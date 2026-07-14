@@ -1193,6 +1193,14 @@ static void append_json_comma_newline(StrBuf* buf, bool comma) {
     strbuf_append_str(buf, comma ? ",\n" : "\n");
 }
 
+static void append_json_after_object(StrBuf* buf, int indent,
+                                     const char* key, const char* value) {
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "},\n");
+    append_json_key(buf, indent, key);
+    strbuf_append_str(buf, value);
+}
+
 static void append_json_string_field(StrBuf* buf, int indent, const char* key,
                                      const char* value, bool comma) {
     append_json_key(buf, indent, key);
@@ -1752,12 +1760,7 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
     strbuf_append_format(buf, "\"combined_from\": %d,\n", text_node_count);
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"length\": %d\n", combined_len);
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "},\n");
-
-    // Output combined layout (using absolute coordinates)
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"layout\": {\n");
+    append_json_after_object(buf, indent + 2, "layout", "{\n");
 
     // Calculate absolute position by walking up parent chain (same as print_bounds_json)
     // Start with the minimum rect position (already in parent-relative coords)
@@ -1875,11 +1878,7 @@ static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int in
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     print_bounds_json(view, buf, indent);
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "},\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"computed\": {\n");
+    append_json_after_object(buf, indent + 2, "computed", "{\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"display\": \"%s\",\n",
                          non_rendered_table_marker_display(elem));
@@ -1929,11 +1928,7 @@ static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int in
     strbuf_append_str(buf, "},\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"_cssPropertiesComplete\": true\n");
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "},\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"children\": []\n");
+    append_json_after_object(buf, indent + 2, "children", "[]\n");
 
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "}");
@@ -2051,10 +2046,7 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
     append_json_format_field(buf, indent + 4, "y", true, "0.0");
     append_json_format_field(buf, indent + 4, "width", true, "0.0");
     append_json_format_field(buf, indent + 4, "height", false, "0.0");
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "},\n");
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"computed\": {\n");
+    append_json_after_object(buf, indent + 2, "computed", "{\n");
     append_json_string_field(buf, indent + 4, "display", "none", false);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}");
@@ -2280,12 +2272,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     if (has_fragments) {
         print_layout_fragments_json(block, buf, indent);
     }
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "},\n");
-
-    // CRITICAL FIX: Use "computed" instead of "css_properties" to match test framework expectations
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"computed\": {\n");
+    // The layout-test schema names computed values "computed".
+    append_json_after_object(buf, indent + 2, "computed", "{\n");
 
     // Display property
     strbuf_append_char_n(buf, ' ', indent + 4);
@@ -2713,12 +2701,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"_cssPropertiesComplete\": true\n");
 
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "},\n");
-
-    // Children
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"children\": [\n");
+    append_json_after_object(buf, indent + 2, "children", "[\n");
 
     bool first_child = true;
     print_children_json(block, buf, indent + 4, &first_child);
@@ -2881,12 +2864,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     strbuf_append_str(buf, "\"layout\": {\n");
     View* projected_bounds = single_inline_child_for_rect(span);
     print_bounds_json(projected_bounds ? projected_bounds : static_cast<View*>(span), buf, indent);
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "},\n");
-
-    // CSS properties (enhanced to match text output)
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"computed\": {\n");
+    append_json_after_object(buf, indent + 2, "computed", "{\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     // Check for display:contents — element has no box but children are laid out
     if (span->display.outer == CSS_VALUE_CONTENTS) {
@@ -2955,12 +2933,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     }
 
     strbuf_append_str(buf, "\n");
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "},\n");
-
-    // Children (this is the critical part - process span children!)
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"children\": [\n");
+    append_json_after_object(buf, indent + 2, "children", "[\n");
 
     View* child = (lam::view_require_element(span))->first_child;
     bool first_child = true;

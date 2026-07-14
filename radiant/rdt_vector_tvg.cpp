@@ -1073,6 +1073,33 @@ static void tvg_draw_stored_or_original(RdtVectorImpl* impl, Tvg_Paint stored,
     tvg_push_draw_remove_clipped(impl, paint);
 }
 
+static uint64_t tvg_paint_hash_color(RdtPaintCacheKind type, RdtPath* path,
+                                     Color color) {
+    uint64_t hash = rdt_paint_hash_common(type, path);
+    rdt_hash_bytes(&hash, &color.r, sizeof(color.r));
+    rdt_hash_bytes(&hash, &color.g, sizeof(color.g));
+    rdt_hash_bytes(&hash, &color.b, sizeof(color.b));
+    rdt_hash_bytes(&hash, &color.a, sizeof(color.a));
+    return hash;
+}
+
+static void tvg_shape_apply_stroke_style(Tvg_Paint shape, Color color, float width,
+                                         RdtStrokeCap cap, RdtStrokeJoin join,
+                                         const float* dash_array, int dash_count,
+                                         float dash_phase) {
+    tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
+    tvg_shape_set_stroke_width(shape, width);
+    Tvg_Stroke_Cap tvg_cap = cap == RDT_CAP_ROUND ? TVG_STROKE_CAP_ROUND
+        : cap == RDT_CAP_SQUARE ? TVG_STROKE_CAP_SQUARE : TVG_STROKE_CAP_BUTT;
+    Tvg_Stroke_Join tvg_join = join == RDT_JOIN_ROUND ? TVG_STROKE_JOIN_ROUND
+        : join == RDT_JOIN_BEVEL ? TVG_STROKE_JOIN_BEVEL : TVG_STROKE_JOIN_MITER;
+    tvg_shape_set_stroke_cap(shape, tvg_cap);
+    tvg_shape_set_stroke_join(shape, tvg_join);
+    if (dash_array && dash_count > 0) {
+        tvg_shape_set_stroke_dash(shape, dash_array, dash_count, dash_phase);
+    }
+}
+
 void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
                    RdtFillRule rule, const RdtMatrix* transform) {
     if (!vec || !vec->impl || !p) return;
@@ -1089,11 +1116,7 @@ void rdt_fill_path(RdtVector* vec, RdtPath* p, Color color,
         return;
     }
 
-    uint64_t hash = rdt_paint_hash_common(RDT_PAINT_CACHE_FILL_PATH, p);
-    rdt_hash_bytes(&hash, &color.r, sizeof(color.r));
-    rdt_hash_bytes(&hash, &color.g, sizeof(color.g));
-    rdt_hash_bytes(&hash, &color.b, sizeof(color.b));
-    rdt_hash_bytes(&hash, &color.a, sizeof(color.a));
+    uint64_t hash = tvg_paint_hash_color(RDT_PAINT_CACHE_FILL_PATH, p, color);
     rdt_hash_bytes(&hash, &rule, sizeof(rule));
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint cached = paint_cache_dup_fill_locked(hash, RDT_PAINT_CACHE_FILL_PATH, p, color, rule);
@@ -1146,34 +1169,13 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
     if (matrix_is_projective(transform)) {
         Tvg_Paint shape = tvg_shape_new();
         path_replay_projective(p, shape, transform);
-        tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
-        tvg_shape_set_stroke_width(shape, width);
-        Tvg_Stroke_Cap tvg_cap;
-        switch (cap) {
-            case RDT_CAP_ROUND:  tvg_cap = TVG_STROKE_CAP_ROUND; break;
-            case RDT_CAP_SQUARE: tvg_cap = TVG_STROKE_CAP_SQUARE; break;
-            default:             tvg_cap = TVG_STROKE_CAP_BUTT; break;
-        }
-        tvg_shape_set_stroke_cap(shape, tvg_cap);
-        Tvg_Stroke_Join tvg_join;
-        switch (join) {
-            case RDT_JOIN_ROUND: tvg_join = TVG_STROKE_JOIN_ROUND; break;
-            case RDT_JOIN_BEVEL: tvg_join = TVG_STROKE_JOIN_BEVEL; break;
-            default:             tvg_join = TVG_STROKE_JOIN_MITER; break;
-        }
-        tvg_shape_set_stroke_join(shape, tvg_join);
-        if (dash_array && dash_count > 0) {
-            tvg_shape_set_stroke_dash(shape, dash_array, dash_count, dash_phase);
-        }
+        tvg_shape_apply_stroke_style(shape, color, width, cap, join,
+                                     dash_array, dash_count, dash_phase);
         tvg_push_draw_remove_clipped(impl, shape);
         return;
     }
 
-    uint64_t hash = rdt_paint_hash_common(RDT_PAINT_CACHE_STROKE_PATH, p);
-    rdt_hash_bytes(&hash, &color.r, sizeof(color.r));
-    rdt_hash_bytes(&hash, &color.g, sizeof(color.g));
-    rdt_hash_bytes(&hash, &color.b, sizeof(color.b));
-    rdt_hash_bytes(&hash, &color.a, sizeof(color.a));
+    uint64_t hash = tvg_paint_hash_color(RDT_PAINT_CACHE_STROKE_PATH, p, color);
     rdt_hash_bytes(&hash, &width, sizeof(width));
     rdt_hash_bytes(&hash, &cap, sizeof(cap));
     rdt_hash_bytes(&hash, &join, sizeof(join));
@@ -1191,31 +1193,8 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
     Tvg_Paint shape = tvg_shape_new();
     path_replay(p, shape);
 
-    tvg_shape_set_stroke_color(shape, color.r, color.g, color.b, color.a);
-    tvg_shape_set_stroke_width(shape, width);
-
-    // map cap
-    Tvg_Stroke_Cap tvg_cap;
-    switch (cap) {
-        case RDT_CAP_ROUND:  tvg_cap = TVG_STROKE_CAP_ROUND; break;
-        case RDT_CAP_SQUARE: tvg_cap = TVG_STROKE_CAP_SQUARE; break;
-        default:             tvg_cap = TVG_STROKE_CAP_BUTT; break;
-    }
-    tvg_shape_set_stroke_cap(shape, tvg_cap);
-
-    // map join
-    Tvg_Stroke_Join tvg_join;
-    switch (join) {
-        case RDT_JOIN_ROUND: tvg_join = TVG_STROKE_JOIN_ROUND; break;
-        case RDT_JOIN_BEVEL: tvg_join = TVG_STROKE_JOIN_BEVEL; break;
-        default:             tvg_join = TVG_STROKE_JOIN_MITER; break;
-    }
-    tvg_shape_set_stroke_join(shape, tvg_join);
-
-    // dash pattern
-    if (dash_array && dash_count > 0) {
-        tvg_shape_set_stroke_dash(shape, dash_array, dash_count, dash_phase);
-    }
+    tvg_shape_apply_stroke_style(shape, color, width, cap, join,
+                                 dash_array, dash_count, dash_phase);
 
     Tvg_Paint draw = paint_cache_store_stroke(hash, p, color, width, cap, join,
                                               dash_array, dash_count, dash_phase, shape);
@@ -1249,6 +1228,20 @@ static void tvg_gradient_apply_transform(Tvg_Gradient gradient,
     tvg_gradient_set_transform(gradient, &matrix);
 }
 
+static uint64_t tvg_gradient_hash(RdtPaintCacheKind kind, RdtPath* path,
+                                  const float* values, size_t values_size,
+                                  const RdtGradientStop* stops, int stop_count,
+                                  RdtFillRule rule,
+                                  const RdtMatrix* gradient_transform) {
+    uint64_t hash = rdt_paint_hash_common(kind, path);
+    rdt_hash_bytes(&hash, values, values_size);
+    rdt_hash_bytes(&hash, &stop_count, sizeof(stop_count));
+    rdt_hash_bytes(&hash, stops, (size_t)stop_count * sizeof(RdtGradientStop));
+    rdt_hash_bytes(&hash, &rule, sizeof(rule));
+    if (gradient_transform) rdt_hash_bytes(&hash, gradient_transform, sizeof(RdtMatrix));
+    return hash;
+}
+
 void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
                               float x1, float y1, float x2, float y2,
                               const RdtGradientStop* stops, int stop_count,
@@ -1278,12 +1271,8 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
     }
     float values[4] = {x1, y1, x2, y2};
 
-    uint64_t hash = rdt_paint_hash_common(RDT_PAINT_CACHE_LINEAR_GRADIENT, p);
-    rdt_hash_bytes(&hash, values, sizeof(values));
-    rdt_hash_bytes(&hash, &stop_count, sizeof(stop_count));
-    rdt_hash_bytes(&hash, stops, (size_t)stop_count * sizeof(RdtGradientStop));
-    rdt_hash_bytes(&hash, &rule, sizeof(rule));
-    if (gradient_transform) rdt_hash_bytes(&hash, gradient_transform, sizeof(RdtMatrix));
+    uint64_t hash = tvg_gradient_hash(RDT_PAINT_CACHE_LINEAR_GRADIENT, p,
+        values, sizeof(values), stops, stop_count, rule, gradient_transform);
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint cached = paint_cache_dup_gradient_locked(hash, RDT_PAINT_CACHE_LINEAR_GRADIENT,
                                                        p, values, stops, stop_count, rule);
@@ -1339,12 +1328,8 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
     }
     float values[3] = {cx, cy, r};
 
-    uint64_t hash = rdt_paint_hash_common(RDT_PAINT_CACHE_RADIAL_GRADIENT, p);
-    rdt_hash_bytes(&hash, values, sizeof(values));
-    rdt_hash_bytes(&hash, &stop_count, sizeof(stop_count));
-    rdt_hash_bytes(&hash, stops, (size_t)stop_count * sizeof(RdtGradientStop));
-    rdt_hash_bytes(&hash, &rule, sizeof(rule));
-    if (gradient_transform) rdt_hash_bytes(&hash, gradient_transform, sizeof(RdtMatrix));
+    uint64_t hash = tvg_gradient_hash(RDT_PAINT_CACHE_RADIAL_GRADIENT, p,
+        values, sizeof(values), stops, stop_count, rule, gradient_transform);
     pthread_mutex_lock(&g_paint_cache_mutex);
     Tvg_Paint cached = paint_cache_dup_gradient_locked(hash, RDT_PAINT_CACHE_RADIAL_GRADIENT,
                                                        p, values, stops, stop_count, rule);
@@ -1852,28 +1837,35 @@ static void svg_dom_picture_draw(RdtVector* vec, RdtPicture* pic,
                       (float)opacity / 255.0f);
 }
 
+static bool draw_svg_dom_picture_if_needed(RdtVector* vec, RdtPicture* pic,
+                                           uint8_t opacity,
+                                           const RdtMatrix* transform) {
+    if (pic->kind != RdtPicture::KIND_SVG_DOM) return false;
+    svg_dom_picture_draw(vec, pic, opacity, transform);
+    return true;
+}
+
+static void prepare_tvg_picture_paint(RdtPicture* pic, Tvg_Paint paint,
+                                      uint8_t opacity,
+                                      const RdtMatrix* transform) {
+    if (pic->width > 0 && pic->height > 0) {
+        tvg_picture_set_size(paint, pic->width, pic->height);
+    }
+    if (opacity < 255) tvg_paint_set_opacity(paint, opacity);
+    apply_transform(paint, transform);
+}
+
 void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
                       uint8_t opacity, const RdtMatrix* transform) {
     if (!vec || !vec->impl || !pic) return;
 
-    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
-        svg_dom_picture_draw(vec, pic, opacity, transform);
-        return;
-    }
+    if (draw_svg_dom_picture_if_needed(vec, pic, opacity, transform)) return;
 
     // KIND_TVG_PAINT
     if (!pic->paint) return;
     RdtVectorImpl* impl = vec->impl;
 
-    if (pic->width > 0 && pic->height > 0) {
-        tvg_picture_set_size(pic->paint, pic->width, pic->height);
-    }
-
-    if (opacity < 255) {
-        tvg_paint_set_opacity(pic->paint, opacity);
-    }
-
-    apply_transform(pic->paint, transform);
+    prepare_tvg_picture_paint(pic, pic->paint, opacity, transform);
 
     // For pictures, we need to push fresh since tvg_push_draw_remove
     // will remove and destroy the paint. Clone or re-load would be needed
@@ -1886,13 +1878,7 @@ void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
                           uint8_t opacity, const RdtMatrix* transform) {
     if (!vec || !vec->impl || !pic) return;
 
-    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
-        // SVG_DOM pictures are immutable during draw; display-list lowering
-        // builds its own SvgRenderContext on the stack.  Safe to call from
-        // multiple threads with distinct vecs.
-        svg_dom_picture_draw(vec, pic, opacity, transform);
-        return;
-    }
+    if (draw_svg_dom_picture_if_needed(vec, pic, opacity, transform)) return;
 
     // KIND_TVG_PAINT: thread-safe duplicate so the original stays intact.
     if (!pic->paint) return;
@@ -1901,15 +1887,7 @@ void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
     Tvg_Paint dup = tvg_duplicate_paint_locked(pic->paint);
     if (!dup) return;
 
-    if (pic->width > 0 && pic->height > 0) {
-        tvg_picture_set_size(dup, pic->width, pic->height);
-    }
-
-    if (opacity < 255) {
-        tvg_paint_set_opacity(dup, opacity);
-    }
-
-    apply_transform(dup, transform);
+    prepare_tvg_picture_paint(pic, dup, opacity, transform);
     tvg_push_draw_remove_clipped(impl, dup);
     // original pic->paint is NOT consumed
 }

@@ -1,5 +1,6 @@
 #include "js_runtime_internal.hpp"
 #include "../lambda-error.h"
+#include "../jube/jube_registry.h"
 
 JsRuntimeState js_runtime_state;
 extern __thread EvalContext* context;
@@ -469,6 +470,9 @@ extern "C" void js_batch_reset() {
     js_canvas_cleanup();
     js_reset_math_object();
     js_reset_json_object();
+    // Intl is heap-backed like the neighboring namespace caches; leaving it
+    // out makes the next isolated document install a pointer to the freed heap.
+    js_reset_intl_object();
     js_reset_console_object();
     js_reset_reflect_object();
     js_reset_atomics_object();
@@ -501,6 +505,7 @@ extern "C" void js_batch_reset() {
     // reset DOM state — stale document proxy and document pointer
     extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
+    jube_modules_runtime_reset();
     // reset legacy RegExp static properties ($1-$9, input, etc.)
     memset(&js_regexp_last_match, 0, sizeof(js_regexp_last_match));
     // reset regex compilation cache — AST pointers from previous test are stale
@@ -569,6 +574,16 @@ extern "C" int js_get_module_var_count() {
     return js_module_var_count;
 }
 
+extern "C" void js_prepare_compiled_preamble_vars(int declaration_count) {
+    js_reset_module_vars();
+    js_active_module_vars = js_module_vars;
+    if (declaration_count < 0) declaration_count = 0;
+    if (declaration_count > JS_MAX_MODULE_VARS) declaration_count = JS_MAX_MODULE_VARS;
+    // Compile-only preambles retain declarations but no heap-backed values;
+    // js_main initializes these fresh slots in the new document realm.
+    js_module_var_count = declaration_count;
+}
+
 // Partial batch reset: restore module vars to a checkpoint and clear test state,
 // but leave heap and cached builtins intact.  Used by js-test-batch preamble mode
 // to avoid re-initializing the harness between tests.
@@ -605,6 +620,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_canvas_cleanup();
     js_reset_math_object();
     js_reset_json_object();
+    js_reset_intl_object();
     js_reset_console_object();
     js_reset_reflect_object();
     js_reset_atomics_object();
@@ -629,6 +645,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // reset DOM state — stale document proxy and document pointer
     extern void js_dom_batch_reset(void);
     js_dom_batch_reset();
+    jube_modules_runtime_reset();
     // reset microtask queue and timers — callbacks referencing old heap
     extern void js_event_loop_init(void);
     js_event_loop_init();

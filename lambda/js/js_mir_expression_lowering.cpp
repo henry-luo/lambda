@@ -224,7 +224,7 @@ static const char* jm_profile_shape_guard_label(JsMirTranspiler* mt,
         slot, point.row + 1, point.column + 1);
     if (len < 0) return "unknown";
     if (len >= (int)sizeof(label)) len = (int)sizeof(label) - 1;
-    NamePool* np = (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
+    NamePool* np = jm_compiled_name_pool(mt);
     if (!np) return "unknown";
     String* interned = name_pool_create_len(np, label, len);
     if (!interned) return "unknown";
@@ -257,7 +257,7 @@ static const char* jm_profile_property_set_label(JsMirTranspiler* mt, JsMemberNo
         point.row + 1, point.column + 1);
     if (len < 0) return "unknown";
     if (len >= (int)sizeof(label)) len = (int)sizeof(label) - 1;
-    NamePool* np = (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
+    NamePool* np = jm_compiled_name_pool(mt);
     if (!np) return "unknown";
     String* interned = name_pool_create_len(np, label, len);
     if (!interned) return "unknown";
@@ -2520,8 +2520,7 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                         MIR_reg_t operand_reg = jm_transpile_box_item(mt, operand);
                         const char* type_str = lit->value.string_value->chars;
                         int type_len = (int)lit->value.string_value->len;
-                        NamePool* np = (mt->is_module && context && context->name_pool)
-                                       ? context->name_pool : mt->tp->name_pool;
+                        NamePool* np = jm_compiled_name_pool(mt);
                         String* interned = name_pool_create_len(np, type_str, type_len);
                         // call js_typeof_is(value, type_str_ptr) → int64_t 0/1
                         MIR_reg_t raw = jm_call_2(mt, "js_typeof_is", MIR_T_I64,
@@ -2735,7 +2734,8 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_reg_t r = jm_new_reg(mt, "typeof_r", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, r),
-                            MIR_new_int_op(mt->ctx, (int64_t)s2it(heap_create_name("function", 8)))));
+                            MIR_new_int_op(mt->ctx, (int64_t)s2it(
+                                name_pool_create_len(jm_compiled_name_pool(mt), "function", 8)))));
                         return r;
                     }
                 }
@@ -2751,7 +2751,8 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
                         MIR_reg_t r = jm_new_reg(mt, "typeof_r", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, r),
-                            MIR_new_int_op(mt->ctx, (int64_t)s2it(heap_create_name("object", 6)))));
+                            MIR_new_int_op(mt->ctx, (int64_t)s2it(
+                                name_pool_create_len(jm_compiled_name_pool(mt), "object", 6)))));
                         return r;
                     }
                 }

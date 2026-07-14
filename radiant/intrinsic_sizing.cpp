@@ -1002,6 +1002,48 @@ static inline bool intrinsic_allows_soft_wrap_after_codepoint(uint32_t cp) {
     return cp == 0x002D || cp == 0x2010;
 }
 
+static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
+                                            uint32_t codepoint,
+                                            bool small_caps_lower,
+                                            float kerning,
+                                            bool* loaded) {
+    FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
+    // Intrinsic sizing must use the current FontStyleDesc because font_get_glyph()
+    // can retain stale advances after a dynamic @font-face load.
+    LoadedGlyph* glyph = font_load_glyph(
+        lycon->font.font_handle, &style, codepoint, false);
+    *loaded = glyph != nullptr;
+    if (!glyph) return 0.0f;
+
+    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
+        ? lycon->ui_context->pixel_ratio : 1.0f;
+    float advance = glyph->advance_x / pixel_ratio + kerning;
+    if (small_caps_lower) advance *= 0.7f;
+    if (lycon->font.style) advance += lycon->font.style->letter_spacing;
+    return advance;
+}
+
+static float intrinsic_apply_full_text_transform(LayoutContext* lycon,
+                                                 uint32_t* codepoint,
+                                                 CssEnum text_transform,
+                                                 bool is_word_start) {
+    if (text_transform == CSS_VALUE_NONE || text_transform == 0) return 0.0f;
+
+    uint32_t transformed[3];
+    int count = apply_text_transform_full(
+        *codepoint, text_transform, is_word_start, transformed);
+    *codepoint = transformed[0];
+
+    float extra_advance = 0.0f;
+    for (int index = 1; index < count; index++) {
+        if (text_codepoint_has_zero_advance(transformed[index])) continue;
+        bool loaded = false;
+        extra_advance += intrinsic_loaded_glyph_advance(
+            lycon, transformed[index], false, 0.0f, &loaded);
+    }
+    return extra_advance;
+}
+
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
                                                    size_t length,
@@ -1197,24 +1239,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
 
         // Apply text-transform if specified (full case mapping: 1→many)
-        if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
-            uint32_t tt_out[3];
-            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
-            codepoint = tt_out[0];
-            // Add advance widths for extra codepoints from full case mapping
-            for (int tti = 1; tti < tt_count; tti++) {
-                if (text_codepoint_has_zero_advance(tt_out[tti])) continue;
-                FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
-                LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd, tt_out[tti], false);
-                if (extra_glyph) {
-                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                    float extra_advance = extra_glyph->advance_x / pixel_ratio;
-                    if (lycon->font.style) extra_advance += lycon->font.style->letter_spacing;
-                    current_word += extra_advance;
-                    total_width += extra_advance;
-                }
-            }
-        }
+        float transform_extra = intrinsic_apply_full_text_transform(
+            lycon, &codepoint, text_transform, is_word_start);
+        current_word += transform_extra;
+        total_width += transform_extra;
 
         // Emoji combining marks: skin tone modifiers, variation selectors, and
         // combining enclosing keycap have zero advance width in composed sequences.
@@ -1256,86 +1284,28 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
         is_word_start = false;  // No longer at word start after first character
 
-        // Get glyph index for the (possibly transformed) codepoint
+        // Get glyph index for the (possibly transformed) codepoint.
         uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
-        if (!glyph_index) {
-            // Glyph not found in primary font - try font fallback via font_load_glyph
-            // This ensures intrinsic sizing uses the same fallback fonts as layout_text.cpp
-            FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
-            LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
-            if (glyph) {
-                // Font is loaded at physical pixel size, so advance is in physical pixels
-                // Divide by pixel_ratio to convert back to CSS pixels for layout
-                float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                float advance = glyph->advance_x / pixel_ratio;
-                // small-caps: scale advance for lowercase-origin characters
-                if (is_small_caps_lower) advance *= 0.7f;
-                // Apply letter-spacing
-                // CSS 2.1 §16.4: letter-spacing after every character (including last)
-                if (lycon->font.style) {
-                    advance += lycon->font.style->letter_spacing;
-                }
-                // CSS 2.1 §16.4: word-spacing applies to U+00A0 (non-breaking space)
-                if (codepoint == 0x00A0 && lycon->font.style) {
-                    advance += lycon->font.style->word_spacing;
-                    is_word_start = true;
-                }
-                current_word += advance;
-                total_width += advance;
-            } else {
-                // No fallback found - use estimate
-                current_word += 11.0f;
-                total_width += 11.0f;
-            }
-            i += bytes;
-            if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint(codepoint)) {
-                longest_word = fmax(longest_word, current_word);
-                current_word = 0.0f;
-            }
-            // CSS Text 3 §5.2: CJK ideographic characters (UAX#14 ID class)
-            // have break opportunities before and after them.
-            else if (cjk_breaks && has_id_line_break_class(codepoint)) {
-                longest_word = fmax(longest_word, current_word);
-                current_word = 0.0f;
-            }
-            continue;
-        }
 
-        // Apply kerning if available (returns CSS pixels directly)
+        // Kerning is only available from the primary font, matching the former
+        // fallback branch's behavior.
         float kerning = 0.0f;
-        if (has_kerning && prev_codepoint) {
+        if (glyph_index && has_kerning && prev_codepoint) {
             kerning = font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint);
         }
 
-        // Use the same glyph loading path as layout_text.cpp. font_get_glyph()
-        // can report stale/default-sized advances for dynamically loaded
-        // @font-face fonts; font_load_glyph() returns the backend advance for
-        // the current FontStyleDesc and fallback chain.
-        FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
-        LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &_sd, codepoint, false);
-        if (glyph) {
-            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
-                ? lycon->ui_context->pixel_ratio : 1.0f;
-            float advance = (glyph->advance_x / pixel_ratio) + kerning;
-            if (is_small_caps_lower) advance *= 0.7f;
-            // Apply letter-spacing (CSS 2.1 §16.4: after every character including last)
-            if (lycon->font.style) {
-                advance += lycon->font.style->letter_spacing;
-            }
-            // CSS 2.1 §16.4: word-spacing applies to U+00A0 (non-breaking space)
-            if (codepoint == 0x00A0 && lycon->font.style) {
-                advance += lycon->font.style->word_spacing;
-                is_word_start = true;
-            }
-            current_word += advance;
-            total_width += advance;
-        } else {
-            // Fallback if glyph load fails - use 11.0 to match font fallback
-            current_word += 11.0f;
-            total_width += 11.0f;
+        bool glyph_loaded = false;
+        float advance = intrinsic_loaded_glyph_advance(
+            lycon, codepoint, is_small_caps_lower, kerning, &glyph_loaded);
+        if (!glyph_loaded) advance = 11.0f;
+        if (glyph_loaded && codepoint == 0x00A0 && lycon->font.style) {
+            advance += lycon->font.style->word_spacing;
+            is_word_start = true;
         }
+        current_word += advance;
+        total_width += advance;
 
-        prev_codepoint = codepoint;
+        if (glyph_index) prev_codepoint = codepoint;
         i += bytes;  // Advance by the number of bytes consumed
 
         // overflow-wrap: anywhere — every character is a break opportunity
@@ -1559,23 +1529,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
             continue;
         }
 
-        if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
-            uint32_t tt_out[3];
-            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
-            codepoint = tt_out[0];
-            // Add advance widths for extra codepoints from full case mapping
-            for (int tti = 1; tti < tt_count; tti++) {
-                if (text_codepoint_has_zero_advance(tt_out[tti])) continue;
-                FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
-                LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd, tt_out[tti], false);
-                if (extra_glyph) {
-                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                    float extra_advance = extra_glyph->advance_x / pixel_ratio;
-                    if (lycon->font.style) extra_advance += lycon->font.style->letter_spacing;
-                    current_word_width += extra_advance;
-                }
-            }
-        }
+        current_word_width += intrinsic_apply_full_text_transform(
+            lycon, &codepoint, text_transform, is_word_start);
 
         // CSS font-variant: small-caps scaling (matching measure_text_intrinsic_widths)
         bool is_small_caps_lower = false;
@@ -2111,6 +2066,68 @@ CssEnum get_element_font_variant(DomElement* element) {
         node = node->parent;
     }
     return CSS_VALUE_NONE;
+}
+
+static void intrinsic_resolve_specified_horizontal_margins(
+        LayoutContext* lycon, DomElement* element, bool include_logical,
+        float* margin_left, float* margin_right) {
+    StyleTree* style = element->specified_style;
+    CssDeclaration* decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_LEFT);
+    if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+        *margin_left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, decl->value);
+    }
+    decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_RIGHT);
+    if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+        *margin_right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, decl->value);
+    }
+    if (include_logical && *margin_left == 0.0f) {
+        decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_INLINE_START);
+        if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            *margin_left = resolve_length_value(
+                lycon, CSS_PROPERTY_MARGIN_INLINE_START, decl->value);
+        }
+    }
+    if (include_logical && *margin_right == 0.0f) {
+        decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_INLINE_END);
+        if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            *margin_right = resolve_length_value(
+                lycon, CSS_PROPERTY_MARGIN_INLINE_END, decl->value);
+        }
+    }
+    if (include_logical && *margin_left == 0.0f && *margin_right == 0.0f) {
+        decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_INLINE);
+        if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            *margin_left = *margin_right = resolve_length_value(
+                lycon, CSS_PROPERTY_MARGIN_INLINE, decl->value);
+        }
+    }
+    if (*margin_left != 0.0f || *margin_right != 0.0f) return;
+
+    decl = style_tree_get_declaration(style, CSS_PROPERTY_MARGIN);
+    if (!decl || !decl->value) return;
+    const CssValue* right_value = css_box_shorthand_side_value(decl->value, 1);
+    const CssValue* left_value = css_box_shorthand_side_value(decl->value, 3);
+    if (right_value) {
+        *margin_right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, right_value);
+    }
+    if (left_value) {
+        *margin_left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, left_value);
+    }
+}
+
+// Text indent belongs to the first formatted line, so every kind of forced
+// break must finalize the same first-line min/max contribution.
+static void intrinsic_apply_first_line_indent(
+        float text_indent, float first_child_min, float nonfirst_min_max,
+        float* inline_max, float* inline_min) {
+    *inline_max = fmaxf(*inline_max + text_indent, 0.0f);
+    float first_segment = first_child_min >= 0.0f ? first_child_min : *inline_min;
+    if (text_indent > 0.0f) {
+        *inline_min = fmaxf(first_segment + text_indent, *inline_min);
+    } else {
+        float indented_min = fmaxf(first_segment + text_indent, 0.0f);
+        *inline_min = fmaxf(indented_min, nonfirst_min_max);
+    }
 }
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
@@ -4206,29 +4223,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 } else if (child_elem->specified_style) {
                     // Fallback: read margins from specified CSS style when bound isn't allocated
                     float ml = 0, mr = 0;
-                    CssDeclaration* ml_decl = style_tree_get_declaration(
-                        child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
-                    if (ml_decl && ml_decl->value && ml_decl->value->type == CSS_VALUE_TYPE_LENGTH)
-                        ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml_decl->value);
-                    CssDeclaration* mr_decl = style_tree_get_declaration(
-                        child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
-                    if (mr_decl && mr_decl->value && mr_decl->value->type == CSS_VALUE_TYPE_LENGTH)
-                        mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr_decl->value);
-                    if (ml == 0 && mr == 0) {
-                        CssDeclaration* m_decl = style_tree_get_declaration(
-                            child_elem->specified_style, CSS_PROPERTY_MARGIN);
-                        if (m_decl && m_decl->value) {
-                            const CssValue* val = m_decl->value;
-                            const CssValue* mr_value = css_box_shorthand_side_value(val, 1);
-                            const CssValue* ml_value = css_box_shorthand_side_value(val, 3);
-                            if (mr_value) {
-                                mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, mr_value);
-                            }
-                            if (ml_value) {
-                                ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, ml_value);
-                            }
-                        }
-                    }
+                    intrinsic_resolve_specified_horizontal_margins(
+                        lycon, child_elem, false, &ml, &mr);
                     child_sizes.max_content += ml + mr;
                     child_sizes.min_content += ml + mr;
                 }
@@ -4276,52 +4272,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         child_view->bound->margin.right >= 0)
                         mr = child_view->bound->margin.right;
                 } else if (child_elem->specified_style) {
-                    // Try margin-left / margin-right first
-                    CssDeclaration* ml_decl = style_tree_get_declaration(
-                        child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
-                    if (ml_decl && ml_decl->value && ml_decl->value->type == CSS_VALUE_TYPE_LENGTH)
-                        ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml_decl->value);
-                    CssDeclaration* mr_decl = style_tree_get_declaration(
-                        child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
-                    if (mr_decl && mr_decl->value && mr_decl->value->type == CSS_VALUE_TYPE_LENGTH)
-                        mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr_decl->value);
-                    // Try margin-inline-start / margin-inline-end (individual logical properties)
-                    if (ml == 0) {
-                        CssDeclaration* mis_decl = style_tree_get_declaration(
-                            child_elem->specified_style, CSS_PROPERTY_MARGIN_INLINE_START);
-                        if (mis_decl && mis_decl->value && mis_decl->value->type == CSS_VALUE_TYPE_LENGTH)
-                            ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_INLINE_START, mis_decl->value);
-                    }
-                    if (mr == 0) {
-                        CssDeclaration* mie_decl = style_tree_get_declaration(
-                            child_elem->specified_style, CSS_PROPERTY_MARGIN_INLINE_END);
-                        if (mie_decl && mie_decl->value && mie_decl->value->type == CSS_VALUE_TYPE_LENGTH)
-                            mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_INLINE_END, mie_decl->value);
-                    }
-                    // Try margin-inline shorthand (logical property → physical left/right in LTR)
-                    if (ml == 0 && mr == 0) {
-                        CssDeclaration* mi_decl = style_tree_get_declaration(
-                            child_elem->specified_style, CSS_PROPERTY_MARGIN_INLINE);
-                        if (mi_decl && mi_decl->value && mi_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                            ml = mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_INLINE, mi_decl->value);
-                        }
-                    }
-                    // Try margin shorthand
-                    if (ml == 0 && mr == 0) {
-                        CssDeclaration* m_decl = style_tree_get_declaration(
-                            child_elem->specified_style, CSS_PROPERTY_MARGIN);
-                        if (m_decl && m_decl->value) {
-                            const CssValue* val = m_decl->value;
-                            const CssValue* mr_value = css_box_shorthand_side_value(val, 1);
-                            const CssValue* ml_value = css_box_shorthand_side_value(val, 3);
-                            if (mr_value) {
-                                mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, mr_value);
-                            }
-                            if (ml_value) {
-                                ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, ml_value);
-                            }
-                        }
-                    }
+                    intrinsic_resolve_specified_horizontal_margins(
+                        lycon, child_elem, true, &ml, &mr);
                 }
                 child_sizes.min_content += ml + mr;
                 child_sizes.max_content += ml + mr;
@@ -4372,16 +4324,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Apply text-indent to the first line before flushing.
                 // Text-indent only affects the first formatted line.
                 if (!inline_has_forced_break && text_indent != 0) {
-                    inline_max_sum = fmaxf(inline_max_sum + text_indent, 0.0f);
-                    // For min-content: apply indent to first segment
-                    float first_seg = (first_inline_child_min >= 0) ? first_inline_child_min : inline_min_sum;
-                    if (text_indent > 0) {
-                        float first_line_min = first_seg + text_indent;
-                        inline_min_sum = fmaxf(first_line_min, inline_min_sum);
-                    } else {
-                        float first_line_min = fmaxf(first_seg + text_indent, 0.0f);
-                        inline_min_sum = fmaxf(first_line_min, nonfirst_inline_min_max);
-                    }
+                    intrinsic_apply_first_line_indent(text_indent, first_inline_child_min,
+                        nonfirst_inline_min_max, &inline_max_sum, &inline_min_sum);
                 }
                 // Record inline_max_sum at the first forced break for parent propagation
                 if (!inline_has_forced_break) {
@@ -4411,16 +4355,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // first formatted line, so only apply when this is the first
                 // forced break encountered.
                 if (!inline_has_forced_break && text_indent != 0) {
-                    inline_max_sum = fmaxf(inline_max_sum + text_indent, 0.0f);
-                    // For min-content: apply indent to first segment
-                    float first_seg = (first_inline_child_min >= 0) ? first_inline_child_min : inline_min_sum;
-                    if (text_indent > 0) {
-                        float first_line_min = first_seg + text_indent;
-                        inline_min_sum = fmaxf(first_line_min, inline_min_sum);
-                    } else {
-                        float first_line_min = fmaxf(first_seg + text_indent, 0.0f);
-                        inline_min_sum = fmaxf(first_line_min, nonfirst_inline_min_max);
-                    }
+                    intrinsic_apply_first_line_indent(text_indent, first_inline_child_min,
+                        nonfirst_inline_min_max, &inline_max_sum, &inline_min_sum);
                 }
                 // Record inline_max_sum at the first forced break for parent propagation
                 if (!inline_has_forced_break) {
@@ -4975,14 +4911,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 // Main API Implementation
 // ============================================================================
 
-float calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
-    if (!node) return 0;
+static IntrinsicSizes calculate_node_intrinsic_widths(LayoutContext* lycon, DomNode* node) {
+    IntrinsicSizes sizes = {};
+    if (!node) return sizes;
 
-    // Handle text nodes directly
     if (node->is_text()) {
         const char* text = (const char*)node->text_data();
         if (text) {
-            // Get text-transform from parent element (text inherits from parent)
             CssEnum text_transform = CSS_VALUE_NONE;
             CssEnum font_variant = CSS_VALUE_NONE;
             if (node->parent && node->parent->is_element()) {
@@ -4991,46 +4926,22 @@ float calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
             }
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
                 lycon, text, strlen(text), text_transform, font_variant);
-            return widths.min_content;
+            sizes.min_content = widths.min_content;
+            sizes.max_content = widths.max_content;
         }
-        return 0;
+        return sizes;
     }
 
-    // Handle element nodes
     DomElement* element = node->as_element();
-    if (!element) return 0;
+    return element ? measure_element_intrinsic_widths(lycon, element) : sizes;
+}
 
-    IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, element);
-    return sizes.min_content;
+float calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
+    return calculate_node_intrinsic_widths(lycon, node).min_content;
 }
 
 float calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
-    if (!node) return 0;
-
-    // Handle text nodes directly
-    if (node->is_text()) {
-        const char* text = (const char*)node->text_data();
-        if (text) {
-            // Get text-transform from parent element (text inherits from parent)
-            CssEnum text_transform = CSS_VALUE_NONE;
-            CssEnum font_variant = CSS_VALUE_NONE;
-            if (node->parent && node->parent->is_element()) {
-                text_transform = get_element_text_transform(node->parent->as_element());
-                font_variant = get_element_font_variant(node->parent->as_element());
-            }
-            TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, text, strlen(text), text_transform, font_variant);
-            return widths.max_content;
-        }
-        return 0;
-    }
-
-    // Handle element nodes
-    DomElement* element = node->as_element();
-    if (!element) return 0;
-
-    IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, element);
-    return sizes.max_content;
+    return calculate_node_intrinsic_widths(lycon, node).max_content;
 }
 
 float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width) {

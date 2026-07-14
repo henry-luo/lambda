@@ -99,6 +99,7 @@ const char* radiant_frame_clock_mode_name(const RadiantFrameClock* clock);
 void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url);
 void script_runner_set_retain_js_state(bool retain);
 void script_runner_set_execute_external_scripts(bool execute);
+void script_runner_set_preamble_cache_enabled(bool enabled);
 void collect_and_compile_event_handlers(DomDocument* dom_doc);
 void script_runner_cleanup_js_state(DomDocument* dom_doc);
 void script_runner_cleanup_heap(void);

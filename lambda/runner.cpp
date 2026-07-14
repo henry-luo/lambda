@@ -1730,6 +1730,10 @@ void runtime_reset_heap(Runtime* runtime) {
         tmp_ctx.result = ItemNull;
         context = &tmp_ctx;
 
+        // Batch heap replacement invalidates module-owned callback Items just
+        // as final runtime teardown does; release those roots before the GC.
+        jube_notify_heap_cleanup(runtime->heap);
+
         // Release name_pool BEFORE heap_destroy: the NamePool struct is
         // pool_calloc'd from the heap's pool, and pool_destroy bulk-frees
         // all pool memory.  We must free the hashmap inside while accessible.

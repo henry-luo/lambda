@@ -1789,50 +1789,43 @@ static bool is_inline_level_atomic_block(View* child, ViewBlock* block) {
          block->display.outer == CSS_VALUE_INLINE_BLOCK);
 }
 
+struct InFlowBlockEdge {
+    ViewBlock* block;
+    View* owner_child;
+};
+
+static InFlowBlockEdge find_in_flow_block_edge(ViewElement* container, bool find_last) {
+    InFlowBlockEdge result = {};
+    if (!container) return result;
+
+    for (View* child = container->first_placed_child(); child; child = child->next()) {
+        ViewBlock* candidate = nullptr;
+        if (child->is_block()) {
+            ViewBlock* block = lam::view_require_block(child);
+            if (!is_out_of_flow_block(block) && !is_inline_level_atomic_block(child, block)) {
+                candidate = block;
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE) {
+            candidate = find_in_flow_block_edge(
+                lam::view_require_element(child), find_last).block;
+        }
+
+        if (candidate) {
+            result.block = candidate;
+            result.owner_child = child;
+            if (!find_last) return result;
+        }
+    }
+    return result;
+}
+
 // Find the first in-flow block child inside an inline wrapper (block-in-inline).
 // In Radiant, a <span> containing a <div> remains as RDT_VIEW_INLINE with a
 // block child, rather than being split into anonymous blocks per CSS 2.1 §9.2.1.1.
 // Returns null if the inline view has no block children.
 static ViewBlock* find_first_block_in_inline(View* inline_view) {
     if (inline_view->view_type != RDT_VIEW_INLINE) return nullptr;
-    ViewElement* span = lam::view_require_element(inline_view);
-    View* child = span->first_placed_child();
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                return vb;
-            }
-        }
-        if (child->view_type == RDT_VIEW_INLINE) {
-            ViewBlock* nested = find_first_block_in_inline(child);
-            if (nested) return nested;
-        }
-        child = child->next();
-    }
-    return nullptr;
-}
-
-// Find the last in-flow block child inside an inline wrapper (block-in-inline).
-static ViewBlock* find_last_block_in_inline(View* inline_view) {
-    if (inline_view->view_type != RDT_VIEW_INLINE) return nullptr;
-    ViewElement* span = lam::view_require_element(inline_view);
-    View* child = span->first_placed_child();
-    ViewBlock* last = nullptr;
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                last = vb;
-            }
-        }
-        if (child->view_type == RDT_VIEW_INLINE) {
-            ViewBlock* nested = find_last_block_in_inline(child);
-            if (nested) last = nested;
-        }
-        child = child->next();
-    }
-    return last;
+    return find_in_flow_block_edge(lam::view_require_element(inline_view), false).block;
 }
 
 static bool shrink_inline_wrappers_containing_block(View* inline_view, ViewBlock* target, float trim) {
@@ -1887,23 +1880,10 @@ static bool has_any_inline_before_first_block(ViewBlock* container) {
 // Check whether any inline/text views exist after the last in-flow block child.
 // Inline wrappers containing blocks (block-in-inline) are treated as block children.
 static bool has_any_inline_after_last_block(ViewBlock* container) {
-    View* child = container->first_placed_child();
-    View* last_block = nullptr;
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                last_block = child;
-            }
-        } else if (child->view_type == RDT_VIEW_INLINE && find_first_block_in_inline(child)) {
-            // Block-in-inline acts as a block child
-            last_block = child;
-        }
-        child = child->next();
-    }
-    if (!last_block) return false;
+    InFlowBlockEdge edge = find_in_flow_block_edge(container, true);
+    if (!edge.owner_child) return false;
 
-    child = last_block->next();
+    View* child = edge.owner_child->next();
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
@@ -2076,29 +2056,10 @@ static ViewBlock* find_first_formatted_line_block(ViewBlock* container) {
         return nullptr; // anonymous block has no formatted line
     }
 
-    // No inline content before first block child — walk to it and recurse.
-    // Also handles block-in-inline: recurse into blocks found inside inline wrappers.
-    View* child = container->first_placed_child();
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (is_out_of_flow_block(vb)) {
-                child = child->next();
-                continue;
-            }
-            if (is_inline_level_atomic_block(child, vb)) {
-                child = child->next();
-                continue;
-            }
-            return find_first_formatted_line_block(vb);
-        }
-        ViewBlock* bii = find_first_block_in_inline(child);
-        if (bii) {
-            return find_first_formatted_line_block(bii);
-        }
-        child = child->next();
-    }
-    return nullptr;
+    // No inline content before first block child — recurse through the edge block,
+    // including a block nested inside an inline wrapper.
+    InFlowBlockEdge edge = find_in_flow_block_edge(container, false);
+    return edge.block ? find_first_formatted_line_block(edge.block) : nullptr;
 }
 
 // Find the block containing the last formatted line.
@@ -2126,25 +2087,8 @@ static ViewBlock* find_last_formatted_line_block(ViewBlock* container) {
         return nullptr; // anonymous block has no formatted line
     }
 
-    // Find last in-flow block child and recurse.
-    // Also handles block-in-inline: check inline wrappers for block children.
-    ViewBlock* last_in_flow = nullptr;
-    View* child = container->first_placed_child();
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                last_in_flow = vb;
-            }
-        } else {
-            ViewBlock* bii = find_last_block_in_inline(child);
-            if (bii) {
-                last_in_flow = bii;
-            }
-        }
-        child = child->next();
-    }
-    return last_in_flow ? find_last_formatted_line_block(last_in_flow) : nullptr;
+    InFlowBlockEdge edge = find_in_flow_block_edge(container, true);
+    return edge.block ? find_last_formatted_line_block(edge.block) : nullptr;
 }
 
 // Get text-box-edge values from a block, walking up to ancestors if not set.
@@ -2304,6 +2248,17 @@ static void shift_text_rects_y_inline_only(View* view, float delta) {
     }
 }
 
+static void shift_inline_with_block_children_y(View* view, float delta) {
+    shift_text_rects_y_inline_only(view, delta);
+    View* child = lam::view_require<RDT_VIEW_INLINE>(view)->first_placed_child();
+    while (child) {
+        if (child->is_block() && !is_out_of_flow_block(lam::view_require_block(child))) {
+            child->y += delta;
+        }
+        child = child->next();
+    }
+}
+
 static void shift_block_axis_content_for_alignment(ViewBlock* block, float delta) {
     View* child = block->first_placed_child();
     while (child) {
@@ -2314,14 +2269,7 @@ static void shift_block_axis_content_for_alignment(ViewBlock* block, float delta
             }
         } else if (child->view_type == RDT_VIEW_INLINE) {
             child->y += delta;
-            shift_text_rects_y_inline_only(child, delta);
-            View* ic = lam::view_require<RDT_VIEW_INLINE>(child)->first_placed_child();
-            while (ic) {
-                if (ic->is_block() && !is_out_of_flow_block(lam::view_require_block(ic))) {
-                    ic->y += delta;
-                }
-                ic = ic->next();
-            }
+            shift_inline_with_block_children_y(child, delta);
         } else {
             child->y += delta;
             shift_text_rects_y(child, delta);
@@ -2388,20 +2336,13 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
                 // Use shift_text_rects_y_inline_only to avoid double-shifting
                 // text rects inside block descendants.
                 if (child->view_type == RDT_VIEW_INLINE) {
-                    shift_text_rects_y_inline_only(child, -trim);
                     // Block-in-inline: block children inside inline wrappers have y
                     // relative to the containing block, not relative to the inline
                     // wrapper. Shift their y coordinates so they move with the wrapper.
                     // Text rects inside blocks are relative to the block, so they
                     // don't need shifting — the absolute position recalculation
                     // already accounts for the block's shifted y.
-                    View* ic = lam::view_require<RDT_VIEW_INLINE>(child)->first_placed_child();
-                    while (ic) {
-                        if (ic->is_block() && !is_out_of_flow_block(lam::view_require_block(ic))) {
-                            ic->y -= trim;
-                        }
-                        ic = ic->next();
-                    }
+                    shift_inline_with_block_children_y(child, -trim);
                 } else {
                     shift_text_rects_y(child, -trim);
                 }
@@ -2460,14 +2401,7 @@ static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, 
             // Non-block content after first block: shift up
             child->y -= trim;
             if (child->view_type == RDT_VIEW_INLINE) {
-                shift_text_rects_y_inline_only(child, -trim);
-                View* ic = lam::view_require<RDT_VIEW_INLINE>(child)->first_placed_child();
-                while (ic) {
-                    if (ic->is_block() && !is_out_of_flow_block(lam::view_require_block(ic))) {
-                        ic->y -= trim;
-                    }
-                    ic = ic->next();
-                }
+                shift_inline_with_block_children_y(child, -trim);
             } else {
                 shift_text_rects_y(child, -trim);
             }
@@ -2518,35 +2452,16 @@ static void apply_end_trim_recursive(ViewBlock* container, ViewBlock* target, fl
         return;
     }
 
-    // Find the last in-flow block child, including blocks inside inline wrappers.
-    View* child = container->first_placed_child();
-    ViewBlock* last_in_flow = nullptr;
-    View* last_inline_wrapper = nullptr;
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                last_in_flow = vb;
-                last_inline_wrapper = nullptr;
-            }
-        } else {
-            ViewBlock* bii = find_last_block_in_inline(child);
-            if (bii) {
-                last_in_flow = bii;
-                last_inline_wrapper = child;
-            }
+    InFlowBlockEdge edge = find_in_flow_block_edge(container, true);
+    if (edge.block) {
+        if (edge.owner_child->view_type == RDT_VIEW_INLINE) {
+            shrink_inline_wrappers_containing_block(edge.owner_child, edge.block, trim);
         }
-        child = child->next();
-    }
-    if (last_in_flow) {
-        if (last_inline_wrapper) {
-            shrink_inline_wrappers_containing_block(last_inline_wrapper, last_in_flow, trim);
+        if (!block_has_layout_fragments(edge.block)) {
+            edge.block->height -= trim;
+            edge.block->content_height -= trim;
         }
-        if (!block_has_layout_fragments(last_in_flow)) {
-            last_in_flow->height -= trim;
-            last_in_flow->content_height -= trim;
-        }
-        apply_end_trim_recursive(last_in_flow, target, trim);
+        apply_end_trim_recursive(edge.block, target, trim);
     }
 }
 
@@ -2557,24 +2472,7 @@ static bool has_start_padding_or_border_between(ViewBlock* container, ViewBlock*
     // Walk the path from container's first in-flow block child down to target
     ViewBlock* current = container;
     while (current != target) {
-        View* child = current->first_placed_child();
-        ViewBlock* next_block = nullptr;
-        while (child) {
-            if (child->is_block()) {
-                ViewBlock* vb = lam::view_require_block(child);
-                if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                    next_block = vb;
-                    break;
-                }
-            } else {
-                ViewBlock* bii = find_first_block_in_inline(child);
-                if (bii) {
-                    next_block = bii;
-                    break;
-                }
-            }
-            child = child->next();
-        }
+        ViewBlock* next_block = find_in_flow_block_edge(current, false).block;
         if (!next_block) break;
         // Check this block's padding-top and border-top
         if (next_block->bound) {
@@ -2592,22 +2490,7 @@ static bool has_end_padding_or_border_between(ViewBlock* container, ViewBlock* t
     if (container == target) return false;
     ViewBlock* current = container;
     while (current != target) {
-        View* child = current->first_placed_child();
-        ViewBlock* last_block = nullptr;
-        while (child) {
-            if (child->is_block()) {
-                ViewBlock* vb = lam::view_require_block(child);
-                if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                    last_block = vb;
-                }
-            } else {
-                ViewBlock* bii = find_last_block_in_inline(child);
-                if (bii) {
-                    last_block = bii;
-                }
-            }
-            child = child->next();
-        }
+        ViewBlock* last_block = find_in_flow_block_edge(current, true).block;
         if (!last_block) break;
         if (last_block->bound) {
             if (last_block->bound->padding.bottom > 0) return true;
@@ -3414,6 +3297,57 @@ static void resolve_table_auto_margins_after_shrink(ViewBlock* block, float cont
     log_debug("%s TABLE-AUTO-MARGIN resolved after shrink: containing=%.1f, width=%.1f, margin-left=%.1f, margin-right=%.1f, x=%.1f",
               block->source_loc(), available_width, block->width,
               block->bound->margin.left, block->bound->margin.right, block->x);
+}
+
+static void update_multipass_advance_y(LayoutContext* lycon, ViewBlock* block) {
+    lycon->block.advance_y = block->height;
+    if (block->bound && block->bound->border) {
+        lycon->block.advance_y -= block->bound->border->width.bottom;
+    }
+    if (block->bound) lycon->block.advance_y -= block->bound->padding.bottom;
+}
+
+static void update_inline_multipass_width(LayoutContext* lycon, ViewBlock* block,
+                                          bool include_text, const char* kind) {
+    if (block->display.outer != CSS_VALUE_INLINE_BLOCK ||
+        (block->blk && block->blk->given_width >= 0)) return;
+
+    float max_right = 0.0f;
+    for (View* child = block->first_child; child; child = child->next_sibling) {
+        if (include_text && child->view_type == RDT_VIEW_TEXT) {
+            max_right = max(max_right, child->x + child->width);
+            continue;
+        }
+        if (child->view_type != RDT_VIEW_BLOCK &&
+            child->view_type != RDT_VIEW_INLINE_BLOCK &&
+            child->view_type != RDT_VIEW_LIST_ITEM) continue;
+
+        ViewElement* item = lam::view_as_element(child);
+        if (!item || layout_block_is_out_of_flow_positioned(lam::view_require_block(child))) {
+            continue;
+        }
+        float right = item->x + item->width;
+        if (item->bound) right += item->bound->margin.right;
+        max_right = max(max_right, right);
+    }
+    if (max_right <= 0.0f) return;
+
+    lycon->block.max_width = max_right;
+    log_debug("%s INLINE-%s: computed max_width %.1f from items",
+              block->source_loc(), kind, max_right);
+}
+
+static void layout_empty_flex_or_grid(LayoutContext* lycon, ViewBlock* block,
+                                      bool is_grid) {
+    auto start = high_resolution_clock::now();
+    if (is_grid) layout_grid_content(lycon, block);
+    else layout_flex_content(lycon, block);
+    double elapsed = duration<double, std::milli>(
+        high_resolution_clock::now() - start).count();
+    if (is_grid) g_grid_layout_time += elapsed;
+    else g_flex_layout_time += elapsed;
+    update_multipass_advance_y(lycon, block);
+    finalize_block_flow(lycon, block, block->display.outer);
 }
 
 static Url* clone_document_url_for_iframe(LayoutContext* lycon) {
@@ -4468,15 +4402,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 layout_flex_content(lycon, block);
                 g_flex_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_flex_start).count();
 
-                // After flex layout, update content_height/advance_y from container height
-                // so that parent containers (like iframes) get the correct scroll height
-                lycon->block.advance_y = block->height;
-                if (block->bound && block->bound->border) {
-                    lycon->block.advance_y -= block->bound->border->width.bottom;
-                }
-                if (block->bound) {
-                    lycon->block.advance_y -= block->bound->padding.bottom;
-                }
+                // Parent containers consume the content-box height from multipass layout.
+                update_multipass_advance_y(lycon, block);
                 log_debug("%s FLEX FINALIZE: Updated advance_y=%.1f from block->height=%.1f", block->source_loc(),
                     lycon->block.advance_y, block->height);
 
@@ -4485,38 +4412,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 // uses the full available width as main_axis_size, so items are positioned
                 // with flex-start (default). The actual content width is the rightmost
                 // edge of any flex item (including its margin).
-                if (block->display.outer == CSS_VALUE_INLINE_BLOCK &&
-                    (!block->blk || block->blk->given_width < 0)) {
-                    float max_right = 0;
-                    for (View* child = block->first_child; child; child = child->next_sibling) {
-                        if (child->view_type == RDT_VIEW_TEXT) {
-                            float right = child->x + child->width;
-                            if (right > max_right) max_right = right;
-                        }
-                        else if (child->view_type == RDT_VIEW_BLOCK ||
-                            child->view_type == RDT_VIEW_INLINE_BLOCK ||
-                            child->view_type == RDT_VIEW_LIST_ITEM) {
-                            ViewElement* item = lam::view_as_element(child);
-                            if (item) {
-                                // Skip absolutely positioned children (not flex items per §4.1)
-                                ViewBlock* vb = lam::view_require_block(child);
-                                if (layout_block_is_out_of_flow_positioned(vb)) {
-                                    continue;
-                                }
-                                float right = item->x + item->width;
-                                if (item->bound) {
-                                    right += item->bound->margin.right;
-                                }
-                                if (right > max_right) max_right = right;
-                            }
-                        }
-                    }
-                    if (max_right > 0) {
-                        lycon->block.max_width = max_right;
-                        log_debug("%s INLINE-FLEX: computed max_width %.1f from flex items", block->source_loc(),
-                                  lycon->block.max_width);
-                    }
-                }
+                update_inline_multipass_width(lycon, block, true, "FLEX");
 
                 finalize_block_flow(lycon, block, block->display.outer);
                 return;
@@ -4529,48 +4425,13 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 log_debug("Finished grid container layout for %s", block->source_loc());
                 g_grid_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_grid_start).count();
 
-                // After grid layout, update content_height/advance_y from container height
-                // so that parent containers (like iframes) get the correct scroll height
-                lycon->block.advance_y = block->height;
-                if (block->bound && block->bound->border) {
-                    lycon->block.advance_y -= block->bound->border->width.bottom;
-                }
-                if (block->bound) {
-                    lycon->block.advance_y -= block->bound->padding.bottom;
-                }
+                update_multipass_advance_y(lycon, block);
                 log_debug("%s GRID FINALIZE: Updated advance_y=%.1f from block->height=%.1f", block->source_loc(),
                     lycon->block.advance_y, block->height);
 
                 // CSS Grid §12.1: For inline-grid with auto width, compute
                 // shrink-to-fit width from the positioned grid items (same as inline-flex).
-                if (block->display.outer == CSS_VALUE_INLINE_BLOCK &&
-                    (!block->blk || block->blk->given_width < 0)) {
-                    float max_right = 0;
-                    for (View* child = block->first_child; child; child = child->next_sibling) {
-                        if (child->view_type == RDT_VIEW_BLOCK ||
-                            child->view_type == RDT_VIEW_INLINE_BLOCK ||
-                            child->view_type == RDT_VIEW_LIST_ITEM) {
-                            ViewElement* item = lam::view_as_element(child);
-                            if (item) {
-                                // Skip absolutely positioned children (not grid items)
-                                ViewBlock* vb = lam::view_require_block(child);
-                                if (layout_block_is_out_of_flow_positioned(vb)) {
-                                    continue;
-                                }
-                                float right = item->x + item->width;
-                                if (item->bound) {
-                                    right += item->bound->margin.right;
-                                }
-                                if (right > max_right) max_right = right;
-                            }
-                        }
-                    }
-                    if (max_right > 0) {
-                        lycon->block.max_width = max_right;
-                        log_debug("%s INLINE-GRID: computed max_width %.1f from grid items", block->source_loc(),
-                                  lycon->block.max_width);
-                    }
-                }
+                update_inline_multipass_width(lycon, block, false, "GRID");
 
                 finalize_block_flow(lycon, block, block->display.outer);
                 return;
@@ -4583,15 +4444,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 layout_table_content(lycon, block, block->display);
                 g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_table_start).count();
 
-                // After table layout, update content_height/advance_y from container height
-                // so that parent containers (like iframes) get the correct scroll height
-                lycon->block.advance_y = block->height;
-                if (block->bound && block->bound->border) {
-                    lycon->block.advance_y -= block->bound->border->width.bottom;
-                }
-                if (block->bound) {
-                    lycon->block.advance_y -= block->bound->padding.bottom;
-                }
+                update_multipass_advance_y(lycon, block);
                 finalize_block_flow(lycon, block, block->display.outer);
 
                 // CSS 2.1 §17.5.2: Tables shrink-to-fit their content (unlike block elements
@@ -4625,33 +4478,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             // Empty container (no children) - still need to run flex/grid layout
             // for proper shrink-to-fit sizing (e.g., abs-pos flex with only border/padding)
             if (block->display.inner == CSS_VALUE_FLEX) {
-                auto t_flex_start = high_resolution_clock::now();
-                layout_flex_content(lycon, block);
-                g_flex_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_flex_start).count();
-
-                lycon->block.advance_y = block->height;
-                if (block->bound && block->bound->border) {
-                    lycon->block.advance_y -= block->bound->border->width.bottom;
-                }
-                if (block->bound) {
-                    lycon->block.advance_y -= block->bound->padding.bottom;
-                }
-                finalize_block_flow(lycon, block, block->display.outer);
+                layout_empty_flex_or_grid(lycon, block, false);
                 return;
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
-                auto t_grid_start = high_resolution_clock::now();
-                layout_grid_content(lycon, block);
-                g_grid_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_grid_start).count();
-
-                lycon->block.advance_y = block->height;
-                if (block->bound && block->bound->border) {
-                    lycon->block.advance_y -= block->bound->border->width.bottom;
-                }
-                if (block->bound) {
-                    lycon->block.advance_y -= block->bound->padding.bottom;
-                }
-                finalize_block_flow(lycon, block, block->display.outer);
+                layout_empty_flex_or_grid(lycon, block, true);
                 return;
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
@@ -4660,13 +4491,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 layout_table_content(lycon, block, block->display);
                 g_table_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_table_start).count();
 
-                lycon->block.advance_y = block->height;
-                if (block->bound && block->bound->border) {
-                    lycon->block.advance_y -= block->bound->border->width.bottom;
-                }
-                if (block->bound) {
-                    lycon->block.advance_y -= block->bound->padding.bottom;
-                }
+                update_multipass_advance_y(lycon, block);
                 finalize_block_flow(lycon, block, block->display.outer);
 
                 // Shrink-to-fit: auto-width tables use their content width, not container width

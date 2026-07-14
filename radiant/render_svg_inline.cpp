@@ -285,6 +285,22 @@ static const char* get_svg_attr(Element* elem, const char* name) {
     return extract_element_attribute(elem, name, nullptr);
 }
 
+static uint8_t svg_element_opacity_u8(Element* elem) {
+    const char* opacity = get_svg_attr(elem, "opacity");
+    return opacity ? (uint8_t)(strtof(opacity, nullptr) * 255.0f) : 255;
+}
+
+static void svg_preserve_aspect_alignment(const char* value,
+                                          float* align_x, float* align_y) {
+    *align_x = 0.5f;
+    *align_y = 0.5f;
+    if (!value) return;
+    if (strstr(value, "xMin")) *align_x = 0.0f;
+    else if (strstr(value, "xMax")) *align_x = 1.0f;
+    if (strstr(value, "YMin")) *align_y = 0.0f;
+    else if (strstr(value, "YMax")) *align_y = 1.0f;
+}
+
 struct SvgStyleRule {
     char selector[128];
     char name[64];
@@ -1988,6 +2004,93 @@ typedef struct SvgPathEndInfo {
     bool has_tangent;
 } SvgPathEndInfo;
 
+typedef struct SvgPathEmitContext {
+    RdtPath* path;
+    float* cur_x;
+    float* cur_y;
+    float* pending_x;
+    float* pending_y;
+    float* last_ctrl_x;
+    float* last_ctrl_y;
+    bool* pending_move;
+    bool* subpath_has_draw;
+    bool* any_draw;
+    SvgPathEndInfo* end_info;
+} SvgPathEmitContext;
+
+static void svg_path_emit_line(SvgPathEmitContext* context, float x, float y) {
+    float previous_x = *context->cur_x;
+    float previous_y = *context->cur_y;
+    if (!svg_same_point(previous_x, previous_y, x, y)) {
+        svg_emit_pending_move(context->path, context->pending_move,
+            *context->pending_x, *context->pending_y);
+        rdt_path_line_to(context->path, x, y);
+        *context->subpath_has_draw = true;
+        *context->any_draw = true;
+    }
+    *context->cur_x = x;
+    *context->cur_y = y;
+    if (context->end_info) {
+        context->end_info->tangent_x = x - previous_x;
+        context->end_info->tangent_y = y - previous_y;
+        context->end_info->has_tangent =
+            !svg_same_point(x, y, previous_x, previous_y);
+    }
+}
+
+static void svg_path_emit_cubic(SvgPathEmitContext* context,
+                                float x1, float y1, float x2, float y2,
+                                float x, float y) {
+    bool degenerate = svg_same_point(*context->cur_x, *context->cur_y, x1, y1)
+        && svg_same_point(*context->cur_x, *context->cur_y, x2, y2)
+        && svg_same_point(*context->cur_x, *context->cur_y, x, y);
+    if (!degenerate) {
+        svg_emit_pending_move(context->path, context->pending_move,
+            *context->pending_x, *context->pending_y);
+        rdt_path_cubic_to(context->path, x1, y1, x2, y2, x, y);
+        *context->subpath_has_draw = true;
+        *context->any_draw = true;
+    }
+    *context->last_ctrl_x = x2;
+    *context->last_ctrl_y = y2;
+    *context->cur_x = x;
+    *context->cur_y = y;
+    if (context->end_info) {
+        context->end_info->tangent_x = x - x2;
+        context->end_info->tangent_y = y - y2;
+        context->end_info->has_tangent = !svg_same_point(x, y, x2, y2);
+    }
+}
+
+// Smooth and explicit quadratic commands must use the original quadratic
+// control point for reflection and marker tangents after cubic conversion.
+static void svg_path_emit_quadratic(SvgPathEmitContext* context,
+                                    float qx, float qy, float x, float y) {
+    float cx1 = *context->cur_x + 2.0f / 3.0f * (qx - *context->cur_x);
+    float cy1 = *context->cur_y + 2.0f / 3.0f * (qy - *context->cur_y);
+    float cx2 = x + 2.0f / 3.0f * (qx - x);
+    float cy2 = y + 2.0f / 3.0f * (qy - y);
+    bool degenerate = svg_same_point(*context->cur_x, *context->cur_y, cx1, cy1)
+        && svg_same_point(*context->cur_x, *context->cur_y, cx2, cy2)
+        && svg_same_point(*context->cur_x, *context->cur_y, x, y);
+    if (!degenerate) {
+        svg_emit_pending_move(context->path, context->pending_move,
+            *context->pending_x, *context->pending_y);
+        rdt_path_cubic_to(context->path, cx1, cy1, cx2, cy2, x, y);
+        *context->subpath_has_draw = true;
+        *context->any_draw = true;
+    }
+    *context->last_ctrl_x = qx;
+    *context->last_ctrl_y = qy;
+    *context->cur_x = x;
+    *context->cur_y = y;
+    if (context->end_info) {
+        context->end_info->tangent_x = x - qx;
+        context->end_info->tangent_y = y - qy;
+        context->end_info->has_tangent = !svg_same_point(x, y, qx, qy);
+    }
+}
+
 // Parse SVG path 'd' attribute into an RdtPath. Returns new path (caller must free).
 static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullptr,
                                  bool allow_move_only = false) {
@@ -2004,6 +2107,11 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
     bool pending_move = false;
     bool subpath_has_draw = false;
     bool any_draw = false;
+    SvgPathEmitContext emit_context = {
+        path, &cur_x, &cur_y, &pending_x, &pending_y,
+        &last_ctrl_x, &last_ctrl_y, &pending_move,
+        &subpath_has_draw, &any_draw, end_info
+    };
 
     const char* p = d;
 
@@ -2046,43 +2154,19 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
                 last_ctrl_y = cur_y;
                 // subsequent coords are implicit lineto
                 while (peek_number(p)) {
-                    float prev_x = cur_x, prev_y = cur_y;
                     x = parse_number(&p);
                     y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
-                    if (!svg_same_point(cur_x, cur_y, x, y)) {
-                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
-                        rdt_path_line_to(path, x, y);
-                        subpath_has_draw = true;
-                        any_draw = true;
-                    }
-                    cur_x = x; cur_y = y;
-                    if (end_info) {
-                        end_info->tangent_x = cur_x - prev_x;
-                        end_info->tangent_y = cur_y - prev_y;
-                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, prev_x, prev_y);
-                    }
+                    svg_path_emit_line(&emit_context, x, y);
                 }
                 break;
             }
             case 'L': {  // lineto
                 while (peek_number(p)) {
-                    float prev_x = cur_x, prev_y = cur_y;
                     float x = parse_number(&p);
                     float y = parse_number(&p);
                     if (relative) { x += cur_x; y += cur_y; }
-                    if (!svg_same_point(cur_x, cur_y, x, y)) {
-                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
-                        rdt_path_line_to(path, x, y);
-                        subpath_has_draw = true;
-                        any_draw = true;
-                    }
-                    cur_x = x; cur_y = y;
-                    if (end_info) {
-                        end_info->tangent_x = cur_x - prev_x;
-                        end_info->tangent_y = cur_y - prev_y;
-                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, prev_x, prev_y);
-                    }
+                    svg_path_emit_line(&emit_context, x, y);
                 }
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
@@ -2145,22 +2229,7 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
                         x2 += cur_x; y2 += cur_y;
                         x += cur_x; y += cur_y;
                     }
-                    bool degenerate = svg_same_point(cur_x, cur_y, x1, y1)
-                        && svg_same_point(cur_x, cur_y, x2, y2)
-                        && svg_same_point(cur_x, cur_y, x, y);
-                    if (!degenerate) {
-                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
-                        rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
-                        subpath_has_draw = true;
-                        any_draw = true;
-                    }
-                    last_ctrl_x = x2; last_ctrl_y = y2;
-                    cur_x = x; cur_y = y;
-                    if (end_info) {
-                        end_info->tangent_x = cur_x - x2;
-                        end_info->tangent_y = cur_y - y2;
-                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, x2, y2);
-                    }
+                    svg_path_emit_cubic(&emit_context, x1, y1, x2, y2, x, y);
                 }
                 break;
             }
@@ -2177,22 +2246,7 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
                         x2 += cur_x; y2 += cur_y;
                         x += cur_x; y += cur_y;
                     }
-                    bool degenerate = svg_same_point(cur_x, cur_y, x1, y1)
-                        && svg_same_point(cur_x, cur_y, x2, y2)
-                        && svg_same_point(cur_x, cur_y, x, y);
-                    if (!degenerate) {
-                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
-                        rdt_path_cubic_to(path, x1, y1, x2, y2, x, y);
-                        subpath_has_draw = true;
-                        any_draw = true;
-                    }
-                    last_ctrl_x = x2; last_ctrl_y = y2;
-                    cur_x = x; cur_y = y;
-                    if (end_info) {
-                        end_info->tangent_x = cur_x - x2;
-                        end_info->tangent_y = cur_y - y2;
-                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, x2, y2);
-                    }
+                    svg_path_emit_cubic(&emit_context, x1, y1, x2, y2, x, y);
                 }
                 break;
             }
@@ -2206,27 +2260,7 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
                         qx += cur_x; qy += cur_y;
                         x += cur_x; y += cur_y;
                     }
-                    // convert Q to C: control points at 2/3 along Q handles
-                    float cx1 = cur_x + 2.0f/3.0f * (qx - cur_x);
-                    float cy1 = cur_y + 2.0f/3.0f * (qy - cur_y);
-                    float cx2 = x + 2.0f/3.0f * (qx - x);
-                    float cy2 = y + 2.0f/3.0f * (qy - y);
-                    bool degenerate = svg_same_point(cur_x, cur_y, cx1, cy1)
-                        && svg_same_point(cur_x, cur_y, cx2, cy2)
-                        && svg_same_point(cur_x, cur_y, x, y);
-                    if (!degenerate) {
-                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
-                        rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
-                        subpath_has_draw = true;
-                        any_draw = true;
-                    }
-                    last_ctrl_x = qx; last_ctrl_y = qy;
-                    cur_x = x; cur_y = y;
-                    if (end_info) {
-                        end_info->tangent_x = cur_x - qx;
-                        end_info->tangent_y = cur_y - qy;
-                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, qx, qy);
-                    }
+                    svg_path_emit_quadratic(&emit_context, qx, qy, x, y);
                 }
                 break;
             }
@@ -2239,26 +2273,7 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
                     if (relative) {
                         x += cur_x; y += cur_y;
                     }
-                    float cx1 = cur_x + 2.0f/3.0f * (qx - cur_x);
-                    float cy1 = cur_y + 2.0f/3.0f * (qy - cur_y);
-                    float cx2 = x + 2.0f/3.0f * (qx - x);
-                    float cy2 = y + 2.0f/3.0f * (qy - y);
-                    bool degenerate = svg_same_point(cur_x, cur_y, cx1, cy1)
-                        && svg_same_point(cur_x, cur_y, cx2, cy2)
-                        && svg_same_point(cur_x, cur_y, x, y);
-                    if (!degenerate) {
-                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
-                        rdt_path_cubic_to(path, cx1, cy1, cx2, cy2, x, y);
-                        subpath_has_draw = true;
-                        any_draw = true;
-                    }
-                    last_ctrl_x = qx; last_ctrl_y = qy;
-                    cur_x = x; cur_y = y;
-                    if (end_info) {
-                        end_info->tangent_x = cur_x - qx;
-                        end_info->tangent_y = cur_y - qy;
-                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, qx, qy);
-                    }
+                    svg_path_emit_quadratic(&emit_context, qx, qy, x, y);
                 }
                 break;
             }
@@ -3779,12 +3794,7 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
                 rdt_picture_set_size(rdt_pic, width, height);
             }
 
-            uint8_t op = 255;
-            const char* opacity = get_svg_attr(elem, "opacity");
-            if (opacity) {
-                float opf = strtof(opacity, nullptr);
-                op = (uint8_t)(opf * 255);
-            }
+            uint8_t op = svg_element_opacity_u8(elem);
 
             RdtMatrix m = compose_element_transform(ctx, elem);
             RdtMatrix translate = rdt_matrix_translate(x, y);
@@ -3832,12 +3842,7 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
             tvg_paint_translate(pic, x, y);
         }
 
-        uint8_t op = 255;
-        const char* opacity = get_svg_attr(elem, "opacity");
-        if (opacity) {
-            float opf = strtof(opacity, nullptr);
-            op = (uint8_t)(opf * 255);
-        }
+        uint8_t op = svg_element_opacity_u8(elem);
 
         RdtPicture* rdt_pic = rdt_picture_take_tvg_paint(pic, 0, 0);
         if (rdt_pic) {
@@ -3865,12 +3870,7 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
             rdt_picture_set_size(rdt_pic, width, height);
         }
 
-        uint8_t op = 255;
-        const char* opacity = get_svg_attr(elem, "opacity");
-        if (opacity) {
-            float opf = strtof(opacity, nullptr);
-            op = (uint8_t)(opf * 255);
-        }
+        uint8_t op = svg_element_opacity_u8(elem);
 
         RdtMatrix m = compose_element_transform(ctx, elem);
         RdtMatrix translate = rdt_matrix_translate(x, y);
@@ -3902,12 +3902,7 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
         tvg_paint_translate(pic, x, y);
 
         // apply opacity if present
-        uint8_t op = 255;
-        const char* opacity = get_svg_attr(elem, "opacity");
-        if (opacity) {
-            float opf = strtof(opacity, nullptr);
-            op = (uint8_t)(opf * 255);
-        }
+        uint8_t op = svg_element_opacity_u8(elem);
 
         // compose element transform with accumulated context transform
         RdtMatrix m = compose_element_transform(ctx, elem);
@@ -4435,13 +4430,8 @@ static void render_svg_use_target(SvgInlineRenderContext* ctx, Element* use_elem
             bool par_slice = par && strstr(par, "slice") != nullptr;
             if (!par_none) {
                 float scale = par_slice ? fmax(sx, sy) : fmin(sx, sy);
-                float align_x = 0.5f, align_y = 0.5f;
-                if (par) {
-                    if      (strstr(par, "xMin")) align_x = 0.0f;
-                    else if (strstr(par, "xMax")) align_x = 1.0f;
-                    if      (strstr(par, "YMin")) align_y = 0.0f;
-                    else if (strstr(par, "YMax")) align_y = 1.0f;
-                }
+                float align_x, align_y;
+                svg_preserve_aspect_alignment(par, &align_x, &align_y);
                 float tx = -vb.min_x * scale + (sym_w - vb.width * scale) * align_x;
                 float ty = -vb.min_y * scale + (sym_h - vb.height * scale) * align_y;
                 RdtMatrix vb_m = {scale, 0, tx, 0, scale, ty, 0, 0, 1};
@@ -4529,20 +4519,22 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
 // SVG Mask Support
 // ============================================================================
 
-static float svg_mask_luminance_for_child(SvgInlineRenderContext* ctx, Element* child) {
+static float svg_mask_fill_alpha(SvgInlineRenderContext* ctx, Element* child,
+                                 Color* fill_color) {
     char fill_buf[256];
     char opacity_buf[64];
     char fill_opacity_buf[64];
+    fill_color->r = 0;
+    fill_color->g = 0;
+    fill_color->b = 0;
+    fill_color->a = 255;
     const char* fill = get_svg_attr_or_style(ctx, child, "fill", fill_buf, sizeof(fill_buf));
     if (fill && strcmp(fill, "none") == 0) return 0.0f;
 
-    Color c;
     if (fill) {
-        c = svg_resolve_color_keyword(ctx, fill);
-    } else {
-        c.r = 0; c.g = 0; c.b = 0; c.a = 255;
+        *fill_color = svg_resolve_color_keyword(ctx, fill);
     }
-    float alpha = (float)c.a / 255.0f;
+    float alpha = (float)fill_color->a / 255.0f;
 
     const char* opacity = get_svg_attr_or_style(ctx, child, "opacity", opacity_buf, sizeof(opacity_buf));
     if (opacity) alpha *= strtof(opacity, nullptr);
@@ -4550,35 +4542,22 @@ static float svg_mask_luminance_for_child(SvgInlineRenderContext* ctx, Element* 
                                                      fill_opacity_buf, sizeof(fill_opacity_buf));
     if (fill_opacity) alpha *= strtof(fill_opacity, nullptr);
 
-    float lum = (0.2126f * (float)c.r + 0.7152f * (float)c.g + 0.0722f * (float)c.b) / 255.0f;
-    float amount = lum * alpha;
-    if (amount < 0.0f) amount = 0.0f;
-    if (amount > 1.0f) amount = 1.0f;
-    return amount;
-}
-
-static float svg_mask_source_alpha_for_child(SvgInlineRenderContext* ctx, Element* child) {
-    char opacity_buf[64];
-    char fill_opacity_buf[64];
-    char fill_buf[256];
-    const char* fill = get_svg_attr_or_style(ctx, child, "fill", fill_buf, sizeof(fill_buf));
-    if (fill && strcmp(fill, "none") == 0) return 0.0f;
-
-    Color c;
-    if (fill) {
-        c = svg_resolve_color_keyword(ctx, fill);
-    } else {
-        c.r = 0; c.g = 0; c.b = 0; c.a = 255;
-    }
-    float alpha = (float)c.a / 255.0f;
-    const char* opacity = get_svg_attr_or_style(ctx, child, "opacity", opacity_buf, sizeof(opacity_buf));
-    if (opacity) alpha *= strtof(opacity, nullptr);
-    const char* fill_opacity = get_svg_attr_or_style(ctx, child, "fill-opacity",
-                                                     fill_opacity_buf, sizeof(fill_opacity_buf));
-    if (fill_opacity) alpha *= strtof(fill_opacity, nullptr);
     if (alpha < 0.0f) alpha = 0.0f;
     if (alpha > 1.0f) alpha = 1.0f;
     return alpha;
+}
+
+static float svg_mask_luminance_for_child(SvgInlineRenderContext* ctx, Element* child) {
+    Color color;
+    float alpha = svg_mask_fill_alpha(ctx, child, &color);
+    float luminance = (0.2126f * (float)color.r + 0.7152f * (float)color.g +
+                       0.0722f * (float)color.b) / 255.0f;
+    return luminance * alpha;
+}
+
+static float svg_mask_source_alpha_for_child(SvgInlineRenderContext* ctx, Element* child) {
+    Color color;
+    return svg_mask_fill_alpha(ctx, child, &color);
 }
 
 static bool render_svg_element_with_simple_mask(SvgInlineRenderContext* ctx, Element* elem) {
@@ -4752,13 +4731,8 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
             } else {
                 float scale = par_slice ? fmax(sx, sy) : fmin(sx, sy);
                 scale_x = scale_y = scale;
-                float align_x = 0.5f, align_y = 0.5f;
-                if (par) {
-                    if      (strstr(par, "xMin")) align_x = 0.0f;
-                    else if (strstr(par, "xMax")) align_x = 1.0f;
-                    if      (strstr(par, "YMin")) align_y = 0.0f;
-                    else if (strstr(par, "YMax")) align_y = 1.0f;
-                }
+                float align_x, align_y;
+                svg_preserve_aspect_alignment(par, &align_x, &align_y);
                 tx = -vb.min_x * scale + (nw - vb.width  * scale) * align_x;
                 ty = -vb.min_y * scale + (nh - vb.height * scale) * align_y;
             }
@@ -4898,13 +4872,8 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
                 ? (ctx.scale_x > ctx.scale_y ? ctx.scale_x : ctx.scale_y)
                 : (ctx.scale_x < ctx.scale_y ? ctx.scale_x : ctx.scale_y);
             ctx.scale_x = ctx.scale_y = scale;
-            float align_x = 0.5f, align_y = 0.5f;
-            if (par) {
-                if      (strstr(par, "xMin")) align_x = 0.0f;
-                else if (strstr(par, "xMax")) align_x = 1.0f;
-                if      (strstr(par, "YMin")) align_y = 0.0f;
-                else if (strstr(par, "YMax")) align_y = 1.0f;
-            }
+            float align_x, align_y;
+            svg_preserve_aspect_alignment(par, &align_x, &align_y);
             ctx.translate_x = -vb.min_x * scale + (viewport_width  - vb.width  * scale) * align_x;
             ctx.translate_y = -vb.min_y * scale + (viewport_height - vb.height * scale) * align_y;
         }

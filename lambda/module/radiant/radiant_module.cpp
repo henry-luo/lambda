@@ -1345,6 +1345,7 @@ static const JubeModuleDef radiant_module = {
     radiant_dom_interface_decl,
     radiant_dom_type_bindings,
     10,  // DOM3 Phase 4e: document/foreign_document are binding-hook driven
+    NULL,
     radiant_custom_layout_heap_cleanup,
 };
 

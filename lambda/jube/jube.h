@@ -431,6 +431,7 @@ struct JubeModuleDef {
     const char* interface_decl;            // Lambda-type-syntax module interface
     const JubeTypeBinding* type_bindings;  // one per declared type
     int32_t type_binding_count;
+    void (*runtime_reset)(void);            // drop JS heap-backed module caches
 
     // Optional cleanup for values rooted in one Lambda heap. Called while the
     // heap is active, immediately before that runtime destroys it.

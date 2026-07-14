@@ -1225,20 +1225,23 @@ extern "C" void state_store_note_selection_mutation(DocState* state) {
     state->selection_layout_dirty = true;
 }
 
+static DomSelection* state_store_require_selection(DocState* state,
+                                                   const char** out_exception) {
+    if (!state) {
+        if (out_exception) *out_exception = "InvalidStateError";
+        return nullptr;
+    }
+    DomSelection* selection = sync_ensure_selection(state);
+    if (!selection && out_exception) *out_exception = "InvalidStateError";
+    return selection;
+}
+
 extern "C" bool state_store_set_selection(DocState* state,
                                            const DomBoundary* anchor,
                                            const DomBoundary* focus,
                                            const char** out_exception) {
-    if (!state) {
-        if (out_exception) *out_exception = "InvalidStateError";
-        return false;
-    }
-
-    DomSelection* selection = sync_ensure_selection(state);
-    if (!selection) {
-        if (out_exception) *out_exception = "InvalidStateError";
-        return false;
-    }
+    DomSelection* selection = state_store_require_selection(state, out_exception);
+    if (!selection) return false;
 
     if (!anchor || !focus || !anchor->node || !focus->node) {
         state->editing.inline_format_state = 0;
@@ -1265,16 +1268,12 @@ extern "C" bool state_store_set_selection(DocState* state,
 extern "C" bool state_store_add_selection_range(DocState* state,
                                                  DomRange* range,
                                                  const char** out_exception) {
-    if (!state || !range) {
+    if (!range) {
         if (out_exception) *out_exception = "InvalidStateError";
         return false;
     }
-
-    DomSelection* selection = sync_ensure_selection(state);
-    if (!selection) {
-        if (out_exception) *out_exception = "InvalidStateError";
-        return false;
-    }
+    DomSelection* selection = state_store_require_selection(state, out_exception);
+    if (!selection) return false;
 
     dom_selection_add_range(selection, range);
     return true;
@@ -1283,16 +1282,12 @@ extern "C" bool state_store_add_selection_range(DocState* state,
 extern "C" bool state_store_remove_selection_range(DocState* state,
                                                     DomRange* range,
                                                     const char** out_exception) {
-    if (!state || !range) {
+    if (!range) {
         if (out_exception) *out_exception = "InvalidStateError";
         return false;
     }
-
-    DomSelection* selection = sync_ensure_selection(state);
-    if (!selection) {
-        if (out_exception) *out_exception = "InvalidStateError";
-        return false;
-    }
+    DomSelection* selection = state_store_require_selection(state, out_exception);
+    if (!selection) return false;
 
     bool in_selection = false;
     for (uint32_t i = 0; i < selection->range_count; i++) {
@@ -1315,16 +1310,8 @@ extern "C" bool state_store_modify_selection(DocState* state,
                                               const char* direction,
                                               const char* granularity,
                                               const char** out_exception) {
-    if (!state) {
-        if (out_exception) *out_exception = "InvalidStateError";
-        return false;
-    }
-
-    DomSelection* selection = sync_ensure_selection(state);
-    if (!selection) {
-        if (out_exception) *out_exception = "InvalidStateError";
-        return false;
-    }
+    DomSelection* selection = state_store_require_selection(state, out_exception);
+    if (!selection) return false;
 
     return dom_selection_modify(selection, alter, direction, granularity,
                                 out_exception);
@@ -1467,6 +1454,14 @@ static const char* selection_state_name(DomSelection* selection) {
         "RangeSelectedBackward" : "RangeSelectedForward";
 }
 
+static void state_transition_log_begin(DocState* state, JsonWriter* writer,
+                                       char* buffer, size_t buffer_size) {
+    event_state_log_begin_record(state->active_event_log, writer, buffer, buffer_size,
+                                 "state.transition", state->active_cascade_id);
+    jw_key(writer, "data");
+    jw_obj_begin(writer);
+}
+
 static void selection_log_transition(DocState* state, const char* transition,
                                      View* anchor_view, int anchor_offset,
                                      View* focus_view, int focus_offset) {
@@ -1474,10 +1469,7 @@ static void selection_log_transition(DocState* state, const char* transition,
 
     char buf[1024];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    state_transition_log_begin(state, &w, buf, sizeof(buf));
         jw_kv_str(&w, "scope", "doc");
         state_transition_write_anchor(&w, state, NULL);
         jw_kv_str(&w, "name", "selection");
@@ -2118,6 +2110,21 @@ void radiant_state_destroy(DocState* state) {
     log_debug("radiant_state_destroy: destroyed state store");
 }
 
+static void editing_composition_reset(EditingCompositionState* composition) {
+    if (!composition) return;
+    composition->active = false;
+    editing_surface_clear(&composition->surface);
+    composition->anchor_view = NULL;
+    composition->anchor_offset = 0;
+    composition->preedit_len = 0;
+    composition->dom_preedit_len = 0;
+    composition->commit_len = 0;
+    composition->caret = 0;
+    composition->update_count = 0;
+    composition->committed = false;
+    composition->canceled = false;
+}
+
 void radiant_state_reset(DocState* state) {
     if (!state) return;
 
@@ -2154,17 +2161,7 @@ void radiant_state_reset(DocState* state) {
     state->editing.drag_anchor_view = NULL;
     state->editing.drag_anchor_offset = 0;
     state->editing.composing = false;
-    state->editing.composition.active = false;
-    editing_surface_clear(&state->editing.composition.surface);
-    state->editing.composition.anchor_view = NULL;
-    state->editing.composition.anchor_offset = 0;
-    state->editing.composition.preedit_len = 0;
-    state->editing.composition.dom_preedit_len = 0;
-    state->editing.composition.commit_len = 0;
-    state->editing.composition.caret = 0;
-    state->editing.composition.update_count = 0;
-    state->editing.composition.committed = false;
-    state->editing.composition.canceled = false;
+    editing_composition_reset(&state->editing.composition);
     state->editing.autoscroll.active = false;
     state->editing.autoscroll.surface = NULL;
     state->editing.autoscroll.pointer_x = 0.0f;
@@ -2290,17 +2287,11 @@ static void editing_interaction_begin_composition_raw(DocState* state,
     if (!state || !surface || surface->kind == EDIT_SURFACE_NONE) return;
     editing_interaction_set_active_surface(state, surface);
     state->editing.composing = true;
+    editing_composition_reset(&state->editing.composition);
     state->editing.composition.active = true;
     state->editing.composition.surface = *surface;
     state->editing.composition.anchor_view = anchor_view;
     state->editing.composition.anchor_offset = anchor_offset;
-    state->editing.composition.preedit_len = 0;
-    state->editing.composition.dom_preedit_len = 0;
-    state->editing.composition.commit_len = 0;
-    state->editing.composition.caret = 0;
-    state->editing.composition.update_count = 0;
-    state->editing.composition.committed = false;
-    state->editing.composition.canceled = false;
 }
 
 void editing_interaction_begin_composition(DocState* state,
@@ -2807,17 +2798,7 @@ static void doc_state_clear_editing_interaction_surface(DocState* state) {
     editing_surface_clear(&state->editing.active_surface);
     state->editing.has_active_surface = false;
     state->editing.composing = false;
-    state->editing.composition.active = false;
-    editing_surface_clear(&state->editing.composition.surface);
-    state->editing.composition.anchor_view = NULL;
-    state->editing.composition.anchor_offset = 0;
-    state->editing.composition.preedit_len = 0;
-    state->editing.composition.dom_preedit_len = 0;
-    state->editing.composition.commit_len = 0;
-    state->editing.composition.caret = 0;
-    state->editing.composition.update_count = 0;
-    state->editing.composition.committed = false;
-    state->editing.composition.canceled = false;
+    editing_composition_reset(&state->editing.composition);
 }
 
 static uint32_t view_state_clear_interaction_flag(DocState* state, const char* name) {
@@ -3274,10 +3255,7 @@ static void state_log_scalar_transition(DocState* state, View* anchor_view,
 
     char buf[512];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    state_transition_log_begin(state, &w, buf, sizeof(buf));
         jw_kv_str(&w, "scope", scope);
         state_transition_write_anchor(&w, state, anchor_view);
         jw_kv_str(&w, "name", name ? name : fallback_name);
@@ -3328,10 +3306,7 @@ static void view_state_log_scroll_transition(DocState* state, View* view,
 
     char buf[768];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    state_transition_log_begin(state, &w, buf, sizeof(buf));
         jw_kv_str(&w, "scope", "view");
         state_transition_write_anchor(&w, state, view);
         jw_kv_str(&w, "name", name ? name : "scroll");
@@ -3361,10 +3336,7 @@ static void state_log_view_ref_transition(DocState* state, View* anchor_view,
 
     char buf[768];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    state_transition_log_begin(state, &w, buf, sizeof(buf));
         jw_kv_str(&w, "scope", scope);
         state_transition_write_anchor(&w, state, anchor_view);
         jw_kv_str(&w, "name", name ? name : fallback_name);
@@ -7773,10 +7745,7 @@ static void focus_log_transition(DocState* state, const char* transition,
 
     char buf[1024];
     JsonWriter w;
-    event_state_log_begin_record(state->active_event_log, &w, buf, sizeof(buf),
-        "state.transition", state->active_cascade_id);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
+    state_transition_log_begin(state, &w, buf, sizeof(buf));
         jw_kv_str(&w, "machine", "focus");
         jw_kv_str(&w, "transition", transition ? transition : "focus_update");
         jw_kv_str(&w, "cause", from_keyboard ? "KEYBOARD_TAB" : "MOUSE");
@@ -8086,6 +8055,16 @@ bool focus_within(DocState* state, View* view) {
 /**
  * Helper: recursively extract text from view tree
  */
+static char* arena_copy_cstr(Arena* arena, const char* text) {
+    if (!arena || !text) return NULL;
+    size_t len = strlen(text);
+    char* result = (char*)arena_alloc(arena, len + 1);
+    if (!result) return NULL;
+    memcpy(result, text, len);
+    result[len] = '\0';
+    return result;
+}
+
 static void extract_text_recursive(View* view, StrBuf* sb) {
     if (!view) return;
 
@@ -8125,30 +8104,8 @@ char* extract_text_from_view(View* view, Arena* arena) {
     if (!sb) return NULL;
 
     extract_text_recursive(view, sb);
-
-    if (sb->length == 0) {
-        strbuf_free(sb);
-        return NULL;
-    }
-
-    // Copy to arena
-    char* result = (char*)arena_alloc(arena, sb->length + 1);
-    if (result) {
-        memcpy(result, sb->str, sb->length);
-        result[sb->length] = '\0';
-    }
-
+    char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
     strbuf_free(sb);
-    return result;
-}
-
-static char* arena_copy_cstr(Arena* arena, const char* text) {
-    if (!arena || !text) return NULL;
-    size_t len = strlen(text);
-    char* result = (char*)arena_alloc(arena, len + 1);
-    if (!result) return NULL;
-    memcpy(result, text, len);
-    result[len] = '\0';
     return result;
 }
 
@@ -8281,7 +8238,10 @@ static void append_selected_text_plain(StrBuf* sb, DomText* text,
     }
 }
 
-static char* extract_dom_range_text_to_arena(DomRange* range, Arena* arena) {
+typedef void (*AppendSelectedText)(StrBuf*, DomText*, uint32_t, uint32_t);
+
+static char* extract_dom_range_to_arena(DomRange* range, Arena* arena,
+                                        AppendSelectedText append_selected) {
     if (!range || !arena) return NULL;
     StrBuf* sb = strbuf_new_cap(256);
     if (!sb) return NULL;
@@ -8297,7 +8257,7 @@ static char* extract_dom_range_text_to_arena(DomRange* range, Arena* arena) {
         if (dom_boundary_compare(&slice_end, &range->end) == DOM_BOUNDARY_AFTER) slice_end = range->end;
         if (slice_start.node == static_cast<DomNode*>(text) && slice_end.node == static_cast<DomNode*>(text) &&
             slice_start.offset < slice_end.offset) {
-            append_selected_text_plain(sb, text, slice_start.offset, slice_end.offset);
+            append_selected(sb, text, slice_start.offset, slice_end.offset);
         }
         if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
         text = next_text_after_for_clipboard(static_cast<DomNode*>(text));
@@ -8305,6 +8265,10 @@ static char* extract_dom_range_text_to_arena(DomRange* range, Arena* arena) {
     char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
     strbuf_free(sb);
     return result;
+}
+
+static char* extract_dom_range_text_to_arena(DomRange* range, Arena* arena) {
+    return extract_dom_range_to_arena(range, arena, append_selected_text_plain);
 }
 
 /**
@@ -8361,47 +8325,13 @@ char* extract_html_from_view(View* view, Arena* arena) {
     if (!sb) return NULL;
 
     extract_html_recursive(view, sb);
-
-    if (sb->length == 0) {
-        strbuf_free(sb);
-        return NULL;
-    }
-
-    // Copy to arena
-    char* result = (char*)arena_alloc(arena, sb->length + 1);
-    if (result) {
-        memcpy(result, sb->str, sb->length);
-        result[sb->length] = '\0';
-    }
-
+    char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
     strbuf_free(sb);
     return result;
 }
 
 static char* extract_dom_range_html_to_arena(DomRange* range, Arena* arena) {
-    if (!range || !arena) return NULL;
-    StrBuf* sb = strbuf_new_cap(256);
-    if (!sb) return NULL;
-    DomText* text = first_text_in_range_for_clipboard(range);
-    while (text) {
-        DomBoundary text_start{ static_cast<DomNode*>(text), 0 };
-        DomBoundary text_end{ static_cast<DomNode*>(text), dom_text_utf16_length(text) };
-        if (!boundary_before_or_equal(&text_start, &range->end)) break;
-
-        DomBoundary slice_start = text_start;
-        DomBoundary slice_end = text_end;
-        if (dom_boundary_compare(&slice_start, &range->start) == DOM_BOUNDARY_BEFORE) slice_start = range->start;
-        if (dom_boundary_compare(&slice_end, &range->end) == DOM_BOUNDARY_AFTER) slice_end = range->end;
-        if (slice_start.node == static_cast<DomNode*>(text) && slice_end.node == static_cast<DomNode*>(text) &&
-            slice_start.offset < slice_end.offset) {
-            append_selected_text_html(sb, text, slice_start.offset, slice_end.offset);
-        }
-        if (!boundary_before_or_equal(&text_end, &range->end) || text_end.node == range->end.node) break;
-        text = next_text_after_for_clipboard(static_cast<DomNode*>(text));
-    }
-    char* result = sb->length > 0 ? arena_copy_cstr(arena, sb->str) : NULL;
-    strbuf_free(sb);
-    return result;
+    return extract_dom_range_to_arena(range, arena, append_selected_text_html);
 }
 
 static char* extract_text_control_selection_to_arena(DocState* state,

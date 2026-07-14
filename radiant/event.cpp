@@ -2952,6 +2952,21 @@ static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem
     return true;
 }
 
+static void dispatch_form_navigation(EventContext* evcon, DomElement* elem,
+                                     DocState* state, View* target,
+                                     int current_offset, uint32_t destination,
+                                     bool extend, const char* extend_operation,
+                                     const char* move_operation) {
+    if (extend) {
+        dispatch_form_selection_extend(evcon, elem, state, target,
+                                       current_offset, (int)destination, // INT_CAST_OK: StateStore selection API uses int offsets.
+                                       extend_operation);
+    } else {
+        dispatch_form_caret_collapse(evcon, elem, state, target,
+                                     destination, move_operation);
+    }
+}
+
 static bool dispatch_form_selection_start(EventContext* evcon, DomElement* elem,
                                           DocState* state, View* target,
                                           uint32_t offset,
@@ -3495,21 +3510,42 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
     return ok;
 }
 
+typedef struct FormImeDispatchContext {
+    DocState* state;
+    View* target;
+    EditingSurface surface;
+    EditingSurface* surface_ptr;
+    EventContext event;
+} FormImeDispatchContext;
+
+static bool prepare_form_ime_dispatch(UiContext* uicon, DomElement* elem,
+                                      View* target, bool require_text_control,
+                                      bool require_surface,
+                                      FormImeDispatchContext* context) {
+    if (!uicon || !uicon->document || !elem || !context) return false;
+    context->state = (DocState*)uicon->document->state;
+    if (!context->state || (require_text_control && !tc_is_text_control(elem))) {
+        return false;
+    }
+    context->target = target ? target : static_cast<View*>(elem);
+    editing_surface_clear(&context->surface);
+    context->surface_ptr = nullptr;
+    if (editing_surface_from_target(context->target, &context->surface) &&
+        editing_surface_is_text_control(&context->surface)) {
+        context->surface_ptr = &context->surface;
+    }
+    if (require_surface && !context->surface_ptr) return false;
+    memset(&context->event, 0, sizeof(context->event));
+    context->event.ui_context = uicon;
+    context->event.target = context->target;
+    return true;
+}
+
 extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
                                                       DomElement* elem,
                                                       View* target) {
-    if (!uicon || !uicon->document || !elem) return false;
-    DocState* state = (DocState*)uicon->document->state;
-    if (!state || !tc_is_text_control(elem)) return false;
-
-    View* event_target = target ? target : static_cast<View*>(elem);
-    EditingSurface surface;
-    editing_surface_clear(&surface);
-    EditingSurface* surface_ptr = nullptr;
-    if (editing_surface_from_target(event_target, &surface) &&
-        editing_surface_is_text_control(&surface)) {
-        surface_ptr = &surface;
-    }
+    FormImeDispatchContext context;
+    if (!prepare_form_ime_dispatch(uicon, elem, target, true, false, &context)) return false;
 
     InputIntent intent;
     memset(&intent, 0, sizeof(intent));
@@ -3517,18 +3553,13 @@ extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
     intent.data = "";
     intent.is_composing = true;
 
-    EventContext evcon;
-    memset(&evcon, 0, sizeof(evcon));
-    evcon.ui_context = uicon;
-    evcon.target = event_target;
-
     te_ime_begin(elem);
-    editing_interaction_set_composing(state, surface_ptr, true);
-    radiant_dispatch_composition_event(&evcon, event_target,
+    editing_interaction_set_composing(context.state, context.surface_ptr, true);
+    radiant_dispatch_composition_event(&context.event, context.target,
                                        "compositionstart", "");
-    event_log_editing_composition(state, surface_ptr, &intent,
+    event_log_editing_composition(context.state, context.surface_ptr, &intent,
                                   "start", 0, 0, 0);
-    doc_state_request_repaint(state);
+    doc_state_request_repaint(context.state);
     return true;
 }
 
@@ -3538,19 +3569,8 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
                                                        const char* preedit,
                                                        uint32_t len,
                                                        uint32_t caret_cp) {
-    if (!uicon || !uicon->document || !elem) return false;
-    DocState* state = (DocState*)uicon->document->state;
-    if (!state || !tc_is_text_control(elem)) return false;
-
-    View* event_target = target ? target : static_cast<View*>(elem);
-    EditingSurface surface;
-    editing_surface_clear(&surface);
-    EditingSurface* surface_ptr = nullptr;
-    if (editing_surface_from_target(event_target, &surface) &&
-        editing_surface_is_text_control(&surface)) {
-        surface_ptr = &surface;
-    }
-    if (!surface_ptr) return false;
+    FormImeDispatchContext context;
+    if (!prepare_form_ime_dispatch(uicon, elem, target, true, true, &context)) return false;
 
     InputIntent intent;
     memset(&intent, 0, sizeof(intent));
@@ -3559,50 +3579,34 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
     intent.composition_caret = caret_cp;
     intent.is_composing = true;
 
-    EventContext evcon;
-    memset(&evcon, 0, sizeof(evcon));
-    evcon.ui_context = uicon;
-    evcon.target = event_target;
-
     EditingDispatchHooks hooks = dispatch_editing_hooks();
 
-    radiant_dispatch_composition_event(&evcon, event_target,
+    radiant_dispatch_composition_event(&context.event, context.target,
                                        "compositionupdate",
                                        preedit ? preedit : "");
     bool prevented = false;
-    editing_dispatch_form_beforeinput(&evcon, &surface, &intent, &hooks,
+    editing_dispatch_form_beforeinput(&context.event, &context.surface, &intent, &hooks,
                                       &prevented);
     if (prevented) {
         log_debug("radiant_dispatch_form_text_ime_update: beforeinput prevented");
-        event_log_editing_composition(state, surface_ptr, &intent,
+        event_log_editing_composition(context.state, context.surface_ptr, &intent,
                                       "update", len, 0, caret_cp);
         return true;
     }
     te_ime_update(elem, preedit, len, caret_cp);
-    editing_interaction_set_composing(state, surface_ptr, true);
-    editing_dispatch_form_input(&evcon, &surface, &intent, &hooks);
-    event_log_editing_composition(state, surface_ptr, &intent,
+    editing_interaction_set_composing(context.state, context.surface_ptr, true);
+    editing_dispatch_form_input(&context.event, &context.surface, &intent, &hooks);
+    event_log_editing_composition(context.state, context.surface_ptr, &intent,
                                   "update", len, 0, caret_cp);
-    doc_state_request_repaint(state);
+    doc_state_request_repaint(context.state);
     return true;
 }
 
 extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
                                                        DomElement* elem,
                                                        View* target) {
-    if (!uicon || !uicon->document || !elem) return false;
-    DocState* state = (DocState*)uicon->document->state;
-    if (!state || !tc_is_text_control(elem)) return false;
-
-    View* event_target = target ? target : static_cast<View*>(elem);
-    EditingSurface surface;
-    editing_surface_clear(&surface);
-    EditingSurface* surface_ptr = nullptr;
-    if (editing_surface_from_target(event_target, &surface) &&
-        editing_surface_is_text_control(&surface)) {
-        surface_ptr = &surface;
-    }
-    if (!surface_ptr) return false;
+    FormImeDispatchContext context;
+    if (!prepare_form_ime_dispatch(uicon, elem, target, true, true, &context)) return false;
 
     InputIntent intent;
     memset(&intent, 0, sizeof(intent));
@@ -3610,30 +3614,25 @@ extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
     intent.data = "";
     intent.is_composing = false;
 
-    EventContext evcon;
-    memset(&evcon, 0, sizeof(evcon));
-    evcon.ui_context = uicon;
-    evcon.target = event_target;
-
     EditingDispatchHooks hooks = dispatch_editing_hooks();
 
-    radiant_dispatch_composition_event(&evcon, event_target,
+    radiant_dispatch_composition_event(&context.event, context.target,
                                        "compositionend", "");
     bool prevented = false;
-    editing_dispatch_form_beforeinput(&evcon, &surface, &intent, &hooks,
+    editing_dispatch_form_beforeinput(&context.event, &context.surface, &intent, &hooks,
                                       &prevented);
     if (prevented) {
         log_debug("radiant_dispatch_form_text_ime_cancel: beforeinput prevented");
-        event_log_editing_composition(state, surface_ptr, &intent,
+        event_log_editing_composition(context.state, context.surface_ptr, &intent,
                                       "cancel", 0, 0, 0);
         return true;
     }
     te_ime_cancel(elem);
-    editing_interaction_set_composing(state, surface_ptr, false);
-    editing_dispatch_form_input(&evcon, &surface, &intent, &hooks);
-    event_log_editing_composition(state, surface_ptr, &intent,
+    editing_interaction_set_composing(context.state, context.surface_ptr, false);
+    editing_dispatch_form_input(&context.event, &context.surface, &intent, &hooks);
+    event_log_editing_composition(context.state, context.surface_ptr, &intent,
                                   "cancel", 0, 0, 0);
-    doc_state_request_repaint(state);
+    doc_state_request_repaint(context.state);
     return true;
 }
 
@@ -3642,28 +3641,14 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
                                                        View* target,
                                                        const char* committed,
                                                        uint32_t len) {
-    if (!uicon || !uicon->document || !elem) return false;
-    DocState* state = (DocState*)uicon->document->state;
-    if (!state) return false;
+    FormImeDispatchContext context;
+    if (!prepare_form_ime_dispatch(uicon, elem, target, false, false, &context)) return false;
 
     uint32_t start = 0, end = 0;
     bool should_mutate = false;
-    if (!te_ime_commit_prepare(elem, state, committed, len,
+    if (!te_ime_commit_prepare(elem, context.state, committed, len,
                                &start, &end, &should_mutate)) {
         return false;
-    }
-
-    EventContext evcon;
-    memset(&evcon, 0, sizeof(evcon));
-    evcon.ui_context = uicon;
-    evcon.target = target ? target : static_cast<View*>(elem);
-
-    EditingSurface surface;
-    editing_surface_clear(&surface);
-    EditingSurface* surface_ptr = nullptr;
-    if (editing_surface_from_target(evcon.target, &surface) &&
-        editing_surface_is_text_control(&surface)) {
-        surface_ptr = &surface;
     }
     InputIntent intent;
     memset(&intent, 0, sizeof(intent));
@@ -3673,31 +3658,31 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
     intent.data = committed ? committed : "";
     intent.is_composing = false;
 
-    radiant_dispatch_composition_event(&evcon, evcon.target,
+    radiant_dispatch_composition_event(&context.event, context.target,
                                        "compositionend",
                                        committed ? committed : "");
 
     if (should_mutate) {
         te_ime_commit_finish(elem, committed, len);
-        dispatch_form_text_replace(&evcon, elem, state, evcon.target,
+        dispatch_form_text_replace(&context.event, elem, context.state, context.target,
                                    start, end, committed, len,
                                    INPUT_INTENT_INSERT_FROM_COMPOSITION);
     } else {
         EditingDispatchHooks hooks = dispatch_editing_hooks();
 
         bool prevented = false;
-        if (intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT && surface_ptr) {
-            editing_dispatch_form_beforeinput(&evcon, surface_ptr, &intent,
+        if (intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT && context.surface_ptr) {
+            editing_dispatch_form_beforeinput(&context.event, context.surface_ptr, &intent,
                                               &hooks, &prevented);
         }
         te_ime_commit_finish(elem, committed, len);
         if (!prevented && intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT &&
-            surface_ptr) {
-            editing_dispatch_form_input(&evcon, surface_ptr, &intent, &hooks);
+            context.surface_ptr) {
+            editing_dispatch_form_input(&context.event, context.surface_ptr, &intent, &hooks);
         }
     }
-    editing_interaction_set_composing(state, surface_ptr, false);
-    event_log_editing_composition(state, surface_ptr, &intent,
+    editing_interaction_set_composing(context.state, context.surface_ptr, false);
+    event_log_editing_composition(context.state, context.surface_ptr, &intent,
                                   (committed && committed[0]) ? "commit" : "cancel",
                                   0, len, 0);
     return true;
@@ -8785,74 +8770,44 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (alt && key_event->key == RDT_KEY_LEFT) {
                     uint32_t new_off = te_prev_word_byte(value, (uint32_t)value_len,
                                                          (uint32_t)cur);
-                    if (shift) {
-                        dispatch_form_selection_extend(&evcon, focus_elem, state,
-                            focused, cur, (int)new_off, "extendWordBackward");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, new_off, "moveWordBackward");
-                    }
+                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
+                        cur, new_off, shift, "extendWordBackward", "moveWordBackward");
                     evcon.need_repaint = true;
                     break;
                 }
                 if (alt && key_event->key == RDT_KEY_RIGHT) {
                     uint32_t new_off = te_next_word_byte(value, (uint32_t)value_len,
                                                          (uint32_t)cur);
-                    if (shift) {
-                        dispatch_form_selection_extend(&evcon, focus_elem, state,
-                            focused, cur, (int)new_off, "extendWordForward");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, new_off, "moveWordForward");
-                    }
+                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
+                        cur, new_off, shift, "extendWordForward", "moveWordForward");
                     evcon.need_repaint = true;
                     break;
                 }
                 // F3: Cmd+Left == Home, Cmd+Right == End on macOS for
                 // single-line inputs.
                 if (cmd && key_event->key == RDT_KEY_LEFT) {
-                    if (shift) {
-                        dispatch_form_selection_extend(&evcon, focus_elem, state,
-                            focused, cur, 0, "extendLineStart");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                                     focused, 0, "moveLineStart");
-                    }
+                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
+                        cur, 0, shift, "extendLineStart", "moveLineStart");
                     evcon.need_repaint = true;
                     break;
                 }
                 if (cmd && key_event->key == RDT_KEY_RIGHT) {
-                    if (shift) {
-                        dispatch_form_selection_extend(&evcon, focus_elem, state,
-                            focused, cur, value_len, "extendLineEnd");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)value_len, "moveLineEnd");
-                    }
+                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
+                        cur, (uint32_t)value_len, shift, "extendLineEnd", "moveLineEnd");
                     evcon.need_repaint = true;
                     break;
                 }
                 // F3: Up/Down in single-line <input> mirrors Chrome —
                 // move caret to start/end of value (no vertical motion).
                 if (key_event->key == RDT_KEY_UP) {
-                    if (shift) {
-                        dispatch_form_selection_extend(&evcon, focus_elem, state,
-                            focused, cur, 0, "extendLineStart");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                                     focused, 0, "moveLineStart");
-                    }
+                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
+                        cur, 0, shift, "extendLineStart", "moveLineStart");
                     evcon.need_repaint = true;
                     break;
                 }
                 if (key_event->key == RDT_KEY_DOWN) {
-                    if (shift) {
-                        dispatch_form_selection_extend(&evcon, focus_elem, state,
-                            focused, cur, value_len, "extendLineEnd");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)value_len, "moveLineEnd");
-                    }
+                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
+                        cur, (uint32_t)value_len, shift, "extendLineEnd", "moveLineEnd");
                     evcon.need_repaint = true;
                     break;
                 }
@@ -8906,23 +8861,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_HOME) {
-                    if (shift) {
-                        dispatch_form_selection_extend(&evcon, focus_elem, state,
-                            focused, cur, 0, "extendLineStart");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                                     focused, 0, "moveLineStart");
-                    }
+                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
+                        cur, 0, shift, "extendLineStart", "moveLineStart");
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_END) {
-                    if (shift) {
-                        dispatch_form_selection_extend(&evcon, focus_elem, state,
-                            focused, cur, value_len, "extendLineEnd");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)value_len, "moveLineEnd");
-                    }
+                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
+                        cur, (uint32_t)value_len, shift, "extendLineEnd", "moveLineEnd");
                     evcon.need_repaint = true;
                     break;
                 } else if (key_event->key == RDT_KEY_BACKSPACE) {

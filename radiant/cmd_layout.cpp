@@ -205,7 +205,7 @@ static bool css_file_url_to_local_path(const char* href, char* out_path, size_t 
     return true;
 }
 
-// Forward declaration for charset conversion (defined after convert_latin1_to_utf8)
+// Forward declaration for charset conversion.
 char* convert_charset_to_utf8(const char* content, size_t content_len, const char* from_charset);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool, int depth = 0);
 void log_root_item(Item item, const char* indent="  ");
@@ -2873,64 +2873,21 @@ const char* detect_html_charset(const char* html, size_t len) {
  * Returns a newly allocated UTF-8 string or nullptr on failure.
  * Caller must free the returned string with mem_free().
  */
-static char* convert_latin1_to_utf8(const char* content, size_t content_len) {
-    if (!content) return nullptr;
-
-    // Windows-1252 to Unicode mapping for 0x80-0x9F (differs from Latin-1)
-    // Latin-1 maps these as C1 control characters; Win-1252 maps them to useful glyphs
-    static const uint16_t win1252_map[32] = {
-        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
-        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
-        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178
-    };
-
-    // worst case: each byte becomes 3 UTF-8 bytes
-    size_t out_size = content_len * 3 + 1;
-    char* out_buf = (char*)mem_alloc(out_size, MEM_CAT_LAYOUT);
-    if (!out_buf) return nullptr;
-
-    char* out = out_buf;
-    for (size_t i = 0; i < content_len; i++) {
-        unsigned char c = (unsigned char)content[i];
-        if (c == 0x00) {
-            // CSS §3.3: replace NUL with U+FFFD
-            *out++ = (char)0xEF; *out++ = (char)0xBF; *out++ = (char)0xBD;
-        } else if (c < 0x80) {
-            *out++ = (char)c;
-        } else {
-            uint16_t cp;
-            if (c >= 0x80 && c <= 0x9F) {
-                cp = win1252_map[c - 0x80];
-            } else {
-                cp = c;  // Latin-1: codepoint == byte value for 0xA0-0xFF
-            }
-            // encode as UTF-8
-            if (cp < 0x80) {
-                *out++ = (char)cp;
-            } else if (cp < 0x800) {
-                *out++ = (char)(0xC0 | (cp >> 6));
-                *out++ = (char)(0x80 | (cp & 0x3F));
-            } else {
-                *out++ = (char)(0xE0 | (cp >> 12));
-                *out++ = (char)(0x80 | ((cp >> 6) & 0x3F));
-                *out++ = (char)(0x80 | (cp & 0x3F));
-            }
-        }
-    }
-    *out = '\0';
-    size_t converted_len = out - out_buf;
-    log_info("[charset] Converted %zu bytes Latin-1/Win-1252 to %zu bytes UTF-8", content_len, converted_len);
-    return out_buf;
-}
-
 /**
  * Convert content from a single-byte encoding to UTF-8 using a 128-entry mapping table.
  * The table maps bytes 0x80-0xFF to Unicode code points.
  * Bytes 0x00-0x7F are passed through as ASCII.
  */
 static char* convert_single_byte_to_utf8(const char* content, size_t content_len, const uint16_t* table, const char* charset_name) {
-    if (!content || !table) return nullptr;
+    if (!content) return nullptr;
+    // Win-1252 maps the Latin-1 C1 control range to the glyphs commonly found
+    // in legacy web content; a null table selects that compatibility mapping.
+    static const uint16_t win1252_map[32] = {
+        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178
+    };
     size_t out_size = content_len * 3 + 1;
     char* out_buf = (char*)mem_alloc(out_size, MEM_CAT_LAYOUT);
     if (!out_buf) return nullptr;
@@ -2944,7 +2901,8 @@ static char* convert_single_byte_to_utf8(const char* content, size_t content_len
         } else if (c < 0x80) {
             *out++ = (char)c;
         } else {
-            uint16_t cp = table[c - 0x80];
+            uint16_t cp = table ? table[c - 0x80]
+                : (c <= 0x9F ? win1252_map[c - 0x80] : c);
             if (cp < 0x80) {
                 *out++ = (char)cp;
             } else if (cp < 0x800) {
@@ -2960,6 +2918,11 @@ static char* convert_single_byte_to_utf8(const char* content, size_t content_len
     *out = '\0';
     log_info("[charset] Converted %zu bytes %s to %zu bytes UTF-8", content_len, charset_name, (size_t)(out - out_buf));
     return out_buf;
+}
+
+static char* convert_latin1_to_utf8(const char* content, size_t content_len) {
+    return convert_single_byte_to_utf8(
+        content, content_len, nullptr, "Latin-1/Win-1252");
 }
 
 // Windows-1251 (Cyrillic) to Unicode mapping for 0x80-0xFF
@@ -6231,6 +6194,7 @@ struct LayoutPhaseTiming {
     double js_exec_ms;
     double js_cleanup_ms;
     double js_total_ms;
+    double js_preamble_ms;
     double layout_ms;
     double output_ms;
 };
@@ -6259,6 +6223,7 @@ static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
         jw_kv_double(&w, "js_exec_ms", timing->js_exec_ms);
         jw_kv_double(&w, "js_cleanup_ms", timing->js_cleanup_ms);
         jw_kv_double(&w, "js_total_ms", timing->js_total_ms);
+        jw_kv_double(&w, "js_preamble_ms", timing->js_preamble_ms);
         jw_kv_double(&w, "layout_ms", timing->layout_ms);
         jw_kv_double(&w, "output_ms", timing->output_ms);
     jw_obj_end(&w);
@@ -6304,7 +6269,7 @@ static bool layout_single_file(
     auto output_end = output_start;
     bool layout_phase_ran = false;
     bool output_phase_ran = false;
-    js_mir_reset_last_phase_timing();
+    JsMirPhaseTiming document_js_timing = {};
 
     // Create memory pool for this file
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
@@ -6312,6 +6277,7 @@ static bool layout_single_file(
         log_error("Failed to create memory pool for %s", input_file);
         return false;
     }
+    js_mir_begin_document_phase_timing();
 
     bool previous_auto_close_mode = js_event_loop_auto_close_mode();
     js_event_loop_set_auto_close_mode(auto_close);
@@ -6456,19 +6422,19 @@ static bool layout_single_file(
 
     if (!doc) {
         load_end = std::chrono::high_resolution_clock::now();
+        js_mir_end_document_phase_timing(&document_js_timing);
         LayoutPhaseTiming timing = {};
-        JsMirPhaseTiming js_timing = {};
-        js_mir_get_last_phase_timing(&js_timing);
         timing.total_ms = std::chrono::duration<double, std::milli>(load_end - total_start).count();
         timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
-        timing.js_parse_ms = js_phase_us_to_ms(js_timing.parse_us);
-        timing.js_ast_ms = js_phase_us_to_ms(js_timing.ast_us);
+        timing.js_parse_ms = js_phase_us_to_ms(document_js_timing.parse_us);
+        timing.js_ast_ms = js_phase_us_to_ms(document_js_timing.ast_us);
         timing.js_transpile_ms = js_phase_us_to_ms(
-            js_timing.early_us + js_timing.imports_us + js_timing.mir_us);
-        timing.js_link_ms = js_phase_us_to_ms(js_timing.link_us);
-        timing.js_exec_ms = js_phase_us_to_ms(js_timing.execute_us);
-        timing.js_cleanup_ms = js_phase_us_to_ms(js_timing.cleanup_us);
-        timing.js_total_ms = js_phase_us_to_ms(js_timing.total_us);
+            document_js_timing.early_us + document_js_timing.imports_us + document_js_timing.mir_us);
+        timing.js_link_ms = js_phase_us_to_ms(document_js_timing.link_us);
+        timing.js_exec_ms = js_phase_us_to_ms(document_js_timing.execute_us);
+        timing.js_cleanup_ms = js_phase_us_to_ms(document_js_timing.cleanup_us);
+        timing.js_total_ms = js_phase_us_to_ms(document_js_timing.total_us);
+        timing.js_preamble_ms = js_phase_us_to_ms(document_js_timing.preamble_us);
         timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
         if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
         write_layout_phase_timing(timing_file, input_file, false, &timing);
@@ -6485,6 +6451,7 @@ static bool layout_single_file(
         return false;
     }
     load_end = std::chrono::high_resolution_clock::now();
+    js_mir_end_document_phase_timing(&document_js_timing);
 
     ui_context->document = doc;
 
@@ -6582,19 +6549,18 @@ static bool layout_single_file(
 
     {
         auto total_end = std::chrono::high_resolution_clock::now();
-        JsMirPhaseTiming js_timing = {};
-        js_mir_get_last_phase_timing(&js_timing);
         LayoutPhaseTiming timing = {};
         timing.total_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
         timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
-        timing.js_parse_ms = js_phase_us_to_ms(js_timing.parse_us);
-        timing.js_ast_ms = js_phase_us_to_ms(js_timing.ast_us);
+        timing.js_parse_ms = js_phase_us_to_ms(document_js_timing.parse_us);
+        timing.js_ast_ms = js_phase_us_to_ms(document_js_timing.ast_us);
         timing.js_transpile_ms = js_phase_us_to_ms(
-            js_timing.early_us + js_timing.imports_us + js_timing.mir_us);
-        timing.js_link_ms = js_phase_us_to_ms(js_timing.link_us);
-        timing.js_exec_ms = js_phase_us_to_ms(js_timing.execute_us);
-        timing.js_cleanup_ms = js_phase_us_to_ms(js_timing.cleanup_us);
-        timing.js_total_ms = js_phase_us_to_ms(js_timing.total_us);
+            document_js_timing.early_us + document_js_timing.imports_us + document_js_timing.mir_us);
+        timing.js_link_ms = js_phase_us_to_ms(document_js_timing.link_us);
+        timing.js_exec_ms = js_phase_us_to_ms(document_js_timing.execute_us);
+        timing.js_cleanup_ms = js_phase_us_to_ms(document_js_timing.cleanup_us);
+        timing.js_total_ms = js_phase_us_to_ms(document_js_timing.total_us);
+        timing.js_preamble_ms = js_phase_us_to_ms(document_js_timing.preamble_us);
         timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
         if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
         timing.layout_ms = layout_phase_ran
@@ -6893,6 +6859,9 @@ int cmd_layout(int argc, char** argv) {
         log_error("Failed to initialize UI context");
         return 1;
     }
+    // Batch files share immutable preamble code, but instantiate it into a
+    // fresh heap and DOM realm for every document.
+    script_runner_set_preamble_cache_enabled(batch_mode);
 
     // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < opts.font_dir_count; i++) {
@@ -7038,6 +7007,7 @@ int cmd_layout(int argc, char** argv) {
         fclose(timing_file);
         timing_file = nullptr;
     }
+    script_runner_set_preamble_cache_enabled(false);
     log_debug("[Cleanup] Starting cleanup...");
     log_debug("[Cleanup] Cleaning up UI context...");
     ui_context_cleanup(&ui_context);

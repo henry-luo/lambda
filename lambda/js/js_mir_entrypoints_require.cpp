@@ -39,6 +39,8 @@ extern "C" void js_trace_flush(void);
 extern "C" Item js_module_get_builtin(Item specifier);
 
 static JsMirPhaseTiming g_last_js_mir_phase_timing;
+static JsMirPhaseTiming g_document_js_mir_phase_timing;
+static bool g_document_js_mir_phase_timing_active = false;
 
 static long js_mir_phase_now_us(void) {
 #ifndef _WIN32
@@ -57,6 +59,34 @@ extern "C" void js_mir_reset_last_phase_timing(void) {
 extern "C" void js_mir_get_last_phase_timing(JsMirPhaseTiming* out) {
     if (!out) return;
     *out = g_last_js_mir_phase_timing;
+}
+
+extern "C" void js_mir_begin_document_phase_timing(void) {
+    // A document can transpile the browser preamble plus many script tasks;
+    // resetting only the last-task record under-reports the load-time JS cost.
+    memset(&g_document_js_mir_phase_timing, 0, sizeof(g_document_js_mir_phase_timing));
+    g_document_js_mir_phase_timing_active = true;
+}
+
+extern "C" void js_mir_accumulate_last_phase_timing(bool is_preamble) {
+    if (!g_document_js_mir_phase_timing_active) return;
+    g_document_js_mir_phase_timing.parse_us += g_last_js_mir_phase_timing.parse_us;
+    g_document_js_mir_phase_timing.ast_us += g_last_js_mir_phase_timing.ast_us;
+    g_document_js_mir_phase_timing.early_us += g_last_js_mir_phase_timing.early_us;
+    g_document_js_mir_phase_timing.imports_us += g_last_js_mir_phase_timing.imports_us;
+    g_document_js_mir_phase_timing.mir_us += g_last_js_mir_phase_timing.mir_us;
+    g_document_js_mir_phase_timing.link_us += g_last_js_mir_phase_timing.link_us;
+    g_document_js_mir_phase_timing.execute_us += g_last_js_mir_phase_timing.execute_us;
+    g_document_js_mir_phase_timing.cleanup_us += g_last_js_mir_phase_timing.cleanup_us;
+    g_document_js_mir_phase_timing.total_us += g_last_js_mir_phase_timing.total_us;
+    if (is_preamble) {
+        g_document_js_mir_phase_timing.preamble_us += g_last_js_mir_phase_timing.total_us;
+    }
+}
+
+extern "C" void js_mir_end_document_phase_timing(JsMirPhaseTiming* out) {
+    if (out) *out = g_document_js_mir_phase_timing;
+    g_document_js_mir_phase_timing_active = false;
 }
 
 // Tune6 §3.2: MIR generated-code volume for the last transpile.
@@ -307,6 +337,10 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
+    if (g_jm_preamble_out) {
+        g_jm_preamble_out->entry_func = (void*)js_main;
+        g_jm_preamble_out->owns_compiled_state = true;
+    }
 
     // execute
     log_debug("js-mir-ast: executing JIT compiled code");
@@ -364,6 +398,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 // Static globals for preamble mode control.
 // Set by wrapper functions before calling the core transpiler.
 bool g_jm_preamble_mode = false;               // compile as preamble (func decls → module vars)
+bool g_jm_preamble_compile_only = false;        // retain code/metadata without binding a document heap
 JsPreambleState* g_jm_preamble_out = NULL;      // output: preamble snapshot (preamble mode)
 const JsPreambleState* g_jm_preamble_in = NULL;  // input: pre-seed from preamble (test mode)
 
@@ -916,6 +951,12 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         js_mir_destroy_unowned_eval_context(&js_context, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
+    if (g_jm_preamble_out) {
+        // The reusable preamble must retain both its entry thunk and ownership;
+        // otherwise batch callers silently recompile it and leak its MIR state.
+        g_jm_preamble_out->entry_func = (void*)js_main;
+        g_jm_preamble_out->owns_compiled_state = true;
+    }
 
     // v14: initialize event loop before execution. Dynamic import runs inside
     // an active script, so preserve the caller's pending PromiseJobs.
@@ -930,7 +971,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
 
     // Execute
     log_debug("js-mir: executing JIT compiled code");
-    if (!g_jm_preamble_in) {
+    if (!g_jm_preamble_compile_only && !g_jm_preamble_in) {
         // Normal/preamble mode: allocate per-module vars for this top-level module
         js_set_active_module_vars(js_alloc_module_vars());
     }
@@ -955,7 +996,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
 
     // With-preamble mode: caller already called js_batch_reset_to() — harness vars preserved
     phase_start = js_mir_phase_now_us();
-    Item result;
+    Item result = ItemNull;
+    if (!g_jm_preamble_compile_only) {
 #if defined(__APPLE__) || defined(__linux__)
     if (sigsetjmp(_lambda_recovery_point, 1)) {
 #elif defined(_WIN32)
@@ -975,6 +1017,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         result = js_main((Context*)context);
         _lambda_recovery_armed = 0;
     }
+    }
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - phase_start;
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
     log_mem_stage("js-core: js_main_done");
@@ -984,14 +1027,14 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // Dynamic import loads modules from inside an already-running script; if the
     // nested module drains the global microtask queue, outer async-generator
     // Promise jobs can run with the imported module's temporary context active.
-    if (js_dom_is_host_driven_loop()) {
+    if (!g_jm_preamble_compile_only && js_dom_is_host_driven_loop()) {
         // A long-lived host (Radiant `view`) keeps this MIR context alive and
         // pumps the event loop after it commits the first layout. Firing timers
         // now would run load-time setTimeout(0) callbacks against an uncommitted
         // document (geometry APIs read zero boxes). Settle only promise
         // microtasks; leave timers + rAF queued for the host's post-commit pump.
         js_microtask_flush();
-    } else {
+    } else if (!g_jm_preamble_compile_only) {
         if (js_dynamic_import_suppress_module_drain <= 0) {
             js_event_loop_drain();
         }
@@ -1009,7 +1052,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // batch workers intentionally run many isolated ECMAScript tests in one
     // process; process lifecycle events are a CLI/Node boundary, not a
     // per-test boundary, and running them here pollutes hot-reload batches.
-    if (!js_batch_execution_mode) {
+    if (!g_jm_preamble_compile_only && !js_batch_execution_mode) {
         int exit_code = (result.item == ITEM_ERROR || js_check_exception()) ? 1 : js_process_current_exit_code();
         js_async_hooks_drain_destroy_queue();
         js_process_emit_before_exit(exit_code);
@@ -1187,6 +1230,25 @@ Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, s
     return result;
 }
 
+Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                 const char* filename, JsPreambleState* out_state) {
+    // Unlike js262's hot-heap preamble, a browser preamble captures document
+    // globals. Retain only MIR code and declaration metadata, then instantiate
+    // it separately into each document heap.
+    g_jm_preamble_mode = true;
+    g_jm_preamble_compile_only = true;
+    g_jm_preamble_out = out_state;
+    g_jm_preamble_in = NULL;
+    unsigned int saved_level = g_js_mir_optimize_level;
+    g_js_mir_optimize_level = 3;
+    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
+    g_js_mir_optimize_level = saved_level;
+    g_jm_preamble_out = NULL;
+    g_jm_preamble_compile_only = false;
+    g_jm_preamble_mode = false;
+    return result;
+}
+
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble) {
     return transpile_js_to_mir_with_preamble_len(runtime, js_source, strlen(js_source), filename, preamble);
@@ -1199,6 +1261,91 @@ Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_sour
     g_jm_preamble_in = preamble;
     Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
     g_jm_preamble_in = NULL;
+    return result;
+}
+
+bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out_state) {
+    if (!source || !source->entry_func || !source->mir_ctx || !out_state) return false;
+    memset(out_state, 0, sizeof(*out_state));
+    out_state->mir_ctx = source->mir_ctx;
+    out_state->tp_ast_pool = source->tp_ast_pool;
+    out_state->tp_name_pool = source->tp_name_pool;
+    out_state->source_buffer = source->source_buffer;
+    out_state->entry_func = source->entry_func;
+    out_state->module_var_count = source->module_var_count;
+    out_state->entry_count = source->entry_count;
+    out_state->owns_compiled_state = false;
+    if (source->entry_count > 0) {
+        out_state->entries = (JsModuleConstEntry*)mem_alloc(
+            (size_t)source->entry_count * sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
+        if (!out_state->entries) return false;
+        memcpy(out_state->entries, source->entries,
+               (size_t)source->entry_count * sizeof(JsModuleConstEntry));
+    }
+    return true;
+}
+
+Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
+                             JsPreambleState* out_state) {
+    if (!runtime || !clone_js_preamble_state(cached, out_state)) return ItemError;
+
+    EvalContext* old_context = context;
+    if (old_context && old_context->heap) {
+        // Cached code is only safe when instantiated into a new document heap.
+        preamble_state_destroy(out_state);
+        return ItemError;
+    }
+
+    EvalContext js_context = {};
+    js_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
+    context = &js_context;
+    if (runtime->reuse_pool) {
+        heap_init_with_pool(runtime->reuse_pool);
+        runtime->reuse_pool = NULL;
+    } else {
+        heap_init();
+    }
+    if (!context->heap || !context->nursery) {
+        preamble_state_destroy(out_state);
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, false);
+        return ItemError;
+    }
+    context->pool = context->heap->pool;
+    context->name_pool = name_pool_create(context->pool, nullptr);
+    context->type_list = arraylist_new(64);
+    if (!context->name_pool || !context->type_list) {
+        preamble_state_destroy(out_state);
+        js_mir_destroy_unowned_eval_context(&js_context, old_context, false);
+        return ItemError;
+    }
+
+    _lambda_rt = (Context*)context;
+    js_source_runtime = runtime;
+    // js262 restores a value checkpoint because its harness heap survives.
+    // This heap is new: clear all process caches, then retain only the compiled
+    // declaration count so js_main initializes fresh module values.
+    js_batch_reset();
+    js_prepare_compiled_preamble_vars(cached->module_var_count);
+    Input* js_input_context = Input::create(context->pool);
+    js_runtime_set_input(js_input_context);
+    js_event_loop_init();
+    if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
+    js_set_active_module_vars(js_alloc_module_vars());
+
+    typedef Item (*js_main_func_t)(Context*);
+    js_main_func_t js_main = (js_main_func_t)cached->entry_func;
+    js_mir_reset_last_phase_timing();
+    long execute_start = js_mir_phase_now_us();
+    Item result = js_main((Context*)context);
+    g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - execute_start;
+    g_last_js_mir_phase_timing.total_us = g_last_js_mir_phase_timing.execute_us;
+    js_microtask_flush();
+
+    runtime->heap = js_context.heap;
+    runtime->nursery = js_context.nursery;
+    runtime->name_pool = js_context.name_pool;
+    runtime->type_list = (ArrayList*)js_context.type_list;
+    context = old_context;
     return result;
 }
 
@@ -1229,21 +1376,21 @@ bool preamble_state_update_from_eval_snapshot(JsPreambleState* state) {
 
 void preamble_state_destroy(JsPreambleState* state) {
     if (!state) return;
-    if (state->mir_ctx) {
+    if (state->owns_compiled_state && state->mir_ctx) {
         MIR_finish((MIR_context_t)state->mir_ctx);
         state->mir_ctx = NULL;
     }
     // Release transpiler pools that were kept alive for string references.
     // name_pool must be released before ast_pool (it was allocated from ast_pool).
-    if (state->tp_name_pool) {
+    if (state->owns_compiled_state && state->tp_name_pool) {
         name_pool_release((NamePool*)state->tp_name_pool);
         state->tp_name_pool = NULL;
     }
-    if (state->tp_ast_pool) {
+    if (state->owns_compiled_state && state->tp_ast_pool) {
         pool_destroy((Pool*)state->tp_ast_pool);
         state->tp_ast_pool = NULL;
     }
-    if (state->source_buffer) {
+    if (state->owns_compiled_state && state->source_buffer) {
         mem_free(state->source_buffer);
         state->source_buffer = NULL;
     }
@@ -1251,6 +1398,8 @@ void preamble_state_destroy(JsPreambleState* state) {
     state->entries = NULL;
     state->entry_count = 0;
     state->module_var_count = 0;
+    state->entry_func = NULL;
+    state->owns_compiled_state = false;
 }
 
 // ============================================================================
