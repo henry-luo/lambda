@@ -7,7 +7,7 @@
 
 **Goal:** collapse radiant's **140 headers** (105 of them 1:1 per-`.cpp` mirrors) into **5 coherent global headers** plus a short justified-exception list, so that each domain has exactly one place to look for existing structs and functions — the glossary/API-doc/design-space role of DD4.
 
-**Implementation status (2026-07-14): H0-H6 complete.** Radiant now has 19 headers against the permanent 24-header cap. The five coherent headers own their planned domains; retained grid implementation headers are marked internal; absorbed-header references have been migrated across `doc/dev/radiant/RAD_*.md`; and both `AGENTS.md` and `CLAUDE.md` point contributors at the coherent surfaces. Final verification: `make build` passed, `make test-radiant-baseline` passed all 6,221 required tests, `make lint ARGS='--rule ^no-new-per-file-header$'` passed at 19/24 headers, and `make check-radiant-dup` reported 0 remaining filtered duplicate blocks. The final `count_loc.sh` snapshot records 162 Radiant C/C++ files and 186,975 lines.
+**Implementation status (2026-07-14): H0-H6 complete; H7 pending.** Every task in the original coherent-header plan is done. Radiant now has 19 headers against the permanent 24-header cap. The five coherent headers own their planned domains; retained grid implementation headers are marked internal; absorbed-header references have been migrated across `doc/dev/radiant/RAD_*.md`; and both `AGENTS.md` and `CLAUDE.md` point contributors at the coherent surfaces. Final H0-H6 verification: `make build` passed, `make test-radiant-baseline` passed all 6,221 required tests, `make lint ARGS='--rule ^no-new-per-file-header$'` passed at 19/24 headers, and `make check-radiant-dup` reported 0 remaining filtered duplicate blocks. The final `count_loc.sh` snapshot records 162 Radiant C/C++ files and 186,975 lines. H7 is a new post-plan phase for the two partially reduced implementation issues; it does not reopen any H0-H6 task.
 
 ---
 
@@ -128,44 +128,53 @@ Note the LOC gate lists the *grown* target header alongside the deleted ones —
 
 Order is deliberately **leaf-first**: render (self-contained consumer, worst shredding — 51 headers) proves the pattern where mistakes ripple least; `view.hpp` (fan-in 93, everything rebuilds when it changes) goes second-to-last, once the process is routine; `radiant.hpp` last because it depends on all four.
 
-### H0 — Prep (≤1 day)
+### ✅ H0 — Prep (complete)
 - Delete `grid_baseline.hpp` (dead).
 - Add `utils/rewrite_includes.sh` (§7.2) and the structural lint rule `no-new-per-file-header` in **warn** mode (flips to error after H1).
 - Record baselines: header count (140), `time make clean-all && time make build`, `./utils/count_loc.sh`.
 
-### H1 — `render.hpp` (pilot; 51 headers → 1)
+### ✅ H1 — `render.hpp` (complete; 51 headers → 1)
 - Largest header count, almost fully internal (external exposure only via `render_export_support.hpp` → `lambda/js`, `lambda/main.cpp`; and 6 display-list gtests in `test/`).
 - Extra care: `paint_ir.h`/`display_list.h` merge must preserve the `PAINT_OP_LIST`/`DL_` macro machinery verbatim (Impl_Clean_Up P4/P5 build on it).
 - Domain suite: radiant baseline + display-list/retained gtests + one SVG-export and PDF fixture run.
 - Exit review: compile-time delta, section layout readability, agent-greppability spot-check. **Go/no-go for the rollout pattern.**
 
-### H2 — `layout.hpp` (28 headers → 1)
+### ✅ H2 — `layout.hpp` (complete; 28 headers → 1)
 - Keep the 5 grid impl headers internal (banner them in this phase). Graph headers untouched (left out — future Lambda migration).
 - Domain suite: radiant baseline + `make layout suite=baseline` (flex 494 / grid 344 / table 703 fixtures).
 
-### H3 — `event.hpp` (21 headers → 1)
+### ✅ H3 — `event.hpp` (complete; 21 headers → 1)
 - The biggest content merge (~4k decl LOC; `state_store.hpp` alone is 1,409). Use strong section bands: `event / editing / ranges / text / state store / state machine / logging`. Keep the state-store band cleanly separable — most of that C+ code is expected to migrate to Lambda script later, and its band should lift out without touching the rest.
 - `event_sim.hpp` stays a separate header (test feature); its includes are untouched.
 - Heaviest external rewrite: `lambda/js` includes many of these; `test/test_state_store_stubs.cpp` and editor gtests too.
 - Domain suite: radiant baseline + `make editor-4c-js` + `make editor-4c-view` + state-store/dom-range/source-pos gtests.
 - **Exit deliverable: a structuring rewrite pass over the merged `event.hpp`** (user-requested) — once all pieces are in, reorder/regroup the bands for readability as a separate, declaration-only commit. This is the one phase where "move text verbatim" is followed by a deliberate reorganization.
 
-### H4 — `view.hpp` absorbs style (8 headers + decls from layout.hpp)
+### ✅ H4 — `view.hpp` absorbs style (complete; 8 headers + declarations from layout.hpp)
 - Move `resolve_css_styles`/`resolve_css_property` (+ `css_temp_decl.hpp` machinery) from `layout.hpp` into a `// ===== style resolution =====` band in `view.hpp`; absorb fonts/transform/clip/css_animation/symbol_resolver/form_control (form-control *model* belongs to the view tree per the governing principle).
 - Highest rebuild blast radius (fan-in 93) but by now the process is proven; content risk is low (pure moves).
 - Domain suite: radiant baseline + layout baseline + css_animation gtest.
 
-### H5 — `radiant.hpp` (shell) + external-API cleanup
+### ✅ H5 — `radiant.hpp` (shell) + external-API cleanup (complete)
 - Create `radiant.hpp`: shell declarations (absorb the 5 shell headers; write proper decls for window/surface/ui_context) + `#include` of the other four globals.
 - Rewrite external consumers (`lambda/main.cpp`, `lambda/module/radiant/*`, `lambda/network`, `lambda/input`, `lambda/format`) to include `radiant/radiant.hpp` (or the specific global where the umbrella is overkill — importer's choice, both are sanctioned).
 - Domain suite: full `make test` (baseline + extended) once, since this touches every consumer surface.
 
-### H6 — Lock-in
+### ✅ H6 — Lock-in (complete)
 - Flip `no-new-per-file-header` to **error**; add header-count ratchet (≤ 24) to `make lint` (tightens further when the graph family migrates to Lambda script).
 - Update `doc/dev/radiant/RAD_*.md` references and `CLAUDE.md`/`AGENTS.md` Key Entry Points table (both files, per convention).
 - Retro: compile-time trend, final `count_loc.sh`, and `make check-radiant-dup` re-scan (the filtered duplicate count should tick down from the removed duplicate declarations).
 
-Estimated effort: H0 ≤1d; H1 2–3d (pilot overhead); H2/H3 2d each; H4 1–2d; H5 1–2d; H6 ½d. Each phase is one PR.
+### H7 — Residual implementation dedup [PENDING]
+
+The original header-consolidation work is complete. This new phase records the two implementation-level issues that were reduced by the related LOC cleanup but are not yet fully converged:
+
+1. **Intrinsic sizing vs real layout.** Intrinsic width/height paths now share many declaration probes, classifiers, box-model helpers, and intrinsic grid `repeat()` counting, but they still mirror portions of the real grid, flex, and table algorithms. Pending work is to share narrow per-engine contribution cores, beginning with grid track-list/repeat expansion and proceeding in separately gated flex and table slices.
+2. **Paint/display-op maintenance surface.** `PAINT_OP_LIST` and `DISPLAY_OP_LIST` now centralize identity and common flags, and common validation/ownership/preflight/replay shapes consume them. Backend- and payload-specific switches remain, so adding an op still touches multiple sites. Pending work is to move only genuinely common traits into descriptors, add coverage for unhandled ops, and document irreducible dispatch. A generic per-op lowering function table remains rejected unless a concrete implementation strictly reduces aggregate LOC.
+
+The detailed work breakdown and completion gates live in [`Radiant_Impl_Clean_Up.md` Phase 8](Radiant_Impl_Clean_Up.md#phase-8--residual-architectural-convergence-pending). Every H7 slice must strictly reduce aggregate LOC and pass the relevant build, Radiant baseline, layout, raster, SVG, PDF, retained-list, and tiled-replay gates.
+
+The H0-H6 effort estimates were planning inputs and are retained only in history; all six implementation phases are complete. H7 is estimated and scheduled independently, one regression-gated slice at a time.
 
 ---
 
@@ -226,9 +235,9 @@ One-liner ritual: concatenate the phase's headers, then check for duplicate `#de
 
 ---
 
-## 10. Legacy dual-path retirement backlog (added 2026-07-13; tracked here, NOT in H-phase scope)
+## 10. Out-of-scope legacy dual-path audit backlog (added 2026-07-13; not H-phase tasks)
 
-The H-phases move declarations only (§6 scope fences). But the 2026-07-13 audit of the `doc/dev/radiant/RAD_*.md` known-issues sections showed that the most-repeated structural-debt class in radiant — **two live representations/code paths where one is canonical and the other awaits deletion** — had no home in any design doc. It is dedup work (each item is a duplicated implementation), so it is tracked here as a post-H6 backlog. Each item is its own small campaign gated the usual way (radiant baseline + the domain suite from §5); every retirement should tick the DD1 Lizard dup-ratchet down.
+The H-phases move declarations only (§6 scope fences). The 2026-07-13 audit of the `doc/dev/radiant/RAD_*.md` known-issues sections also found live dual representations/code paths. This table preserves those audit findings for their owning subsystem plans; it is not part of the completed H0-H6 implementation scope and is not included in H7's two-item pending phase.
 
 | # | Dual path | Canonical / legacy | Source | Action |
 |---|---|---|---|---|
