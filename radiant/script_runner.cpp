@@ -138,8 +138,7 @@ static int js_exec_timeout_seconds(size_t source_len) {
 // Destroyed by script_runner_cleanup_heap() in per-file cleanup (after layout).
 static Pool* s_js_reuse_pool = nullptr;
 static LruCache* s_script_source_cache = nullptr;
-static JsPreambleState* s_browser_preamble_cache = nullptr;
-static bool s_browser_preamble_cache_enabled = false;
+static JsMirCache* s_js_mir_cache = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
 
@@ -151,32 +150,10 @@ extern "C" void script_runner_set_execute_external_scripts(bool execute) {
     s_execute_external_scripts = execute;
 }
 
-static void script_runner_cleanup_preamble_cache() {
-    if (!s_browser_preamble_cache) return;
-    preamble_state_destroy(s_browser_preamble_cache);
-    mem_free(s_browser_preamble_cache);
-    s_browser_preamble_cache = nullptr;
-}
-
-extern "C" void script_runner_set_preamble_cache_enabled(bool enabled) {
-    if (!enabled) script_runner_cleanup_preamble_cache();
-    s_browser_preamble_cache_enabled = enabled;
-}
-
-static bool script_runner_adopt_preamble_cache(JsPreambleState* document_state) {
-    if (!document_state || !document_state->owns_compiled_state || s_browser_preamble_cache) {
-        return false;
-    }
-    JsPreambleState* cached = (JsPreambleState*)mem_alloc(
-        sizeof(JsPreambleState), MEM_CAT_JS_RUNTIME);
-    if (!cached) return false;
-    *cached = *document_state;
-
-    // Transfer immutable compiled ownership before instantiating any document;
-    // unlike js262's checkpoint, no browser global may survive in the cache.
-    memset(document_state, 0, sizeof(*document_state));
-    s_browser_preamble_cache = cached;
-    return true;
+extern "C" void script_runner_set_js_mir_cache(JsMirCache* cache) {
+    // The layout batch owns the cache. The runner only borrows it so cached
+    // code cannot outlive the process-level batch that established its ABI.
+    s_js_mir_cache = cache;
 }
 
 static void script_runner_cleanup_source_cache() {
@@ -1606,16 +1583,114 @@ static void script_runner_set_ready_state(Runtime* runtime, const char* ready_st
     }
 }
 
+static const char LIFECYCLE_INTERACTIVE_SOURCE[] =
+    "if (document && document.dispatchEvent && typeof Event === 'function') {\n"
+    "  document.dispatchEvent(new Event('readystatechange'));\n"
+    "}\n";
+static const char LIFECYCLE_DOM_CONTENT_LOADED_SOURCE[] =
+    "if (document && document.dispatchEvent && typeof Event === 'function') {\n"
+    "  document.dispatchEvent(new Event('DOMContentLoaded'));\n"
+    "}\n";
+static const char LIFECYCLE_WINDOW_LOAD_SOURCE[] =
+    "if (window && window.dispatchEvent && typeof Event === 'function') {\n"
+    "  window.dispatchEvent(new Event('load'));\n"
+    "}\n"
+    "if (window.onload) { window.onload(); }\n";
+
+static const char LIFECYCLE_INTERACTIVE_FILENAME[] =
+    "<document-readystatechange-interactive>";
+static const char LIFECYCLE_DOM_CONTENT_LOADED_FILENAME[] =
+    "<document-domcontentloaded>";
+static const char LIFECYCLE_COMPLETE_FILENAME[] =
+    "<document-readystatechange-complete>";
+static const char LIFECYCLE_WINDOW_LOAD_FILENAME[] = "<window-load>";
+
+typedef struct JsLifecycleCacheUnits {
+    const JsPreambleState* interactive;
+    const JsPreambleState* dom_content_loaded;
+    const JsPreambleState* complete;
+    const JsPreambleState* window_load;
+} JsLifecycleCacheUnits;
+
 static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preamble,
-                                      const char* source, const char* filename) {
-    Item result = execute_js_source_with_preamble(runtime, preamble, source, strlen(source),
-                                                 filename, false);
+                                      const JsPreambleState* cached,
+                                      const char* source, const char* filename,
+                                      DocumentScriptPhaseTiming* timing) {
+    Item result;
+    if (cached) {
+        result = execute_compiled_js_in_current_realm(runtime, cached);
+        js_mir_cache_record_instantiation(s_js_mir_cache);
+        if (timing) timing->cache_instantiations++;
+        js_mir_accumulate_last_phase_timing(false);
+    } else {
+        result = execute_js_source_with_preamble(
+            runtime, preamble, source, strlen(source), filename, false);
+    }
     js_microtask_flush();
     if (get_type_id(result) == LMD_TYPE_ERROR) {
         log_error("execute_document_scripts: lifecycle task failed: %s", filename);
         return false;
     }
     return true;
+}
+
+static const JsPreambleState* prepare_cached_lifecycle_unit(
+    Runtime* runtime, const JsPreambleState* base_preamble,
+    const char* source, const char* filename,
+    DocumentScriptPhaseTiming* timing) {
+    if (!s_js_mir_cache || !runtime || !base_preamble) return nullptr;
+
+    if (timing) timing->cache_lookups++;
+    const JsPreambleState* cached = js_mir_cache_lookup(
+        s_js_mir_cache, JS_MIR_CACHE_LIFECYCLE,
+        source, strlen(source), filename, base_preamble);
+    if (cached) {
+        if (timing) timing->cache_hits++;
+        return cached;
+    }
+    if (timing) timing->cache_misses++;
+
+    JsPreambleState compiled = {};
+    Item result = compile_js_mir_with_preamble_len(
+        runtime, source, strlen(source), filename, base_preamble, &compiled);
+    js_mir_accumulate_last_phase_timing(false);
+    if (get_type_id(result) != LMD_TYPE_ERROR) {
+        cached = js_mir_cache_adopt(
+            s_js_mir_cache, JS_MIR_CACHE_LIFECYCLE,
+            source, strlen(source), filename, base_preamble, &compiled);
+        if (cached && timing) timing->cache_compiles++;
+    }
+    if (!cached) preamble_state_destroy(&compiled);
+
+    // Compile-only lowering may create temporary heap values. Discard them
+    // before the document preamble is instantiated so cached code never makes
+    // a prior document heap part of its execution contract.
+    EvalContext* previous_context = context;
+    js_batch_reset();
+    runtime_reset_heap(runtime);
+    context = previous_context;
+    return cached;
+}
+
+static void prepare_cached_lifecycle_units(
+    Runtime* runtime, const JsPreambleState* base_preamble,
+    JsLifecycleCacheUnits* units, DocumentScriptPhaseTiming* timing) {
+    if (!units) return;
+    memset(units, 0, sizeof(*units));
+    if (!s_js_mir_cache || !base_preamble) return;
+
+    units->interactive = prepare_cached_lifecycle_unit(
+        runtime, base_preamble, LIFECYCLE_INTERACTIVE_SOURCE,
+        LIFECYCLE_INTERACTIVE_FILENAME, timing);
+    units->dom_content_loaded = prepare_cached_lifecycle_unit(
+        runtime, base_preamble, LIFECYCLE_DOM_CONTENT_LOADED_SOURCE,
+        LIFECYCLE_DOM_CONTENT_LOADED_FILENAME, timing);
+    units->complete = prepare_cached_lifecycle_unit(
+        runtime, base_preamble, LIFECYCLE_INTERACTIVE_SOURCE,
+        LIFECYCLE_COMPLETE_FILENAME, timing);
+    units->window_load = prepare_cached_lifecycle_unit(
+        runtime, base_preamble, LIFECYCLE_WINDOW_LOAD_SOURCE,
+        LIFECYCLE_WINDOW_LOAD_FILENAME, timing);
 }
 
 static void script_runner_clear_pending_exception(const char* phase_name, const char* filename) {
@@ -1874,42 +1949,61 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     long preamble_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
     Item result;
-    if (s_browser_preamble_cache_enabled && !s_retain_js_state && s_browser_preamble_cache) {
-        result = instantiate_js_preamble(runtime, s_browser_preamble_cache, preamble);
-        js_mir_accumulate_last_phase_timing(true);
-    } else if (s_browser_preamble_cache_enabled && !s_retain_js_state) {
-        preamble_buf = strbuf_new_cap(4096);
-        append_browser_document_preamble(preamble_buf);
+    JsLifecycleCacheUnits lifecycle_units = {};
+    preamble_buf = strbuf_new_cap(4096);
+    append_browser_document_preamble(preamble_buf);
 #ifndef NDEBUG
-        preamble_source_len = preamble_buf->length;
+    preamble_source_len = preamble_buf->length;
 #endif
-        result = compile_js_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
-                                             "<document-preamble>", preamble);
-        js_mir_accumulate_last_phase_timing(true);
-        if (get_type_id(result) != LMD_TYPE_ERROR) {
-            if (script_runner_adopt_preamble_cache(preamble)) {
-                // js262 retains its harness heap and recompiles after heap teardown.
-                // Radiant instead discards this compile-only heap, then executes the
-                // cached preamble in a fresh realm because it captures document/window.
-                EvalContext* previous_context = context;
-                js_batch_reset();
-                runtime_reset_heap(runtime);
-                context = previous_context;
-                result = instantiate_js_preamble(runtime, s_browser_preamble_cache, preamble);
-                js_mir_accumulate_last_phase_timing(true);
-            } else {
-                preamble_state_destroy(preamble);
-                result = ItemError;
+    const char* preamble_filename = "<document-preamble>";
+    const JsPreambleState* cached_preamble = nullptr;
+    if (s_js_mir_cache && !s_retain_js_state) {
+        if (timing) timing->cache_lookups++;
+        cached_preamble = js_mir_cache_lookup(
+            s_js_mir_cache, JS_MIR_CACHE_PREAMBLE,
+            preamble_buf->str, preamble_buf->length, preamble_filename, nullptr);
+        if (timing) {
+            if (cached_preamble) timing->cache_hits++;
+            else timing->cache_misses++;
+        }
+    }
+
+    if (s_js_mir_cache && !s_retain_js_state) {
+        if (!cached_preamble) {
+            result = compile_js_mir_preamble_len(runtime, preamble_buf->str,
+                                                 preamble_buf->length,
+                                                 preamble_filename, preamble);
+            js_mir_accumulate_last_phase_timing(true);
+            if (get_type_id(result) != LMD_TYPE_ERROR) {
+                cached_preamble = js_mir_cache_adopt(
+                    s_js_mir_cache, JS_MIR_CACHE_PREAMBLE,
+                    preamble_buf->str, preamble_buf->length, preamble_filename,
+                    nullptr, preamble);
+                if (cached_preamble && timing) timing->cache_compiles++;
             }
+
+            // Compile-only preambles allocate a temporary realm. Destroy it
+            // before compiling dependent units or instantiating the document.
+            EvalContext* previous_context = context;
+            js_batch_reset();
+            runtime_reset_heap(runtime);
+            context = previous_context;
+        }
+
+        if (cached_preamble) {
+            prepare_cached_lifecycle_units(
+                runtime, cached_preamble, &lifecycle_units, timing);
+            result = instantiate_js_preamble(runtime, cached_preamble, preamble);
+            js_mir_cache_record_instantiation(s_js_mir_cache);
+            if (timing) timing->cache_instantiations++;
+            js_mir_accumulate_last_phase_timing(true);
+        } else {
+            preamble_state_destroy(preamble);
+            result = ItemError;
         }
     } else {
-        preamble_buf = strbuf_new_cap(4096);
-        append_browser_document_preamble(preamble_buf);
-#ifndef NDEBUG
-        preamble_source_len = preamble_buf->length;
-#endif
         result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
-                                                  "<document-preamble>", preamble);
+                                                  preamble_filename, preamble);
         js_mir_accumulate_last_phase_timing(true);
     }
 #ifndef NDEBUG
@@ -1956,11 +2050,9 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     phase_start_us = timing ? time_now_us() : 0;
     script_runner_set_ready_state(runtime, "interactive");
-    if (!execute_lifecycle_snippet(runtime, preamble,
-        "if (document && document.dispatchEvent && typeof Event === 'function') {\n"
-        "  document.dispatchEvent(new Event('readystatechange'));\n"
-        "}\n",
-        "<document-readystatechange-interactive>")) {
+    if (!execute_lifecycle_snippet(
+        runtime, preamble, lifecycle_units.interactive,
+        LIFECYCLE_INTERACTIVE_SOURCE, LIFECYCLE_INTERACTIVE_FILENAME, timing)) {
         any_error = true;
     }
     if (timing) timing->interactive_us += time_now_us() - phase_start_us;
@@ -1975,11 +2067,10 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
-    if (!execute_lifecycle_snippet(runtime, preamble,
-        "if (document && document.dispatchEvent && typeof Event === 'function') {\n"
-        "  document.dispatchEvent(new Event('DOMContentLoaded'));\n"
-        "}\n",
-        "<document-domcontentloaded>")) {
+    if (!execute_lifecycle_snippet(
+        runtime, preamble, lifecycle_units.dom_content_loaded,
+        LIFECYCLE_DOM_CONTENT_LOADED_SOURCE,
+        LIFECYCLE_DOM_CONTENT_LOADED_FILENAME, timing)) {
         any_error = true;
     }
     if (timing) timing->dom_content_loaded_us += time_now_us() - phase_start_us;
@@ -2000,11 +2091,9 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 
     phase_start_us = timing ? time_now_us() : 0;
     script_runner_set_ready_state(runtime, "complete");
-    if (!execute_lifecycle_snippet(runtime, preamble,
-        "if (document && document.dispatchEvent && typeof Event === 'function') {\n"
-        "  document.dispatchEvent(new Event('readystatechange'));\n"
-        "}\n",
-        "<document-readystatechange-complete>")) {
+    if (!execute_lifecycle_snippet(
+        runtime, preamble, lifecycle_units.complete,
+        LIFECYCLE_INTERACTIVE_SOURCE, LIFECYCLE_COMPLETE_FILENAME, timing)) {
         any_error = true;
     }
     if (timing) timing->complete_us += time_now_us() - phase_start_us;
@@ -2016,12 +2105,9 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (timing) timing->body_onload_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
-    if (!execute_lifecycle_snippet(runtime, preamble,
-        "if (window && window.dispatchEvent && typeof Event === 'function') {\n"
-        "  window.dispatchEvent(new Event('load'));\n"
-        "}\n"
-        "if (window.onload) { window.onload(); }\n",
-        "<window-load>")) {
+    if (!execute_lifecycle_snippet(
+        runtime, preamble, lifecycle_units.window_load,
+        LIFECYCLE_WINDOW_LOAD_SOURCE, LIFECYCLE_WINDOW_LOAD_FILENAME, timing)) {
         any_error = true;
     }
     if (timing) timing->window_load_us += time_now_us() - phase_start_us;

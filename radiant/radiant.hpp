@@ -113,6 +113,11 @@ typedef struct DocumentScriptPhaseTiming {
     uint64_t event_loop_us;
     uint64_t runtime_cleanup_us;
     uint64_t source_cleanup_us;
+    uint64_t cache_lookups;
+    uint64_t cache_hits;
+    uint64_t cache_misses;
+    uint64_t cache_compiles;
+    uint64_t cache_instantiations;
 } DocumentScriptPhaseTiming;
 
 void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url);
@@ -120,7 +125,8 @@ void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc,
                                        Url* base_url, DocumentScriptPhaseTiming* timing);
 void script_runner_set_retain_js_state(bool retain);
 void script_runner_set_execute_external_scripts(bool execute);
-void script_runner_set_preamble_cache_enabled(bool enabled);
+struct JsMirCache;
+void script_runner_set_js_mir_cache(JsMirCache* cache);
 void collect_and_compile_event_handlers(DomDocument* dom_doc);
 void script_runner_cleanup_js_state(DomDocument* dom_doc);
 void script_runner_cleanup_heap(void);

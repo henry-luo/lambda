@@ -320,6 +320,48 @@ TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
         "[image] Decoded local image on demand: 640x427 (intrinsic 640x427, target 640x427)"));
 }
 
+TEST(RadiantViewTest, JsMirCacheKeepsFreshDocumentRealms) {
+    ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_realm_mutate.html"));
+    ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_realm_verify.html"));
+    test_radiant_view_ensure_temp_dir();
+
+    const char* output_dir = "./temp/test_js_mir_cache_realm";
+#ifdef _WIN32
+    _mkdir(output_dir);
+#else
+    mkdir(output_dir, 0755);
+#endif
+
+    const char* timing_path = "./temp/test_js_mir_cache_realm/timing.jsonl";
+    const char* result_path =
+        "./temp/test_js_mir_cache_realm/html__js_cache_realm_verify.json";
+    const char* args[] = {
+        "./lambda.exe", "layout",
+        "test/html/js_cache_realm_mutate.html",
+        "test/html/js_cache_realm_verify.html",
+        "--output-dir", output_dir,
+        "--timing-output", timing_path,
+        NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    // Cached code may cross documents, but window values and prototype
+    // mutations must remain owned by the document heap that created them.
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        result_path, "js-cache-realm-isolated"));
+    EXPECT_FALSE(test_radiant_view_file_contains(
+        result_path, "js-cache-realm-leaked"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"script_cache_hits\":5"));
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        timing_path, "\"script_cache_compiles\":0"));
+}
+
 struct RadiantViewWorkQueue {
     const size_t* selected;
     size_t selected_count;

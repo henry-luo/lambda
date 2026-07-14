@@ -1,6 +1,6 @@
 # Lambda JavaScript MIR Cache Design
 
-**Status:** Proposed; browser-preamble prototype present on the current branch
+**Status:** Implementing; Phases 1 and 2 complete for Radiant layout batches
 **Date:** 2026-07-14
 **Scope:** In-process reuse of compiled JavaScript MIR across script executions, with fresh runtime and DOM state per execution
 **Companion:** `vibe/Lambda_Design_MIR_Cache.md`
@@ -39,6 +39,40 @@ The first consumers, in priority order, are:
 4. repeated inline scripts, only after measured admission;
 5. JavaScript modules and broader `js-test-batch` reuse after their lifetime
    audit is complete.
+
+### 1.1 Implementation checkpoint — 2026-07-14
+
+The first safe slice is implemented:
+
+- `JsMirCache` is a batch-owned, in-process cache keyed by source bytes,
+  execution mode, diagnostic filename, and preamble declaration ABI;
+- cache entries own the retained source, MIR context, transpiler pools, entry
+  function, and immutable declaration metadata through `JsPreambleState`;
+- the browser preamble compiles once per layout worker and is instantiated into
+  a fresh heap and DOM realm for every scripted document;
+- the four fixed lifecycle units compile once per layout worker against the
+  immutable browser-preamble ABI, then execute in the current document realm;
+- per-document timing JSON records lookups, hits, misses, cold compiles, and
+  cached instantiations;
+- `LAMBDA_DISABLE_JS_MIR_CACHE=1` selects the identical uncached batch path for
+  differential correctness and performance measurements.
+
+Normal single-file layout execution remains uncached. External scripts, inline
+scripts, modules, browser-global synchronization, crash poisoning, and
+cross-process persistence are not enabled by this checkpoint.
+
+Release measurements on the 381 runnable form tests were:
+
+| Configuration | Cache on | Cache off | Reduction |
+|---|---:|---:|---:|
+| Normal runner, 7 workers | 3.18 s | 4.91 s | 35.2% |
+| One worker, one 381-file batch | 9.67 s | 15.00 s | 35.5% |
+
+The form correctness gate reported all 378 required baselines passing. A
+cached-versus-uncached two-document view-tree comparison differed only in the
+generated timestamp field. On the first scripted document the worker recorded
+five misses and five cold compiles; the next document recorded five hits and
+zero cold compiles, while still creating five fresh execution instances.
 
 ---
 
@@ -680,7 +714,7 @@ does not prove whether compilation, execution, or cleanup changed.
 **Exit gate:** every retained address category has an owner and lifetime; the
 form-suite timing reconciles cache lookup, compilation, execution, and cleanup.
 
-### Phase 1 — Promote the browser-preamble prototype
+### Phase 1 — Promote the browser-preamble prototype (implemented)
 
 1. Extract the common compiled-artifact ownership from `JsPreambleState`.
 2. Move cache lifetime from file-static Radiant state into a batch-owned
@@ -691,7 +725,7 @@ form-suite timing reconciles cache lookup, compilation, execution, and cleanup.
 **Exit gate:** cached and uncached preamble modes produce identical layout JSON;
 cross-document mutation tests pass; no retained document heap after cleanup.
 
-### Phase 2 — Cache fixed lifecycle units
+### Phase 2 — Cache fixed lifecycle units (implemented)
 
 1. Compile the four lifecycle snippets against the immutable base-preamble ABI.
 2. Instantiate them in the active document realm without refreshing or
@@ -855,11 +889,11 @@ rather than treating the aggregate upper bounds as promised savings.
 
 | ID | Decision | Status |
 |---|---|---|
-| JC1 | Extend Level-1 MIR caching with a JS-specific in-process cache | Proposed |
+| JC1 | Extend Level-1 MIR caching with a JS-specific in-process cache | Implemented for preamble and lifecycle units |
 | JC2 | Retain compiled code and compile-time pools, never a prior layout document's heap or DOM realm | Decided invariant |
 | JC3 | Use js262 as the preamble-reuse reference, but preserve Radiant's fresh-realm model | Decided invariant |
-| JC4 | Promote existing preamble ownership rather than duplicate it in a Radiant-only cache | Proposed |
-| JC5 | Cache fixed lifecycle snippets before general user scripts | Proposed |
+| JC4 | Promote existing preamble ownership rather than duplicate it in a Radiant-only cache | Implemented |
+| JC5 | Cache fixed lifecycle snippets before general user scripts | Implemented |
 | JC6 | Fix global/window binding coherence; use cached global-sync only as an interim mechanism | Proposed |
 | JC7 | Admit external scripts by canonical identity; admit inline scripts only after measured repetition | Proposed |
 | JC8 | Reject unsafe pointer categories until per-realm initialization is implemented | Decided invariant |
@@ -874,8 +908,9 @@ rather than treating the aggregate upper bounds as promised savings.
   the execution heap rather than a retained compiler-owned pool?
 - **OQ2:** Can mutable IC/shape cells be described and reset generically, or
   must lowering place them in an explicit per-realm sidecar first?
-- **OQ3:** Does lifecycle code compiled against the immutable base-preamble ABI
-  execute correctly after user scripts extend the active declaration snapshot?
+- **OQ3 (resolved for fixed lifecycle units):** Form-suite and focused batch
+  verification confirm that units compiled against the immutable base-preamble
+  ABI execute after user scripts extend the active declaration snapshot.
 - **OQ4:** How much of the 6.72 s user-script phase is cold compilation versus
   execution and browser-global synchronization?
 - **OQ5:** What proportion of inline script executions are covered by repeated

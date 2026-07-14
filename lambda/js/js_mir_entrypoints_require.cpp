@@ -1230,22 +1230,72 @@ Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, s
     return result;
 }
 
-Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                                 const char* filename, JsPreambleState* out_state) {
-    // Unlike js262's hot-heap preamble, a browser preamble captures document
-    // globals. Retain only MIR code and declaration metadata, then instantiate
-    // it separately into each document heap.
-    g_jm_preamble_mode = true;
+static Item compile_js_mir_cached_unit_len(
+    Runtime* runtime, const char* js_source, size_t js_source_len,
+    const char* filename, bool preamble_mode,
+    const JsPreambleState* preamble, JsPreambleState* out_state) {
+    // Cached units retain code and declaration metadata only. Execution is a
+    // separate step so no document heap can become part of the cache owner.
+    g_jm_preamble_mode = preamble_mode;
     g_jm_preamble_compile_only = true;
     g_jm_preamble_out = out_state;
-    g_jm_preamble_in = NULL;
+    g_jm_preamble_in = preamble;
     unsigned int saved_level = g_js_mir_optimize_level;
     g_js_mir_optimize_level = 3;
     Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
     g_js_mir_optimize_level = saved_level;
     g_jm_preamble_out = NULL;
+    g_jm_preamble_in = NULL;
     g_jm_preamble_compile_only = false;
     g_jm_preamble_mode = false;
+    return result;
+}
+
+Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                                 const char* filename, JsPreambleState* out_state) {
+    // Unlike js262's hot-heap preamble, a browser preamble captures document
+    // globals. Retain only MIR code and declaration metadata, then instantiate
+    // it separately into each document heap.
+    return compile_js_mir_cached_unit_len(runtime, js_source, js_source_len,
+                                          filename, true, NULL, out_state);
+}
+
+Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
+                                      size_t js_source_len, const char* filename,
+                                      const JsPreambleState* preamble,
+                                      JsPreambleState* out_state) {
+    if (!preamble) return ItemError;
+    return compile_js_mir_cached_unit_len(runtime, js_source, js_source_len,
+                                          filename, false, preamble, out_state);
+}
+
+Item execute_compiled_js_in_current_realm(Runtime* runtime,
+                                          const JsPreambleState* compiled_state) {
+    if (!runtime || !runtime->heap || !compiled_state || !compiled_state->entry_func) {
+        return ItemError;
+    }
+
+    EvalContext task_context = {};
+    task_context.heap = runtime->heap;
+    task_context.nursery = runtime->nursery;
+    task_context.name_pool = runtime->name_pool;
+    task_context.type_list = runtime->type_list;
+    task_context.pool = runtime->heap->pool;
+
+    EvalContext* old_context = context;
+    context = &task_context;
+    _lambda_rt = (Context*)context;
+    js_source_runtime = runtime;
+    if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
+
+    typedef Item (*js_main_func_t)(Context*);
+    js_main_func_t js_main = (js_main_func_t)compiled_state->entry_func;
+    js_mir_reset_last_phase_timing();
+    long execute_start = js_mir_phase_now_us();
+    Item result = js_main((Context*)context);
+    g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - execute_start;
+    g_last_js_mir_phase_timing.total_us = g_last_js_mir_phase_timing.execute_us;
+    context = old_context;
     return result;
 }
 

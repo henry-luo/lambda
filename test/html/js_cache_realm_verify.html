@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>JS MIR cache fresh realm verification</title>
+</head>
+<body>
+  <div id="result">pending</div>
+  <script>
+    const isolated = typeof window.__lambdaCacheRealmLeak === "undefined" &&
+      typeof Array.prototype.__lambdaCacheRealmLeak === "undefined";
+    document.getElementById("result").textContent = isolated
+      ? "js-cache-realm-isolated"
+      : "js-cache-realm-leaked";
+  </script>
+</body>
+</html>
