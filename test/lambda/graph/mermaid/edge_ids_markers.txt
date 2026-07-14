@@ -1,0 +1,6 @@
+{
+  source: [["e1", "none", "circle"], ["e2", "none", "cross"], ["e3", "circle", "circle"], ["e4", "cross", "cross"]],
+  html: [["e1", "none", "circle"], ["e2", "none", "cross"], ["e3", "circle", "circle"], ["e4", "cross", "cross"]],
+  layout: [["e1", "none", "circle"], ["e2", "none", "cross"], ["e3", "circle", "circle"], ["e4", "cross", "cross"]],
+  paint: [["e1", "edge", "none", "circle", "none", "circle", "path", "circle"], ["e2", "edge", "none", "cross", "none", "cross", "path", "path"], ["e3", "edge", "circle", "circle", "circle", "circle", "circle", "circle"], ["e4", "edge", "cross", "cross", "cross", "cross", "path", "path"]]
+}

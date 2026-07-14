@@ -1081,6 +1081,12 @@ The initial Stage 2 tranche is implemented as follows:
 - extra solid, dotted, and thick link units normalize to `min-length`; the
   constraint survives semantic HTML and Velmt adaptation and is enforced by
   layered rank assignment rather than retained as inert parser metadata;
+- Mermaid `edgeId@operator` syntax preserves stable edge identity, including
+  deterministic suffixed identities when one multi-node declaration expands
+  into several canonical edges;
+- normal, circle, and cross endpoint markers normalize independently as
+  `arrow-tail` and `arrow-head`, survive HTML and Velmt adaptation, and render
+  as distinct SVG marker geometry;
 - node-local `:::` classes normalize to ordinary `<class-assignment>` metadata
   and therefore share the common model and HTML class-lowering path;
 - Mermaid's general `id@{ shape: ..., label: ... }` node form is parsed, with
@@ -1096,8 +1102,10 @@ The initial Stage 2 tranche is implemented as follows:
   subgraph membership as stable metadata, applies class assignments, and emits
   separately measured `<edge-label>` children;
 - the Velmt adapter places measured edge labels at routed anchors, paints start
-  and end arrow markers, clips rectangle, ellipse/circle, and diamond endpoints,
+  and end endpoint markers, clips rectangle, ellipse/circle, and diamond endpoints,
   routes self-loops, and includes route extents in graph bounds;
+- generated edge paths retain `data-graph-role`, stable edge id, endpoints, and
+  normalized marker names for semantic SVG adaptation and future hit testing;
 - `test/test_graph_mermaid_gtest.cpp` reads
   `test/lambda/graph/mermaid/manifest.mark` once, retains one input runtime, and
   compares recursive Mark semantics without raw SVG or image fixtures;
@@ -1115,8 +1123,8 @@ The following Stage 2 work remains open:
 
 - a distinct source AST, source spans, structured diagnostic values, and the
   schema validator/`normalize.ls` boundary;
-- `style`, `linkStyle`, HTML/Markdown labels, accessibility metadata, edge ids,
-  ports, interaction metadata, circle/cross edge markers, and the rendering
+- `style`, `linkStyle`, HTML/Markdown labels, accessibility metadata, ports,
+  interaction metadata, edge-ID property/class statements, and the rendering
   semantics for general shapes beyond the currently canonicalized rectangle,
   rounded, cylinder, diamond, circle, and double-circle families;
 - visual recursive subgraph boxes and measured subgraph labels rather than only

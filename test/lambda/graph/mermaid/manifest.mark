@@ -47,6 +47,13 @@
     <edge from: 'C', to: 'E', arrow-end: 'true'>
     <edge from: 'D', to: 'E', arrow-end: 'true'>
   >
+  <case id: 'edge-ids-markers', source: 'edge_ids_markers.mmd';
+    <expect direction: 'LR', nodes: 5, edges: 4>
+    <edge id: 'e1', from: 'A', to: 'B', arrow-tail: 'none', arrow-head: 'circle'>
+    <edge id: 'e2', from: 'B', to: 'C', arrow-tail: 'none', arrow-head: 'cross'>
+    <edge id: 'e3', from: 'C', to: 'D', arrow-tail: 'circle', arrow-head: 'circle'>
+    <edge id: 'e4', from: 'D', to: 'E', arrow-tail: 'cross', arrow-head: 'cross'>
+  >
   <case id: 'chart-routing', source: 'chart_routing.mmd';
     <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0>
   >

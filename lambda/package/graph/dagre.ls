@@ -57,6 +57,18 @@ fn normalize_node(node, index) {
   }
 }
 
+fn edge_bool(value, fallback) {
+  let actual = if (value == null) fallback else value;
+  not (actual == null or actual == false or actual == "false" or actual == "none" or actual == "no")
+}
+
+fn edge_marker(value, enabled) {
+  if (value == null or value == "") { if (enabled) "normal" else "none" }
+  else if (value == true or value == "true") "normal"
+  else if (value == false or value == "false") "none"
+  else string(value)
+}
+
 fn normalize_edge(edge, nodes, index, directed) {
   let from_id = if (edge.from != null) string(edge.from)
     else if (edge.from_id != null) string(edge.from_id)
@@ -64,6 +76,16 @@ fn normalize_edge(edge, nodes, index, directed) {
   let to_id = if (edge.to != null) string(edge.to)
     else if (edge.to_id != null) string(edge.to_id)
     else "";
+  let arrow_start = edge_bool(if (edge.arrow_start != null) edge.arrow_start
+    else edge["arrow-start"], false);
+  let arrow_end = edge_bool(if (edge.arrow_end != null) edge.arrow_end
+    else edge["arrow-end"], directed);
+  let marker_start = edge_marker(if (edge.marker_start != null) edge.marker_start
+    else if (edge["marker-start"] != null) edge["marker-start"]
+    else edge["arrow-tail"], arrow_start);
+  let marker_end = edge_marker(if (edge.marker_end != null) edge.marker_end
+    else if (edge["marker-end"] != null) edge["marker-end"]
+    else edge["arrow-head"], arrow_end);
   if (has_id(nodes, from_id) and has_id(nodes, to_id)) {
     {
       id: if (edge.id != null) string(edge.id) else "e" ++ string(index),
@@ -71,12 +93,10 @@ fn normalize_edge(edge, nodes, index, directed) {
       to: to_id,
       label: if (edge.label != null) string(edge.label) else null,
       directed: if (edge.directed != null) edge.directed else directed,
-      arrow_start: if (edge.arrow_start != null) edge.arrow_start
-        else if (edge["arrow-start"] != null) edge["arrow-start"]
-        else false,
-      arrow_end: if (edge.arrow_end != null) edge.arrow_end
-        else if (edge["arrow-end"] != null) edge["arrow-end"]
-        else directed,
+      arrow_start: marker_start != "none",
+      arrow_end: marker_end != "none",
+      marker_start: marker_start,
+      marker_end: marker_end,
       style: if (edge.style != null) string(edge.style) else "solid",
       min_length: max([1, int(if (edge.min_length != null) edge.min_length
         else if (edge["min-length"] != null) edge["min-length"] else 1)]),
@@ -413,6 +433,8 @@ fn route_edge(edge, nodes, opts) {
       directed: edge.directed,
       arrow_start: edge.arrow_start,
       arrow_end: edge.arrow_end,
+      marker_start: edge.marker_start,
+      marker_end: edge.marker_end,
       style: edge.style,
       min_length: edge.min_length,
       z: edge.z,

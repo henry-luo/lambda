@@ -74,16 +74,31 @@ fn bool_text(value, fallback) {
       actual == "none" or actual == "no") "false" else "true"
 }
 
+fn marker_text(value, enabled) {
+  if (value == null or value == "") {
+    if (bool_text(enabled, false) == "true") "normal" else "none"
+  }
+  else if (value == true or value == "true") "normal"
+  else if (value == false or value == "false") "none"
+  else string(value)
+}
+
 fn html_edge(edge, index, group, graph_directed) {
   let directed = bool_text(source_attr(edge, "directed", null), graph_directed);
+  let marker_start = marker_text(source_attr(edge, "arrow-tail", source_attr(edge, "marker-start", null)),
+    source_attr(edge, "arrow-start", source_attr(edge, "arrow_start", false)));
+  let explicit_end = source_attr(edge, "arrow-end", source_attr(edge, "arrow_end", null));
+  let marker_end = marker_text(source_attr(edge, "arrow-head", source_attr(edge, "marker-end", null)),
+    if (explicit_end != null) explicit_end else directed == "true");
   <edge 'data-edge-id': string(source_attr(edge, "id", "e" ++ string(index))),
       'data-from': string(source_attr(edge, "from", source_attr(edge, "from_id", ""))),
       'data-to': string(source_attr(edge, "to", source_attr(edge, "to_id", ""))),
       'data-subgraph-id': group,
       'data-label': source_attr(edge, "label", null),
       'data-directed': directed,
-      'data-arrow-start': bool_text(source_attr(edge, "arrow-start", source_attr(edge, "arrow_start", false)), false),
-      'data-arrow-end': bool_text(source_attr(edge, "arrow-end", source_attr(edge, "arrow_end", null)), directed == "true"),
+      'data-arrow-start': bool_text(marker_start != "none", false),
+      'data-arrow-end': bool_text(marker_end != "none", false),
+      'data-marker-start': marker_start, 'data-marker-end': marker_end,
       'data-style': string(source_attr(edge, "style", "solid")),
       'data-min-length': string(source_attr(edge, "min-length", source_attr(edge, "min_length", 1))),
       'data-z': string(source_attr(edge, "z", -1)),

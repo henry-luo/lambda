@@ -56,11 +56,31 @@ static bool parse_mermaid_direction(SourceTracker& tracker, char direction[3]) {
     return true;
 }
 
-static bool is_mermaid_edge_start(SourceTracker& tracker) {
-    return tracker.current() == '<' || tracker.match("-->") || tracker.match("-.->") ||
+static bool is_direct_mermaid_edge_start(SourceTracker& tracker) {
+    char current = tracker.current();
+    bool endpoint_marker = (current == 'o' || current == 'x') &&
+        (tracker.peek(1) == '-' || tracker.peek(1) == '=' || tracker.peek(1) == '.');
+    return current == '<' || endpoint_marker || tracker.match("-->") || tracker.match("-.->") ||
         tracker.match("==>") || tracker.match("---") || tracker.match("-.-") ||
-        tracker.match("===") || tracker.match("--") || tracker.current() == '-' ||
-        tracker.current() == '=';
+        tracker.match("===") || tracker.match("--") || current == '-' || current == '=';
+}
+
+static size_t mermaid_edge_id_length(SourceTracker& tracker) {
+    char first = tracker.current();
+    if (!(str_char_is_alpha(first) || first == '_')) return 0;
+    size_t length = 0;
+    while (str_char_is_alnum(tracker.peek(length)) || tracker.peek(length) == '_' ||
+           tracker.peek(length) == '-') {
+        length++;
+    }
+    if (tracker.peek(length) != '@') return 0;
+    char edge_start = tracker.peek(length + 1);
+    return edge_start == '<' || edge_start == 'o' || edge_start == 'x' ||
+        edge_start == '-' || edge_start == '=' || edge_start == '.' ? length : 0;
+}
+
+static bool is_mermaid_edge_start(SourceTracker& tracker) {
+    return is_direct_mermaid_edge_start(tracker) || mermaid_edge_id_length(tracker) > 0;
 }
 
 static Element* find_direct_node(Element* graph, const char* id) {
@@ -462,23 +482,40 @@ static ArrayList* parse_mermaid_node_list(InputContext& ctx, Element* graph,
 
 static void add_mermaid_edges(InputContext& ctx, Element* graph,
                               const ArrayList* from_ids, const ArrayList* to_ids,
-                              String* label, const char* edge_style,
-                              bool has_arrow_start, bool has_arrow_end,
+                              String* edge_id, String* label, const char* edge_style,
+                              const char* marker_start, const char* marker_end,
                               int min_length) {
+    int edge_count = from_ids->length * to_ids->length;
+    int edge_ordinal = 0;
     for (int from_index = 0; from_index < from_ids->length; from_index++) {
         String* from_id = (String*)arraylist_get(from_ids, from_index);
         for (int to_index = 0; to_index < to_ids->length; to_index++) {
             String* to_id = (String*)arraylist_get(to_ids, to_index);
             Element* edge = create_edge_element(ctx.input(), from_id->chars, to_id->chars,
                 label ? label->chars : nullptr, edge_style,
-                has_arrow_start ? "true" : "false",
-                has_arrow_end ? "true" : "false");
+                strcmp(marker_start, "none") != 0 ? "true" : "false",
+                strcmp(marker_end, "none") != 0 ? "true" : "false");
+            if (edge_id) {
+                if (edge_count == 1) {
+                    add_graph_attribute(ctx.input(), edge, "id", edge_id->chars);
+                } else {
+                    char ordinal_text[24];
+                    snprintf(ordinal_text, sizeof(ordinal_text), ":%d", edge_ordinal);
+                    stringbuf_reset(ctx.sb);
+                    stringbuf_append_str_n(ctx.sb, edge_id->chars, edge_id->len);
+                    stringbuf_append_str(ctx.sb, ordinal_text);
+                    add_graph_attribute(ctx.input(), edge, "id", ctx.sb->str->chars);
+                }
+            }
+            add_graph_attribute(ctx.input(), edge, "arrow-tail", marker_start);
+            add_graph_attribute(ctx.input(), edge, "arrow-head", marker_end);
             if (min_length > 1) {
                 char length_text[16];
                 snprintf(length_text, sizeof(length_text), "%d", min_length);
                 add_graph_attribute(ctx.input(), edge, "min-length", length_text);
             }
             add_edge_to_graph(ctx.input(), graph, edge);
+            edge_ordinal++;
         }
     }
 }
@@ -489,15 +526,26 @@ static ArrayList* parse_mermaid_edge_def(InputContext& ctx, Element* graph,
     SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
-    bool has_arrow_start = false;
-    bool has_arrow_end = false;
+    String* edge_id = nullptr;
+    size_t edge_id_length = mermaid_edge_id_length(tracker);
+    if (edge_id_length > 0) {
+        edge_id = ctx.builder.createString(tracker.rest(), edge_id_length);
+        tracker.advance(edge_id_length + 1);
+    }
+
+    const char* marker_start = "none";
+    const char* marker_end = "none";
     String* label = nullptr;
     const char* edge_style = "solid";
     int stroke_units = 0;
     int dotted_units = 0;
 
     if (tracker.current() == '<') {
-        has_arrow_start = true;
+        marker_start = "normal";
+        tracker.advance();
+    } else if ((tracker.current() == 'o' || tracker.current() == 'x') &&
+               (tracker.peek(1) == '-' || tracker.peek(1) == '=' || tracker.peek(1) == '.')) {
+        marker_start = tracker.current() == 'o' ? "circle" : "cross";
         tracker.advance();
     }
 
@@ -534,14 +582,15 @@ static ArrayList* parse_mermaid_edge_def(InputContext& ctx, Element* graph,
         }
     }
 
-    if (tracker.current() == '>') {
-        has_arrow_end = true;
+    if (tracker.current() == '>' || tracker.current() == 'o' || tracker.current() == 'x') {
+        marker_end = tracker.current() == '>' ? "normal"
+            : tracker.current() == 'o' ? "circle" : "cross";
         tracker.advance();
     }
 
     int min_length = dotted_units > 0
         ? dotted_units
-        : stroke_units - (has_arrow_end ? 1 : 2);
+        : stroke_units - (strcmp(marker_end, "none") != 0 ? 1 : 2);
     if (min_length < 1) min_length = 1;
 
     if (tracker.current() == '|') {
@@ -567,8 +616,8 @@ static ArrayList* parse_mermaid_edge_def(InputContext& ctx, Element* graph,
         return nullptr;
     }
 
-    add_mermaid_edges(ctx, graph, from_ids, to_ids, label, edge_style,
-                       has_arrow_start, has_arrow_end, min_length);
+    add_mermaid_edges(ctx, graph, from_ids, to_ids, edge_id, label, edge_style,
+                       marker_start, marker_end, min_length);
     return to_ids;
 }
 
