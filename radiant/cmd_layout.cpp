@@ -73,6 +73,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/transpiler.hpp"
+#include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/mark_builder.hpp"
@@ -6183,6 +6184,11 @@ struct LayoutPhaseTiming {
     double script_event_loop_ms;
     double script_runtime_cleanup_ms;
     double script_source_cleanup_ms;
+    uint64_t script_cache_lookups;
+    uint64_t script_cache_hits;
+    uint64_t script_cache_misses;
+    uint64_t script_cache_compiles;
+    uint64_t script_cache_instantiations;
     double js_parse_ms;
     double js_ast_ms;
     double js_transpile_ms;
@@ -6218,6 +6224,11 @@ static void set_detailed_script_timing(LayoutPhaseTiming* timing,
     timing->script_event_loop_ms = script_phase_us_to_ms(script_timing->event_loop_us);
     timing->script_runtime_cleanup_ms = script_phase_us_to_ms(script_timing->runtime_cleanup_us);
     timing->script_source_cleanup_ms = script_phase_us_to_ms(script_timing->source_cleanup_us);
+    timing->script_cache_lookups = script_timing->cache_lookups;
+    timing->script_cache_hits = script_timing->cache_hits;
+    timing->script_cache_misses = script_timing->cache_misses;
+    timing->script_cache_compiles = script_timing->cache_compiles;
+    timing->script_cache_instantiations = script_timing->cache_instantiations;
 }
 
 static void set_detailed_load_timing(LayoutPhaseTiming* timing,
@@ -6318,6 +6329,11 @@ static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
         jw_kv_double(&w, "script_event_loop_ms", timing->script_event_loop_ms);
         jw_kv_double(&w, "script_runtime_cleanup_ms", timing->script_runtime_cleanup_ms);
         jw_kv_double(&w, "script_source_cleanup_ms", timing->script_source_cleanup_ms);
+        jw_kv_uint(&w, "script_cache_lookups", timing->script_cache_lookups);
+        jw_kv_uint(&w, "script_cache_hits", timing->script_cache_hits);
+        jw_kv_uint(&w, "script_cache_misses", timing->script_cache_misses);
+        jw_kv_uint(&w, "script_cache_compiles", timing->script_cache_compiles);
+        jw_kv_uint(&w, "script_cache_instantiations", timing->script_cache_instantiations);
         jw_kv_double(&w, "script_lifecycle_ms", script_lifecycle_ms);
         jw_kv_double(&w, "js_parse_ms", timing->js_parse_ms);
         jw_kv_double(&w, "js_ast_ms", timing->js_ast_ms);
@@ -6952,9 +6968,17 @@ int cmd_layout(int argc, char** argv) {
         log_error("Failed to initialize UI context");
         return 1;
     }
-    // Batch files share immutable preamble code, but instantiate it into a
-    // fresh heap and DOM realm for every document.
-    script_runner_set_preamble_cache_enabled(batch_mode);
+    // Batch files share immutable JS code, but every document instantiates it
+    // into a fresh heap and DOM realm. The batch owns the cache lifetime.
+    // The disable switch keeps an identical uncached path available for
+    // differential verification and performance attribution.
+    bool js_mir_cache_enabled = batch_mode &&
+        shell_getenv("LAMBDA_DISABLE_JS_MIR_CACHE") == nullptr;
+    JsMirCache* js_mir_cache = js_mir_cache_enabled ? js_mir_cache_create() : nullptr;
+    if (js_mir_cache_enabled && !js_mir_cache) {
+        log_error("layout_js_mir_cache: failed to create batch cache; continuing uncached");
+    }
+    script_runner_set_js_mir_cache(js_mir_cache);
 
     // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < opts.font_dir_count; i++) {
@@ -7100,7 +7124,8 @@ int cmd_layout(int argc, char** argv) {
         fclose(timing_file);
         timing_file = nullptr;
     }
-    script_runner_set_preamble_cache_enabled(false);
+    script_runner_set_js_mir_cache(nullptr);
+    js_mir_cache_destroy(js_mir_cache);
     log_debug("[Cleanup] Starting cleanup...");
     log_debug("[Cleanup] Cleaning up UI context...");
     ui_context_cleanup(&ui_context);

@@ -144,12 +144,53 @@ struct JsPreambleState {
     int entry_count;
     bool owns_compiled_state;   // clones share the immutable MIR context and pools
 };
+
+enum JsMirCacheMode {
+    JS_MIR_CACHE_PREAMBLE = 1,
+    JS_MIR_CACHE_LIFECYCLE = 2,
+    JS_MIR_CACHE_EXTERNAL_CLASSIC = 3,
+    JS_MIR_CACHE_INLINE_CLASSIC = 4,
+    JS_MIR_CACHE_MODULE = 5,
+};
+
+struct JsMirCache;
+
+struct JsMirCacheStats {
+    uint64_t lookups;
+    uint64_t hits;
+    uint64_t misses;
+    uint64_t compiles;
+    uint64_t instantiations;
+    uint64_t poisoned;
+    size_t retained_entries;
+    size_t retained_metadata_bytes;
+};
+
+JsMirCache* js_mir_cache_create(void);
+void js_mir_cache_destroy(JsMirCache* cache);
+const JsPreambleState* js_mir_cache_lookup(
+    JsMirCache* cache, JsMirCacheMode mode,
+    const char* source, size_t source_len, const char* filename,
+    const JsPreambleState* preamble);
+const JsPreambleState* js_mir_cache_adopt(
+    JsMirCache* cache, JsMirCacheMode mode,
+    const char* source, size_t source_len, const char* filename,
+    const JsPreambleState* preamble, JsPreambleState* compiled_state);
+void js_mir_cache_record_instantiation(JsMirCache* cache);
+void js_mir_cache_get_stats(const JsMirCache* cache, JsMirCacheStats* stats);
+
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                    JsPreambleState* out_state);
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                       const char* filename, JsPreambleState* out_state);
 Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                  const char* filename, JsPreambleState* out_state);
+Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
+                                      size_t js_source_len, const char* filename,
+                                      const JsPreambleState* preamble,
+                                      JsPreambleState* out_state);
+Item execute_compiled_js_in_current_realm(Runtime* runtime,
+                                          const JsPreambleState* compiled_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,

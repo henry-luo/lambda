@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>JS MIR cache realm mutation setup</title>
+</head>
+<body>
+  <div id="result">mutated</div>
+  <script>
+    window.__lambdaCacheRealmLeak = "prior-window";
+    Array.prototype.__lambdaCacheRealmLeak = "prior-prototype";
+  </script>
+</body>
+</html>
