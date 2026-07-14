@@ -844,6 +844,15 @@ custom.name  // "custom" (user-defined takes precedence)
 name(custom) // 'div' (function always returns tag)
 ```
 
+Use `map(element)` to copy an element's attribute facet into a map. Element
+children are not included, so the result can be spread into a rebuilt element:
+
+```lambda
+let source = <node id: "a", custom: 42; "old content">
+let attrs = map(source)
+let rebuilt = <node *:attrs; "new content">
+```
+
 ### Ranges
 
 Numeric sequences for iteration:

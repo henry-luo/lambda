@@ -13,6 +13,21 @@ fn source_attr(source, key, fallback) {
   if (source != null and source[key] != null) source[key] else fallback
 }
 
+fn label_source(value, fallback = null) {
+  if (value is element) model.label_source(value, fallback)
+  else source_attr(value, "label", fallback)
+}
+
+fn label_format(value) {
+  if (value is element) model.label_format(value)
+  else string(source_attr(value, "label-format", "text"))
+}
+
+fn canonical_content(value) {
+  if (value is element and model.content_element(value) != null) model.content_items(value)
+  else null
+}
+
 fn source_children(graph, tag) {
   if (graph is element) {
     if (len(graph) == 0) { [] }
@@ -46,19 +61,18 @@ fn node_style(node, style_declarations, palette) {
     "border:1px solid " ++ palette.node_border ++ ";border-radius:" ++ radius ++ ";" ++
     "background:" ++ palette.node_background ++ ";color:" ++ palette.node_text ++
     ";white-space:" ++
-    (if (graph_content.is_rich(string(source_attr(node, "label-format", "text")))) "normal" else "nowrap") ++
+    (if (graph_content.is_rich(label_format(node))) "normal" else "nowrap") ++
     ";" ++ graph_style.node_css(parsed)
 }
 
 fn node_content(node, id) {
-  if (node is element and len(node) > 0) {
-    [for (i in 0 to (len(node) - 1)) node[i]]
-  }
+  let content = canonical_content(node);
+  if (content != null) content
   else if (node.content is array) { [for (child in node.content) child] }
   else if (node.content is list) { [for (child in node.content) child] }
   else if (node.content != null) { [node.content] }
-  else if (node.label != null) {
-    graph_content.lower(node.label, string(source_attr(node, "label-format", "text")))
+  else if (label_source(node) != null) {
+    graph_content.lower(label_source(node), label_format(node))
   }
   else { [id] }
 }
@@ -69,7 +83,7 @@ fn html_node(node, index, group, assigned_classes, style_declarations, palette) 
   <node class: node_class(node, assigned_classes), 'data-node-id': id,
       'data-subgraph-id': group,
       'data-shape': source_attr(node, "shape", "box"),
-      'data-label-format': source_attr(node, "label-format", "text"),
+      'data-label-format': label_format(node),
       'data-style-declarations': style_declarations,
       'data-z': string(source_attr(node, "z", 0)),
       style: node_style(node, style_declarations, palette);
@@ -103,8 +117,8 @@ fn html_edge(edge, index, group, graph_directed, style_declarations) {
       'data-from': string(source_attr(edge, "from", source_attr(edge, "from_id", ""))),
       'data-to': string(source_attr(edge, "to", source_attr(edge, "to_id", ""))),
       'data-subgraph-id': group,
-      'data-label': source_attr(edge, "label", null),
-      'data-label-format': source_attr(edge, "label-format", "text"),
+      'data-label': label_source(edge),
+      'data-label-format': label_format(edge),
       'data-directed': directed,
       'data-arrow-start': bool_text(marker_start != "none", false),
       'data-arrow-end': bool_text(marker_end != "none", false),
@@ -117,19 +131,20 @@ fn html_edge(edge, index, group, graph_directed, style_declarations) {
 }
 
 fn html_edge_label(edge, index, group, palette) {
-  let label = source_attr(edge, "label", null);
-  let label_format = string(source_attr(edge, "label-format", "text"));
+  let label = label_source(edge);
+  let format = label_format(edge);
+  let content = canonical_content(edge);
   if (label == null or label == "") null
   else {
     <'edge-label' class: "graph-edge-label",
         'data-edge-id': string(source_attr(edge, "id", "e" ++ string(index))),
-        'data-subgraph-id': group, 'data-label-format': label_format,
+        'data-subgraph-id': group, 'data-label-format': format,
         'data-z': string(source_attr(edge, "label-z", 0)),
         style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
           "background:" ++ palette.graph_background ++ ";color:" ++ palette.node_text ++
-          ";white-space:" ++ (if (graph_content.is_rich(label_format)) "normal" else "nowrap") ++
+          ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
           ";pointer-events:none;";
-      for (child in graph_content.lower(label, label_format)) child
+      for (child in if (content != null) content else graph_content.lower(label, format)) child
     >
   }
 }

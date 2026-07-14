@@ -1,8 +1,9 @@
 # Duplicate-code checks
 
 `check_code_dup.py` runs Lizard's duplicate-code detector in C/C++ mode, removes
-reviewed false positives described in `exclude.json`, and prints the remaining
-duplicate blocks. Run it from the repository root.
+reviewed false positives described in `exclude.json`, clusters overlapping
+windows into review families, and checks the maintained Lambda metrics against
+`baseline.json`. Run it from the repository root.
 
 ## Prerequisites
 
@@ -31,17 +32,25 @@ python3 test/dedup/check_code_dup.py radiant
 python3 test/dedup/check_code_dup.py lib lambda
 ```
 
-Long reports may be kept under the repository's `temp/` directory:
+The default output is a ranked summary. Use `--full` to append every remaining
+Lizard location for an audit. Long reports must remain under the repository's
+`temp/` directory:
 
 ```bash
-python3 test/dedup/check_code_dup.py radiant > temp/dedup-radiant.txt
+python3 test/dedup/check_code_dup.py lambda --full > temp/dedup-lambda.txt
 ```
 
-The summary reports remaining blocks, excluded known false positives, and the
-number of file exclusion rules passed to Lizard. Remaining duplicate blocks do
-not currently make the command fail: this is a measurement and review tool, not
-a threshold gate. Configuration errors, a missing `lizard` executable, or an
-abnormal Lizard failure return a nonzero status.
+The summary reports raw and remaining blocks, clone-family counts, union
+duplicate lines, top files and cross-file pairs, and reviewed exclusions. Raw
+Lizard block count remains diagnostic because one logical family can produce
+many overlapping windows.
+
+The checked-in Lambda ratchet fails if either reviewed clone-family count or
+union duplicate lines grows beyond `baseline.json`. A reduction passes without
+editing the baseline; lower the checked-in values in the same reviewed cleanup
+that establishes the new scan result. Selections without a configured baseline
+remain report-only. Configuration errors, a missing `lizard` executable, an
+abnormal Lizard failure, or ratchet growth return a nonzero status.
 
 ## Exclusions
 
@@ -50,14 +59,16 @@ non-empty reason. Exclusions are for generated code or reviewed false positives,
 not for suppressing ordinary duplication.
 
 File exclusions are passed directly to Lizard with `-x`. Paths and patterns are
-relative to the repository root. The current Lambda exclusions cover
-`lambda/lambda-embed.h` and generated `parser.c` files.
+relative to the repository root. The current Lambda exclusions cover the
+generated `lambda/lambda-embed.h` and every vendored `lambda/tree-sitter*`
+tree, including runtimes, grammar sources, generated parsers, scanners, and
+language bindings.
 
 ```json
 {
-  "pattern": "lambda/*/parser.c",
+  "pattern": "lambda/tree-sitter*",
   "modules": ["lambda"],
-  "reason": "Tree-sitter parser tables are generated code."
+  "reason": "Vendored Tree-sitter code is outside the maintained Lambda scan."
 }
 ```
 
@@ -88,6 +99,12 @@ must fit within the declared regions.
 By default, a matching duplicate must span at least two declared regions. The
 optional `"allow_within_region": true` is reserved for a declarative table whose
 repeated row shape is clearer than a macro or runtime builder.
+
+The maintained Lambda scan currently has one reviewed block exclusion:
+`property_definitions` in `lambda/input/css/css_properties.cpp`. Its rows form a
+static CSS property schema and contain no executable control flow. Similar
+struct declarations, parser states, switches, loops, and adapters remain
+visible until a separate narrow invariant is reviewed.
 
 When adding an exclusion:
 

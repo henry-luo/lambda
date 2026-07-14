@@ -16,9 +16,9 @@ The plan deliberately stops at Phase 4. Splitting the large JS source files mere
 | Phase | Step | Status |
 |---|---|---|
 | **0** | Force the scan to C/C++ (`-l cpp`) | ✅ implemented and verified; 0 non-C/C++ files in the report |
-| 0 | Exclude all vendored tree-sitter trees | ⬜ pending |
-| 0 | Review declarative/independent false positives | ⬜ pending |
-| 0 | Cluster overlapping windows and establish the first-party ratchet | ⬜ pending |
+| 0 | Exclude all vendored tree-sitter trees | ✅ implemented and verified; 0 tree-sitter locations in the report |
+| 0 | Review declarative/independent false positives | ✅ CSS descriptor table excluded; unproven structural similarities remain visible |
+| 0 | Cluster overlapping windows and establish the first-party ratchet | ✅ deterministic summary, `--full`, and two-metric Lambda gate implemented |
 | **1** | Adopt `MirEmitter` in Python, Ruby, and Bash transpilers | ⬜ pending |
 | 1 | Extract the common typed-index load emitter | ⬜ pending |
 | 1 | Remove trivial Radiant DOM array-constructor copies | ⬜ pending |
@@ -36,35 +36,48 @@ The plan deliberately stops at Phase 4. Splitting the large JS source files mere
 
 ### 1.1 Corrected scan
 
-`make check-lambda-dup` now forces Lizard's C/C++ frontend. The verified full report is `temp/lambda_dup_scan.txt`.
+`make check-lambda-dup` now forces Lizard's C/C++ frontend and prints the ranked
+summary. The verified audit report is `temp/lambda_dup_full.txt`.
 
 | Measure | Result |
 |---|---:|
-| Remaining duplicate blocks | **3,658** |
-| Same-file blocks | **2,980 (81.5%)** |
-| Cross-file blocks | **678 (18.5%)** |
+| Raw Lizard duplicate blocks | **3,520** |
+| Remaining blocks after reviewed exclusions | **3,340** |
+| First-party clone families | **1,385** |
+| Same-file clone families | **1,035 (74.7%)** |
+| Cross-file clone families | **350 (25.3%)** |
+| Union duplicate lines | **56,478** |
+| Reviewed false-positive blocks | **180** |
 | Median matched location span | **6 lines** |
 | 90th-percentile span | **18 lines** |
-| Blocks touching vendored tree-sitter | **171** |
-| JS-only blocks | **1,865 (51.0%)** |
+| Blocks touching vendored tree-sitter | **0** |
+| JS-only blocks | **1,839 (52.2%)** |
 
-Running the documented first-party scan with all tree-sitter trees excluded produces **3,520 blocks**. The older design-doc baseline was 3,519, so maintained-code duplication is effectively unchanged; the 3,658 Make result is higher because its current exclusion file still admits vendored tree-sitter C/C++.
+The Make target now reproduces the documented first-party scan with all
+tree-sitter trees excluded: **3,520 blocks**. The older design-doc baseline was
+3,519, so maintained-code duplication is effectively unchanged. Replacing the
+old generated-`parser.c` exclusion with the complete `lambda/tree-sitter*`
+boundary removed 138 mixed vendor/generated blocks from the Make report.
 
 ### 1.2 Concentration
 
-Lizard uses overlapping token windows, so “appearances” and union-covered source lines identify leverage better than the raw block count.
+Lizard uses overlapping token windows, so clone-family participation and
+union-covered source lines identify leverage better than raw block appearances.
 
-| File | Appearances | Union-covered lines | Dominant cause |
+| File | Family participations | Union-covered lines | Dominant cause |
 |---|---:|---:|---|
-| `lambda/js/js_mir_expression_lowering.cpp` | 1,523 | 4,727 | builtin-name ladders; generator/class lowering templates |
-| `lambda/js/js_runtime.cpp` | 1,421 | 5,021 | builtin dispatch; repeated per-operation runtime shapes |
-| `lambda/transpile-mir.cpp` | 979 | 3,128 | typed array/index fast paths expanded per representation |
-| `lambda/js/js_globals.cpp` | 883 | 2,463 | constructor/type/name inventories repeated across policies |
-| `lambda/input/css/css_properties.cpp` | 843 | 439 | declarative property rows, not duplicated algorithms |
-| `lambda/module/radiant/radiant_dom_bridge.cpp` | 381 | 1,031 | reflected-property adapters expanded per IDL member |
-| Python/Ruby/Bash MIR transpilers | ~793 combined | ~2,843 | parallel register/import/call emitter infrastructure |
+| `lambda/js/js_runtime.cpp` | 182 | 4,990 | builtin dispatch; repeated per-operation runtime shapes |
+| `lambda/js/js_mir_expression_lowering.cpp` | 117 | 4,707 | builtin-name ladders; generator/class lowering templates |
+| `lambda/transpile-mir.cpp` | 55 | 3,136 | typed array/index fast paths expanded per representation |
+| `lambda/js/js_globals.cpp` | 115 | 2,471 | constructor/type/name inventories repeated across policies |
+| Python/Ruby/Bash MIR transpilers | 111 combined | 2,955 | parallel register/import/call emitter infrastructure |
+| `lambda/module/radiant/radiant_dom_bridge.cpp` | 21 | 1,031 | reflected-property adapters expanded per IDL member |
 
-The conclusion is not “Lambda has 3,658 functions to merge.” The actionable result is four structural problems:
+After excluding the declarative property schema,
+`lambda/input/css/css_properties.cpp` retains only 2 families and 37 union
+lines outside that table.
+
+The conclusion is not “Lambda has 3,520 functions to merge.” The actionable result is four structural problems:
 
 1. one concept is declared in several JS builtin inventories;
 2. MIR backend mechanics are still cloned in the guest-language transpilers;
@@ -89,40 +102,68 @@ The conclusion is not “Lambda has 3,658 functions to merge.” The actionable 
 
 The wrapper constructs `lizard -Eduplicate -l cpp ...`. A focused unit test pins the command, and the rerun contained only `.c`, `.cc`, `.cpp`, `.h`, and `.hpp` paths.
 
-### P0.2 — Exclude vendored/generated trees
+### P0.2 — Exclude vendored/generated trees — complete
 
-Add a documented `file_exclusions` rule covering all `lambda/tree-sitter*` paths, not only `parser.c`. Keep `lambda/lambda-embed.h` excluded. Do not add broad exclusions for maintained parser or transpiler code.
+The documented `file_exclusions` now cover all `lambda/tree-sitter*` paths,
+not only generated `parser.c` files. `lambda/lambda-embed.h` remains excluded,
+while maintained parser and transpiler code remains in scope. A focused unit
+test pins the exact Lambda exclusion set so future edits cannot silently widen
+or narrow this boundary.
 
-**Acceptance:** the Make target reproduces the documented **3,520** first-party result before block exclusions, modulo changes landed after this snapshot.
+**Acceptance:** `make check-lambda-dup` reproduced the documented **3,520**
+first-party result before block exclusions. The parsed report contained 0
+tree-sitter locations and only `.c`, `.cpp`, `.h`, and `.hpp` paths.
 
-### P0.3 — Review declarative and independent false positives
+### P0.3 — Review declarative and independent false positives — complete
 
-Add marker-based block exclusions only after source review. The first candidates are:
+The marker-based review admitted one Lambda block exclusion:
 
-- `static CssProperty property_definitions[]` in `css_properties.cpp` — one declarative schema;
-- independent AST/parser/CSS struct declarations that share only field-layout shape;
-- other tables where rows contain no executable control flow.
+- `static CssProperty property_definitions[]` in `css_properties.cpp` is one
+  declarative schema. Its fixed aggregate rows contain metadata, not executable
+  control flow. The narrow source-marker region excludes exactly **180** raw
+  Lizard windows.
 
-Each exclusion must name the invariant and its reason. Ordinary per-type implementations, switches, loops, or adapters are never excluded merely because they are numerous.
+The independent AST/parser/CSS struct similarities were not excluded. Lizard's
+normalized output alone cannot prove that every reported layout pair is an
+independent false positive, and a broad header/struct rule would hide future
+executable duplication. They remain visible until each candidate has a narrow,
+stable invariant. Ordinary per-type implementations, switches, loops, and
+adapters likewise remain in the review queue.
 
-### P0.4 — Report clone families, not only windows
+### P0.4 — Report clone families, not only windows — complete
 
-Extend `check_code_dup.py` to merge overlapping windows with the same file set into a review family. Report:
+`check_code_dup.py` now takes the transitive closure of overlapping windows
+without crossing an exact file-set boundary. An overlap in any participating
+file connects two windows from that same file set. This collapses token-window
+fragmentation while keeping unrelated file combinations separate.
 
-- raw Lizard block count for reproducibility;
-- first-party family count;
-- union duplicate lines per file;
-- same-file versus cross-file families;
-- top files and file pairs;
-- excluded counts by reviewed rule.
+The deterministic summary reports raw and remaining block counts, first-party
+family count, global and per-file union lines, same-file versus cross-file
+families, ranked files and file pairs, and excluded counts by reviewed rule.
+Default Make output is summary-only. `--full` appends all **3,340** remaining
+blocks and their **12,968** locations for audits; reports stay under `./temp/`.
 
-Default Make output should be the ranked summary. A `--full` option should preserve every Lizard location for audits. Long reports remain under `./temp/`.
+Focused tests pin the file-set boundary, transitive overlap behavior, union-line
+accounting, summary-only default, full location output, and both ratchet
+dimensions.
 
-### P0.5 — Ratchet
+### P0.5 — Ratchet — complete
 
-Commit the first-party baseline only after P0.2–P0.4. The gate fails on growth in reviewed family count or union duplicate lines. Raw Lizard block count remains diagnostic because a small edit can split one family into many overlapping windows.
+`test/dedup/baseline.json` commits the first-party Lambda limits:
 
-**Phase 0 gate:** focused Python unit tests, `make check-lambda-dup`, deterministic rerun, `git diff --check`.
+- clone families: **1,385**;
+- union duplicate lines: **56,478**.
+
+`make check-lambda-dup` fails if either reviewed metric grows. A reduction
+passes, allowing the cleanup that establishes it to lower the checked-in limit.
+Raw Lizard block count and remaining block count are recorded diagnostically but
+do not gate because a small edit can split one family into many token windows.
+Other module selections remain report-only until they receive separately
+reviewed baselines.
+
+**Phase 0 gate — passed:** 9 focused Python tests; `make check-lambda-dup`
+ratchet PASS; byte-identical summary rerun; `--full` location-count audit; valid
+JSON configuration; `git diff --check`.
 
 ---
 

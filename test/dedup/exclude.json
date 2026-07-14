@@ -7,12 +7,25 @@
       "reason": "Generated embedded-resource data is not maintained source code."
     },
     {
-      "pattern": "lambda/*/parser.c",
+      "pattern": "lambda/tree-sitter*",
       "modules": ["lambda"],
-      "reason": "Tree-sitter parser.c files are generated parser tables and contain unavoidable repeated structures."
+      "reason": "Vendored Tree-sitter runtimes, grammars, generated parsers, scanners, and bindings are not maintained Lambda source code."
     }
   ],
   "block_exclusions": [
+    {
+      "id": "declarative_css_property_rows",
+      "modules": ["lambda"],
+      "reason": "The static CSS property schema intentionally repeats one aggregate row shape; it contains declarative metadata rather than executable control flow.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "lambda/input/css/css_properties.cpp",
+          "start": "static CssProperty property_definitions[] = {",
+          "end": "#define PROPERTY_DEFINITION_COUNT"
+        }
+      ]
+    },
     {
       "id": "independent_event_enum_declarations",
       "modules": ["radiant"],

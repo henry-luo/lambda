@@ -93,7 +93,7 @@ Reference:
 | Attribute                 | Type          | Description                        |
 | ------------------------- | ------------- | ---------------------------------- |
 | id                        | string        | Unique node identifier             |
-| label                     | string        | Text label                         |
+| label                     | string        | Legacy input shorthand for `<label>` |
 | shape                     | string        | `rect`, `ellipse`, `diamond`, etc. |
 | fill, stroke              | color         | Colors                             |
 | width, height             | number        | Size override                      |
@@ -111,7 +111,7 @@ Reference:
 | Attribute                 | Type          | Description                  |
 | ------------------------- | ------------- | ---------------------------- |
 | from, to                  | node id       | Endpoints                    |
-| label                     | string        | Edge label                   |
+| label                     | string        | Legacy input shorthand for `<label>` |
 | style                     | ref/string    | Reference to style in `<defs>` |
 | stroke-dasharray          | string        | Line pattern: `solid`, `dashed`, etc. |
 | color                     | color         | Line color                   |
@@ -135,7 +135,31 @@ Reference:
 | color, fill, stroke | color | Cluster border styling |
 | style | string | `dashed`, `rounded`, etc. |
 
-### 2.5 `<style>` and `<defs>`
+### 2.5 Canonical `<label>` and `<content>`
+
+Normalization rebuilds every labeled node, edge, and subgraph with separate
+source and measured-content children:
+
+```mark
+<node id:"api" label:"The **API**" label-format:"markdown";
+  <label format:"markdown"; "The **API**">
+  <content; "The " <strong; "API">>
+>
+```
+
+`<label>` preserves the source value and format. `<content>` is the Mark subtree
+consumed by HTML transformation and measured by Radiant. Plain, Markdown, and
+HTML label shorthands are lowered into this pair. Authored rich node children
+are wrapped in `<content>` without reducing them to inline text, so normal
+block, inline, table, flex, grid, replaced, and SVG descendants remain
+available to Radiant layout.
+
+Canonical consumers use these children as the authority. Legacy `label` and
+`label-format` attributes may remain for source compatibility and provenance,
+but do not override `<label>` or `<content>`. Normalization is recursive and
+idempotent, and preserves unrelated attributes.
+
+### 2.6 `<style>` and `<defs>`
 Used for global and reusable style definitions.
 
 ```mark
@@ -150,7 +174,7 @@ Used for global and reusable style definitions.
 </defs>
 ```
 
-### 2.6 `<meta>`
+### 2.7 `<meta>`
 Metadata for authorship, versioning, provenance, etc.
 
 ```mark

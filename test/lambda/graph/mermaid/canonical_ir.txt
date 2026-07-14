@@ -1,0 +1,12 @@
+{
+  valid: true,
+  rebuilt: true,
+  idempotent: true,
+  graph_custom: "graph-meta",
+  subgraph: ["subgraph-meta", "Group **One**", "markdown", ["text", "strong"]],
+  nodes: [["A", 42, "The **API**", "markdown", ["text", "strong"]], ["B", "rich-block", "B", "text", ["section"]]],
+  edge: ["edge-meta", "<b>calls</b>", "html", ["strong"]],
+  html_node_content: [["A", ["text", "strong"]], ["B", ["section"]]],
+  authored_unchanged: true,
+  authored_custom: "preserved"
+}
