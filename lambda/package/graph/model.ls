@@ -1,4 +1,4 @@
-// Recursive queries over the canonical Mark Graph IR.
+// Recursive queries shared by source-stage and canonical Mark Graph IR.
 
 pub fn element_children(value) {
   if (value is element and len(value) > 0) {

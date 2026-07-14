@@ -13,6 +13,7 @@ Reference:
 ```mark
 <graph
   id: myGraph
+  ir-stage: "canonical"     // source or canonical
   directed: true
   layout: "dot"           // e.g. dot, neato, fdp, force, radial, grid, dagre
   rank-dir: "LR"          // LR, TB, RL, BT (for hierarchical layouts)
@@ -67,6 +68,7 @@ Reference:
 | Attribute | Type | Description |
 |------------|------|-------------|
 | id | string | Unique identifier |
+| ir-stage | string | `source` preserves parser declarations; `canonical` has resolved identities |
 | directed | bool | `true` for digraphs |
 | layout | string | Layout engine or algorithm |
 | rank-dir | string | Direction for hierarchical layouts |
@@ -76,6 +78,11 @@ Reference:
 | margin, padding | number | Space around the graph |
 | scale | number | Global zoom scaling |
 | width, height | number | Fixed graph dimensions |
+
+Source-stage and canonical graph values share this Mark representation. A
+source-stage Mermaid graph may contain repeated node ids so each declaration
+retains its own values and source span. Normalization resolves those declarations
+before emitting a canonical graph, where node ids are unique.
 
 ### 2.2 `<node>`
 

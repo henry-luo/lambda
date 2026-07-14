@@ -1,0 +1,10 @@
+{
+  source_stage: "source",
+  source_nodes: [["A", "Initial", "box", 2], ["A", "Final", "diamond", 3]],
+  canonical_stage: "canonical",
+  canonical_valid: true,
+  canonical_diagnostics: [],
+  canonical_nodes: [["A", "Final", "diamond", 3]],
+  idempotent: true,
+  html_nodes: [["A", "diamond", "Final"]]
+}

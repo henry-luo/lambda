@@ -178,30 +178,22 @@ static Element* ensure_mermaid_node(InputContext& ctx, Element* graph, Element* 
     if (!node && graph != root_graph) node = find_mermaid_node(root_graph, id);
     if (node) return node;
 
-    // Mermaid edges declare their endpoints implicitly, so the IR must materialize
-    // both endpoints before layout can resolve edge identity and dimensions.
+    // mermaid edges declare endpoints implicitly, so source Mark must materialize
+    // both identities before canonical endpoint resolution.
     node = create_node_element(ctx.input(), id, id, "box");
     add_node_to_graph(ctx.input(), graph, node);
     return node;
 }
 
-static Element* upsert_mermaid_node(InputContext& ctx, Element* graph, const char* id,
-                                    Element* root_graph, const char* label,
-                                    const char* shape, const char* label_format) {
-    Element* node = find_mermaid_node(graph, id);
-    if (!node && graph != root_graph) node = find_mermaid_node(root_graph, id);
-    if (!node) {
-        node = create_node_element(ctx.input(), id, label, shape);
-        if (label_format) add_graph_attribute(ctx.input(), node, "label-format", label_format);
-        add_node_to_graph(ctx.input(), graph, node);
-        return node;
-    }
-
-    // Repeated declarations refine one semantic node; duplicate elements would
-    // give layout ambiguous endpoint ownership and unstable measured dimensions.
-    if (label) add_graph_attribute(ctx.input(), node, "label", label);
-    if (shape) add_graph_attribute(ctx.input(), node, "shape", shape);
+static Element* add_mermaid_node_declaration(InputContext& ctx, Element* graph,
+                                             const char* id, const char* label,
+                                             const char* shape,
+                                             const char* label_format) {
+    // explicit declarations retain their own spans and values until the Lambda
+    // normalizer applies Mermaid's graph-global redeclaration semantics.
+    Element* node = create_node_element(ctx.input(), id, label, shape);
     if (label_format) add_graph_attribute(ctx.input(), node, "label-format", label_format);
+    add_node_to_graph(ctx.input(), graph, node);
     return node;
 }
 
@@ -566,14 +558,14 @@ static String* parse_mermaid_node_ref(InputContext& ctx, Element* graph,
         const char* shape = "box";
         const char* label_format = "text";
         String* label = parse_mermaid_node_shape(ctx, node_id->chars, &shape, &label_format);
-        node = upsert_mermaid_node(ctx, graph, node_id->chars, root_graph,
+        node = add_mermaid_node_declaration(ctx, graph, node_id->chars,
             label ? label->chars : node_id->chars, shape, label_format);
     } else if (ctx.tracker.match("@{")) {
         String* label = nullptr;
         String* shape = nullptr;
         const char* label_format = "text";
         parse_mermaid_general_shape(ctx, node_id->chars, &label, &shape, &label_format);
-        node = upsert_mermaid_node(ctx, graph, node_id->chars, root_graph,
+        node = add_mermaid_node_declaration(ctx, graph, node_id->chars,
             label ? label->chars : node_id->chars, shape ? shape->chars : "box", label_format);
     } else {
         node = ensure_mermaid_node(ctx, graph, root_graph, node_id->chars);
@@ -1100,6 +1092,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     // create main graph element
     Element* graph = create_graph_element(input, "directed", "mermaid", "mermaid");
     add_graph_attribute(input, graph, "version", "1");
+    add_graph_attribute(input, graph, "ir-stage", "source");
     add_graph_attribute(input, graph, "kind", diagram_type);
     add_graph_attribute(input, graph, "diagram-type", diagram_type);
     add_graph_attribute(input, graph, "directed", "true");
