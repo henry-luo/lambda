@@ -6185,11 +6185,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (block->parent && block->parent->is_block()) {
             ViewBlock* mt_pa = lam::view_require_block(static_cast<View*>(block->parent));
             if (is_quirky_container(mt_pa, lycon) &&
-                (mt_pa->tag_id == HTM_TAG_TD || mt_pa->tag_id == HTM_TAG_TH) &&
                 has_quirky_margin_top(block)) {
                 View* first = mt_pa->first_placed_child();
                 if (first == static_cast<View*>(block)) {
-                    log_debug("%s [QUIRKS] table cell trims first child UA margin.top=%f",
+                    // Quirks-mode body/table-cell containers trim first-child UA
+                    // margins before placement even when padding blocks normal collapse.
+                    log_debug("%s [QUIRKS] container trims first child UA margin.top=%f",
                               block->source_loc(), block->bound->margin.top);
                     block->bound->margin.top = 0;
                 }

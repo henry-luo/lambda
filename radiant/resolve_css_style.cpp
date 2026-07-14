@@ -1019,6 +1019,23 @@ static bool css_font_face_descriptor_is_available(FontFaceDescriptor* desc) {
     return css_font_face_source_is_available(desc->src_local_path);
 }
 
+static bool css_font_context_family_has_available_source(FontContext* font_ctx,
+                                                         const char* family) {
+    if (!font_ctx || !family) return false;
+    const FontFaceDesc* faces[16];
+    int count = font_face_list(font_ctx, family, faces, 16);
+    for (int i = 0; i < count; i++) {
+        const FontFaceDesc* face = faces[i];
+        if (!face || !face->sources || face->source_count <= 0) continue;
+        for (int s = 0; s < face->source_count; s++) {
+            if (css_font_face_source_is_available(face->sources[s].path)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool css_font_family_is_available(LayoutContext* lycon, const char* family,
                                   bool require_loadable_face_source) {
     if (!family) return false;
@@ -1053,8 +1070,10 @@ bool css_font_family_is_available(LayoutContext* lycon, const char* family,
             // Async webfonts are registered in FontContext before layout; treating
             // only installed database faces as available drops them to generic fallback.
             // When selecting a concrete family for immediate layout, an unloadable
-            // @font-face must not stop the CSS fallback list at a dead source.
-            return !require_loadable_face_source;
+            // @font-face must not stop the CSS fallback list at a dead source, but
+            // downloaded cache files registered by the network loader are usable.
+            return !require_loadable_face_source ||
+                css_font_context_family_has_available_source(lycon->ui_context->font_ctx, family);
         }
         return font_family_exists(lycon->ui_context->font_ctx, family);
     }

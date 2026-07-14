@@ -12,11 +12,14 @@
     <expect direction: 'BT', nodes: 2, edges: 1>
   >
   <case id: 'shapes-and-labels', source: 'shapes_and_labels.mmd';
-    <expect direction: 'TB', nodes: 3, edges: 2>
+    <expect direction: 'TB', nodes: 3, source-nodes: 4, edges: 2>
     <node id: 'A', label: 'Start', shape: 'rounded'>
     <node id: 'B', label: 'Valid?', shape: 'diamond'>
     <node id: 'C', label: 'Done', shape: 'doublecircle'>
     <edge from: 'A', to: 'B', label: 'check', arrow-end: 'true'>
+  >
+  <case id: 'node-redeclarations', source: 'node_redeclarations.mmd';
+    <expect direction: 'TB', nodes: 1, source-nodes: 2, edges: 0>
   >
   <case id: 'rich-labels', source: 'rich_labels.mmd';
     <expect direction: 'LR', nodes: 2, edges: 1>

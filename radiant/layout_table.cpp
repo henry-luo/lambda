@@ -830,9 +830,11 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // (stored in content_height during layout_inline).
             if (child->view_type == RDT_VIEW_INLINE) {
                 if (block->content_height > 0) {
+                    // Inline descendants can resolve normal line-height against
+                    // their own font; the cell strut is only a fallback when the
+                    // span made no line-height contribution of its own.
                     child_height = block->content_height;
-                }
-                if (cell_line_height > child_height) {
+                } else if (cell_line_height > child_height) {
                     child_height = cell_line_height;
                 }
             }
@@ -913,7 +915,9 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
         has_any = true;
     }
     float content_height = has_any ? (overall_max_y - overall_min_y) : 0.0f;
-    if (tcell->content_height > content_height) {
+    if (!has_any && tcell->content_height > content_height) {
+        // Replaced-only spacer cells measure from their child boxes; the line
+        // advance fallback would incorrectly add the table cell's font strut.
         content_height = tcell->content_height;
         has_any = true;
     }
@@ -6248,6 +6252,23 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     // CRITICAL FIX: Set line.left and advance_x to content_start_x to apply padding offset
     lycon->block.content_width = content_width;
     lycon->block.content_height = content_height;
+    cell->content_width = content_width;
+    cell->content_height = content_height;
+
+    // Table cells establish a BFC; otherwise floats inside the cell are
+    // registered against an outer context and following inline content cannot
+    // query their intrusion in cell coordinates.
+    lycon->block.parent = &saved_block;
+    lycon->block.establishing_element = cell;
+    lycon->block.is_bfc_root = true;
+    lycon->block.origin_x = cell->x + content_start_x;
+    lycon->block.origin_y = cell->y + content_start_y;
+    lycon->block.bfc_offset_x = 0.0f;
+    lycon->block.bfc_offset_y = 0.0f;
+    lycon->block.float_left_edge = 0.0f;
+    lycon->block.float_right_edge = content_width;
+    lycon->block.saved_clear_y = -1.0f;
+    block_context_reset_floats(&lycon->block);
 
     // CSS 2.2 §10.5: If the cell has an explicit CSS height, set given_height in the
     // block context so children with percentage heights can resolve against it.

@@ -1443,6 +1443,17 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
     return true;
 }
 
+static bool quirks_table_cell_uses_descendant_font_baseline(LayoutContext* lycon) {
+    if (!lycon || !lycon->doc || !lycon->doc->view_tree) return false;
+    if (!is_quirks_mode(lycon->doc->view_tree->html_version)) return false;
+    ViewBlock* block = lycon->block.establishing_element;
+    if (!block || block->view_type != RDT_VIEW_TABLE_CELL) return false;
+    if (!lycon->block.line_height_is_normal || !lycon->line.has_different_inline_font) return false;
+    if (lycon->line.max_normal_line_height <= 0.0f) return false;
+    float descendant_line_height = lycon->line.max_ascender + lycon->line.max_descender;
+    return descendant_line_height <= lycon->line.max_normal_line_height + 0.5f;
+}
+
 float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
     float line_height = max(lycon->block.line_height,
                             lycon->line.max_ascender + lycon->line.max_descender);
@@ -1460,6 +1471,11 @@ float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
         }
     }
     if (out_line_height) *out_line_height = line_height;
+    if (quirks_table_cell_uses_descendant_font_baseline(lycon)) {
+        // BackCompat table cells match Chromium by sizing descendant-only
+        // normal font runs from the descendant baseline instead of the cell strut.
+        return lycon->line.max_ascender;
+    }
     return max(lycon->line.max_ascender, strut_baseline);
 }
 
@@ -2022,13 +2038,9 @@ void line_align(LayoutContext* lycon) {
             }
         }
 
-        // For justify, always use current view if start_view is NULL
-        if (!view && text_align == CSS_VALUE_JUSTIFY) {
-            view = lycon->view;
-        }
-
-        // For center/right without wrapped text, return if no start_view
-        // (table cells and other blocks handle alignment themselves)
+        // A missing start_view means this block context has no inline content
+        // on the current line; using the stale current view can justify a
+        // descendant from a different line or child block.
         if (!view) {
             return;
         }

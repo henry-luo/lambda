@@ -170,6 +170,7 @@ TEST_F(GraphMermaidCorpusTest, SemanticMarkIR) {
         ASSERT_EQ(graph_input->root.type_id(), LMD_TYPE_ELEMENT);
         ElementReader graph(graph_input->root);
         ASSERT_TRUE(graph.hasTag("graph"));
+        EXPECT_STREQ(graph.get_attr_string("ir-stage"), "source");
 
         ElementReader expected = test_case.findChildElement("expect");
         ASSERT_TRUE(expected.isValid());
@@ -180,7 +181,11 @@ TEST_F(GraphMermaidCorpusTest, SemanticMarkIR) {
         if (kind) EXPECT_STREQ(graph.get_attr_string("kind"), kind);
         if (status) EXPECT_STREQ(graph.get_attr_string("status"), status);
 
-        EXPECT_EQ(count_tag_recursive(graph, "node"), expected.get_int_attr("nodes", 0));
+        // the native parser runner observes source-stage declarations; canonical
+        // node counts remain the manifest default for downstream normalization.
+        int64_t expected_source_nodes = expected.get_int_attr(
+            "source-nodes", expected.get_int_attr("nodes", 0));
+        EXPECT_EQ(count_tag_recursive(graph, "node"), expected_source_nodes);
         EXPECT_EQ(count_tag_recursive(graph, "edge"), expected.get_int_attr("edges", 0));
         EXPECT_EQ(count_tag_recursive(graph, "subgraph"), expected.get_int_attr("subgraphs", 0));
         EXPECT_EQ(count_tag_recursive(graph, "style-rule"), expected.get_int_attr("style-rules", 0));

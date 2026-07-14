@@ -50,6 +50,17 @@ static inline bool is_out_of_flow_child(View* child) {
     return layout_view_is_out_of_flow(child);
 }
 
+static bool quirks_table_cell_br_after_nested_inline_text(LayoutContext* lycon,
+                                                          DomNode* br_node) {
+    if (!lycon || !lycon->doc || !lycon->doc->view_tree || !br_node) return false;
+    if (!is_quirks_mode(lycon->doc->view_tree->html_version)) return false;
+    ViewBlock* block = lycon->block.establishing_element;
+    if (!block || block->view_type != RDT_VIEW_TABLE_CELL) return false;
+    ViewText* last_text = lycon->line.last_text_view;
+    return last_text && last_text->parent && br_node->parent &&
+        last_text->parent != br_node->parent;
+}
+
 typedef struct InlineOutOfFlowKind {
     bool floated;
     bool positioned;
@@ -1126,12 +1137,20 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // content on the line, including replaced elements.
         float br_line_height = lycon->block.line_height > 0.0f ? lycon->block.line_height : br_font_height;
         br_view->y = lycon->block.advance_y + (br_line_height - br_font_height) / 2.0f;
+        bool collapse_br_rect = quirks_table_cell_br_after_nested_inline_text(lycon, elmt);
+        float collapsed_br_y = lycon->block.advance_y + lycon->line.max_ascender;
         // CSS Text 3 §7.2: text-align-last applies to lines immediately before
         // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
         bool was_line_clamped = lycon->block.line_clamped;
         lycon->line.is_last_line = true;
         line_break(lycon);
         lycon->line.is_last_line = false;
+        if (collapse_br_rect) {
+            // BackCompat table cells expose terminal breaks after nested inline
+            // text as caret-position boxes; the line still advances normally.
+            br_view->y = collapsed_br_y;
+            br_view->height = 0.0f;
+        }
         if (!was_line_clamped && lycon->block.line_clamped && lycon->font.font_handle) {
             GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026); // U+2026
             br_view->width = ellipsis.id != 0 ? ellipsis.advance_x : lycon->font.current_font_size * 0.5f;
@@ -1222,6 +1241,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     CssEnum pa_line_align = lycon->line.vertical_align;
     float pa_valign_offset = lycon->line.vertical_align_offset;
     lycon->elmt = elmt;
+
+    if (lycon->line.is_line_start) {
+        // A preceding float on an otherwise empty line does not trigger
+        // line_reset(); refresh before assigning this inline's line fragment.
+        update_line_for_bfc_floats(lycon);
+    }
 
     ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(set_view(lycon, RDT_VIEW_INLINE, elmt));
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
@@ -1357,9 +1382,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         } else {
             // font-size changed: only re-resolve for number/normal line-height
             CssValue inherited_lh = inherit_line_height(lycon, block_api_span);
-            if (inherited_lh.type == CSS_VALUE_TYPE_NUMBER ||
+            if (pa_line_height_is_normal ||
+                inherited_lh.type == CSS_VALUE_TYPE_NUMBER ||
                 (inherited_lh.type == CSS_VALUE_TYPE_KEYWORD &&
                  inherited_lh.data.keyword == CSS_VALUE_NORMAL)) {
+                // A parent's resolved normal line-height is font-dependent;
+                // inline font-size changes must recompute it for the new font.
                 setup_line_height(lycon, block_api_span);
             }
         }
@@ -1377,6 +1405,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
         }
     }
+    float span_resolved_line_height = lycon->block.line_height;
     // line.max_ascender and max_descender to be changed only when there's output from the span
 
     // layout inline content
@@ -1690,7 +1719,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // view_vertical_align() to compute the inline box Y/height.
     // For inline non-replaced elements, the inline box height equals line-height,
     // not the union of children's visual extent.
-    span->content_height = lycon->block.line_height;
+    // Forced breaks inside the span reset the shared line context; preserve
+    // this inline's resolved line-height for table-cell height measurement.
+    span->content_height = span_resolved_line_height;
     if (had_children && has_inline_axis_decoration && span_children_have_no_line_content(span)) {
         span->has_collapsed_line_fragment_union = true;
         span->collapsed_line_fragment_min_x = collapsed_inline_fragment_x;

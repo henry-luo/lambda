@@ -19,6 +19,7 @@ fn graph_spec() => {
     *common_attrs(),
     attr("id", "text"), attr("version", "text"), attr("kind", "text"),
     attr("diagram-type", "text"), attr("directed", "boolish"),
+    attr("ir-stage", "text", false, ["source", "canonical"]),
     attr("direction", "text"), attr("rank-dir", "text"),
     attr("layout", "text"), attr("status", "text"),
     attr("rank-sep", "number"), attr("node-sep", "number"),

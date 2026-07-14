@@ -132,6 +132,85 @@ fn canonical_graph(graph) {
   >
 }
 
+fn is_mermaid_source_graph(graph) =>
+  graph is element and model.tag(graph) == "graph" and
+    graph.flavor == "mermaid" and graph["ir-stage"] == "source"
+
+fn node_declaration_groups(graph) {
+  let entries = [for (entry in model.node_entries(graph)
+    where entry.value.id != null) {
+      id: string(entry.value.id), value: entry.value
+    }];
+  let grouped = [for (entry in entries group by entry.id into declarations) {
+    id: declarations.id,
+    // group keys are attributes on the grouped value and are not declarations.
+    values: [for (declaration in declarations
+      where declaration.value != null) declaration.value]
+  }];
+  map([for (declarations in grouped,
+    pair in [declarations.id, declarations.values]) pair])
+}
+
+fn merge_node_attrs_at(values, i, attrs) {
+  if (i >= len(values)) { attrs }
+  else {
+    let next_attrs = map(values[i]);
+    let merged = {*:attrs, *:next_attrs};
+    merge_node_attrs_at(values, i + 1, merged)
+  }
+}
+
+fn source_declaration_matches(a, b) =>
+  a["source-start"] == b["source-start"] and
+    a["source-end"] == b["source-end"] and
+    a["source-line"] == b["source-line"] and
+    a["source-column"] == b["source-column"]
+
+fn is_first_node_declaration(groups, node) {
+  let values = if (node.id != null) groups[string(node.id)] else null;
+  if (values != null and len(values) > 0) { source_declaration_matches(node, values[0]) }
+  // missing ids must survive merging so canonical validation can diagnose them.
+  else if (node.id == null) { true }
+  else { false }
+}
+
+fn merged_source_node(groups, node) {
+  let values = if (node.id != null) groups[string(node.id)] else [node];
+  let final_declaration = values[len(values) - 1];
+  let attrs = merge_node_attrs_at(values, 0, {});
+  <node *:attrs;
+    // mermaid redeclarations replace authored node content, while ports remain
+    // cumulative metadata attached to the graph-global node identity.
+    for (child in model.child_items(final_declaration)
+      where not (child is element and model.tag(child) == "port")) child
+    for (declaration in values, port in node_ports(declaration)) port
+  >
+}
+
+fn merged_source_children(groups, container) => [
+  for (child in model.child_items(container), merged in
+    if (not (child is element)) [child]
+    else if (model.tag(child) == "node")
+      (if (is_first_node_declaration(groups, child)) [merged_source_node(groups, child)] else [])
+    else if (model.tag(child) == "subgraph") [merged_source_subgraph(groups, child)]
+    else [child]) merged
+]
+
+fn merged_source_subgraph(groups, subgraph) {
+  let attrs = map(subgraph);
+  <subgraph *:attrs;
+    for (child in merged_source_children(groups, subgraph)) child
+  >
+}
+
+fn merge_mermaid_source_graph(graph) {
+  let attrs = {*:map(graph), 'ir-stage': "canonical"};
+  let groups = node_declaration_groups(graph);
+  <graph *:attrs;
+    for (child in merged_source_children(groups, graph)) child
+  >
+}
+
 fn item_id(value) =>
   if (value.id != null and value.id != "") string(value.id) else ""
 
@@ -256,11 +335,15 @@ pub fn validate(graph) {
 }
 
 pub fn normalize(graph) {
-  let canonical = if (graph is element and string(name(graph)) == "graph")
-    (if (is_canonical_graph(graph)) graph else canonical_graph(graph)) else graph;
+  // mermaid parser output retains redeclarations; merge that source stage before
+  // canonical uniqueness checks while authored canonical Mark keeps strict IDs.
+  let resolved = if (is_mermaid_source_graph(graph)) merge_mermaid_source_graph(graph)
+    else graph;
+  let canonical = if (resolved is element and string(name(resolved)) == "graph")
+    (if (is_canonical_graph(resolved)) resolved else canonical_graph(resolved)) else resolved;
   // Validate authored structure before rebuilding so duplicate canonical children
   // cannot disappear without a diagnostic when the canonical pair is selected.
-  let values = validate(graph);
+  let values = validate(resolved);
   {
     graph: canonical,
     diagnostics: values,

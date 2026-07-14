@@ -657,13 +657,13 @@ diagram family:
 
 ```text
 Mermaid source
-  -> Mermaid source AST
-  -> graph-oriented family -> Mark Graph IR -> graph package
-  -> chart-oriented family -> Mark Chart IR -> chart package
+  -> source-stage Mark with source-order declarations
+  -> graph-oriented family -> canonical Mark Graph IR -> graph package
+  -> chart-oriented family -> canonical Mark Chart IR -> chart package
 ```
 
 The graph proposal specifies only the graph-oriented branch and the boundary by
-which chart-oriented ASTs are handed to `lambda.package.chart`.
+which chart-oriented source-stage Mark is handed to `lambda.package.chart`.
 
 ### 18.2 Stage 2 pipeline
 
@@ -672,7 +672,7 @@ The complete graph path is:
 ```text
 Mermaid, D2, DOT, GV, or Mark graph source
   -> format-specific parser
-  -> source AST with source spans and format-specific statements
+  -> source-stage Mark with source spans and format-specific declarations
   -> pure normalization and semantic resolution
   -> canonical Mark Graph IR
   -> graph.transform.to_html()
@@ -685,12 +685,28 @@ Mermaid, D2, DOT, GV, or Mark graph source
   -> final SVG, PDF, raster, or interactive view
 ```
 
-The source AST and common IR are distinct. The AST preserves declarations in
-source order, comments or directives where needed, exact source spans, and
-format-specific constructs. The normalizer applies source-language semantics,
-including Mermaid node redeclaration, chained-edge expansion, class assignment,
-defaults, subgraph membership, and generated identity. Only then does it emit
-the canonical Mark Graph IR.
+The source and canonical stages use the same Mark representation and are
+distinguished by the root `ir-stage` attribute. Source-stage Mark preserves
+declarations in source order, exact source spans, and format-specific constructs;
+it may therefore contain repeated node ids. The normalizer applies
+source-language semantics, including Mermaid node redeclaration, chained-edge
+expansion, class assignment, defaults, subgraph membership, and generated
+identity. It then emits canonical Mark Graph IR with unique node identities.
+There is no separate Mermaid AST data model.
+
+The Mermaid parser must not merge explicit node declarations. For example:
+
+```text
+A[Initial]
+A{Final}
+```
+
+produces two source-stage `<node>` values, each with its own label, shape, and
+source span. Mermaid normalization folds them into one canonical node whose
+effective label is `Final`, shape is `diamond`, and provenance points to the
+final effective declaration. Bare endpoint references synthesized while parsing
+edges remain deduplicated because they carry no later declaration value that
+would otherwise be lost.
 
 A parser may build the Mark IR directly when the source grammar is already
 canonical, but it must still pass through the same validation and normalization
@@ -981,7 +997,7 @@ document layout. It must not start a new `lambda.exe` process for every fixture.
 
 For each manifest entry the runner performs the applicable stages:
 
-1. Parse source into the source AST and collect structured diagnostics.
+1. Parse source into source-stage Mark and collect structured diagnostics.
 2. Normalize to Mark Graph IR and compare with `expected/ir`.
 3. Transform to semantic HTML and compare selected normalized structure with
    `expected/html`.
@@ -1008,7 +1024,8 @@ checked-in references during a normal test invocation.
 #### Stage 2A - IR and diagnostics
 
 - finalize the Mark Graph IR schema and validator;
-- separate Mermaid source AST construction from graph normalization;
+- emit source-order Mark separately from graph normalization;
+- distinguish source and canonical contracts with `ir-stage`;
 - preserve graph direction, source spans, diagnostics, and stable identities;
 - add common IR queries and constructors in `graph/model.ls`;
 - add exact IR fixtures and the initial dedicated runner.
@@ -1075,9 +1092,12 @@ The initial Stage 2 tranche is implemented as follows:
 - the Mermaid parser emits `version`, `kind`, `diagram-type`, `directed`,
   `direction`, and `rank-dir` on the root Mark `<graph>`;
 - `TD` is normalized to `TB`, and all five flowchart directions are preserved;
-- every edge materializes both endpoint nodes, repeated declarations update one
-  graph-global node identity, and subgraph references no longer create duplicate
-  nodes;
+- every edge materializes both endpoint nodes, and subgraph references no longer
+  create duplicate implicit nodes;
+- the Mermaid parser emits `ir-stage: "source"` and preserves repeated explicit
+  node declarations with independent values and source spans; normalization
+  applies Mermaid's graph-global last-declaration semantics and emits
+  `ir-stage: "canonical"` with unique node ids;
 - recursive `<subgraph>` structure and local direction are retained, including
   quoted subgraph labels and ids;
 - `classDef` and `class` statements survive as `<style-rule>` and
@@ -1222,10 +1242,9 @@ cardinality, and required-attribute diagnostics.
 
 The following Stage 2 work remains open:
 
-- a distinct Mermaid source AST and declaration-list provenance for merged
-  values; the current boundary performs declarative Graph IR validation and
-  retains first-declaration spans but does not yet separate parsing from
-  normalization;
+- source-stage provenance for parser-expanded chained and multi-node edge
+  declarations, including a stable way to relate generated canonical edges back
+  to one authored statement;
 - interaction metadata, edge-ID property/class statements, the remaining
   Mermaid style properties beyond the initial safe paint allowlist, and
   rendering semantics for general shape names beyond the implemented legacy
