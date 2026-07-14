@@ -6166,6 +6166,7 @@ struct LayoutPhaseTiming {
     double js_exec_ms;
     double js_cleanup_ms;
     double js_total_ms;
+    double js_preamble_ms;
     double layout_ms;
     double output_ms;
 };
@@ -6194,6 +6195,7 @@ static void write_layout_phase_timing(FILE* timing_file, const char* input_file,
         jw_kv_double(&w, "js_exec_ms", timing->js_exec_ms);
         jw_kv_double(&w, "js_cleanup_ms", timing->js_cleanup_ms);
         jw_kv_double(&w, "js_total_ms", timing->js_total_ms);
+        jw_kv_double(&w, "js_preamble_ms", timing->js_preamble_ms);
         jw_kv_double(&w, "layout_ms", timing->layout_ms);
         jw_kv_double(&w, "output_ms", timing->output_ms);
     jw_obj_end(&w);
@@ -6239,7 +6241,7 @@ static bool layout_single_file(
     auto output_end = output_start;
     bool layout_phase_ran = false;
     bool output_phase_ran = false;
-    js_mir_reset_last_phase_timing();
+    JsMirPhaseTiming document_js_timing = {};
 
     // Create memory pool for this file
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
@@ -6247,6 +6249,7 @@ static bool layout_single_file(
         log_error("Failed to create memory pool for %s", input_file);
         return false;
     }
+    js_mir_begin_document_phase_timing();
 
     bool previous_auto_close_mode = js_event_loop_auto_close_mode();
     js_event_loop_set_auto_close_mode(auto_close);
@@ -6385,19 +6388,19 @@ static bool layout_single_file(
 
     if (!doc) {
         load_end = std::chrono::high_resolution_clock::now();
+        js_mir_end_document_phase_timing(&document_js_timing);
         LayoutPhaseTiming timing = {};
-        JsMirPhaseTiming js_timing = {};
-        js_mir_get_last_phase_timing(&js_timing);
         timing.total_ms = std::chrono::duration<double, std::milli>(load_end - total_start).count();
         timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
-        timing.js_parse_ms = js_phase_us_to_ms(js_timing.parse_us);
-        timing.js_ast_ms = js_phase_us_to_ms(js_timing.ast_us);
+        timing.js_parse_ms = js_phase_us_to_ms(document_js_timing.parse_us);
+        timing.js_ast_ms = js_phase_us_to_ms(document_js_timing.ast_us);
         timing.js_transpile_ms = js_phase_us_to_ms(
-            js_timing.early_us + js_timing.imports_us + js_timing.mir_us);
-        timing.js_link_ms = js_phase_us_to_ms(js_timing.link_us);
-        timing.js_exec_ms = js_phase_us_to_ms(js_timing.execute_us);
-        timing.js_cleanup_ms = js_phase_us_to_ms(js_timing.cleanup_us);
-        timing.js_total_ms = js_phase_us_to_ms(js_timing.total_us);
+            document_js_timing.early_us + document_js_timing.imports_us + document_js_timing.mir_us);
+        timing.js_link_ms = js_phase_us_to_ms(document_js_timing.link_us);
+        timing.js_exec_ms = js_phase_us_to_ms(document_js_timing.execute_us);
+        timing.js_cleanup_ms = js_phase_us_to_ms(document_js_timing.cleanup_us);
+        timing.js_total_ms = js_phase_us_to_ms(document_js_timing.total_us);
+        timing.js_preamble_ms = js_phase_us_to_ms(document_js_timing.preamble_us);
         timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
         if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
         write_layout_phase_timing(timing_file, input_file, false, &timing);
@@ -6414,6 +6417,7 @@ static bool layout_single_file(
         return false;
     }
     load_end = std::chrono::high_resolution_clock::now();
+    js_mir_end_document_phase_timing(&document_js_timing);
 
     ui_context->document = doc;
 
@@ -6511,19 +6515,18 @@ static bool layout_single_file(
 
     {
         auto total_end = std::chrono::high_resolution_clock::now();
-        JsMirPhaseTiming js_timing = {};
-        js_mir_get_last_phase_timing(&js_timing);
         LayoutPhaseTiming timing = {};
         timing.total_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
         timing.load_ms = std::chrono::duration<double, std::milli>(load_end - load_start).count();
-        timing.js_parse_ms = js_phase_us_to_ms(js_timing.parse_us);
-        timing.js_ast_ms = js_phase_us_to_ms(js_timing.ast_us);
+        timing.js_parse_ms = js_phase_us_to_ms(document_js_timing.parse_us);
+        timing.js_ast_ms = js_phase_us_to_ms(document_js_timing.ast_us);
         timing.js_transpile_ms = js_phase_us_to_ms(
-            js_timing.early_us + js_timing.imports_us + js_timing.mir_us);
-        timing.js_link_ms = js_phase_us_to_ms(js_timing.link_us);
-        timing.js_exec_ms = js_phase_us_to_ms(js_timing.execute_us);
-        timing.js_cleanup_ms = js_phase_us_to_ms(js_timing.cleanup_us);
-        timing.js_total_ms = js_phase_us_to_ms(js_timing.total_us);
+            document_js_timing.early_us + document_js_timing.imports_us + document_js_timing.mir_us);
+        timing.js_link_ms = js_phase_us_to_ms(document_js_timing.link_us);
+        timing.js_exec_ms = js_phase_us_to_ms(document_js_timing.execute_us);
+        timing.js_cleanup_ms = js_phase_us_to_ms(document_js_timing.cleanup_us);
+        timing.js_total_ms = js_phase_us_to_ms(document_js_timing.total_us);
+        timing.js_preamble_ms = js_phase_us_to_ms(document_js_timing.preamble_us);
         timing.document_parse_ms = timing.load_ms - timing.js_total_ms;
         if (timing.document_parse_ms < 0.0) timing.document_parse_ms = 0.0;
         timing.layout_ms = layout_phase_ran
@@ -6822,6 +6825,9 @@ int cmd_layout(int argc, char** argv) {
         log_error("Failed to initialize UI context");
         return 1;
     }
+    // Batch files share immutable preamble code, but instantiate it into a
+    // fresh heap and DOM realm for every document.
+    script_runner_set_preamble_cache_enabled(batch_mode);
 
     // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < opts.font_dir_count; i++) {
@@ -6967,6 +6973,7 @@ int cmd_layout(int argc, char** argv) {
         fclose(timing_file);
         timing_file = nullptr;
     }
+    script_runner_set_preamble_cache_enabled(false);
     log_debug("[Cleanup] Starting cleanup...");
     log_debug("[Cleanup] Cleaning up UI context...");
     ui_context_cleanup(&ui_context);

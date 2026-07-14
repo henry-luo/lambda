@@ -5972,7 +5972,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (should_define_global) {
                         const char* js_name = mce->name;
                         if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
-                        NamePool* np = (context && context->name_pool) ? context->name_pool : mt->tp->name_pool;
+                        NamePool* np = jm_compiled_name_pool(mt);
                         String* interned = name_pool_create_len(np, js_name, (int)strlen(js_name));
                         bulk_indices_global[bulk_global_count] = (int)mce->int_val;
                         bulk_keys_global[bulk_global_count] = (Item){.item = s2it(interned)};

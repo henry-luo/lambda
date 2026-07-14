@@ -230,6 +230,18 @@ static int hostobj_demo_init(const JubeHostAPI* host) {
     return 0;
 }
 
+static void hostobj_demo_runtime_reset(void) {
+    if (s_hostobj_demo_host && s_hostobj_demo_roots_registered) {
+        s_hostobj_demo_host->gc->unregister_root(&s_hostobj_demo_namespace.item);
+        s_hostobj_demo_host->gc->unregister_root(&s_hostobj_demo_ctor.item);
+    }
+    // Namespace/constructor Items belong to the current JS heap and must not
+    // survive a document or batch-runtime boundary.
+    s_hostobj_demo_namespace = ItemNull;
+    s_hostobj_demo_ctor = ItemNull;
+    s_hostobj_demo_roots_registered = false;
+}
+
 static const JubeModuleDef s_hostobj_demo_module = {
     JUBE_ABI_VERSION,
     sizeof(JubeModuleDef),
@@ -247,6 +259,7 @@ static const JubeModuleDef s_hostobj_demo_module = {
     s_hostobj_demo_interface,
     s_hostobj_demo_bindings,
     (int32_t)(sizeof(s_hostobj_demo_bindings) / sizeof(s_hostobj_demo_bindings[0])),
+    hostobj_demo_runtime_reset,
 };
 
 extern "C" void hostobj_demo_jube_register_static(void) {

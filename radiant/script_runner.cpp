@@ -137,6 +137,8 @@ static int js_exec_timeout_seconds(size_t source_len) {
 // Destroyed by script_runner_cleanup_heap() in per-file cleanup (after layout).
 static Pool* s_js_reuse_pool = nullptr;
 static LruCache* s_script_source_cache = nullptr;
+static JsPreambleState* s_browser_preamble_cache = nullptr;
+static bool s_browser_preamble_cache_enabled = false;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
 
@@ -146,6 +148,34 @@ extern "C" void script_runner_set_retain_js_state(bool retain) {
 
 extern "C" void script_runner_set_execute_external_scripts(bool execute) {
     s_execute_external_scripts = execute;
+}
+
+static void script_runner_cleanup_preamble_cache() {
+    if (!s_browser_preamble_cache) return;
+    preamble_state_destroy(s_browser_preamble_cache);
+    mem_free(s_browser_preamble_cache);
+    s_browser_preamble_cache = nullptr;
+}
+
+extern "C" void script_runner_set_preamble_cache_enabled(bool enabled) {
+    if (!enabled) script_runner_cleanup_preamble_cache();
+    s_browser_preamble_cache_enabled = enabled;
+}
+
+static bool script_runner_adopt_preamble_cache(JsPreambleState* document_state) {
+    if (!document_state || !document_state->owns_compiled_state || s_browser_preamble_cache) {
+        return false;
+    }
+    JsPreambleState* cached = (JsPreambleState*)mem_alloc(
+        sizeof(JsPreambleState), MEM_CAT_JS_RUNTIME);
+    if (!cached) return false;
+    *cached = *document_state;
+
+    // Transfer immutable compiled ownership before instantiating any document;
+    // unlike js262's checkpoint, no browser global may survive in the cache.
+    memset(document_state, 0, sizeof(*document_state));
+    s_browser_preamble_cache = cached;
+    return true;
 }
 
 static void script_runner_cleanup_source_cache() {
@@ -1534,6 +1564,7 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
     context = &task_context;
     Item result = transpile_js_to_mir_with_preamble_len(runtime, source, source_len, filename, preamble);
     context = saved_context;
+    js_mir_accumulate_last_phase_timing(false);
 
     if (refresh_snapshot && get_type_id(result) != LMD_TYPE_ERROR) {
         preamble_state_update_from_eval_snapshot(preamble);
@@ -1564,6 +1595,7 @@ static Item execute_js_module_source(Runtime* runtime, const char* source, size_
     context = &task_context;
     Item result = transpile_js_module_to_mir(runtime, source, filename);
     context = saved_context;
+    js_mir_accumulate_last_phase_timing(false);
 
     if (result.item == 0 || get_type_id(result) == LMD_TYPE_NULL) {
         return ItemError;
@@ -1837,14 +1869,51 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
                                                   JsPreambleState* preamble) {
     if (!runtime || !collection || !preamble) return ItemError;
 
-    StrBuf* preamble_buf = strbuf_new_cap(4096);
-    append_browser_document_preamble(preamble_buf);
+    StrBuf* preamble_buf = nullptr;
 #ifndef NDEBUG
+    size_t preamble_source_len = 0;
     bool timing_enabled = script_task_timing_enabled();
     long preamble_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
-    Item result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
-                                                   "<document-preamble>", preamble);
+    Item result;
+    if (s_browser_preamble_cache_enabled && !s_retain_js_state && s_browser_preamble_cache) {
+        result = instantiate_js_preamble(runtime, s_browser_preamble_cache, preamble);
+        js_mir_accumulate_last_phase_timing(true);
+    } else if (s_browser_preamble_cache_enabled && !s_retain_js_state) {
+        preamble_buf = strbuf_new_cap(4096);
+        append_browser_document_preamble(preamble_buf);
+#ifndef NDEBUG
+        preamble_source_len = preamble_buf->length;
+#endif
+        result = compile_js_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
+                                             "<document-preamble>", preamble);
+        js_mir_accumulate_last_phase_timing(true);
+        if (get_type_id(result) != LMD_TYPE_ERROR) {
+            if (script_runner_adopt_preamble_cache(preamble)) {
+                // js262 retains its harness heap and recompiles after heap teardown.
+                // Radiant instead discards this compile-only heap, then executes the
+                // cached preamble in a fresh realm because it captures document/window.
+                EvalContext* previous_context = context;
+                js_batch_reset();
+                runtime_reset_heap(runtime);
+                context = previous_context;
+                result = instantiate_js_preamble(runtime, s_browser_preamble_cache, preamble);
+                js_mir_accumulate_last_phase_timing(true);
+            } else {
+                preamble_state_destroy(preamble);
+                result = ItemError;
+            }
+        }
+    } else {
+        preamble_buf = strbuf_new_cap(4096);
+        append_browser_document_preamble(preamble_buf);
+#ifndef NDEBUG
+        preamble_source_len = preamble_buf->length;
+#endif
+        result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
+                                                  "<document-preamble>", preamble);
+        js_mir_accumulate_last_phase_timing(true);
+    }
 #ifndef NDEBUG
     if (timing_enabled) {
         long preamble_wall_us = script_runner_wall_now_us() - preamble_start_us;
@@ -1863,10 +1932,10 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
                    phase_timing.link_us,
                    phase_timing.execute_us,
                    phase_timing.cleanup_us,
-                   preamble_buf->length);
+                   preamble_source_len);
     }
 #endif
-    strbuf_free(preamble_buf);
+    if (preamble_buf) strbuf_free(preamble_buf);
     if (get_type_id(result) == LMD_TYPE_ERROR) {
         log_error("execute_document_scripts: document preamble execution failed");
         return result;
@@ -2153,6 +2222,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     // functions (clicked(), toggle(), setFontFamily(), etc.) can be invoked
     // at event time without re-compilation.
     if (preamble && preamble->mir_ctx) {
+        // MIR setup consumes runtime.reuse_pool into the fresh heap. Restore the
+        // owner pointer so document cleanup can release that per-document pool.
+        if (!runtime.reuse_pool && runtime.heap) runtime.reuse_pool = runtime.heap->pool;
         dom_doc->js_preamble_state = preamble;
         dom_doc->js_mir_ctx = preamble->mir_ctx;
         dom_doc->js_runtime_heap = runtime.heap;
