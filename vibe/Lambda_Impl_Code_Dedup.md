@@ -19,9 +19,9 @@ The plan deliberately stops at Phase 4. Splitting the large JS source files mere
 | 0 | Exclude all vendored tree-sitter trees | ✅ implemented and verified; 0 tree-sitter locations in the report |
 | 0 | Review declarative/independent false positives | ✅ CSS descriptor table excluded; unproven structural similarities remain visible |
 | 0 | Cluster overlapping windows and establish the first-party ratchet | ✅ deterministic summary, `--full`, and two-metric Lambda gate implemented |
-| **1** | Adopt `MirEmitter` in Python, Ruby, and Bash transpilers | ⬜ pending |
-| 1 | Extract the common typed-index load emitter | ⬜ pending |
-| 1 | Remove trivial Radiant DOM array-constructor copies | ⬜ pending |
+| **1** | Adopt `MirEmitter` in Python, Ruby, and Bash transpilers | ✅ implemented and verified |
+| 1 | Extract the common typed-index load emitter | ✅ implemented and verified |
+| 1 | Remove trivial Radiant DOM array-constructor copies | ✅ implemented and verified |
 | **2** | Establish one JS builtin catalog | ⬜ pending |
 | 2 | Drive registration/name lookup and MIR classification from the catalog | ⬜ pending |
 | 2 | Reduce runtime dispatch to explicit descriptor groups plus custom handlers | ⬜ pending |
@@ -192,6 +192,21 @@ Preserve these boundaries:
 
 **Per-language gate:** `make build`, `make build-jube`, that language's focused/full gtests, `make test-lambda-baseline`, `make check-lambda-dup`, `git diff --check`.
 
+**Status — complete.** Python, Ruby, and Bash now embed `MirEmitter`; their
+register/label allocation, instruction emission, import caches, prototype/import
+construction, and fixed-arity argument setup delegate to shared `em_*` helpers.
+The three private import-cache layouts and their ensure-import implementations
+were deleted. The guest wrappers retain their language-local names only as thin
+call-site adapters, and all three explicitly retain the original name-only
+import-key policy (`include_signature=false`).
+
+While closing the Python runtime gate, `test_py_packages.py` exposed an existing
+module-lifetime defect: imported JIT functions embedded string pointers owned by
+the parser pool, then dereferenced them after that pool was destroyed. Python
+literal emission now interns into the persistent runtime heap before embedding
+the tagged string Item. This is a lifetime fix, not a change to Python lowering
+or call semantics.
+
 ### P1.2 — Extract common typed-index load emission
 
 `transpile_index()` in `transpile-mir.cpp` repeats the same MIR structure for known integer arrays, floating arrays, boxed boolean arrays, runtime-guarded arrays, and `ANY` indexes:
@@ -217,11 +232,50 @@ Do not combine semantically different cases until the helper reproduces their cu
 
 **Gate:** focused typed-array/vector/index smokes, `make test-lambda-baseline` at 100%, `make check-lambda-dup`, `git diff --check`.
 
+**Status — complete.** `MirIndexLoadPolicy` keeps storage kind, element MIR
+type/width, native versus boxed representation, runtime guard, out-of-bounds
+value, and slow fallback explicit. Seven live integer, float, boxed-bool,
+mutation-guarded, and `ANY` paths now call one `emit_checked_index_load()`
+bounds/address emitter. The unreachable older `ARRAY_NUM + ANY` expansion was
+deleted because the preceding known-`ARRAY_NUM` branch already handled it.
+
 ### P1.3 — Remove trivial DOM array constructors
 
 Replace `radiant_dom_empty_node_list()`, `radiant_dom_empty_array_item()`, and `radiant_dom_array_item()` with one module-local array constructor. This is independent of the broader DOM descriptor work in Phase 4.
 
+**Status — complete.** `radiant_dom_array_item()` is the sole module-local
+constructor. The two synonym helpers and the other three hand-expanded empty
+`Array` allocations in attribute and selector result construction were replaced
+with it, reducing six construction copies to one.
+
 **Phase 1 exit:** all three guest transpilers use the shared emitter mechanics; typed indexing has one bounds/address emitter; no duplicate DOM empty-array constructors remain; every slice passes its real runtime baseline.
+
+### Phase 1 verified result
+
+| Measure | Phase 0 ratchet | Phase 1 result | Delta |
+|---|---:|---:|---:|
+| First-party clone families | 1,385 | **1,378** | **-7** |
+| Union duplicate lines | 56,478 | **56,407** | **-71** |
+| Net maintained source LOC across the six implementation files | — | **-666** | 2,913 added / 3,579 removed |
+| Guest emitter/cache implementations | 3 private copies | **1 shared implementation** | -3 private caches |
+| Live typed bounds/address expansions | 7 | **1 emitter + 7 explicit policies** | one point of change |
+| DOM empty-array construction copies | 6 | **1** | -5 |
+
+Verified gates:
+
+- `make build` and `make build-jube`: pass with zero build errors.
+- Python: **24/24**; Ruby: **22/22**; Bash runtime: **37/37**; Bash pattern: **51/51**.
+- Typed-array/vector/index focus: **40/40**; Radiant DOM focus: **6/6**.
+- Lambda baseline runner: **1,217/1,217** at the real `lambda` baseline target.
+- `make check-lambda-dup`: PASS against the lowered **1,378 / 56,407** ratchet.
+- `git diff --check`: pass.
+
+The top-level `make test-lambda-baseline` prerequisite still encounters the
+pre-existing unrelated `test_state_store_gtest` link error for
+`bidi_strong_class(unsigned int)` while building every test executable. The
+missing Lambda runners were built directly and the exact Lambda baseline runner
+command then passed 1,217/1,217; no Phase 1 source participates in that Radiant
+test link.
 
 ---
 

@@ -2,10 +2,10 @@
   "version": 1,
   "baselines": {
     "lambda": {
-      "family_count": 1385,
-      "union_duplicate_lines": 56478,
-      "diagnostic_raw_blocks": 3520,
-      "diagnostic_remaining_blocks": 3340
+      "family_count": 1378,
+      "union_duplicate_lines": 56407,
+      "diagnostic_raw_blocks": 3539,
+      "diagnostic_remaining_blocks": 3383
     }
   }
 }

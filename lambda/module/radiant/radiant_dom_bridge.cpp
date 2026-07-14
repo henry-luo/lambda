@@ -286,24 +286,6 @@ static Item radiant_dom_document_item(DomDocument* doc) {
     return ItemNull;
 }
 
-static Item radiant_dom_empty_node_list() {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    return (Item){.array = arr};
-}
-
-static Item radiant_dom_empty_array_item() {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    return (Item){.array = arr};
-}
-
 static Item radiant_dom_array_item() {
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
@@ -611,12 +593,8 @@ static int64_t radiant_dom_script_visible_element_child_count(DomElement* elem) 
 }
 
 static Item radiant_dom_attributes_item(DomElement* elem) {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
-    Item arr_item = (Item){.array = arr};
+    Item arr_item = radiant_dom_array_item();
+    Array* arr = arr_item.array;
 
     int attr_count = 0;
     const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
@@ -1062,7 +1040,7 @@ static bool radiant_dom_get_text_property(DomText* text_node, const char* prop, 
         return true;
     }
     if (strcmp(prop, "childNodes") == 0) {
-        *out = radiant_dom_empty_node_list();
+        *out = radiant_dom_array_item();
         return true;
     }
     if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
@@ -1115,7 +1093,7 @@ static bool radiant_dom_get_comment_property(DomComment* comment_node, const cha
         return true;
     }
     if (strcmp(prop, "childNodes") == 0) {
-        *out = radiant_dom_empty_node_list();
+        *out = radiant_dom_array_item();
         return true;
     }
     if (strcmp(prop, "firstChild") == 0 || strcmp(prop, "lastChild") == 0) {
@@ -2275,7 +2253,7 @@ RADIANT_C_API int radiant_dom_member_child_nodes_any(Item receiver, Item* out) {
     if (!node || !out) return 0;
     *out = node->is_element()
         ? js_dom_live_child_collection_bridge((void*)node->as_element(), false)
-        : radiant_dom_empty_node_list();
+        : radiant_dom_array_item();
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4d_named_item(Item r, Item* args, int argc, Item* out) {
@@ -2734,11 +2712,8 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
 }
 
 static Item radiant_dom_attribute_names_item(DomElement* elem) {
-    Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-    arr->type_id = LMD_TYPE_ARRAY;
-    arr->items = nullptr;
-    arr->length = 0;
-    arr->capacity = 0;
+    Item arr_item = radiant_dom_array_item();
+    Array* arr = arr_item.array;
 
     int attr_count = 0;
     const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
@@ -2746,7 +2721,7 @@ static Item radiant_dom_attribute_names_item(DomElement* elem) {
         if (radiant_dom_is_internal_attr(attr_names[i])) continue;
         array_push(arr, radiant_dom_string_item(attr_names[i]));
     }
-    return (Item){.array = arr};
+    return arr_item;
 }
 
 static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, Item* args, int argc, Item* out) {
@@ -2917,7 +2892,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        Item arr_item = radiant_dom_empty_array_item();
+        Item arr_item = radiant_dom_array_item();
         CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->pool);
         if (!selector_group) {
             *out = arr_item;
@@ -4072,21 +4047,18 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         }
         const char* sel_text = fn_to_cstr(args[0]);
         if (!sel_text || !doc || !doc->pool) {
-            *out = radiant_dom_empty_array_item();
+            *out = radiant_dom_array_item();
             return 1;
         }
         CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->pool);
         if (!selector_group) {
-            *out = radiant_dom_empty_array_item();
+            *out = radiant_dom_array_item();
             return 1;
         }
         SelectorMatcher* matcher = selector_matcher_create(doc->pool);
         ArrayList* results = arraylist_new(16);
-        Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
-        arr->type_id = LMD_TYPE_ARRAY;
-        arr->items = nullptr;
-        arr->length = 0;
-        arr->capacity = 0;
+        Item arr_item = radiant_dom_array_item();
+        Array* arr = arr_item.array;
         if (results) {
             radiant_dom_selector_group_collect_all(matcher, selector_group, root, results);
             for (int i = 0; i < results->length; i++) {
@@ -4094,7 +4066,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             }
             arraylist_free(results);
         }
-        *out = (Item){.array = arr};
+        *out = arr_item;
         return 1;
     }
 
