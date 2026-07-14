@@ -1090,93 +1090,6 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
     }
 }
 
-static bool svg_build_transform_matrix(const TransformProp* tp, float elem_x, float elem_y,
-                                       float elem_w, float elem_h, RdtMatrix* out_matrix) {
-    if (!tp || !tp->functions) return false;
-
-    // Compose 2D affine matrix: [a c e; b d f; 0 0 1]
-    // Identity:
-    double ma = 1, mb = 0, mc = 0, md = 1, me = 0, mf = 0;
-
-    // Resolve transform-origin
-    float ox = tp->origin_x_percent ? elem_x + elem_w * tp->origin_x / 100.0f : elem_x + tp->origin_x;
-    float oy = tp->origin_y_percent ? elem_y + elem_h * tp->origin_y / 100.0f : elem_y + tp->origin_y;
-
-    // Pre-translate for transform-origin
-    me += ox; mf += oy;
-
-    for (TransformFunction* tf = tp->functions; tf; tf = tf->next) {
-        // accumulate: result = result * local
-        double la=1, lb=0, lc=0, ld=1, le=0, lf=0;
-        switch (tf->type) {
-            case TRANSFORM_TRANSLATE:
-            case TRANSFORM_TRANSLATEX:
-            case TRANSFORM_TRANSLATEY: {
-                float tx = tf->params.translate.x, ty = tf->params.translate.y;
-                if (!isnan(tf->translate_x_percent)) tx = tf->translate_x_percent * elem_w / 100.0f;
-                if (!isnan(tf->translate_y_percent)) ty = tf->translate_y_percent * elem_h / 100.0f;
-                le = tx; lf = ty;
-                break;
-            }
-            case TRANSFORM_TRANSLATE3D:
-            case TRANSFORM_TRANSLATEZ:
-                le = tf->params.translate3d.x; lf = tf->params.translate3d.y;
-                break;
-            case TRANSFORM_SCALE:
-            case TRANSFORM_SCALEX:
-            case TRANSFORM_SCALEY:
-                la = tf->params.scale.x > 0 ? tf->params.scale.x : 1.0;
-                ld = tf->params.scale.y > 0 ? tf->params.scale.y : 1.0;
-                break;
-            case TRANSFORM_ROTATE:
-            case TRANSFORM_ROTATEZ: {
-                double ang = tf->params.angle;  // radians
-                la = cos(ang); lc = -sin(ang); lb = sin(ang); ld = cos(ang);
-                break;
-            }
-            case TRANSFORM_SKEWX:
-                lc = tan((double)tf->params.angle);
-                break;
-            case TRANSFORM_SKEWY:
-                lb = tan((double)tf->params.angle);
-                break;
-            case TRANSFORM_MATRIX:
-                la = tf->params.matrix.a; lb = tf->params.matrix.b;
-                lc = tf->params.matrix.c; ld = tf->params.matrix.d;
-                le = tf->params.matrix.e; lf = tf->params.matrix.f;
-                break;
-            default:
-                break;
-        }
-        // result = result * L
-        double na = ma*la + mc*lb, nb = mb*la + md*lb;
-        double nc = ma*lc + mc*ld, nd = mb*lc + md*ld;
-        double ne = ma*le + mc*lf + me, nf = mb*le + md*lf + mf;
-        ma=na; mb=nb; mc=nc; md=nd; me=ne; mf=nf;
-    }
-
-    // Post-translate: undo transform-origin shift
-    me -= ox; mf -= oy;
-
-    // Skip if effectively identity
-    bool is_identity = (fabs(ma-1)<1e-5 && fabs(mb)<1e-5 && fabs(mc)<1e-5
-                     && fabs(md-1)<1e-5 && fabs(me)<1e-5 && fabs(mf)<1e-5);
-    if (is_identity) return false;
-
-    if (out_matrix) {
-        out_matrix->e11 = ma;
-        out_matrix->e12 = mc;
-        out_matrix->e13 = me;
-        out_matrix->e21 = mb;
-        out_matrix->e22 = md;
-        out_matrix->e23 = mf;
-        out_matrix->e31 = 0.0f;
-        out_matrix->e32 = 0.0f;
-        out_matrix->e33 = 1.0f;
-    }
-    return true;
-}
-
 // ============================================================================
 // SVG RenderBackend vtable callbacks
 // ============================================================================
@@ -1371,7 +1284,7 @@ static void svg_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, fl
     }
 
     RdtMatrix transform = {};
-    bool has = svg_build_transform_matrix(
+    bool has = render_geometry_transform_matrix(
         block->transform,
         abs_x, abs_y,
         block->width, block->height,
@@ -1742,105 +1655,27 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     log_debug("render_html_to_svg called with html_file='%s', svg_file='%s', viewport=%dx%d, scale=%.2f",
               html_file, svg_file, viewport_width, viewport_height, scale);
 
-    // Validate scale
-    if (scale <= 0) scale = 1.0f;
-
-    // Remember if we need to auto-size (viewport was 0)
-    bool auto_width = (viewport_width == 0);
-    bool auto_height = (viewport_height == 0);
-
-    // Use reasonable defaults for layout if auto-sizing
-    int layout_width = viewport_width > 0 ? viewport_width : 1200;
-    int layout_height = viewport_height > 0 ? viewport_height : 800;
-
-    // Initialize UI context in headless mode
-    UiContext ui_context;
-    if (ui_context_init(&ui_context, true) != 0) {
-        log_debug("Failed to initialize UI context for SVG rendering");
+    RenderExportSession session;
+    if (!render_export_session_begin(
+            &session, html_file, viewport_width, viewport_height, 1200, 800, scale)) {
         return 1;
     }
-
-    // Create a surface for layout calculations with layout dimensions
-    ui_context_create_surface(&ui_context, layout_width, layout_height);
-
-    // Update UI context viewport dimensions for layout calculations
-    ui_context.window_width = layout_width;
-    ui_context.window_height = layout_height;
-
-    // Get current directory for relative path resolution
-    Url* cwd = get_current_dir();
-    if (!cwd) {
-        log_debug("Could not get current directory");
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    // Load HTML document
-    log_debug("Loading HTML document: %s", html_file);
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file, layout_width, layout_height);
-    if (!doc) {
-        log_debug("Could not load HTML file: %s", html_file);
-        url_destroy(cwd);
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    ui_context.document = doc;
-
-    // Set document scale for rendering
-    doc->given_scale = scale;
-    doc->scale = scale;  // In headless mode, pixel_ratio is always 1.0
-
-    // Process @font-face rules before layout
-    process_document_font_faces(&ui_context, doc);
-
-    // Layout the document (produces CSS logical pixels)
-    log_debug("Performing layout...");
-    layout_html_doc(&ui_context, doc, false);
-
-    // Calculate actual content dimensions (in CSS logical pixels)
-    int content_max_x = layout_width;
-    int content_max_y = layout_height;
-    if (doc->view_tree && doc->view_tree->root) {
-        int bounds_x = 0, bounds_y = 0;
-        calculate_content_bounds(doc->view_tree->root, &bounds_x, &bounds_y);
-        // Add some padding to ensure nothing is cut off
-        bounds_x += 50;
-        bounds_y += 50;
-
-        // If auto-sizing, use content bounds; otherwise use minimum of viewport and content
-        if (auto_width) {
-            content_max_x = bounds_x;
-        } else {
-            content_max_x = (bounds_x > layout_width) ? bounds_x : layout_width;
-        }
-        if (auto_height) {
-            content_max_y = bounds_y;
-        } else {
-            content_max_y = (bounds_y > layout_height) ? bounds_y : layout_height;
-        }
-
-        if (auto_width || auto_height) {
-            log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding)", content_max_x, content_max_y);
-        } else {
-            log_debug("Calculated content bounds: %dx%d", content_max_x, content_max_y);
-        }
-    }
+    UiContext* ui_context = session.ui_context;
+    DomDocument* doc = session.document;
 
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("Rendering view tree to SVG...");
         // SVG output dimensions are scaled; coordinates inside are in CSS pixels with viewBox transform
-        int svg_width = (int)(content_max_x * scale);
-        int svg_height = (int)(content_max_y * scale);
-        char* svg_content = render_view_tree_to_svg(&ui_context, doc->view_tree->root,
+        int svg_width = (int)(session.content_width * session.scale); // INT_CAST_OK: SVG dimensions are integer pixels.
+        int svg_height = (int)(session.content_height * session.scale); // INT_CAST_OK: SVG dimensions are integer pixels.
+        char* svg_content = render_view_tree_to_svg(ui_context, doc->view_tree->root,
                                                    svg_width, svg_height, doc->state);
         if (svg_content) {
             if (save_svg_to_file(svg_content, svg_file)) {
                 log_info("Successfully rendered HTML to SVG: %s", svg_file);
                 mem_free(svg_content);
-                url_destroy(cwd);
-                ui_context_cleanup(&ui_context);
+                render_export_session_end(&session);
                 return 0;
             } else {
                 log_debug("Failed to save SVG to file: %s", svg_file);
@@ -1854,7 +1689,6 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     }
 
     // Cleanup
-    url_destroy(cwd);
-    ui_context_cleanup(&ui_context);
+    render_export_session_end(&session);
     return 1;
 }

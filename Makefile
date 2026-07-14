@@ -495,7 +495,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup docs intellisense analyze-binary \
 	    build-debug build-release build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
@@ -587,6 +587,9 @@ help:
 	@echo "                  Usage: make lint [ARGS='--rule <id>' | --report | --list]   ~10 s"
 	@echo "  lint-full     - Same plus the clang-tidy backend (slow, comprehensive)"
 	@echo "                  Usage: make lint-full [ARGS=--report]                         ~4 min"
+	@echo "  check-code-dup    - Check lib, lambda, and radiant for duplicate code"
+	@echo "  check-lambda-dup  - Check lambda for duplicate code"
+	@echo "  check-radiant-dup - Check radiant for duplicate code"
 	@echo "  count-loc     - Count lines of code in the repository"
 	@echo "  cheatsheet    - Regenerate Lambda_Cheatsheet.pdf from Markdown (requires pandoc, xelatex)"
 	@echo "  bench-compile - Run C/C++ compilation performance benchmark"
@@ -2048,6 +2051,16 @@ lint:
 # All Report_NNN.* still aggregate findings across every active backend.
 lint-full:
 	@utils/lint/run.sh --with-tidy $(ARGS)
+
+# Lizard duplicate-code reports with documented generated-file and block exclusions.
+check-code-dup:
+	@python3 test/dedup/check_code_dup.py
+
+check-lambda-dup:
+	@python3 test/dedup/check_code_dup.py lambda
+
+check-radiant-dup:
+	@python3 test/dedup/check_code_dup.py radiant
 
 # Clang-tidy static analysis
 # tidy / tidy-full / tidy-fix / generate-compile-db were retired in the Phase 3
