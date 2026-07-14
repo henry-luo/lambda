@@ -1074,6 +1074,9 @@ The initial Stage 2 tranche is implemented as follows:
 - `classDef` and `class` statements survive as `<style-rule>` and
   `<class-assignment>` metadata instead of being discarded;
 - quoted node labels lose only their Mermaid delimiter quotes;
+- Mermaid Markdown-string delimiters and HTML-like label content now normalize to
+  explicit `label-format` metadata on nodes and edges while preserving the
+  source-level Markdown or HTML text in `label`;
 - chained flowchart links normalize each operator into an explicit edge whose
   source is the preceding target, including independently styled operators;
 - multi-node source and target sets use the same node-reference parser and
@@ -1132,6 +1135,11 @@ The initial Stage 2 tranche is implemented as follows:
 - `transform.to_html()` recursively lowers nested graph nodes and edges, carries
   subgraph membership as stable metadata, applies class assignments, and emits
   separately measured `<edge-label>` children;
+- `graph/transform/content.ls` reuses Lambda's Markdown and HTML-fragment parsers
+  to lower rich node and edge labels into measured semantic Mark; its sanitizer
+  reconstructs only safe inline formatting (`strong`, `em`, `code`, `u`, `sub`,
+  `sup`, and `br`), strips authored attributes and unknown wrappers, and removes
+  script, style, and template subtrees;
 - the Velmt adapter places measured edge labels at routed anchors, paints start
   and end endpoint markers, clips rectangle, ellipse/circle, and diamond endpoints,
   routes self-loops, and includes route extents in graph bounds;
@@ -1159,8 +1167,9 @@ The initial Stage 2 tranche is implemented as follows:
 The checked-in manifest is a bootstrap corpus covering implicit endpoints,
 directions, shapes and labels, recursive subgraphs, class and style metadata,
 accessibility directives, and chart family diagnostics. Lambda integration
-fixtures additionally cover recursive HTML membership, class lowering,
-accessibility lowering, measured edge-label placement, bidirectional markers,
+fixtures additionally cover recursive HTML membership, rich Markdown/HTML node
+and edge labels, hostile-tag removal, class lowering, accessibility lowering,
+measured edge-label placement, bidirectional markers,
 shape clipping, self-loop bounds, parallel-edge separation and label anchors,
 safe style rejection and precedence, and styled edge paint propagation.
 
@@ -1170,8 +1179,9 @@ The following Stage 2 work remains open:
   full schema-driven Graph IR validation, and canonical rebuilding in
   `normalize.ls`; the current boundary validates semantic invariants and retains
   first-declaration spans but does not yet separate parsing from normalization;
-- HTML/Markdown labels, ports, interaction metadata, edge-ID property/class
-  statements, the remaining Mermaid style properties beyond the initial safe
+- canonical `<label>`/`<content>` rebuilding during normalization, ports,
+  interaction metadata, edge-ID property/class statements, the remaining
+  Mermaid style properties beyond the initial safe
   paint allowlist, and rendering semantics for general shapes beyond the
   currently canonicalized rectangle, rounded, cylinder, diamond, circle, and
   double-circle families;
