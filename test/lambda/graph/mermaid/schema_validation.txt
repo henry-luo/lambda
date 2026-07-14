@@ -1,0 +1,7 @@
+{
+  valid: true,
+  valid_diagnostics: [],
+  invalid_valid: false,
+  invalid_codes: ["graph.schema.attribute-type", "graph.schema.child", "graph.schema.child", "graph.schema.child", "graph.schema.child-cardinality", "graph.schema.attribute-value", "graph.edge.missing-endpoint", "graph.subgraph.missing-id", "graph.node.missing-id"],
+  invalid_paths: ["graph.directed", "graph[0]", "graph[4]", "graph.node[1][3]", "graph.node[1].content", "graph.node[1].label[0].format", "graph.edge[2].to", "graph.subgraph[3].id", "graph.node[5].id"]
+}

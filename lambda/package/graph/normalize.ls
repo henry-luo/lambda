@@ -2,25 +2,18 @@
 
 import model: .model
 import diagnostic: .diagnostics
+import schema: .schema
 import graph_content: .transform.content
 
-fn tag(value) => if (value is element) string(name(value)) else ""
-
-fn all_children(value) {
-  if (value is element and len(value) > 0) {
-    [for (i in 0 to (len(value) - 1)) value[i]]
-  } else []
-}
-
 fn noncanonical_children(value) => [
-  for (child in all_children(value)
+  for (child in model.child_items(value)
     where not (child is element) or
-      (tag(child) != "label" and tag(child) != "content")) child
+      (model.tag(child) != "label" and model.tag(child) != "content")) child
 ]
 
 fn direct_tag_count(value, wanted_tag) => len([
-  for (child in all_children(value)
-    where child is element and tag(child) == wanted_tag) child
+  for (child in model.child_items(value)
+    where child is element and model.tag(child) == wanted_tag) child
 ])
 
 fn has_canonical_label_content(value, require_pair) {
@@ -33,7 +26,7 @@ fn has_canonical_label_content(value, require_pair) {
 fn is_canonical_child(child) {
   if (not (child is element)) true
   else {
-    let child_tag = tag(child);
+    let child_tag = model.tag(child);
     if (child_tag == "node") {
       has_canonical_label_content(child, true) and len(noncanonical_children(child)) == 0
     }
@@ -47,7 +40,7 @@ fn is_canonical_child(child) {
 }
 
 fn is_canonical_graph(graph) =>
-  all([for (child in all_children(graph)) is_canonical_child(child)])
+  all([for (child in model.child_items(graph)) is_canonical_child(child)])
 
 fn canonical_label(value, fallback = null) {
   let source = model.label_source(value, fallback);
@@ -111,7 +104,7 @@ fn canonical_subgraph(subgraph) {
 fn canonical_child(child) {
   if (not (child is element)) child
   else {
-    let child_tag = tag(child);
+    let child_tag = model.tag(child);
     if (child_tag == "node") canonical_node(child)
     else if (child_tag == "edge") canonical_edge(child)
     else if (child_tag == "subgraph") canonical_subgraph(child)
@@ -122,18 +115,12 @@ fn canonical_child(child) {
 fn canonical_graph(graph) {
   let attrs = map(graph);
   <graph *:attrs;
-    for (child in all_children(graph)) canonical_child(child)
+    for (child in model.child_items(graph)) canonical_child(child)
   >
 }
 
 fn item_id(value) =>
   if (value.id != null and value.id != "") string(value.id) else ""
-
-fn missing_id_diagnostics(entries, kind) => [
-  for (i, value in entries where item_id(value) == "") diagnostic.for_value(
-    "graph." ++ kind ++ ".missing-id", "error",
-    "Graph " ++ kind ++ " requires a stable id", kind ++ "[" ++ string(i) ++ "]", value)
-]
 
 fn duplicate_id_diagnostics_at(entries, kind, i) {
   if (i >= len(entries)) { [] }
@@ -180,14 +167,10 @@ fn endpoint_diagnostics(edges, node_ids) => [
     endpoint in [
       {role: "from", id: if (edge.from != null) string(edge.from) else ""},
       {role: "to", id: if (edge.to != null) string(edge.to) else ""}
-    ], let code = if (endpoint.id == "") "graph.edge.missing-endpoint"
-      else "graph.edge.unresolved-endpoint",
-    let message = if (endpoint.id == "")
-      "Graph edge requires a '" ++ endpoint.role ++ "' endpoint"
-    else
-      "Graph edge " ++ endpoint.role ++ " endpoint '" ++ endpoint.id ++ "' does not resolve"
-    where endpoint.id == "" or not has_node_id(node_ids, endpoint.id)) diagnostic.for_value(
-    code, "error", message,
+    ], let message = "Graph edge " ++ endpoint.role ++ " endpoint '" ++
+      endpoint.id ++ "' does not resolve"
+    where endpoint.id != "" and not has_node_id(node_ids, endpoint.id)) diagnostic.for_value(
+    "graph.edge.unresolved-endpoint", "error", message,
     "edge[" ++ string(i) ++ "]." ++ endpoint.role, edge)
 ]
 
@@ -210,8 +193,6 @@ fn graph_diagnostics(graph) {
   [
     *parser_diagnostics(graph),
     *direction_diagnostics(graph),
-    *missing_id_diagnostics(nodes, "node"),
-    *missing_id_diagnostics(subgraphs, "subgraph"),
     *duplicate_id_diagnostics(nodes, "node"),
     *duplicate_id_diagnostics(subgraphs, "subgraph"),
     *duplicate_id_diagnostics(edges, "edge"),
@@ -225,13 +206,15 @@ pub fn validate(graph) {
     diagnostic.make("graph.invalid-root", "error",
       "Canonical Graph IR root must be a <graph> element", "graph", null)
   ] }
-  else { graph_diagnostics(graph) }
+  else { [*schema.validate(graph), *graph_diagnostics(graph)] }
 }
 
 pub fn normalize(graph) {
   let canonical = if (graph is element and string(name(graph)) == "graph")
     (if (is_canonical_graph(graph)) graph else canonical_graph(graph)) else graph;
-  let values = validate(canonical);
+  // Validate authored structure before rebuilding so duplicate canonical children
+  // cannot disappear without a diagnostic when the canonical pair is selected.
+  let values = validate(graph);
   {
     graph: canonical,
     diagnostics: values,

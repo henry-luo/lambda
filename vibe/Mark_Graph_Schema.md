@@ -159,6 +159,13 @@ Canonical consumers use these children as the authority. Legacy `label` and
 but do not override `<label>` or `<content>`. Normalization is recursive and
 idempotent, and preserves unrelated attributes.
 
+`lambda.package.graph.schema` enforces the structural Graph IR boundary before
+normalization rebuilds the tree. It validates known attribute types and enum
+values, required node/subgraph identities and edge endpoints, permitted child
+placement, and the cardinality of canonical `<label>/<content>` pairs. Unknown
+attributes remain available for source provenance and future extensions, while
+unknown structural children produce diagnostics.
+
 ### 2.6 `<style>` and `<defs>`
 Used for global and reusable style definitions.
 
@@ -260,7 +267,8 @@ Metadata for authorship, versioning, provenance, etc.
 2. Builder → Intermediate representation (nodes, edges, clusters, styles).
 3. Exporters → DOT, Mermaid, PlantUML, D2, JSON.
 4. Renderer → via D3.js, Dagre, or Graphviz.
-5. Validator → check references, style inheritance.
+5. Validator → declarative structure and attribute checks plus semantic
+   identity, endpoint-reference, and style-inheritance checks.
 
 ---
 

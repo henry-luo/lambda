@@ -1,20 +1,20 @@
 // Recursive queries over the canonical Mark Graph IR.
 
-fn element_children(value) {
+pub fn element_children(value) {
   if (value is element and len(value) > 0) {
     [for (i in 0 to (len(value) - 1), let child = value[i]
       where child is element) child]
   } else []
 }
 
-fn tag(value) => if (value is element) string(name(value)) else ""
+pub fn tag(value) => if (value is element) string(name(value)) else ""
 
 fn first_direct_child(value, wanted_tag) {
   let matches = [for (child in element_children(value) where tag(child) == wanted_tag) child];
   if (len(matches) > 0) matches[0] else null
 }
 
-fn child_items(value) {
+pub fn child_items(value) {
   if (value is element and len(value) > 0) {
     [for (i in 0 to (len(value) - 1)) value[i]]
   } else []

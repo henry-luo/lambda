@@ -3,8 +3,9 @@
 **Status:** Stage 1 is implemented for the initial rich-node release. The package
 split, semantic HTML transform, Velmt callback, generated SVG paint, signed
 stacking, runtime-scoped registration, CLI bridges, and C graph ABI removal are
-complete. Stage 2 is in progress: the first common Mark IR contract, recursive
-model queries, Mermaid flowchart normalization fixes, measured edge labels,
+complete. Stage 2 is in progress: the first common Mark IR contract, declarative
+schema validation, recursive model queries, Mermaid flowchart normalization
+fixes, measured edge labels,
 shape-aware and parallel-edge routing, safe style cascade, and semantic corpus
 runner are implemented. Section 18.12 records the current boundary and
 remaining work.
@@ -762,6 +763,7 @@ lambda/package/graph/
   graph.ls                     compatibility facade
   model.ls                     Mark Graph IR queries and constructors
   normalize.ls                 validation and canonicalization
+  schema.ls                    declarative element, attribute, and child contract
   diagnostics.ls               structured graph diagnostics
   style.ls                     graph style cascade and safe properties
   layout.ls                    public measured-layout adapter
@@ -1139,6 +1141,11 @@ The initial Stage 2 tranche is implemented as follows:
   attributes, materializes one `<label>` source element and one measured
   `<content>` element for labeled values, wraps authored rich node children in
   `<content>`, and returns an already-canonical recursive tree unchanged;
+- `graph/schema.ls` defines the Graph IR element hierarchy, known attribute
+  types and enums, required identities and endpoints, and canonical
+  `<label>/<content>` cardinality. Normalization validates the authored tree
+  before rebuilding it, so malformed canonical children cannot be silently
+  collapsed;
 - canonical `<label>` and `<content>` children are authoritative. Legacy
   `label` and `label-format` attributes remain as compatibility/provenance
   attributes, but model and transform consumers prefer the canonical children;
@@ -1185,14 +1192,15 @@ shape clipping, self-loop bounds, parallel-edge separation and label anchors,
 safe style rejection and precedence, and styled edge paint propagation. They
 also cover recursive canonical rebuilding, arbitrary-attribute retention,
 authored block content, canonical HTML consumption, and normalization
-idempotency.
+idempotency, plus schema type, enum, child-placement, cardinality, and
+required-attribute diagnostics.
 
 The following Stage 2 work remains open:
 
-- a distinct Mermaid source AST, declaration-list provenance for merged values,
-  and full schema-driven Graph IR validation; the current boundary validates
-  semantic invariants and retains first-declaration spans but does not yet
-  separate parsing from normalization;
+- a distinct Mermaid source AST and declaration-list provenance for merged
+  values; the current boundary performs declarative Graph IR validation and
+  retains first-declaration spans but does not yet separate parsing from
+  normalization;
 - ports, interaction metadata, edge-ID property/class statements, the remaining
   Mermaid style properties beyond the initial safe
   paint allowlist, and rendering semantics for general shapes beyond the
