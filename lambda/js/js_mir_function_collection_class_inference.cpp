@@ -1325,7 +1325,9 @@ void jm_scan_subscript_arrays(JsAstNode* node, char names[][64], bool unsafe[],
                     int len = (int)id->name->len < 63 ? (int)id->name->len : 63;
                     memcpy(names[*count], id->name->chars, len);
                     names[*count][len] = 0;
-                    unsafe[*count] = false;
+                    // unsafe[max_names] records a call seen earlier in this scan;
+                    // later-discovered arrays must inherit the same invalidation.
+                    unsafe[*count] = unsafe[max_names];
                     (*count)++;
                 }
             }
@@ -1388,6 +1390,10 @@ void jm_scan_subscript_arrays(JsAstNode* node, char names[][64], bool unsafe[],
     case JS_AST_NODE_CALL_EXPRESSION:
     case JS_AST_NODE_NEW_EXPRESSION: {
         JsCallNode* n = (JsCallNode*)node;
+        // an arbitrary call can resize, transfer, or detach a backing buffer,
+        // invalidating every loop-hoisted typed-array pointer and length
+        unsafe[max_names] = true;
+        for (int i = 0; i < *count; i++) unsafe[i] = true;
         jm_scan_subscript_arrays(n->callee, names, unsafe, count, max_names);
         for (JsAstNode* a = n->arguments; a; a = a->next)
             jm_scan_subscript_arrays(a, names, unsafe, count, max_names);

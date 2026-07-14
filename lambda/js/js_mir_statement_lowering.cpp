@@ -1595,7 +1595,7 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
     int p4h_hoisted_count = 0;
     if (wh->body) {
         char arr_names[16][64];
-        bool arr_unsafe[16];
+        bool arr_unsafe[17] = {false};
         int arr_count = 0;
         jm_scan_subscript_arrays(wh->test, arr_names, arr_unsafe, &arr_count, 16);
         jm_scan_subscript_arrays(wh->body, arr_names, arr_unsafe, &arr_count, 16);
@@ -1867,7 +1867,7 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     int p4h_hoisted_count = 0;
     if (for_node->body) {
         char arr_names[16][64];
-        bool arr_unsafe[16];
+        bool arr_unsafe[17] = {false};
         int arr_count = 0;
         // also scan test and update since they may reference arrays
         jm_scan_subscript_arrays(for_node->test, arr_names, arr_unsafe, &arr_count, 16);

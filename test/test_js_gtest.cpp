@@ -717,6 +717,17 @@ TEST(JavaScriptRegression, Js54P3TypedArrayLengthTracking) {
     ASSERT_EQ(status, 0) << output;
 }
 
+// ArrayNum issue 38: calls inside a subscript loop may resize, transfer, or
+// detach a typed array's backing buffer. P4h must therefore use the live
+// per-access pointer and length instead of snapshots taken before the loop.
+TEST(JavaScriptRegression, ArrayNumLoopResizeInvalidatesHoist) {
+    char output[2048];
+    int status = execute_js_script_status(
+        "test/js/regression_js_arraynum_loop_resize_hoist.js",
+        output, sizeof(output));
+    ASSERT_EQ(status, 0) << output;
+}
+
 // Js54 P4: TypedArray prototype methods over resizable buffers. The shared
 // shape: each method calls ValidateTypedArray at entry (throw TypeError on
 // detached or OOB). Several methods (slice, forEach, reduce, reduceRight,
