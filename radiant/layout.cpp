@@ -3063,8 +3063,8 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
 
     // Clear measurement cache at the start of each layout pass
     // This ensures fresh intrinsic size calculations for each layout
-    clear_measurement_cache();
-    advance_measurement_cache_generation();
+    clear_measurement_cache(doc->view_tree);
+    advance_measurement_cache_generation(doc->view_tree);
 
     // Reset styles_resolved flags before layout
     // Phase 15: Skip blanket reset during incremental rebuilds — new DOM nodes
@@ -3116,6 +3116,17 @@ void layout_cleanup(LayoutContext* lycon) {
     (void)lycon;
 }
 
+LayoutPassScope::LayoutPassScope(LayoutContext* l, DomDocument* doc, UiContext* uicon)
+    : lycon(l), active(false) {
+    if (!lycon) return;
+    layout_init(lycon, doc, uicon);
+    active = true;
+}
+
+LayoutPassScope::~LayoutPassScope() {
+    if (active) layout_cleanup(lycon);
+}
+
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
@@ -3134,13 +3145,13 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     bool init_view_pool = false;
     if (is_reflow) {
         if (!doc->view_tree) {
-            doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
+            doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
             init_view_pool = true;
         } else if (!doc->view_tree->pool) {
             init_view_pool = true;
         }
     } else {
-        doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
+        doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
         init_view_pool = true;
     }
     // Phase 16: In incremental layout, keep existing view pool (preserves BoundaryProp etc.).
@@ -3156,17 +3167,10 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
                 mem_node_set_doc((MemNode*)arena_get_mem_node(doc->view_tree->arena), did);
         }
     }
-    log_debug("calling layout_init...");
-    layout_init(&lycon, doc, uicon);
-    log_debug("layout_init complete");
 
-    auto t_init = high_resolution_clock::now();
-
-    // Get root node based on document type
-    DomNode* root_node = nullptr;
-    root_node = doc->root;
+    DomNode* root_node = doc->root;
     if (root_node) {
-        // Validate pointer before calling virtual methods
+        // invalid DOM roots must be rejected before layout_init registers per-pass resources.
         if (root_node->node_type >= DOM_NODE_ELEMENT && root_node->node_type <= DOM_NODE_DOCTYPE) {
             log_debug("layout lambda css html root %s", root_node->node_name());
         } else {
@@ -3176,9 +3180,16 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     }
 
     if (!root_node) {
+        // missing DOM roots must be rejected before layout_init registers per-pass resources.
         log_error("Failed to get root_node");
         return;
     }
+
+    log_debug("calling layout_init...");
+    LayoutPassScope layout_scope(&lycon, doc, uicon);
+    log_debug("layout_init complete");
+
+    auto t_init = high_resolution_clock::now();
 
     log_debug("calling layout_html_root...");
     layout_html_root(&lycon, root_node);
@@ -3214,9 +3225,6 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     radiant::layout_profiler_set_bucket(&lycon.profiler, radiant::LAYOUT_PROFILE_GRID, g_grid_layout_time);
     radiant::layout_profiler_set_cache(&lycon.profiler, g_layout_cache_hits, g_layout_cache_misses);
     radiant::layout_profiler_report(&lycon);
-
-    log_debug("calling layout_cleanup...");
-    layout_cleanup(&lycon);
 
     // post-layout: sync web view positions (create/reposition native child windows)
     if (doc->view_tree && uicon->window) {

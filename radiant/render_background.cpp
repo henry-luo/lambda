@@ -342,7 +342,13 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
 
     // Build gradient stops
     int stop_count = gradient->stop_count;
-    RdtGradientStop* stops = (RdtGradientStop*)alloca(gradient->stop_count * sizeof(RdtGradientStop));
+    // gradient stop counts come from parsed CSS; use render scratch to avoid attacker-sized stack frames.
+    RdtGradientStop* stops = (RdtGradientStop*)scratch_calloc(&rdcon->scratch, (size_t)stop_count * sizeof(RdtGradientStop));
+    if (!stops) {
+        log_error("[GRADIENT] failed to allocate %d linear gradient stops", stop_count);
+        rdt_path_free(p);
+        return;
+    }
     for (int i = 0; i < gradient->stop_count; i++) {
         GradientStop* gs = &gradient->stops[i];
         stops[i].offset = gs->position >= 0 ? gs->position : (float)i / (gradient->stop_count - 1);
@@ -406,6 +412,7 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
     rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
+    scratch_free(&rdcon->scratch, stops);
 }
 
 static void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
@@ -476,7 +483,13 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, Radial
     log_debug("[GRADIENT] Radial gradient center=(%.1f,%.1f) radius=%.1f shape=%d",
               cx, cy, radius, gradient->shape);
 
-    RdtGradientStop* stops = (RdtGradientStop*)alloca(gradient->stop_count * sizeof(RdtGradientStop));
+    // gradient stop counts come from parsed CSS; use render scratch to avoid attacker-sized stack frames.
+    RdtGradientStop* stops = (RdtGradientStop*)scratch_calloc(&rdcon->scratch, (size_t)gradient->stop_count * sizeof(RdtGradientStop));
+    if (!stops) {
+        log_error("[GRADIENT] failed to allocate %d radial gradient stops", gradient->stop_count);
+        rdt_path_free(p);
+        return;
+    }
     for (int i = 0; i < gradient->stop_count; i++) {
         GradientStop* gs = &gradient->stops[i];
         stops[i].offset = gs->position;
@@ -495,6 +508,7 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, Radial
     rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
+    scratch_free(&rdcon->scratch, stops);
 }
 
 /**
@@ -1210,8 +1224,12 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     if (shadow_count == 0) return;
 
-    // Collect shadows into array
-    BoxShadow** shadows = (BoxShadow**)alloca(shadow_count * sizeof(BoxShadow*));
+    // Shadow lists come from parsed CSS, so do not let author input size a stack frame.
+    BoxShadow** shadows = (BoxShadow**)scratch_calloc(&rdcon->scratch, (size_t)shadow_count * sizeof(BoxShadow*));
+    if (!shadows) {
+        log_error("[BOX-SHADOW] failed to allocate shadow list for %d shadow(s)", shadow_count);
+        return;
+    }
     shadow = view->bound->box_shadow;
     for (int i = 0; i < shadow_count; i++) {
         shadows[i] = shadow;
@@ -1356,6 +1374,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         }
     }
 
+    scratch_free(&rdcon->scratch, shadows);
     log_debug("[BOX-SHADOW] Rendered %d outer shadow(s)", shadow_count);
 }
 
@@ -1385,8 +1404,12 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
     if (shadow_count == 0) return;
 
-    // Collect inset shadows into array for reverse iteration
-    BoxShadow** shadows = (BoxShadow**)alloca(shadow_count * sizeof(BoxShadow*));
+    // Shadow lists come from parsed CSS, so do not let author input size a stack frame.
+    BoxShadow** shadows = (BoxShadow**)scratch_calloc(&rdcon->scratch, (size_t)shadow_count * sizeof(BoxShadow*));
+    if (!shadows) {
+        log_error("[BOX-SHADOW INSET] failed to allocate shadow list for %d shadow(s)", shadow_count);
+        return;
+    }
     shadow = view->bound->box_shadow;
     int idx = 0;
     while (shadow) {
@@ -1590,6 +1613,7 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         }
     }
 
+    scratch_free(&rdcon->scratch, shadows);
     log_debug("[BOX-SHADOW INSET] Rendered %d inset shadow(s)", shadow_count);
 }
 

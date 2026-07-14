@@ -197,7 +197,7 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
         // set up navigation delegate
         LayerWebViewDelegate* delegate = [[LayerWebViewDelegate alloc] init];
 
-        WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT);
+        WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: platform webview handle is released by webview_layer_platform_destroy.
         handle->wk_view = wk_view;
         handle->mode = WEBVIEW_MODE_LAYER;
         handle->pixel_ratio = pixel_ratio;

@@ -2473,7 +2473,6 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     }
 
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = input_type;
     intent.data = repl ? repl : "";
 
@@ -2764,7 +2763,6 @@ static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
     if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = INPUT_INTENT_SELECT_ALL;
     editing_dispatch_log_intent(evcon, &surface, &intent);
 
@@ -3116,7 +3114,6 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
     }
 
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = input_type;
     intent.data = "";
 
@@ -3184,7 +3181,6 @@ static bool dispatch_editing_history_for_controller(EventContext* evcon,
 
     if (editing_surface_is_rich(surface)) {
         InputIntent intent;
-        memset(&intent, 0, sizeof(intent));
         intent.type = input_type;
         intent.data = "";
         View* target = static_cast<View*>(surface->owner);
@@ -3379,7 +3375,6 @@ static bool editing_text_drag_dispatch_delete(EventContext* evcon,
                                           INPUT_INTENT_DELETE_BY_DRAG);
     }
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = INPUT_INTENT_DELETE_BY_DRAG;
     intent.data = "";
     return dispatch_rich_transaction_defaultable(evcon, range_view, &intent,
@@ -3408,7 +3403,6 @@ static bool editing_text_drag_dispatch_insert(EventContext* evcon,
                                           INPUT_INTENT_INSERT_FROM_DROP);
     }
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = INPUT_INTENT_INSERT_FROM_DROP;
     intent.data = text;
     intent.html_data = html_payload && html_payload[0] ? html_payload : nullptr;
@@ -3448,7 +3442,6 @@ static bool dispatch_rich_drop_transaction_at_range(EventContext* evcon,
     if (!state) return false;
 
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = INPUT_INTENT_INSERT_FROM_DROP;
     intent.data = payload ? payload : "";
     intent.data_mime = "text/plain";
@@ -3588,7 +3581,6 @@ extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
     if (!prepare_form_ime_dispatch(uicon, elem, target, true, false, &context)) return false;
 
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = INPUT_INTENT_COMPOSITION_START;
     intent.data = "";
     intent.is_composing = true;
@@ -3613,7 +3605,6 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
     if (!prepare_form_ime_dispatch(uicon, elem, target, true, true, &context)) return false;
 
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = INPUT_INTENT_INSERT_COMPOSITION_TEXT;
     intent.data = preedit ? preedit : "";
     intent.composition_caret = caret_cp;
@@ -3649,7 +3640,6 @@ extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
     if (!prepare_form_ime_dispatch(uicon, elem, target, true, true, &context)) return false;
 
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = INPUT_INTENT_DELETE_COMPOSITION_TEXT;
     intent.data = "";
     intent.is_composing = false;
@@ -3691,7 +3681,6 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
         return false;
     }
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = (committed && committed[0])
         ? INPUT_INTENT_INSERT_FROM_COMPOSITION
         : INPUT_INTENT_DELETE_COMPOSITION_TEXT;
@@ -4665,7 +4654,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
     // identity change; keep the ViewTree shell and retained nodes for StateStore.
     if (!doc->view_tree) {
-        doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
+        doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
         view_pool_reset_retained(doc->view_tree);
     } else {
         view_pool_reset_retained(doc->view_tree);
@@ -8575,7 +8564,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (rich_select_all_target) {
                         dispatch_rich_select_all_transaction(&evcon, state,
                             rich_select_all_target, &intent);
-                        input_intent_dispose(&intent);
                         evcon.need_repaint = true;
                         break;
                     }
@@ -8614,7 +8602,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         handled = dispatch_rich_consumer_transaction(&evcon, intent_target, &intent);
                     }
                 }
-                input_intent_dispose(&intent);
                 if (handled) {
                     evcon.need_repaint = true;
                     break;

@@ -18,6 +18,8 @@ metadata:
 #
 # Bad shapes flagged:
 #   alloca(lowercase_var)              alloca(size)
+#   alloca(obj->field)                 alloca(cache->count)
+#   alloca(obj->field * sizeof(T))     alloca(cache->count * sizeof(Item))
 #   alloca(lowercase * sizeof(T))      alloca(n * sizeof(MIR_op_t))
 #   alloca(sizeof(T) * lowercase)      alloca(sizeof(Item) * argc)
 #
@@ -32,6 +34,7 @@ constraints:
   N1: { regex: "^[a-z][a-zA-Z0-9_]*$" }
   N2: { regex: "^[a-z][a-zA-Z0-9_]*$" }
   X:  { regex: "^[a-z][a-zA-Z0-9_]*$" }
+  OBJ: { regex: "^[a-z][a-zA-Z0-9_]*$" }
 rule:
   any:
     # alloca(var * sizeof(T))
@@ -42,11 +45,27 @@ rule:
     - pattern:
         context: "void f() { alloca(sizeof($T) * $N2); }"
         selector: call_expression
+    # alloca(obj->field * sizeof(T))
+    - pattern:
+        context: "void f() { alloca($OBJ->$F * sizeof($T)); }"
+        selector: call_expression
+    # alloca(obj->field * expr)
+    - pattern:
+        context: "void f() { alloca($OBJ->$F * $EXPR); }"
+        selector: call_expression
+    # alloca(expr * obj->field)
+    - pattern:
+        context: "void f() { alloca($EXPR * $OBJ->$F); }"
+        selector: call_expression
+    # alloca(obj->field)
+    - pattern:
+        context: "void f() { alloca($OBJ->$F); }"
+        selector: call_expression
     # alloca(var)     — bare lowercase identifier
     - pattern: alloca($X)
 files:
   - "lambda/**/*.{c,cpp,h,hpp}"
-  - "radiant/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp,mm}"
 ignores:
   - "**/tree-sitter*/**"
   - "lambda/lambda-wasm-main.c"

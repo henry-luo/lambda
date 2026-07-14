@@ -3,9 +3,12 @@
 // Radiant rendering code calls only rdt_* functions.
 
 #include "render.hpp"
+#include "../lib/atomic.h"
 #include "../lib/log.h"
 #include "../lib/lambda_alloca.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/mem_factory.h"
+#include "../lib/hashmap.h"
 #include <thorvg_capi.h>
 #include "../lib/mem.h"
 #include "../lib/mempool.h"
@@ -66,6 +69,8 @@ struct RdtPicture {
     Input* input;          // owns the parse arena (allocated from owned pool)
     Pool* pool;            // owned pool (created by rdt_picture_load*); freed on rdt_picture_free
     bool owns_pool;        // true for originals, false for dups
+    atomic_int32 ref_count; // SVG_DOM owner references, including cache and duplicate handles
+    RdtPicture* owner;     // duplicate handles retain the owning SVG_DOM picture
     Element* svg_root;     // root <svg> element
     char* source_path;     // original file path for resolving nested SVG refs
 
@@ -74,6 +79,9 @@ struct RdtPicture {
     float height;
     RdtMatrix transform;   // optional explicit transform (set via rdt_picture_set_transform)
     bool has_transform;
+
+    RdtPicture* dup();
+    void release();
 };
 
 // Process-wide font context for SVG-DOM pictures (set by ui_context).
@@ -92,11 +100,13 @@ typedef struct RdtPictureCacheEntry {
     char* mime_key;
     char* data_copy;
     RdtPicture* picture;
-    RdtPictureCacheEntry* next;
+    uint64_t last_used;
 } RdtPictureCacheEntry;
 
-static RdtPictureCacheEntry* g_picture_path_cache = nullptr;
-static RdtPictureCacheEntry* g_picture_data_cache = nullptr;
+static HashMap* g_picture_path_cache = nullptr;
+static HashMap* g_picture_data_cache = nullptr;
+static uint64_t g_picture_cache_clock = 0;
+static const size_t RDT_PICTURE_CACHE_MAX_ENTRIES = 64;
 static pthread_mutex_t g_picture_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef enum RdtPaintCacheKind {
@@ -122,10 +132,9 @@ typedef struct RdtPaintCacheEntry {
     RdtGradientStop* stops;
     int stop_count;
     Tvg_Paint paint;
-    RdtPaintCacheEntry* next;
 } RdtPaintCacheEntry;
 
-static RdtPaintCacheEntry* g_paint_cache = nullptr;
+static HashMap* g_paint_cache = nullptr;
 static int g_paint_cache_count = 0;
 static const int RDT_PAINT_CACHE_MAX_ENTRIES = 256;
 static pthread_mutex_t g_paint_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -137,10 +146,9 @@ typedef struct RdtImagePaintCacheEntry {
     int src_h;
     int src_stride;
     Tvg_Paint paint;
-    RdtImagePaintCacheEntry* next;
 } RdtImagePaintCacheEntry;
 
-static RdtImagePaintCacheEntry* g_image_paint_cache = nullptr;
+static HashMap* g_image_paint_cache = nullptr;
 static int g_image_paint_cache_count = 0;
 static const int RDT_IMAGE_PAINT_CACHE_MAX_ENTRIES = 128;
 static pthread_mutex_t g_image_paint_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -153,12 +161,18 @@ static pthread_mutex_t g_tvg_dup_mutex = PTHREAD_MUTEX_INITIALIZER;
 // Helpers
 // ============================================================================
 
-static void path_ensure_capacity(RdtPath* p) {
-    if (p->count >= p->capacity) {
-        int new_cap = p->capacity ? p->capacity * 2 : 16;
-        p->entries = (RdtPath::Entry*)mem_realloc(p->entries, new_cap * sizeof(RdtPath::Entry), MEM_CAT_RENDER);
-        p->capacity = new_cap;
+static bool path_ensure_capacity(RdtPath* p) {
+    if (!p) return false;
+    if (p->count < p->capacity) return true;
+    int old_capacity = p->capacity;
+    if (lam::mem_grow_array(&p->entries, &p->capacity, p->count + 1, 16,
+                            MEM_CAT_RENDER)) {
+        return true;
     }
+    // path entries are appended immediately after growth; failing closed prevents writing past the old buffer.
+    log_error("RAD_CAP_RDT_PATH: unable to grow path entries from %d to %d",
+              old_capacity, p->count + 1);
+    return false;
 }
 
 static uint64_t rdt_picture_data_hash(const char* data, int size, const char* mime_type) {
@@ -212,11 +226,40 @@ static Tvg_Paint tvg_duplicate_paint_locked(Tvg_Paint paint) {
     return dup;
 }
 
+static uint64_t picture_cache_next_stamp_locked() {
+    g_picture_cache_clock++;
+    if (g_picture_cache_clock == 0) g_picture_cache_clock++;
+    return g_picture_cache_clock;
+}
+
+static RdtPicture* rdt_picture_svg_owner(RdtPicture* pic) {
+    return pic && pic->owner ? pic->owner : pic;
+}
+
+static bool rdt_picture_retain_svg_owner(RdtPicture* pic) {
+    RdtPicture* owner = rdt_picture_svg_owner(pic);
+    if (!owner || owner->kind != RdtPicture::KIND_SVG_DOM) return false;
+    atomic_inc32(&owner->ref_count);
+    return true;
+}
+
+static void picture_cache_entry_release(const RdtPictureCacheEntry* entry) {
+    if (!entry) return;
+    if (entry->path_key) mem_free(entry->path_key);
+    if (entry->mime_key) mem_free(entry->mime_key);
+    if (entry->data_copy) mem_free(entry->data_copy);
+    if (entry->picture) rdt_picture_free(entry->picture);
+}
+
 static RdtPicture* picture_cache_dup_path_locked(const char* path) {
-    for (RdtPictureCacheEntry* e = g_picture_path_cache; e; e = e->next) {
-        if (e->path_key && strcmp(e->path_key, path) == 0) {
-            return rdt_picture_dup(e->picture);
-        }
+    if (!g_picture_path_cache) return nullptr;
+    RdtPictureCacheEntry query = {};
+    query.path_key = (char*)path;
+    const RdtPictureCacheEntry* e =
+        (const RdtPictureCacheEntry*)hashmap_get(g_picture_path_cache, &query);
+    if (e) {
+        ((RdtPictureCacheEntry*)e)->last_used = picture_cache_next_stamp_locked();
+        return rdt_picture_dup(e->picture);
     }
     return nullptr;
 }
@@ -230,67 +273,180 @@ static bool picture_cache_data_matches(RdtPictureCacheEntry* e, const char* data
     return e->data_copy && memcmp(e->data_copy, data, (size_t)size) == 0;
 }
 
+static uint64_t picture_path_cache_hash(const void* item, uint64_t s0, uint64_t s1) {
+    const RdtPictureCacheEntry* e = (const RdtPictureCacheEntry*)item;
+    const char* key = e->path_key ? e->path_key : "";
+    return hashmap_sip(key, strlen(key), s0, s1);
+}
+
+static int picture_path_cache_cmp(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const RdtPictureCacheEntry* ea = (const RdtPictureCacheEntry*)a;
+    const RdtPictureCacheEntry* eb = (const RdtPictureCacheEntry*)b;
+    const char* ka = ea->path_key ? ea->path_key : "";
+    const char* kb = eb->path_key ? eb->path_key : "";
+    return strcmp(ka, kb);
+}
+
+static uint64_t picture_data_cache_hash(const void* item, uint64_t s0, uint64_t s1) {
+    const RdtPictureCacheEntry* e = (const RdtPictureCacheEntry*)item;
+    uint64_t h = hashmap_sip(&e->data_hash, sizeof(e->data_hash), s0, s1);
+    h ^= hashmap_sip(&e->data_size, sizeof(e->data_size), s0, s1);
+    const char* mime = e->mime_key ? e->mime_key : "";
+    h ^= hashmap_sip(mime, strlen(mime), s0, s1);
+    return h;
+}
+
+static int picture_data_cache_cmp(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const RdtPictureCacheEntry* ea = (const RdtPictureCacheEntry*)a;
+    const RdtPictureCacheEntry* eb = (const RdtPictureCacheEntry*)b;
+    if (ea->data_hash != eb->data_hash) return ea->data_hash < eb->data_hash ? -1 : 1;
+    if (ea->data_size != eb->data_size) return ea->data_size < eb->data_size ? -1 : 1;
+    const char* ma = ea->mime_key ? ea->mime_key : "";
+    const char* mb = eb->mime_key ? eb->mime_key : "";
+    int mime_cmp = strcmp(ma, mb);
+    if (mime_cmp != 0) return mime_cmp;
+    if (ea->data_size <= 0) return 0;
+    if (!ea->data_copy || !eb->data_copy) return ea->data_copy == eb->data_copy ? 0 : (ea->data_copy ? 1 : -1);
+    return memcmp(ea->data_copy, eb->data_copy, (size_t)ea->data_size);
+}
+
+static bool picture_cache_ensure_path_locked() {
+    if (g_picture_path_cache) return true;
+    g_picture_path_cache = hashmap_new(sizeof(RdtPictureCacheEntry), 32, 0, 0,
+        picture_path_cache_hash, picture_path_cache_cmp, NULL, NULL);
+    return g_picture_path_cache != nullptr;
+}
+
+static bool picture_cache_ensure_data_locked() {
+    if (g_picture_data_cache) return true;
+    g_picture_data_cache = hashmap_new(sizeof(RdtPictureCacheEntry), 32, 0, 0,
+        picture_data_cache_hash, picture_data_cache_cmp, NULL, NULL);
+    return g_picture_data_cache != nullptr;
+}
+
 static RdtPicture* picture_cache_dup_data_locked(const char* data, int size,
                                                  const char* mime_type, uint64_t hash) {
-    for (RdtPictureCacheEntry* e = g_picture_data_cache; e; e = e->next) {
-        if (picture_cache_data_matches(e, data, size, mime_type, hash)) {
-            return rdt_picture_dup(e->picture);
-        }
+    if (!g_picture_data_cache) return nullptr;
+    RdtPictureCacheEntry query = {};
+    query.data_hash = hash;
+    query.data_size = size;
+    query.mime_key = (char*)(mime_type ? mime_type : "");
+    query.data_copy = (char*)data;
+    const RdtPictureCacheEntry* e =
+        (const RdtPictureCacheEntry*)hashmap_get(g_picture_data_cache, &query);
+    if (e && picture_cache_data_matches((RdtPictureCacheEntry*)e, data, size, mime_type, hash)) {
+        ((RdtPictureCacheEntry*)e)->last_used = picture_cache_next_stamp_locked();
+        return rdt_picture_dup(e->picture);
     }
     return nullptr;
 }
 
-static void picture_cache_insert_path_locked(const char* path, RdtPicture* picture) {
-    if (!path || !picture) return;
-    RdtPictureCacheEntry* e = (RdtPictureCacheEntry*)mem_calloc(1, sizeof(RdtPictureCacheEntry), MEM_CAT_CACHE_IMAGE);
-    e->path_key = mem_strdup(path, MEM_CAT_CACHE_IMAGE);
-    e->picture = picture;
-    e->next = g_picture_path_cache;
-    g_picture_path_cache = e;
+typedef struct PictureCacheEvictionCandidate {
+    RdtPictureCacheEntry entry;
+    bool found;
+} PictureCacheEvictionCandidate;
+
+static bool picture_cache_find_lru_scan(const void* item, void* udata) {
+    PictureCacheEvictionCandidate* candidate = (PictureCacheEvictionCandidate*)udata;
+    const RdtPictureCacheEntry* entry = (const RdtPictureCacheEntry*)item;
+    if (!candidate->found || entry->last_used < candidate->entry.last_used) {
+        candidate->entry = *entry;
+        candidate->found = true;
+    }
+    return true;
+}
+
+static void picture_cache_evict_to_capacity_locked(HashMap* cache) {
+    if (!cache || RDT_PICTURE_CACHE_MAX_ENTRIES == 0) return;
+    while (hashmap_count(cache) > RDT_PICTURE_CACHE_MAX_ENTRIES) {
+        PictureCacheEvictionCandidate candidate = {};
+        hashmap_scan(cache, picture_cache_find_lru_scan, &candidate);
+        if (!candidate.found) return;
+        const RdtPictureCacheEntry* removed =
+            (const RdtPictureCacheEntry*)hashmap_delete(cache, &candidate.entry);
+        if (!removed) return;
+        // SVG handles can outlive cache eviction; refcounted owners keep the
+        // parsed tree alive until the last display-list/media duplicate exits.
+        picture_cache_entry_release(removed);
+    }
+}
+
+static bool picture_cache_insert_path_locked(const char* path, RdtPicture* picture) {
+    if (!path || !picture) return false;
+    if (!picture_cache_ensure_path_locked()) return false;
+    RdtPictureCacheEntry e = {};
+    e.path_key = mem_strdup(path, MEM_CAT_CACHE_IMAGE);
+    e.picture = picture;
+    e.last_used = picture_cache_next_stamp_locked();
+    if (!e.path_key) return false;
+    const RdtPictureCacheEntry* replaced =
+        (const RdtPictureCacheEntry*)hashmap_set(g_picture_path_cache, &e);
+    if (hashmap_oom(g_picture_path_cache)) {
+        if (e.path_key) mem_free(e.path_key);
+        return false;
+    }
+    if (replaced) picture_cache_entry_release(replaced);
+    picture_cache_evict_to_capacity_locked(g_picture_path_cache);
+    return true;
 }
 
 static bool picture_cache_insert_data_locked(const char* data, int size,
                                              const char* mime_type, uint64_t hash,
                                              RdtPicture* picture) {
     if (!data || size <= 0 || !picture) return false;
-    RdtPictureCacheEntry* e = (RdtPictureCacheEntry*)mem_calloc(1, sizeof(RdtPictureCacheEntry), MEM_CAT_CACHE_IMAGE);
-    e->data_copy = (char*)mem_alloc((size_t)size, MEM_CAT_CACHE_IMAGE);
-    if (!e->data_copy) {
-        mem_free(e);
+    if (!picture_cache_ensure_data_locked()) return false;
+    RdtPictureCacheEntry e = {};
+    e.data_copy = (char*)mem_alloc((size_t)size, MEM_CAT_CACHE_IMAGE);
+    if (!e.data_copy) {
         return false;
     }
-    memcpy(e->data_copy, data, (size_t)size);
-    e->data_size = size;
-    e->data_hash = hash;
-    e->mime_key = mem_strdup(mime_type ? mime_type : "", MEM_CAT_CACHE_IMAGE);
-    e->picture = picture;
-    e->next = g_picture_data_cache;
-    g_picture_data_cache = e;
+    memcpy(e.data_copy, data, (size_t)size);
+    e.data_size = size;
+    e.data_hash = hash;
+    e.mime_key = mem_strdup(mime_type ? mime_type : "", MEM_CAT_CACHE_IMAGE);
+    e.picture = picture;
+    e.last_used = picture_cache_next_stamp_locked();
+    if (!e.mime_key) {
+        mem_free(e.data_copy);
+        return false;
+    }
+    const RdtPictureCacheEntry* replaced =
+        (const RdtPictureCacheEntry*)hashmap_set(g_picture_data_cache, &e);
+    if (hashmap_oom(g_picture_data_cache)) {
+        mem_free(e.data_copy);
+        mem_free(e.mime_key);
+        return false;
+    }
+    if (replaced) picture_cache_entry_release(replaced);
+    picture_cache_evict_to_capacity_locked(g_picture_data_cache);
     return true;
 }
 
-static void picture_cache_free_list(RdtPictureCacheEntry* entry) {
-    while (entry) {
-        RdtPictureCacheEntry* next = entry->next;
-        if (entry->path_key) mem_free(entry->path_key);
-        if (entry->mime_key) mem_free(entry->mime_key);
-        if (entry->data_copy) mem_free(entry->data_copy);
-        if (entry->picture) rdt_picture_free(entry->picture);
-        mem_free(entry);
-        entry = next;
-    }
+static bool picture_cache_free_scan(const void* item, void* udata) {
+    (void)udata;
+    const RdtPictureCacheEntry* entry = (const RdtPictureCacheEntry*)item;
+    picture_cache_entry_release(entry);
+    return true;
 }
 
 static void picture_cache_clear_all() {
     pthread_mutex_lock(&g_picture_cache_mutex);
-    RdtPictureCacheEntry* path_cache = g_picture_path_cache;
-    RdtPictureCacheEntry* data_cache = g_picture_data_cache;
+    HashMap* path_cache = g_picture_path_cache;
+    HashMap* data_cache = g_picture_data_cache;
     g_picture_path_cache = nullptr;
     g_picture_data_cache = nullptr;
     pthread_mutex_unlock(&g_picture_cache_mutex);
 
-    picture_cache_free_list(path_cache);
-    picture_cache_free_list(data_cache);
+    if (path_cache) {
+        hashmap_scan(path_cache, picture_cache_free_scan, NULL);
+        hashmap_free(path_cache);
+    }
+    if (data_cache) {
+        hashmap_scan(data_cache, picture_cache_free_scan, NULL);
+        hashmap_free(data_cache);
+    }
 }
 
 static bool paint_cache_path_equals(const RdtPath* a, const RdtPath* b) {
@@ -349,13 +505,65 @@ static bool paint_cache_entry_matches_gradient(RdtPaintCacheEntry* e, uint64_t h
         paint_cache_path_equals(e->path, path);
 }
 
+static uint64_t paint_cache_hash_entry(const void* item, uint64_t s0, uint64_t s1) {
+    const RdtPaintCacheEntry* e = (const RdtPaintCacheEntry*)item;
+    uint64_t h = hashmap_sip(&e->hash, sizeof(e->hash), s0, s1);
+    h ^= hashmap_sip(&e->kind, sizeof(e->kind), s0, s1);
+    return h;
+}
+
+static int paint_cache_cmp_entry(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const RdtPaintCacheEntry* ea = (const RdtPaintCacheEntry*)a;
+    const RdtPaintCacheEntry* eb = (const RdtPaintCacheEntry*)b;
+    if (ea->hash != eb->hash) return ea->hash < eb->hash ? -1 : 1;
+    if (ea->kind != eb->kind) return ea->kind < eb->kind ? -1 : 1;
+    if (!paint_cache_path_equals(ea->path, eb->path)) return 1;
+    if (ea->kind == RDT_PAINT_CACHE_FILL_PATH) {
+        if (ea->fill_rule != eb->fill_rule) return ea->fill_rule < eb->fill_rule ? -1 : 1;
+        return paint_cache_color_equals(ea->color, eb->color) ? 0 : 1;
+    }
+    if (ea->kind == RDT_PAINT_CACHE_STROKE_PATH) {
+        if (!paint_cache_color_equals(ea->color, eb->color)) return 1;
+        if (ea->stroke_width != eb->stroke_width) return ea->stroke_width < eb->stroke_width ? -1 : 1;
+        if (ea->stroke_cap != eb->stroke_cap) return ea->stroke_cap < eb->stroke_cap ? -1 : 1;
+        if (ea->stroke_join != eb->stroke_join) return ea->stroke_join < eb->stroke_join ? -1 : 1;
+        if (ea->dash_count != eb->dash_count) return ea->dash_count < eb->dash_count ? -1 : 1;
+        if (ea->dash_phase != eb->dash_phase) return ea->dash_phase < eb->dash_phase ? -1 : 1;
+        return paint_cache_float_array_equals(ea->dash_array, eb->dash_array, ea->dash_count) ? 0 : 1;
+    }
+    int value_count = ea->kind == RDT_PAINT_CACHE_LINEAR_GRADIENT ? 4 : 3;
+    if (ea->fill_rule != eb->fill_rule) return ea->fill_rule < eb->fill_rule ? -1 : 1;
+    if (ea->stop_count != eb->stop_count) return ea->stop_count < eb->stop_count ? -1 : 1;
+    int value_cmp = memcmp(ea->gradient_values, eb->gradient_values,
+                           (size_t)value_count * sizeof(float));
+    if (value_cmp != 0) return value_cmp;
+    return paint_cache_stops_equal(ea->stops, eb->stops, ea->stop_count) ? 0 : 1;
+}
+
+static bool paint_cache_ensure_locked() {
+    if (g_paint_cache) return true;
+    g_paint_cache = hashmap_new(sizeof(RdtPaintCacheEntry), RDT_PAINT_CACHE_MAX_ENTRIES, 0, 0,
+        paint_cache_hash_entry, paint_cache_cmp_entry, NULL, NULL);
+    return g_paint_cache != nullptr;
+}
+
+static void paint_cache_entry_free(RdtPaintCacheEntry* e);
+
 static Tvg_Paint paint_cache_dup_fill_locked(uint64_t hash, RdtPaintCacheKind kind,
                                              const RdtPath* path, Color color,
                                              RdtFillRule rule) {
-    for (RdtPaintCacheEntry* e = g_paint_cache; e; e = e->next) {
-        if (paint_cache_entry_matches_fill(e, hash, kind, path, color, rule)) {
-            return tvg_duplicate_paint_locked(e->paint);
-        }
+    if (!g_paint_cache) return nullptr;
+    RdtPaintCacheEntry query = {};
+    query.hash = hash;
+    query.kind = kind;
+    query.path = (RdtPath*)path;
+    query.color = color;
+    query.fill_rule = rule;
+    const RdtPaintCacheEntry* e =
+        (const RdtPaintCacheEntry*)hashmap_get(g_paint_cache, &query);
+    if (e && paint_cache_entry_matches_fill((RdtPaintCacheEntry*)e, hash, kind, path, color, rule)) {
+        return tvg_duplicate_paint_locked(e->paint);
     }
     return nullptr;
 }
@@ -365,11 +573,23 @@ static Tvg_Paint paint_cache_dup_stroke_locked(uint64_t hash, const RdtPath* pat
                                                RdtStrokeCap cap, RdtStrokeJoin join,
                                                const float* dash_array, int dash_count,
                                                float dash_phase) {
-    for (RdtPaintCacheEntry* e = g_paint_cache; e; e = e->next) {
-        if (paint_cache_entry_matches_stroke(e, hash, path, color, width, cap, join,
-                                             dash_array, dash_count, dash_phase)) {
-            return tvg_duplicate_paint_locked(e->paint);
-        }
+    if (!g_paint_cache) return nullptr;
+    RdtPaintCacheEntry query = {};
+    query.hash = hash;
+    query.kind = RDT_PAINT_CACHE_STROKE_PATH;
+    query.path = (RdtPath*)path;
+    query.color = color;
+    query.stroke_width = width;
+    query.stroke_cap = cap;
+    query.stroke_join = join;
+    query.dash_array = (float*)dash_array;
+    query.dash_count = dash_count;
+    query.dash_phase = dash_phase;
+    const RdtPaintCacheEntry* e =
+        (const RdtPaintCacheEntry*)hashmap_get(g_paint_cache, &query);
+    if (e && paint_cache_entry_matches_stroke((RdtPaintCacheEntry*)e, hash, path, color,
+                                              width, cap, join, dash_array, dash_count, dash_phase)) {
+        return tvg_duplicate_paint_locked(e->paint);
     }
     return nullptr;
 }
@@ -378,19 +598,38 @@ static Tvg_Paint paint_cache_dup_gradient_locked(uint64_t hash, RdtPaintCacheKin
                                                  const RdtPath* path, const float* values,
                                                  const RdtGradientStop* stops, int stop_count,
                                                  RdtFillRule rule) {
-    for (RdtPaintCacheEntry* e = g_paint_cache; e; e = e->next) {
-        if (paint_cache_entry_matches_gradient(e, hash, kind, path, values, stops, stop_count, rule)) {
-            return tvg_duplicate_paint_locked(e->paint);
-        }
+    if (!g_paint_cache) return nullptr;
+    int value_count = kind == RDT_PAINT_CACHE_LINEAR_GRADIENT ? 4 : 3;
+    RdtPaintCacheEntry query = {};
+    query.hash = hash;
+    query.kind = kind;
+    query.path = (RdtPath*)path;
+    query.fill_rule = rule;
+    query.stop_count = stop_count;
+    query.stops = (RdtGradientStop*)stops;
+    memcpy(query.gradient_values, values, (size_t)value_count * sizeof(float));
+    const RdtPaintCacheEntry* e =
+        (const RdtPaintCacheEntry*)hashmap_get(g_paint_cache, &query);
+    if (e && paint_cache_entry_matches_gradient((RdtPaintCacheEntry*)e, hash, kind, path,
+                                                values, stops, stop_count, rule)) {
+        return tvg_duplicate_paint_locked(e->paint);
     }
     return nullptr;
 }
 
 static void paint_cache_insert_entry_locked(RdtPaintCacheEntry* entry) {
     if (!entry || !entry->paint || g_paint_cache_count >= RDT_PAINT_CACHE_MAX_ENTRIES) return;
-    entry->next = g_paint_cache;
-    g_paint_cache = entry;
-    g_paint_cache_count++;
+    if (!paint_cache_ensure_locked()) {
+        paint_cache_entry_free(entry);
+        return;
+    }
+    hashmap_set(g_paint_cache, entry);
+    if (hashmap_oom(g_paint_cache)) {
+        paint_cache_entry_free(entry);
+    } else {
+        mem_free(entry);
+        g_paint_cache_count++;
+    }
 }
 
 static Tvg_Paint paint_cache_prepare_store_locked(Tvg_Paint existing,
@@ -488,38 +727,85 @@ static Tvg_Paint paint_cache_store_gradient(uint64_t hash, RdtPaintCacheKind kin
     return draw;
 }
 
-static void paint_cache_entry_free(RdtPaintCacheEntry* e) {
+static void paint_cache_entry_release_fields(RdtPaintCacheEntry* e) {
     if (!e) return;
     if (e->path) rdt_path_free(e->path);
     if (e->dash_array) mem_free(e->dash_array);
     if (e->stops) mem_free(e->stops);
     if (e->paint) tvg_paint_unref(e->paint, true);
+}
+
+static void paint_cache_entry_free(RdtPaintCacheEntry* e) {
+    if (!e) return;
+    paint_cache_entry_release_fields(e);
     mem_free(e);
+}
+
+static bool paint_cache_free_scan(const void* item, void* udata) {
+    (void)udata;
+    RdtPaintCacheEntry copy = *(const RdtPaintCacheEntry*)item;
+    paint_cache_entry_release_fields(&copy);
+    return true;
 }
 
 static void paint_cache_clear_all() {
     pthread_mutex_lock(&g_paint_cache_mutex);
-    RdtPaintCacheEntry* entry = g_paint_cache;
+    HashMap* cache = g_paint_cache;
     g_paint_cache = nullptr;
     g_paint_cache_count = 0;
     pthread_mutex_unlock(&g_paint_cache_mutex);
 
-    while (entry) {
-        RdtPaintCacheEntry* next = entry->next;
-        paint_cache_entry_free(entry);
-        entry = next;
+    if (cache) {
+        hashmap_scan(cache, paint_cache_free_scan, NULL);
+        hashmap_free(cache);
     }
 }
 
 static Tvg_Paint image_paint_cache_dup_locked(const uint32_t* pixels, int src_w, int src_h,
                                               int src_stride, uint64_t generation) {
-    for (RdtImagePaintCacheEntry* e = g_image_paint_cache; e; e = e->next) {
-        if (e->pixels == pixels && e->src_w == src_w && e->src_h == src_h &&
-            e->src_stride == src_stride && e->generation == generation) {
-            return tvg_duplicate_paint_locked(e->paint);
-        }
+    if (!g_image_paint_cache) return nullptr;
+    RdtImagePaintCacheEntry query = {};
+    query.pixels = pixels;
+    query.generation = generation;
+    query.src_w = src_w;
+    query.src_h = src_h;
+    query.src_stride = src_stride;
+    const RdtImagePaintCacheEntry* e =
+        (const RdtImagePaintCacheEntry*)hashmap_get(g_image_paint_cache, &query);
+    if (e) {
+        return tvg_duplicate_paint_locked(e->paint);
     }
     return nullptr;
+}
+
+static uint64_t image_paint_cache_hash(const void* item, uint64_t s0, uint64_t s1) {
+    const RdtImagePaintCacheEntry* e = (const RdtImagePaintCacheEntry*)item;
+    uint64_t h = hashmap_sip(&e->pixels, sizeof(e->pixels), s0, s1);
+    h ^= hashmap_sip(&e->generation, sizeof(e->generation), s0, s1);
+    h ^= hashmap_sip(&e->src_w, sizeof(e->src_w), s0, s1);
+    h ^= hashmap_sip(&e->src_h, sizeof(e->src_h), s0, s1);
+    h ^= hashmap_sip(&e->src_stride, sizeof(e->src_stride), s0, s1);
+    return h;
+}
+
+static int image_paint_cache_cmp(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const RdtImagePaintCacheEntry* ea = (const RdtImagePaintCacheEntry*)a;
+    const RdtImagePaintCacheEntry* eb = (const RdtImagePaintCacheEntry*)b;
+    if (ea->pixels != eb->pixels) return ea->pixels < eb->pixels ? -1 : 1;
+    if (ea->generation != eb->generation) return ea->generation < eb->generation ? -1 : 1;
+    if (ea->src_w != eb->src_w) return ea->src_w < eb->src_w ? -1 : 1;
+    if (ea->src_h != eb->src_h) return ea->src_h < eb->src_h ? -1 : 1;
+    if (ea->src_stride != eb->src_stride) return ea->src_stride < eb->src_stride ? -1 : 1;
+    return 0;
+}
+
+static bool image_paint_cache_ensure_locked() {
+    if (g_image_paint_cache) return true;
+    g_image_paint_cache = hashmap_new(sizeof(RdtImagePaintCacheEntry),
+        RDT_IMAGE_PAINT_CACHE_MAX_ENTRIES, 0, 0,
+        image_paint_cache_hash, image_paint_cache_cmp, NULL, NULL);
+    return g_image_paint_cache != nullptr;
 }
 
 static Tvg_Paint image_paint_cache_store(const uint32_t* pixels, int src_w, int src_h,
@@ -542,32 +828,48 @@ static Tvg_Paint image_paint_cache_store(const uint32_t* pixels, int src_w, int 
         return nullptr;
     }
 
-    RdtImagePaintCacheEntry* e = (RdtImagePaintCacheEntry*)mem_calloc(1, sizeof(RdtImagePaintCacheEntry), MEM_CAT_CACHE_IMAGE);
-    e->pixels = pixels;
-    e->generation = generation;
-    e->src_w = src_w;
-    e->src_h = src_h;
-    e->src_stride = src_stride;
-    e->paint = paint;
-    e->next = g_image_paint_cache;
-    g_image_paint_cache = e;
-    g_image_paint_cache_count++;
+    if (!image_paint_cache_ensure_locked()) {
+        tvg_paint_unref(draw, true);
+        pthread_mutex_unlock(&g_image_paint_cache_mutex);
+        return nullptr;
+    }
+
+    RdtImagePaintCacheEntry e = {};
+    e.pixels = pixels;
+    e.generation = generation;
+    e.src_w = src_w;
+    e.src_h = src_h;
+    e.src_stride = src_stride;
+    e.paint = paint;
+    hashmap_set(g_image_paint_cache, &e);
+    if (hashmap_oom(g_image_paint_cache)) {
+        tvg_paint_unref(draw, true);
+        pthread_mutex_unlock(&g_image_paint_cache_mutex);
+        return nullptr;
+    } else {
+        g_image_paint_cache_count++;
+    }
     pthread_mutex_unlock(&g_image_paint_cache_mutex);
     return draw;
 }
 
+static bool image_paint_cache_free_scan(const void* item, void* udata) {
+    (void)udata;
+    const RdtImagePaintCacheEntry* entry = (const RdtImagePaintCacheEntry*)item;
+    if (entry->paint) tvg_paint_unref(entry->paint, true);
+    return true;
+}
+
 static void image_paint_cache_clear_all() {
     pthread_mutex_lock(&g_image_paint_cache_mutex);
-    RdtImagePaintCacheEntry* entry = g_image_paint_cache;
+    HashMap* cache = g_image_paint_cache;
     g_image_paint_cache = nullptr;
     g_image_paint_cache_count = 0;
     pthread_mutex_unlock(&g_image_paint_cache_mutex);
 
-    while (entry) {
-        RdtImagePaintCacheEntry* next = entry->next;
-        if (entry->paint) tvg_paint_unref(entry->paint, true);
-        mem_free(entry);
-        entry = next;
+    if (cache) {
+        hashmap_scan(cache, image_paint_cache_free_scan, NULL);
+        hashmap_free(cache);
     }
 }
 
@@ -873,14 +1175,14 @@ RdtPath* rdt_path_new(void) {
 }
 
 void rdt_path_move_to(RdtPath* p, float x, float y) {
-    path_ensure_capacity(p);
+    if (!path_ensure_capacity(p)) return;
     RdtPath::Entry* e = &p->entries[p->count++];
     e->cmd = RdtPath::CMD_MOVE;
     e->args[0] = x; e->args[1] = y;
 }
 
 void rdt_path_line_to(RdtPath* p, float x, float y) {
-    path_ensure_capacity(p);
+    if (!path_ensure_capacity(p)) return;
     RdtPath::Entry* e = &p->entries[p->count++];
     e->cmd = RdtPath::CMD_LINE;
     e->args[0] = x; e->args[1] = y;
@@ -888,7 +1190,7 @@ void rdt_path_line_to(RdtPath* p, float x, float y) {
 
 void rdt_path_cubic_to(RdtPath* p, float cx1, float cy1,
                        float cx2, float cy2, float x, float y) {
-    path_ensure_capacity(p);
+    if (!path_ensure_capacity(p)) return;
     RdtPath::Entry* e = &p->entries[p->count++];
     e->cmd = RdtPath::CMD_CUBIC;
     e->args[0] = cx1; e->args[1] = cy1;
@@ -897,14 +1199,14 @@ void rdt_path_cubic_to(RdtPath* p, float cx1, float cy1,
 }
 
 void rdt_path_close(RdtPath* p) {
-    path_ensure_capacity(p);
+    if (!path_ensure_capacity(p)) return;
     RdtPath::Entry* e = &p->entries[p->count++];
     e->cmd = RdtPath::CMD_CLOSE;
 }
 
 void rdt_path_add_rect(RdtPath* p, float x, float y, float w, float h,
                        float rx, float ry) {
-    path_ensure_capacity(p);
+    if (!path_ensure_capacity(p)) return;
     RdtPath::Entry* e = &p->entries[p->count++];
     e->cmd = RdtPath::CMD_RECT;
     e->args[0] = x; e->args[1] = y;
@@ -913,7 +1215,7 @@ void rdt_path_add_rect(RdtPath* p, float x, float y, float w, float h,
 }
 
 void rdt_path_add_circle(RdtPath* p, float cx, float cy, float rx, float ry) {
-    path_ensure_capacity(p);
+    if (!path_ensure_capacity(p)) return;
     RdtPath::Entry* e = &p->entries[p->count++];
     e->cmd = RdtPath::CMD_CIRCLE;
     e->args[0] = cx; e->args[1] = cy;
@@ -1609,7 +1911,7 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
     }
     Input* input = Input::create(pool, nullptr);
     if (!input) {
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return nullptr;
     }
     input->ui_mode = false;
@@ -1617,7 +1919,7 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
     // html5_parse_svg_document expects a null-terminated string and applies the
     // same SVG tag/attribute correction path used by inline HTML SVG.
     char* buf = (char*)mem_alloc(size + 1, MEM_CAT_RENDER);
-    if (!buf) { pool_destroy(pool); return nullptr; }
+    if (!buf) { mem_pool_destroy(pool); return nullptr; }
     memcpy(buf, data, size);
     buf[size] = '\0';
     Element* svg_root = html5_parse_svg_document(input, buf, nullptr);
@@ -1625,12 +1927,12 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
 
     if (!input->root.item || input->root.item == ITEM_ERROR) {
         log_error("svg_picture_create: html5_parse_svg_document failed");
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return nullptr;
     }
     if (!svg_root) {
         log_error("svg_picture_create: no <svg> root element found");
-        pool_destroy(pool);
+        mem_pool_destroy(pool);
         return nullptr;
     }
 
@@ -1644,6 +1946,8 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
     p->input = input;
     p->pool = pool;
     p->owns_pool = true;
+    atomic_store32(&p->ref_count, 1);
+    p->owner = nullptr;
     p->svg_root = svg_root;
     p->source_path = source_path ? mem_strdup(source_path, MEM_CAT_RENDER) : nullptr;  // RETAINED_FIELD_OK: TVG picture-local field, mem_strdup-owned, not a retained DOM field
     p->width = w;
@@ -1692,8 +1996,8 @@ RdtPicture* rdt_picture_load(const char* path) {
         rdt_picture_free(p);
         return cached;
     }
-    picture_cache_insert_path_locked(path, p);
-    RdtPicture* result = rdt_picture_dup(p);
+    bool inserted = picture_cache_insert_path_locked(path, p);
+    RdtPicture* result = inserted ? rdt_picture_dup(p) : p;
     pthread_mutex_unlock(&g_picture_cache_mutex);
     return result;
 }
@@ -1729,34 +2033,44 @@ RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_t
     return result;
 }
 
-RdtPicture* rdt_picture_dup(RdtPicture* pic) {
-    if (!pic) return nullptr;
-    if (pic->kind == RdtPicture::KIND_TVG_PAINT) {
-        if (!pic->paint) return nullptr;
-        Tvg_Paint dup = tvg_paint_duplicate(pic->paint);
+RdtPicture* RdtPicture::dup() {
+    if (kind == RdtPicture::KIND_TVG_PAINT) {
+        if (!paint) return nullptr;
+        Tvg_Paint dup = tvg_paint_duplicate(paint);
         if (!dup) return nullptr;
         RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
         p->kind = RdtPicture::KIND_TVG_PAINT;
+        atomic_store32(&p->ref_count, 1);
         p->paint = dup;
-        p->width = pic->width;
-        p->height = pic->height;
+        p->width = width;
+        p->height = height;
         return p;
     }
-    // SVG_DOM: shallow copy that shares the underlying Element/Pool with the
-    // original; only the original owns the pool.  Callers must ensure the
-    // dup outlives no longer than the source.
+    // SVG_DOM duplicates have independent draw state but retain the parsed
+    // owner so cache eviction cannot free the shared Element tree underneath.
+    if (!rdt_picture_retain_svg_owner(this)) return nullptr;
+    RdtPicture* owner = rdt_picture_svg_owner(this);
     RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
+    if (!p) {
+        rdt_picture_free(owner);
+        return nullptr;
+    }
     p->kind = RdtPicture::KIND_SVG_DOM;
-    p->input = pic->input;
-    p->pool = pic->pool;
+    p->input = owner->input;
+    p->pool = owner->pool;
     p->owns_pool = false;
-    p->svg_root = pic->svg_root;
-    p->source_path = pic->source_path;  // RETAINED_FIELD_OK: TVG picture-local field, not a retained DOM field
-    p->width = pic->width;
-    p->height = pic->height;
-    p->transform = pic->transform;
-    p->has_transform = pic->has_transform;
+    p->owner = owner;
+    p->svg_root = owner->svg_root;
+    p->source_path = owner->source_path;  // RETAINED_FIELD_OK: TVG picture-local field, not a retained DOM field
+    p->width = width;
+    p->height = height;
+    p->transform = transform;
+    p->has_transform = has_transform;
     return p;
+}
+
+RdtPicture* rdt_picture_dup(RdtPicture* pic) {
+    return pic ? pic->dup() : nullptr;
 }
 
 static const char* rdt_picture_elem_attr(Element* element, const char* attr_name) {
@@ -1892,20 +2206,31 @@ void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
     // original pic->paint is NOT consumed
 }
 
-void rdt_picture_free(RdtPicture* pic) {
-    if (!pic) return;
+void RdtPicture::release() {
+    RdtPicture* pic = this;
     if (pic->kind == RdtPicture::KIND_SVG_DOM) {
-        if (pic->owns_pool && pic->pool) {
-            pool_destroy(pic->pool);
+        RdtPicture* owner = pic->owner;
+        if (owner) {
+            mem_free(pic);
+            pic = owner;
         }
-        if (pic->owns_pool && pic->source_path) {
-            mem_free(pic->source_path);
+        int32_t refs = atomic_dec32(&pic->ref_count);
+        if (refs > 0) return;
+        if (refs < 0) {
+            log_error("rdt_picture_free: SVG picture ref_count underflow");
+            return;
         }
+        if (pic->pool) mem_pool_destroy(pic->pool);
+        if (pic->source_path) mem_free(pic->source_path);
         // input is allocated from the pool; destroyed implicitly above
     } else {
         if (pic->paint) tvg_paint_unref(pic->paint, true);
     }
     mem_free(pic);
+}
+
+void rdt_picture_free(RdtPicture* pic) {
+    if (pic) pic->release();
 }
 
 // ============================================================================
@@ -1916,6 +2241,7 @@ RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
     if (!paint) return nullptr;
     RdtPicture* pic = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
     pic->kind = RdtPicture::KIND_TVG_PAINT;
+    atomic_store32(&pic->ref_count, 1);
     pic->paint = paint;
     pic->width = w;
     pic->height = h;

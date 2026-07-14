@@ -202,7 +202,7 @@ WebViewHandle* webview_platform_create(GLFWwindow* window,
     ensure_gtk_initialized();
     if (!s_gtk_initialized) return nullptr;
 
-    WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT);
+    WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: platform webview handle is released by webview_platform_destroy.
     handle->mode        = WEBVIEW_MODE_WINDOW;
     handle->glfw_window = window;
     handle->width       = w;

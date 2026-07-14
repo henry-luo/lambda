@@ -17,6 +17,8 @@ static inline int munmap(void* addr, size_t len) { (void)addr; (void)len; return
 #endif
 #include "../memtrack.h"
 
+#define FONT_DEFAULT_MAX_GLYPH_ARENA_BYTES ((size_t)64 * 1024 * 1024)
+
 // ============================================================================
 // Face cache hashmap callbacks
 // ============================================================================
@@ -122,7 +124,12 @@ FontContext* font_context_create(FontContextConfig* config) {
     ctx->glyph_cache_generation = 1;
 
     // create glyph arena (separate for bitmap data, resettable)
-    ctx->glyph_arena = arena_create(pool, 256 * 1024, 4 * 1024 * 1024);
+    bool owns_glyph_arena = false;
+    ctx->glyph_arena = config && config->glyph_arena
+        ? config->glyph_arena
+        : arena_create(pool, 256 * 1024, 4 * 1024 * 1024);
+    owns_glyph_arena = !(config && config->glyph_arena);
+    ctx->owns_glyph_arena = owns_glyph_arena;
     if (!ctx->glyph_arena) {
         log_error("font_context_create: failed to create glyph arena");
         if (owns_arena) arena_destroy(arena);
@@ -136,13 +143,16 @@ FontContext* font_context_create(FontContextConfig* config) {
     }
     if (ctx->config.max_cached_faces <= 0) ctx->config.max_cached_faces = 64;
     if (ctx->config.max_cached_glyphs <= 0) ctx->config.max_cached_glyphs = 4096;
+    if (ctx->config.max_glyph_arena_bytes == 0) {
+        ctx->config.max_glyph_arena_bytes = FONT_DEFAULT_MAX_GLYPH_ARENA_BYTES;
+    }
     if (ctx->config.pixel_ratio <= 0.0f) ctx->config.pixel_ratio = 1.0f;
 
     // create font database
     ctx->database = font_database_create_internal(pool, arena);
     if (!ctx->database) {
         log_error("font_context_create: failed to create font database");
-        arena_destroy(ctx->glyph_arena);
+        if (owns_glyph_arena) arena_destroy(ctx->glyph_arena);
         if (owns_arena) arena_destroy(arena);
         if (owns_pool)  pool_destroy(pool);
         return NULL;
@@ -241,8 +251,8 @@ void font_context_destroy(FontContext* ctx) {
         ctx->database = NULL;
     }
 
-    // skip glyph arena destroy — pool_destroy will free all allocations
-    // via rpmalloc_heap_free_all. Individual arena_destroy would double-free.
+    Arena* glyph_arena = ctx->glyph_arena;
+    bool owns_glyph_arena = ctx->owns_glyph_arena;
     ctx->glyph_arena = NULL;
 
     // save references before freeing ctx
@@ -257,6 +267,7 @@ void font_context_destroy(FontContext* ctx) {
     // destroy owned allocators last
     // When pool is also owned, skip arena_destroy — pool_destroy will free
     // everything via rpmalloc_heap_free_all. Individual frees would double-free.
+    if (owns_glyph_arena && glyph_arena && !owns_pool) arena_destroy(glyph_arena);
     if (owns_arena && arena && !owns_pool) arena_destroy(arena);
     if (owns_pool  && pool)  pool_destroy(pool);
 }
@@ -339,33 +350,6 @@ void font_context_reset_document_fonts(FontContext* ctx) {
     }
 
     log_info("font_context_reset_document_fonts: cleared per-document font state");
-}
-
-void font_context_reset_glyph_caches(FontContext* ctx) {
-    if (!ctx) return;
-
-    // clear loaded glyph cache (entries reference glyph_arena bitmap data)
-    if (ctx->loaded_glyph_cache) {
-        hashmap_clear(ctx->loaded_glyph_cache, false);
-    }
-
-    // clear bitmap cache (also references glyph_arena data)
-    if (ctx->bitmap_cache) {
-        hashmap_clear(ctx->bitmap_cache, false);
-    }
-
-    // reset glyph arena to reclaim bitmap memory without destroying it
-    if (ctx->glyph_arena) {
-        arena_reset(ctx->glyph_arena);
-    }
-    ctx->glyph_cache_generation++;
-    if (ctx->glyph_cache_generation == 0) ctx->glyph_cache_generation = 1;
-
-    log_info("font_context_reset_glyph_caches: cleared loaded/bitmap caches and glyph arena");
-}
-
-uint64_t font_context_glyph_cache_generation(FontContext* ctx) {
-    return ctx ? ctx->glyph_cache_generation : 0;
 }
 
 bool font_context_scan(FontContext* ctx) {

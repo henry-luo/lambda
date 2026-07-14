@@ -100,11 +100,6 @@ static PaintList* pdf_active_paint_list(PdfRenderContext* ctx) {
     return ctx ? &ctx->paint_list : nullptr;
 }
 
-static void pdf_effect_raster_fallback_clear(PdfEffectRasterFallback* fallback) {
-    if (!fallback) return;
-    paint_list_clear(&fallback->paint_list);
-}
-
 static bool pdf_effect_group_needs_raster_fallback(const PaintEffectGroup* group) {
     return group &&
            (group->has_clip || group->blend_mode != 0 || group->filter ||
@@ -581,7 +576,7 @@ static void pdf_begin_effect_raster_fallback(PdfRenderContext* ctx,
     ctx->effect_fallback.active = true;
     ctx->effect_fallback.nested_depth = 0;
     ctx->effect_fallback.group = *group;
-    pdf_effect_raster_fallback_clear(&ctx->effect_fallback);
+    paint_list_clear(&ctx->effect_fallback.paint_list);
     paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
     paint_begin_effect_group(&ctx->effect_fallback.paint_list, group);
     log_error("[PDF_PAINT_IR] raster fallback effect group opacity=%.3f blend=%d filter=%p backdrop=%d backdrop_filter=%p shadow=%d isolation=%d",
@@ -617,7 +612,7 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
     pdf_paint_record_fallback(&ctx->paint_state, drew_fallback, nullptr);
     pdf_record_page_backdrop_paint_list(ctx, &ctx->effect_fallback.paint_list);
     if (image.surface) image_surface_destroy(image.surface);
-    pdf_effect_raster_fallback_clear(&ctx->effect_fallback);
+    paint_list_clear(&ctx->effect_fallback.paint_list);
     ctx->effect_fallback.active = false;
     ctx->effect_fallback.nested_depth = 0;
 }
@@ -1981,12 +1976,13 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     render_profiler_emit_path_trace(nullptr, uicon, nullptr, &trace);
 
     paint_list_destroy(&ctx.paint_list);
-    pdf_effect_raster_fallback_clear(&ctx.effect_fallback);
+    paint_list_clear(&ctx.effect_fallback.paint_list);
     paint_list_destroy(&ctx.effect_fallback.paint_list);
     if (ctx.page_backdrop_ready) {
         dl_destroy(&ctx.page_backdrop_dl);
     }
     if (ctx.page_backdrop_pool) {
+        // Page backdrop display-list storage is arena-in-pool; pool teardown owns the arena chunks.
         mem_pool_destroy(ctx.page_backdrop_pool);
     }
     return ctx.pdf_doc;

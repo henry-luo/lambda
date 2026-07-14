@@ -114,6 +114,7 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
 
     scratch_release(&scratch);
     dl_clear(&dl);
+    // The temporary arena is pool-backed here; destroying the pool releases its arena chunks once.
     mem_pool_destroy(temp_pool);
 
     out->surface = surface;

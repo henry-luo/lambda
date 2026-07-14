@@ -160,12 +160,25 @@ void destroy_grid_area(GridArea* area) {
 void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_number, bool is_row) {
     if (!grid || !name) return;
 
-    // Ensure we have space for more line names
+    // Line-name tables are pass-local; grow by allocating a larger scratch
+    // table so the grid container mark can release every generation at once.
     if (grid->line_name_count >= grid->allocated_line_names) {
-        if (!lam::mem_grow_array(&grid->line_names, &grid->allocated_line_names,
-                                 grid->line_name_count + 1, 8, MEM_CAT_LAYOUT)) {
+        if (!grid->lycon) return;
+        int new_capacity = grid->allocated_line_names > 0
+            ? grid->allocated_line_names * 2 : 8;
+        while (new_capacity <= grid->line_name_count) new_capacity *= 2;
+        GridLineName* grown = (GridLineName*)scratch_calloc(&grid->lycon->scratch,
+            (size_t)new_capacity * sizeof(GridLineName));
+        if (!grown) {
+            log_error("grid_utils: unable to grow grid line-name scratch table to %d", new_capacity);
             return;
         }
+        if (grid->line_names && grid->line_name_count > 0) {
+            memcpy(grown, grid->line_names,
+                   (size_t)grid->line_name_count * sizeof(GridLineName));
+        }
+        grid->line_names = grown;
+        grid->allocated_line_names = new_capacity;
     }
 
     GridLineName* line_name = &grid->line_names[grid->line_name_count];

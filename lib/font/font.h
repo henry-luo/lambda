@@ -42,10 +42,12 @@ struct Arena;
 typedef struct FontContextConfig {
     struct Pool*  pool;                 // memory pool (NULL = create internally)
     struct Arena* arena;                // arena for strings (NULL = create internally)
+    struct Arena* glyph_arena;          // glyph bitmap arena (NULL = create internally)
     float         pixel_ratio;          // display pixel ratio (1.0, 2.0, etc.)
     const char*   cache_dir;            // disk cache directory (NULL = default)
     int           max_cached_faces;     // max open font faces (0 = default 64)
     int           max_cached_glyphs;    // max cached glyph bitmaps (0 = default 4096)
+    size_t        max_glyph_arena_bytes;// max glyph arena allocation before reset (0 = default 64 MiB)
     bool          enable_lcd_rendering; // subpixel rendering
     bool          enable_disk_cache;    // persist font database to disk
 } FontContextConfig;

@@ -207,11 +207,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                   has_definite_width, has_definite_height);
     }
 
-    // Save parent grid context (for nested grids)
-    GridContainerLayout* pa_grid = lycon->grid_container;
-
     // Initialize grid container
-    init_grid_container(lycon, grid_container);
+    GridLayoutScope grid_scope(lycon, grid_container);
 
     // Note: Grid properties (grid-template-columns/rows) may not be populated in embed->grid
     // at this point if they haven't been resolved in resolve_css_style.cpp.
@@ -251,8 +248,6 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         }
         if (!has_absolute_children) {
             log_debug("No grid items and no absolute children - skipping");
-            cleanup_grid_container(lycon);
-            lycon->grid_container = pa_grid;
             log_leave();
             return;
         }
@@ -260,8 +255,6 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         log_info("=== GRID: no in-flow items, running track sizing for absolute children ===");
         layout_grid_container(lycon, grid_container);
         layout_grid_absolute_children(lycon, grid_container);
-        cleanup_grid_container(lycon);
-        lycon->grid_container = pa_grid;
         log_leave();
         return;
     }
@@ -540,8 +533,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     radiant::layout_pass_cache_store(lycon, dom_elem, known_dims, result, "GRID");
 
     // Cleanup and restore parent context
-    cleanup_grid_container(lycon);
-    lycon->grid_container = pa_grid;
+    grid_scope.close();
 
     log_info("GRID LAYOUT END: container=%p", grid_container);
     log_leave();
@@ -1034,16 +1026,17 @@ bool grid_item_is_nested_container(ViewBlock* item) {
 
 // Calculate track positions for a given axis
 // Returns an array of (track_count + 1) positions representing grid line positions
-// Caller must free the returned array
 static float* calculate_grid_line_positions(GridContainerLayout* grid_layout, bool is_row_axis,
                                             float container_offset, int* out_line_count) {
+    if (!grid_layout || !grid_layout->lycon) return nullptr;
     int track_count = is_row_axis ? grid_layout->computed_row_count : grid_layout->computed_column_count;
     GridTrack* tracks = is_row_axis ? grid_layout->computed_rows : grid_layout->computed_columns;
     float gap = is_row_axis ? grid_layout->row_gap : grid_layout->column_gap;
 
     // We need (track_count + 1) positions for grid lines
     int line_count = track_count + 1;
-    float* positions = (float*)mem_calloc(line_count, sizeof(float), MEM_CAT_LAYOUT);
+    float* positions = (float*)scratch_calloc(&grid_layout->lycon->scratch,
+        (size_t)line_count * sizeof(float));
     if (!positions) return nullptr;
 
     float current_pos = container_offset;
@@ -1104,8 +1097,8 @@ static bool compute_grid_area_for_absolute(
     float* row_positions = calculate_grid_line_positions(grid_layout, true, container_offset_y, &row_line_count);
 
     if (!col_positions || !row_positions) {
-        mem_free(col_positions);
-        mem_free(row_positions);
+        scratch_free(&grid_layout->lycon->scratch, col_positions);
+        scratch_free(&grid_layout->lycon->scratch, row_positions);
         return false;
     }
 
@@ -1171,8 +1164,8 @@ static bool compute_grid_area_for_absolute(
               col_start_line, col_end_line, row_start_line, row_end_line,
               *out_x, *out_y, *out_width, *out_height);
 
-    mem_free(col_positions);
-    mem_free(row_positions);
+    scratch_free(&grid_layout->lycon->scratch, row_positions);
+    scratch_free(&grid_layout->lycon->scratch, col_positions);
     return true;
 }
 

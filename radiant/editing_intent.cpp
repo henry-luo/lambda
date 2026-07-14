@@ -7,6 +7,24 @@
 
 const char* clipboard_get_text();
 
+InputIntent::InputIntent()
+    : type(INPUT_INTENT_NONE),
+      data(nullptr),
+      html_data(nullptr),
+      data_mime(nullptr),
+      owned_data(nullptr),
+      owned_html_data(nullptr),
+      key(0),
+      mods(0),
+      is_composing(false),
+      composition_caret(0) {}
+
+InputIntent::~InputIntent() {
+    // paste/drop intents may own payload copies; scope cleanup keeps every
+    // dispatch exit path from leaking or double-owning those buffers.
+    input_intent_dispose(this);
+}
+
 void input_intent_dispose(InputIntent* intent) {
     if (!intent) return;
     mem_free(intent->owned_data);
@@ -15,6 +33,17 @@ void input_intent_dispose(InputIntent* intent) {
     intent->owned_html_data = nullptr;
     intent->data = nullptr;
     intent->html_data = nullptr;
+}
+
+static void input_intent_reset(InputIntent* intent) {
+    if (!intent) return;
+    input_intent_dispose(intent);
+    intent->type = INPUT_INTENT_NONE;
+    intent->data_mime = nullptr;
+    intent->key = 0;
+    intent->mods = 0;
+    intent->is_composing = false;
+    intent->composition_caret = 0;
 }
 
 const char* input_intent_type_name(InputIntentType type) {
@@ -108,7 +137,7 @@ bool input_intent_is_dispatchable(InputIntentType type) {
 
 bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* out) {
     if (!key_event || !out) return false;
-    memset(out, 0, sizeof(*out));
+    input_intent_reset(out);
     out->key = key_event->key;
     out->mods = key_event->mods;
 
@@ -187,7 +216,7 @@ bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* out) {
 bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,
                                   char* utf8_buf, size_t utf8_buf_size) {
     if (!out || !utf8_buf || utf8_buf_size < 5 || codepoint == 0) return false;
-    memset(out, 0, sizeof(*out));
+    input_intent_reset(out);
     size_t utf8_len = utf8_encode_z(codepoint, utf8_buf);
     if (utf8_len == 0) return false;
     out->type = INPUT_INTENT_INSERT_TEXT;
@@ -198,7 +227,7 @@ bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,
 bool input_intent_from_composition_event(const CompositionEvent* comp_event,
                                          InputIntent* out) {
     if (!comp_event || !out) return false;
-    memset(out, 0, sizeof(*out));
+    input_intent_reset(out);
     out->data = comp_event->text ? comp_event->text : "";
     out->composition_caret = comp_event->preedit_caret;
 

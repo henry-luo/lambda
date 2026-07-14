@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../radiant/render.hpp"
+#include "../lib/mem.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include <string.h>
@@ -71,6 +72,60 @@ TEST_F(DisplayListTest, DescriptorCoversOpsAndOwnsPayloadCleanup) {
     picture_item.draw_picture.picture = (RdtPicture*)1;
     dl_item_free_owned_payload(&picture_item);
     EXPECT_EQ(picture_item.draw_picture.picture, nullptr);
+}
+
+TEST_F(DisplayListTest, ClearKeepsReusableScratchRegistered) {
+    ASSERT_NE(dl.arena.mem_node, nullptr);
+    RdtGradientStop stop = {};
+    stop.offset = 1.0f;
+    stop.a = 255;
+    ASSERT_NE(dl_copy_stops(&dl, &stop, 1), nullptr);
+
+    dl_clear(&dl);
+
+    EXPECT_EQ(dl.count, 0);
+    EXPECT_EQ(scratch_live_count(&dl.arena), 0u);
+    EXPECT_NE(dl.arena.mem_node, nullptr);
+}
+
+TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
+    PaintList clear_list = {};
+    paint_list_init(&clear_list, nullptr);
+
+    RdtGradientStop* stops = (RdtGradientStop*)mem_calloc(2, sizeof(RdtGradientStop), MEM_CAT_RENDER);
+    ASSERT_NE(stops, nullptr);
+    paint_fill_linear_gradient(&clear_list, nullptr, 0.0f, 0.0f, 10.0f, 10.0f,
+                               stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
+    ASSERT_EQ(clear_list.count, 1);
+    clear_list.cmds[0].fill_linear_gradient.owns_stops = true;
+
+    PaintGlyphRun run = {};
+    run.text = mem_strdup("owned glyph text", MEM_CAT_RENDER);
+    ASSERT_NE(run.text, nullptr);
+    run.owns_text = true;
+    paint_glyph_run(&clear_list, &run);
+    ASSERT_EQ(clear_list.count, 2);
+
+    paint_list_clear(&clear_list);
+    EXPECT_EQ(clear_list.count, 0);
+    EXPECT_EQ(clear_list.cmds[0].fill_linear_gradient.stops, nullptr);
+    EXPECT_FALSE(clear_list.cmds[0].fill_linear_gradient.owns_stops);
+    EXPECT_EQ(clear_list.cmds[1].glyph_run.text, nullptr);
+    EXPECT_FALSE(clear_list.cmds[1].glyph_run.owns_text);
+    paint_list_destroy(&clear_list);
+
+    PaintList destroy_list = {};
+    paint_list_init(&destroy_list, nullptr);
+    PaintGlyphRun destroy_run = {};
+    destroy_run.text = mem_strdup("destroy owned glyph text", MEM_CAT_RENDER);
+    ASSERT_NE(destroy_run.text, nullptr);
+    destroy_run.owns_text = true;
+    paint_glyph_run(&destroy_list, &destroy_run);
+    ASSERT_EQ(destroy_list.count, 1);
+    paint_list_destroy(&destroy_list);
+    EXPECT_EQ(destroy_list.cmds, nullptr);
+    EXPECT_EQ(destroy_list.count, 0);
+    EXPECT_EQ(destroy_list.capacity, 0);
 }
 
 TEST_F(DisplayListTest, BoundsIntersectorPreservesReplayStateCommands) {

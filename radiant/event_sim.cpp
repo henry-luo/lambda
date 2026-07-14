@@ -12,7 +12,9 @@
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/file.h"
+#include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
+#include "../lib/arena.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
@@ -111,6 +113,17 @@ void event_sim_set_replay_assert_state(bool assert_state) {
 static EventSimContext* event_sim_create_context() {
     EventSimContext* ctx = (EventSimContext*)mem_calloc(1, sizeof(EventSimContext), MEM_CAT_LAYOUT);
     if (!ctx) return NULL;
+    ctx->event_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "event_sim.events");
+    ctx->event_arena = ctx->event_pool
+        ? mem_arena_create(NULL, ctx->event_pool, MEM_ROLE_TEMP, "event_sim.events.arena")
+        : NULL;
+    if (!ctx->event_pool || !ctx->event_arena) {
+        log_error("event_sim: failed to create per-fixture event arena");
+        if (ctx->event_arena) mem_arena_destroy(ctx->event_arena);
+        if (ctx->event_pool) mem_pool_destroy(ctx->event_pool);
+        mem_free(ctx);
+        return NULL;
+    }
     ctx->events = arraylist_new(16);
     ctx->current_index = 0;
     ctx->next_event_time = 0;
@@ -126,6 +139,12 @@ static EventSimContext* event_sim_create_context() {
     ctx->replay_expected_caret_offset = -1;
     ctx->state_store_snapshots = arraylist_new(4);
     return ctx;
+}
+
+static SimEvent* event_sim_alloc_event(EventSimContext* ctx) {
+    if (!ctx || !ctx->event_arena) return NULL;
+    // Parsed event structs are fixture-scoped; strings still have individual owners below.
+    return (SimEvent*)arena_calloc(ctx->event_arena, sizeof(SimEvent));
 }
 
 // Map key name string to GLFW key code
@@ -1050,16 +1069,69 @@ static void parse_assertion_strings(MapReader& reader, SimEvent* ev,
     if (with_target) parse_target(reader, ev);
 }
 
+static void sim_event_free_owned_fields(SimEvent* ev) {
+    if (!ev) return;
+    if (ev->message) mem_free(ev->message);
+    if (ev->file_path) mem_free(ev->file_path);
+    if (ev->target_text) mem_free(ev->target_text);
+    if (ev->target_selector) mem_free(ev->target_selector);
+    if (ev->to_target_selector) mem_free(ev->to_target_selector);
+    if (ev->to_target_text) mem_free(ev->to_target_text);
+    if (ev->input_text) mem_free(ev->input_text);
+    if (ev->assert_contains) mem_free(ev->assert_contains);
+    if (ev->assert_equals) mem_free(ev->assert_equals);
+    if (ev->assert_not_contains) mem_free(ev->assert_not_contains);
+    if (ev->state_snapshot_name) mem_free(ev->state_snapshot_name);
+    if (ev->clipboard_mime) mem_free(ev->clipboard_mime);
+    if (ev->clipboard_html) mem_free(ev->clipboard_html);
+    if (ev->option_value) mem_free(ev->option_value);
+    if (ev->option_label) mem_free(ev->option_label);
+    if (ev->state_name) mem_free(ev->state_name);
+    if (ev->style_property) mem_free(ev->style_property);
+    if (ev->element_a_selector) mem_free(ev->element_a_selector);
+    if (ev->element_a_text) mem_free(ev->element_a_text);
+    if (ev->element_b_selector) mem_free(ev->element_b_selector);
+    if (ev->element_b_text) mem_free(ev->element_b_text);
+    if (ev->position_relation) mem_free(ev->position_relation);
+    if (ev->navigate_url) mem_free(ev->navigate_url);
+    if (ev->expected_at_selector) mem_free(ev->expected_at_selector);
+    if (ev->expected_at_tag) mem_free(ev->expected_at_tag);
+    if (ev->attribute_name) mem_free(ev->attribute_name);
+    if (ev->expected_view_state_kind) mem_free(ev->expected_view_state_kind);
+    if (ev->snapshot_reference) mem_free(ev->snapshot_reference);
+    if (ev->snapshot_diff_path) mem_free(ev->snapshot_diff_path);
+    if (ev->snapshot_actual_path) mem_free(ev->snapshot_actual_path);
+    if (ev->js_code) mem_free(ev->js_code);
+    if (ev->frame_selector) mem_free(ev->frame_selector);
+    if (ev->ime_phase) mem_free(ev->ime_phase);
+    if (ev->editing_event_type) mem_free(ev->editing_event_type);
+    if (ev->editing_input_type) mem_free(ev->editing_input_type);
+    if (ev->editing_surface_kind) mem_free(ev->editing_surface_kind);
+    if (ev->editing_surface_mode) mem_free(ev->editing_surface_mode);
+    if (ev->editing_operation) mem_free(ev->editing_operation);
+    if (ev->editing_owned_by) mem_free(ev->editing_owned_by);
+    if (ev->replay_event_name) mem_free(ev->replay_event_name);
+    if (ev->state_dump_reference) mem_free(ev->state_dump_reference);
+    if (ev->expected_reconcile_mode) mem_free(ev->expected_reconcile_mode);
+    if (ev->expected_reconcile_reason) mem_free(ev->expected_reconcile_reason);
+    memset(ev, 0, sizeof(SimEvent));
+}
+
+static SimEvent* parse_sim_event_fail(SimEvent* ev) {
+    // SimEvent records are arena-owned, but parse-time strings remain heap-owned.
+    sim_event_free_owned_fields(ev);
+    return NULL;
+}
+
 // Parse a single event from MapReader
-static SimEvent* parse_sim_event(MapReader& reader) {
-    SimEvent* ev = (SimEvent*)mem_calloc(1, sizeof(SimEvent), MEM_CAT_LAYOUT);
+static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
+    SimEvent* ev = event_sim_alloc_event(ctx);
     if (!ev) return NULL;
 
     ItemReader type_item = reader.get("type");
     const char* type_str = type_item.cstring();
     if (!type_str) {
-        mem_free(ev);
-        return NULL;
+        return parse_sim_event_fail(ev);
     }
 
     // Parse event type
@@ -1106,13 +1178,11 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->drag_steps = steps > 0 ? steps : 5;
         if (!ev->target_selector && !ev->target_text) {
             log_error("event_sim: drag_and_drop missing 'target' (drag source)");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
         if (!ev->to_target_selector && !ev->to_target_text) {
             log_error("event_sim: drag_and_drop missing 'to_target' (drop target)");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "editing_text_drag_drop") == 0) {
@@ -1146,13 +1216,11 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->drag_move = reader.has("move") ? reader.get("move").asBool() : true;
         if (!ev->target_selector && !ev->target_text) {
             log_error("event_sim: editing_text_drag_drop missing 'target'");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
         if (!ev->to_target_selector && !ev->to_target_text) {
             log_error("event_sim: editing_text_drag_drop missing 'to_target'");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "fuzz_schema") == 0) {
@@ -1241,8 +1309,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         parse_target(reader, ev);
         if (!ev->target_selector && !ev->target_text) {
             log_error("event_sim: assert_editing_selection requires target");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "assert_preedit") == 0) {
@@ -1305,8 +1372,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->y = reader.get("height").asInt32();
         if (ev->x <= 0 || ev->y <= 0) {
             log_error("event_sim: resize requires positive width and height");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     // F6 (Radiant_Design_Form_Input.md §3.6): clipboard helpers.
@@ -1359,8 +1425,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         parse_target(reader, ev);
         if (!ev->target_selector && !ev->target_text) {
             log_error("event_sim: set_editing_selection requires target");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "set_editing_value") == 0) {
@@ -1370,8 +1435,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         parse_target(reader, ev);
         if (!ev->target_selector && !ev->target_text) {
             log_error("event_sim: set_editing_value requires target");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "assert_text") == 0) {
@@ -1513,13 +1577,11 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (ncont) ev->assert_not_contains = mem_strdup(ncont, MEM_CAT_LAYOUT);
         if (!ev->target_selector && !ev->target_text) {
             log_error("event_sim: assert_attribute missing 'target'");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
         if (!attr) {
             log_error("event_sim: assert_attribute missing 'attribute' field");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "assert_count") == 0) {
@@ -1528,8 +1590,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         parse_assert_count(reader, ev);
         if (!ev->target_selector) {
             log_error("event_sim: assert_count requires 'target' CSS selector");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "assert_state_store") == 0) {
@@ -1654,8 +1715,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (name) ev->state_snapshot_name = mem_strdup(name, MEM_CAT_LAYOUT);
         if (!ev->state_snapshot_name || (!ev->target_selector && !ev->target_text)) {
             log_error("event_sim: snapshot_state_store requires 'name' and target");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "assert_state_store_snapshot") == 0) {
@@ -1670,8 +1730,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (!ev->state_snapshot_name ||
             (!ev->has_expected_snapshot_removed && !ev->target_selector && !ev->target_text)) {
             log_error("event_sim: assert_state_store_snapshot requires 'name' and target unless removed is set");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "assert_event_log") == 0) {
@@ -1681,8 +1740,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         parse_assert_count(reader, ev);
         if (!ev->assert_contains) {
             log_error("event_sim: assert_event_log requires 'contains'");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "assert_state_dump") == 0) {
@@ -1691,8 +1749,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (ref) ev->state_dump_reference = mem_strdup(ref, MEM_CAT_LAYOUT);
         else {
             log_error("event_sim: assert_state_dump requires 'reference' field");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "assert_reconcile_mode") == 0) {
@@ -1715,8 +1772,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         }
         if (!ev->expected_reconcile_mode) {
             log_error("event_sim: assert_reconcile_mode requires 'mode' field");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "assert_editing_event") == 0) {
@@ -1748,8 +1804,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         parse_assert_count(reader, ev);
         if (!ev->editing_event_type) {
             log_error("event_sim: assert_editing_event requires 'event'");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "navigate") == 0) {
@@ -1758,8 +1813,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (url) ev->navigate_url = mem_strdup(url, MEM_CAT_LAYOUT);
         else {
             log_error("event_sim: navigate event missing 'url' field");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "navigate_back") == 0) {
@@ -1782,8 +1836,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (file) ev->file_path = mem_strdup(file, MEM_CAT_LAYOUT);
         else {
             log_error("event_sim: render event missing 'file' field");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "render_pending") == 0) {
@@ -1801,8 +1854,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (ref) ev->snapshot_reference = mem_strdup(ref, MEM_CAT_LAYOUT);
         else {
             log_error("event_sim: assert_snapshot requires 'reference' field");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
         {
             ItemReader th = reader.get("threshold");
@@ -1845,8 +1897,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->advance_steps = reader.get("steps").asInt32();
         if (ev->wait_ms <= 0) {
             log_error("event_sim: advance_time requires positive 'ms' field");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "webview_eval_js") == 0) {
@@ -1856,8 +1907,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (js) ev->js_code = mem_strdup(js, MEM_CAT_LAYOUT);
         else {
             log_error("event_sim: webview_eval_js requires 'js' field");
-            mem_free(ev);
-            return NULL;
+            return parse_sim_event_fail(ev);
         }
     }
     else if (strcmp(type_str, "webview_wait_load") == 0) {
@@ -1868,8 +1918,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else {
         log_error("event_sim: unknown event type '%s'", type_str);
-        mem_free(ev);
-        return NULL;
+        return parse_sim_event_fail(ev);
     }
 
     // Parse optional auto-waiting fields for assertion events. The fixtures use
@@ -1969,7 +2018,7 @@ EventSimContext* event_sim_load(const char* json_file) {
             continue;
         }
         MapReader event_map = event_item.asMap();
-        SimEvent* ev = parse_sim_event(event_map);
+        SimEvent* ev = parse_sim_event(ctx, event_map);
         if (ev) {
             arraylist_append(ctx->events, ev);
         }
@@ -2060,10 +2109,10 @@ static void replay_parse_expected_snapshot(EventSimContext* ctx, MapReader& root
     }
 }
 
-static SimEvent* replay_input_raw_to_event(MapReader& data) {
+static SimEvent* replay_input_raw_to_event(EventSimContext* ctx, MapReader& data) {
     const char* event_name = data.get("event").cstring();
     if (!event_name) return NULL;
-    SimEvent* ev = (SimEvent*)mem_calloc(1, sizeof(SimEvent), MEM_CAT_LAYOUT);
+    SimEvent* ev = event_sim_alloc_event(ctx);
     if (!ev) return NULL;
     ev->type = SIM_EVENT_REPLAY_INPUT;
     ev->replay_event_name = mem_strdup(event_name, MEM_CAT_LAYOUT);
@@ -2173,7 +2222,7 @@ EventSimContext* event_sim_load_replay_log(const char* jsonl_file) {
                     ItemReader data_item = root_map.get("data");
                     if (data_item.isMap()) {
                         MapReader data = data_item.asMap();
-                        SimEvent* ev = replay_input_raw_to_event(data);
+                        SimEvent* ev = replay_input_raw_to_event(ctx, data);
                         if (ev) {
                             arraylist_append(ctx->events, ev);
                             last_input = ev;
@@ -2207,50 +2256,7 @@ void event_sim_free(EventSimContext* ctx) {
     if (ctx->events) {
         for (int i = 0; i < ctx->events->length; i++) {
             SimEvent* ev = (SimEvent*)ctx->events->data[i];
-            if (ev->message) mem_free(ev->message);
-            if (ev->file_path) mem_free(ev->file_path);
-            if (ev->target_text) mem_free(ev->target_text);
-            if (ev->target_selector) mem_free(ev->target_selector);
-            if (ev->to_target_selector) mem_free(ev->to_target_selector);
-            if (ev->to_target_text) mem_free(ev->to_target_text);
-            if (ev->input_text) mem_free(ev->input_text);
-            if (ev->assert_contains) mem_free(ev->assert_contains);
-            if (ev->assert_equals) mem_free(ev->assert_equals);
-            if (ev->assert_not_contains) mem_free(ev->assert_not_contains);
-            if (ev->state_snapshot_name) mem_free(ev->state_snapshot_name);
-            if (ev->clipboard_mime) mem_free(ev->clipboard_mime);
-            if (ev->clipboard_html) mem_free(ev->clipboard_html);
-            if (ev->option_value) mem_free(ev->option_value);
-            if (ev->option_label) mem_free(ev->option_label);
-            if (ev->state_name) mem_free(ev->state_name);
-            if (ev->style_property) mem_free(ev->style_property);
-            if (ev->element_a_selector) mem_free(ev->element_a_selector);
-            if (ev->element_a_text) mem_free(ev->element_a_text);
-            if (ev->element_b_selector) mem_free(ev->element_b_selector);
-            if (ev->element_b_text) mem_free(ev->element_b_text);
-            if (ev->position_relation) mem_free(ev->position_relation);
-            if (ev->navigate_url) mem_free(ev->navigate_url);
-            if (ev->expected_at_selector) mem_free(ev->expected_at_selector);
-            if (ev->expected_at_tag) mem_free(ev->expected_at_tag);
-            if (ev->attribute_name) mem_free(ev->attribute_name);
-            if (ev->expected_view_state_kind) mem_free(ev->expected_view_state_kind);
-            if (ev->snapshot_reference) mem_free(ev->snapshot_reference);
-            if (ev->snapshot_diff_path) mem_free(ev->snapshot_diff_path);
-            if (ev->snapshot_actual_path) mem_free(ev->snapshot_actual_path);
-            if (ev->js_code) mem_free(ev->js_code);
-            if (ev->frame_selector) mem_free(ev->frame_selector);
-            if (ev->ime_phase) mem_free(ev->ime_phase);
-            if (ev->editing_event_type) mem_free(ev->editing_event_type);
-            if (ev->editing_input_type) mem_free(ev->editing_input_type);
-            if (ev->editing_surface_kind) mem_free(ev->editing_surface_kind);
-            if (ev->editing_surface_mode) mem_free(ev->editing_surface_mode);
-            if (ev->editing_operation) mem_free(ev->editing_operation);
-            if (ev->editing_owned_by) mem_free(ev->editing_owned_by);
-            if (ev->replay_event_name) mem_free(ev->replay_event_name);
-            if (ev->state_dump_reference) mem_free(ev->state_dump_reference);
-            if (ev->expected_reconcile_mode) mem_free(ev->expected_reconcile_mode);
-            if (ev->expected_reconcile_reason) mem_free(ev->expected_reconcile_reason);
-            mem_free(ev);
+            sim_event_free_owned_fields(ev);
         }
         arraylist_free(ctx->events);
     }
@@ -2268,6 +2274,8 @@ void event_sim_free(EventSimContext* ctx) {
 
     if (ctx->test_name) mem_free(ctx->test_name);
     if (ctx->result_file) fclose(ctx->result_file);
+    if (ctx->event_arena) mem_arena_destroy(ctx->event_arena);
+    if (ctx->event_pool) mem_pool_destroy(ctx->event_pool);
     mem_free(ctx);
 }
 

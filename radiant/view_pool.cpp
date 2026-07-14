@@ -5,6 +5,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
+#include <stdlib.h>
 #include <time.h>
 #include <cmath>  // for INFINITY
 #include <string.h>
@@ -545,14 +546,19 @@ void free_view(ViewTree* tree, View* view) {
 }
 
 void* alloc_prop(LayoutContext* lycon, size_t size) {
-    void* prop = pool_calloc(lycon->doc->view_tree->pool, size);
+    return lycon->doc->view_tree->alloc_prop(size);
+}
+
+void* ViewTree::alloc_prop(size_t size) {
+    void* prop = pool_calloc(pool, size);
     if (prop) {
         return prop;
     }
     else {
+        // layout properties have no recovery path; aborting here avoids unchecked callers dereferencing NULL later.
         log_error("alloc_prop: pool_calloc returned NULL (pool=%p, size=%zu) - pool may be corrupt",
-                  (void*)lycon->doc->view_tree->pool, size);
-        return NULL;
+                  (void*)pool, size);
+        abort();
     }
 }
 
@@ -749,52 +755,67 @@ void view_pool_release_detached_subtree(DomNode* root) {
         false);
 }
 
-void view_pool_init(ViewTree* tree) {
+void ViewTree::init() {
     log_debug("init view pool");
-    tree->pool = mem_pool_create(NULL, MEM_ROLE_VIEW, "view_tree.pool");
-    if (!tree->pool) {
+    pool = mem_pool_create(NULL, MEM_ROLE_VIEW, "view_tree.pool");
+    if (!pool) {
         log_error("Failed to initialize view pool");
     }
     else {
-        tree->arena = mem_arena_create(NULL, tree->pool, MEM_ROLE_VIEW, "view_tree.arena");
+        arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "view_tree.arena");
         log_debug("view pool initialized");
     }
 }
 
-void view_pool_reset_retained(ViewTree* tree) {
-    if (!tree) return;
+void view_pool_init(ViewTree* tree) {
+    if (tree) tree->init();
+}
 
-    if (tree->root) {
+void ViewTree::reset_retained() {
+    if (root) {
         // DOM mutation fallback keeps DOM/view nodes; only layout-pool-owned
         // props are replaced so StateStore anchors can keep binding by node id.
-        view_teardown_visit_node(tree, tree->root,
+        view_teardown_visit_node(this, root,
             VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_CLEAR_POINTERS,
             false);
-        tree->root = NULL;
+        root = NULL;
     }
+    // Measurement entries point at this tree's views; reset invalidates them with the layout epoch.
+    clear_measurement_cache(this);
 
-    Arena* arena = tree->arena;
-    Pool* pool = tree->pool;
-    tree->arena = NULL;
-    tree->pool = NULL;
-    if (arena) arena_destroy(arena);
-    if (pool) pool_destroy(pool);
-    view_pool_init(tree);
+    Arena* old_arena = arena;
+    Pool* old_pool = pool;
+    arena = NULL;
+    pool = NULL;
+    // Factory-created view roots must unregister their memory-context nodes on teardown.
+    if (old_arena) mem_arena_destroy(old_arena);
+    if (old_pool) mem_pool_destroy(old_pool);
+    init();
+}
+
+void view_pool_reset_retained(ViewTree* tree) {
+    if (tree) tree->reset_retained();
+}
+
+void ViewTree::destroy() {
+    destroy_measurement_cache(this);
+    if (root) {
+        view_teardown_visit_node(this, root,
+            VIEW_TEARDOWN_RELEASE_EXTERNAL,
+            false);
+        root = NULL;
+    }
+    Arena* old_arena = arena;
+    Pool* old_pool = pool;
+    arena = NULL;
+    pool = NULL;
+    // Factory-created view roots must unregister their memory-context nodes on teardown.
+    if (old_arena) mem_arena_destroy(old_arena);
+    if (old_pool) mem_pool_destroy(old_pool);
 }
 
 void view_pool_destroy(ViewTree* tree) {
-    if (tree->root) {
-        view_teardown_visit_node(tree, tree->root,
-            VIEW_TEARDOWN_RELEASE_EXTERNAL,
-            false);
-        tree->root = NULL;
-    }
-    Arena* arena = tree->arena;
-    Pool* pool = tree->pool;
-    tree->arena = NULL;
-    tree->pool = NULL;
-    if (arena) arena_destroy(arena);
-    if (pool) pool_destroy(pool);
+    if (tree) tree->destroy();
 }
 
 void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {

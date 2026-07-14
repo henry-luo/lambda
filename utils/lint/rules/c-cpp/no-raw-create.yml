@@ -1,0 +1,14 @@
+id: no-raw-create
+language: cpp
+severity: error
+message: >-
+  Raw allocator creation in Radiant. Use the mem_factory wrappers so allocators
+  are registered, grouped, and destroyed symmetrically. Mark an audited
+  exception with a trailing "// RAWCREATE_OK: <reason>".
+metadata:
+  suppress: RAWCREATE_OK
+rule:
+  kind: call_expression
+  regex: "\\b(pool_create|pool_create_mmap|arena_create|arena_create_default|arena_create_sized|scratch_init|gc_nursery_create)\\s*\\("
+files:
+  - "radiant/**/*.{c,cpp,h,hpp,mm}"

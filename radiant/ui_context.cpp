@@ -7,6 +7,7 @@
 
 #include "../lib/log.h"
 #include "../lib/font/font.h"
+#include "../lib/mem_factory.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/memtrack.h"
@@ -52,23 +53,33 @@ char *fallback_fonts[] = {
 };
 
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
+    if (!uicon) return;
+    uicon->create_surface(pixel_width, pixel_height);
+}
+
+void UiContext::create_surface(int pixel_width, int pixel_height) {
     // re-creates the surface for rendering, 32-bits per pixel, RGBA format
-    if (uicon->surface) image_surface_destroy(uicon->surface);
-    uicon->surface = image_surface_create(pixel_width, pixel_height);
-    if (!uicon->surface) {
+    if (surface) image_surface_destroy(surface);
+    surface = image_surface_create(pixel_width, pixel_height);
+    if (!surface) {
         log_error("Error: Could not create image surface.");
     }
 }
 
 int ui_context_init(UiContext* uicon, bool headless) {
-    memset(uicon, 0, sizeof(UiContext));
-    uicon->headless = headless;
+    if (!uicon) return EXIT_FAILURE;
+    return uicon->init(headless);
+}
+
+int UiContext::init(bool next_headless) {
+    memset(this, 0, sizeof(UiContext));
+    headless = next_headless;
     // inital window width and height - match browser test viewport
     int window_width = 1200, window_height = 800;
 
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
-    if (headless) {
+    if (next_headless) {
         // Headless automation runs entirely against the in-memory view tree.
         // Avoid creating a hidden native window by default: on macOS, GLFW's
         // hidden-window path can block in LaunchServices before the test runner
@@ -89,23 +100,23 @@ int ui_context_init(UiContext* uicon, bool headless) {
                 return EXIT_FAILURE;
             }
             glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);  // hidden window
-            uicon->window = glfwCreateWindow(window_width, window_height, "Lambda Headless", NULL, NULL);
-            if (!uicon->window) {
+            window = glfwCreateWindow(window_width, window_height, "Lambda Headless", NULL, NULL);
+            if (!window) {
                 log_error("Headless: could not create hidden GLFW window, falling back to NULL window");
                 glfwTerminate();
-                uicon->window = NULL;
+                window = NULL;
             } else {
                 log_info("Running in headless mode (hidden GLFW window)");
             }
         } else {
-            uicon->window = NULL;
+            window = NULL;
             log_info("Running in headless mode (windowless)");
         }
-        uicon->pixel_ratio = 1.0;  // Default pixel ratio for headless
-        uicon->window_width = window_width;
-        uicon->window_height = window_height;
-        uicon->viewport_width = window_width;   // CSS pixels
-        uicon->viewport_height = window_height; // CSS pixels
+        pixel_ratio = 1.0;  // Default pixel ratio for headless
+        this->window_width = window_width;
+        this->window_height = window_height;
+        viewport_width = window_width;   // CSS pixels
+        viewport_height = window_height; // CSS pixels
     } else {
         // GUI mode: create window
         // Force X11 backend on Linux to ensure window visibility in mixed Wayland/XWayland environments
@@ -118,56 +129,87 @@ int ui_context_init(UiContext* uicon, bool headless) {
         }
 
         // create a window and its OpenGL context
-        uicon->window = glfwCreateWindow(window_width, window_height, "Lambda Radiant Text Rendering", NULL, NULL);
-        if (!uicon->window) {
+        window = glfwCreateWindow(window_width, window_height, "Lambda Radiant Text Rendering", NULL, NULL);
+        if (!window) {
             log_error("GLFW window create failed");
             return EXIT_FAILURE;
         }
 
         // ensure window is shown and focused (needed on some Wayland/XWayland setups)
-        glfwShowWindow(uicon->window);
-        glfwFocusWindow(uicon->window);
+        glfwShowWindow(window);
+        glfwFocusWindow(window);
 
         // get logical and actual pixel ratio
         int pixel_w, pixel_h;
-        glfwGetFramebufferSize(uicon->window, &pixel_w, &pixel_h);
+        glfwGetFramebufferSize(window, &pixel_w, &pixel_h);
         float scale_x = (float)pixel_w / window_width;
         float scale_y = (float)pixel_h / window_height;
         log_info("ui_context_init: scale factor: %.2f x %.2f, framebuffer size: %d x %d", scale_x, scale_y, pixel_w, pixel_h);
-        uicon->pixel_ratio = scale_x;
-        uicon->window_width = pixel_w;  uicon->window_height = pixel_h;
+        pixel_ratio = scale_x;
+        this->window_width = pixel_w;  this->window_height = pixel_h;
         // viewport_width/height store the intended CSS viewport (for vh/vw units)
         // These are the logical (CSS) pixels we requested, not the actual framebuffer size
-        uicon->viewport_width = window_width;   // CSS pixels (e.g., 1200)
-        uicon->viewport_height = window_height; // CSS pixels (e.g., 800)
+        viewport_width = window_width;   // CSS pixels (e.g., 1200)
+        viewport_height = window_height; // CSS pixels (e.g., 800)
         log_info("ui_context_init: viewport=%dx%d (CSS), framebuffer=%dx%d (physical)",
-               (int)uicon->viewport_width, (int)uicon->viewport_height,
-               (int)uicon->window_width, (int)uicon->window_height);
+               (int)viewport_width, (int)viewport_height,
+               (int)this->window_width, (int)this->window_height);
     }
 
     // F7: install platform IME shims (no-op on platforms without one).
-    radiant_ime_mac_attach(uicon);
-    radiant_ime_win_attach(uicon);
+    radiant_ime_mac_attach(this);
+    radiant_ime_win_attach(this);
 
     // Create unified font context — owns font database internally
     // Created after window so pixel_ratio is known
     FontContextConfig font_cfg = {};
-    font_cfg.pixel_ratio = uicon->pixel_ratio;
+    font_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "ui.font.pool");
+    font_arena = font_pool
+        ? mem_arena_create(NULL, font_pool, MEM_ROLE_RENDER, "ui.font.arena")
+        : NULL;
+    font_glyph_arena = font_pool
+        ? mem_arena_create_sized(NULL, font_pool, 256 * 1024, 4 * 1024 * 1024,
+                                 MEM_ROLE_RENDER, "ui.font.glyph_arena")
+        : NULL;
+    if (!font_pool || !font_arena || !font_glyph_arena) {
+        log_error("ui_context_init: failed to create tracked font allocators");
+        if (font_glyph_arena) mem_arena_destroy(font_glyph_arena);
+        if (font_arena) mem_arena_destroy(font_arena);
+        if (font_pool) mem_pool_destroy(font_pool);
+        font_glyph_arena = NULL;
+        font_arena = NULL;
+        font_pool = NULL;
+        return EXIT_FAILURE;
+    }
+    font_cfg.pool = font_pool;
+    font_cfg.arena = font_arena;
+    font_cfg.glyph_arena = font_glyph_arena;
+    font_cfg.pixel_ratio = pixel_ratio;
     font_cfg.max_cached_faces = 64;
     font_cfg.enable_lcd_rendering = true;
-    uicon->font_ctx = font_context_create(&font_cfg);
+    font_ctx = font_context_create(&font_cfg);
+    if (!font_ctx) {
+        log_error("ui_context_init: failed to initialize font context");
+        mem_arena_destroy(font_glyph_arena);
+        mem_arena_destroy(font_arena);
+        mem_pool_destroy(font_pool);
+        font_glyph_arena = NULL;
+        font_arena = NULL;
+        font_pool = NULL;
+        return EXIT_FAILURE;
+    }
 
     // set default fonts
     // Browsers use serif (Times/Times New Roman) as the default font when no font-family is specified
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 CSS pixels - layout operates in CSS logical pixels
-    uicon->default_font = (FontProp){default_font_times_new_roman, 16.0f, // 16px (CSS logical pixels)
+    default_font = (FontProp){default_font_times_new_roman, 16.0f, // 16px (CSS logical pixels)
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
-    uicon->default_font.font_size_from_medium = true;
-    uicon->legacy_default_font = (FontProp){default_font_times, 16.0f, // 16px (CSS logical pixels)
+    default_font.font_size_from_medium = true;
+    legacy_default_font = (FontProp){default_font_times, 16.0f, // 16px (CSS logical pixels)
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
-    uicon->legacy_default_font.font_size_from_medium = true;
-    uicon->fallback_fonts = fallback_fonts;
+    legacy_default_font.font_size_from_medium = true;
+    fallback_fonts = ::fallback_fonts;
 
     // init vector rendering engine
     rdt_engine_init(1);
@@ -176,10 +218,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
     // share font context with the vector backend so that picture-mode SVG
     // (file-based and data-URI) can resolve fonts via the same code path
     // used by inline <svg> in HTML body — including weight/style matching.
-    rdt_set_font_context(uicon->font_ctx);
+    rdt_set_font_context(font_ctx);
     // creates the surface for rendering
-    ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
-    scroll_config_init(uicon->pixel_ratio);
+    create_surface(this->window_width, this->window_height);
+    scroll_config_init(pixel_ratio);
 
     return EXIT_SUCCESS;
 }
@@ -256,7 +298,7 @@ void free_document(DomDocument* doc) {
     }
 
     if (doc->view_tree) {
-        // Check if doc->pool is the same as view_tree->pool to avoid double-free
+        // Some imported DOM/view fixtures alias the pools; the view-tree destroy path owns that shared pool.
         if (doc->pool == doc->view_tree->pool) {
             doc->pool = nullptr;  // Pool will be destroyed by view_pool_destroy
         }
@@ -280,40 +322,66 @@ void free_document(DomDocument* doc) {
 }
 
 void ui_context_cleanup(UiContext* uicon) {
+    if (!uicon) return;
+    uicon->destroy();
+}
+
+void UiContext::destroy_document() {
+    if (document) {
+        free_document(document);
+        document = nullptr;
+    }
+}
+
+void UiContext::destroy() {
     log_debug("cleaning up UI context");
 
     // destroy all webviews before tearing down the window
-    if (uicon->webview_mgr) {
-        webview_manager_destroy(uicon->webview_mgr);
-        uicon->webview_mgr = nullptr;
+    if (webview_mgr) {
+        webview_manager_destroy(webview_mgr);
+        webview_mgr = nullptr;
     }
 
-    if (uicon->document) {
-        free_document(uicon->document);
-    }
+    destroy_document();
 
     log_debug("cleaning up font resources");
-    fontface_cleanup(uicon);  // free font cache
-    font_prop_release_handle(&uicon->default_font);
-    font_prop_release_handle(&uicon->legacy_default_font);
-    if (uicon->font_ctx) {
-        font_context_destroy(uicon->font_ctx);
-        uicon->font_ctx = NULL;
+    fontface_cleanup(this);  // free font cache
+    font_prop_release_handle(&default_font);
+    font_prop_release_handle(&legacy_default_font);
+    if (font_ctx) {
+        font_context_destroy(font_ctx);
+        font_ctx = NULL;
+    }
+    // FontContext borrows these tracked roots; destroy them after its caches release their handles.
+    if (font_glyph_arena) {
+        mem_arena_destroy(font_glyph_arena);
+        font_glyph_arena = NULL;
+    }
+    if (font_arena) {
+        mem_arena_destroy(font_arena);
+        font_arena = NULL;
+    }
+    if (font_pool) {
+        mem_pool_destroy(font_pool);
+        font_pool = NULL;
     }
 
     log_debug("cleaning up media resources");
-    image_cache_cleanup(uicon);  // cleanup image cache
+    image_cache_cleanup(this);  // cleanup image cache
     render_pool_shutdown();  // destroy worker threads before ThorVG engine
     rdt_engine_term();
-    image_surface_destroy(uicon->surface);
+    image_surface_destroy(surface);
+    surface = nullptr;
 
     // Only tear down GLFW if a window was created (i.e., non-headless mode).
     // Calling glfwTerminate() without a prior glfwInit() is undefined behavior.
-    if (uicon->window) {
-        if (uicon->mouse_state.sys_cursor) {
-            glfwDestroyCursor(uicon->mouse_state.sys_cursor);
+    if (window) {
+        if (mouse_state.sys_cursor) {
+            glfwDestroyCursor(mouse_state.sys_cursor);
+            mouse_state.sys_cursor = nullptr;
         }
-        glfwDestroyWindow(uicon->window);
+        glfwDestroyWindow(window);
+        window = nullptr;
         glfwTerminate();
     }
 }

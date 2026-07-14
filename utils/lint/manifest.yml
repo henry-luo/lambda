@@ -41,6 +41,32 @@ rules:
     enforces: claude-md/rule-1
     tags: [memory, mandatory]
 
+  no-raw-create:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-raw-create.yml
+    category: memory-safety
+    tags: [radiant, allocator, mandatory]
+
+  no-open-realloc:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-open-realloc.yml
+    category: memory-safety
+    tags: [radiant, allocation-growth, mandatory]
+
+  radiant-alloc-allowlist:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/radiant-alloc-allowlist.yml
+    category: memory-safety
+    tags: [radiant, allocator, allowlist, warn]
+    note: "Warn-mode R7 gate while the sanctioned allocation API allowlist stabilizes."
+
+  obj-heap-ok:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/obj-heap-ok.yml
+    category: memory-safety
+    tags: [radiant, heap-root, warn]
+    note: "Warn-mode R2 review marker for typed struct heap roots."
+
   alloca-static-size:
     backend: ast-grep
     file: utils/lint/rules/c-cpp/alloca-static-size.yml

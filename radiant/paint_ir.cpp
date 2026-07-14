@@ -35,9 +35,9 @@ void paint_ir_register_glyph_run_raster_lowerer(PaintGlyphRunRasterLowerFn lower
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-void paint_list_init(PaintList* pl, Arena* backing_arena) {
-    memset(pl, 0, sizeof(PaintList));
-    pl->arena = backing_arena;
+void PaintList::init(Arena* backing_arena) {
+    memset(this, 0, sizeof(PaintList));
+    (void)backing_arena;
 }
 
 static void paint_free_owned_path(RdtPath** path, bool* owns_path) {
@@ -99,29 +99,43 @@ static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
     }
 }
 
-void paint_list_clear(PaintList* pl) {
-    if (!pl) return;
-    for (int i = 0; i < pl->count; i++) {
-        if (paint_op_has_flags(pl->cmds[i].op, PAINT_OP_FLAG_OWNED_PAYLOAD)) {
-            paint_cmd_free_owned_payload(&pl->cmds[i]);
+void PaintList::clear() {
+    for (int i = 0; i < count; i++) {
+        if (paint_op_has_flags(cmds[i].op, PAINT_OP_FLAG_OWNED_PAYLOAD)) {
+            paint_cmd_free_owned_payload(&cmds[i]);
         }
     }
-    pl->count = 0;
+    count = 0;
+}
+
+void PaintList::destroy() {
+    clear();
+    if (cmds) {
+        mem_free(cmds);
+        cmds = nullptr;
+    }
+    count = 0;
+    capacity = 0;
+}
+
+int PaintList::item_count() const {
+    return count;
+}
+
+void paint_list_init(PaintList* pl, Arena* backing_arena) {
+    if (pl) pl->init(backing_arena);
+}
+
+void paint_list_clear(PaintList* pl) {
+    if (pl) pl->clear();
 }
 
 void paint_list_destroy(PaintList* pl) {
-    if (!pl) return;
-    paint_list_clear(pl);
-    if (pl->cmds) {
-        mem_free(pl->cmds);
-        pl->cmds = nullptr;
-    }
-    pl->count = 0;
-    pl->capacity = 0;
+    if (pl) pl->destroy();
 }
 
 int paint_list_count(const PaintList* pl) {
-    return pl ? pl->count : 0;
+    return pl ? pl->item_count() : 0;
 }
 
 static void paint_ir_validation_set(PaintIrValidationResult* result, bool valid,

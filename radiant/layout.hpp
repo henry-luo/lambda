@@ -780,6 +780,12 @@ typedef struct CounterContext {
     Arena* arena;
     CounterScope* current_scope;
     lam::ArrayList<CounterScope*>* scope_stack;
+
+    bool init(Arena* backing_arena);
+    void destroy();
+    void push_scope();
+    void pop_scope();
+    void pop_scope_propagate(bool propagate_resets = false);
 } CounterContext;
 
 CounterContext* counter_context_create(Arena* arena);
@@ -1489,6 +1495,9 @@ typedef struct FlexContainerLayout : FlexProp {
 
     // Layout context for intrinsic sizing (set during init_flex_container)
     struct LayoutContext* lycon;
+
+    // pass-local flex state lives above this mark and is released together.
+    ScratchMark scratch_mark;
 } FlexContainerLayout;
 
 // ============================================================================
@@ -1608,6 +1617,22 @@ inline float flex_gap_for_axis(FlexContainerLayout* flex, LayoutAxis axis) {
 
 void init_flex_container(LayoutContext* lycon, ViewBlock* container);
 void cleanup_flex_container(LayoutContext* lycon);
+
+// Mirrors BlockContextScope: pass-local flex scratch and parent context must
+// unwind together, even when nested layout exits early.
+struct FlexLayoutScope {
+    LayoutContext* lycon;
+    FlexContainerLayout* saved;
+    bool active;
+
+    FlexLayoutScope(LayoutContext* l, ViewBlock* container);
+    ~FlexLayoutScope();
+    void close();
+
+    FlexLayoutScope(const FlexLayoutScope&) = delete;
+    FlexLayoutScope& operator=(const FlexLayoutScope&) = delete;
+};
+
 int collect_and_prepare_flex_items(LayoutContext* lycon, FlexContainerLayout* flex_layout, ViewBlock* container);
 float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout);
 void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout);
@@ -1662,10 +1687,11 @@ void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
 void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
 void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
-void clear_measurement_cache();
+void clear_measurement_cache(ViewTree* tree);
+void destroy_measurement_cache(ViewTree* tree);
 void invalidate_measurement_cache_for_node(DomNode* node);
-void advance_measurement_cache_generation();
-uint32_t get_measurement_cache_generation();
+void advance_measurement_cache_generation(ViewTree* tree);
+uint32_t get_measurement_cache_generation(ViewTree* tree);
 void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node);
 void init_flex_item_view(LayoutContext* lycon, DomNode* node);
 void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node);
@@ -1915,10 +1941,28 @@ typedef struct GridContainerLayout : GridProp {
     bool owns_auto_rows;
     bool owns_auto_columns;
     bool owns_grid_areas;
+    // pass-local grid state lives above this mark and is released together.
+    ScratchMark scratch_mark;
 } GridContainerLayout;
 
 void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
 void cleanup_grid_container(LayoutContext* lycon);
+
+// Mirrors BlockContextScope: pass-local grid scratch and parent context must
+// unwind together, even when no-item or absolute-only grid paths return early.
+struct GridLayoutScope {
+    LayoutContext* lycon;
+    GridContainerLayout* saved;
+    bool active;
+
+    GridLayoutScope(LayoutContext* l, ViewBlock* container);
+    ~GridLayoutScope();
+    void close();
+
+    GridLayoutScope(const GridLayoutScope&) = delete;
+    GridLayoutScope& operator=(const GridLayoutScope&) = delete;
+};
+
 GridTrackList* create_grid_track_list(int initial_capacity);
 void destroy_grid_track_list(GridTrackList* track_list);
 GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value);
@@ -2561,6 +2605,20 @@ struct LayoutContextScope {
     }
     LayoutContextScope(const LayoutContextScope&) = delete;
     LayoutContextScope& operator=(const LayoutContextScope&) = delete;
+};
+
+/**
+ * RAII guard for a top-level layout pass.
+ * Mirrors BlockContextScope: constructor initializes pass resources, destructor
+ * releases scratch/counters even when later layout code returns early.
+ */
+struct LayoutPassScope {
+    LayoutContext* lycon;
+    bool active;
+    LayoutPassScope(LayoutContext* l, DomDocument* doc, UiContext* uicon);
+    ~LayoutPassScope();
+    LayoutPassScope(const LayoutPassScope&) = delete;
+    LayoutPassScope& operator=(const LayoutPassScope&) = delete;
 };
 
 // Forward declaration

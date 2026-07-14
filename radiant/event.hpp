@@ -395,6 +395,8 @@ typedef enum InputIntentType {
 } InputIntentType;
 
 typedef struct InputIntent {
+    InputIntent();
+    ~InputIntent();
     InputIntentType type;
     const char* data;
     const char* html_data;
@@ -1633,6 +1635,9 @@ struct EditHistory {
     uint16_t          count;  // valid entries
     uint16_t          cursor; // 0 = at newest; N = N undos back
     uint16_t          cap;    // ring capacity
+
+    bool init(uint16_t capacity);
+    void destroy();
 };
 
 EditHistory* te_history_new(uint16_t cap);
@@ -2118,6 +2123,10 @@ typedef struct StateStore {
     Pool* pool;
     Arena* arena;
     struct DocState* doc_state;
+
+    bool init(DomDocument* document);
+    void destroy();
+    struct DocState* state() const;
 } StateStore;
 
 typedef struct CaretState CaretState;
@@ -2309,6 +2318,7 @@ typedef struct DocState {
     // semantics). See state_store_set_text_control_selection.
     EditingSelection     sel;
     struct DomRange*     live_ranges;       // doubly-linked list head
+    struct DomRange*     range_freelist;    // released arena slots for churny Range users
     uint32_t             next_range_id;     // monotonic id (debug)
     bool                 selection_layout_dirty;
     uint32_t             selection_projection_seq; // last selection seq reflected by projection caches
@@ -2398,6 +2408,9 @@ typedef struct DocState {
         bool  is_seeking;          // true while seek bar is being dragged
         float seek_fraction;       // seek position during drag (0.0–1.0)
     } video_controls;
+
+    bool init(Pool* pool, StateUpdateMode mode);
+    void destroy();
 } DocState;
 
 typedef struct ScrollInteractionState {
@@ -2476,11 +2489,6 @@ void radiant_state_set_dump_log(DocState* state, StateDumpLog* dump);
 StrBuf* radiant_state_dump_mark(DocState* state);
 void radiant_state_dump_emit_cascade(DocState* state, uint64_t cascade_id);
 bool radiant_state_dump_to_file(DocState* state, const char* path);
-
-/**
- * Reset state store, clearing all states but keeping allocation
- */
-void radiant_state_reset(DocState* state);
 
 /**
  * Get a state value

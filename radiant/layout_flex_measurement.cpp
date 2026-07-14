@@ -6,6 +6,7 @@
 
 #include "../lib/log.h"
 #include "../lib/mem.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/tagged.hpp"
 #include <float.h>
 #include <limits.h>
@@ -1215,94 +1216,113 @@ static void flex_measure_direct_child_heights(LayoutContext* lycon, DomElement* 
 // Content measurement for multi-pass flex layout
 // This file implements the first pass of the multi-pass flex layout algorithm
 
-// Global measurement cache
-static MeasurementCacheEntry* measurement_cache = nullptr;
-static int cache_count = 0;
-static int cache_capacity = 0;
-static uint32_t cache_generation = 0;  // incremented on each top-level layout
-
-static bool ensure_measurement_cache_capacity(int required) {
-    if (required <= cache_capacity) return true;
-
-    int new_capacity = cache_capacity > 0 ? cache_capacity : 1024;
-    while (new_capacity < required) {
-        new_capacity *= 2;
+// Content measurement cache is owned by ViewTree because entries point at that document's views.
+static ViewTree* measurement_cache_tree_for_node(DomNode* node) {
+    DomNode* current = node;
+    while (current) {
+        if (current->is_element()) {
+            DomElement* elem = current->as_element();
+            return elem && elem->doc ? elem->doc->view_tree : nullptr;
+        }
+        current = current->parent;
     }
-    MeasurementCacheEntry* grown = (MeasurementCacheEntry*)mem_realloc(
-        measurement_cache, (size_t)new_capacity * sizeof(MeasurementCacheEntry), MEM_CAT_CACHE_LAYOUT);
-    if (!grown) {
+    return nullptr;
+}
+
+static bool ensure_measurement_cache_capacity(ViewTree* tree, int required) {
+    if (!tree) return false;
+    if (required <= tree->measurement_cache_capacity) return true;
+
+    int old_capacity = tree->measurement_cache_capacity;
+    if (!lam::mem_grow_array(&tree->measurement_cache, &tree->measurement_cache_capacity, required, 1024,
+                             MEM_CAT_CACHE_LAYOUT)) {
         log_error("RAD_CAP_FLEX_MEASURE_CACHE: unable to grow measurement cache from %d to %d entries",
-                  cache_capacity, new_capacity);
+                  old_capacity, required);
         return false;
     }
     // New slots are zeroed so a failed/incomplete entry cannot look like a stale node hit.
-    if (new_capacity > cache_capacity) {
-        memset(grown + cache_capacity, 0,
-               (size_t)(new_capacity - cache_capacity) * sizeof(MeasurementCacheEntry));
+    if (tree->measurement_cache_capacity > old_capacity) {
+        memset(tree->measurement_cache + old_capacity, 0,
+               (size_t)(tree->measurement_cache_capacity - old_capacity) * sizeof(MeasurementCacheEntry));
     }
-    if (cache_capacity > 0) {
+    if (old_capacity > 0) {
         log_warn("[RAD_CAP_FLEX_MEASURE_CACHE] grew measurement cache from %d to %d entries",
-                 cache_capacity, new_capacity);
+                 old_capacity, tree->measurement_cache_capacity);
     }
-    measurement_cache = grown;
-    cache_capacity = new_capacity;
     return true;
 }
 
-void advance_measurement_cache_generation() {
-    cache_generation++;
-    log_debug("Measurement cache generation advanced to %u", cache_generation);
+void advance_measurement_cache_generation(ViewTree* tree) {
+    if (!tree) return;
+    tree->measurement_cache_generation++;
+    log_debug("Measurement cache generation advanced to %u", tree->measurement_cache_generation);
 }
 
-uint32_t get_measurement_cache_generation() {
-    return cache_generation;
+uint32_t get_measurement_cache_generation(ViewTree* tree) {
+    return tree ? tree->measurement_cache_generation : 0;
 }
 
 void store_in_measurement_cache(DomNode* node, float width, float height,
                                float content_width, float content_height,
                                float context_width) {
-    if (!ensure_measurement_cache_capacity(cache_count + 1)) {
+    ViewTree* tree = measurement_cache_tree_for_node(node);
+    if (!ensure_measurement_cache_capacity(tree, tree ? tree->measurement_cache_count + 1 : 1)) {
         return;
     }
 
-    measurement_cache[cache_count].node = node;
-    measurement_cache[cache_count].measured_width = width;
-    measurement_cache[cache_count].measured_height = height;
-    measurement_cache[cache_count].content_width = content_width;
-    measurement_cache[cache_count].content_height = content_height;
-    measurement_cache[cache_count].context_width = context_width;
-    measurement_cache[cache_count].generation = cache_generation;
-    cache_count++;
+    int cache_count = tree->measurement_cache_count;
+    tree->measurement_cache[cache_count].node = node;
+    tree->measurement_cache[cache_count].measured_width = width;
+    tree->measurement_cache[cache_count].measured_height = height;
+    tree->measurement_cache[cache_count].content_width = content_width;
+    tree->measurement_cache[cache_count].content_height = content_height;
+    tree->measurement_cache[cache_count].context_width = context_width;
+    tree->measurement_cache[cache_count].generation = tree->measurement_cache_generation;
+    tree->measurement_cache_count++;
 
     log_debug("Cached measurement for node %p: %.1fx%.1f (content: %.1fx%.1f) gen=%u",
-              node, width, height, content_width, content_height, cache_generation);
+              node, width, height, content_width, content_height, tree->measurement_cache_generation);
 }
 
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node) {
-    for (int i = 0; i < cache_count; i++) {
-        if (measurement_cache[i].node == node) {
+    ViewTree* tree = measurement_cache_tree_for_node(node);
+    if (!tree) return nullptr;
+    for (int i = 0; i < tree->measurement_cache_count; i++) {
+        if (tree->measurement_cache[i].node == node) {
             // skip stale entries from a previous layout generation
-            if (measurement_cache[i].generation != cache_generation) {
+            if (tree->measurement_cache[i].generation != tree->measurement_cache_generation) {
                 log_debug("Skipping stale measurement cache entry for node %p (gen %u, current %u)",
-                          node, measurement_cache[i].generation, cache_generation);
+                          node, tree->measurement_cache[i].generation, tree->measurement_cache_generation);
                 return nullptr;
             }
-            return &measurement_cache[i];
+            return &tree->measurement_cache[i];
         }
     }
     return nullptr;
 }
 
-void clear_measurement_cache() {
-    cache_count = 0;
+void clear_measurement_cache(ViewTree* tree) {
+    if (!tree) return;
+    tree->measurement_cache_count = 0;
     log_debug("Cleared measurement cache");
 }
 
+void destroy_measurement_cache(ViewTree* tree) {
+    if (!tree) return;
+    mem_free(tree->measurement_cache);
+    tree->measurement_cache = nullptr;
+    tree->measurement_cache_count = 0;
+    tree->measurement_cache_capacity = 0;
+    tree->measurement_cache_generation = 0;
+}
+
 void invalidate_measurement_cache_for_node(DomNode* node) {
-    for (int i = 0; i < cache_count; i++) {
-        if (measurement_cache[i].node == node) {
+    ViewTree* tree = measurement_cache_tree_for_node(node);
+    if (!tree) return;
+    for (int i = 0; i < tree->measurement_cache_count; i++) {
+        if (tree->measurement_cache[i].node == node) {
             // Swap with last entry and decrement count to remove this entry
-            measurement_cache[i] = measurement_cache[--cache_count];
+            tree->measurement_cache[i] = tree->measurement_cache[--tree->measurement_cache_count];
             log_debug("Invalidated measurement cache for node %p (%s)", node, node ? node->node_name() : "null");
             return;
         }

@@ -4272,8 +4272,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
             if (!block->embed->webview) {
                 WebViewProp* wv = (WebViewProp*)alloc_prop(lycon, sizeof(WebViewProp));
-                wv->src = block->get_attribute("src");
-                wv->srcdoc = block->get_attribute("srcdoc");
+                // webview attributes are borrowed from the DOM pool and must stay registered across retained view-pool resets.
+                radiant_retain_webview_src(wv, lam::PoolPtr<const char>(block->get_attribute("src")));
+                radiant_retain_webview_srcdoc(wv, lam::PoolPtr<const char>(block->get_attribute("srcdoc")));
                 const char* mode_attr = block->get_attribute("mode");
                 wv->mode = (mode_attr && strcmp(mode_attr, "layer") == 0)
                     ? WEBVIEW_MODE_LAYER : WEBVIEW_MODE_WINDOW;

@@ -123,11 +123,6 @@ static const char* css_value_extract_name(const CssValue* value) {
 // ============================================================================
 
 DomDocument* dom_document_create(Input* input) {
-    if (!input) {
-        log_error("dom_document_create: input is required");
-        return nullptr;
-    }
-
     // Allocate document structure
     DomDocument* document = (DomDocument*)mem_calloc(1, sizeof(DomDocument), MEM_CAT_INPUT_CSS);
     if (!document) {
@@ -135,79 +130,97 @@ DomDocument* dom_document_create(Input* input) {
         return nullptr;
     }
 
-    // Reuse the input's per-document memory sub-context so the DOM pool/arena are
-    // attributed to the same document (URL) as the parsed source. The whole
-    // document subtree is reclaimed together at free_document() time.
-    MemContext* dctx = (input && input->mem_ctx) ? (MemContext*)input->mem_ctx : NULL;
-    document->mem_ctx = dctx;
-
-    // Create pool for arena chunks
-    document->pool = mem_pool_create(dctx, MEM_ROLE_NODE, "dom.document");
-    if (!document->pool) {
-        log_error("dom_document_create: failed to create pool");
+    if (!document->init(input)) {
         mem_free(document);
         return nullptr;
     }
-
-    // Create arena for all DOM node allocations
-    document->arena = mem_arena_create(dctx, document->pool, MEM_ROLE_NODE, "dom.document.arena");
-    if (!document->arena) {
-        log_error("dom_document_create: failed to create arena");
-        pool_destroy(document->pool);
-        mem_free(document);
-        return nullptr;
-    }
-
-    document->input = input;
-    document->root = nullptr;
 
     log_debug("dom_document_create: created document with arena");
     return document;
+}
+
+bool DomDocument::init(Input* source_input) {
+    if (!source_input) {
+        log_error("dom_document_create: input is required");
+        return false;
+    }
+
+    // Reuse the input's per-document memory sub-context so the DOM pool/arena are
+    // attributed to the same document (URL) as the parsed source. The whole
+    // document subtree is reclaimed together at free_document() time.
+    MemContext* dctx = source_input->mem_ctx ? (MemContext*)source_input->mem_ctx : NULL;
+    mem_ctx = dctx;
+
+    // Create pool for arena chunks
+    pool = mem_pool_create(dctx, MEM_ROLE_NODE, "dom.document");
+    if (!pool) {
+        log_error("dom_document_create: failed to create pool");
+        return false;
+    }
+
+    // Create arena for all DOM node allocations
+    arena = mem_arena_create(dctx, pool, MEM_ROLE_NODE, "dom.document.arena");
+    if (!arena) {
+        log_error("dom_document_create: failed to create arena");
+        // Factory-created DOM roots must unregister their memory-context nodes on teardown.
+        destroy();
+        return false;
+    }
+
+    input = source_input;
+    root = nullptr;
+    return true;
 }
 
 void dom_document_destroy(DomDocument* document) {
     if (!document) {
         return;
     }
+    document->destroy();
+    mem_free(document);
+}
 
-    if (document->html_root) {
-        svg_unregister_image_resolvers_for_tree(document->html_root);
+void DomDocument::destroy() {
+    if (html_root) {
+        svg_unregister_image_resolvers_for_tree(html_root);
     }
 
-    if (document->pending_navigation_url) {
-        mem_free(document->pending_navigation_url);
-        document->pending_navigation_url = nullptr;
+    if (pending_navigation_url) {
+        mem_free(pending_navigation_url);
+        pending_navigation_url = nullptr;
     }
 
     // Runtime-backed extension values must release their GC roots while the
     // document's retained Lambda runtime is still alive.
-    DomDocumentResource* resource = document->resources;
+    DomDocumentResource* resource = resources;
     while (resource) {
         DomDocumentResource* next = resource->next;
         if (resource->destroy) resource->destroy(resource->data);
         mem_free(resource);
         resource = next;
     }
-    document->resources = nullptr;
+    resources = nullptr;
 
-    if (document->lambda_runtime) {
-        if (g_runtime_cleanup_hook) g_runtime_cleanup_hook(document->lambda_runtime);
-        mem_free(document->lambda_runtime);
-        document->lambda_runtime = nullptr;
+    if (lambda_runtime) {
+        if (g_runtime_cleanup_hook) g_runtime_cleanup_hook(lambda_runtime);
+        mem_free(lambda_runtime);
+        lambda_runtime = nullptr;
     }
 
     // Note: root and all DOM nodes are allocated from arena,
     // so they will be freed when arena is destroyed
-    if (document->arena) {
-        arena_destroy(document->arena);
+    if (arena) {
+        // Factory-created DOM roots must unregister their memory-context nodes on teardown.
+        mem_arena_destroy(arena);
+        arena = nullptr;
     }
 
-    if (document->pool) {
-        pool_destroy(document->pool);
+    if (pool) {
+        mem_pool_destroy(pool);
+        pool = nullptr;
     }
 
     // Note: Input* is not owned by document, don't free it
-    mem_free(document);
     log_debug("dom_document_destroy: destroyed document and arena");
 }
 

@@ -11,10 +11,15 @@ static void initialize_grid_axis(GridTrack** destination, int track_count,
                                  int explicit_count, int negative_implicit_count,
                                  GridTrackList* template_tracks,
                                  GridTrackList* automatic_tracks,
+                                 ScratchArena* scratch,
                                  const char* axis_name) {
     if (track_count <= 0) return;
 
-    *destination = (GridTrack*)mem_calloc(track_count, sizeof(GridTrack), MEM_CAT_LAYOUT);
+    *destination = (GridTrack*)scratch_calloc(scratch, (size_t)track_count * sizeof(GridTrack));
+    if (!*destination) {
+        log_error("grid_sizing: unable to allocate %d %s scratch tracks", track_count, axis_name);
+        return;
+    }
     log_debug("  Allocated %d %s tracks", track_count, axis_name);
     int explicit_start = negative_implicit_count;
     int explicit_end = explicit_start + explicit_count;
@@ -52,6 +57,10 @@ static void initialize_grid_axis(GridTrack** destination, int track_count,
 // Initialize track sizes
 void initialize_track_sizes(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
+    if (!grid_layout->lycon) {
+        log_error("grid_sizing: missing layout context for scratch track allocation");
+        return;
+    }
 
     log_debug("Initializing track sizes: computed_rows=%d, computed_cols=%d",
               grid_layout->computed_row_count, grid_layout->computed_column_count);
@@ -63,12 +72,13 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
     initialize_grid_axis(&grid_layout->computed_rows, grid_layout->computed_row_count,
                          grid_layout->explicit_row_count,
                          grid_layout->negative_implicit_row_count,
-                         grid_layout->grid_template_rows, grid_layout->grid_auto_rows, "row");
+                         grid_layout->grid_template_rows, grid_layout->grid_auto_rows,
+                         &grid_layout->lycon->scratch, "row");
     initialize_grid_axis(&grid_layout->computed_columns, grid_layout->computed_column_count,
                          grid_layout->explicit_column_count,
                          grid_layout->negative_implicit_column_count,
                          grid_layout->grid_template_columns,
-                         grid_layout->grid_auto_columns, "column");
+                         grid_layout->grid_auto_columns, &grid_layout->lycon->scratch, "column");
 
     log_debug("Track sizes initialized - %d rows, %d columns\n",
               grid_layout->computed_row_count, grid_layout->computed_column_count);

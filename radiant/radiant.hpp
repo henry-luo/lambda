@@ -37,6 +37,20 @@ typedef struct BrowsingSession {
 
     struct NetworkThreadPool* thread_pool;
     struct EnhancedFileCache* file_cache;
+#ifdef __cplusplus
+    void init(struct NetworkThreadPool* pool, struct EnhancedFileCache* cache);
+    void destroy();
+    DomDocument* navigate(struct UiContext* uicon, const char* url, int vw, int vh);
+    DomDocument* go_back(struct UiContext* uicon, int vw, int vh);
+    DomDocument* go_forward(struct UiContext* uicon, int vw, int vh);
+    bool can_go_back() const;
+    bool can_go_forward() const;
+    const char* current_url() const;
+    const char* current_title() const;
+    void save_scroll_position(float scroll_y);
+    float get_scroll_position() const;
+    void set_current_title(const char* title);
+#endif
 } BrowsingSession;
 
 BrowsingSession* session_create(struct NetworkThreadPool* pool, struct EnhancedFileCache* cache);
@@ -217,6 +231,16 @@ void webview_layer_platform_inject_scroll(WebViewHandle* handle,
 #ifdef __cplusplus
 }
 #endif
+
+inline void radiant_retain_webview_src(WebViewProp* webview, lam::PoolPtr<const char> src) {
+    lam::PersistentFieldRef<const char, lam::PoolDomain> field(webview->src);
+    field.set(src);
+}
+
+inline void radiant_retain_webview_srcdoc(WebViewProp* webview, lam::PoolPtr<const char> srcdoc) {
+    lam::PersistentFieldRef<const char, lam::PoolDomain> field(webview->srcdoc);
+    field.set(srcdoc);
+}
 
 // ===== window / surface / UI context =====
 

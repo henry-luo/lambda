@@ -1385,7 +1385,6 @@ static void validate_editing_target_ranges_invariant(
     }
 
     InputIntent intent;
-    memset(&intent, 0, sizeof(intent));
     intent.type = (InputIntentType)editing->rich_transaction_input_type;
     EditingTargetRange recomputed[4];
     memset(recomputed, 0, sizeof(recomputed));

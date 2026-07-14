@@ -9,6 +9,7 @@ extern "C" {
 #include "../lib/lambda_alloca.h"
 #include "../lib/str.h"
 }
+#include "../lib/mem_grow.hpp"
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include <stdlib.h>
@@ -94,8 +95,7 @@ void log_font_fallback_triggered(const char* requested, const char* fallback) {
 }
 
 static FontFaceDescriptor* font_face_descriptor_from_css(CssFontFaceDescriptor* css_desc) {
-    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(
-        1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT);
+    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: UiContext owns @font-face descriptors across layout passes.
     if (!descriptor) return nullptr;
     descriptor->family_name = css_desc->family_name
         ? mem_strdup(css_desc->family_name, MEM_CAT_LAYOUT) : nullptr;
@@ -365,17 +365,11 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
 
     // Expand array if needed
     if (uicon->font_face_count >= uicon->font_face_capacity) {
-        int new_capacity = uicon->font_face_capacity * 2;
-        FontFaceDescriptor** new_array = (FontFaceDescriptor**)mem_realloc(
-            uicon->font_faces, new_capacity * sizeof(FontFaceDescriptor*), MEM_CAT_LAYOUT);
-
-        if (!new_array) {
+        if (!lam::mem_grow_array(&uicon->font_faces, &uicon->font_face_capacity,
+                                 uicon->font_face_count + 1, 16, MEM_CAT_LAYOUT)) {
             clog_error(font_log, "Failed to expand font_faces array");
             return;
         }
-
-        uicon->font_faces = new_array;
-        uicon->font_face_capacity = new_capacity;
     }
 
     // Store the descriptor

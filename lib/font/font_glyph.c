@@ -519,6 +519,8 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     FontContext* ctx = handle->ctx;
     if (!ctx) return NULL;
 
+    font_context_enforce_glyph_arena_limit(ctx);
+
     // check bitmap cache first
     struct hashmap* bmp_cache = ensure_bitmap_cache(ctx);
     if (bmp_cache) {
@@ -751,6 +753,8 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
     // Phase 17: check loaded glyph cache before loading
     FontContext* ctx = handle->ctx;
     if (ctx) {
+        font_context_enforce_glyph_arena_limit(ctx);
+
         struct hashmap* lgcache = ctx->loaded_glyph_cache;
         if (lgcache) {
             LoadedGlyphCacheEntry search;
@@ -854,6 +858,8 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
     if (!handle || !style) return NULL;
     FontContext* ctx = handle->ctx;
     if (!ctx) return font_load_glyph(handle, style, codepoint, for_rendering);
+
+    font_context_enforce_glyph_arena_limit(ctx);
 
     // check loaded glyph cache before expensive emoji font lookup
     struct hashmap* lgcache = ctx->loaded_glyph_cache;
