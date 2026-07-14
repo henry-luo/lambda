@@ -5573,6 +5573,28 @@ static void for_each_table_caption(ArrayList* captions, Fn fn) {
     }
 }
 
+struct TableCaptionCollection {
+    ArrayList* captions;
+    ViewBlock* first_caption;
+    float total_height;
+};
+
+static TableCaptionCollection table_collect_captions(ViewTable* table) {
+    TableCaptionCollection result = {arraylist_new(4), nullptr, 0.0f};
+    for_each_direct_table_block(table, [&](ViewBlock* child) {
+        if (!table_view_is_caption(child)) return;
+        arraylist_append(result.captions, child);
+        if (!result.first_caption) result.first_caption = child;
+        if (child->height > 0.0f) {
+            float margin_v = table_caption_positive_vertical_margin(child);
+            result.total_height += table_caption_height_with_margins(child);
+            log_debug("Caption height calculation: height(content+padding+border)=%.1f, margin_v=%.1f, total_so_far=%.1f",
+                      child->height, margin_v, result.total_height);
+        }
+    });
+    return result;
+}
+
 static void table_position_caption_with_margins(ViewBlock* caption, float base_y) {
     if (!caption) return;
     caption->x = table_caption_positive_margin_left(caption);
@@ -7248,28 +7270,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // CRITICAL FIX: Handle caption positioning first
     // CSS 2.1 §17.4: A table may have multiple captions; all are rendered.
-    ArrayList* captions = arraylist_new(4);
-    ViewBlock* caption = nullptr;  // first caption (for backward-compat checks)
-    float caption_height = 0;
-
-    // Find ALL captions - check both HTML tag and CSS display property
-    for (View* child_view = static_cast<View*>(table->first_child); child_view; child_view = static_cast<View*>(child_view->next_sibling)) {
-        ViewBlock* child = lam::view_as_block(child_view);
-        if (!child) continue;
-        // Check for HTML <caption> tag OR CSS display: table-caption
-        if (table_view_is_caption(child)) {
-            arraylist_append(captions, child);
-            if (!caption) caption = child;
-            // Caption height calculation: caption->height already includes content+padding+border
-            if (child->height > 0) {
-                float margin_v = table_caption_positive_vertical_margin(child);
-                caption_height += table_caption_height_with_margins(child);
-                log_debug("Caption height calculation: height(content+padding+border)=%.1f, margin_v=%.1f, total_so_far=%.1f",
-                    child->height, margin_v, caption_height);
-            }
-            // Continue to find all captions (no break)
-        }
-    }
+    TableCaptionCollection caption_collection = table_collect_captions(table);
+    ArrayList* captions = caption_collection.captions;
+    ViewBlock* caption = caption_collection.first_caption;  // first caption (for backward-compat checks)
+    float caption_height = caption_collection.total_height;
     log_debug("Found %d caption(s), total caption_height=%.1f", captions->length, caption_height);
 
     // Step 1: Analyze table structure (Phase 3 optimization)
