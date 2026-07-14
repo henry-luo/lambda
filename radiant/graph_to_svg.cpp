@@ -137,6 +137,19 @@ static const char* get_node_attribute(Element* graph, const char* node_id,
     return get_node_attribute_recursive(graph_reader, node_id, attr_name, default_value);
 }
 
+static Item render_polygon(MarkBuilder& builder, StringBuf* points,
+                           const char* fill, const char* stroke,
+                           float stroke_width) {
+    Item result = builder.element("polygon")
+        .attr("points", points->str->chars)
+        .attr("fill", fill)
+        .attr("stroke", stroke)
+        .attr("stroke-width", (double)stroke_width)
+        .final();
+    stringbuf_free(points);
+    return result;
+}
+
 // Helper: render node shape - returns Item (Element)
 static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* pos,
                               const char* shape, const char* fill,
@@ -177,14 +190,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
                          cx, y + h,       // bottom
                          x, cy);          // left
 
-        Item result = builder.element("polygon")
-            .attr("points", sb->str->chars)
-            .attr("fill", fill)
-            .attr("stroke", stroke)
-            .attr("stroke-width", (double)stroke_width)
-            .final();
-        stringbuf_free(sb);
-        return result;
+        return render_polygon(builder, sb, fill, stroke, stroke_width);
     } else if (strcmp(shape, "hexagon") == 0) {
         // hexagon as polygon (6 points)
         float r = fminf(w, h) / 2.0f;
@@ -197,14 +203,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
             stringbuf_append_format(sb, "%.1f,%.1f", px, py);
         }
 
-        Item result = builder.element("polygon")
-            .attr("points", sb->str->chars)
-            .attr("fill", fill)
-            .attr("stroke", stroke)
-            .attr("stroke-width", (double)stroke_width)
-            .final();
-        stringbuf_free(sb);
-        return result;
+        return render_polygon(builder, sb, fill, stroke, stroke_width);
     } else if (strcmp(shape, "triangle") == 0) {
         // triangle pointing up
         StringBuf* sb = stringbuf_new(pool);
@@ -213,14 +212,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
                          x + w, y + h,    // bottom-right
                          x, y + h);       // bottom-left
 
-        Item result = builder.element("polygon")
-            .attr("points", sb->str->chars)
-            .attr("fill", fill)
-            .attr("stroke", stroke)
-            .attr("stroke-width", (double)stroke_width)
-            .final();
-        stringbuf_free(sb);
-        return result;
+        return render_polygon(builder, sb, fill, stroke, stroke_width);
     } else if (strcmp(shape, "stadium") == 0 || strcmp(shape, "rounded") == 0) {
         // stadium/pill shape: rectangle with fully rounded ends (half-circles)
         float r = h / 2.0f;  // radius is half the height
@@ -358,14 +350,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
                          x + w, y + h,         // bottom-right
                          x, y + h);            // bottom-left
 
-        Item result = builder.element("polygon")
-            .attr("points", sb->str->chars)
-            .attr("fill", fill)
-            .attr("stroke", stroke)
-            .attr("stroke-width", (double)stroke_width)
-            .final();
-        stringbuf_free(sb);
-        return result;
+        return render_polygon(builder, sb, fill, stroke, stroke_width);
     } else if (strcmp(shape, "trapezoid-alt") == 0 || strcmp(shape, "inv_trapezoid") == 0) {
         // inverted trapezoid: wider at top, narrower at bottom  [\text/]
         float inset = w * 0.15f;  // 15% inset on each side at bottom
@@ -376,14 +361,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
                          x + w - inset, y + h,     // bottom-right (inset)
                          x + inset, y + h);        // bottom-left (inset)
 
-        Item result = builder.element("polygon")
-            .attr("points", sb->str->chars)
-            .attr("fill", fill)
-            .attr("stroke", stroke)
-            .attr("stroke-width", (double)stroke_width)
-            .final();
-        stringbuf_free(sb);
-        return result;
+        return render_polygon(builder, sb, fill, stroke, stroke_width);
     } else if (strcmp(shape, "asymmetric") == 0) {
         // asymmetric: flag-like shape with pointed right side  >text]
         float point_offset = w * 0.15f;
@@ -395,14 +373,7 @@ static Item render_node_shape(MarkBuilder& builder, Pool* pool, NodePosition* po
                          x, y + h,                     // bottom-left
                          x + point_offset, cy);        // left point
 
-        Item result = builder.element("polygon")
-            .attr("points", sb->str->chars)
-            .attr("fill", fill)
-            .attr("stroke", stroke)
-            .attr("stroke-width", (double)stroke_width)
-            .final();
-        stringbuf_free(sb);
-        return result;
+        return render_polygon(builder, sb, fill, stroke, stroke_width);
     } else if (strcmp(shape, "box") == 0) {
         // box: simple rectangle with no rounded corners
         return builder.element("rect")

@@ -84,6 +84,76 @@
           "file": "radiant/layout_debug.cpp",
           "start": "static const char* bucket_name(",
           "end": "void layout_debug_init("
+        },
+        {
+          "file": "radiant/state_machine.cpp",
+          "start": "static const char* editing_drag_mode_name(",
+          "end": "static const char* editing_rich_transaction_phase_name("
+        },
+        {
+          "file": "radiant/state_machine.cpp",
+          "start": "static const char* editing_rich_transaction_phase_name(",
+          "end": "static void write_editing_surface_ref("
+        },
+        {
+          "file": "radiant/editing.cpp",
+          "start": "const char* editing_surface_kind_name(",
+          "end": "const char* editing_mode_name("
+        },
+        {
+          "file": "radiant/editing.cpp",
+          "start": "const char* editing_mode_name(",
+          "end": "}"
+        }
+      ]
+    },
+    {
+      "id": "independent_switch_case_inventories",
+      "modules": ["radiant"],
+      "reason": "These switches are independent membership inventories over unrelated intent, HTML tag, and display-op enums; Lizard discards the distinguishing case labels.",
+      "regions": [
+        {
+          "file": "radiant/editing_intent.cpp",
+          "start": "bool input_intent_is_dispatchable(",
+          "end": "bool input_intent_from_key_event("
+        },
+        {
+          "file": "radiant/editing_target_range.cpp",
+          "start": "static bool target_range_is_simple_inline_tag(",
+          "end": "struct TargetRangeJoinContent"
+        },
+        {
+          "file": "radiant/editing_dispatch.cpp",
+          "start": "static bool editing_history_intent_is_recordable(",
+          "end": "static bool editing_history_intent_is_boundary("
+        },
+        {
+          "file": "radiant/editing_dispatch.cpp",
+          "start": "static bool editing_history_intent_is_boundary(",
+          "end": "static const char* editing_history_boundary_reason("
+        },
+        {
+          "file": "radiant/tile_pool.cpp",
+          "start": "// vector ops are handled before this switch by dl_replay_vector_item().",
+          "end": "// -- Direct-pixel operations: manual tile-local coordinate translation --"
+        },
+        {
+          "file": "radiant/render_list.cpp",
+          "start": "case CSS_VALUE_DECIMAL:",
+          "end": "if (marker_prop->text_content && *marker_prop->text_content"
+        }
+      ]
+    },
+    {
+      "id": "declarative_state_transition_rows",
+      "modules": ["radiant"],
+      "reason": "The static state-machine schema intentionally uses one fixed aggregate row shape; converting readable data rows into macros or runtime builders would add code without reducing behavior duplication.",
+      "allow_within_region": true,
+      "regions": [
+        {
+          "file": "radiant/state_schema.cpp",
+          "start": "static const StateTransitionRule RADIANT_STATE_RULES[] = {",
+          "end": "#undef SM_RULE_TO"
         }
       ]
     }

@@ -2165,6 +2165,14 @@ static bool dispatch_editing_copy_selection(DocState* state,
     return copy_current_selection_to_clipboard(state, prefix);
 }
 
+static EditingDispatchHooks dispatch_editing_hooks() {
+    EditingDispatchHooks hooks = {};
+    hooks.dispatch_input_event = dispatch_editing_input_event;
+    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
+    hooks.copy_selection = dispatch_editing_copy_selection;
+    return hooks;
+}
+
 static void rich_select_all_sync_descendant_text_controls(DocState* state,
                                                           DomNode* node) {
     if (!state || !node || !node->is_element()) return;
@@ -2194,11 +2202,7 @@ static bool dispatch_rich_consumer_transaction_operation(EventContext* evcon,
     if (!editing_surface_from_target(target, &surface)) return false;
     if (!editing_surface_is_rich(&surface)) return false;
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
     DocState* state = event_context_target_state(evcon);
     event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
 
@@ -2249,11 +2253,7 @@ static bool dispatch_rich_transaction_defaultable(EventContext* evcon,
     if (!editing_surface_from_target(target, &surface)) return false;
     if (!editing_surface_is_rich(&surface)) return false;
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     DocState* state = event_context_target_state(evcon);
     event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
@@ -2420,11 +2420,7 @@ static bool dispatch_rich_select_all_transaction(EventContext* evcon,
         return false;
     }
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     EditingTransaction tx;
     memset(&tx, 0, sizeof(tx));
@@ -2459,11 +2455,7 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     intent.type = input_type;
     intent.data = repl ? repl : "";
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     uint32_t saved_selection_start = 0;
     uint32_t saved_selection_end = 0;
@@ -2736,16 +2728,18 @@ static int form_control_live_value_len_int(DomElement* elem) {
     return (int)value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
 }
 
+static bool dispatch_form_editing_surface(EventContext* evcon, DomElement* elem,
+                                          DocState* state, View* target,
+                                          EditingSurface* surface) {
+    return evcon && elem && state && target && tc_is_text_control(elem) &&
+        editing_surface_from_target(target, surface) &&
+        editing_surface_is_text_control(surface);
+}
+
 static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
                                      DocState* state, View* target) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     InputIntent intent;
     memset(&intent, 0, sizeof(intent));
@@ -2774,14 +2768,8 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
                                          DocState* state, View* target,
                                          uint32_t offset,
                                          const char* operation) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     uint32_t value_len = 0;
     form_control_live_value(elem, &value_len);
@@ -2799,14 +2787,8 @@ static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem
                                            DocState* state, View* target,
                                            int anchor_offset, int focus_offset,
                                            const char* operation) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     int value_len = form_control_live_value_len_int(elem);
     if (anchor_offset < 0) anchor_offset = 0;
@@ -2843,14 +2825,8 @@ static bool dispatch_form_selection_start(EventContext* evcon, DomElement* elem,
                                           DocState* state, View* target,
                                           uint32_t offset,
                                           const char* operation) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     tc_ensure_init(elem);
     uint32_t value_len = elem->form ? elem->form->current_value_len : 0;
@@ -2872,14 +2848,8 @@ static bool dispatch_form_selection_range(EventContext* evcon, DomElement* elem,
                                           DocState* state, View* target,
                                           uint32_t start, uint32_t end,
                                           const char* operation) {
-    if (!evcon || !elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-
     EditingSurface surface;
-    if (!editing_surface_from_target(target, &surface) ||
-        !editing_surface_is_text_control(&surface)) {
-        return false;
-    }
+    if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
     tc_ensure_init(elem);
     uint32_t value_len = elem->form ? elem->form->current_value_len : 0;
@@ -2964,11 +2934,7 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
     intent.type = input_type;
     intent.data = "";
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT,
                                SM_EV_FORM_HISTORY, target);
@@ -3043,11 +3009,7 @@ static bool dispatch_editing_history_for_controller(EventContext* evcon,
             return false;
         }
 
-        EditingDispatchHooks hooks;
-        hooks.dispatch_input_event = dispatch_editing_input_event;
-        hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-        hooks.copy_selection = dispatch_editing_copy_selection;
-        hooks.user = nullptr;
+        EditingDispatchHooks hooks = dispatch_editing_hooks();
 
         EditingTransaction tx;
         memset(&tx, 0, sizeof(tx));
@@ -3471,11 +3433,7 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
     evcon.ui_context = uicon;
     evcon.target = event_target;
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     radiant_dispatch_composition_event(&evcon, event_target,
                                        "compositionupdate",
@@ -3526,11 +3484,7 @@ extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
     evcon.ui_context = uicon;
     evcon.target = event_target;
 
-    EditingDispatchHooks hooks;
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-    hooks.copy_selection = dispatch_editing_copy_selection;
-    hooks.user = nullptr;
+    EditingDispatchHooks hooks = dispatch_editing_hooks();
 
     radiant_dispatch_composition_event(&evcon, event_target,
                                        "compositionend", "");
@@ -3598,11 +3552,7 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
                                    start, end, committed, len,
                                    INPUT_INTENT_INSERT_FROM_COMPOSITION);
     } else {
-        EditingDispatchHooks hooks;
-        hooks.dispatch_input_event = dispatch_editing_input_event;
-        hooks.dispatch_lambda_event = dispatch_editing_lambda_event;
-        hooks.copy_selection = dispatch_editing_copy_selection;
-        hooks.user = nullptr;
+        EditingDispatchHooks hooks = dispatch_editing_hooks();
 
         bool prevented = false;
         if (intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT && surface_ptr) {

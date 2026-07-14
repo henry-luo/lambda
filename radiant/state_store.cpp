@@ -3438,6 +3438,12 @@ static FormControlProp* form_prop_for_view(View* view) {
     return block->form;
 }
 
+static ViewBlock* form_block_for_view(View* view) {
+    if (!view || !view->is_block()) return NULL;
+    ViewBlock* block = lam::view_require_block(view);
+    return block->form ? block : NULL;
+}
+
 static bool view_element_has_attr(View* view, const char* attr_name) {
     if (!view || !view->is_element() || !attr_name) return false;
     ViewElement* elem = lam::view_require_element(view);
@@ -4470,10 +4476,8 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
 }
 
 void form_control_set_value(DocState* state, View* view, const char* value, uint32_t len) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT, SM_EV_FORM_SET_VALUE, view);
 
     DomElement* elem = lam::dom_require_element(block);
@@ -4551,10 +4555,8 @@ void form_control_get_selection(DocState* state, View* view,
         return;
     }
 
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
 
     FormControlProp* form = block->form;
     if (out_start) *out_start = form->selection_start;
@@ -4685,10 +4687,8 @@ int form_control_get_selected_index(DocState* state, View* view) {
 }
 
 void form_control_set_selected_index(DocState* state, View* view, int index) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_FORM_SET_SELECTED_INDEX, view);
 
     FormControlProp* form = block->form;
@@ -4719,10 +4719,8 @@ float form_control_get_range_value(DocState* state, View* view) {
 }
 
 void form_control_set_range_value(DocState* state, View* view, float value) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_RANGE, SM_EV_FORM_SET_RANGE_VALUE, view);
 
     FormControlProp* form = block->form;
@@ -4756,25 +4754,55 @@ bool form_control_is_disabled(DocState* state, View* view) {
     return view_element_has_attr(view, "disabled");
 }
 
-void form_control_set_disabled(DocState* state, View* view, bool disabled) {
-    if (!view || !view->is_block()) return;
+typedef enum FormConstraintKind {
+    FORM_CONSTRAINT_DISABLED,
+    FORM_CONSTRAINT_READONLY,
+    FORM_CONSTRAINT_REQUIRED,
+} FormConstraintKind;
 
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
-    SmFamily family = form_control_schema_family_for_view(view);
-    SmTransitionGuard sm_guard(state, family, SM_EV_FORM_SET_DISABLED, view);
+static bool form_constraint_stored_value(const ViewState* view_state,
+                                         FormConstraintKind kind) {
+    if (kind == FORM_CONSTRAINT_DISABLED) return view_state->data.form.disabled != 0;
+    if (kind == FORM_CONSTRAINT_READONLY) return view_state->data.form.readonly != 0;
+    return view_state->data.form.required != 0;
+}
 
+static void form_constraint_store_value(ViewState* view_state,
+                                        FormConstraintKind kind, bool value) {
+    if (kind == FORM_CONSTRAINT_DISABLED) view_state->data.form.disabled = value ? 1 : 0;
+    else if (kind == FORM_CONSTRAINT_READONLY) view_state->data.form.readonly = value ? 1 : 0;
+    else view_state->data.form.required = value ? 1 : 0;
+}
+
+static void form_control_set_constraint(DocState* state, View* view, bool value,
+                                        FormConstraintKind kind,
+                                        const char* attr_name, const char* log_name,
+                                        SmEvent event) {
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
+
+    SmFamily family = kind == FORM_CONSTRAINT_READONLY
+        ? form_control_schema_family_for_readonly(view)
+        : form_control_schema_family_for_view(view);
+    SmTransitionGuard sm_guard(state, family, event, view);
     FormControlProp* form = block->form;
     form->state_ref = state;
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.disabled != 0 : view_element_has_attr(view, "disabled");
+    bool old_value = view_state
+        ? form_constraint_stored_value(view_state, kind)
+        : view_element_has_attr(view, attr_name);
     if (view_state) {
-        if (old_value == disabled) return;
-        view_state->data.form.disabled = disabled ? 1 : 0;
+        if (old_value == value) return;
+        form_constraint_store_value(view_state, kind, value);
     }
-    view_state_log_bool_transition(state, view, "form.disabled", old_value, disabled);
+    view_state_log_bool_transition(state, view, log_name, old_value, value);
     if (family != SM_FAMILY__COUNT) sm_guard.commit();
     form_state_mark_dirty(state);
+}
+
+void form_control_set_disabled(DocState* state, View* view, bool disabled) {
+    form_control_set_constraint(state, view, disabled, FORM_CONSTRAINT_DISABLED,
+                                "disabled", "form.disabled", SM_EV_FORM_SET_DISABLED);
 }
 
 bool form_control_is_readonly(DocState* state, View* view) {
@@ -4786,24 +4814,8 @@ bool form_control_is_readonly(DocState* state, View* view) {
 }
 
 void form_control_set_readonly(DocState* state, View* view, bool readonly) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
-    SmFamily family = form_control_schema_family_for_readonly(view);
-    SmTransitionGuard sm_guard(state, family, SM_EV_FORM_SET_READONLY, view);
-
-    FormControlProp* form = block->form;
-    form->state_ref = state;
-    ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.readonly != 0 : view_element_has_attr(view, "readonly");
-    if (view_state) {
-        if (old_value == readonly) return;
-        view_state->data.form.readonly = readonly ? 1 : 0;
-    }
-    view_state_log_bool_transition(state, view, "form.readonly", old_value, readonly);
-    if (family != SM_FAMILY__COUNT) sm_guard.commit();
-    form_state_mark_dirty(state);
+    form_control_set_constraint(state, view, readonly, FORM_CONSTRAINT_READONLY,
+                                "readonly", "form.readonly", SM_EV_FORM_SET_READONLY);
 }
 
 bool form_control_is_required(DocState* state, View* view) {
@@ -4815,24 +4827,8 @@ bool form_control_is_required(DocState* state, View* view) {
 }
 
 void form_control_set_required(DocState* state, View* view, bool required) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
-    SmFamily family = form_control_schema_family_for_view(view);
-    SmTransitionGuard sm_guard(state, family, SM_EV_FORM_SET_REQUIRED, view);
-
-    FormControlProp* form = block->form;
-    form->state_ref = state;
-    ViewState* view_state = form_view_state_get_or_create(state, view, form);
-    bool old_value = view_state ? view_state->data.form.required != 0 : view_element_has_attr(view, "required");
-    if (view_state) {
-        if (old_value == required) return;
-        view_state->data.form.required = required ? 1 : 0;
-    }
-    view_state_log_bool_transition(state, view, "form.required", old_value, required);
-    if (family != SM_FAMILY__COUNT) sm_guard.commit();
-    form_state_mark_dirty(state);
+    form_control_set_constraint(state, view, required, FORM_CONSTRAINT_REQUIRED,
+                                "required", "form.required", SM_EV_FORM_SET_REQUIRED);
 }
 
 // ============================================================================
@@ -4983,10 +4979,8 @@ void doc_state_set_context_menu_hover(DocState* state, int hover_index) {
 }
 
 void form_control_open_dropdown(DocState* state, View* view) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_DROPDOWN_OPEN, view);
 
     FormControlProp* form = block->form;
@@ -5006,10 +5000,8 @@ void form_control_open_dropdown(DocState* state, View* view) {
 }
 
 void form_control_close_dropdown(DocState* state, View* view) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_DROPDOWN_CLOSE, view);
 
     FormControlProp* form = block->form;
@@ -5028,10 +5020,8 @@ void form_control_close_dropdown(DocState* state, View* view) {
 }
 
 void form_control_set_hover_index(DocState* state, View* view, int index) {
-    if (!view || !view->is_block()) return;
-
-    ViewBlock* block = lam::view_require_block(view);
-    if (!block->form) return;
+    ViewBlock* block = form_block_for_view(view);
+    if (!block) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_SELECT, SM_EV_FORM_SET_HOVER_INDEX, view);
 
     FormControlProp* form = block->form;
