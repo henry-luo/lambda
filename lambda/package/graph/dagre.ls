@@ -98,6 +98,10 @@ fn normalize_edge(edge, nodes, index, directed) {
       marker_start: marker_start,
       marker_end: marker_end,
       style: if (edge.style != null) string(edge.style) else "solid",
+      stroke: if (edge.stroke != null) string(edge.stroke) else null,
+      stroke_width: if (edge.stroke_width != null) float(edge.stroke_width) else null,
+      opacity: if (edge.opacity != null) float(edge.opacity) else null,
+      dash_array: if (edge.dash_array != null) string(edge.dash_array) else null,
       min_length: max([1, int(if (edge.min_length != null) edge.min_length
         else if (edge["min-length"] != null) edge["min-length"] else 1)]),
       z: if (edge.z != null) int(edge.z) else -1,
@@ -375,17 +379,26 @@ fn clip_node(node, target_x, target_y) {
   else clip_rect(node.x, node.y, target_x, target_y, half_w, half_h)
 }
 
-fn remove_collinear(points) {
-  if (len(points) < 3) points
-  else {
-    let first = points[0];
-    let mid = points[1];
-    let tail = points[len(points) - 1];
-    let same_x = abs(first.x - mid.x) < 1.0 and abs(mid.x - tail.x) < 1.0;
-    let same_y = abs(first.y - mid.y) < 1.0 and abs(mid.y - tail.y) < 1.0;
-    if (same_x or same_y) { [first, tail] } else { points }
-  }
+fn points_close(a, b) => abs(a.x - b.x) < 0.001 and abs(a.y - b.y) < 0.001
+
+fn points_collinear(a, b, c) =>
+  (abs(a.x - b.x) < 0.001 and abs(b.x - c.x) < 0.001) or
+  (abs(a.y - b.y) < 0.001 and abs(b.y - c.y) < 0.001)
+
+fn append_route_point(points, point) {
+  let count = len(points);
+  if (count > 0 and points_close(points[count - 1], point)) points
+  else if (count > 1 and points_collinear(points[count - 2], points[count - 1], point))
+    [*slice(points, 0, count - 1), point]
+  else [*points, point]
 }
+
+fn simplify_route_at(points, i, result) {
+  if (i >= len(points)) result
+  else simplify_route_at(points, i + 1, append_route_point(result, points[i]))
+}
+
+fn simplify_route(points) => simplify_route_at(points, 0, [])
 
 fn orthogonal_points(points, vertical_first) {
   if (len(points) < 2) points
@@ -397,16 +410,17 @@ fn orthogonal_points(points, vertical_first) {
     if (dx < 1.0 or dy < 1.0) points
     else {
       let bend = if (vertical_first) {x: start.x, y: finish.y} else {x: finish.x, y: start.y};
-      remove_collinear([start, bend, finish])
+      simplify_route([start, bend, finish])
     }
   }
 }
 
-fn self_loop_points(node, edge_sep, edge_index) {
+fn self_loop_points(node, edge_sep, sibling_index) {
   let half_w = node.width / 2.0;
   let half_h = node.height / 2.0;
   let spread = max([10.0, half_h / 2.0]);
-  let loop_gap = max([20.0, edge_sep * float(edge_index + 2)]);
+  // sibling rank keeps loop geometry independent of unrelated edge source order.
+  let loop_gap = max([20.0, edge_sep * float(sibling_index + 2)]);
   [
     {x: node.x + half_w, y: node.y - spread},
     {x: node.x + half_w + loop_gap, y: node.y - spread},
@@ -415,7 +429,45 @@ fn self_loop_points(node, edge_sep, edge_index) {
   ]
 }
 
-fn route_edge(edge, nodes, opts) {
+fn parallel_edges(edge, edges) => [
+  for (candidate in edges
+    where candidate.from == edge.from and candidate.to == edge.to) candidate
+]
+
+fn parallel_info(edge, edges) {
+  let siblings = parallel_edges(edge, edges);
+  let positions = [for (i, candidate in siblings where candidate.index == edge.index) i];
+  {
+    count: len(siblings),
+    index: if (len(positions) > 0) positions[0] else 0
+  }
+}
+
+fn parallel_route_points(from_node, to_node, offset, vertical_first) {
+  if (vertical_first) {
+    let lane_x = (from_node.x + to_node.x) / 2.0 + offset;
+    let start = clip_node(from_node, lane_x, to_node.y);
+    let finish = clip_node(to_node, lane_x, from_node.y);
+    simplify_route([
+      start,
+      {x: lane_x, y: start.y},
+      {x: lane_x, y: finish.y},
+      finish
+    ])
+  } else {
+    let lane_y = (from_node.y + to_node.y) / 2.0 + offset;
+    let start = clip_node(from_node, to_node.x, lane_y);
+    let finish = clip_node(to_node, from_node.x, lane_y);
+    simplify_route([
+      start,
+      {x: start.x, y: lane_y},
+      {x: finish.x, y: lane_y},
+      finish
+    ])
+  }
+}
+
+fn route_edge(edge, nodes, edges, opts) {
   let from_node = find_node(nodes, edge.from);
   let to_node = find_node(nodes, edge.to);
   if (from_node == null or to_node == null) null
@@ -423,12 +475,16 @@ fn route_edge(edge, nodes, opts) {
     let start = clip_node(from_node, to_node.x, to_node.y);
     let finish = clip_node(to_node, from_node.x, from_node.y);
     let vertical_first = not (opts.direction == "LR" or opts.direction == "RL");
+    let parallel = parallel_info(edge, edges);
+    let lane_offset = (float(parallel.index) - float(parallel.count - 1) / 2.0) * opts.edge_sep;
     {
       id: edge.id,
       from: edge.from,
       to: edge.to,
       points: if (edge.from == edge.to)
-        self_loop_points(from_node, opts.edge_sep, edge.index)
+        self_loop_points(from_node, opts.edge_sep, parallel.index)
+        else if (parallel.count > 1)
+          parallel_route_points(from_node, to_node, lane_offset, vertical_first)
         else orthogonal_points([start, finish], vertical_first),
       directed: edge.directed,
       arrow_start: edge.arrow_start,
@@ -436,6 +492,10 @@ fn route_edge(edge, nodes, opts) {
       marker_start: edge.marker_start,
       marker_end: edge.marker_end,
       style: edge.style,
+      stroke: edge.stroke,
+      stroke_width: edge.stroke_width,
+      opacity: edge.opacity,
+      dash_array: edge.dash_array,
       min_length: edge.min_length,
       z: edge.z,
       index: edge.index,
@@ -444,17 +504,28 @@ fn route_edge(edge, nodes, opts) {
   }
 }
 
-fn graph_bounds(nodes, edges) {
-  if (len(nodes) == 0) { {width: 0.0, height: 0.0} }
+fn normalize_graph_geometry(nodes, edges) {
+  if (len(nodes) == 0) { {width: 0.0, height: 0.0, nodes: nodes, edges: edges} }
   else {
-    let min_x = min([for (node in nodes) node.x - node.width / 2.0]);
-    let min_y = min([for (node in nodes) node.y - node.height / 2.0]);
     let edge_points = [for (edge in edges, point in edge.points) point];
+    // parallel lanes may extend before the node origin, so bounds and coordinates shift together.
+    let min_x = min([for (node in nodes) node.x - node.width / 2.0,
+      for (point in edge_points) point.x]);
+    let min_y = min([for (node in nodes) node.y - node.height / 2.0,
+      for (point in edge_points) point.y]);
     let max_x = max([for (node in nodes) node.x + node.width / 2.0,
       for (point in edge_points) point.x]);
     let max_y = max([for (node in nodes) node.y + node.height / 2.0,
       for (point in edge_points) point.y]);
-    {width: max_x - min_x, height: max_y - min_y}
+    {
+      width: max_x - min_x,
+      height: max_y - min_y,
+      nodes: [for (node in nodes) {*:node, x: node.x - min_x, y: node.y - min_y}],
+      edges: [for (edge in edges) {*:edge, points: [for (point in edge.points) {
+        x: point.x - min_x,
+        y: point.y - min_y
+      }]}]
+    }
   }
 }
 
@@ -464,14 +535,16 @@ pub fn layout(input, opts = null) {
   let layers0 = create_layers(ranked);
   let layers = reduce_crossings(layers0, graph.edges, graph.options.max_iterations);
   let canonical_nodes = position_nodes(layers, graph.options);
-  let nodes = orient_nodes(canonical_nodes, graph.options.direction);
-  let edges = [for (edge in graph.edges,
-    let path = route_edge(edge, nodes, graph.options)
+  let routed_nodes = orient_nodes(canonical_nodes, graph.options.direction);
+  let routed_edges = [for (edge in graph.edges,
+    let path = route_edge(edge, routed_nodes, graph.edges, graph.options)
     where path != null) path];
-  let bounds = graph_bounds(nodes, edges);
+  let geometry = normalize_graph_geometry(routed_nodes, routed_edges);
+  let nodes = geometry.nodes;
+  let edges = geometry.edges;
   {
-    width: bounds.width,
-    height: bounds.height,
+    width: geometry.width,
+    height: geometry.height,
     nodes: nodes,
     edges: edges,
     layers: layers,

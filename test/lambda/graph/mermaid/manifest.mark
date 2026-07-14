@@ -54,6 +54,9 @@
     <edge id: 'e3', from: 'C', to: 'D', arrow-tail: 'circle', arrow-head: 'circle'>
     <edge id: 'e4', from: 'D', to: 'E', arrow-tail: 'cross', arrow-head: 'cross'>
   >
+  <case id: 'parallel-edges', source: 'parallel_edges.mmd';
+    <expect direction: 'TB', nodes: 2, edges: 3>
+  >
   <case id: 'metadata-styles', source: 'metadata_styles.mmd';
     <expect direction: 'LR', nodes: 2, edges: 1, style-assignments: 2;
       <title value: 'Service request graph'>

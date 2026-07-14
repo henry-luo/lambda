@@ -3,7 +3,7 @@
   class: "lambda-graph lambda-graph-theme-light",
   layout: "lambda-graph",
   direction: "LR",
-  spacing: ["42", "64"],
+  spacing: ["42", "64", "18"],
   children: [{
       tag: 'node',
       id: "a",
