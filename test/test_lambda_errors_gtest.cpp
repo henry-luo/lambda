@@ -12,8 +12,15 @@
 #include "../lambda/lambda-error.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/arraylist.h"
+#include "../lib/shell.h"
 #include <string>
 #include <cstring>
+
+#ifdef _WIN32
+#define LAMBDA_EXE "lambda.exe"
+#else
+#define LAMBDA_EXE "./lambda.exe"
+#endif
 
 //==============================================================================
 // Error Code Category Tests
@@ -508,25 +515,16 @@ struct ScriptResult {
 
 ScriptResult run_lambda_script(const char* script_path) {
     ScriptResult result;
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe --no-log \"%s\" 2>&1", script_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe --no-log \"%s\" 2>&1", script_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        result.exit_code = -1;
-        return result;
+    const char* args[] = {LAMBDA_EXE, "--no-log", script_path, NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    // Negative paths are untrusted test data and must not be interpolated into a shell command.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.stdout_buf) {
+        result.output.assign(shell_result.stdout_buf, shell_result.stdout_len);
     }
-
-    char buffer[4096];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        result.output += buffer;
-    }
-
-    result.exit_code = pclose(pipe);
+    result.exit_code = shell_result.exit_code;
+    shell_result_free(&shell_result);
     return result;
 }
 

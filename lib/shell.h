@@ -42,6 +42,7 @@ typedef struct {
 typedef struct {
     const char* cwd;                // working directory (NULL = inherit)
     const ShellEnvEntry* env;       // extra env vars (NULL-terminated array, NULL = inherit all)
+    const char* stdin_path;         // file connected to stdin (NULL = inherit stdin)
     int timeout_ms;                 // timeout in ms (0 = no timeout)
     bool merge_stderr;              // merge stderr into stdout
     ShellLineCallback on_stdout;    // streaming stdout callback (NULL = buffer all)

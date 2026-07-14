@@ -50,6 +50,7 @@ NPROCS := $(shell n="$(NPROCS)"; if expr "$$n" : '^[1-9][0-9]*$$' >/dev/null; th
 # the OS and browser/reference helpers.
 RADIANT_RENDER_JOBS := $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); else echo 1; fi)
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1
+RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -498,7 +499,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup docs intellisense analyze-binary \
 	    build-debug build-release build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
-	    generate-premake clean-premake build-test build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
+	    generate-premake clean-premake build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
@@ -537,6 +538,7 @@ help:
 	@echo "  generate-premake - Generate premake5.lua from build_lambda_config.json"
 	@echo "  clean-premake - Clean Premake build artifacts and generated files"
 	@echo "  build-test    - Build all test executables using Premake"
+	@echo "  build-radiant-baseline - Build only lambda and the native runners used by test-radiant-baseline"
 	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
 	@echo "  build-jube-test - Build lambda-jube and all test executables"
 	@echo ""
@@ -1208,10 +1210,12 @@ test-input-baseline: build-test ensure-yaml-submodule
 # Layout baseline suites - add new suites here (each must have baseline.txt in its data dir)
 LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-text wpt-css-inline wpt-css-images wpt-css-multicol puppertino markdown
 
-test-radiant-baseline: build-test
+test-radiant-baseline: build-radiant-baseline
 	@$(MAKE) --no-print-directory run-radiant-baseline
 
-# Run radiant tests without rebuilding (use when test executables are already built)
+# Run radiant tests without rebuilding (use when test executables are already built).
+# Poll children once per second so progress reporting never adds a 5-10 second
+# tail delay, and keep the fuzzy runner name aligned with the configured binary.
 run-radiant-baseline:
 	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	radiant_view_passed=0; radiant_view_failed=0; radiant_view_status="⏭️  SKIP"; \
@@ -1230,8 +1234,8 @@ run-radiant-baseline:
 		"$$@" > "$$log_file" 2>&1 & \
 		child_pid=$$!; elapsed=0; \
 		while kill -0 $$child_pid 2>/dev/null; do \
-			sleep 10; elapsed=$$((elapsed + 10)); \
-			if kill -0 $$child_pid 2>/dev/null; then \
+			sleep 1; elapsed=$$((elapsed + 1)); \
+			if kill -0 $$child_pid 2>/dev/null && [ $$((elapsed % 10)) -eq 0 ]; then \
 				latest=$$(grep -E '^\[ RUN      \]|^\[[[:space:]]*[0-9]+/[0-9]+\]|^\[  PASSED  \]|^\[  FAILED  \]|PASS|FAIL|Results:' "$$log_file" | tail -1); \
 				if [ -n "$$latest" ]; then \
 					echo "   ... $$label ($${elapsed}s): $$latest"; \
@@ -1257,9 +1261,10 @@ run-radiant-baseline:
 		rm -f "$$log_file"; \
 		$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js -c $$suite > "$$log_file" 2>&1 & \
 		suite_pid=$$!; \
+		poll_elapsed=0; \
 		while kill -0 $$suite_pid 2>/dev/null; do \
-			sleep 5; \
-			if kill -0 $$suite_pid 2>/dev/null; then \
+			sleep 1; poll_elapsed=$$((poll_elapsed + 1)); \
+			if kill -0 $$suite_pid 2>/dev/null && [ $$((poll_elapsed % 5)) -eq 0 ]; then \
 				last_test=$$(grep "📊 Test Case:" "$$log_file" | tail -1 | sed 's/^.*Test Case: //'); \
 				if [ -n "$$last_test" ]; then \
 					echo "     ... running, latest: $$last_test"; \
@@ -1346,15 +1351,15 @@ run-radiant-baseline:
 	\
 	echo ""; \
 	echo "📦 Fuzzy Crash Tests:"; \
-	if [ -f "test/test_fuzzy_crash_gtest.exe" ]; then \
-		output=$$(./test/test_fuzzy_crash_gtest.exe 2>&1) || true; \
+	if [ -f "test/test_layout_fuzzy_gtest.exe" ]; then \
+		output=$$(./test/test_layout_fuzzy_gtest.exe 2>&1) || true; \
 		echo "$$output" | grep -E "^\[|fuzzy files tested" | tail -5; \
 		fuzzy_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		fuzzy_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		fuzzy_passed=$${fuzzy_passed:-0}; fuzzy_failed=$${fuzzy_failed:-0}; \
 		if [ "$$fuzzy_failed" = "0" ] || [ -z "$$fuzzy_failed" ]; then fuzzy_status="✅ PASS"; fuzzy_failed=0; else fuzzy_status="❌ FAIL"; any_failed=1; fi; \
 	else \
-		echo "   ⚠️  test/test_fuzzy_crash_gtest.exe not found"; \
+		echo "   ⚠️  test/test_layout_fuzzy_gtest.exe not found"; \
 	fi; \
 	\
 	echo ""; \
@@ -1432,7 +1437,7 @@ run-radiant-baseline:
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
 	echo "   ├── Radiant View Cmd    $$radiant_view_status  ($$radiant_view_passed passed, $$radiant_view_failed failed) (test_radiant_view_gtest.exe)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
-	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_fuzzy_crash_gtest.exe)"; \
+	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_layout_fuzzy_gtest.exe)"; \
 	echo "   ├── Render Visual       $$render_status  ($$render_details) (test_radiant_render.js --baseline)"; \
 	echo "   └── WPT CSS Syntax      $$wpt_syntax_status  ($$wpt_syntax_passed passed, $$wpt_syntax_failed failed) (test_wpt_css_syntax_gtest.exe)"; \
 	echo ""; \
@@ -2206,6 +2211,25 @@ build-test: build-lambda-input
 		echo "Restoring release lambda.exe..."; \
 		mv .lambda_build_backup.exe lambda.exe; \
 	fi
+
+# Radiant baseline needs lambda plus five native runners; building every test
+# project made unrelated suites dominate this gate after a clean build.
+build-radiant-baseline:
+	@echo "Building the Radiant baseline runtime and native test runners..."
+	@mkdir -p build/premake
+	$(MAKE) generate-premake
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	@echo "Building lambda-input DLLs with $(TEST_JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_native lambda-input-full-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@if [ -f .lambda_release_build ]; then \
+		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
+		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
+	else \
+		echo "Rebuilding lambda.exe in debug mode (incremental)..."; \
+		$(MAKE) -C build/premake config=debug_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
+	fi
+	@echo "Building Radiant baseline test executables (debug mode, $(TEST_JOBS) jobs)..."
+	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native $(RADIANT_BASELINE_TEST_PROJECTS) -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 
 # Capture browser layout references using Puppeteer
 # Usage:

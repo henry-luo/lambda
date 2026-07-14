@@ -5,6 +5,10 @@
 #include <cstring>
 #include <cstddef>
 
+extern "C" {
+#include "../lib/shell.h"
+}
+
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
@@ -80,17 +84,6 @@ static void test_radiant_view_ensure_temp_dir() {
 #endif
 }
 
-static int test_radiant_view_exit_code(int status) {
-#ifdef _WIN32
-    return status;
-#else
-    if (status == -1) return -1;
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-    return status;
-#endif
-}
-
 static bool test_radiant_view_file_contains(const char* path, const char* needle) {
     FILE* file = fopen(path, "rb");
     if (!file) return false;
@@ -153,30 +146,37 @@ static void test_radiant_view_run_case(size_t index) {
         return;
     }
 
-    char command[1024];
-    int written = 0;
+    const char* args[10];
+    int arg_count = 0;
+    args[arg_count++] = "./lambda.exe";
+    args[arg_count++] = "view";
+    args[arg_count++] = view_case->path;
     if (view_case->event_path) {
-        written = snprintf(command, sizeof(command),
-            "./lambda.exe view %s --event-file %s --headless --no-log > %s 2>&1",
-            view_case->path, view_case->event_path, log_path);
-    } else {
-        written = snprintf(command, sizeof(command),
-            "./lambda.exe view %s --headless --no-log > %s 2>&1",
-            view_case->path, log_path);
+        args[arg_count++] = "--event-file";
+        args[arg_count++] = view_case->event_path;
     }
-    if (written <= 0 || written >= (int)sizeof(command)) {
-        snprintf(result->message, sizeof(result->message),
-                 "failed to build command for %s", view_case->path);
-        result->executed = true;
-        return;
+    args[arg_count++] = "--headless";
+    args[arg_count++] = "--no-log";
+    args[arg_count] = nullptr;
+
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    // system() serialized worker-thread launches on macOS; direct argv spawning
+    // preserves the parallel work queue and avoids shell quoting entirely.
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    result->exit_code = shell_result.exit_code;
+
+    const char* output = shell_result.stdout_buf ? shell_result.stdout_buf : "";
+    FILE* log_file = fopen(log_path, "wb");
+    if (log_file) {
+        fwrite(output, 1, shell_result.stdout_len, log_file);
+        fclose(log_file);
     }
 
-    int status = system(command);
-    result->exit_code = test_radiant_view_exit_code(status);
-    result->has_layout_prof = test_radiant_view_file_contains(log_path, "[LAYOUT_PROF]");
-    result->has_render_prof = test_radiant_view_file_contains(log_path, "[RENDER_PROF]");
-    result->has_peak_footprint = test_radiant_view_file_contains(log_path, "[PEAK_FOOTPRINT]");
-    result->has_view_completed = test_radiant_view_file_contains(log_path, "view command completed");
+    result->has_layout_prof = strstr(output, "[LAYOUT_PROF]") != nullptr;
+    result->has_render_prof = strstr(output, "[RENDER_PROF]") != nullptr;
+    result->has_peak_footprint = strstr(output, "[PEAK_FOOTPRINT]") != nullptr;
+    result->has_view_completed = strstr(output, "view command completed") != nullptr;
     if (result->exit_code != 0) {
         snprintf(result->message, sizeof(result->message),
                  "lambda view exited with code %d; see %s",
@@ -188,6 +188,7 @@ static void test_radiant_view_run_case(size_t index) {
     } else {
         snprintf(result->message, sizeof(result->message), "ok");
     }
+    shell_result_free(&shell_result);
     result->executed = true;
 }
 
@@ -295,14 +296,22 @@ TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
     // parallel test runs concurrent processes clobber it — making assertions on
     // log.txt flaky. A per-test log file is isolated.
     const char* view_log = "./temp/test_radiant_view_cache_promotion_log.txt";
-    char command[512];
-    snprintf(command, sizeof(command),
-             "LAMBDA_IMAGE_DECODE_TRACE=1 LAMBDA_LOG_FILE=%s "
-             "./lambda.exe view test/html/image_cache_promotion.html "
-             "--headless > ./temp/test_radiant_view_cache_promotion.log 2>&1",
-             view_log);
-    int status = system(command);
-    ASSERT_EQ(0, test_radiant_view_exit_code(status));
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_IMAGE_DECODE_TRACE", "1"},
+        {"LAMBDA_LOG_FILE", view_log},
+        {NULL, NULL},
+    };
+    const char* args[] = {
+        "./lambda.exe", "view", "test/html/image_cache_promotion.html", "--headless", NULL,
+    };
+    ShellOptions options = {0};
+    options.env = env;
+    options.merge_stderr = true;
+    // Per-child environment keeps this diagnostic isolated from parallel workers.
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
     EXPECT_TRUE(test_radiant_view_file_contains(
         view_log,
         "[image] Decoded local image on demand: 64x42 (intrinsic 640x427, target 60x40)"));

@@ -22,6 +22,10 @@
 #include <string>
 #include <sys/stat.h>
 
+extern "C" {
+#include "../lib/shell.h"
+}
+
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
@@ -30,9 +34,11 @@
     #define popen _popen
     #define pclose _pclose
     #define WEXITSTATUS(s) (s)
+    #define LAMBDA_EXE "lambda.exe"
 #else
     #include <unistd.h>
     #include <sys/wait.h>
+    #define LAMBDA_EXE "./lambda.exe"
 #endif
 
 namespace {
@@ -74,20 +80,16 @@ struct RunResult {
 
 RunResult run_js(const std::string& script_path) {
     RunResult r{-1, std::string()};
-    std::string cmd;
-#ifdef _WIN32
-    cmd = "lambda.exe js \"" + script_path + "\" --no-log 2>&1";
-#else
-    cmd = "./lambda.exe js \"" + script_path + "\" --no-log 2>&1";
-#endif
-
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return r;
-
-    char buf[1024];
-    while (fgets(buf, sizeof(buf), pipe)) r.output += buf;
-    int status = pclose(pipe);
-    r.exit_code = WEXITSTATUS(status);
+    const char* args[] = {LAMBDA_EXE, "js", script_path.c_str(), "--no-log", NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    // Coercion snippets are file paths, so direct argv avoids a shell per test case.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.stdout_buf) {
+        r.output.assign(shell_result.stdout_buf, shell_result.stdout_len);
+    }
+    r.exit_code = shell_result.exit_code;
+    shell_result_free(&shell_result);
 
     const char* marker = strstr(r.output.c_str(), "##### Script");
     if (marker) {

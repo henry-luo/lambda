@@ -30,13 +30,16 @@
 #include <atomic>
 #include <chrono>
 
+extern "C" {
+#include "../lib/shell.h"
+}
+
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #define NOGDI
     #define NOUSER
     #include <windows.h>
     #include <io.h>
-    #define WEXITSTATUS(s) (s)
     #define LAMBDA_EXE "lambda.exe"
     #define FUZZY_DIR "test\\layout\\data\\fuzzy"
     #define PATH_SEP "\\"
@@ -45,8 +48,6 @@
     #include <unistd.h>
     #include <dirent.h>
     #include <sys/stat.h>
-    #include <sys/wait.h>
-    #include <signal.h>
     #define LAMBDA_EXE "./lambda.exe"
     #define FUZZY_DIR "test/layout/data/fuzzy"
     #define PATH_SEP "/"
@@ -148,37 +149,6 @@ struct FuzzyTestResult {
     std::string output;   // stderr/stdout from lambda.exe
 };
 
-#ifdef _WIN32
-
-static FuzzyTestResult run_fuzzy_test(const FuzzyTestInfo& info) {
-    FuzzyTestResult result;
-    result.exit_code = -1;
-    result.timed_out = false;
-    result.elapsed_ms = 0;
-
-    std::string cmd = std::string(LAMBDA_EXE) + " layout " + info.html_path + " --no-log -o " NULL_DEV " 2>&1";
-
-    auto t0 = std::chrono::steady_clock::now();
-    FILE* pipe = _popen(cmd.c_str(), "r");
-    if (!pipe) {
-        result.output = "Failed to popen: " + cmd;
-        return result;
-    }
-
-    char buf[512];
-    while (fgets(buf, sizeof(buf), pipe) != nullptr) {
-        result.output += buf;
-    }
-
-    int status = _pclose(pipe);
-    result.exit_code = status;
-    auto t1 = std::chrono::steady_clock::now();
-    result.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    return result;
-}
-
-#else
-
 static FuzzyTestResult run_fuzzy_test(const FuzzyTestInfo& info) {
     FuzzyTestResult result;
     result.exit_code = -1;
@@ -186,90 +156,26 @@ static FuzzyTestResult run_fuzzy_test(const FuzzyTestInfo& info) {
     result.elapsed_ms = 0;
 
     auto t0 = std::chrono::steady_clock::now();
-
-    // Use fork/exec with timeout for crash safety
-    int pipefd[2];
-    if (pipe(pipefd) != 0) {
-        result.output = "Failed to create pipe";
-        return result;
+    const char* args[] = {
+        LAMBDA_EXE, "layout", info.html_path.c_str(), "--no-log", "-o", NULL_DEV, NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    options.timeout_ms = FUZZY_TIMEOUT_SECONDS * 1000;
+    // Centralized process-group cleanup prevents a timed-out layout child from leaking descendants.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.stdout_buf) {
+        size_t output_len = shell_result.stdout_len;
+        if (output_len > 64 * 1024) output_len = 64 * 1024;
+        result.output.assign(shell_result.stdout_buf, output_len);
     }
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        result.output = "Failed to fork";
-        close(pipefd[0]);
-        close(pipefd[1]);
-        return result;
-    }
-
-    if (pid == 0) {
-        // Child process
-        close(pipefd[0]);
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-        close(pipefd[1]);
-        // Create new process group so we can kill the whole group on timeout
-        setpgid(0, 0);
-        execl(LAMBDA_EXE, LAMBDA_EXE, "layout", info.html_path.c_str(),
-              "--no-log", "-o", NULL_DEV, (char*)NULL);
-        _exit(127); // exec failed
-    }
-
-    // Parent process
-    close(pipefd[1]);
-
-    // Read output with timeout
-    char buf[512];
-    fd_set fds;
-    struct timeval tv;
-    bool child_done = false;
-
-    while (!child_done) {
-        FD_ZERO(&fds);
-        FD_SET(pipefd[0], &fds);
-        tv.tv_sec = FUZZY_TIMEOUT_SECONDS;
-        tv.tv_usec = 0;
-
-        int sel = select(pipefd[0] + 1, &fds, NULL, NULL, &tv);
-        if (sel > 0) {
-            ssize_t n = read(pipefd[0], buf, sizeof(buf) - 1);
-            if (n > 0) {
-                buf[n] = '\0';
-                if (result.output.size() < 64 * 1024) { // cap at 64KB
-                    result.output += buf;
-                }
-            } else {
-                child_done = true; // EOF
-            }
-        } else {
-            // Timeout or error
-            result.timed_out = true;
-            kill(-pid, SIGKILL); // kill process group
-            child_done = true;
-        }
-    }
-    close(pipefd[0]);
-
-    int status = 0;
-    waitpid(pid, &status, 0);
-
+    result.timed_out = shell_result.timed_out;
+    result.exit_code = result.timed_out ? -1 : shell_result.exit_code;
+    shell_result_free(&shell_result);
     auto t1 = std::chrono::steady_clock::now();
     result.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-
-    if (result.timed_out) {
-        result.exit_code = -1;
-    } else if (WIFEXITED(status)) {
-        result.exit_code = WEXITSTATUS(status);
-    } else if (WIFSIGNALED(status)) {
-        result.exit_code = 128 + WTERMSIG(status);
-    } else {
-        result.exit_code = -1;
-    }
-
     return result;
 }
-
-#endif
 
 // ============================================================================
 // Parallel execution

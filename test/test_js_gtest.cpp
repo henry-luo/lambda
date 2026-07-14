@@ -10,6 +10,11 @@
 #include <unordered_map>
 #include <thread>
 #include <atomic>
+#include "test_process.h"
+
+extern "C" {
+#include "../lib/shell.h"
+}
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -28,6 +33,7 @@
     #define popen _popen
     #define pclose _pclose
     #define WEXITSTATUS(status) (status)
+    #define LAMBDA_EXE "lambda.exe"
     #ifndef F_OK
     #define F_OK 0
     #endif
@@ -35,53 +41,23 @@
     #include <unistd.h>
     #include <sys/wait.h>
     #include <dirent.h>
+    #define LAMBDA_EXE "./lambda.exe"
 #endif
 
 // Helper function to execute a JavaScript file with lambda js and capture output
 char* execute_js_script(const char* script_path) {
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --no-log", script_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --no-log", script_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        fprintf(stderr, "Error: Could not execute command: %s\n", command);
-        return nullptr;
-    }
-
-    // Read output in chunks
-    char buffer[1024];
-    size_t total_size = 0;
-    char* full_output = nullptr;
-
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t len = strlen(buffer);
-        char* new_output = (char*)realloc(full_output, total_size + len + 1);
-        if (!new_output) {
-            free(full_output);
-            pclose(pipe);
-            return nullptr;
-        }
-        full_output = new_output;
-        strcpy(full_output + total_size, buffer);
-        total_size += len;
-    }
-
-    int exit_code = pclose(pipe);
-    if (WEXITSTATUS(exit_code) != 0) {
+    const char* args[] = {LAMBDA_EXE, "js", script_path, "--no-log", NULL};
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, NULL);
+    if (shell_result.exit_code != 0) {
         fprintf(stderr, "Error: lambda.exe js exited with code %d for script: %s\n",
-                WEXITSTATUS(exit_code), script_path);
-        free(full_output);
+                shell_result.exit_code, script_path);
+        shell_result_free(&shell_result);
         return nullptr;
     }
+    char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    shell_result_free(&shell_result);
 
     // Return empty string for successful but empty output
-    if (!full_output) {
-        return strdup("");
-    }
     char* marker = strstr(full_output, "##### Script");
     if (marker) {
         char* result_start = strchr(marker, '\n');
@@ -98,42 +74,22 @@ char* execute_js_script(const char* script_path) {
 }
 
 int execute_js_script_status(const char* script_path, char* output, size_t output_size) {
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --no-log 2>&1", script_path);
-#else
-    snprintf(command, sizeof(command), "timeout 5 ./lambda.exe js \"%s\" --no-log 2>&1", script_path);
-#endif
-
+    const char* args[] = {LAMBDA_EXE, "js", script_path, "--no-log", NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    options.timeout_ms = 5000;
     if (output && output_size > 0) output[0] = '\0';
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        return -1;
+    // Native timeout handling kills the full process group instead of relying on an external utility.
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (output && output_size > 0 && shell_result.stdout_buf) {
+        size_t copy_len = shell_result.stdout_len;
+        if (copy_len >= output_size) copy_len = output_size - 1;
+        memcpy(output, shell_result.stdout_buf, copy_len);
+        output[copy_len] = '\0';
     }
-
-    char buffer[256];
-    size_t total_size = 0;
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        if (output && output_size > 0 && total_size < output_size - 1) {
-            size_t len = strlen(buffer);
-            size_t copy_len = len;
-            if (copy_len > output_size - 1 - total_size) {
-                copy_len = output_size - 1 - total_size;
-            }
-            memcpy(output + total_size, buffer, copy_len);
-            total_size += copy_len;
-            output[total_size] = '\0';
-        }
-    }
-
-    int status = pclose(pipe);
-#ifdef _WIN32
-    return status;
-#else
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-    return status;
-#endif
+    int exit_code = shell_result.exit_code;
+    shell_result_free(&shell_result);
+    return exit_code;
 }
 
 int execute_command_status(const char* command, char* output, size_t output_size) {
@@ -229,92 +185,33 @@ void test_js_script_against_file(const char* script_path, const char* expected_f
 
 // Helper function to test JavaScript command interface
 char* execute_js_builtin_tests() {
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js --no-log 2>&1");
-#else
-    snprintf(command, sizeof(command), "./lambda.exe js --no-log 2>&1");
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
+    const char* args[] = {LAMBDA_EXE, "js", "--no-log", NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.exit_code != 0) {
+        shell_result_free(&shell_result);
         return nullptr;
     }
-
-    // Read output in chunks
-    char buffer[1024];
-    size_t total_size = 0;
-    char* full_output = nullptr;
-
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t len = strlen(buffer);
-        char* new_output = (char*)realloc(full_output, total_size + len + 1);
-        if (!new_output) {
-            free(full_output);
-            pclose(pipe);
-            return nullptr;
-        }
-        full_output = new_output;
-        strcpy(full_output + total_size, buffer);
-        total_size += len;
-    }
-
-    int exit_code = pclose(pipe);
-    
-    // Even if there's no output, if the command succeeded (exit code 0), return an empty string
-    if (WEXITSTATUS(exit_code) != 0) {
-        free(full_output);
-        return nullptr;
-    }
-    
-    // If no output was produced but command succeeded, return empty string
-    if (full_output == nullptr) {
-        full_output = (char*)calloc(1, 1);  // Empty string
-    }
-
+    char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    shell_result_free(&shell_result);
     return full_output;
 }
 
 // Helper function to execute a JavaScript file with --document flag and capture output
 char* execute_js_script_with_doc(const char* script_path, const char* html_path) {
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --document \"%s\" --no-log", script_path, html_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --document \"%s\" --no-log", script_path, html_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        fprintf(stderr, "Error: Could not execute command: %s\n", command);
-        return nullptr;
-    }
-
-    // Read output in chunks
-    char buffer[1024];
-    size_t total_size = 0;
-    char* full_output = nullptr;
-
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        size_t len = strlen(buffer);
-        char* new_output = (char*)realloc(full_output, total_size + len + 1);
-        if (!new_output) {
-            free(full_output);
-            pclose(pipe);
-            return nullptr;
-        }
-        full_output = new_output;
-        strcpy(full_output + total_size, buffer);
-        total_size += len;
-    }
-
-    int exit_code = pclose(pipe);
-    if (WEXITSTATUS(exit_code) != 0) {
+    const char* args[] = {
+        LAMBDA_EXE, "js", script_path, "--document", html_path, "--no-log", NULL,
+    };
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, NULL);
+    if (shell_result.exit_code != 0) {
         fprintf(stderr, "Error: lambda.exe js exited with code %d for script: %s --document %s\n",
-                WEXITSTATUS(exit_code), script_path, html_path);
-        free(full_output);
+                shell_result.exit_code, script_path, html_path);
+        shell_result_free(&shell_result);
         return nullptr;
     }
+    char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
+    shell_result_free(&shell_result);
 
     // Extract result from "##### Script" marker (same as Lambda tests)
     if (!full_output) {
@@ -385,15 +282,12 @@ static void run_js_sub_batch(
     }
     fclose(manifest);
 
-    char command[512];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js-test-batch --timeout=60 < \"%s\"", manifest_path);
-#else
-    snprintf(command, sizeof(command), "./lambda.exe js-test-batch --timeout=60 < \"%s\"", manifest_path);
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
+    const char* args[] = {LAMBDA_EXE, "js-test-batch", "--timeout=60", NULL};
+    ShellOptions options = {0};
+    options.stdin_path = manifest_path;
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    if (shell_result.exit_code < 0) {
+        shell_result_free(&shell_result);
         unlink(manifest_path);
         return;
     }
@@ -403,7 +297,9 @@ static void run_js_sub_batch(
     std::string current_output;
     bool in_script = false;
 
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    TestProcessLines lines;
+    test_process_lines_init(&lines, shell_result.stdout_buf, shell_result.stdout_len);
+    while (test_process_next_line(&lines, buffer, sizeof(buffer))) {
         if (buffer[0] == '\x01') {
             if (strncmp(buffer + 1, "BATCH_START ", 12) == 0) {
                 current_script = std::string(buffer + 13);
@@ -422,7 +318,7 @@ static void run_js_sub_batch(
         }
     }
 
-    pclose(pipe);
+    shell_result_free(&shell_result);
     unlink(manifest_path);
 }
 
