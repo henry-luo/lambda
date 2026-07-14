@@ -12,6 +12,24 @@ fn path_data(points) {
     "M " ++ string(points[0].x) ++ " " ++ string(points[0].y))
 }
 
+fn route_tail(points, index, result) {
+  if (index >= len(points)) result
+  else route_tail(points, index + 1,
+    result ++ " " ++ string(points[index].x) ++ "," ++ string(points[index].y))
+}
+
+fn route_data(points) {
+  if (len(points) == 0) ""
+  else route_tail(points, 1, string(points[0].x) ++ "," ++ string(points[0].y))
+}
+
+fn route_kind(edge) {
+  if (edge.from == edge.to) "self-loop"
+  else if (edge.is_bezier == true) "curved"
+  else if (len(edge.points) <= 2) "straight"
+  else "orthogonal"
+}
+
 fn dash_array(style) {
   if (style == "dashed" or style == "dash") "7 5"
   else if (style == "dotted" or style == "dot") "2 4"
@@ -61,6 +79,7 @@ fn edge_path(edge, color, stroke_width, opacity) {
       'marker-start': marker_start, 'marker-end': marker_end,
       'data-graph-role': "edge", 'data-edge-id': edge.id,
       'data-from': edge.from, 'data-to': edge.to,
+      'data-route': route_data(edge.points), 'data-route-kind': route_kind(edge),
       'data-marker-start': edge.marker_start, 'data-marker-end': edge.marker_end>
 }
 

@@ -113,9 +113,11 @@ fn node_content(node, id) {
 fn html_node(node, index, group, assigned_classes, style_declarations, palette) {
   let id = node_id(node, index);
   let content = node_content(node, id);
-  <node class: node_class(node, assigned_classes), 'data-node-id': id,
+  <node class: node_class(node, assigned_classes),
+      'data-graph-role': "node", 'data-node-id': id,
       'data-subgraph-id': group,
       'data-shape': source_attr(node, "shape", "box"),
+      'data-label': label_source(node, id),
       'data-label-format': label_format(node),
       'data-style-declarations': style_declarations,
       'data-z': string(source_attr(node, "z", 0)),
@@ -186,9 +188,10 @@ fn html_cluster_label(entry, index, palette) {
   let content = canonical_content(group);
   if (label == null or label == "") null
   else {
-    <'cluster-label' class: "graph-cluster-label",
+    <'cluster-label' class: "graph-cluster-label", 'data-graph-role': "cluster-label",
         'data-cluster-id': entry.group,
         'data-parent-cluster-id': entry.parent,
+        'data-label': label,
         'data-label-format': format,
         'data-z': string(source_attr(group, "label-z", 0)),
         style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
@@ -206,9 +209,9 @@ fn html_edge_label(edge, index, group, palette) {
   let content = canonical_content(edge);
   if (label == null or label == "") null
   else {
-    <'edge-label' class: "graph-edge-label",
+    <'edge-label' class: "graph-edge-label", 'data-graph-role': "edge-label",
         'data-edge-id': string(source_attr(edge, "id", "e" ++ string(index))),
-        'data-subgraph-id': group, 'data-label-format': format,
+        'data-subgraph-id': group, 'data-label': label, 'data-label-format': format,
         'data-z': string(source_attr(edge, "label-z", 0)),
         style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
           "background:" ++ palette.graph_background ++ ";color:" ++ palette.node_text ++
@@ -262,7 +265,7 @@ pub fn to_html(graph, opts = null) {
       ]) else "")
   ];
   <'graph' class: "lambda-graph lambda-graph-theme-" ++ theme,
-      'data-radiant-layout': "lambda-graph", 'data-theme': theme,
+      'data-graph-role': "graph", 'data-radiant-layout': "lambda-graph", 'data-theme': theme,
       role: "group", 'aria-label': title, 'aria-description': description,
       'data-graph-title': title,
       'data-edge-color': palette.edge,

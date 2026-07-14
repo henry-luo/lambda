@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -113,99 +114,153 @@ static void expect_source_span(const ElementReader& element) {
     EXPECT_GT(column.asInt(), 0);
 }
 
-class GraphMermaidCorpusTest : public ::testing::Test {
-protected:
-    static Pool* type_pool;
-    static String* mark_type;
-    static String* graph_type;
-    static String* mermaid_flavor;
+static Pool* g_type_pool = nullptr;
+static String* g_mark_type = nullptr;
+static String* g_graph_type = nullptr;
+static String* g_mermaid_flavor = nullptr;
+static Item g_manifest_root = {.item = 0};
 
-    static void SetUpTestSuite() {
-        type_pool = pool_create();
-        ASSERT_NE(type_pool, nullptr);
-        mark_type = create_string(type_pool, "mark");
-        graph_type = create_string(type_pool, "graph");
-        mermaid_flavor = create_string(type_pool, "mermaid");
-    }
-
-    static void TearDownTestSuite() {
-        InputManager::destroy_global();
-        pool_destroy(type_pool);
-        type_pool = nullptr;
-    }
-};
-
-Pool* GraphMermaidCorpusTest::type_pool = nullptr;
-String* GraphMermaidCorpusTest::mark_type = nullptr;
-String* GraphMermaidCorpusTest::graph_type = nullptr;
-String* GraphMermaidCorpusTest::mermaid_flavor = nullptr;
-
-TEST_F(GraphMermaidCorpusTest, SemanticMarkIR) {
-    char* manifest_source = read_text_file(MERMAID_MANIFEST);
-    ASSERT_NE(manifest_source, nullptr);
-    Input* manifest_input = input_from_source(manifest_source, nullptr, mark_type, nullptr);
-    free(manifest_source);
-    ASSERT_NE(manifest_input, nullptr);
-    ASSERT_EQ(manifest_input->root.type_id(), LMD_TYPE_ELEMENT);
-
-    ElementReader manifest(manifest_input->root);
-    ASSERT_TRUE(manifest.hasTag("mermaid-suite"));
+static ElementReader manifest_case_at(int wanted_index) {
+    ElementReader manifest(g_manifest_root);
     ElementReader test_case;
     auto cases = manifest.childElements();
+    int case_index = 0;
     while (cases.next(&test_case)) {
         if (!test_case.hasTag("case")) continue;
-        SCOPED_TRACE(attr_text(test_case, "id"));
+        if (case_index == wanted_index) return test_case;
+        case_index++;
+    }
+    return ElementReader();
+}
 
-        const char* source_name = attr_text(test_case, "source");
-        ASSERT_NE(source_name, nullptr);
-        char* source_path = file_path_join(MERMAID_CORPUS_DIR, source_name);
-        ASSERT_NE(source_path, nullptr);
-        char* source = read_text_file(source_path);
-        free(source_path);
-        ASSERT_NE(source, nullptr);
+static void expect_manifest_policy(const ElementReader& test_case) {
+    const char* origin = attr_text(test_case, "origin");
+    ASSERT_NE(origin, nullptr);
+    ASSERT_NE(attr_text(test_case, "status"), nullptr);
+    ASSERT_NE(attr_text(test_case, "policy"), nullptr);
+    ASSERT_NE(attr_text(test_case, "features"), nullptr);
+    if (strcmp(origin, "mermaid") == 0) {
+        ASSERT_NE(attr_text(test_case, "upstream-file"), nullptr);
+        ASSERT_NE(attr_text(test_case, "upstream-test"), nullptr);
+        EXPECT_STREQ(attr_text(test_case, "reference-version"), "11.16.0");
+    }
+}
 
-        Input* graph_input = input_from_source(source, nullptr, graph_type, mermaid_flavor);
-        free(source);
-        ASSERT_NE(graph_input, nullptr);
-        ASSERT_EQ(graph_input->root.type_id(), LMD_TYPE_ELEMENT);
-        ElementReader graph(graph_input->root);
-        ASSERT_TRUE(graph.hasTag("graph"));
-        EXPECT_STREQ(graph.get_attr_string("ir-stage"), "source");
+static void run_manifest_case(int case_index) {
+    ElementReader test_case = manifest_case_at(case_index);
+    ASSERT_TRUE(test_case.isValid());
+    expect_manifest_policy(test_case);
 
-        ElementReader expected = test_case.findChildElement("expect");
-        ASSERT_TRUE(expected.isValid());
-        const char* direction = attr_text(expected, "direction");
-        const char* kind = attr_text(expected, "kind");
-        const char* status = attr_text(expected, "status");
-        if (direction) EXPECT_STREQ(graph.get_attr_string("direction"), direction);
-        if (kind) EXPECT_STREQ(graph.get_attr_string("kind"), kind);
-        if (status) EXPECT_STREQ(graph.get_attr_string("status"), status);
+    const char* source_name = attr_text(test_case, "source");
+    ASSERT_NE(source_name, nullptr);
+    char* source_path = file_path_join(MERMAID_CORPUS_DIR, source_name);
+    ASSERT_NE(source_path, nullptr);
+    char* source = read_text_file(source_path);
+    free(source_path);
+    ASSERT_NE(source, nullptr);
 
-        // the native parser runner observes source-stage declarations; canonical
-        // node counts remain the manifest default for downstream normalization.
-        int64_t expected_source_nodes = expected.get_int_attr(
-            "source-nodes", expected.get_int_attr("nodes", 0));
-        EXPECT_EQ(count_tag_recursive(graph, "node"), expected_source_nodes);
-        EXPECT_EQ(count_tag_recursive(graph, "edge"), expected.get_int_attr("edges", 0));
-        EXPECT_EQ(count_tag_recursive(graph, "subgraph"), expected.get_int_attr("subgraphs", 0));
-        EXPECT_EQ(count_tag_recursive(graph, "style-rule"), expected.get_int_attr("style-rules", 0));
-        EXPECT_EQ(count_tag_recursive(graph, "class-assignment"),
-                  expected.get_int_attr("class-assignments", 0));
-        EXPECT_EQ(count_tag_recursive(graph, "style-assignment"),
-                  expected.get_int_attr("style-assignments", 0));
+    Input* graph_input = input_from_source(source, nullptr, g_graph_type, g_mermaid_flavor);
+    free(source);
+    ASSERT_NE(graph_input, nullptr);
+    ASSERT_EQ(graph_input->root.type_id(), LMD_TYPE_ELEMENT);
+    ElementReader graph(graph_input->root);
+    ASSERT_TRUE(graph.hasTag("graph"));
+    EXPECT_STREQ(graph.get_attr_string("ir-stage"), "source");
 
-        ElementReader expected_item;
-        auto expected_items = expected.childElements();
-        while (expected_items.next(&expected_item)) {
-            ElementReader actual_item = find_by_identity(graph, expected_item);
-            ASSERT_TRUE(actual_item.isValid()) << "missing semantic " << expected_item.tagName();
-            expect_matching_attributes(actual_item, expected_item);
-            if (expected_item.hasTag("node") || expected_item.hasTag("edge") ||
-                expected_item.hasTag("subgraph") || expected_item.hasTag("title") ||
-                expected_item.hasTag("description") ||
-                expected_item.hasTag("style-assignment")) {
-                expect_source_span(actual_item);
-            }
+    ElementReader expected = test_case.findChildElement("expect");
+    ASSERT_TRUE(expected.isValid());
+    const char* direction = attr_text(expected, "direction");
+    const char* kind = attr_text(expected, "kind");
+    const char* status = attr_text(expected, "status");
+    if (direction) EXPECT_STREQ(graph.get_attr_string("direction"), direction);
+    if (kind) EXPECT_STREQ(graph.get_attr_string("kind"), kind);
+    if (status) EXPECT_STREQ(graph.get_attr_string("status"), status);
+
+    // source-stage declarations may repeat ids; canonical node counts belong to normalization.
+    int64_t expected_source_nodes = expected.get_int_attr(
+        "source-nodes", expected.get_int_attr("nodes", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "node"), expected_source_nodes);
+    EXPECT_EQ(count_tag_recursive(graph, "edge"), expected.get_int_attr("edges", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "subgraph"), expected.get_int_attr("subgraphs", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "style-rule"), expected.get_int_attr("style-rules", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "class-assignment"),
+              expected.get_int_attr("class-assignments", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "style-assignment"),
+              expected.get_int_attr("style-assignments", 0));
+
+    ElementReader expected_item;
+    auto expected_items = expected.childElements();
+    while (expected_items.next(&expected_item)) {
+        ElementReader actual_item = find_by_identity(graph, expected_item);
+        ASSERT_TRUE(actual_item.isValid()) << "missing semantic " << expected_item.tagName();
+        expect_matching_attributes(actual_item, expected_item);
+        if (expected_item.hasTag("node") || expected_item.hasTag("edge") ||
+            expected_item.hasTag("subgraph") || expected_item.hasTag("title") ||
+            expected_item.hasTag("description") ||
+            expected_item.hasTag("style-assignment")) {
+            expect_source_span(actual_item);
         }
     }
+}
+
+class GraphMermaidCorpusTest : public ::testing::Test {};
+
+class GraphMermaidCaseTest : public GraphMermaidCorpusTest {
+public:
+    explicit GraphMermaidCaseTest(int case_index) : case_index_(case_index) {}
+    void TestBody() override { run_manifest_case(case_index_); }
+
+private:
+    int case_index_;
+};
+
+static void sanitize_test_name(const char* id, char* name, size_t capacity) {
+    if (!name || capacity == 0) return;
+    size_t index = 0;
+    for (const char* cursor = id; cursor && *cursor && index + 1 < capacity; cursor++) {
+        unsigned char ch = (unsigned char)*cursor;
+        name[index++] = (char)(isalnum(ch) ? ch : '_');
+    }
+    name[index] = '\0';
+}
+
+int main(int argc, char** argv) {
+    ::testing::InitGoogleTest(&argc, argv);
+    g_type_pool = pool_create();
+    if (!g_type_pool) return 1;
+    g_mark_type = create_string(g_type_pool, "mark");
+    g_graph_type = create_string(g_type_pool, "graph");
+    g_mermaid_flavor = create_string(g_type_pool, "mermaid");
+
+    char* manifest_source = read_text_file(MERMAID_MANIFEST);
+    if (!manifest_source) return 1;
+    Input* manifest_input = input_from_source(manifest_source, nullptr, g_mark_type, nullptr);
+    free(manifest_source);
+    if (!manifest_input || manifest_input->root.type_id() != LMD_TYPE_ELEMENT) return 1;
+    g_manifest_root = manifest_input->root;
+
+    ElementReader manifest(g_manifest_root);
+    if (!manifest.hasTag("mermaid-suite")) return 1;
+    ElementReader test_case;
+    auto cases = manifest.childElements();
+    int case_index = 0;
+    while (cases.next(&test_case)) {
+        if (!test_case.hasTag("case")) continue;
+        const char* id = attr_text(test_case, "id");
+        if (!id || !id[0]) return 1;
+        char test_name[192];
+        sanitize_test_name(id, test_name, sizeof(test_name));
+        int registered_index = case_index;
+        ::testing::RegisterTest(
+            "GraphMermaidCorpus", test_name, nullptr, id, __FILE__, __LINE__,
+            [registered_index]() -> GraphMermaidCorpusTest* {
+                return new GraphMermaidCaseTest(registered_index);
+            });
+        case_index++;
+    }
+
+    int result = RUN_ALL_TESTS();
+    InputManager::destroy_global();
+    pool_destroy(g_type_pool);
+    return result;
 }

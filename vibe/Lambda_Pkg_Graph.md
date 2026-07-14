@@ -7,8 +7,9 @@ complete. Stage 2 is in progress: the first common Mark IR contract, declarative
 schema validation, recursive model queries, Mermaid flowchart normalization
 fixes, measured edge and cluster labels, visual recursive clusters, named
 ports, compound and parallel-edge routing, broader shape clipping, safe style
-cascade, and the semantic corpus runner are implemented. Section 18.12 records
-the current boundary and remaining work.
+cascade, final-SVG graph metadata, Graph Scene adaptation/comparison, in-process
+Radiant scene rendering, and the pinned semantic corpus runner are implemented.
+Section 18.12 records the current boundary and remaining work.
 
 ## 1. Summary
 
@@ -787,6 +788,7 @@ lambda/package/graph/
   diagnostics.ls               structured graph diagnostics
   style.ls                     graph style cascade and safe properties
   layout.ls                    public measured-layout adapter
+  scene.ls                     Graph Scene Mark SVG adapter and comparator
   layout/
     layered.ls                 ranking and rank constraints
     ordering.ls                crossing reduction and stable ordering
@@ -845,7 +847,7 @@ edge and cluster label children. Zero-size `<edge>`, `<cluster>`, and `<port>`
 metadata remains available to the callback, while visual labels are measured
 children associated by stable identities.
 
-Final SVG output should preserve renderer-neutral identity metadata:
+Final SVG output preserves renderer-neutral identity metadata:
 
 ```html
 <g data-graph-role="node" data-node-id="api">...</g>
@@ -960,9 +962,10 @@ provenance remain beside the adapted corpus.
 
 `expected/ir` contains canonical Mark Graph IR for parser and normalization
 tests. `expected/html` contains selected semantic HTML structure expectations;
-it excludes unstable CSS serialization. `expected/scene` contains Graph Scene
-Mark generated from the pinned Mermaid SVG DOM. No PNG, JPEG, PDF, or screenshot
-goldens are part of this suite.
+it excludes unstable CSS serialization. `expected/scene` contains reviewed
+Graph Scene Mark. Geometry references may be generated from the pinned Mermaid
+SVG DOM, while semantic-only references may deliberately omit geometry. No PNG,
+JPEG, PDF, or screenshot goldens are part of this suite.
 
 The reference tools are maintenance tools, not production dependencies and not
 part of ordinary test execution. Reference generation runs pinned Mermaid in a
@@ -990,12 +993,15 @@ make test-graph-mermaid
 ./test/test_graph_mermaid_gtest.exe --gtest_filter='*subgraph*'
 ```
 
-The runner must use project `lib/` containers and strings rather than `std::`
-types. It owns one retained Lambda runtime and compiled graph package for the
-suite, so cases exercise the same module and JIT caching behavior as repeated
-document layout. It must not start a new `lambda.exe` process for every fixture.
+The native runner uses project `lib/` containers and strings rather than `std::`
+types. It owns the parsed manifest and Mark input state for the suite. The
+in-process transform/layout/render stages run in a paired Lambda integration
+fixture, which installs the compiled callback once and renders multiple cases in
+one Lambda runtime. The focused Make target runs both layers; it does not start a
+new `lambda.exe` process for every manifest entry.
 
-For each manifest entry the runner performs the applicable stages:
+Across the native corpus runner and retained render fixture, each manifest entry
+performs the applicable stages:
 
 1. Parse source into source-stage Mark and collect structured diagnostics.
 2. Normalize to Mark Graph IR and compare with `expected/ir`.
@@ -1214,9 +1220,32 @@ The initial Stage 2 tranche is implemented as follows:
   than selecting a point-count midpoint on bent routes;
 - generated edge paths retain `data-graph-role`, stable edge id, endpoints, and
   normalized marker names for semantic SVG adaptation and future hit testing;
+- semantic HTML emits graph, node, edge, edge-label, cluster, and cluster-label
+  roles with stable source identities, direction, shape, marker, label, and
+  route metadata; Radiant preserves these attributes on final SVG wrappers and
+  records measured absolute border-box geometry;
+- `graph/scene.ls` adapts final Radiant SVG into renderer-neutral Graph Scene
+  Mark, discarding wrapper tags and classes while retaining normalized nodes,
+  clusters, edges, labels, markers, measured boxes, route classes, and points;
+  its comparator performs exact textual semantics plus configurable tolerant
+  box and route-point comparison with structured mismatch values;
+- `graph.transform.render_svg()` and `render_scene()` run HTML parsing, Radiant
+  measurement, the cached custom layout callback, generated paint, SVG lowering,
+  and scene adaptation in one process. The paired `scene_render.ls` fixture
+  renders multiple Mermaid cases after one callback installation and exercises
+  both accepted and rejected geometry tolerances;
+- `reference/mermaid_svg_adapter.mjs` adapts a live Mermaid browser SVG DOM to
+  the same scene vocabulary, flattening transforms and normalizing labels,
+  source identities, shapes, endpoint markers, bounds, and sampled routes. It is
+  a pinned maintenance tool and is not an ordinary test dependency;
+- the adapted Mermaid corpus pins commit
+  `f3dea58385fd5c7dd1f4e9c9c1876751ae6943cc` (Mermaid 11.16.0), carries the
+  upstream MIT license, and records source file, upstream test name, features,
+  status, policy, and reference version for every adapted case;
 - `test/test_graph_mermaid_gtest.cpp` reads
-  `test/lambda/graph/mermaid/manifest.mark` once, retains one input runtime, and
-  compares recursive Mark semantics without raw SVG or image fixtures;
+  `test/lambda/graph/mermaid/manifest.mark` once, retains one input runtime,
+  dynamically registers every case as a named/filterable GTest, and compares
+  recursive Mark semantics without raw SVG or image fixtures;
 - the normal retained Lambda batch runner discovers every paired `.ls`/`.txt`
   fixture under `test/lambda/graph/mermaid`, so package transform, layout, and
   paint behavior is part of baseline test discovery;
@@ -1251,14 +1280,9 @@ The following Stage 2 work remains open:
   and polygon families;
 - cluster-aware ranking/ordering, obstacle avoidance between independently
   placed clusters and nonmembers, and collision-aware route-label placement;
-- renderer-neutral graph-role metadata in final SVG, Graph Scene Mark adapters,
-  tolerant geometry comparison, and in-process Radiant render stages in the
-  native runner;
-- the pinned and licensed adapted upstream Mermaid corpus, provenance files,
-  feature/status policies, and named per-case GTest registration;
 - graph-oriented Mermaid family adapters beyond flowcharts and independent
   chart-package dispatch tests for chart-oriented families.
 
-Accordingly, the current runner proves the parser-to-Mark semantic baseline. It
-does not yet claim full Mermaid compatibility or satisfy the final Stage 2
-acceptance criteria in Section 18.11.
+Accordingly, the current suite proves the parser-to-Mark baseline and the first
+semantic/tolerant final-render scene path. It does not yet claim full Mermaid
+compatibility or satisfy the final Stage 2 acceptance criteria in Section 18.11.

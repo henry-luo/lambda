@@ -72,6 +72,7 @@ RADIANT_C_API Item fn_radiant_attr(Item node_item, Item name_item);
 RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item value_item);
 RADIANT_C_API Item fn_radiant_free(Item node_item);
 RADIANT_C_API Item fn_radiant_layout(Item node_item);
+RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item height_item);
 RADIANT_C_API Item fn_radiant_box(Item node_item);
 RADIANT_C_API Item fn_radiant_poc_attr(Item path_item);
 RADIANT_C_API Item fn_radiant_register_layout(Item name_item, Item fn_item);

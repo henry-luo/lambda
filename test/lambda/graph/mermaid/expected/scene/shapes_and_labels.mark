@@ -1,0 +1,9 @@
+<'graph-scene' direction: 'TB';
+  <node id: 'A', shape: 'rounded'; <label; 'Start'>>
+  <node id: 'B', shape: 'diamond'; <label; 'Valid?'>>
+  <node id: 'C', shape: 'doublecircle'; <label; 'Done'>>
+  <edge id: 'e0', from: 'A', to: 'B', marker-start: 'none', marker-end: 'normal', route-kind: 'straight';
+    <label; 'check'>
+  >
+  <edge id: 'e1', from: 'B', to: 'C', marker-start: 'none', marker-end: 'normal', route-kind: 'straight'>
+>
