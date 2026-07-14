@@ -18,6 +18,7 @@
 #include "js_class.h"
 #include "js_coerce.h"
 #include "js_runtime_state.hpp"
+#include "js_builtin_catalog.hpp"
 #include "js_state_guards.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
@@ -43,6 +44,8 @@ extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
 extern double js_get_number(Item value);
 extern __thread EvalContext* context;
+extern "C" Item js_func_get_custom_proto(Item func);
+extern "C" Item js_get_typed_array_base();
 
 static const JubeTypeDef* js_host_object_type(Item object) {
     if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap || !object.vmap->host_type) {
@@ -6865,10 +6868,9 @@ extern "C" Item js_object_create(Item proto) {
 // the source instance, chained to the original __proto__ for instanceof support.
 
 // Forward declarations for %TypedArray% intrinsic (defined later in file)
-extern "C" bool js_is_typed_array_ctor_name(const char* name, int len);
-extern "C" Item js_get_typed_array_base();
-extern "C" Item js_func_get_custom_proto(Item func);
-extern "C" Item js_array_get_custom_proto(Item arr);
+extern "C" bool js_is_typed_array_ctor_name(const char* name, int len) {
+    return js_builtin_global_has_flag(name, len, JS_BUILTIN_GLOBAL_TYPED_ARRAY);
+}
 
 static bool js_is_arguments_exotic_array_for_proto(Item value) {
     if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->is_content != 1 ||
@@ -15788,37 +15790,16 @@ extern "C" Item js_get_global_this() {
             js_mark_non_configurable(js_global_this_obj, key);
         }
 
-        // populate constructor functions on globalThis
-        static const struct { const char* name; int len; } ctor_names[] = {
-            {"Object", 6}, {"Array", 5}, {"Function", 8},
-            {"String", 6}, {"Number", 6}, {"Boolean", 7}, {"Symbol", 6}, {"BigInt", 6},
-            {"Error", 5}, {"TypeError", 9}, {"RangeError", 10},
-            {"ReferenceError", 14}, {"SyntaxError", 11},
-            {"URIError", 8}, {"EvalError", 9}, {"AggregateError", 14},
-            {"RegExp", 6}, {"Date", 4}, {"Promise", 7},
-            {"Map", 3}, {"Set", 3}, {"WeakMap", 7}, {"WeakSet", 7},
-            {"WeakRef", 7}, {"FinalizationRegistry", 20},
-            {"ArrayBuffer", 11}, {"SharedArrayBuffer", 17}, {"DataView", 8},
-            {"Int8Array", 9}, {"Uint8Array", 10}, {"Uint8ClampedArray", 17},
-            {"Int16Array", 10}, {"Uint16Array", 11},
-            {"Int32Array", 10}, {"Uint32Array", 11},
-            {"Float16Array", 12}, {"Float32Array", 12}, {"Float64Array", 12},
-            {"BigInt64Array", 13}, {"BigUint64Array", 14},
-            {"Proxy", 5},
-            {"Event", 5}, {"CustomEvent", 11}, {"EventTarget", 11},
-            {"UIEvent", 7}, {"FocusEvent", 10}, {"MouseEvent", 10},
-            {"WheelEvent", 10}, {"KeyboardEvent", 13},
-            {"CompositionEvent", 16}, {"InputEvent", 10}, {"PointerEvent", 12},
-            {"StaticRange", 11},
-            {NULL, 0}
-        };
-        for (int i = 0; ctor_names[i].name; i++) {
-            Item name_item = (Item){.item = s2it(heap_create_name(ctor_names[i].name, ctor_names[i].len))};
+        // The catalog owns constructor names shared by registration and MIR lookup.
+        for (int i = 0; i < js_builtin_global_count(); i++) {
+            const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
+            if (!spec || spec->kind != JS_BUILTIN_GLOBAL_CONSTRUCTOR ||
+                !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
+            Item name_item = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
             Item ctor = js_get_constructor(name_item);
             if (get_type_id(ctor) == LMD_TYPE_FUNC) {
                 js_property_set(js_global_this_obj, name_item, ctor);
-                if ((ctor_names[i].len == 7 && strncmp(ctor_names[i].name, "WeakRef", 7) == 0) ||
-                    (ctor_names[i].len == 20 && strncmp(ctor_names[i].name, "FinalizationRegistry", 20) == 0)) {
+                if (spec->flags & JS_BUILTIN_GLOBAL_NON_ENUMERABLE) {
                     js_mark_non_enumerable(js_global_this_obj, name_item);
                 }
             }
@@ -15849,31 +15830,17 @@ extern "C" Item js_get_global_this() {
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("os", 2))}, js_get_os_namespace());
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("vm", 2))}, js_get_vm_namespace());
 
-        // populate global functions as own properties
-        static const struct { const char* name; int len; int param_count; } global_fns[] = {
-            {"parseInt", 8, 2}, {"parseFloat", 10, 1},
-            {"isNaN", 5, 1}, {"isFinite", 8, 1},
-            {"eval", 4, 1},
-            {"decodeURI", 9, 1}, {"encodeURI", 9, 1},
-            {"decodeURIComponent", 18, 1}, {"encodeURIComponent", 18, 1},
-            {"escape", 6, 1}, {"unescape", 8, 1},
-            // Timer and scheduling functions (Node.js globals)
-            {"setTimeout", 10, 2}, {"setInterval", 11, 2},
-            {"clearTimeout", 12, 1}, {"clearInterval", 13, 1},
-            {"setImmediate", 12, 1}, {"clearImmediate", 14, 1},
-            {"requestAnimationFrame", 21, 1}, {"cancelAnimationFrame", 20, 1},
-            {"queueMicrotask", 14, 1},
-            // Web API globals
-            {"structuredClone", 15, 1}, {"fetch", 5, 2},
-            {"gc", 2, 0},
-            {NULL, 0, 0}
-        };
-        for (int i = 0; global_fns[i].name; i++) {
-            Item name_item = (Item){.item = s2it(heap_create_name(global_fns[i].name, global_fns[i].len))};
-            Item fn = (global_fns[i].len == 2 && strncmp(global_fns[i].name, "gc", 2) == 0)
-                ? js_new_function((void*)js_global_gc, 0)
-                : js_get_global_builtin_fn(name_item, (Item){.item = i2it(global_fns[i].param_count)});
-            if (global_fns[i].len == 10 && strncmp(global_fns[i].name, "setTimeout", 10) == 0) {
+        // Global function names, arity, and installation policy come from the catalog.
+        for (int i = 0; i < js_builtin_global_count(); i++) {
+            const JsBuiltinGlobalSpec* spec = js_builtin_global_at(i);
+            if (!spec || spec->kind != JS_BUILTIN_GLOBAL_FUNCTION ||
+                !(spec->flags & JS_BUILTIN_GLOBAL_INSTALL)) continue;
+            Item name_item = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
+            Item fn = (spec->flags & JS_BUILTIN_GLOBAL_CUSTOM_GC)
+                ? js_new_function((void*)js_global_gc, spec->param_count)
+                : js_get_global_builtin_fn(
+                    name_item, (Item){.item = i2it(spec->param_count)});
+            if (spec->flags & JS_BUILTIN_GLOBAL_TIMER_PROMISIFY) {
                 extern void js_timer_install_promisify_custom(Item fn_item);
                 js_timer_install_promisify_custom(fn);
             }
@@ -17298,66 +17265,6 @@ extern "C" Item js_get_global_builtin_fn(Item name_item, Item param_count_item) 
 // `Array.prototype.push` work correctly.
 // =============================================================================
 
-// Constructor IDs for dispatch
-enum JsConstructorId {
-    JS_CTOR_OBJECT = 1,
-    JS_CTOR_ARRAY,
-    JS_CTOR_FUNCTION,
-    JS_CTOR_STRING,
-    JS_CTOR_NUMBER,
-    JS_CTOR_BOOLEAN,
-    JS_CTOR_SYMBOL,
-    JS_CTOR_BIGINT,
-    JS_CTOR_ERROR,
-    JS_CTOR_TYPE_ERROR,
-    JS_CTOR_RANGE_ERROR,
-    JS_CTOR_REFERENCE_ERROR,
-    JS_CTOR_SYNTAX_ERROR,
-    JS_CTOR_URI_ERROR,
-    JS_CTOR_EVAL_ERROR,
-    JS_CTOR_REGEXP,
-    JS_CTOR_DATE,
-    JS_CTOR_PROMISE,
-    JS_CTOR_MAP,
-    JS_CTOR_SET,
-    JS_CTOR_WEAKMAP,
-    JS_CTOR_WEAKSET,
-    JS_CTOR_WEAKREF,
-    JS_CTOR_FINALIZATION_REGISTRY,
-    JS_CTOR_ARRAY_BUFFER,
-    JS_CTOR_SHARED_ARRAY_BUFFER,
-    JS_CTOR_DATAVIEW,
-    JS_CTOR_INT8ARRAY,
-    JS_CTOR_UINT8ARRAY,
-    JS_CTOR_UINT8CLAMPEDARRAY,
-    JS_CTOR_INT16ARRAY,
-    JS_CTOR_UINT16ARRAY,
-    JS_CTOR_INT32ARRAY,
-    JS_CTOR_UINT32ARRAY,
-    JS_CTOR_FLOAT16ARRAY,
-    JS_CTOR_FLOAT32ARRAY,
-    JS_CTOR_FLOAT64ARRAY,
-    JS_CTOR_BIGINT64ARRAY,
-    JS_CTOR_BIGUINT64ARRAY,
-    JS_CTOR_AGGREGATE_ERROR,
-    JS_CTOR_PROXY,
-    JS_CTOR_EVENT,
-    JS_CTOR_CUSTOM_EVENT,
-    JS_CTOR_EVENT_TARGET,
-    JS_CTOR_UI_EVENT,
-    JS_CTOR_FOCUS_EVENT,
-    JS_CTOR_MOUSE_EVENT,
-    JS_CTOR_WHEEL_EVENT,
-    JS_CTOR_KEYBOARD_EVENT,
-    JS_CTOR_COMPOSITION_EVENT,
-    JS_CTOR_INPUT_EVENT,
-    JS_CTOR_POINTER_EVENT,
-    JS_CTOR_STATIC_RANGE,
-    JS_CTOR_TIMEOUT,
-    JS_CTOR_IMMEDIATE,
-    JS_CTOR_MAX
-};
-
 static Item js_constructor_cache[JS_CTOR_MAX];
 static Item js_intrinsic_proto_cache[JS_CLASS__COUNT];
 static bool js_intrinsic_proto_resolving[JS_CLASS__COUNT];
@@ -17797,21 +17704,6 @@ extern "C" void js_proto_snapshot_invalidate() {
 extern "C" Item js_get_typed_array_per_type_proto(int element_type);
 
 
-extern "C" bool js_is_typed_array_ctor_name(const char* name, int len) {
-    return (len == 9  && strncmp(name, "Int8Array", 9) == 0) ||
-           (len == 10 && strncmp(name, "Uint8Array", 10) == 0) ||
-           (len == 17 && strncmp(name, "Uint8ClampedArray", 17) == 0) ||
-           (len == 10 && strncmp(name, "Int16Array", 10) == 0) ||
-           (len == 11 && strncmp(name, "Uint16Array", 11) == 0) ||
-           (len == 10 && strncmp(name, "Int32Array", 10) == 0) ||
-           (len == 11 && strncmp(name, "Uint32Array", 11) == 0) ||
-           (len == 12 && strncmp(name, "Float16Array", 12) == 0) ||
-           (len == 12 && strncmp(name, "Float32Array", 12) == 0) ||
-           (len == 12 && strncmp(name, "Float64Array", 12) == 0) ||
-           (len == 13 && strncmp(name, "BigInt64Array", 13) == 0) ||
-           (len == 14 && strncmp(name, "BigUint64Array", 14) == 0);
-}
-
 extern "C" Item js_get_typed_array_base_proto(); // forward declaration
 
 extern "C" Item js_get_typed_array_base() {
@@ -18113,69 +18005,9 @@ extern "C" Item js_get_constructor(Item name_item) {
     String* name = it2s(name_item);
     if (!name) return make_js_undefined();
 
-    struct { const char* name; int len; int id; int pc; } ctors[] = {
-        {"Object", 6, JS_CTOR_OBJECT, 1},
-        {"Array", 5, JS_CTOR_ARRAY, 1},
-        {"Function", 8, JS_CTOR_FUNCTION, 1},
-        {"String", 6, JS_CTOR_STRING, 1},
-        {"Number", 6, JS_CTOR_NUMBER, 1},
-        {"Boolean", 7, JS_CTOR_BOOLEAN, 1},
-        {"Symbol", 6, JS_CTOR_SYMBOL, 0},
-        {"BigInt", 6, JS_CTOR_BIGINT, 1},
-        {"Error", 5, JS_CTOR_ERROR, 1},
-        {"TypeError", 9, JS_CTOR_TYPE_ERROR, 1},
-        {"RangeError", 10, JS_CTOR_RANGE_ERROR, 1},
-        {"ReferenceError", 14, JS_CTOR_REFERENCE_ERROR, 1},
-        {"SyntaxError", 11, JS_CTOR_SYNTAX_ERROR, 1},
-        {"URIError", 8, JS_CTOR_URI_ERROR, 1},
-        {"EvalError", 9, JS_CTOR_EVAL_ERROR, 1},
-        {"AggregateError", 14, JS_CTOR_AGGREGATE_ERROR, 2},
-        {"RegExp", 6, JS_CTOR_REGEXP, 2},
-        {"Date", 4, JS_CTOR_DATE, 7},
-        {"Promise", 7, JS_CTOR_PROMISE, 1},
-        {"Map", 3, JS_CTOR_MAP, 0},
-        {"Set", 3, JS_CTOR_SET, 0},
-        {"WeakMap", 7, JS_CTOR_WEAKMAP, 0},
-        {"WeakSet", 7, JS_CTOR_WEAKSET, 0},
-        {"WeakRef", 7, JS_CTOR_WEAKREF, 1},
-        {"FinalizationRegistry", 20, JS_CTOR_FINALIZATION_REGISTRY, 1},
-        {"ArrayBuffer", 11, JS_CTOR_ARRAY_BUFFER, 1},
-        {"SharedArrayBuffer", 17, JS_CTOR_SHARED_ARRAY_BUFFER, 1},
-        {"DataView", 8, JS_CTOR_DATAVIEW, 1},
-        {"Int8Array", 9, JS_CTOR_INT8ARRAY, 3},
-        {"Uint8Array", 10, JS_CTOR_UINT8ARRAY, 3},
-        {"Uint8ClampedArray", 17, JS_CTOR_UINT8CLAMPEDARRAY, 3},
-        {"Int16Array", 10, JS_CTOR_INT16ARRAY, 3},
-        {"Uint16Array", 11, JS_CTOR_UINT16ARRAY, 3},
-        {"Int32Array", 10, JS_CTOR_INT32ARRAY, 3},
-        {"Uint32Array", 11, JS_CTOR_UINT32ARRAY, 3},
-        {"Float16Array", 12, JS_CTOR_FLOAT16ARRAY, 3},
-        {"Float32Array", 12, JS_CTOR_FLOAT32ARRAY, 3},
-        {"Float64Array", 12, JS_CTOR_FLOAT64ARRAY, 3},
-        {"BigInt64Array", 13, JS_CTOR_BIGINT64ARRAY, 3},
-        {"BigUint64Array", 14, JS_CTOR_BIGUINT64ARRAY, 3},
-        {"Proxy", 5, JS_CTOR_PROXY, 2},
-        {"Event", 5, JS_CTOR_EVENT, 2},
-        {"CustomEvent", 11, JS_CTOR_CUSTOM_EVENT, 2},
-        {"EventTarget", 11, JS_CTOR_EVENT_TARGET, 0},
-        {"UIEvent", 7, JS_CTOR_UI_EVENT, 2},
-        {"FocusEvent", 10, JS_CTOR_FOCUS_EVENT, 2},
-        {"MouseEvent", 10, JS_CTOR_MOUSE_EVENT, 2},
-        {"WheelEvent", 10, JS_CTOR_WHEEL_EVENT, 2},
-        {"KeyboardEvent", 13, JS_CTOR_KEYBOARD_EVENT, 2},
-        {"CompositionEvent", 16, JS_CTOR_COMPOSITION_EVENT, 2},
-        {"InputEvent", 10, JS_CTOR_INPUT_EVENT, 2},
-        {"PointerEvent", 12, JS_CTOR_POINTER_EVENT, 2},
-        {"StaticRange", 11, JS_CTOR_STATIC_RANGE, 1},
-        {"Timeout", 7, JS_CTOR_TIMEOUT, 0},
-        {"Immediate", 9, JS_CTOR_IMMEDIATE, 0},
-        {NULL, 0, 0, 0}
-    };
-
-    for (int i = 0; ctors[i].name; i++) {
-        if ((int)name->len == ctors[i].len && strncmp(name->chars, ctors[i].name, name->len) == 0) {
-            return js_create_constructor(ctors[i].id, ctors[i].name, ctors[i].pc);
-        }
+    const JsBuiltinGlobalSpec* spec = js_builtin_global_find(name->chars, (int)name->len);
+    if (spec && spec->kind == JS_BUILTIN_GLOBAL_CONSTRUCTOR && spec->runtime_id > 0) {
+        return js_create_constructor(spec->runtime_id, spec->name, spec->param_count);
     }
     return make_js_undefined();
 }

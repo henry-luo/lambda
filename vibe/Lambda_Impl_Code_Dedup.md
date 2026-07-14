@@ -22,9 +22,9 @@ The plan deliberately stops at Phase 4. Splitting the large JS source files mere
 | **1** | Adopt `MirEmitter` in Python, Ruby, and Bash transpilers | ✅ implemented and verified |
 | 1 | Extract the common typed-index load emitter | ✅ implemented and verified |
 | 1 | Remove trivial Radiant DOM array-constructor copies | ✅ implemented and verified |
-| **2** | Establish one JS builtin catalog | ⬜ pending |
-| 2 | Drive registration/name lookup and MIR classification from the catalog | ⬜ pending |
-| 2 | Reduce runtime dispatch to explicit descriptor groups plus custom handlers | ⬜ pending |
+| **2** | Establish one JS builtin catalog | ✅ implemented and verified |
+| 2 | Drive registration/name lookup and MIR classification from the catalog | ✅ implemented and verified |
+| 2 | Reduce runtime dispatch to explicit descriptor groups plus custom handlers | ✅ implemented and verified |
 | **3** | Extract JS generator/async resume-state helpers | ⬜ pending |
 | 3 | Extract JS exception-routing and class-method installation helpers | ⬜ pending |
 | **4** | Make Radiant DOM reflected attributes source-generated from one spec | ⬜ pending |
@@ -298,6 +298,13 @@ The catalog may be an X-macro `.def` file or one static descriptor table. It mus
 
 The catalog does not contain large behavior bodies. Custom semantics remain named functions or explicit custom cases.
 
+**Status — complete.** `js_builtin_catalog.def` is the single readable X-macro
+source for **43 owners**, **26 owner/prototype bindings**, **374 ABI-ordered
+builtin IDs**, **395 method/accessor properties**, and **90 global namespace,
+function, and constructor entries**. `js_builtin_catalog.hpp` exposes the small
+shared contract used by registration, MIR lowering, globals, and runtime
+dispatch. Behavior bodies remain in their semantic owners.
+
 ### P2.2 — Derive enum, registration, and lookup
 
 Move in this order:
@@ -309,11 +316,29 @@ Move in this order:
 
 The first slices should be cohesive families with good tests: Math/JSON, Array, String, typed arrays, then Object/Function and the remaining constructors.
 
+**Status — complete.** The ID enum and dense dispatch/MIR descriptor array are
+derived from the catalog. Compile-time assertions pin the full count and the
+Array, String, Number, and Math ranges used by arithmetic. Registration tables,
+constructor/global installation, prototype placement, accessor installation,
+typed-array recognition, error-family classification, realm construction, and
+cache metadata now query the catalog. Both `(owner, name)` method lookup and
+global-name lookup use registry-owned open-addressed hash indexes; the old local
+constructor, namespace, typed-array, prototype-owner, species, and method-name
+inventories were deleted.
+
 ### P2.3 — Replace MIR `strncmp` classification
 
 `js_mir_expression_lowering.cpp` currently contains hundreds of string comparisons for builtin recognition and optimized lowering. Resolve the callee to a catalog entry once, then dispatch on `mir_lowering_kind` or builtin ID.
 
 Use a small explicit custom switch for syntax- or receiver-sensitive intrinsics. Do not force generic runtime calls where the current MIR specialization is required for semantics or performance.
+
+**Status — complete.** Static member recognition resolves through the catalog
+once and compares builtin IDs or `mir_lowering_kind`. This replaced the Object,
+Array, ArrayBuffer, Date, Number, String, BigInt, Symbol, Math, JSON, Reflect,
+Proxy, and error-family name ladders while preserving the specialized Math and
+Date lowering paths. The expression lowerer removed **200** `strncmp`/Math
+matcher lines and added 38 comparisons only where receiver or syntax semantics
+remain intentionally name-sensitive.
 
 ### P2.4 — Reduce runtime dispatch by behavior group
 
@@ -326,6 +351,14 @@ The giant `js_dispatch_builtin()` switch should become a top-level dispatch over
 
 The goal is single-point-of-change, not a switch-free codebase.
 
+**Status — complete.** The top-level dispatcher now consults the catalog group
+before its exceptional-case switch. Array, String, and Math use shared adapters
+that obtain their operation name and metadata from the catalog; the former
+local Array, String, Number, and Math name arrays are gone. Other groups retain
+their existing compact operation switches or named custom handlers where their
+receiver checks, iterator state, exception ordering, or mutation semantics are
+not interchangeable.
+
 ### Phase 2 invariants and gate
 
 - Builtin IDs and any contiguous ranges used for arithmetic remain compile-time asserted.
@@ -334,6 +367,37 @@ The goal is single-point-of-change, not a switch-free codebase.
 - Release performance is measured for builtin-heavy AWFY/Node workloads; debug builds are never used for performance conclusions.
 
 **Gate per family:** `make build`, full/focused `test_js_gtest.exe`, `make test262-baseline`, `make node-baseline` with zero new failures/retries, release benchmark where lowering changes, `make check-lambda-dup`, `git diff --check`.
+
+### Phase 2 verified result
+
+| Measure | Phase 1 ratchet | Phase 2 result | Delta |
+|---|---:|---:|---:|
+| First-party clone families | 1,378 | **1,371** | **-7** |
+| Union duplicate lines | 56,407 | **56,117** | **-290** |
+| Net maintained source LOC across the seven catalog/consumer files | — | **-375** | 2,434 added / 2,809 removed |
+| Synchronized builtin inventories | IDs, registration, globals, MIR ladders, runtime name arrays | **1 catalog** | old inventories deleted |
+
+Verification on the final catalog shape:
+
+- `make build`: pass, 0 errors and 0 warnings.
+- `test_js_gtest.exe`: **309/309 passed**.
+- `make test262-baseline`: **40,261/40,261 fully passed**, 0 failed,
+  0 non-fully-passing, 0 regressions, retry time 0.0s.
+- `make node-baseline`: **3,528/3,528 enabled baseline tests passed**, 0 failed,
+  missing, timed out, crashed, or regressed; 22 excluded/slow parameter cases
+  remained skipped.
+- Release-only builtin-heavy medians over three runs (ms): AWFY `nbody` 578,
+  AWFY `json` 88.3, BENG `nbody` 314, BENG `regexredux` 14.8, and BENG
+  `revcomp` 45.8. Raw results are in `temp/phase2_builtin_perf.json`.
+- `make check-lambda-dup`: PASS against the lowered **1,371 / 56,117** ratchet.
+- `git diff --check`: pass.
+
+The Node gate initially exposed an unrelated domain-stack regression introduced
+before this phase: root error handlers overrode an empty-stack `undefined`
+`process.domain` with `null`, and async capture discarded all but the active
+parent. The runtime now preserves the synchronized empty-stack value and
+captures the complete already-trimmed parent stack. The focused domain test and
+the full Node baseline both pass.
 
 ---
 

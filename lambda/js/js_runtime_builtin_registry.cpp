@@ -13,23 +13,57 @@ static bool js_builtin_cache_init = false;
 
 extern "C" void js_func_init_property(Item fn_item, Item key, Item value);
 
-typedef struct JsBuiltinSpecLookupCacheEntry {
-    const JsBuiltinMethodSpec* specs;
-    const JsBuiltinMethodSpec* spec;
-    uint32_t hash;
-    int len;
-} JsBuiltinSpecLookupCacheEntry;
+typedef struct JsBuiltinDescriptor {
+    JsBuiltinDispatchGroup dispatch_group;
+    JsBuiltinMirLoweringKind mir_kind;
+} JsBuiltinDescriptor;
 
-#define JS_BUILTIN_SPEC_LOOKUP_CACHE_SIZE 1024u
-static JsBuiltinSpecLookupCacheEntry
-    js_builtin_spec_lookup_cache[JS_BUILTIN_SPEC_LOOKUP_CACHE_SIZE];
+static const JsBuiltinDescriptor JS_BUILTIN_DESCRIPTORS[] = {
+    {JS_BUILTIN_DISPATCH_NONE, JS_BUILTIN_MIR_GENERIC},
+#define JS_BUILTIN_OWNER(owner)
+#define JS_BUILTIN_ID(id, dispatch_group, mir_kind) {dispatch_group, mir_kind},
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags)
+#include "js_builtin_catalog.def"
+#undef JS_BUILTIN_GLOBAL
+#undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_ID
+#undef JS_BUILTIN_OWNER
+};
 
-static const char* js_builtin_method_spec_display_name(const JsBuiltinMethodSpec* spec) {
-    return spec->display_name ? spec->display_name : spec->name;
-}
+static const JsBuiltinMethodSpec JS_BUILTIN_METHOD_SPECS[] = {
+#define JS_BUILTIN_OWNER(owner)
+#define JS_BUILTIN_ID(id, dispatch_group, mir_kind)
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache) \
+    {owner, name, len, id, arity, display_name, property_kind, flags, use_cache},
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags)
+#include "js_builtin_catalog.def"
+#undef JS_BUILTIN_GLOBAL
+#undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_ID
+#undef JS_BUILTIN_OWNER
+    {JS_BUILTIN_OWNER_NONE, NULL, 0, 0, 0, NULL, JS_BUILTIN_PROPERTY_METHOD, 0, false}
+};
 
-static uint32_t js_builtin_spec_name_hash(const char* name, int len) {
-    uint32_t h = 2166136261u;
+static const JsBuiltinGlobalSpec JS_BUILTIN_GLOBAL_SPECS[] = {
+#define JS_BUILTIN_OWNER(owner)
+#define JS_BUILTIN_ID(id, dispatch_group, mir_kind)
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags) \
+    {id, name, len, kind, runtime_id, arity, flags},
+#include "js_builtin_catalog.def"
+#undef JS_BUILTIN_GLOBAL
+#undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_ID
+#undef JS_BUILTIN_OWNER
+};
+
+static_assert(sizeof(JS_BUILTIN_GLOBAL_SPECS) / sizeof(JS_BUILTIN_GLOBAL_SPECS[0]) ==
+                  JS_BUILTIN_GLOBAL_MAX - 1,
+              "global builtin catalog IDs must remain dense");
+
+static uint32_t js_builtin_name_hash(uint32_t seed, const char* name, int len) {
+    uint32_t h = seed;
     for (int i = 0; i < len; i++) {
         h ^= (uint8_t)name[i];
         h *= 16777619u;
@@ -37,84 +71,173 @@ static uint32_t js_builtin_spec_name_hash(const char* name, int len) {
     return h ? h : 1u;
 }
 
-static const JsBuiltinMethodSpec* js_builtin_spec_cache_get(
-        const JsBuiltinMethodSpec* specs, const char* name, int len,
-        uint32_t hash) {
-    uint32_t slot = hash & (JS_BUILTIN_SPEC_LOOKUP_CACHE_SIZE - 1u);
-    JsBuiltinSpecLookupCacheEntry* entry = &js_builtin_spec_lookup_cache[slot];
-    if (entry->specs != specs || entry->len != len || entry->hash != hash ||
-        !entry->spec || !entry->spec->name) {
-        return NULL;
-    }
-    if (strncmp(name, entry->spec->name, len) == 0) return entry->spec;
-    return NULL;
-}
+#define JS_BUILTIN_GLOBAL_LOOKUP_INDEX_SIZE 256u
+static const JsBuiltinGlobalSpec* js_builtin_global_lookup_index[
+    JS_BUILTIN_GLOBAL_LOOKUP_INDEX_SIZE];
+static bool js_builtin_global_lookup_index_initialized = false;
 
-static void js_builtin_spec_cache_put(const JsBuiltinMethodSpec* specs,
-                                      const JsBuiltinMethodSpec* spec,
-                                      int len, uint32_t hash) {
-    uint32_t slot = hash & (JS_BUILTIN_SPEC_LOOKUP_CACHE_SIZE - 1u);
-    JsBuiltinSpecLookupCacheEntry* entry = &js_builtin_spec_lookup_cache[slot];
-    entry->specs = specs;
-    entry->spec = spec;
-    entry->hash = hash;
-    entry->len = len;
-}
-
-static const JsBuiltinMethodSpec* js_find_builtin_method_spec(const JsBuiltinMethodSpec* specs, const char* name, int len) {
-    if (!specs || !name) return NULL;
-    uint32_t hash = js_builtin_spec_name_hash(name, len);
-    const JsBuiltinMethodSpec* cached = js_builtin_spec_cache_get(specs, name, len, hash);
-    if (cached) return cached;
-
-    char first = len > 0 ? name[0] : '\0';
-    for (int i = 0; specs[i].name; i++) {
-        if (len == specs[i].len && first == specs[i].name[0] &&
-            strncmp(name, specs[i].name, len) == 0) {
-            js_builtin_spec_cache_put(specs, &specs[i], len, hash);
-            return &specs[i];
+static void js_builtin_global_initialize_index() {
+    if (js_builtin_global_lookup_index_initialized) return;
+    int count = (int)(sizeof(JS_BUILTIN_GLOBAL_SPECS) / sizeof(JS_BUILTIN_GLOBAL_SPECS[0]));
+    for (int i = 0; i < count; i++) {
+        const JsBuiltinGlobalSpec* spec = &JS_BUILTIN_GLOBAL_SPECS[i];
+        uint32_t slot = js_builtin_name_hash(2166136261u, spec->name, spec->len) &
+                        (JS_BUILTIN_GLOBAL_LOOKUP_INDEX_SIZE - 1u);
+        while (js_builtin_global_lookup_index[slot]) {
+            slot = (slot + 1u) & (JS_BUILTIN_GLOBAL_LOOKUP_INDEX_SIZE - 1u);
         }
+        js_builtin_global_lookup_index[slot] = spec;
+    }
+    js_builtin_global_lookup_index_initialized = true;
+}
+
+const JsBuiltinGlobalSpec* js_builtin_global_find(const char* name, int len) {
+    if (!name || len <= 0) return NULL;
+    js_builtin_global_initialize_index();
+    uint32_t slot = js_builtin_name_hash(2166136261u, name, len) &
+                    (JS_BUILTIN_GLOBAL_LOOKUP_INDEX_SIZE - 1u);
+    for (uint32_t probe = 0; probe < JS_BUILTIN_GLOBAL_LOOKUP_INDEX_SIZE; probe++) {
+        const JsBuiltinGlobalSpec* spec = js_builtin_global_lookup_index[slot];
+        if (!spec) return NULL;
+        if (spec->len == len &&
+            strncmp(spec->name, name, len) == 0) {
+            return spec;
+        }
+        slot = (slot + 1u) & (JS_BUILTIN_GLOBAL_LOOKUP_INDEX_SIZE - 1u);
     }
     return NULL;
 }
 
-Item js_lookup_builtin_method_spec(const JsBuiltinMethodSpec* specs, const char* name, int len) {
-    const JsBuiltinMethodSpec* spec = js_find_builtin_method_spec(specs, name, len);
-    if (spec) {
-        return js_get_or_create_builtin(spec->builtin_id, js_builtin_method_spec_display_name(spec), spec->param_count);
-    }
-    return ItemNull;
+bool js_builtin_global_has_flag(const char* name, int len, int flag) {
+    const JsBuiltinGlobalSpec* spec = js_builtin_global_find(name, len);
+    return spec && (spec->flags & flag) != 0;
 }
 
-void js_install_builtin_method_specs(Item object, const JsBuiltinMethodSpec* specs) {
-    if (!specs) return;
-    for (int i = 0; specs[i].name; i++) {
-        Item key = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
-        Item fn = js_get_or_create_builtin(specs[i].builtin_id, js_builtin_method_spec_display_name(&specs[i]), specs[i].param_count);
-        js_property_set(object, key, fn);
-        js_mark_non_enumerable(object, key);
+int js_builtin_typed_array_type(const char* name, int len) {
+    const JsBuiltinGlobalSpec* spec = js_builtin_global_find(name, len);
+    if (!spec || !(spec->flags & JS_BUILTIN_GLOBAL_TYPED_ARRAY)) return -1;
+    switch (spec->runtime_id) {
+    case JS_CTOR_INT8ARRAY: return JS_TYPED_INT8;
+    case JS_CTOR_UINT8ARRAY: return JS_TYPED_UINT8;
+    case JS_CTOR_UINT8CLAMPEDARRAY: return JS_TYPED_UINT8_CLAMPED;
+    case JS_CTOR_INT16ARRAY: return JS_TYPED_INT16;
+    case JS_CTOR_UINT16ARRAY: return JS_TYPED_UINT16;
+    case JS_CTOR_INT32ARRAY: return JS_TYPED_INT32;
+    case JS_CTOR_UINT32ARRAY: return JS_TYPED_UINT32;
+    case JS_CTOR_FLOAT16ARRAY: return JS_TYPED_FLOAT16;
+    case JS_CTOR_FLOAT32ARRAY: return JS_TYPED_FLOAT32;
+    case JS_CTOR_FLOAT64ARRAY: return JS_TYPED_FLOAT64;
+    case JS_CTOR_BIGINT64ARRAY: return JS_TYPED_BIGINT64;
+    case JS_CTOR_BIGUINT64ARRAY: return JS_TYPED_BIGUINT64;
+    default: return -1;
     }
 }
 
-static void js_install_builtin_method_specs_on_function(Item function_item, const JsBuiltinMethodSpec* specs, bool skip_existing) {
-    if (!specs || get_type_id(function_item) != LMD_TYPE_FUNC) return;
-    JsFunction* fn = (JsFunction*)function_item.function;
-    for (int i = 0; specs[i].name; i++) {
-        Item key = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
-        if (skip_existing && fn->properties_map.item != 0 &&
-            get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
-            Item existing = map_get(fn->properties_map.map, key);
-            if (existing.item != ItemNull.item) continue;
+int js_builtin_global_count() {
+    return (int)(sizeof(JS_BUILTIN_GLOBAL_SPECS) / sizeof(JS_BUILTIN_GLOBAL_SPECS[0]));
+}
+
+const JsBuiltinGlobalSpec* js_builtin_global_at(int index) {
+    if (index < 0 || index >= js_builtin_global_count()) return NULL;
+    return &JS_BUILTIN_GLOBAL_SPECS[index];
+}
+
+static_assert(sizeof(JS_BUILTIN_DESCRIPTORS) / sizeof(JS_BUILTIN_DESCRIPTORS[0]) == JS_BUILTIN_MAX,
+              "builtin catalog IDs must remain dense");
+static_assert(JS_BUILTIN_ARR_TO_LOCALE_STRING - JS_BUILTIN_ARR_PUSH == 38,
+              "Array builtin range arithmetic requires contiguous catalog IDs");
+static_assert(JS_BUILTIN_STR_TO_LOCALE_UPPER_CASE - JS_BUILTIN_STR_CHAR_AT == 47,
+              "String builtin range arithmetic requires contiguous catalog IDs");
+static_assert(JS_BUILTIN_NUM_TO_EXPONENTIAL - JS_BUILTIN_NUM_TO_STRING == 4,
+              "Number builtin range arithmetic requires contiguous catalog IDs");
+static_assert(JS_BUILTIN_MATH_LOG1P - JS_BUILTIN_MATH_ABS == 34,
+              "Math builtin range arithmetic requires contiguous catalog IDs");
+
+#define JS_BUILTIN_LOOKUP_INDEX_SIZE 1024u
+static const JsBuiltinMethodSpec* js_builtin_lookup_index[JS_BUILTIN_LOOKUP_INDEX_SIZE];
+static const JsBuiltinMethodSpec* js_builtin_id_index[JS_BUILTIN_MAX];
+static bool js_builtin_lookup_index_initialized = false;
+
+static const char* js_builtin_method_spec_display_name(const JsBuiltinMethodSpec* spec) {
+    return spec->display_name ? spec->display_name : spec->name;
+}
+
+static uint32_t js_builtin_spec_name_hash(JsBuiltinOwner owner, const char* name, int len) {
+    return js_builtin_name_hash(2166136261u ^ (uint32_t)owner, name, len);
+}
+
+static void js_builtin_catalog_initialize_index() {
+    if (js_builtin_lookup_index_initialized) return;
+    for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
+        const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
+        uint32_t slot = js_builtin_spec_name_hash(spec->owner, spec->name, spec->len) &
+                        (JS_BUILTIN_LOOKUP_INDEX_SIZE - 1u);
+        while (js_builtin_lookup_index[slot]) {
+            slot = (slot + 1u) & (JS_BUILTIN_LOOKUP_INDEX_SIZE - 1u);
         }
-        Item method = js_get_or_create_builtin(specs[i].builtin_id, js_builtin_method_spec_display_name(&specs[i]), specs[i].param_count);
-        js_func_init_property(function_item, key, method);
-        js_mark_non_enumerable(function_item, key);
+        js_builtin_lookup_index[slot] = spec;
+        if (spec->builtin_id > 0 && spec->builtin_id < JS_BUILTIN_MAX &&
+            !js_builtin_id_index[spec->builtin_id]) {
+            js_builtin_id_index[spec->builtin_id] = spec;
+        }
     }
+    js_builtin_lookup_index_initialized = true;
 }
 
-static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec, int flags, bool use_cache) {
+const JsBuiltinMethodSpec* js_builtin_catalog_find(JsBuiltinOwner owner,
+                                                    const char* name, int len) {
+    if (owner <= JS_BUILTIN_OWNER_NONE || owner >= JS_BUILTIN_OWNER_MAX || !name) return NULL;
+    js_builtin_catalog_initialize_index();
+    uint32_t slot = js_builtin_spec_name_hash(owner, name, len) &
+                    (JS_BUILTIN_LOOKUP_INDEX_SIZE - 1u);
+    for (uint32_t probe = 0; probe < JS_BUILTIN_LOOKUP_INDEX_SIZE; probe++) {
+        const JsBuiltinMethodSpec* spec = js_builtin_lookup_index[slot];
+        if (!spec) return NULL;
+        if (spec->owner == owner && spec->len == len &&
+            strncmp(spec->name, name, len) == 0) {
+            return spec;
+        }
+        slot = (slot + 1u) & (JS_BUILTIN_LOOKUP_INDEX_SIZE - 1u);
+    }
+    return NULL;
+}
+
+const JsBuiltinMethodSpec* js_builtin_catalog_find_id(int builtin_id) {
+    if (builtin_id <= JS_BUILTIN_NONE || builtin_id >= JS_BUILTIN_MAX) return NULL;
+    js_builtin_catalog_initialize_index();
+    return js_builtin_id_index[builtin_id];
+}
+
+int js_builtin_catalog_lookup_id(JsBuiltinOwner owner, const char* name, int len) {
+    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(owner, name, len);
+    return spec ? spec->builtin_id : JS_BUILTIN_NONE;
+}
+
+JsBuiltinDispatchGroup js_builtin_dispatch_group(int builtin_id) {
+    if (builtin_id <= JS_BUILTIN_NONE || builtin_id >= JS_BUILTIN_MAX) {
+        return JS_BUILTIN_DISPATCH_NONE;
+    }
+    return JS_BUILTIN_DESCRIPTORS[builtin_id].dispatch_group;
+}
+
+JsBuiltinMirLoweringKind js_builtin_mir_kind(int builtin_id) {
+    if (builtin_id <= JS_BUILTIN_NONE || builtin_id >= JS_BUILTIN_MAX) {
+        return JS_BUILTIN_MIR_GENERIC;
+    }
+    return JS_BUILTIN_DESCRIPTORS[builtin_id].mir_kind;
+}
+
+Item js_lookup_builtin_method_spec(JsBuiltinOwner owner, const char* name, int len) {
+    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(owner, name, len);
+    if (!spec || spec->builtin_id <= JS_BUILTIN_NONE) return ItemNull;
+    return js_get_or_create_builtin(spec->builtin_id,
+                                    js_builtin_method_spec_display_name(spec),
+                                    spec->param_count);
+}
+
+static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec) {
     const char* display_name = js_builtin_method_spec_display_name(spec);
-    if (use_cache && flags == 0 && spec->builtin_id > 0) {
+    if (spec->use_cache && spec->flags == 0 && spec->builtin_id > 0) {
         return js_get_or_create_builtin(spec->builtin_id, display_name, spec->param_count);
     }
     JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
@@ -123,745 +246,138 @@ static Item js_create_builtin_function_from_spec(const JsBuiltinMethodSpec* spec
     fn->formal_length = -1;
     fn->builtin_id = spec->builtin_id;
     fn->name = heap_create_name(display_name, strlen(display_name));
-    fn->flags = flags;
+    fn->flags = spec->flags;
     return (Item){.function = (Function*)fn};
 }
 
-void js_install_builtin_function_specs(Item object, const JsBuiltinMethodSpec* specs, int flags, bool use_cache) {
-    if (!specs) return;
-    for (int i = 0; specs[i].name; i++) {
-        Item key = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
-        Item fn = js_create_builtin_function_from_spec(&specs[i], flags, use_cache);
+void js_install_builtin_method_specs(Item object, JsBuiltinOwner owner) {
+    for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
+        const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
+        if (spec->owner != owner || spec->property_kind != JS_BUILTIN_PROPERTY_METHOD) continue;
+        Item key = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
+        Item fn = js_create_builtin_function_from_spec(spec);
         js_property_set(object, key, fn);
         js_mark_non_enumerable(object, key);
     }
 }
 
-void js_install_builtin_accessor_specs(Item object, const JsBuiltinMethodSpec* specs, int flags) {
-    if (!specs) return;
-    for (int i = 0; specs[i].name; i++) {
-        Item getter = js_create_builtin_function_from_spec(&specs[i], flags, false);
-        Item prop_name = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
+static void js_install_builtin_method_specs_on_function(Item function_item,
+                                                        JsBuiltinOwner owner,
+                                                        bool skip_existing) {
+    if (get_type_id(function_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)function_item.function;
+    for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
+        const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
+        if (spec->owner != owner || spec->property_kind != JS_BUILTIN_PROPERTY_METHOD) continue;
+        Item key = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
+        if (skip_existing && fn->properties_map.item != 0 &&
+            get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+            Item existing = map_get(fn->properties_map.map, key);
+            if (existing.item != ItemNull.item) continue;
+        }
+        Item method = js_create_builtin_function_from_spec(spec);
+        js_func_init_property(function_item, key, method);
+        js_mark_non_enumerable(function_item, key);
+    }
+}
+
+void js_install_builtin_function_specs(Item object, JsBuiltinOwner owner) {
+    js_install_builtin_method_specs(object, owner);
+}
+
+void js_install_builtin_accessor_specs(Item object, JsBuiltinOwner owner) {
+    for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
+        const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
+        if (spec->owner != owner || spec->property_kind != JS_BUILTIN_PROPERTY_ACCESSOR) continue;
+        Item getter = js_create_builtin_function_from_spec(spec);
+        Item prop_name = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
         js_install_native_accessor(object, prop_name, getter, ItemNull, JSPD_NON_ENUMERABLE);
     }
 }
 
-const JsBuiltinMethodSpec JS_MATH_METHOD_SPECS[] = {
-    {"abs", 3, JS_BUILTIN_MATH_ABS, 1},
-    {"floor", 5, JS_BUILTIN_MATH_FLOOR, 1},
-    {"ceil", 4, JS_BUILTIN_MATH_CEIL, 1},
-    {"round", 5, JS_BUILTIN_MATH_ROUND, 1},
-    {"sqrt", 4, JS_BUILTIN_MATH_SQRT, 1},
-    {"pow", 3, JS_BUILTIN_MATH_POW, 2},
-    {"min", 3, JS_BUILTIN_MATH_MIN, 2},
-    {"max", 3, JS_BUILTIN_MATH_MAX, 2},
-    {"log", 3, JS_BUILTIN_MATH_LOG, 1},
-    {"log10", 5, JS_BUILTIN_MATH_LOG10, 1},
-    {"log2", 4, JS_BUILTIN_MATH_LOG2, 1},
-    {"exp", 3, JS_BUILTIN_MATH_EXP, 1},
-    {"sin", 3, JS_BUILTIN_MATH_SIN, 1},
-    {"cos", 3, JS_BUILTIN_MATH_COS, 1},
-    {"tan", 3, JS_BUILTIN_MATH_TAN, 1},
-    {"sign", 4, JS_BUILTIN_MATH_SIGN, 1},
-    {"trunc", 5, JS_BUILTIN_MATH_TRUNC, 1},
-    {"random", 6, JS_BUILTIN_MATH_RANDOM, 0},
-    {"asin", 4, JS_BUILTIN_MATH_ASIN, 1},
-    {"acos", 4, JS_BUILTIN_MATH_ACOS, 1},
-    {"atan", 4, JS_BUILTIN_MATH_ATAN, 1},
-    {"atan2", 5, JS_BUILTIN_MATH_ATAN2, 2},
-    {"cbrt", 4, JS_BUILTIN_MATH_CBR, 1},
-    {"hypot", 5, JS_BUILTIN_MATH_HYPOT, 2},
-    {"clz32", 5, JS_BUILTIN_MATH_CLZ32, 1},
-    {"fround", 6, JS_BUILTIN_MATH_FROUND, 1},
-    {"imul", 4, JS_BUILTIN_MATH_IMUL, 2},
-    {"sinh", 4, JS_BUILTIN_MATH_SINH, 1},
-    {"cosh", 4, JS_BUILTIN_MATH_COSH, 1},
-    {"tanh", 4, JS_BUILTIN_MATH_TANH, 1},
-    {"asinh", 5, JS_BUILTIN_MATH_ASINH, 1},
-    {"acosh", 5, JS_BUILTIN_MATH_ACOSH, 1},
-    {"atanh", 5, JS_BUILTIN_MATH_ATANH, 1},
-    {"expm1", 5, JS_BUILTIN_MATH_EXPM1, 1},
-    {"log1p", 5, JS_BUILTIN_MATH_LOG1P, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_OBJECT_PROTOTYPE_METHOD_SPECS[] = {
-    {"hasOwnProperty", 14, JS_BUILTIN_OBJ_HAS_OWN_PROPERTY, 1},
-    {"propertyIsEnumerable", 20, JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE, 1},
-    {"toString", 8, JS_BUILTIN_OBJ_TO_STRING, 0},
-    {"valueOf", 7, JS_BUILTIN_OBJ_VALUE_OF, 0},
-    {"isPrototypeOf", 13, JS_BUILTIN_OBJ_IS_PROTOTYPE_OF, 1},
-    {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
-    {"__defineGetter__", 16, JS_BUILTIN_OBJ_DEFINE_GETTER, 2},
-    {"__defineSetter__", 16, JS_BUILTIN_OBJ_DEFINE_SETTER, 2},
-    {"__lookupGetter__", 16, JS_BUILTIN_OBJ_LOOKUP_GETTER, 1},
-    {"__lookupSetter__", 16, JS_BUILTIN_OBJ_LOOKUP_SETTER, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_FUNCTION_PROTOTYPE_METHOD_SPECS[] = {
-    {"call", 4, JS_BUILTIN_FUNC_CALL, 1},
-    {"apply", 5, JS_BUILTIN_FUNC_APPLY, 2},
-    {"bind", 4, JS_BUILTIN_FUNC_BIND, 1},
-    {"toString", 8, JS_BUILTIN_FUNC_TO_STRING, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_BOOLEAN_PROTOTYPE_METHOD_SPECS[] = {
-    {"toString", 8, JS_BUILTIN_BOOL_TO_STRING, 0},
-    {"valueOf", 7, JS_BUILTIN_BOOL_VALUE_OF, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
-    {"push", 4, JS_BUILTIN_ARR_PUSH, 1},
-    {"pop", 3, JS_BUILTIN_ARR_POP, 0},
-    {"shift", 5, JS_BUILTIN_ARR_SHIFT, 0},
-    {"unshift", 7, JS_BUILTIN_ARR_UNSHIFT, 1},
-    {"join", 4, JS_BUILTIN_ARR_JOIN, 1},
-    {"slice", 5, JS_BUILTIN_ARR_SLICE, 2},
-    {"splice", 6, JS_BUILTIN_ARR_SPLICE, 2},
-    {"indexOf", 7, JS_BUILTIN_ARR_INDEX_OF, 1},
-    {"lastIndexOf", 11, JS_BUILTIN_ARR_LAST_INDEX_OF, 1},
-    {"includes", 8, JS_BUILTIN_ARR_INCLUDES, 1},
-    {"map", 3, JS_BUILTIN_ARR_MAP, 1},
-    {"filter", 6, JS_BUILTIN_ARR_FILTER, 1},
-    {"reduce", 6, JS_BUILTIN_ARR_REDUCE, 1},
-    {"forEach", 7, JS_BUILTIN_ARR_FOR_EACH, 1},
-    {"find", 4, JS_BUILTIN_ARR_FIND, 1},
-    {"findIndex", 9, JS_BUILTIN_ARR_FIND_INDEX, 1},
-    {"some", 4, JS_BUILTIN_ARR_SOME, 1},
-    {"every", 5, JS_BUILTIN_ARR_EVERY, 1},
-    {"sort", 4, JS_BUILTIN_ARR_SORT, 1},
-    {"reverse", 7, JS_BUILTIN_ARR_REVERSE, 0},
-    {"concat", 6, JS_BUILTIN_ARR_CONCAT, 1},
-    {"flat", 4, JS_BUILTIN_ARR_FLAT, 0},
-    {"flatMap", 7, JS_BUILTIN_ARR_FLAT_MAP, 1},
-    {"fill", 4, JS_BUILTIN_ARR_FILL, 1},
-    {"copyWithin", 10, JS_BUILTIN_ARR_COPY_WITHIN, 2},
-    {"toString", 8, JS_BUILTIN_ARR_TO_STRING, 0},
-    {"toLocaleString", 14, JS_BUILTIN_ARR_TO_LOCALE_STRING, 0},
-    {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
-    {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
-    {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
-    {"at", 2, JS_BUILTIN_ARR_AT, 1},
-    {"item", 4, JS_BUILTIN_ARR_ITEM, 1},
-    {"reduceRight", 11, JS_BUILTIN_ARR_REDUCE_RIGHT, 1},
-    {"findLast", 8, JS_BUILTIN_ARR_FIND_LAST, 1},
-    {"findLastIndex", 13, JS_BUILTIN_ARR_FIND_LAST_INDEX, 1},
-    {"toSorted", 8, JS_BUILTIN_ARR_TO_SORTED, 1},
-    {"toReversed", 10, JS_BUILTIN_ARR_TO_REVERSED, 0},
-    {"toSpliced", 9, JS_BUILTIN_ARR_TO_SPLICED, 2},
-    {"with", 4, JS_BUILTIN_ARR_WITH, 2},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_NUMBER_PROTOTYPE_METHOD_SPECS[] = {
-    {"toString", 8, JS_BUILTIN_NUM_TO_STRING, 1},
-    {"valueOf", 7, JS_BUILTIN_NUM_VALUE_OF, 0},
-    {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
-    {"toFixed", 7, JS_BUILTIN_NUM_TO_FIXED, 1},
-    {"toPrecision", 11, JS_BUILTIN_NUM_TO_PRECISION, 1},
-    {"toExponential", 13, JS_BUILTIN_NUM_TO_EXPONENTIAL, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_SYMBOL_PROTOTYPE_METHOD_SPECS[] = {
-    {"toString", 8, JS_BUILTIN_SYM_TO_STRING, 0},
-    {"valueOf", 7, JS_BUILTIN_SYM_VALUE_OF, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_BIGINT_PROTOTYPE_METHOD_SPECS[] = {
-    {"toString", 8, JS_BUILTIN_BIGINT_TO_STRING, 0},
-    {"valueOf", 7, JS_BUILTIN_BIGINT_VALUE_OF, 0},
-    {"toLocaleString", 14, JS_BUILTIN_BIGINT_TO_LOCALE_STRING, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_BIGINT_STATIC_METHOD_SPECS[] = {
-    {"asIntN", 6, JS_BUILTIN_BIGINT_AS_INT_N, 2},
-    {"asUintN", 7, JS_BUILTIN_BIGINT_AS_UINT_N, 2},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_STRING_PROTOTYPE_METHOD_SPECS[] = {
-    {"charAt", 6, JS_BUILTIN_STR_CHAR_AT, 1},
-    {"charCodeAt", 10, JS_BUILTIN_STR_CHAR_CODE_AT, 1},
-    {"indexOf", 7, JS_BUILTIN_STR_INDEX_OF, 1},
-    {"lastIndexOf", 11, JS_BUILTIN_STR_LAST_INDEX_OF, 1},
-    {"includes", 8, JS_BUILTIN_STR_INCLUDES, 1},
-    {"slice", 5, JS_BUILTIN_STR_SLICE, 2},
-    {"substring", 9, JS_BUILTIN_STR_SUBSTRING, 2},
-    {"toLowerCase", 11, JS_BUILTIN_STR_TO_LOWER_CASE, 0},
-    {"toUpperCase", 11, JS_BUILTIN_STR_TO_UPPER_CASE, 0},
-    {"trim", 4, JS_BUILTIN_STR_TRIM, 0},
-    {"trimStart", 9, JS_BUILTIN_STR_TRIM_START, 0},
-    {"trimEnd", 7, JS_BUILTIN_STR_TRIM_END, 0},
-    {"split", 5, JS_BUILTIN_STR_SPLIT, 2},
-    {"replace", 7, JS_BUILTIN_STR_REPLACE, 2},
-    {"replaceAll", 10, JS_BUILTIN_STR_REPLACE_ALL, 2},
-    {"match", 5, JS_BUILTIN_STR_MATCH, 1},
-    {"matchAll", 8, JS_BUILTIN_STR_MATCH_ALL, 1},
-    {"search", 6, JS_BUILTIN_STR_SEARCH, 1},
-    {"startsWith", 10, JS_BUILTIN_STR_STARTS_WITH, 1},
-    {"endsWith", 8, JS_BUILTIN_STR_ENDS_WITH, 1},
-    {"repeat", 6, JS_BUILTIN_STR_REPEAT, 1},
-    {"padStart", 8, JS_BUILTIN_STR_PAD_START, 1},
-    {"padEnd", 6, JS_BUILTIN_STR_PAD_END, 1},
-    {"toString", 8, JS_BUILTIN_STR_TO_STRING, 0},
-    {"valueOf", 7, JS_BUILTIN_STR_VALUE_OF, 0},
-    {"codePointAt", 11, JS_BUILTIN_STR_CODE_POINT_AT, 1},
-    {"normalize", 9, JS_BUILTIN_STR_NORMALIZE, 0},
-    {"concat", 6, JS_BUILTIN_STR_CONCAT, 1},
-    {"at", 2, JS_BUILTIN_STR_AT, 1},
-    {"localeCompare", 13, JS_BUILTIN_STR_LOCALE_COMPARE, 1},
-    {"trimLeft", 8, JS_BUILTIN_STR_TRIM_START, 0, "trimStart"},
-    {"trimRight", 9, JS_BUILTIN_STR_TRIM_END, 0, "trimEnd"},
-    {"isWellFormed", 12, JS_BUILTIN_STR_IS_WELL_FORMED, 0},
-    {"toWellFormed", 12, JS_BUILTIN_STR_TO_WELL_FORMED, 0},
-    {"anchor", 6, JS_BUILTIN_STR_ANCHOR, 1},
-    {"big", 3, JS_BUILTIN_STR_BIG, 0},
-    {"blink", 5, JS_BUILTIN_STR_BLINK, 0},
-    {"bold", 4, JS_BUILTIN_STR_BOLD, 0},
-    {"fixed", 5, JS_BUILTIN_STR_FIXED, 0},
-    {"fontcolor", 9, JS_BUILTIN_STR_FONTCOLOR, 1},
-    {"fontsize", 8, JS_BUILTIN_STR_FONTSIZE, 1},
-    {"italics", 7, JS_BUILTIN_STR_ITALICS, 0},
-    {"link", 4, JS_BUILTIN_STR_LINK, 1},
-    {"small", 5, JS_BUILTIN_STR_SMALL, 0},
-    {"strike", 6, JS_BUILTIN_STR_STRIKE, 0},
-    {"sub", 3, JS_BUILTIN_STR_SUB, 0},
-    {"sup", 3, JS_BUILTIN_STR_SUP, 0},
-    {"substr", 6, JS_BUILTIN_STR_SUBSTR, 2},
-    {"toLocaleLowerCase", 17, JS_BUILTIN_STR_TO_LOCALE_LOWER_CASE, 0},
-    {"toLocaleUpperCase", 17, JS_BUILTIN_STR_TO_LOCALE_UPPER_CASE, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_PROMISE_PROTOTYPE_METHOD_SPECS[] = {
-    {"then", 4, JS_BUILTIN_PROMISE_PROTO_THEN, 2},
-    {"catch", 5, JS_BUILTIN_PROMISE_PROTO_CATCH, 1},
-    {"finally", 7, JS_BUILTIN_PROMISE_PROTO_FINALLY, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_MAP_PROTOTYPE_METHOD_SPECS[] = {
-    {"set", 3, JS_BUILTIN_MAP_SET, 2},
-    {"get", 3, JS_BUILTIN_MAP_GET, 1},
-    {"has", 3, JS_BUILTIN_MAP_HAS, 1},
-    {"delete", 6, JS_BUILTIN_MAP_DELETE, 1},
-    {"clear", 5, JS_BUILTIN_MAP_CLEAR, 0},
-    {"forEach", 7, JS_BUILTIN_MAP_FOREACH, 1},
-    {"keys", 4, JS_BUILTIN_MAP_KEYS, 0},
-    {"values", 6, JS_BUILTIN_MAP_VALUES, 0},
-    {"entries", 7, JS_BUILTIN_MAP_ENTRIES, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_SET_PROTOTYPE_METHOD_SPECS[] = {
-    {"add", 3, JS_BUILTIN_SET_ADD, 1},
-    {"has", 3, JS_BUILTIN_SET_HAS, 1},
-    {"delete", 6, JS_BUILTIN_SET_DELETE, 1},
-    {"clear", 5, JS_BUILTIN_SET_CLEAR, 0},
-    {"forEach", 7, JS_BUILTIN_SET_FOREACH, 1},
-    {"values", 6, JS_BUILTIN_SET_VALUES, 0},
-    {"entries", 7, JS_BUILTIN_SET_ENTRIES, 0},
-    {"intersection", 12, JS_BUILTIN_SET_INTERSECTION, 1},
-    {"union", 5, JS_BUILTIN_SET_UNION, 1},
-    {"difference", 10, JS_BUILTIN_SET_DIFFERENCE, 1},
-    {"symmetricDifference", 19, JS_BUILTIN_SET_SYM_DIFF, 1},
-    {"isSubsetOf", 10, JS_BUILTIN_SET_IS_SUBSET, 1},
-    {"isSupersetOf", 12, JS_BUILTIN_SET_IS_SUPERSET, 1},
-    {"isDisjointFrom", 14, JS_BUILTIN_SET_IS_DISJOINT, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_WEAKMAP_PROTOTYPE_METHOD_SPECS[] = {
-    {"set", 3, JS_BUILTIN_WEAKMAP_SET, 2},
-    {"get", 3, JS_BUILTIN_WEAKMAP_GET, 1},
-    {"has", 3, JS_BUILTIN_WEAKMAP_HAS, 1},
-    {"delete", 6, JS_BUILTIN_WEAKMAP_DELETE, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_WEAKSET_PROTOTYPE_METHOD_SPECS[] = {
-    {"add", 3, JS_BUILTIN_WEAKSET_ADD, 1},
-    {"has", 3, JS_BUILTIN_WEAKSET_HAS, 1},
-    {"delete", 6, JS_BUILTIN_WEAKSET_DELETE, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_WEAKREF_PROTOTYPE_METHOD_SPECS[] = {
-    {"deref", 5, JS_BUILTIN_WEAKREF_DEREF, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_FINALIZATION_REGISTRY_PROTOTYPE_METHOD_SPECS[] = {
-    {"register", 8, JS_BUILTIN_FINALIZATION_REGISTER, 2},
-    {"unregister", 10, JS_BUILTIN_FINALIZATION_UNREGISTER, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS[] = {
-    {"slice", 5, JS_BUILTIN_ARRAYBUFFER_SLICE, 2},
-    {"resize", 6, JS_BUILTIN_ARRAYBUFFER_RESIZE, 1},
-    // Js54 P8: ArrayBuffer.prototype.transfer / transferToFixedLength (ES2024)
-    {"transfer", 8, JS_BUILTIN_ARRAYBUFFER_TRANSFER, 0},
-    {"transferToFixedLength", 21, JS_BUILTIN_ARRAYBUFFER_TRANSFER_TO_FIXED_LENGTH, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_ARRAYBUFFER_ACCESSOR_SPECS[] = {
-    {"byteLength", 10, JS_BUILTIN_ARRAYBUFFER_GET_BYTE_LENGTH, 0, "get byteLength"},
-    {"resizable", 9, JS_BUILTIN_ARRAYBUFFER_GET_RESIZABLE, 0, "get resizable"},
-    {"maxByteLength", 13, JS_BUILTIN_ARRAYBUFFER_GET_MAX_BYTE_LENGTH, 0, "get maxByteLength"},
-    // Js54 P8: ES2024 ArrayBuffer.prototype.detached accessor
-    {"detached", 8, JS_BUILTIN_ARRAYBUFFER_GET_DETACHED, 0, "get detached"},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_SHAREDARRAYBUFFER_PROTOTYPE_METHOD_SPECS[] = {
-    {"slice", 5, JS_BUILTIN_SHAREDARRAYBUFFER_SLICE, 2},
-    {"grow", 4, JS_BUILTIN_SHAREDARRAYBUFFER_GROW, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_SHAREDARRAYBUFFER_ACCESSOR_SPECS[] = {
-    {"byteLength", 10, JS_BUILTIN_SHAREDARRAYBUFFER_GET_BYTE_LENGTH, 0, "get byteLength"},
-    {"growable", 8, JS_BUILTIN_SHAREDARRAYBUFFER_GET_GROWABLE, 0, "get growable"},
-    {"maxByteLength", 13, JS_BUILTIN_SHAREDARRAYBUFFER_GET_MAX_BYTE_LENGTH, 0, "get maxByteLength"},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_DATAVIEW_PROTOTYPE_METHOD_SPECS[] = {
-    {"getInt8", 7, -2, 1},
-    {"getUint8", 8, -2, 1},
-    {"getInt16", 8, -2, 1},
-    {"getUint16", 9, -2, 1},
-    {"getInt32", 8, -2, 1},
-    {"getUint32", 9, -2, 1},
-    {"getFloat32", 10, -2, 1},
-    {"getFloat64", 10, -2, 1},
-    {"getBigInt64", 11, -2, 1},
-    {"getBigUint64", 12, -2, 1},
-    {"setInt8", 7, -2, 2},
-    {"setUint8", 8, -2, 2},
-    {"setInt16", 8, -2, 2},
-    {"setUint16", 9, -2, 2},
-    {"setInt32", 8, -2, 2},
-    {"setUint32", 9, -2, 2},
-    {"setFloat32", 10, -2, 2},
-    {"setFloat64", 10, -2, 2},
-    {"setBigInt64", 11, -2, 2},
-    {"setBigUint64", 12, -2, 2},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_DATAVIEW_ACCESSOR_SPECS[] = {
-    {"buffer", 6, 0, 0, "get buffer"},
-    {"byteLength", 10, 0, 0, "get byteLength"},
-    {"byteOffset", 10, 0, 0, "get byteOffset"},
-    {NULL, 0, 0, 0}
-};
-
 void js_populate_dataview_prototype_methods(Item prototype) {
-    js_install_builtin_function_specs(prototype, JS_DATAVIEW_PROTOTYPE_METHOD_SPECS, 0, false);
-    js_install_builtin_accessor_specs(prototype, JS_DATAVIEW_ACCESSOR_SPECS,
-        JS_FUNC_FLAG_DATA_VIEW_ACCESSOR | JS_FUNC_FLAG_STRICT);
+    js_install_builtin_function_specs(prototype, JS_BUILTIN_OWNER_DATAVIEW_PROTOTYPE_METHOD);
+    js_install_builtin_accessor_specs(prototype, JS_BUILTIN_OWNER_DATAVIEW_ACCESSOR);
 }
 
-const JsBuiltinMethodSpec JS_DATE_PROTOTYPE_METHOD_SPECS[] = {
-    {"getTime", 7, JS_BUILTIN_DATE_GET_TIME, 0},
-    {"getFullYear", 11, JS_BUILTIN_DATE_GET_FULL_YEAR, 0},
-    {"getMonth", 8, JS_BUILTIN_DATE_GET_MONTH, 0},
-    {"getDate", 7, JS_BUILTIN_DATE_GET_DATE, 0},
-    {"getHours", 8, JS_BUILTIN_DATE_GET_HOURS, 0},
-    {"getMinutes", 10, JS_BUILTIN_DATE_GET_MINUTES, 0},
-    {"getSeconds", 10, JS_BUILTIN_DATE_GET_SECONDS, 0},
-    {"getMilliseconds", 15, JS_BUILTIN_DATE_GET_MILLISECONDS, 0},
-    {"getDay", 6, JS_BUILTIN_DATE_GET_DAY, 0},
-    {"getUTCFullYear", 14, JS_BUILTIN_DATE_GET_UTC_FULL_YEAR, 0},
-    {"getUTCMonth", 11, JS_BUILTIN_DATE_GET_UTC_MONTH, 0},
-    {"getUTCDate", 10, JS_BUILTIN_DATE_GET_UTC_DATE, 0},
-    {"getUTCHours", 11, JS_BUILTIN_DATE_GET_UTC_HOURS, 0},
-    {"getUTCMinutes", 13, JS_BUILTIN_DATE_GET_UTC_MINUTES, 0},
-    {"getUTCSeconds", 13, JS_BUILTIN_DATE_GET_UTC_SECONDS, 0},
-    {"getUTCMilliseconds", 18, JS_BUILTIN_DATE_GET_UTC_MILLISECONDS, 0},
-    {"getUTCDay", 9, JS_BUILTIN_DATE_GET_UTC_DAY, 0},
-    {"getTimezoneOffset", 17, JS_BUILTIN_DATE_GET_TIMEZONE_OFFSET, 0},
-    {"setTime", 7, JS_BUILTIN_DATE_SET_TIME, 1},
-    {"setFullYear", 11, JS_BUILTIN_DATE_SET_FULL_YEAR, 3},
-    {"setMonth", 8, JS_BUILTIN_DATE_SET_MONTH, 2},
-    {"setDate", 7, JS_BUILTIN_DATE_SET_DATE, 1},
-    {"setHours", 8, JS_BUILTIN_DATE_SET_HOURS, 4},
-    {"setMinutes", 10, JS_BUILTIN_DATE_SET_MINUTES, 3},
-    {"setSeconds", 10, JS_BUILTIN_DATE_SET_SECONDS, 2},
-    {"setMilliseconds", 15, JS_BUILTIN_DATE_SET_MILLISECONDS, 1},
-    {"setUTCFullYear", 14, JS_BUILTIN_DATE_SET_UTC_FULL_YEAR, 3},
-    {"setUTCMonth", 11, JS_BUILTIN_DATE_SET_UTC_MONTH, 2},
-    {"setUTCDate", 10, JS_BUILTIN_DATE_SET_UTC_DATE, 1},
-    {"setUTCHours", 11, JS_BUILTIN_DATE_SET_UTC_HOURS, 4},
-    {"setUTCMinutes", 13, JS_BUILTIN_DATE_SET_UTC_MINUTES, 3},
-    {"setUTCSeconds", 13, JS_BUILTIN_DATE_SET_UTC_SECONDS, 2},
-    {"setUTCMilliseconds", 18, JS_BUILTIN_DATE_SET_UTC_MILLISECONDS, 1},
-    {"toISOString", 11, JS_BUILTIN_DATE_TO_ISO_STRING, 0},
-    {"toJSON", 6, JS_BUILTIN_DATE_TO_JSON, 1},
-    {"toUTCString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
-    {"toGMTString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
-    {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
-    {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
-    {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
-    {"toLocaleString", 14, JS_BUILTIN_OBJ_TO_LOCALE_STRING, 0},
-    {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
-    {"toLocaleTimeString", 18, JS_BUILTIN_DATE_TO_LOCALE_TIME_STRING, 0},
-    {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
-    {"getYear", 7, JS_BUILTIN_DATE_GET_YEAR, 0},
-    {"setYear", 7, JS_BUILTIN_DATE_SET_YEAR, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_REGEXP_PROTOTYPE_METHOD_SPECS[] = {
-    {"exec", 4, JS_BUILTIN_REGEXP_EXEC, 1},
-    {"test", 4, JS_BUILTIN_REGEXP_TEST, 1},
-    {"toString", 8, JS_BUILTIN_REGEXP_TO_STRING, 0},
-    {"compile", 7, JS_BUILTIN_REGEXP_COMPILE, 2},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_JSON_METHOD_SPECS[] = {
-    {"parse", 5, JS_BUILTIN_JSON_PARSE, 2},
-    {"stringify", 9, JS_BUILTIN_JSON_STRINGIFY, 3},
-    {"rawJSON", 7, JS_BUILTIN_JSON_RAW_JSON, 1},
-    {"isRawJSON", 9, JS_BUILTIN_JSON_IS_RAW_JSON, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_REFLECT_METHOD_SPECS[] = {
-    {"apply", 5, JS_BUILTIN_REFLECT_APPLY, 3},
-    {"construct", 9, JS_BUILTIN_REFLECT_CONSTRUCT, 2},
-    {"defineProperty", 14, JS_BUILTIN_REFLECT_DEFINE_PROPERTY, 3},
-    {"deleteProperty", 14, JS_BUILTIN_REFLECT_DELETE_PROPERTY, 2},
-    {"get", 3, JS_BUILTIN_REFLECT_GET, 2},
-    {"getOwnPropertyDescriptor", 24, JS_BUILTIN_REFLECT_GET_OWN_PROPERTY_DESCRIPTOR, 2},
-    {"getPrototypeOf", 14, JS_BUILTIN_REFLECT_GET_PROTOTYPE_OF, 1},
-    {"has", 3, JS_BUILTIN_REFLECT_HAS, 2},
-    {"isExtensible", 12, JS_BUILTIN_REFLECT_IS_EXTENSIBLE, 1},
-    {"ownKeys", 7, JS_BUILTIN_REFLECT_OWN_KEYS, 1},
-    {"preventExtensions", 17, JS_BUILTIN_REFLECT_PREVENT_EXTENSIONS, 1},
-    {"set", 3, JS_BUILTIN_REFLECT_SET, 3},
-    {"setPrototypeOf", 14, JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF, 2},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_ATOMICS_METHOD_SPECS[] = {
-    {"add", 3, JS_BUILTIN_ATOMICS_ADD, 3},
-    {"and", 3, JS_BUILTIN_ATOMICS_AND, 3},
-    {"compareExchange", 15, JS_BUILTIN_ATOMICS_COMPAREEXCHANGE, 4},
-    {"exchange", 8, JS_BUILTIN_ATOMICS_EXCHANGE, 3},
-    {"isLockFree", 10, JS_BUILTIN_ATOMICS_ISLOCKFREE, 1},
-    {"load", 4, JS_BUILTIN_ATOMICS_LOAD, 2},
-    {"notify", 6, JS_BUILTIN_ATOMICS_NOTIFY, 3},
-    {"or", 2, JS_BUILTIN_ATOMICS_OR, 3},
-    {"pause", 5, JS_BUILTIN_ATOMICS_PAUSE, 0},
-    {"store", 5, JS_BUILTIN_ATOMICS_STORE, 3},
-    {"sub", 3, JS_BUILTIN_ATOMICS_SUB, 3},
-    {"wait", 4, JS_BUILTIN_ATOMICS_WAIT, 4},
-    {"waitAsync", 9, JS_BUILTIN_ATOMICS_WAIT_ASYNC, 4},
-    {"xor", 3, JS_BUILTIN_ATOMICS_XOR, 3},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_CSS_METHOD_SPECS[] = {
-    {"supports", 8, JS_BUILTIN_CSS_SUPPORTS, 2},
-    {"escape", 6, JS_BUILTIN_CSS_ESCAPE, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_OBJECT_STATIC_METHOD_SPECS[] = {
-    {"keys", 4, JS_BUILTIN_OBJECT_KEYS, 1},
-    {"values", 6, JS_BUILTIN_OBJECT_VALUES, 1},
-    {"entries", 7, JS_BUILTIN_OBJECT_ENTRIES, 1},
-    {"fromEntries", 11, JS_BUILTIN_OBJECT_FROM_ENTRIES, 1},
-    {"create", 6, JS_BUILTIN_OBJECT_CREATE, 2},
-    {"assign", 6, JS_BUILTIN_OBJECT_ASSIGN, 2},
-    {"freeze", 6, JS_BUILTIN_OBJECT_FREEZE, 1},
-    {"isFrozen", 8, JS_BUILTIN_OBJECT_IS_FROZEN, 1},
-    {"seal", 4, JS_BUILTIN_OBJECT_SEAL, 1},
-    {"isSealed", 8, JS_BUILTIN_OBJECT_IS_SEALED, 1},
-    {"preventExtensions", 17, JS_BUILTIN_OBJECT_PREVENT_EXTENSIONS, 1},
-    {"isExtensible", 12, JS_BUILTIN_OBJECT_IS_EXTENSIBLE, 1},
-    {"is", 2, JS_BUILTIN_OBJECT_IS, 2},
-    {"getPrototypeOf", 14, JS_BUILTIN_OBJECT_GET_PROTOTYPE_OF, 1},
-    {"setPrototypeOf", 14, JS_BUILTIN_OBJECT_SET_PROTOTYPE_OF, 2},
-    {"defineProperty", 14, JS_BUILTIN_OBJECT_DEFINE_PROPERTY, 3},
-    {"defineProperties", 16, JS_BUILTIN_OBJECT_DEFINE_PROPERTIES, 2},
-    {"getOwnPropertyDescriptor", 24, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR, 2},
-    {"getOwnPropertyDescriptors", 25, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTORS, 1},
-    {"getOwnPropertyNames", 19, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_NAMES, 1},
-    {"getOwnPropertySymbols", 21, JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_SYMBOLS, 1},
-    {"hasOwn", 6, JS_BUILTIN_OBJECT_HAS_OWN, 2},
-    {"groupBy", 7, JS_BUILTIN_OBJECT_GROUP_BY, 2},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_ARRAY_STATIC_METHOD_SPECS[] = {
-    {"isArray", 7, JS_BUILTIN_ARRAY_IS_ARRAY, 1},
-    {"from", 4, JS_BUILTIN_ARRAY_FROM, 1},
-    {"of", 2, JS_BUILTIN_ARRAY_OF, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_STRING_STATIC_METHOD_SPECS[] = {
-    {"fromCharCode", 12, JS_BUILTIN_STRING_FROM_CHAR_CODE, 1},
-    {"fromCodePoint", 13, JS_BUILTIN_STRING_FROM_CODE_POINT, 1},
-    {"raw", 3, JS_BUILTIN_STRING_RAW, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_DATE_STATIC_METHOD_SPECS[] = {
-    {"now", 3, JS_BUILTIN_DATE_NOW, 0},
-    {"parse", 5, JS_BUILTIN_DATE_PARSE, 1},
-    {"UTC", 3, JS_BUILTIN_DATE_UTC, 7},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_PROMISE_STATIC_METHOD_SPECS[] = {
-    {"resolve", 7, JS_BUILTIN_PROMISE_RESOLVE, 1},
-    {"reject", 6, JS_BUILTIN_PROMISE_REJECT, 1},
-    {"all", 3, JS_BUILTIN_PROMISE_ALL, 1},
-    {"allSettled", 10, JS_BUILTIN_PROMISE_ALL_SETTLED, 1},
-    {"any", 3, JS_BUILTIN_PROMISE_ANY, 1},
-    {"race", 4, JS_BUILTIN_PROMISE_RACE, 1},
-    {"withResolvers", 13, JS_BUILTIN_PROMISE_WITH_RESOLVERS, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_NUMBER_STATIC_METHOD_SPECS[] = {
-    {"isFinite", 8, JS_BUILTIN_NUMBER_IS_FINITE, 1},
-    {"isNaN", 5, JS_BUILTIN_NUMBER_IS_NAN, 1},
-    {"isInteger", 9, JS_BUILTIN_NUMBER_IS_INTEGER, 1},
-    {"isSafeInteger", 13, JS_BUILTIN_NUMBER_IS_SAFE_INTEGER, 1},
-    {"parseInt", 8, JS_BUILTIN_NUMBER_PARSE_INT, 2},
-    {"parseFloat", 10, JS_BUILTIN_NUMBER_PARSE_FLOAT, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_MAP_STATIC_METHOD_SPECS[] = {
-    {"groupBy", 7, JS_BUILTIN_MAP_GROUP_BY, 2},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_ARRAYBUFFER_STATIC_METHOD_SPECS[] = {
-    {"isView", 6, JS_BUILTIN_ARRAYBUFFER_ISVIEW, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_PROXY_STATIC_METHOD_SPECS[] = {
-    {"revocable", 9, JS_BUILTIN_PROXY_REVOCABLE, 2},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_TYPED_ARRAY_STATIC_METHOD_SPECS[] = {
-    {"from", 4, JS_BUILTIN_TYPED_ARRAY_FROM, 1},
-    {"of", 2, JS_BUILTIN_TYPED_ARRAY_OF, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_SYMBOL_STATIC_METHOD_SPECS[] = {
-    {"for", 3, JS_BUILTIN_SYMBOL_FOR, 1},
-    {"keyFor", 6, JS_BUILTIN_SYMBOL_KEY_FOR, 1},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_TYPED_ARRAY_PROTOTYPE_METHOD_SPECS[] = {
-    {"at", 2, JS_BUILTIN_ARR_AT, 1},
-    {"copyWithin", 10, JS_BUILTIN_ARR_COPY_WITHIN, 2},
-    {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
-    {"every", 5, JS_BUILTIN_ARR_EVERY, 1},
-    {"fill", 4, JS_BUILTIN_ARR_FILL, 1},
-    {"filter", 6, JS_BUILTIN_ARR_FILTER, 1},
-    {"find", 4, JS_BUILTIN_ARR_FIND, 1},
-    {"findIndex", 9, JS_BUILTIN_ARR_FIND_INDEX, 1},
-    {"findLast", 8, JS_BUILTIN_ARR_FIND_LAST, 1},
-    {"findLastIndex", 13, JS_BUILTIN_ARR_FIND_LAST_INDEX, 1},
-    {"forEach", 7, JS_BUILTIN_ARR_FOR_EACH, 1},
-    {"includes", 8, JS_BUILTIN_ARR_INCLUDES, 1},
-    {"indexOf", 7, JS_BUILTIN_ARR_INDEX_OF, 1},
-    {"join", 4, JS_BUILTIN_ARR_JOIN, 1},
-    {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
-    {"lastIndexOf", 11, JS_BUILTIN_ARR_LAST_INDEX_OF, 1},
-    {"map", 3, JS_BUILTIN_ARR_MAP, 1},
-    {"reduce", 6, JS_BUILTIN_ARR_REDUCE, 1},
-    {"reduceRight", 11, JS_BUILTIN_ARR_REDUCE_RIGHT, 1},
-    {"reverse", 7, JS_BUILTIN_ARR_REVERSE, 0},
-    {"slice", 5, JS_BUILTIN_ARR_SLICE, 2},
-    {"some", 4, JS_BUILTIN_ARR_SOME, 1},
-    {"sort", 4, JS_BUILTIN_ARR_SORT, 1},
-    {"toReversed", 10, JS_BUILTIN_ARR_TO_REVERSED, 0},
-    {"toSorted", 8, JS_BUILTIN_ARR_TO_SORTED, 1},
-    {"toString", 8, JS_BUILTIN_ARR_TO_STRING, 0},
-    {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
-    {"with", 4, JS_BUILTIN_ARR_WITH, 2},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_TYPED_ARRAY_STUB_METHOD_SPECS[] = {
-    {"set", 3, 0, 1},
-    {"subarray", 8, 0, 2},
-    {"toLocaleString", 14, 0, 0},
-    {NULL, 0, 0, 0}
-};
-
-const JsBuiltinMethodSpec JS_TYPED_ARRAY_ACCESSOR_SPECS[] = {
-    {"buffer", 6, 0, 0, "get buffer"},
-    {"byteLength", 10, 0, 0, "get byteLength"},
-    {"byteOffset", 10, 0, 0, "get byteOffset"},
-    {"length", 6, 0, 0, "get length"},
-    {NULL, 0, 0, 0}
-};
-
-typedef struct JsBuiltinCtorSpecMap {
-    const char* name;
-    int len;
-    const JsBuiltinMethodSpec* specs;
-} JsBuiltinCtorSpecMap;
-
-typedef struct JsBuiltinCtorAccessorSpecMap {
-    const char* name;
-    int len;
-    const JsBuiltinMethodSpec* specs;
-    int flags;
-} JsBuiltinCtorAccessorSpecMap;
-
-typedef struct JsBuiltinTypeSpecMap {
+typedef struct JsBuiltinTypeOwnerMap {
     TypeId type;
-    const JsBuiltinMethodSpec* specs;
-} JsBuiltinTypeSpecMap;
+    JsBuiltinOwner owner;
+} JsBuiltinTypeOwnerMap;
 
-typedef struct JsBuiltinCtorName {
+typedef struct JsBuiltinOwnerBinding {
     const char* name;
     int len;
-} JsBuiltinCtorName;
+    JsBuiltinOwner member_owner;
+    JsBuiltinOwner prototype_owner;
+    JsBuiltinOwner accessor_owner;
+    int flags;
+} JsBuiltinOwnerBinding;
 
-static const JsBuiltinMethodSpec* js_find_ctor_spec_map(const JsBuiltinCtorSpecMap* map,
-                                                        const char* ctor_name,
-                                                        int ctor_len) {
-    if (!map || !ctor_name) return NULL;
-    for (int i = 0; map[i].name; i++) {
-        if (ctor_len == map[i].len && strncmp(ctor_name, map[i].name, map[i].len) == 0) {
-            return map[i].specs;
-        }
+#define JS_BUILTIN_OWNER_BINDING_SPECIES 1
+static const JsBuiltinOwnerBinding JS_BUILTIN_OWNER_BINDINGS[] = {
+#define JS_BUILTIN_OWNER(owner)
+#define JS_BUILTIN_ID(id, dispatch_group, mir_kind)
+#define JS_BUILTIN_METHOD(owner, name, len, id, arity, display_name, property_kind, flags, use_cache)
+#define JS_BUILTIN_GLOBAL(id, name, len, kind, runtime_id, arity, flags)
+#define JS_BUILTIN_OWNER_BINDING(name, len, member, prototype, accessor, flags) \
+    {name, len, member, prototype, accessor, flags},
+#include "js_builtin_catalog.def"
+#undef JS_BUILTIN_OWNER_BINDING
+#undef JS_BUILTIN_GLOBAL
+#undef JS_BUILTIN_METHOD
+#undef JS_BUILTIN_ID
+#undef JS_BUILTIN_OWNER
+    {NULL, 0, JS_BUILTIN_OWNER_NONE, JS_BUILTIN_OWNER_NONE, JS_BUILTIN_OWNER_NONE, 0}
+};
+
+static const JsBuiltinOwnerBinding* js_find_owner_binding(const char* name, int len) {
+    if (!name) return NULL;
+    for (int i = 0; JS_BUILTIN_OWNER_BINDINGS[i].name; i++) {
+        const JsBuiltinOwnerBinding* binding = &JS_BUILTIN_OWNER_BINDINGS[i];
+        if (binding->len == len && strncmp(binding->name, name, len) == 0) return binding;
     }
     return NULL;
 }
 
-static bool js_ctor_name_in_table(const JsBuiltinCtorName* names,
-                                  const char* ctor_name,
-                                  int ctor_len) {
-    if (!names || !ctor_name) return false;
-    for (int i = 0; names[i].name; i++) {
-        if (ctor_len == names[i].len && strncmp(ctor_name, names[i].name, names[i].len) == 0) {
-            return true;
-        }
+static JsBuiltinOwner js_find_type_owner(const JsBuiltinTypeOwnerMap* map, TypeId type) {
+    if (!map) return JS_BUILTIN_OWNER_NONE;
+    for (int i = 0; map[i].owner != JS_BUILTIN_OWNER_NONE; i++) {
+        if (map[i].type == type) return map[i].owner;
     }
-    return false;
+    return JS_BUILTIN_OWNER_NONE;
 }
 
-static const JsBuiltinCtorAccessorSpecMap* js_find_ctor_accessor_spec_map(
-    const JsBuiltinCtorAccessorSpecMap* map, const char* ctor_name, int ctor_len) {
-    if (!map || !ctor_name) return NULL;
-    for (int i = 0; map[i].name; i++) {
-        if (ctor_len == map[i].len && strncmp(ctor_name, map[i].name, map[i].len) == 0) {
-            return &map[i];
-        }
-    }
-    return NULL;
+static const JsBuiltinTypeOwnerMap JS_PROTOTYPE_TYPE_OWNER_MAP[] = {
+    {LMD_TYPE_ARRAY, JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD},
+    {LMD_TYPE_FUNC, JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD},
+    {LMD_TYPE_INT, JS_BUILTIN_OWNER_NUMBER_PROTOTYPE_METHOD},
+    {LMD_TYPE_FLOAT, JS_BUILTIN_OWNER_NUMBER_PROTOTYPE_METHOD},
+    {LMD_TYPE_DECIMAL, JS_BUILTIN_OWNER_BIGINT_PROTOTYPE_METHOD},
+    {LMD_TYPE_STRING, JS_BUILTIN_OWNER_STRING_PROTOTYPE_METHOD},
+    {LMD_TYPE_BOOL, JS_BUILTIN_OWNER_BOOLEAN_PROTOTYPE_METHOD},
+    {LMD_TYPE_NULL, JS_BUILTIN_OWNER_NONE}
+};
+
+static JsBuiltinOwner js_get_constructor_static_owner(const char* ctor_name, int ctor_len) {
+    const JsBuiltinOwnerBinding* binding = js_find_owner_binding(ctor_name, ctor_len);
+    return binding ? binding->member_owner : JS_BUILTIN_OWNER_NONE;
 }
 
-static const JsBuiltinMethodSpec* js_find_type_spec_map(const JsBuiltinTypeSpecMap* map,
-                                                        TypeId type) {
-    if (!map) return NULL;
-    for (int i = 0; map[i].specs; i++) {
-        if (map[i].type == type) return map[i].specs;
-    }
-    return NULL;
+static JsBuiltinOwner js_get_prototype_owner_for_type(TypeId type) {
+    return js_find_type_owner(JS_PROTOTYPE_TYPE_OWNER_MAP, type);
 }
 
-static const JsBuiltinCtorSpecMap JS_CONSTRUCTOR_STATIC_SPEC_MAP[] = {
-    {"Object", 6, JS_OBJECT_STATIC_METHOD_SPECS},
-    {"Array", 5, JS_ARRAY_STATIC_METHOD_SPECS},
-    {"String", 6, JS_STRING_STATIC_METHOD_SPECS},
-    {"Date", 4, JS_DATE_STATIC_METHOD_SPECS},
-    {"Promise", 7, JS_PROMISE_STATIC_METHOD_SPECS},
-    {"Number", 6, JS_NUMBER_STATIC_METHOD_SPECS},
-    {"BigInt", 6, JS_BIGINT_STATIC_METHOD_SPECS},
-    {"Map", 3, JS_MAP_STATIC_METHOD_SPECS},
-    {"ArrayBuffer", 11, JS_ARRAYBUFFER_STATIC_METHOD_SPECS},
-    {"Proxy", 5, JS_PROXY_STATIC_METHOD_SPECS},
-    {"TypedArray", 10, JS_TYPED_ARRAY_STATIC_METHOD_SPECS},
-    {"Symbol", 6, JS_SYMBOL_STATIC_METHOD_SPECS},
-    {NULL, 0, NULL}
-};
-
-static const JsBuiltinCtorSpecMap JS_CONSTRUCTOR_PROTOTYPE_SPEC_MAP[] = {
-    {"Object", 6, JS_OBJECT_PROTOTYPE_METHOD_SPECS},
-    {"Array", 5, JS_ARRAY_PROTOTYPE_METHOD_SPECS},
-    {"Function", 8, JS_FUNCTION_PROTOTYPE_METHOD_SPECS},
-    {"Number", 6, JS_NUMBER_PROTOTYPE_METHOD_SPECS},
-    {"BigInt", 6, JS_BIGINT_PROTOTYPE_METHOD_SPECS},
-    {"String", 6, JS_STRING_PROTOTYPE_METHOD_SPECS},
-    {"Promise", 7, JS_PROMISE_PROTOTYPE_METHOD_SPECS},
-    {"Map", 3, JS_MAP_PROTOTYPE_METHOD_SPECS},
-    {"Set", 3, JS_SET_PROTOTYPE_METHOD_SPECS},
-    {"WeakMap", 7, JS_WEAKMAP_PROTOTYPE_METHOD_SPECS},
-    {"WeakSet", 7, JS_WEAKSET_PROTOTYPE_METHOD_SPECS},
-    {"WeakRef", 7, JS_WEAKREF_PROTOTYPE_METHOD_SPECS},
-    {"FinalizationRegistry", 20, JS_FINALIZATION_REGISTRY_PROTOTYPE_METHOD_SPECS},
-    {"ArrayBuffer", 11, JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS},
-    {"SharedArrayBuffer", 17, JS_SHAREDARRAYBUFFER_PROTOTYPE_METHOD_SPECS},
-    {"Date", 4, JS_DATE_PROTOTYPE_METHOD_SPECS},
-    {"RegExp", 6, JS_REGEXP_PROTOTYPE_METHOD_SPECS},
-    {NULL, 0, NULL}
-};
-
-static const JsBuiltinCtorAccessorSpecMap JS_CONSTRUCTOR_PROTOTYPE_ACCESSOR_SPEC_MAP[] = {
-    {"ArrayBuffer", 11, JS_ARRAYBUFFER_ACCESSOR_SPECS, JS_FUNC_FLAG_STRICT},
-    {"SharedArrayBuffer", 17, JS_SHAREDARRAYBUFFER_ACCESSOR_SPECS, JS_FUNC_FLAG_STRICT},
-    {NULL, 0, NULL, 0}
-};
-
-static const JsBuiltinTypeSpecMap JS_PROTOTYPE_TYPE_SPEC_MAP[] = {
-    {LMD_TYPE_ARRAY, JS_ARRAY_PROTOTYPE_METHOD_SPECS},
-    {LMD_TYPE_FUNC, JS_FUNCTION_PROTOTYPE_METHOD_SPECS},
-    {LMD_TYPE_INT, JS_NUMBER_PROTOTYPE_METHOD_SPECS},
-    {LMD_TYPE_FLOAT, JS_NUMBER_PROTOTYPE_METHOD_SPECS},
-    {LMD_TYPE_DECIMAL, JS_BIGINT_PROTOTYPE_METHOD_SPECS},
-    {LMD_TYPE_STRING, JS_STRING_PROTOTYPE_METHOD_SPECS},
-    {LMD_TYPE_BOOL, JS_BOOLEAN_PROTOTYPE_METHOD_SPECS},
-    {LMD_TYPE_NULL, NULL}
-};
-
-static const JsBuiltinCtorName JS_SPECIES_CONSTRUCTOR_NAMES[] = {
-    {"Array", 5},
-    {"RegExp", 6},
-    {"Promise", 7},
-    {"Map", 3},
-    {"Set", 3},
-    {"ArrayBuffer", 11},
-    {NULL, 0}
-};
-
-static const JsBuiltinMethodSpec* js_get_constructor_static_method_specs(const char* ctor_name, int ctor_len) {
-    return js_find_ctor_spec_map(JS_CONSTRUCTOR_STATIC_SPEC_MAP, ctor_name, ctor_len);
+int js_builtin_catalog_lookup_constructor_id(const char* ctor_name, int ctor_len,
+                                             const char* prop_name, int prop_len) {
+    JsBuiltinOwner owner = js_get_constructor_static_owner(ctor_name, ctor_len);
+    return js_builtin_catalog_lookup_id(owner, prop_name, prop_len);
 }
 
-static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_ctor(const char* ctor_name, int ctor_len) {
-    return js_find_ctor_spec_map(JS_CONSTRUCTOR_PROTOTYPE_SPEC_MAP, ctor_name, ctor_len);
-}
-
-static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_type(TypeId type) {
-    return js_find_type_spec_map(JS_PROTOTYPE_TYPE_SPEC_MAP, type);
+int js_builtin_catalog_lookup_member_id(const char* owner_name, int owner_len,
+                                        const char* prop_name, int prop_len) {
+    JsBuiltinOwner owner = js_get_constructor_static_owner(owner_name, owner_len);
+    return js_builtin_catalog_lookup_id(owner, prop_name, prop_len);
 }
 
 static bool js_builtin_type_has_own_to_string(TypeId type) {
@@ -882,48 +398,48 @@ static bool js_builtin_type_uses_number_prototype(TypeId type) {
            type == LMD_TYPE_FLOAT;
 }
 
-static const JsBuiltinMethodSpec* js_get_prototype_method_specs_for_class_or_type(
-    int js_class, TypeId fallback_type, int* out_flags, bool* out_use_cache) {
-    if (out_flags) *out_flags = 0;
-    if (out_use_cache) *out_use_cache = true;
+static JsBuiltinOwner js_get_prototype_owner_for_class_or_type(int js_class,
+                                                                  TypeId fallback_type) {
     switch ((JsClass)js_class) {
-    case JS_CLASS_OBJECT: return JS_OBJECT_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_FUNCTION: return JS_FUNCTION_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_BOOLEAN: return JS_BOOLEAN_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_NUMBER: return JS_NUMBER_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_BIGINT: return JS_BIGINT_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_SYMBOL: return JS_SYMBOL_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_STRING: return JS_STRING_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_ARRAY: return JS_ARRAY_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_DATE: return JS_DATE_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_REGEXP: return JS_REGEXP_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_PROMISE: return JS_PROMISE_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_MAP: return JS_MAP_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_SET: return JS_SET_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_WEAK_MAP: return JS_WEAKMAP_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_WEAK_SET: return JS_WEAKSET_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_WEAK_REF: return JS_WEAKREF_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_FINALIZATION_REGISTRY: return JS_FINALIZATION_REGISTRY_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_ARRAY_BUFFER: return JS_ARRAYBUFFER_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_DATA_VIEW:
-        if (out_use_cache) *out_use_cache = false;
-        return JS_DATAVIEW_PROTOTYPE_METHOD_SPECS;
-    case JS_CLASS_TYPED_ARRAY:
-        if (out_flags) *out_flags = JS_FUNC_FLAG_TYPED_ARRAY_METHOD;
-        if (out_use_cache) *out_use_cache = false;
-        return JS_TYPED_ARRAY_PROTOTYPE_METHOD_SPECS;
+    case JS_CLASS_OBJECT: return JS_BUILTIN_OWNER_OBJECT_PROTOTYPE_METHOD;
+    case JS_CLASS_FUNCTION: return JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD;
+    case JS_CLASS_BOOLEAN: return JS_BUILTIN_OWNER_BOOLEAN_PROTOTYPE_METHOD;
+    case JS_CLASS_NUMBER: return JS_BUILTIN_OWNER_NUMBER_PROTOTYPE_METHOD;
+    case JS_CLASS_BIGINT: return JS_BUILTIN_OWNER_BIGINT_PROTOTYPE_METHOD;
+    case JS_CLASS_SYMBOL: return JS_BUILTIN_OWNER_SYMBOL_PROTOTYPE_METHOD;
+    case JS_CLASS_STRING: return JS_BUILTIN_OWNER_STRING_PROTOTYPE_METHOD;
+    case JS_CLASS_ARRAY: return JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD;
+    case JS_CLASS_DATE: return JS_BUILTIN_OWNER_DATE_PROTOTYPE_METHOD;
+    case JS_CLASS_REGEXP: return JS_BUILTIN_OWNER_REGEXP_PROTOTYPE_METHOD;
+    case JS_CLASS_PROMISE: return JS_BUILTIN_OWNER_PROMISE_PROTOTYPE_METHOD;
+    case JS_CLASS_MAP: return JS_BUILTIN_OWNER_MAP_PROTOTYPE_METHOD;
+    case JS_CLASS_SET: return JS_BUILTIN_OWNER_SET_PROTOTYPE_METHOD;
+    case JS_CLASS_WEAK_MAP: return JS_BUILTIN_OWNER_WEAKMAP_PROTOTYPE_METHOD;
+    case JS_CLASS_WEAK_SET: return JS_BUILTIN_OWNER_WEAKSET_PROTOTYPE_METHOD;
+    case JS_CLASS_WEAK_REF: return JS_BUILTIN_OWNER_WEAKREF_PROTOTYPE_METHOD;
+    case JS_CLASS_FINALIZATION_REGISTRY:
+        return JS_BUILTIN_OWNER_FINALIZATION_REGISTRY_PROTOTYPE_METHOD;
+    case JS_CLASS_ARRAY_BUFFER: return JS_BUILTIN_OWNER_ARRAYBUFFER_PROTOTYPE_METHOD;
+    case JS_CLASS_DATA_VIEW: return JS_BUILTIN_OWNER_DATAVIEW_PROTOTYPE_METHOD;
+    case JS_CLASS_TYPED_ARRAY: return JS_BUILTIN_OWNER_TYPED_ARRAY_PROTOTYPE_METHOD;
     default:
-        break;
+        return js_get_prototype_owner_for_type(fallback_type);
     }
-    return js_get_prototype_method_specs_for_type(fallback_type);
 }
 
-static void js_append_builtin_method_spec_names(const JsBuiltinMethodSpec* specs, Item result);
+static void js_append_builtin_method_spec_names(JsBuiltinOwner owner, Item result) {
+    if (owner == JS_BUILTIN_OWNER_NONE) return;
+    for (int i = 0; JS_BUILTIN_METHOD_SPECS[i].name; i++) {
+        const JsBuiltinMethodSpec* spec = &JS_BUILTIN_METHOD_SPECS[i];
+        if (spec->owner != owner) continue;
+        Item key = (Item){.item = s2it(heap_create_name(spec->name, spec->len))};
+        js_array_push(result, key);
+    }
+}
 
-static Item js_builtin_registry_data_descriptor_from_spec(const JsBuiltinMethodSpec* spec,
-                                                          int flags, bool use_cache) {
+static Item js_builtin_registry_data_descriptor_from_spec(const JsBuiltinMethodSpec* spec) {
     if (!spec) return make_js_undefined();
-    Item value = js_create_builtin_function_from_spec(spec, flags, use_cache);
+    Item value = js_create_builtin_function_from_spec(spec);
     Item desc = js_new_object();
     js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
     js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
@@ -932,10 +448,9 @@ static Item js_builtin_registry_data_descriptor_from_spec(const JsBuiltinMethodS
     return desc;
 }
 
-static Item js_builtin_registry_accessor_descriptor_from_spec(const JsBuiltinMethodSpec* spec,
-                                                              int flags) {
+static Item js_builtin_registry_accessor_descriptor_from_spec(const JsBuiltinMethodSpec* spec) {
     if (!spec) return make_js_undefined();
-    Item getter = js_create_builtin_function_from_spec(spec, flags, false);
+    Item getter = js_create_builtin_function_from_spec(spec);
     Item desc = js_new_object();
     js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))}, getter);
     js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))}, make_js_undefined());
@@ -945,8 +460,8 @@ static Item js_builtin_registry_accessor_descriptor_from_spec(const JsBuiltinMet
 }
 
 static Item js_lookup_unconditional_object_prototype_method(const char* name, int len) {
-    const JsBuiltinMethodSpec* spec =
-        js_find_builtin_method_spec(JS_OBJECT_PROTOTYPE_METHOD_SPECS, name, len);
+    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(
+        JS_BUILTIN_OWNER_OBJECT_PROTOTYPE_METHOD, name, len);
     if (!spec) return ItemNull;
     if (spec->builtin_id == JS_BUILTIN_OBJ_TO_STRING ||
         spec->builtin_id == JS_BUILTIN_OBJ_VALUE_OF) {
@@ -959,38 +474,23 @@ static Item js_lookup_unconditional_object_prototype_method(const char* name, in
 
 extern "C" Item js_builtin_registry_prototype_method_descriptor(
     int js_class, TypeId fallback_type, const char* name, int len) {
-    int flags = 0;
-    bool use_cache = true;
-    const JsBuiltinMethodSpec* specs =
-        js_get_prototype_method_specs_for_class_or_type(js_class, fallback_type, &flags, &use_cache);
-    const JsBuiltinMethodSpec* spec = js_find_builtin_method_spec(specs, name, len);
-    if (spec) return js_builtin_registry_data_descriptor_from_spec(spec, flags, use_cache);
+    JsBuiltinOwner owner = js_get_prototype_owner_for_class_or_type(js_class, fallback_type);
+    const JsBuiltinMethodSpec* spec = js_builtin_catalog_find(owner, name, len);
+    if (spec) return js_builtin_registry_data_descriptor_from_spec(spec);
 
     if ((JsClass)js_class == JS_CLASS_TYPED_ARRAY) {
-        spec = js_find_builtin_method_spec(JS_TYPED_ARRAY_STUB_METHOD_SPECS, name, len);
-        if (spec) {
-            return js_builtin_registry_data_descriptor_from_spec(
-                spec, JS_FUNC_FLAG_TYPED_ARRAY_METHOD, false);
-        }
-        spec = js_find_builtin_method_spec(JS_TYPED_ARRAY_ACCESSOR_SPECS, name, len);
-        if (spec) {
-            return js_builtin_registry_accessor_descriptor_from_spec(
-                spec, JS_FUNC_FLAG_TYPED_ARRAY_METHOD);
-        }
+        spec = js_builtin_catalog_find(JS_BUILTIN_OWNER_TYPED_ARRAY_STUB_METHOD, name, len);
+        if (spec) return js_builtin_registry_data_descriptor_from_spec(spec);
+        spec = js_builtin_catalog_find(JS_BUILTIN_OWNER_TYPED_ARRAY_ACCESSOR, name, len);
+        if (spec) return js_builtin_registry_accessor_descriptor_from_spec(spec);
     }
     if ((JsClass)js_class == JS_CLASS_DATA_VIEW) {
-        spec = js_find_builtin_method_spec(JS_DATAVIEW_ACCESSOR_SPECS, name, len);
-        if (spec) {
-            return js_builtin_registry_accessor_descriptor_from_spec(
-                spec, JS_FUNC_FLAG_DATA_VIEW_ACCESSOR | JS_FUNC_FLAG_STRICT);
-        }
+        spec = js_builtin_catalog_find(JS_BUILTIN_OWNER_DATAVIEW_ACCESSOR, name, len);
+        if (spec) return js_builtin_registry_accessor_descriptor_from_spec(spec);
     }
     if ((JsClass)js_class == JS_CLASS_ARRAY_BUFFER) {
-        spec = js_find_builtin_method_spec(JS_ARRAYBUFFER_ACCESSOR_SPECS, name, len);
-        if (spec) {
-            return js_builtin_registry_accessor_descriptor_from_spec(
-                spec, JS_FUNC_FLAG_STRICT);
-        }
+        spec = js_builtin_catalog_find(JS_BUILTIN_OWNER_ARRAYBUFFER_ACCESSOR, name, len);
+        if (spec) return js_builtin_registry_accessor_descriptor_from_spec(spec);
     }
     return make_js_undefined();
 }
@@ -1003,50 +503,28 @@ extern "C" bool js_builtin_registry_has_prototype_method(
 
 extern "C" void js_append_builtin_method_names_for_class(
     int js_class, TypeId fallback_type, Item result) {
-    int flags = 0;
-    bool use_cache = true;
-    (void)flags;
-    (void)use_cache;
-    const JsBuiltinMethodSpec* specs =
-        js_get_prototype_method_specs_for_class_or_type(js_class, fallback_type, NULL, NULL);
-    js_append_builtin_method_spec_names(specs, result);
+    JsBuiltinOwner owner = js_get_prototype_owner_for_class_or_type(js_class, fallback_type);
+    js_append_builtin_method_spec_names(owner, result);
     if ((JsClass)js_class == JS_CLASS_TYPED_ARRAY) {
-        js_append_builtin_method_spec_names(JS_TYPED_ARRAY_STUB_METHOD_SPECS, result);
-        js_append_builtin_method_spec_names(JS_TYPED_ARRAY_ACCESSOR_SPECS, result);
+        js_append_builtin_method_spec_names(JS_BUILTIN_OWNER_TYPED_ARRAY_STUB_METHOD, result);
+        js_append_builtin_method_spec_names(JS_BUILTIN_OWNER_TYPED_ARRAY_ACCESSOR, result);
     } else if ((JsClass)js_class == JS_CLASS_DATA_VIEW) {
-        js_append_builtin_method_spec_names(JS_DATAVIEW_ACCESSOR_SPECS, result);
+        js_append_builtin_method_spec_names(JS_BUILTIN_OWNER_DATAVIEW_ACCESSOR, result);
     } else if ((JsClass)js_class == JS_CLASS_ARRAY_BUFFER) {
-        js_append_builtin_method_spec_names(JS_ARRAYBUFFER_ACCESSOR_SPECS, result);
+        js_append_builtin_method_spec_names(JS_BUILTIN_OWNER_ARRAYBUFFER_ACCESSOR, result);
     }
 }
 
 void js_populate_builtin_prototype_methods(Item prototype, const char* ctor_name, int ctor_len) {
-    const JsBuiltinMethodSpec* specs = js_get_prototype_method_specs_for_ctor(ctor_name, ctor_len);
-    js_install_builtin_method_specs(prototype, specs);
-    const JsBuiltinCtorAccessorSpecMap* accessor_specs =
-        js_find_ctor_accessor_spec_map(JS_CONSTRUCTOR_PROTOTYPE_ACCESSOR_SPEC_MAP,
-                                       ctor_name, ctor_len);
-    if (accessor_specs) {
-        js_install_builtin_accessor_specs(prototype, accessor_specs->specs, accessor_specs->flags);
-    }
-}
-
-static void js_append_builtin_method_spec_names(const JsBuiltinMethodSpec* specs, Item result) {
-    if (!specs) return;
-    for (int i = 0; specs[i].name; i++) {
-        Item key = (Item){.item = s2it(heap_create_name(specs[i].name, specs[i].len))};
-        js_array_push(result, key);
-    }
+    const JsBuiltinOwnerBinding* binding = js_find_owner_binding(ctor_name, ctor_len);
+    if (!binding) return;
+    js_install_builtin_method_specs(prototype, binding->prototype_owner);
+    js_install_builtin_accessor_specs(prototype, binding->accessor_owner);
 }
 
 Item js_lookup_builtin_prototype_method_for_class(JsClass cls, const char* name, int len) {
-    int flags = 0;
-    bool use_cache = true;
-    const JsBuiltinMethodSpec* specs =
-        js_get_prototype_method_specs_for_class_or_type((int)cls, LMD_TYPE_MAP, &flags, &use_cache);
-    (void)flags;
-    (void)use_cache;
-    return js_lookup_builtin_method_spec(specs, name, len);
+    JsBuiltinOwner owner = js_get_prototype_owner_for_class_or_type((int)cls, LMD_TYPE_MAP);
+    return js_lookup_builtin_method_spec(owner, name, len);
 }
 
 void js_builtin_cache_reset() {
@@ -1110,8 +588,8 @@ extern "C" Item js_symbol_builtin_method(int which) {
 // Returns ItemNull if not a known constructor or not a known static method.
 Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
                                           const char* prop_name, int prop_len) {
-    const JsBuiltinMethodSpec* specs = js_get_constructor_static_method_specs(ctor_name, ctor_len);
-    Item method = js_lookup_builtin_method_spec(specs, prop_name, prop_len);
+    JsBuiltinOwner owner = js_get_constructor_static_owner(ctor_name, ctor_len);
+    Item method = js_lookup_builtin_method_spec(owner, prop_name, prop_len);
     if (method.item != ItemNull.item) return method;
 
     // Handle .prototype on any constructor — delegate to the constructor's property access
@@ -1152,8 +630,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     js_mark_non_enumerable(proto, ctor_key);
 
     // Prototype methods: reuse Array builtins (dispatch handles typed arrays)
-    js_install_builtin_function_specs(proto, JS_TYPED_ARRAY_PROTOTYPE_METHOD_SPECS,
-        JS_FUNC_FLAG_TYPED_ARRAY_METHOD, false);
+    js_install_builtin_function_specs(proto, JS_BUILTIN_OWNER_TYPED_ARRAY_PROTOTYPE_METHOD);
 
     // %TypedArray%.prototype.toString is exactly Array.prototype.toString.
     {
@@ -1164,8 +641,7 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     }
 
     // TypedArray-specific methods (stubs — no Array equivalent)
-    js_install_builtin_function_specs(proto, JS_TYPED_ARRAY_STUB_METHOD_SPECS,
-        JS_FUNC_FLAG_TYPED_ARRAY_METHOD, false);
+    js_install_builtin_function_specs(proto, JS_BUILTIN_OWNER_TYPED_ARRAY_STUB_METHOD);
 
     // Symbol.iterator = values (same function object as TypedArray.prototype.values per spec)
     {
@@ -1191,12 +667,12 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
     // Accessor getter stubs for buffer, byteLength, byteOffset, length
     // These throw TypeError when accessed on non-TypedArray (ES spec §23.2.3.1/2/3)
     // Phase 3 Stage A: route through unified js_install_native_accessor.
-    js_install_builtin_accessor_specs(proto, JS_TYPED_ARRAY_ACCESSOR_SPECS,
-        JS_FUNC_FLAG_TYPED_ARRAY_METHOD);
+    js_install_builtin_accessor_specs(proto, JS_BUILTIN_OWNER_TYPED_ARRAY_ACCESSOR);
 
     // Install static methods from/of on %TypedArray% constructor (base_ctor)
     {
-        js_install_builtin_method_specs_on_function(base_ctor, JS_TYPED_ARRAY_STATIC_METHOD_SPECS, false);
+        js_install_builtin_method_specs_on_function(
+            base_ctor, JS_BUILTIN_OWNER_TYPED_ARRAY_STATIC_METHOD, false);
 
         // Install get [Symbol.species]() { return this; } on %TypedArray%
         // Phase 3 Stage A: route through unified js_install_native_accessor.
@@ -1209,12 +685,13 @@ extern "C" void js_populate_typed_array_base_proto(Item proto, Item base_ctor) {
 // Populate all known static methods on a constructor function as own properties.
 // This makes them visible to hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames.
 extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor_name, int ctor_len) {
-    const JsBuiltinMethodSpec* specs = js_get_constructor_static_method_specs(ctor_name, ctor_len);
-    js_install_builtin_method_specs_on_function(ctor_item, specs, true);
+    JsBuiltinOwner owner = js_get_constructor_static_owner(ctor_name, ctor_len);
+    js_install_builtin_method_specs_on_function(ctor_item, owner, true);
 
     // ES spec: install get [Symbol.species]() { return this; } on constructors
     // that support @@species (Array, RegExp, Promise, Map, Set, ArrayBuffer, TypedArray constructors)
-    bool needs_species = js_ctor_name_in_table(JS_SPECIES_CONSTRUCTOR_NAMES, ctor_name, ctor_len);
+    const JsBuiltinOwnerBinding* binding = js_find_owner_binding(ctor_name, ctor_len);
+    bool needs_species = binding && (binding->flags & JS_BUILTIN_OWNER_BINDING_SPECIES);
     if (needs_species) {
         // install getter: __get___sym_6 → function that returns this
         // Phase 3 Stage A: route through unified js_install_native_accessor.
@@ -1234,7 +711,8 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_TO_STRING, "toString", 0);
     }
     if (type == LMD_TYPE_BOOL) {
-        Item method = js_lookup_builtin_method_spec(JS_BOOLEAN_PROTOTYPE_METHOD_SPECS, name, len);
+        Item method = js_lookup_builtin_method_spec(
+            JS_BUILTIN_OWNER_BOOLEAN_PROTOTYPE_METHOD, name, len);
         if (method.item != ItemNull.item) return method;
     }
     if (len == 7 && strncmp(name, "valueOf", 7) == 0 &&
@@ -1244,25 +722,29 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
 
     // Function.prototype methods
     if (type == LMD_TYPE_FUNC) {
-        Item method = js_lookup_builtin_method_spec(JS_FUNCTION_PROTOTYPE_METHOD_SPECS, name, len);
+        Item method = js_lookup_builtin_method_spec(
+            JS_BUILTIN_OWNER_FUNCTION_PROTOTYPE_METHOD, name, len);
         if (method.item != ItemNull.item) return method;
     }
 
     // Array.prototype methods
     if (type == LMD_TYPE_ARRAY) {
-        Item method = js_lookup_builtin_method_spec(JS_ARRAY_PROTOTYPE_METHOD_SPECS, name, len);
+        Item method = js_lookup_builtin_method_spec(
+            JS_BUILTIN_OWNER_ARRAY_PROTOTYPE_METHOD, name, len);
         if (method.item != ItemNull.item) return method;
     }
 
     // String.prototype methods
     if (type == LMD_TYPE_STRING) {
-        Item method = js_lookup_builtin_method_spec(JS_STRING_PROTOTYPE_METHOD_SPECS, name, len);
+        Item method = js_lookup_builtin_method_spec(
+            JS_BUILTIN_OWNER_STRING_PROTOTYPE_METHOD, name, len);
         if (method.item != ItemNull.item) return method;
     }
 
     // Number.prototype methods
     if (js_builtin_type_uses_number_prototype(type)) {
-        Item method = js_lookup_builtin_method_spec(JS_NUMBER_PROTOTYPE_METHOD_SPECS, name, len);
+        Item method = js_lookup_builtin_method_spec(
+            JS_BUILTIN_OWNER_NUMBER_PROTOTYPE_METHOD, name, len);
         if (method.item != ItemNull.item) return method;
     }
 
@@ -1272,10 +754,10 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
 // v26: Return all builtin method names for a prototype type as a Lambda array.
 // Used by getOwnPropertyNames to enumerate builtin methods on prototype objects.
 extern "C" void js_append_builtin_method_names(TypeId type, Item result) {
-    const JsBuiltinMethodSpec* specs = js_get_prototype_method_specs_for_type(type);
-    if (!specs) specs = JS_OBJECT_PROTOTYPE_METHOD_SPECS;
-    if (specs) {
-        js_append_builtin_method_spec_names(specs, result);
+    JsBuiltinOwner owner = js_get_prototype_owner_for_type(type);
+    if (owner == JS_BUILTIN_OWNER_NONE) owner = JS_BUILTIN_OWNER_OBJECT_PROTOTYPE_METHOD;
+    if (owner != JS_BUILTIN_OWNER_NONE) {
+        js_append_builtin_method_spec_names(owner, result);
         if (type == LMD_TYPE_ARRAY) {
             Item locale_key = (Item){.item = s2it(heap_create_name("toLocaleString", 14))};
             js_array_push(result, locale_key);

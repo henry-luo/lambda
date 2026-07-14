@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "js_builtin_catalog.hpp"
 #include "js_exec_profile.h"
 #include "../../lib/lambda_alloca.h"
 
@@ -1660,92 +1661,45 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
 
     log_debug("js-mir: undefined variable '%s' — checking built-in constructors", vname);
 
-    // v18n: Handle global namespace objects (Math, JSON, console) as values
-    if (id->name->len == 4 && strncmp(id->name->chars, "Math", 4) == 0) {
-        MIR_reg_t value = jm_call_0(mt, "js_get_math_object_value", MIR_T_I64);
-        return jm_apply_with_identifier_fallback(mt, id, value);
-    }
-    if (id->name->len == 4 && strncmp(id->name->chars, "JSON", 4) == 0) {
-        MIR_reg_t value = jm_call_0(mt, "js_get_json_object_value", MIR_T_I64);
-        return jm_apply_with_identifier_fallback(mt, id, value);
-    }
-    if (id->name->len == 7 && strncmp(id->name->chars, "Reflect", 7) == 0) {
-        MIR_reg_t value = jm_call_0(mt, "js_get_reflect_object_value", MIR_T_I64);
-        return jm_apply_with_identifier_fallback(mt, id, value);
-    }
-    if (id->name->len == 7 && strncmp(id->name->chars, "Atomics", 7) == 0) {
-        MIR_reg_t value = jm_call_0(mt, "js_get_atomics_object_value", MIR_T_I64);
-        return jm_apply_with_identifier_fallback(mt, id, value);
-    }
-    if (id->name->len == 7 && strncmp(id->name->chars, "console", 7) == 0) {
-        MIR_reg_t value = jm_call_0(mt, "js_get_console_object_value", MIR_T_I64);
-        return jm_apply_with_identifier_fallback(mt, id, value);
-    }
-    if (id->name->len == 8 && strncmp(id->name->chars, "document", 8) == 0) {
-        MIR_reg_t value = jm_call_0(mt, "js_get_document_object_value", MIR_T_I64);
-        return jm_apply_with_identifier_fallback(mt, id, value);
-    }
-    if (id->name->len == 7 && strncmp(id->name->chars, "process", 7) == 0) {
-        MIR_reg_t value = jm_call_0(mt, "js_get_process_object_value", MIR_T_I64);
-        return jm_apply_with_identifier_fallback(mt, id, value);
-    }
-    if (id->name->len == 4 && strncmp(id->name->chars, "$262", 4) == 0) {
-        MIR_reg_t value = jm_call_0(mt, "js_get_262_object_value", MIR_T_I64);
-        return jm_apply_with_identifier_fallback(mt, id, value);
-    }
-    if (id->name->len == 3 && strncmp(id->name->chars, "CSS", 3) == 0) {
-        MIR_reg_t value = jm_call_0(mt, "js_get_css_object_value", MIR_T_I64);
-        return jm_apply_with_identifier_fallback(mt, id, value);
-    }
-
-    // v48: Global builtin functions as values (parseInt, parseFloat, isNaN, etc.)
-    {
-        static const struct { const char* name; int len; int param_count; } global_builtins[] = {
-            {"parseInt", 8, 2}, {"parseFloat", 10, 1},
-            {"isNaN", 5, 1}, {"isFinite", 8, 1},
-            {"encodeURI", 9, 1}, {"decodeURI", 9, 1},
-            {"encodeURIComponent", 18, 1}, {"decodeURIComponent", 18, 1},
-            {"eval", 4, 1}, {"atob", 4, 1}, {"btoa", 4, 1},
-            {"print", 5, 1},
-            {NULL, 0, 0}
-        };
-        for (int i = 0; global_builtins[i].name; i++) {
-            if ((int)id->name->len == global_builtins[i].len &&
-                strncmp(id->name->chars, global_builtins[i].name, id->name->len) == 0) {
-                char prefixed[128];
-                snprintf(prefixed, sizeof(prefixed), "_js_%s", global_builtins[i].name);
-                if (jm_find_var(mt, prefixed)) break;  // local shadows global
-                MIR_reg_t name_reg = jm_box_string_literal(mt, global_builtins[i].name, global_builtins[i].len);
-                MIR_reg_t pc_reg = jm_box_int_const(mt, (int64_t)global_builtins[i].param_count);
+    const JsBuiltinGlobalSpec* global_spec = js_builtin_global_find(
+        id->name->chars, (int)id->name->len);
+    if (global_spec && (global_spec->flags & JS_BUILTIN_GLOBAL_MIR_DIRECT)) {
+        if (global_spec->kind == JS_BUILTIN_GLOBAL_NAMESPACE) {
+            const char* getter = NULL;
+            switch (global_spec->id) {
+            case JS_BUILTIN_GLOBAL_NS_MATH: getter = "js_get_math_object_value"; break;
+            case JS_BUILTIN_GLOBAL_NS_JSON: getter = "js_get_json_object_value"; break;
+            case JS_BUILTIN_GLOBAL_NS_REFLECT: getter = "js_get_reflect_object_value"; break;
+            case JS_BUILTIN_GLOBAL_NS_ATOMICS: getter = "js_get_atomics_object_value"; break;
+            case JS_BUILTIN_GLOBAL_NS_CONSOLE: getter = "js_get_console_object_value"; break;
+            case JS_BUILTIN_GLOBAL_NS_DOCUMENT: getter = "js_get_document_object_value"; break;
+            case JS_BUILTIN_GLOBAL_NS_PROCESS: getter = "js_get_process_object_value"; break;
+            case JS_BUILTIN_GLOBAL_NS_HOST_262: getter = "js_get_262_object_value"; break;
+            case JS_BUILTIN_GLOBAL_NS_CSS: getter = "js_get_css_object_value"; break;
+            default: break;
+            }
+            if (getter) {
+                MIR_reg_t value = jm_call_0(mt, getter, MIR_T_I64);
+                return jm_apply_with_identifier_fallback(mt, id, value);
+            }
+        } else if (global_spec->kind == JS_BUILTIN_GLOBAL_FUNCTION) {
+            char prefixed[128];
+            snprintf(prefixed, sizeof(prefixed), "_js_%s", global_spec->name);
+            if (!jm_find_var(mt, prefixed)) {
+                MIR_reg_t name_reg = jm_box_string_literal(
+                    mt, global_spec->name, global_spec->len);
+                MIR_reg_t pc_reg = jm_box_int_const(mt, (int64_t)global_spec->param_count);
                 MIR_reg_t value = jm_call_2(mt, "js_get_global_builtin_fn", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, pc_reg));
                 return jm_apply_with_identifier_fallback(mt, id, value);
             }
-        }
-    }
-
-    // Check for built-in constructors: Array, Object, Function, String, etc.
-    {
-        static const char* builtins[] = {
-            "Object", "Array", "Function", "String", "Number", "Boolean",
-            "Symbol", "Error", "TypeError", "RangeError", "ReferenceError",
-            "SyntaxError", "URIError", "EvalError", "RegExp", "Date", "Promise",
-            "Map", "Set", "WeakMap", "WeakSet",
-            "ArrayBuffer", "DataView",
-            "Int8Array", "Uint8Array", "Uint8ClampedArray",
-            "Int16Array", "Uint16Array", "Int32Array", "Uint32Array",
-            "Float16Array", "Float32Array", "Float64Array", NULL
-        };
-        for (int i = 0; builtins[i]; i++) {
-            if ((int)id->name->len == (int)strlen(builtins[i]) &&
-                strncmp(id->name->chars, builtins[i], id->name->len) == 0) {
-                MIR_reg_t name_reg = jm_box_string_literal(mt, builtins[i], (int)strlen(builtins[i]));
-                MIR_reg_t value = jm_call_1(mt, "js_get_global_property_strict", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
-                jm_emit_exc_propagate_check(mt);
-                return value;
-            }
+        } else if (global_spec->kind == JS_BUILTIN_GLOBAL_CONSTRUCTOR) {
+            MIR_reg_t name_reg = jm_box_string_literal(mt, global_spec->name, global_spec->len);
+            MIR_reg_t value = jm_call_1(mt, "js_get_global_property_strict", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
+            jm_emit_exc_propagate_check(mt);
+            return value;
         }
     }
 
@@ -2622,13 +2576,8 @@ MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
             int rlen = (int)rid->name->len;
             // Check for builtin class names — these are safe for name-based check
             // (they never have custom Symbol.hasInstance)
-            bool is_builtin_class =
-                (rlen == 5 && strncmp(rname, "Error", 5) == 0) ||
-                (rlen == 9 && strncmp(rname, "TypeError", 9) == 0) ||
-                (rlen == 10 && strncmp(rname, "RangeError", 10) == 0) ||
-                (rlen == 11 && strncmp(rname, "SyntaxError", 11) == 0) ||
-                (rlen == 14 && strncmp(rname, "ReferenceError", 14) == 0) ||
-                (rlen == 14 && strncmp(rname, "AggregateError", 14) == 0);
+            bool is_builtin_class = js_builtin_global_has_flag(
+                rname, rlen, JS_BUILTIN_GLOBAL_ERROR_CLASS);
             if (is_builtin_class) {
                 MIR_reg_t classname = jm_box_string_literal(mt, rname, rlen);
                 return jm_call_2(mt, "js_instanceof_classname", MIR_T_I64,
@@ -2705,54 +2654,20 @@ MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
             if (id->name) {
                 const char* n = id->name->chars;
                 int nl = (int)id->name->len;
-                // Check if it's a known global built-in function or constructor
-                bool is_builtin_func =
-                    (nl == 8 && strncmp(n, "parseInt", 8) == 0) ||
-                    (nl == 10 && strncmp(n, "parseFloat", 10) == 0) ||
-                    (nl == 5 && strncmp(n, "isNaN", 5) == 0) ||
-                    (nl == 8 && strncmp(n, "isFinite", 8) == 0) ||
-                    (nl == 9 && strncmp(n, "encodeURI", 9) == 0) ||
-                    (nl == 9 && strncmp(n, "decodeURI", 9) == 0) ||
-                    (nl == 18 && strncmp(n, "encodeURIComponent", 18) == 0) ||
-                    (nl == 18 && strncmp(n, "decodeURIComponent", 18) == 0) ||
-                    (nl == 4 && strncmp(n, "eval", 4) == 0) ||
-                    (nl == 4 && strncmp(n, "atob", 4) == 0) ||
-                    (nl == 4 && strncmp(n, "btoa", 4) == 0) ||
-                    (nl == 11 && strncmp(n, "ArrayBuffer", 11) == 0) ||
-                    (nl == 17 && strncmp(n, "SharedArrayBuffer", 17) == 0) ||
-                    (nl == 8 && strncmp(n, "DataView", 8) == 0) ||
-                    (nl == 7 && strncmp(n, "WeakRef", 7) == 0) ||
-                    (nl == 20 && strncmp(n, "FinalizationRegistry", 20) == 0) ||
-                    (nl == 14 && strncmp(n, "AggregateError", 14) == 0) ||
-                    (nl == 6 && strncmp(n, "escape", 6) == 0) ||
-                    (nl == 8 && strncmp(n, "unescape", 8) == 0);
-                // Also check if it's a variable we know about — if so, don't override
-                if (is_builtin_func) {
+                const JsBuiltinGlobalSpec* global_spec = js_builtin_global_find(n, nl);
+                if (global_spec) {
                     char prefixed[128];
                     snprintf(prefixed, sizeof(prefixed), "_js_%.*s", nl, n);
                     if (!jm_find_var(mt, prefixed)) {
+                        const char* type_name = global_spec->kind == JS_BUILTIN_GLOBAL_NAMESPACE ?
+                            "object" : "function";
+                        int type_name_len = global_spec->kind == JS_BUILTIN_GLOBAL_NAMESPACE ? 6 : 8;
                         MIR_reg_t r = jm_new_reg(mt, "typeof_r", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, r),
                             MIR_new_int_op(mt->ctx, (int64_t)s2it(
-                                name_pool_create_len(jm_compiled_name_pool(mt), "function", 8)))));
-                        return r;
-                    }
-                }
-                // v25: Reflect, Math, JSON are built-in objects (typeof → "object")
-                bool is_builtin_object =
-                    (nl == 7 && strncmp(n, "Reflect", 7) == 0) ||
-                    (nl == 4 && strncmp(n, "Math", 4) == 0) ||
-                    (nl == 4 && strncmp(n, "JSON", 4) == 0);
-                if (is_builtin_object) {
-                    char prefixed2[128];
-                    snprintf(prefixed2, sizeof(prefixed2), "_js_%.*s", nl, n);
-                    if (!jm_find_var(mt, prefixed2)) {
-                        MIR_reg_t r = jm_new_reg(mt, "typeof_r", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, r),
-                            MIR_new_int_op(mt->ctx, (int64_t)s2it(
-                                name_pool_create_len(jm_compiled_name_pool(mt), "object", 6)))));
+                                name_pool_create_len(
+                                    jm_compiled_name_pool(mt), type_name, type_name_len)))));
                         return r;
                     }
                 }
@@ -6075,15 +5990,12 @@ bool jm_is_math_call(JsCallNode* call) {
 // specific Lambda function directly. Eliminates string boxing, args array allocation,
 // and runtime string matching per call.
 
-// Check if name matches a known string (helper macro for readability)
-#define MATH_MATCH(s, slen) (ml == (slen) && strncmp(m, (s), (slen)) == 0)
-
 // Compile-time Math method resolution for boxed path.
 // Returns boxed Item result.
 MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* method) {
     int argc = jm_count_args(call->arguments);
-    const char* m = method->chars;
-    int ml = (int)method->len;
+    int math_builtin_id = js_builtin_catalog_lookup_id(
+        JS_BUILTIN_OWNER_MATH_METHOD, method->chars, (int)method->len);
 
     // Transpile first argument and convert to number
     JsAstNode* arg0 = call->arguments;
@@ -6092,7 +6004,8 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
     // if any argument is a spread element, fall through to runtime dispatch via js_math_apply
     for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
         if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
-            log_debug("phase5: Math.%.*s called with spread arg, using js_math_apply", ml, m);
+            log_debug("phase5: Math.%.*s called with spread arg, using js_math_apply",
+                (int)method->len, method->chars);
             MIR_reg_t method_str = jm_box_string_literal(mt, method->chars, method->len);
             MIR_reg_t args_array = jm_build_spread_args_array(mt, call->arguments);
             return jm_call_2(mt, "js_math_apply", MIR_T_I64,
@@ -6104,7 +6017,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
     // --- 1-argument Math functions ---
     if (argc >= 1) {
         // Math.abs(x) → fn_abs(js_to_number(x))
-        if (MATH_MATCH("abs", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_ABS) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6112,7 +6025,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.floor(x) → js_math_floor(js_to_number(x))
-        if (MATH_MATCH("floor", 5)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_FLOOR) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6120,7 +6033,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.ceil(x) → js_math_ceil(js_to_number(x))
-        if (MATH_MATCH("ceil", 4)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_CEIL) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6128,7 +6041,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.round(x) → js_math_round_item(js_to_number(x)) with JS semantics
-        if (MATH_MATCH("round", 5)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_ROUND) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6136,7 +6049,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.sqrt(x) → fn_math_sqrt(js_to_number(x))
-        if (MATH_MATCH("sqrt", 4)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_SQRT) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6144,7 +6057,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.log(x) → fn_math_log(js_to_number(x))
-        if (MATH_MATCH("log", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_LOG) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6152,7 +6065,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.log10(x) → fn_math_log10(js_to_number(x))
-        if (MATH_MATCH("log10", 5)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_LOG10) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6160,7 +6073,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.exp(x) → fn_math_exp(js_to_number(x))
-        if (MATH_MATCH("exp", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_EXP) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6168,7 +6081,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.sin(x) → fn_math_sin(js_to_number(x))
-        if (MATH_MATCH("sin", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_SIN) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6176,7 +6089,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.cos(x) → fn_math_cos(js_to_number(x))
-        if (MATH_MATCH("cos", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_COS) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6184,7 +6097,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.tan(x) → fn_math_tan(js_to_number(x))
-        if (MATH_MATCH("tan", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_TAN) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6192,7 +6105,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.sign(x) → js_math_sign(js_to_number(x))
-        if (MATH_MATCH("sign", 4)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_SIGN) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6200,7 +6113,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.trunc(x) → js_math_trunc(js_to_number(x))
-        if (MATH_MATCH("trunc", 5)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_TRUNC) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6212,7 +6125,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
     // --- 2-argument Math functions ---
     if (argc >= 2 && arg1) {
         // Math.pow(x, y) → js_math_pow(x, y) with ES spec edge cases
-        if (MATH_MATCH("pow", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_POW) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t b = jm_transpile_box_item(mt, arg1);
             return jm_call_2(mt, "js_math_pow", MIR_T_I64,
@@ -6220,7 +6133,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, b));
         }
         // Math.min(x, y) → fn_min2(js_to_number(x), js_to_number(y))
-        if (MATH_MATCH("min", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_MIN) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t na = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6238,7 +6151,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
             return result;
         }
         // Math.max(x, y) → fn_max2(js_to_number(x), js_to_number(y))
-        if (MATH_MATCH("max", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_MAX) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t na = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6256,7 +6169,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
             return result;
         }
         // Math.atan2(y, x) → fn_math_atan2(js_to_number(y), js_to_number(x))
-        if (MATH_MATCH("atan2", 5)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_ATAN2) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t b = jm_transpile_box_item(mt, arg1);
             MIR_reg_t na = jm_call_1(mt, "js_to_number", MIR_T_I64,
@@ -6272,14 +6185,14 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
     // --- 0 or 1-arg special cases ---
     // Math.min() → Infinity, Math.max() → -Infinity (0 args)
     if (argc == 0) {
-        if (MATH_MATCH("min", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_MIN) {
             MIR_reg_t r = jm_new_reg(mt, "inf", MIR_T_D);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_double_op(mt->ctx, INFINITY)));
             return jm_call_1(mt, JS_PROFILED_PUSH_D_NAME, MIR_T_I64, MIR_T_D,
                 MIR_new_reg_op(mt->ctx, r));
         }
-        if (MATH_MATCH("max", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_MAX) {
             MIR_reg_t r = jm_new_reg(mt, "ninf", MIR_T_D);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_double_op(mt->ctx, -INFINITY)));
@@ -6289,7 +6202,7 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
     }
     // Math.min(x) / Math.max(x) with 1 arg → js_to_number(x)
     if (argc == 1) {
-        if (MATH_MATCH("min", 3) || MATH_MATCH("max", 3)) {
+        if ((math_builtin_id == JS_BUILTIN_MATH_MIN) || (math_builtin_id == JS_BUILTIN_MATH_MAX)) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             return jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
@@ -6297,7 +6210,8 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
     }
 
     // --- Fallback: unknown Math method → dispatch via js_math_method ---
-    log_debug("phase5: unresolved Math.%.*s, using runtime dispatch", ml, m);
+    log_debug("phase5: unresolved Math.%.*s, using runtime dispatch",
+        (int)method->len, method->chars);
     MIR_reg_t method_str = jm_box_string_literal(mt, method->chars, method->len);
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, argc);
     return jm_call_3(mt, "js_math_method", MIR_T_I64,
@@ -6309,22 +6223,22 @@ MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, String* 
 // Phase 5: Resolve Math method return type at compile time
 TypeId jm_math_return_type(String* method, JsMirTranspiler* mt, JsAstNode* arg0) {
     if (!method) return LMD_TYPE_ANY;
-    const char* m = method->chars;
-    int ml = (int)method->len;
+    int math_builtin_id = js_builtin_catalog_lookup_id(
+        JS_BUILTIN_OWNER_MATH_METHOD, method->chars, (int)method->len);
 
     // Always-float methods: sqrt, sin, cos, tan, log, log10, exp, pow, random, atan2
-    if (MATH_MATCH("sqrt", 4) || MATH_MATCH("sin", 3) || MATH_MATCH("cos", 3) ||
-        MATH_MATCH("tan", 3) || MATH_MATCH("log", 3) || MATH_MATCH("log10", 5) ||
-        MATH_MATCH("exp", 3) || MATH_MATCH("pow", 3) || MATH_MATCH("random", 6) ||
-        MATH_MATCH("atan2", 5))
+    if ((math_builtin_id == JS_BUILTIN_MATH_SQRT) || (math_builtin_id == JS_BUILTIN_MATH_SIN) || (math_builtin_id == JS_BUILTIN_MATH_COS) ||
+        (math_builtin_id == JS_BUILTIN_MATH_TAN) || (math_builtin_id == JS_BUILTIN_MATH_LOG) || (math_builtin_id == JS_BUILTIN_MATH_LOG10) ||
+        (math_builtin_id == JS_BUILTIN_MATH_EXP) || (math_builtin_id == JS_BUILTIN_MATH_POW) || (math_builtin_id == JS_BUILTIN_MATH_RANDOM) ||
+        (math_builtin_id == JS_BUILTIN_MATH_ATAN2))
         return LMD_TYPE_FLOAT;
 
     // JS Number methods may compute integer-valued results, but their observable value is still Number/binary64.
-    if (MATH_MATCH("trunc", 5) || MATH_MATCH("sign", 4))
+    if ((math_builtin_id == JS_BUILTIN_MATH_TRUNC) || (math_builtin_id == JS_BUILTIN_MATH_SIGN))
         return LMD_TYPE_FLOAT;
 
     // Type-preserving: abs, floor, ceil, round, min, max
-    if (MATH_MATCH("abs", 3)) {
+    if (math_builtin_id == JS_BUILTIN_MATH_ABS) {
         if (arg0) {
             TypeId at = jm_get_effective_type(mt, arg0);
             if (at == LMD_TYPE_INT || at == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
@@ -6332,11 +6246,11 @@ TypeId jm_math_return_type(String* method, JsMirTranspiler* mt, JsAstNode* arg0)
         return LMD_TYPE_ANY;
     }
     // floor/ceil/round compute integer-valued doubles.
-    if (MATH_MATCH("floor", 5) || MATH_MATCH("ceil", 4) || MATH_MATCH("round", 5))
+    if ((math_builtin_id == JS_BUILTIN_MATH_FLOOR) || (math_builtin_id == JS_BUILTIN_MATH_CEIL) || (math_builtin_id == JS_BUILTIN_MATH_ROUND))
         return LMD_TYPE_FLOAT;
 
     // min/max: preserve type if both args same type; return FLOAT if either arg is float
-    if (MATH_MATCH("min", 3) || MATH_MATCH("max", 3)) {
+    if ((math_builtin_id == JS_BUILTIN_MATH_MIN) || (math_builtin_id == JS_BUILTIN_MATH_MAX)) {
         if (arg0) {
             TypeId at = jm_get_effective_type(mt, arg0);
             JsAstNode* arg1 = arg0->next;
@@ -6364,8 +6278,8 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
         return jm_emit_double_to_int(mt, d);
     }
 
-    const char* m = method->chars;
-    int ml = (int)method->len;
+    int math_builtin_id = js_builtin_catalog_lookup_id(
+        JS_BUILTIN_OWNER_MATH_METHOD, method->chars, (int)method->len);
     JsAstNode* arg0 = call->arguments;
     TypeId arg_type = jm_get_effective_type(mt, arg0);
     bool arg_numeric = (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_FLOAT);
@@ -6373,50 +6287,50 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
     // For numeric arguments, use native C math functions directly
     if (arg_numeric) {
         // 1-arg double→double functions: sqrt, sin, cos, tan, log, log10, exp
-        if (MATH_MATCH("sqrt", 4)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_SQRT) {
             MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
             MIR_reg_t r = jm_call_1(mt, "sqrt", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
             if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
             return r;
         }
-        if (MATH_MATCH("sin", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_SIN) {
             MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
             MIR_reg_t r = jm_call_1(mt, "sin", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
             if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
             return r;
         }
-        if (MATH_MATCH("cos", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_COS) {
             MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
             MIR_reg_t r = jm_call_1(mt, "cos", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
             if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
             return r;
         }
-        if (MATH_MATCH("tan", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_TAN) {
             MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
             MIR_reg_t r = jm_call_1(mt, "tan", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
             if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
             return r;
         }
-        if (MATH_MATCH("log", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_LOG) {
             MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
             MIR_reg_t r = jm_call_1(mt, "log", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
             if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
             return r;
         }
-        if (MATH_MATCH("log10", 5)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_LOG10) {
             MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
             MIR_reg_t r = jm_call_1(mt, "log10", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
             if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
             return r;
         }
-        if (MATH_MATCH("exp", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_EXP) {
             MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
             MIR_reg_t r = jm_call_1(mt, "exp", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
             if (target_type == LMD_TYPE_INT) return jm_emit_double_to_int(mt, r);
             return r;
         }
         // Math.abs: int→int, float→float
-        if (MATH_MATCH("abs", 3)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_ABS) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
                 MIR_reg_t r = jm_call_1(mt, "fn_abs_i", MIR_T_I64,
@@ -6431,7 +6345,7 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
             }
         }
         // Math.floor: int→int (identity), float→int via C floor()
-        if (MATH_MATCH("floor", 5)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_FLOOR) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
                 if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
@@ -6444,7 +6358,7 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
             }
         }
         // Math.ceil: int→int (identity), float→ceil (preserves -0)
-        if (MATH_MATCH("ceil", 4)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_CEIL) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
                 if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
@@ -6457,7 +6371,7 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
             }
         }
         // Math.round: int→int (identity), float→int via js_math_round (JS semantics)
-        if (MATH_MATCH("round", 5)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_ROUND) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
                 if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
@@ -6470,7 +6384,7 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
             }
         }
         // Math.trunc: int→int (identity), float→trunc (preserves -0 as double)
-        if (MATH_MATCH("trunc", 5)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_TRUNC) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
                 if (target_type == LMD_TYPE_FLOAT) return jm_emit_int_to_double(mt, i);
@@ -6483,7 +6397,7 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
             }
         }
         // Math.sign: returns i32, but we need target type
-        if (MATH_MATCH("sign", 4)) {
+        if (math_builtin_id == JS_BUILTIN_MATH_SIGN) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
                 MIR_reg_t r = jm_call_1(mt, "fn_sign_i", MIR_T_I64,
@@ -6499,7 +6413,7 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
             }
         }
         // Math.pow(x, y): both args → double, call js_math_pow_d (ES spec)
-        if (MATH_MATCH("pow", 3) && argc >= 2) {
+        if ((math_builtin_id == JS_BUILTIN_MATH_POW) && argc >= 2) {
             JsAstNode* arg1_n = arg0->next;
             TypeId a1t = jm_get_effective_type(mt, arg1_n);
             if (a1t == LMD_TYPE_INT || a1t == LMD_TYPE_FLOAT) {
@@ -6513,7 +6427,7 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
             }
         }
         // Math.min/max with 2 args: both → double, call fn_min2_u/fn_max2_u
-        if (MATH_MATCH("min", 3) && argc >= 2) {
+        if ((math_builtin_id == JS_BUILTIN_MATH_MIN) && argc >= 2) {
             JsAstNode* arg1_n = arg0->next;
             TypeId a1t = jm_get_effective_type(mt, arg1_n);
             if (a1t == LMD_TYPE_INT || a1t == LMD_TYPE_FLOAT) {
@@ -6526,7 +6440,7 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return r;
             }
         }
-        if (MATH_MATCH("max", 3) && argc >= 2) {
+        if ((math_builtin_id == JS_BUILTIN_MATH_MAX) && argc >= 2) {
             JsAstNode* arg1_n = arg0->next;
             TypeId a1t = jm_get_effective_type(mt, arg1_n);
             if (a1t == LMD_TYPE_INT || a1t == LMD_TYPE_FLOAT) {
@@ -6551,8 +6465,6 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
         return jm_emit_double_to_int(mt, d);
     }
 }
-
-#undef MATH_MATCH
 
 // Helper: check if a CALL_EXPRESSION is a Math.xxx() call and extract the method name
 String* jm_get_math_method(JsCallNode* call) {
@@ -7260,14 +7172,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     if (super_id->name) {
                         const char* sname = super_id->name->chars;
                         int slen = (int)super_id->name->len;
-                        bool is_error_class =
-                            (slen == 5 && strncmp(sname, "Error", 5) == 0) ||
-                            (slen == 9 && strncmp(sname, "TypeError", 9) == 0) ||
-                            (slen == 9 && strncmp(sname, "EvalError", 9) == 0) ||
-                            (slen == 8 && strncmp(sname, "URIError", 8) == 0) ||
-                            (slen == 10 && strncmp(sname, "RangeError", 10) == 0) ||
-                            (slen == 11 && strncmp(sname, "SyntaxError", 11) == 0) ||
-                            (slen == 14 && strncmp(sname, "ReferenceError", 14) == 0);
+                        bool is_error_class = js_builtin_global_has_flag(
+                            sname, slen, JS_BUILTIN_GLOBAL_ERROR_CLASS);
                         if (is_error_class) {
                             // Set this.message = first arg, this.name = error type name
                             MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
@@ -7874,29 +7780,28 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
             JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 4 && strncmp(prop->name->chars, "keys", 4) == 0) {
+            int catalog_builtin_id = js_builtin_catalog_lookup_member_id(
+                obj->name->chars, (int)obj->name->len,
+                prop->name->chars, (int)prop->name->len);
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_KEYS) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_object_keys", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.getOwnPropertyNames(obj) — includes non-enumerable own properties
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 19 && strncmp(prop->name->chars, "getOwnPropertyNames", 19) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_NAMES) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_object_get_own_property_names", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.getOwnPropertySymbols(obj)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 21 && strncmp(prop->name->chars, "getOwnPropertySymbols", 21) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_SYMBOLS) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_object_get_own_property_symbols", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.getOwnPropertyDescriptor(obj, name)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 24 && strncmp(prop->name->chars, "getOwnPropertyDescriptor", 24) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -7906,15 +7811,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_arg));
             }
             // Object.getOwnPropertyDescriptors(obj) — returns map of all descriptors
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 25 && strncmp(prop->name->chars, "getOwnPropertyDescriptors", 25) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_GET_OWN_PROPERTY_DESCRIPTORS) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_object_get_own_property_descriptors", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.create(proto) or Object.create(proto, properties)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "create", 6) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_CREATE) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t result = jm_call_1(mt, "js_object_create", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
@@ -7932,8 +7835,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return result;
             }
             // Object.defineProperty(obj, name, descriptor)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "defineProperty", 14) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_DEFINE_PROPERTY) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 JsAstNode* a3 = a2 ? a2->next : NULL;
@@ -7946,8 +7848,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, desc_arg));
             }
             // Object.defineProperties(obj, props)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 16 && strncmp(prop->name->chars, "defineProperties", 16) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_DEFINE_PROPERTIES) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -7962,63 +7863,54 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_0(mt, "js_performance_now", MIR_T_I64);
             }
             // Date.now()
-            if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Date", 4) == 0 &&
-                prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "now", 3) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_DATE_NOW) {
                 return jm_call_0(mt, "js_date_now", MIR_T_I64);
             }
             // Date.UTC(year, month, day, hour, min, sec, ms)
-            if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Date", 4) == 0 &&
-                prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "UTC", 3) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_DATE_UTC) {
                 // Build a proper JS array and pass to js_date_utc
                 MIR_reg_t args_arr = jm_build_spread_args_array(mt, call->arguments);
                 return jm_call_1(mt, "js_date_utc", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr));
             }
             // v20: Date.parse(string)
-            if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Date", 4) == 0 &&
-                prop->name && prop->name->len == 5 && strncmp(prop->name->chars, "parse", 5) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_DATE_PARSE) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_date_parse", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Array.isArray(x)
-            if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "Array", 5) == 0 &&
-                prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "isArray", 7) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_ARRAY_IS_ARRAY) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_array_is_array", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // ArrayBuffer.isView(x)
-            if (obj->name && obj->name->len == 11 && strncmp(obj->name->chars, "ArrayBuffer", 11) == 0 &&
-                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "isView", 6) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_ARRAYBUFFER_ISVIEW) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_arraybuffer_is_view", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.values(obj)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "values", 6) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_VALUES) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_object_values", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.entries(obj)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "entries", 7) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_ENTRIES) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_object_entries", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.fromEntries(iterable)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 11 && strncmp(prop->name->chars, "fromEntries", 11) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_FROM_ENTRIES) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_object_from_entries", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.is(value1, value2)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 2 && strncmp(prop->name->chars, "is", 2) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_IS) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t left = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
@@ -8028,8 +7920,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
             }
             // Object.assign(target, ...sources)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "assign", 6) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_ASSIGN) {
                 JsAstNode* a1 = call->arguments;
                 MIR_reg_t target = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
                 // build array of source arguments
@@ -8044,22 +7935,19 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, source_count));
             }
             // Object.freeze(obj)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "freeze", 6) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_FREEZE) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_object_freeze", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.isFrozen(obj)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 8 && strncmp(prop->name->chars, "isFrozen", 8) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_IS_FROZEN) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_object_is_frozen", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Object.hasOwn(obj, key)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "hasOwn", 6) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_HAS_OWN) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -8069,8 +7957,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg));
             }
             // Object.groupBy(items, callbackFn)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "groupBy", 7) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_GROUP_BY) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t items_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -8080,8 +7967,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cb_arg));
             }
             // Map.groupBy(items, callbackFn)
-            if (obj->name && obj->name->len == 3 && strncmp(obj->name->chars, "Map", 3) == 0 &&
-                prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "groupBy", 7) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_MAP_GROUP_BY) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t items_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -8091,8 +7977,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cb_arg));
             }
             // Proxy.revocable(target, handler)
-            if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "Proxy", 5) == 0 &&
-                prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "revocable", 9) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_PROXY_REVOCABLE) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t target_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -8102,16 +7987,14 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, handler_arg));
             }
             // Object.getPrototypeOf(obj)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "getPrototypeOf", 14) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_GET_PROTOTYPE_OF) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 jm_emit_exc_propagate_check(mt);
                 return jm_call_1(mt, "js_get_prototype_of", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Reflect.construct(target, argumentsList[, newTarget])
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "construct", 9) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_CONSTRUCT) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 JsAstNode* a3 = a2 ? a2->next : NULL;
@@ -8124,15 +8007,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, newtarget_arg));
             }
             // Reflect.ownKeys(obj)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "ownKeys", 7) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_OWN_KEYS) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_reflect_own_keys", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Reflect.has(obj, key)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "has", 3) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_HAS) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -8142,8 +8023,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg));
             }
             // Reflect.get(obj, key)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "get", 3) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_GET) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 JsAstNode* a3 = a2 ? a2->next : NULL;
@@ -8156,8 +8036,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv_arg));
             }
             // Reflect.set(obj, key, value [, receiver])
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "set", 3) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_SET) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 JsAstNode* a3 = a2 ? a2->next : NULL;
@@ -8173,8 +8052,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv_arg));
             }
             // Reflect.defineProperty(obj, key, desc)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "defineProperty", 14) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_DEFINE_PROPERTY) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 JsAstNode* a3 = a2 ? a2->next : NULL;
@@ -8187,8 +8065,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, desc_arg));
             }
             // Reflect.deleteProperty(obj, key)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "deleteProperty", 14) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_DELETE_PROPERTY) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -8198,8 +8075,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg));
             }
             // Reflect.getOwnPropertyDescriptor(obj, key)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 24 && strncmp(prop->name->chars, "getOwnPropertyDescriptor", 24) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_GET_OWN_PROPERTY_DESCRIPTOR) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -8209,15 +8085,13 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, name_arg));
             }
             // Reflect.getPrototypeOf(obj)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "getPrototypeOf", 14) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_GET_PROTOTYPE_OF) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_reflect_get_prototype_of", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Reflect.setPrototypeOf(obj, proto)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "setPrototypeOf", 14) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_SET_PROTOTYPE_OF) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
@@ -8227,22 +8101,19 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_arg));
             }
             // Reflect.isExtensible(obj)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 12 && strncmp(prop->name->chars, "isExtensible", 12) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_IS_EXTENSIBLE) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_reflect_is_extensible", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Reflect.preventExtensions(obj)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 17 && strncmp(prop->name->chars, "preventExtensions", 17) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_PREVENT_EXTENSIONS) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_reflect_prevent_extensions", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Reflect.apply(target, thisArg, argsList)
-            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Reflect", 7) == 0 &&
-                prop->name && prop->name->len == 5 && strncmp(prop->name->chars, "apply", 5) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_REFLECT_APPLY) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 JsAstNode* a3 = a2 ? a2->next : NULL;
@@ -8255,8 +8126,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arg));
             }
             // Object.setPrototypeOf(obj, proto)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
-                prop->name && prop->name->len == 14 && strncmp(prop->name->chars, "setPrototypeOf", 14) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_OBJECT_SET_PROTOTYPE_OF) {
                 JsAstNode* a1 = call->arguments;
                 JsAstNode* a2 = a1 ? a1->next : NULL;
                 MIR_reg_t obj_arg = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_undefined(mt);
@@ -8266,8 +8136,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_arg));
             }
             // JSON.parse(str, reviver?)
-            if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "JSON", 4) == 0 &&
-                prop->name && prop->name->len == 5 && strncmp(prop->name->chars, "parse", 5) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_JSON_PARSE) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
                 // v20: check for reviver (2nd arg)
                 JsAstNode* second_arg = call->arguments ? call->arguments->next : NULL;
@@ -8281,8 +8150,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // JSON.stringify(value, replacer?, space?)
-            if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "JSON", 4) == 0 &&
-                prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "stringify", 9) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_JSON_STRINGIFY) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 // v20: check for replacer (2nd arg) and space (3rd arg)
                 JsAstNode* second_arg = call->arguments ? call->arguments->next : NULL;
@@ -8299,8 +8167,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Array.from(iterable, mapFn?)
-            if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "Array", 5) == 0 &&
-                prop->name && prop->name->len == 4 && strncmp(prop->name->chars, "from", 4) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_ARRAY_FROM) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 // Check if second argument (mapFn) is provided
                 JsAstNode* second_arg = call->arguments ? call->arguments->next : NULL;
@@ -8322,8 +8189,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Array.of(...items) — build array from arguments
-            if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "Array", 5) == 0 &&
-                prop->name && prop->name->len == 2 && strncmp(prop->name->chars, "of", 2) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_ARRAY_OF) {
                 MIR_reg_t result = jm_call_1(mt, "js_array_new", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
                 JsAstNode* arg = call->arguments;
@@ -8354,8 +8220,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // BigInt.asIntN(bits, bigintValue)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "BigInt", 6) == 0 &&
-                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "asIntN", 6) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_BIGINT_AS_INT_N) {
                 MIR_reg_t bits_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
                 MIR_reg_t val_arg = arg2 ? jm_transpile_box_item(mt, arg2) : jm_emit_null(mt);
@@ -8364,8 +8229,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val_arg));
             }
             // BigInt.asUintN(bits, bigintValue)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "BigInt", 6) == 0 &&
-                prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "asUintN", 7) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_BIGINT_AS_UINT_N) {
                 MIR_reg_t bits_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
                 MIR_reg_t val_arg = arg2 ? jm_transpile_box_item(mt, arg2) : jm_emit_null(mt);
@@ -8374,43 +8238,37 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val_arg));
             }
             // Number.isInteger(x)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Number", 6) == 0 &&
-                prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "isInteger", 9) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_NUMBER_IS_INTEGER) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_number_is_integer", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Number.isFinite(x)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Number", 6) == 0 &&
-                prop->name && prop->name->len == 8 && strncmp(prop->name->chars, "isFinite", 8) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_NUMBER_IS_FINITE) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_number_is_finite", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Number.isNaN(x)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Number", 6) == 0 &&
-                prop->name && prop->name->len == 5 && strncmp(prop->name->chars, "isNaN", 5) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_NUMBER_IS_NAN) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_number_is_nan", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // Number.isSafeInteger(x)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Number", 6) == 0 &&
-                prop->name && prop->name->len == 13 && strncmp(prop->name->chars, "isSafeInteger", 13) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_NUMBER_IS_SAFE_INTEGER) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_number_is_safe_integer", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // v12: Symbol.for(key) -> js_symbol_for(key)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Symbol", 6) == 0 &&
-                prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "for", 3) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_SYMBOL_FOR) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_symbol_for", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // v12: Symbol.keyFor(sym) -> js_symbol_key_for(sym)
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Symbol", 6) == 0 &&
-                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "keyFor", 6) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_SYMBOL_KEY_FOR) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_symbol_key_for", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
@@ -8425,8 +8283,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* obj = (JsIdentifierNode*)m->object;
             JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "String", 6) == 0 &&
-                prop->name && prop->name->len == 12 && strncmp(prop->name->chars, "fromCharCode", 12) == 0) {
+            int catalog_builtin_id = js_builtin_catalog_lookup_member_id(
+                obj->name->chars, (int)obj->name->len,
+                prop->name->chars, (int)prop->name->len);
+            if (catalog_builtin_id == JS_BUILTIN_STRING_FROM_CHAR_CODE) {
                 // Count arguments
                 int argc = 0;
                 for (JsAstNode* a = call->arguments; a; a = a->next) argc++;
@@ -8470,8 +8330,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
             // String.fromCodePoint(cp1, cp2, ...) — full Unicode code points
-            if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "String", 6) == 0 &&
-                prop->name && prop->name->len == 13 && strncmp(prop->name->chars, "fromCodePoint", 13) == 0) {
+            if (catalog_builtin_id == JS_BUILTIN_STRING_FROM_CODE_POINT) {
                 int argc = 0;
                 for (JsAstNode* a = call->arguments; a; a = a->next) argc++;
                 if (argc == 0) {
@@ -8840,56 +8699,56 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
-            // v11: Date instance methods → js_date_method(obj, method_id)
+            // Date instance methods use the catalog ID; runtime operation numbers stay explicit.
             {
                 int date_method_id = -1;
-                int date_setter_id = -1; // v20: setter methods
-                int plen = prop->name->len;
-                const char* pname = prop->name->chars;
-                if (plen == 7 && strncmp(pname, "getTime", 7) == 0) date_method_id = 0;
-                else if (plen == 11 && strncmp(pname, "getFullYear", 11) == 0) date_method_id = 1;
-                else if (plen == 8 && strncmp(pname, "getMonth", 8) == 0) date_method_id = 2;
-                else if (plen == 7 && strncmp(pname, "getDate", 7) == 0) date_method_id = 3;
-                else if (plen == 8 && strncmp(pname, "getHours", 8) == 0) date_method_id = 4;
-                else if (plen == 10 && strncmp(pname, "getMinutes", 10) == 0) date_method_id = 5;
-                else if (plen == 10 && strncmp(pname, "getSeconds", 10) == 0) date_method_id = 6;
-                else if (plen == 15 && strncmp(pname, "getMilliseconds", 15) == 0) date_method_id = 7;
-                else if (plen == 11 && strncmp(pname, "toISOString", 11) == 0) date_method_id = 8;
-                else if (plen == 18 && strncmp(pname, "toLocaleDateString", 18) == 0) date_method_id = 9;
-                // UTC variants (10-16)
-                else if (plen == 14 && strncmp(pname, "getUTCFullYear", 14) == 0) date_method_id = 10;
-                else if (plen == 11 && strncmp(pname, "getUTCMonth", 11) == 0) date_method_id = 11;
-                else if (plen == 10 && strncmp(pname, "getUTCDate", 10) == 0) date_method_id = 12;
-                else if (plen == 11 && strncmp(pname, "getUTCHours", 11) == 0) date_method_id = 13;
-                else if (plen == 13 && strncmp(pname, "getUTCMinutes", 13) == 0) date_method_id = 14;
-                else if (plen == 13 && strncmp(pname, "getUTCSeconds", 13) == 0) date_method_id = 15;
-                else if (plen == 18 && strncmp(pname, "getUTCMilliseconds", 18) == 0) date_method_id = 16;
-                // v20: additional getters via setter dispatch (method_id >= 40)
-                else if (plen == 6 && strncmp(pname, "getDay", 6) == 0) date_setter_id = 40;
-                else if (plen == 9 && strncmp(pname, "getUTCDay", 9) == 0) date_setter_id = 41;
-                else if (plen == 17 && strncmp(pname, "getTimezoneOffset", 17) == 0) date_setter_id = 42;
-                else if (plen == 7 && strncmp(pname, "valueOf", 7) == 0) date_setter_id = 43;
-                else if (plen == 6 && strncmp(pname, "toJSON", 6) == 0) date_setter_id = 44;
-                else if (plen == 11 && strncmp(pname, "toUTCString", 11) == 0) date_setter_id = 45;
-                else if (plen == 12 && strncmp(pname, "toDateString", 12) == 0) date_setter_id = 46;
-                else if (plen == 12 && strncmp(pname, "toTimeString", 12) == 0) date_setter_id = 47;
-                // v20: local setters (21-27)
-                else if (plen == 7 && strncmp(pname, "setTime", 7) == 0) date_setter_id = 20;
-                else if (plen == 11 && strncmp(pname, "setFullYear", 11) == 0) date_setter_id = 21;
-                else if (plen == 8 && strncmp(pname, "setMonth", 8) == 0) date_setter_id = 22;
-                else if (plen == 7 && strncmp(pname, "setDate", 7) == 0) date_setter_id = 23;
-                else if (plen == 8 && strncmp(pname, "setHours", 8) == 0) date_setter_id = 24;
-                else if (plen == 10 && strncmp(pname, "setMinutes", 10) == 0) date_setter_id = 25;
-                else if (plen == 10 && strncmp(pname, "setSeconds", 10) == 0) date_setter_id = 26;
-                else if (plen == 15 && strncmp(pname, "setMilliseconds", 15) == 0) date_setter_id = 27;
-                // v20: UTC setters (30-36)
-                else if (plen == 14 && strncmp(pname, "setUTCFullYear", 14) == 0) date_setter_id = 30;
-                else if (plen == 11 && strncmp(pname, "setUTCMonth", 11) == 0) date_setter_id = 31;
-                else if (plen == 10 && strncmp(pname, "setUTCDate", 10) == 0) date_setter_id = 32;
-                else if (plen == 11 && strncmp(pname, "setUTCHours", 11) == 0) date_setter_id = 33;
-                else if (plen == 13 && strncmp(pname, "setUTCMinutes", 13) == 0) date_setter_id = 34;
-                else if (plen == 13 && strncmp(pname, "setUTCSeconds", 13) == 0) date_setter_id = 35;
-                else if (plen == 18 && strncmp(pname, "setUTCMilliseconds", 18) == 0) date_setter_id = 36;
+                int date_setter_id = -1;
+                int date_builtin_id = js_builtin_catalog_lookup_id(
+                    JS_BUILTIN_OWNER_DATE_PROTOTYPE_METHOD,
+                    prop->name->chars, (int)prop->name->len);
+                switch (date_builtin_id) {
+                case JS_BUILTIN_DATE_GET_TIME: date_method_id = 0; break;
+                case JS_BUILTIN_DATE_GET_FULL_YEAR: date_method_id = 1; break;
+                case JS_BUILTIN_DATE_GET_MONTH: date_method_id = 2; break;
+                case JS_BUILTIN_DATE_GET_DATE: date_method_id = 3; break;
+                case JS_BUILTIN_DATE_GET_HOURS: date_method_id = 4; break;
+                case JS_BUILTIN_DATE_GET_MINUTES: date_method_id = 5; break;
+                case JS_BUILTIN_DATE_GET_SECONDS: date_method_id = 6; break;
+                case JS_BUILTIN_DATE_GET_MILLISECONDS: date_method_id = 7; break;
+                case JS_BUILTIN_DATE_TO_ISO_STRING: date_method_id = 8; break;
+                case JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING: date_method_id = 9; break;
+                case JS_BUILTIN_DATE_GET_UTC_FULL_YEAR: date_method_id = 10; break;
+                case JS_BUILTIN_DATE_GET_UTC_MONTH: date_method_id = 11; break;
+                case JS_BUILTIN_DATE_GET_UTC_DATE: date_method_id = 12; break;
+                case JS_BUILTIN_DATE_GET_UTC_HOURS: date_method_id = 13; break;
+                case JS_BUILTIN_DATE_GET_UTC_MINUTES: date_method_id = 14; break;
+                case JS_BUILTIN_DATE_GET_UTC_SECONDS: date_method_id = 15; break;
+                case JS_BUILTIN_DATE_GET_UTC_MILLISECONDS: date_method_id = 16; break;
+                case JS_BUILTIN_DATE_GET_DAY: date_setter_id = 40; break;
+                case JS_BUILTIN_DATE_GET_UTC_DAY: date_setter_id = 41; break;
+                case JS_BUILTIN_DATE_GET_TIMEZONE_OFFSET: date_setter_id = 42; break;
+                case JS_BUILTIN_DATE_VALUE_OF: date_setter_id = 43; break;
+                case JS_BUILTIN_DATE_TO_JSON: date_setter_id = 44; break;
+                case JS_BUILTIN_DATE_TO_UTC_STRING: date_setter_id = 45; break;
+                case JS_BUILTIN_DATE_TO_DATE_STRING: date_setter_id = 46; break;
+                case JS_BUILTIN_DATE_TO_TIME_STRING: date_setter_id = 47; break;
+                case JS_BUILTIN_DATE_SET_TIME: date_setter_id = 20; break;
+                case JS_BUILTIN_DATE_SET_FULL_YEAR: date_setter_id = 21; break;
+                case JS_BUILTIN_DATE_SET_MONTH: date_setter_id = 22; break;
+                case JS_BUILTIN_DATE_SET_DATE: date_setter_id = 23; break;
+                case JS_BUILTIN_DATE_SET_HOURS: date_setter_id = 24; break;
+                case JS_BUILTIN_DATE_SET_MINUTES: date_setter_id = 25; break;
+                case JS_BUILTIN_DATE_SET_SECONDS: date_setter_id = 26; break;
+                case JS_BUILTIN_DATE_SET_MILLISECONDS: date_setter_id = 27; break;
+                case JS_BUILTIN_DATE_SET_UTC_FULL_YEAR: date_setter_id = 30; break;
+                case JS_BUILTIN_DATE_SET_UTC_MONTH: date_setter_id = 31; break;
+                case JS_BUILTIN_DATE_SET_UTC_DATE: date_setter_id = 32; break;
+                case JS_BUILTIN_DATE_SET_UTC_HOURS: date_setter_id = 33; break;
+                case JS_BUILTIN_DATE_SET_UTC_MINUTES: date_setter_id = 34; break;
+                case JS_BUILTIN_DATE_SET_UTC_SECONDS: date_setter_id = 35; break;
+                case JS_BUILTIN_DATE_SET_UTC_MILLISECONDS: date_setter_id = 36; break;
+                default: break;
+                }
                 if (date_method_id >= 0) {
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
                     return jm_call_2(mt, "js_date_method", MIR_T_I64,
@@ -14374,14 +14233,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         if (super_id->name) {
                             const char* sname = super_id->name->chars;
                             int slen = (int)super_id->name->len;
-                            bool is_error_class =
-                                (slen == 5 && strncmp(sname, "Error", 5) == 0) ||
-                                (slen == 9 && strncmp(sname, "TypeError", 9) == 0) ||
-                                (slen == 9 && strncmp(sname, "EvalError", 9) == 0) ||
-                                (slen == 8 && strncmp(sname, "URIError", 8) == 0) ||
-                                (slen == 10 && strncmp(sname, "RangeError", 10) == 0) ||
-                                (slen == 11 && strncmp(sname, "SyntaxError", 11) == 0) ||
-                                (slen == 14 && strncmp(sname, "ReferenceError", 14) == 0);
+                            bool is_error_class = js_builtin_global_has_flag(
+                                sname, slen, JS_BUILTIN_GLOBAL_ERROR_CLASS);
                             if (is_error_class) {
                                 // Use the actual NativeError.prototype singleton (not a synthetic copy).
                                 // This ensures identity checks like `Err.prototype.__proto__ === RangeError.prototype`
