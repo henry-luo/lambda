@@ -96,6 +96,21 @@ pub fn classes_for(graph, node_id) {
     string(assignment.class)]
 }
 
+fn class_style_declarations_for(graph, node_id) {
+  let classes = classes_for(graph, node_id);
+  [for (rule in style_rules(graph)
+    where rule.class != null and contains(classes, string(rule.class)) and
+      rule.declarations != null) string(rule.declarations)]
+}
+
+pub fn node_style_declarations_for(graph, node_id) {
+  let assigned = style_declarations_for(graph, "node", [string(node_id)]);
+  join([
+    *class_style_declarations_for(graph, node_id),
+    for (value in [assigned] where value != "") value
+  ], ";")
+}
+
 pub fn direction(graph) {
   let value = if (graph.direction != null) graph.direction
     else if (graph["rank-dir"] != null) graph["rank-dir"]

@@ -821,7 +821,7 @@
     {
       "id": "independent_intrinsic_dom_traversals",
       "modules": ["radiant"],
-      "reason": "Lizard normalizes the first element-filtering statements of independent table-height, anonymous-row, caption, grid-width, flex-height, and select-option traversals; their bodies aggregate different dimensions and CSS structures.",
+      "reason": "The H7 audit confirmed that Lizard normalizes only the first element-filtering statements of independent table-height, anonymous-row, caption, grid-width, flex-height, and select-option traversals; their bodies aggregate different dimensions, unresolved-style policies, and CSS structures while their contribution primitives are already shared.",
       "regions": [
         {
           "file": "radiant/intrinsic_sizing.cpp",

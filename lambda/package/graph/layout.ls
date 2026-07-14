@@ -1,6 +1,7 @@
 // Public graph geometry and Radiant Velmt adapter.
 
 import dagre: .dagre
+import graph_style: .style
 
 pub fn make_options() => dagre.make_options()
 
@@ -53,7 +54,9 @@ fn semantic_nodes(children) {
 }
 
 fn semantic_edges(children) {
-  [for (i, child in children where child_tag(child) == "edge") {
+  [for (i, child in children,
+    let parsed_style = graph_style.parse(attr_or(child, "data-style-declarations", ""))
+    where child_tag(child) == "edge") {
     id: string(attr_or(child, "data-edge-id", "e" ++ string(i))),
     from: string(attr_or(child, "data-from", "")),
     to: string(attr_or(child, "data-to", "")),
@@ -66,6 +69,10 @@ fn semantic_edges(children) {
       if (attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true")
         "normal" else "none")),
     style: string(attr_or(child, "data-style", "solid")),
+    stroke: parsed_style.stroke,
+    stroke_width: parsed_style.stroke_width,
+    opacity: parsed_style.opacity,
+    dash_array: parsed_style.dash_array,
     min_length: int(attr_or(child, "data-min-length", 1)),
     z: child_z(child, -1),
     child_index: child_index(child, i)
@@ -87,16 +94,38 @@ fn routed_edge(edges, edge_id) {
   if (len(matches) > 0) matches[0] else null
 }
 
+fn segment_length(a, b) =>
+  math.sqrt((b.x - a.x) ** 2.0 + (b.y - a.y) ** 2.0)
+
+fn route_length_at(points, i, total) {
+  if (i >= len(points)) total
+  else route_length_at(points, i + 1, total + segment_length(points[i - 1], points[i]))
+}
+
+fn point_along_route(points, i, remaining) {
+  if (i >= len(points)) points[len(points) - 1]
+  else {
+    let start = points[i - 1];
+    let finish = points[i];
+    let distance = segment_length(start, finish);
+    if (distance < 0.001) point_along_route(points, i + 1, remaining)
+    else if (remaining <= distance) {
+      let ratio = remaining / distance;
+      {
+        x: start.x + (finish.x - start.x) * ratio,
+        y: start.y + (finish.y - start.y) * ratio
+      }
+    }
+    else point_along_route(points, i + 1, remaining - distance)
+  }
+}
+
 fn route_anchor(edge) {
   if (edge == null or len(edge.points) == 0) null
   else if (len(edge.points) == 1) edge.points[0]
-  else if (len(edge.points) == 2) {
-    {
-      x: (edge.points[0].x + edge.points[1].x) / 2.0,
-      y: (edge.points[0].y + edge.points[1].y) / 2.0
-    }
-  }
-  else edge.points[int(len(edge.points) / 2)]
+  // point-count midpoints bias labels toward short segments on bent routes.
+  else point_along_route(edge.points, 1,
+    route_length_at(edge.points, 1, 0.0) / 2.0)
 }
 
 fn label_placement(label, edges) {
@@ -132,6 +161,7 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
   let edges = if (opts != null and opts.edges != null) opts.edges else metadata_edges;
   let node_sep = float(graph_option(parent, opts, "node_sep", "data-node-sep", 60.0));
   let rank_sep = float(graph_option(parent, opts, "rank_sep", "data-rank-sep", 80.0));
+  let edge_sep = float(graph_option(parent, opts, "edge_sep", "data-edge-sep", 10.0));
   let direction = string(graph_option(parent, opts, "direction", "data-direction", "TB"));
   let graph_input = {
     nodes: [for (entry in nodes) {
@@ -145,7 +175,8 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
     edges: edges,
     direction: direction,
     node_sep: node_sep,
-    rank_sep: rank_sep
+    rank_sep: rank_sep,
+    edge_sep: edge_sep
   };
   let result = compute(graph_input, opts);
   {

@@ -33,29 +33,31 @@ fn marker_shape(marker_type, color) {
   }
 }
 
-fn edge_marker(id, marker_type, color) {
+fn edge_marker(id, marker_type, color, opacity) {
   let ref_x = if (marker_type == "normal") 7 else 4;
   <marker id: id, markerWidth: 8, markerHeight: 8,
       refX: ref_x, refY: 4, orient: "auto-start-reverse", markerUnits: "strokeWidth",
-      'data-marker-type': marker_type;
+      opacity: opacity, 'data-marker-type': marker_type;
     marker_shape(marker_type, color)
   >
 }
 
-fn edge_defs(edge, color) {
+fn edge_defs(edge, color, opacity) {
   [<defs;
-    edge_marker(marker_id(edge, "start"), edge.marker_start, color)
-    edge_marker(marker_id(edge, "end"), edge.marker_end, color)
+    edge_marker(marker_id(edge, "start"), edge.marker_start, color, opacity)
+    edge_marker(marker_id(edge, "end"), edge.marker_end, color, opacity)
   >]
 }
 
-fn edge_path(edge, color, stroke_width) {
+fn edge_path(edge, color, stroke_width, opacity) {
   let marker_start = if (edge.marker_start != "none")
     "url(#" ++ marker_id(edge, "start") ++ ")" else null;
   let marker_end = if (edge.marker_end != "none")
     "url(#" ++ marker_id(edge, "end") ++ ")" else null;
   <path d: path_data(edge.points), fill: "none", stroke: color,
-      'stroke-width': stroke_width, 'stroke-dasharray': dash_array(edge.style),
+      'stroke-width': stroke_width,
+      'stroke-dasharray': if (edge.dash_array != null) edge.dash_array else dash_array(edge.style),
+      opacity: opacity,
       'marker-start': marker_start, 'marker-end': marker_end,
       'data-graph-role': "edge", 'data-edge-id': edge.id,
       'data-from': edge.from, 'data-to': edge.to,
@@ -63,14 +65,17 @@ fn edge_path(edge, color, stroke_width) {
 }
 
 fn edge_svg(edge, width, height, opts) {
-  let color = if (opts != null and opts.edge_color != null) string(opts.edge_color) else "#59636e";
-  let stroke_width = if (opts != null and opts.edge_width != null) opts.edge_width else 1.5;
-  let defs = edge_defs(edge, color);
+  let color = if (edge.stroke != null) string(edge.stroke)
+    else if (opts != null and opts.edge_color != null) string(opts.edge_color) else "#59636e";
+  let stroke_width = if (edge.stroke_width != null) edge.stroke_width
+    else if (opts != null and opts.edge_width != null) opts.edge_width else 1.5;
+  let opacity = if (edge.opacity != null) edge.opacity else null;
+  let defs = edge_defs(edge, color, opacity);
   <svg xmlns: "http://www.w3.org/2000/svg", width: width, height: height,
       viewBox: "0 0 " ++ string(width) ++ " " ++ string(height),
       style: "overflow:visible;pointer-events:none;";
     for (item in defs) item
-    edge_path(edge, color, stroke_width)
+    edge_path(edge, color, stroke_width, opacity)
   >
 }
 

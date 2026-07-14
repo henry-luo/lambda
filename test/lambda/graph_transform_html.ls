@@ -10,14 +10,14 @@ let result = transform.to_html({
   edges: [
     {id: "ab", from: "a", to: "b", label: "A to B"}
   ]
-}, {direction: "LR", node_sep: 42, rank_sep: 64})
+}, {direction: "LR", node_sep: 42, rank_sep: 64, edge_sep: 18})
 
 {
   tag: name(result),
   class: result.class,
   layout: result['data-radiant-layout'],
   direction: result['data-direction'],
-  spacing: [result['data-node-sep'], result['data-rank-sep']],
+  spacing: [result['data-node-sep'], result['data-rank-sep'], result['data-edge-sep']],
   children: [for (i in 0 to (len(result) - 1), let child = result[i]) {
     tag: name(child),
     id: child['data-node-id'],

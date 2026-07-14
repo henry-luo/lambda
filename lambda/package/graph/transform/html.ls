@@ -2,6 +2,7 @@
 
 import theme_defaults: .theme
 import model: lambda.package.graph.model
+import graph_style: lambda.package.graph.style
 
 fn opt(opts, key, fallback) {
   if (opts != null and opts[key] != null) opts[key] else fallback
@@ -35,14 +36,15 @@ fn node_class(node, assigned_classes) {
   if (len(classes) > 0) "graph-node " ++ join(classes, " ") else "graph-node"
 }
 
-fn node_style(node, palette) {
+fn node_style(node, style_declarations, palette) {
   let source = if (node.style != null) string(node.style) else "";
+  let parsed = graph_style.parse(source ++ ";" ++ style_declarations);
   let shape = string(source_attr(node, "shape", "box"));
   let radius = if (shape == "round" or shape == "rounded" or shape == "stadium") "999px" else "4px";
   "display:inline-block;box-sizing:border-box;padding:10px 14px;" ++
     "border:1px solid " ++ palette.node_border ++ ";border-radius:" ++ radius ++ ";" ++
     "background:" ++ palette.node_background ++ ";color:" ++ palette.node_text ++
-    ";white-space:nowrap;" ++ source
+    ";white-space:nowrap;" ++ graph_style.node_css(parsed)
 }
 
 fn node_content(node, id) {
@@ -64,7 +66,7 @@ fn html_node(node, index, group, assigned_classes, style_declarations, palette) 
       'data-shape': source_attr(node, "shape", "box"),
       'data-style-declarations': style_declarations,
       'data-z': string(source_attr(node, "z", 0)),
-      style: node_style(node, palette);
+      style: node_style(node, style_declarations, palette);
     for (child in content) child
   >
 }
@@ -137,6 +139,7 @@ pub fn to_html(graph, opts = null) {
     else source_attr(graph, "direction", source_attr(graph, "rank-dir", "TB"))));
   let node_sep = string(opt(opts, "node_sep", source_attr(graph, "node-sep", 60)));
   let rank_sep = string(opt(opts, "rank_sep", source_attr(graph, "rank-sep", 80)));
+  let edge_sep = string(opt(opts, "edge_sep", source_attr(graph, "edge-sep", 10)));
   let directed = graph_directed(graph);
   let theme = string(opt(opts, "theme", "light"));
   let palette = theme_defaults.palette(theme);
@@ -146,8 +149,8 @@ pub fn to_html(graph, opts = null) {
   let children = [
     for (i, entry in node_entries) html_node(entry.value, i, entry.group,
       if (graph is element) model.classes_for(graph, node_id(entry.value, i)) else [],
-      if (graph is element) model.style_declarations_for(
-        graph, "node", [node_id(entry.value, i)]) else "", palette),
+      if (graph is element) model.node_style_declarations_for(
+        graph, node_id(entry.value, i)) else "", palette),
     for (i, entry in edge_entries,
       let label = html_edge_label(entry.value, i, entry.group, palette)
       where label != null) label,
@@ -162,7 +165,7 @@ pub fn to_html(graph, opts = null) {
       'data-graph-title': title,
       'data-edge-color': palette.edge,
       'data-direction': direction, 'data-node-sep': node_sep,
-      'data-rank-sep': rank_sep,
+      'data-rank-sep': rank_sep, 'data-edge-sep': edge_sep,
       style: "position:relative;background:" ++ palette.graph_background ++ ";";
     for child in children { child }>
 }

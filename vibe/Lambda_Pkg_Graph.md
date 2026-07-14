@@ -5,8 +5,9 @@ split, semantic HTML transform, Velmt callback, generated SVG paint, signed
 stacking, runtime-scoped registration, CLI bridges, and C graph ABI removal are
 complete. Stage 2 is in progress: the first common Mark IR contract, recursive
 model queries, Mermaid flowchart normalization fixes, measured edge labels,
-shape-aware routing, and semantic corpus runner are implemented. Section 18.12
-records the current boundary and remaining work.
+shape-aware and parallel-edge routing, safe style cascade, and semantic corpus
+runner are implemented. Section 18.12 records the current boundary and
+remaining work.
 
 ## 1. Summary
 
@@ -579,12 +580,12 @@ The phases below constitute Stage 1.
 - test the shared signed ordering of generated layers and child views,
   including generated-before-child ordering at equal `z`.
 
-### Phase 5 - Routing parity (four directions complete; advanced routing deferred)
+### Phase 5 - Routing parity (parallel and self-loop paths complete; compound routing deferred)
 
-- honor all four layout directions in rank and coordinate assignment;
-- run the requested number of crossing-reduction iterations;
-- add shape-specific clipping;
-- add parallel-edge and self-loop routing;
+- honor all four layout directions in rank and coordinate assignment (complete);
+- run the requested number of crossing-reduction iterations (complete);
+- add shape-specific clipping (complete for the initial shape set);
+- add parallel-edge and self-loop routing (complete for non-compound edges);
 - add subgraph/cluster geometry and edge-label placement as required;
 - compare Mermaid, D2, and DOT fixtures against accepted goldens.
 
@@ -1107,8 +1108,16 @@ The initial Stage 2 tranche is implemented as follows:
 - `style` and `linkStyle` statements survive as source-spanned
   `<style-assignment>` values with node/edge target kind, canonical target text,
   and raw declarations; model queries resolve node ids, edge indices, explicit
-  edge ids, and `default`, while HTML retains the result in
-  `data-style-declarations` for the future safe style cascade;
+  edge ids, and `default`, while HTML retains the original declarations in
+  `data-style-declarations` for provenance;
+- `graph/style.ls` tokenizes comma- or semicolon-separated declarations without
+  splitting functional colors, rejects properties and values outside the safe
+  graph allowlist, and emits typed fill, stroke, stroke width, text color,
+  opacity, and dash-array values rather than appending authored CSS verbatim;
+- class-definition declarations cascade before node-specific `style`
+  assignments; safe node paint becomes reconstructed inline CSS, while safe
+  `linkStyle` stroke, width, opacity, and dash metadata survives Velmt
+  adaptation, Dagre normalization and routing, and generated SVG paint;
 - node-local `:::` classes normalize to ordinary `<class-assignment>` metadata
   and therefore share the common model and HTML class-lowering path;
 - Mermaid's general `id@{ shape: ..., label: ... }` node form is parsed, with
@@ -1126,21 +1135,34 @@ The initial Stage 2 tranche is implemented as follows:
 - the Velmt adapter places measured edge labels at routed anchors, paints start
   and end endpoint markers, clips rectangle, ellipse/circle, and diamond endpoints,
   routes self-loops, and includes route extents in graph bounds;
+- repeated edges with the same ordered endpoints receive deterministic,
+  sibling-local lanes separated by `edge_sep`; semantic HTML carries this
+  option as `data-edge-sep`, and route-bound normalization shifts nodes and
+  edges together when an outer lane extends before the original graph origin;
+- self-loop spacing also uses sibling-local order rather than global source
+  index, so unrelated preceding edges cannot change loop geometry; measured
+  edge labels interpolate the half-length point of the complete polyline rather
+  than selecting a point-count midpoint on bent routes;
 - generated edge paths retain `data-graph-role`, stable edge id, endpoints, and
   normalized marker names for semantic SVG adaptation and future hit testing;
 - `test/test_graph_mermaid_gtest.cpp` reads
   `test/lambda/graph/mermaid/manifest.mark` once, retains one input runtime, and
   compares recursive Mark semantics without raw SVG or image fixtures;
-- `make test-graph-mermaid` builds and runs the focused native runner; the build
-  generator now applies a target's platform library exclusions consistently to
-  consuming tests.
+- the normal retained Lambda batch runner discovers every paired `.ls`/`.txt`
+  fixture under `test/lambda/graph/mermaid`, so package transform, layout, and
+  paint behavior is part of baseline test discovery;
+- `make test-graph-mermaid` builds and runs both the focused native Mark runner
+  and the filtered Lambda package integration batch; the build generator now
+  applies a target's platform library exclusions consistently to consuming
+  tests.
 
 The checked-in manifest is a bootstrap corpus covering implicit endpoints,
 directions, shapes and labels, recursive subgraphs, class and style metadata,
 accessibility directives, and chart family diagnostics. Lambda integration
 fixtures additionally cover recursive HTML membership, class lowering,
 accessibility lowering, measured edge-label placement, bidirectional markers,
-shape clipping, and self-loop bounds.
+shape clipping, self-loop bounds, parallel-edge separation and label anchors,
+safe style rejection and precedence, and styled edge paint propagation.
 
 The following Stage 2 work remains open:
 
@@ -1148,15 +1170,15 @@ The following Stage 2 work remains open:
   full schema-driven Graph IR validation, and canonical rebuilding in
   `normalize.ls`; the current boundary validates semantic invariants and retains
   first-declaration spans but does not yet separate parsing from normalization;
-- the safe property cascade and paint semantics for preserved `style` and
-  `linkStyle` declarations, HTML/Markdown labels, ports, interaction metadata,
-  edge-ID property/class statements, and the rendering semantics for general
-  shapes beyond the currently canonicalized rectangle, rounded, cylinder,
-  diamond, circle, and double-circle families;
+- HTML/Markdown labels, ports, interaction metadata, edge-ID property/class
+  statements, the remaining Mermaid style properties beyond the initial safe
+  paint allowlist, and rendering semantics for general shapes beyond the
+  currently canonicalized rectangle, rounded, cylinder, diamond, circle, and
+  double-circle families;
 - visual recursive subgraph boxes and measured subgraph labels rather than only
   preserved membership metadata;
-- parallel-edge separation, compound/cluster crossing routes, ports, and route
-  label anchors based on full segment length;
+- compound/cluster crossing routes, ports, parallel-edge handling across
+  compound boundaries, and collision-aware route-label placement;
 - renderer-neutral graph-role metadata in final SVG, Graph Scene Mark adapters,
   tolerant geometry comparison, and in-process Radiant render stages in the
   native runner;
