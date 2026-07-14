@@ -1,0 +1,11 @@
+{
+  invalid_valid: false,
+  invalid_codes: ["graph.invalid-direction", "graph.node.duplicate-id", "graph.edge.duplicate-id", "graph.edge.unresolved-endpoint"],
+  invalid_paths: ["graph.direction", "node:A", "edge:same", "edge[0].to"],
+  parsed_valid: true,
+  parsed_diagnostics: [],
+  node_spans: [["A", true, true], ["B", true, true], ["C", true, true], ["D", true, true], ["E", true, true]],
+  edge_spans: [["e1", true, true], ["e2", true, true], ["e3", true, true], ["e4", true, true]],
+  chart_valid: false,
+  chart_codes: ["mermaid.chart-family"]
+}

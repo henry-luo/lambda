@@ -85,6 +85,13 @@ TEST(ErrorTrackingTests, InputContext) {
     EXPECT_EQ(ctx.errorCount(), 1u);  // Still 1 error
     EXPECT_TRUE(ctx.hasWarnings());
 
+    ctx.addErrorCode(loc, "test.stable-code", "Coded error %d", 7);
+    ASSERT_EQ(ctx.errorCount(), 2u);
+    ParseError* coded_error = ctx.errors().getError(2);
+    ASSERT_NE(coded_error, nullptr);
+    EXPECT_STREQ(coded_error->code, "test.stable-code");
+    EXPECT_STREQ(coded_error->message, "Coded error 7");
+
     std::string formatted = ctx.formatErrors();
     EXPECT_FALSE(formatted.empty());
 

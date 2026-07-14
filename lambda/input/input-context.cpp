@@ -40,6 +40,19 @@ void InputContext::addError(const SourceLocation& loc, const char* message,
                                  context_line, hint));
 }
 
+void InputContext::addErrorCode(const SourceLocation& loc, const char* code,
+                                const char* fmt, ...) {
+    char buffer[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+
+    const char* context_line = owned_source_ ? tracker.extractLine(loc.line) : nullptr;
+    errors_.addError(ParseError(loc, ParseErrorSeverity::ERROR, code, buffer,
+        context_line && context_line[0] != '\0' ? context_line : nullptr, nullptr));
+}
+
 void InputContext::addWarning(const SourceLocation& loc, const char* fmt, ...) {
     char buffer[1024];
     va_list args;

@@ -54,7 +54,19 @@
     <edge id: 'e3', from: 'C', to: 'D', arrow-tail: 'circle', arrow-head: 'circle'>
     <edge id: 'e4', from: 'D', to: 'E', arrow-tail: 'cross', arrow-head: 'cross'>
   >
+  <case id: 'metadata-styles', source: 'metadata_styles.mmd';
+    <expect direction: 'LR', nodes: 2, edges: 1, style-assignments: 2;
+      <title value: 'Service request graph'>
+      <description value: 'Client request flow to the API.'>
+      <style-assignment target-kind: 'node', targets: 'A',
+        declarations: 'fill:#f8fafc,stroke:#334155'>
+      <style-assignment target-kind: 'edge', targets: '0',
+        declarations: 'stroke:#0f766e,stroke-width:2px'>
+    >
+  >
   <case id: 'chart-routing', source: 'chart_routing.mmd';
-    <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0>
+    <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0;
+      <diagnostic code: 'mermaid.chart-family', severity: 'error'>
+    >
   >
 >

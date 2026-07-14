@@ -2,6 +2,7 @@
 
 import radiant;
 import graph_layout: .layout
+import normalize: .normalize
 import html: .transform.html
 import paint: .transform.paint
 
@@ -19,4 +20,4 @@ fn lambda_graph_layout(parent, children, ctx) {
 
 pub fn install() => radiant.register_layout("lambda-graph", lambda_graph_layout)
 
-pub fn to_html(graph, opts = null) => html.to_html(graph, opts)
+pub fn to_html(graph, opts = null) => html.to_html(normalize.normalize(graph).graph, opts)

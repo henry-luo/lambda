@@ -148,6 +148,15 @@ void add_graph_attribute(Input* input, Element* element, const char* name, const
     }
 }
 
+void add_graph_integer_attribute(Input* input, Element* element, const char* name, int64_t value) {
+    if (!element || !name) return;
+    MarkBuilder builder(input);
+    String* key = builder.createString(name);
+    if (key) {
+        builder.putToElement(lam::gc_borrow(element), key, builder.createInt(value));
+    }
+}
+
 static void add_child_to_graph_element(Input* input, Element* graph, Element* child) {
     if (!graph || !child) return;
 

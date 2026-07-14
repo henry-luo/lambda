@@ -42,6 +42,7 @@ static ElementReader find_by_identity(const ElementReader& parent,
     const char* expected_from = attr_text(expected, "from");
     const char* expected_to = attr_text(expected, "to");
     const char* expected_class = attr_text(expected, "class");
+    const char* expected_target_kind = attr_text(expected, "target-kind");
 
     ElementReader child;
     auto children = parent.childElements();
@@ -63,6 +64,11 @@ static ElementReader find_by_identity(const ElementReader& parent,
         if (identity_matches && expected_class) {
             const char* actual_class = child.get_attr_string("class");
             identity_matches = actual_class && strcmp(actual_class, expected_class) == 0;
+        }
+        if (identity_matches && expected_target_kind) {
+            const char* actual_target_kind = child.get_attr_string("target-kind");
+            identity_matches = actual_target_kind &&
+                strcmp(actual_target_kind, expected_target_kind) == 0;
         }
         if (identity_matches) return child;
 
@@ -91,6 +97,20 @@ static void expect_matching_attributes(const ElementReader& actual,
             EXPECT_EQ(actual_value.asBool(), expected_value.asBool()) << "attribute " << key;
         }
     }
+}
+
+static void expect_source_span(const ElementReader& element) {
+    ItemReader start = element.get_attr("source-start");
+    ItemReader end = element.get_attr("source-end");
+    ItemReader line = element.get_attr("source-line");
+    ItemReader column = element.get_attr("source-column");
+    ASSERT_TRUE(start.isInt());
+    ASSERT_TRUE(end.isInt());
+    ASSERT_TRUE(line.isInt());
+    ASSERT_TRUE(column.isInt());
+    EXPECT_LT(start.asInt(), end.asInt());
+    EXPECT_GT(line.asInt(), 0);
+    EXPECT_GT(column.asInt(), 0);
 }
 
 class GraphMermaidCorpusTest : public ::testing::Test {
@@ -166,6 +186,8 @@ TEST_F(GraphMermaidCorpusTest, SemanticMarkIR) {
         EXPECT_EQ(count_tag_recursive(graph, "style-rule"), expected.get_int_attr("style-rules", 0));
         EXPECT_EQ(count_tag_recursive(graph, "class-assignment"),
                   expected.get_int_attr("class-assignments", 0));
+        EXPECT_EQ(count_tag_recursive(graph, "style-assignment"),
+                  expected.get_int_attr("style-assignments", 0));
 
         ElementReader expected_item;
         auto expected_items = expected.childElements();
@@ -173,6 +195,12 @@ TEST_F(GraphMermaidCorpusTest, SemanticMarkIR) {
             ElementReader actual_item = find_by_identity(graph, expected_item);
             ASSERT_TRUE(actual_item.isValid()) << "missing semantic " << expected_item.tagName();
             expect_matching_attributes(actual_item, expected_item);
+            if (expected_item.hasTag("node") || expected_item.hasTag("edge") ||
+                expected_item.hasTag("subgraph") || expected_item.hasTag("title") ||
+                expected_item.hasTag("description") ||
+                expected_item.hasTag("style-assignment")) {
+                expect_source_span(actual_item);
+            }
         }
     }
 }

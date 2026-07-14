@@ -44,9 +44,54 @@ pub fn style_rules(graph) => metadata_entries(graph, "style-rule")
 
 pub fn class_assignments(graph) => metadata_entries(graph, "class-assignment")
 
+pub fn style_assignments(graph) => metadata_entries(graph, "style-assignment")
+
+fn meta_values(graph, wanted_tag) {
+  [for (child in element_children(graph),
+    meta_child in if (tag(child) == "meta") element_children(child) else []
+    where tag(meta_child) == wanted_tag and meta_child.value != null)
+    string(meta_child.value)]
+}
+
+fn last_or(values, fallback) =>
+  if (len(values) > 0) values[len(values) - 1] else fallback
+
+pub fn title(graph) => last_or(meta_values(graph, "title"), null)
+
+pub fn description(graph) => last_or(meta_values(graph, "description"), null)
+
+fn assignment_targets(assignment) => [
+  for (target in split(
+    string(if (assignment.targets != null) assignment.targets else ""), ","))
+  trim(string(target))
+]
+
+fn assignment_matches(assignment, target_kind, targets) {
+  let assigned_targets = assignment_targets(assignment);
+  assignment["target-kind"] == target_kind and
+    (contains(assigned_targets, "default") or
+     len([for (target in targets where contains(assigned_targets, string(target))) target]) > 0)
+}
+
+pub fn style_declarations_for(graph, target_kind, targets) => join([
+  for (assignment in style_assignments(graph)
+    where assignment_matches(assignment, target_kind, targets) and
+      assignment.declarations != null) string(assignment.declarations)
+], ";")
+
+fn diagnostic_entries(container) {
+  [for (child in element_children(container),
+    entry in if (tag(child) == "diagnostic") [child]
+      else if (tag(child) == "diagnostics" or tag(child) == "subgraph")
+        diagnostic_entries(child)
+      else []) entry]
+}
+
+pub fn diagnostics(graph) => diagnostic_entries(graph)
+
 pub fn classes_for(graph, node_id) {
   [for (assignment in class_assignments(graph),
-    let targets = split(string(if (assignment.targets != null) assignment.targets else ""), ",")
+    let targets = assignment_targets(assignment)
     where contains(targets, string(node_id)) and assignment.class != null)
     string(assignment.class)]
 }

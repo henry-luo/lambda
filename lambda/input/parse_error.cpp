@@ -18,6 +18,7 @@ ParseErrorList::~ParseErrorList() {
     for (int i = 0; i < errors_->length; i++) {
         ParseError* err = (ParseError*)errors_->data[i];
         // Free the duplicated strings
+        if (err->code) mem_free((void*)err->code);
         if (err->message) mem_free((void*)err->message);
         if (err->context_line) mem_free((void*)err->context_line);
         if (err->hint) mem_free((void*)err->hint);
@@ -40,20 +41,39 @@ bool ParseErrorList::addError(const ParseError& error) {
     }
     *err_copy = error;
 
+    if (error.code) {
+        err_copy->code = mem_strdup(error.code, MEM_CAT_INPUT_OTHER);
+        if (!err_copy->code) { mem_free(err_copy); return false; }
+    }
     // Deep copy the message string since it may be in a reused buffer
     if (error.message) {
         err_copy->message = mem_strdup(error.message, MEM_CAT_INPUT_OTHER);
-        if (!err_copy->message) { mem_free(err_copy); return false; }
+        if (!err_copy->message) {
+            mem_free((void*)err_copy->code);
+            mem_free(err_copy);
+            return false;
+        }
     }
     // Deep copy context_line if present
     if (error.context_line) {
         err_copy->context_line = mem_strdup(error.context_line, MEM_CAT_INPUT_OTHER);
-        if (!err_copy->context_line) { mem_free((void*)err_copy->message); mem_free(err_copy); return false; }
+        if (!err_copy->context_line) {
+            mem_free((void*)err_copy->message);
+            mem_free((void*)err_copy->code);
+            mem_free(err_copy);
+            return false;
+        }
     }
     // Deep copy hint if present
     if (error.hint) {
         err_copy->hint = mem_strdup(error.hint, MEM_CAT_INPUT_OTHER);
-        if (!err_copy->hint) { mem_free((void*)err_copy->context_line); mem_free((void*)err_copy->message); mem_free(err_copy); return false; }
+        if (!err_copy->hint) {
+            mem_free((void*)err_copy->context_line);
+            mem_free((void*)err_copy->message);
+            mem_free((void*)err_copy->code);
+            mem_free(err_copy);
+            return false;
+        }
     }
 
     arraylist_append(errors_, err_copy);
@@ -174,6 +194,7 @@ void ParseErrorList::clear() {
     // Free ParseError copies and their duplicated strings
     for (int i = 0; i < errors_->length; i++) {
         ParseError* err = (ParseError*)errors_->data[i];
+        if (err->code) mem_free((void*)err->code);
         if (err->message) mem_free((void*)err->message);
         if (err->context_line) mem_free((void*)err->context_line);
         if (err->hint) mem_free((void*)err->hint);
