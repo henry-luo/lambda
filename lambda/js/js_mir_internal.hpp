@@ -80,6 +80,41 @@ typedef struct JsMirLexicalThisRebind {
     int scope_env_slot;
 } JsMirLexicalThisRebind;
 
+typedef enum JsMirSuspendKind {
+    JS_MIR_SUSPEND_YIELD = 0,
+    JS_MIR_SUSPEND_AWAIT,
+    JS_MIR_SUSPEND_IMPLICIT_AWAIT
+} JsMirSuspendKind;
+
+typedef enum JsMirCompletionKind {
+    JS_MIR_COMPLETION_THROW = 0,
+    JS_MIR_COMPLETION_AWAIT_REJECTION,
+    JS_MIR_COMPLETION_RETURN,
+    JS_MIR_COMPLETION_RETURN_THROUGH_CLEANUP,
+    JS_MIR_COMPLETION_GENERATOR_RETURN_SIGNAL
+} JsMirCompletionKind;
+
+typedef enum JsMirClassMethodInstallMode {
+    JS_MIR_CLASS_METHOD_INHERITED_STATIC = 0,
+    JS_MIR_CLASS_METHOD_OWN_STATIC,
+    JS_MIR_CLASS_METHOD_OWN_INSTANCE
+} JsMirClassMethodInstallMode;
+
+typedef enum JsMirComputedKeyOrder {
+    JS_MIR_COMPUTED_KEY_AFTER_FUNCTION = 0,
+    JS_MIR_COMPUTED_KEY_BEFORE_FUNCTION
+} JsMirComputedKeyOrder;
+
+typedef struct JsMirClassMethodInstallPolicy {
+    MIR_reg_t destination;
+    MIR_reg_t home_class;
+    MIR_reg_t preserve_reg;
+    JsClassEntry* owner_class;
+    int method_index;
+    JsMirClassMethodInstallMode mode;
+    JsMirComputedKeyOrder computed_key_order;
+} JsMirClassMethodInstallPolicy;
+
 // internal function declarations
 int js_var_scope_cmp(const void *a, const void *b, void *udata);
 uint64_t js_var_scope_hash(const void *item, uint64_t seed0, uint64_t seed1);
@@ -120,6 +155,18 @@ void jm_emit_iterator_close_on_exception_if_open(JsMirTranspiler* mt, MIR_reg_t 
 void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt);
 void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk);
 void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont);
+int jm_next_resume_state(JsMirTranspiler* mt, JsMirSuspendKind kind);
+void jm_emit_suspend_env_save(JsMirTranspiler* mt);
+void jm_emit_resume_env_restore(JsMirTranspiler* mt);
+void jm_emit_try_state_reset(JsMirTranspiler* mt);
+void jm_emit_async_resume_refresh(JsMirTranspiler* mt);
+JsTryContext* jm_find_completion_context(JsMirTranspiler* mt, JsMirCompletionKind kind);
+void jm_emit_pending_exception_check(JsMirTranspiler* mt, JsMirCompletionKind kind);
+bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
+    JsMirCompletionKind kind);
+void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
+void jm_emit_pending_exception_exit(JsMirTranspiler* mt);
+MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value);
 MIR_reg_t jm_emit_uext8(JsMirTranspiler* mt, MIR_reg_t r);
 void jm_push_scope(JsMirTranspiler* mt);
 int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname);
@@ -212,6 +259,14 @@ void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char
 void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* asgn, MIR_reg_t rhs, String* name);
 void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node);
 void jm_emit_set_class_source(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassNode* cls_node);
+MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce);
+void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
+void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
+void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_item, MIR_reg_t cls_obj);
+bool jm_emit_class_method_install(JsMirTranspiler* mt,
+    const JsMirClassMethodInstallPolicy* policy);
+void jm_emit_class_constructor_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+    JsClassEntry* ce, bool set_home_class);
 void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirLexicalThisRebind* state, bool restore_binding);
 void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,

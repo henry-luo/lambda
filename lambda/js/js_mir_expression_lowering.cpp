@@ -525,15 +525,6 @@ static JsClassEntry* jm_current_inner_class_binding(JsMirTranspiler* mt, String*
     return NULL;
 }
 
-static MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) {
-    if (!mt || !ce || !ce->name) return 0;
-    JsIdentifierNode tmp_id;
-    memset(&tmp_id, 0, sizeof(tmp_id));
-    tmp_id.node_type = JS_AST_NODE_IDENTIFIER;
-    tmp_id.name = ce->name;
-    return jm_transpile_box_item(mt, (JsAstNode*)&tmp_id);
-}
-
 static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_node, String* name) {
     if (!jm_is_private_name(name) || !mt) return name;
     const char* suffix = NULL; int suffix_len = 0;
@@ -594,7 +585,7 @@ static MIR_reg_t jm_emit_member_key(JsMirTranspiler* mt, JsMemberNode* mem) {
     return jm_transpile_box_item(mt, mem->property);
 }
 
-static void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
+void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
     if (!mt || !ce) return;
     int metadata_count = 0;
     for (int fi = 0; fi < ce->instance_field_count; fi++) {
@@ -689,29 +680,6 @@ static void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t
             MIR_T_I64, MIR_new_reg_op(mt->ctx, kind_val));
         metadata_index++;
     }
-}
-
-static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int method_index) {
-    if (!ce || method_index < 0 || method_index >= ce->method_count) return false;
-    JsClassMethodEntry* me = &ce->methods[method_index];
-    if (!me->is_static || me->is_constructor || !me->name || !jm_is_private_name(me->name)) return false;
-    for (int pi = 0; pi < method_index; pi++) {
-        JsClassMethodEntry* prev = &ce->methods[pi];
-        if (!prev->is_static || prev->is_constructor || !prev->name || !jm_is_private_name(prev->name)) continue;
-        if (prev->name->len == me->name->len &&
-            memcmp(prev->name->chars, me->name->chars, (size_t)me->name->len) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
-    if (!mt || !cls_obj || !ce || mt->class_count <= 0) return;
-    int class_index = (int)(ce - mt->class_entries);
-    jm_call_void_2(mt, "js_set_private_class_index",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, class_index));
 }
 
 static MIR_reg_t jm_emit_current_this(JsMirTranspiler* mt) {
@@ -13651,30 +13619,10 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
 
         if (mt->in_generator) {
             // v15: Generator state machine — emit save/return/resume/load
-            int next_state = ++mt->gen_yield_index;
+            int next_state = jm_next_resume_state(mt, JS_MIR_SUSPEND_YIELD);
+            if (next_state < 0) return val;
 
-            // safety: if yield count was underestimated (e.g., yields in destructuring patterns
-            // not counted by jm_count_yields), return undefined instead of crashing
-            if (next_state > mt->gen_yield_count || next_state >= 64) {
-                log_error("js-mir: yield index %d exceeds allocated state labels (%d) — returning undefined",
-                    next_state, mt->gen_yield_count);
-                return val;
-            }
-
-            // Save all generator locals to env before yielding
-            for (int sd = 1; sd <= mt->scope_depth; sd++) {
-                if (!mt->var_scopes[sd]) continue;
-                size_t iter = 0; void* item;
-                while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
-                    JsVarScopeEntry* e = (JsVarScopeEntry*)item;
-                    if (e->var.env_slot >= 0 && e->var.from_env) {
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
-                            MIR_new_reg_op(mt->ctx, e->var.reg)));
-                    }
-                }
-            }
+            jm_emit_suspend_env_save(mt);
 
             if (yield_node->delegate) {
                 // yield* delegation: return [iterable, resume_state, 1]
@@ -13695,20 +13643,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             // Emit resume label for this state
             jm_emit_label(mt, mt->gen_state_labels[next_state]);
 
-            // Load all generator locals from env after resuming
-            for (int sd = 1; sd <= mt->scope_depth; sd++) {
-                if (!mt->var_scopes[sd]) continue;
-                size_t iter = 0; void* item;
-                while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
-                    JsVarScopeEntry* e = (JsVarScopeEntry*)item;
-                    if (e->var.env_slot >= 0 && e->var.from_env) {
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, e->var.reg),
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
-                    }
-                }
-            }
+            jm_emit_resume_env_restore(mt);
 
             // Re-initialize try-block state registers after resume.
             // These are plain MIR registers (not env-backed), so they don't
@@ -13716,30 +13651,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             // has_return_reg cause spurious early returns at the try end_label
             // (returning the also-uninitialized return_val_reg, which surfaces
             // as a `null`-valued done iteration result).
-            for (int td = 0; td < mt->try_ctx_depth; td++) {
-                JsTryContext* tc = &mt->try_ctx_stack[td];
-                if (tc->has_return_reg) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->has_return_reg),
-                        MIR_new_int_op(mt->ctx, 0)));
-                }
-                if (tc->return_val_reg) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->return_val_reg),
-                        MIR_new_int_op(mt->ctx, 0)));
-                }
-                if (tc->saved_exc_flag_reg) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->saved_exc_flag_reg),
-                        MIR_new_int_op(mt->ctx, 0)));
-                }
-                if (tc->saved_exc_val_reg) {
-                    MIR_reg_t null_val = jm_emit_null(mt);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->saved_exc_val_reg),
-                        MIR_new_reg_op(mt->ctx, null_val)));
-                }
-            }
+            jm_emit_try_state_reset(mt);
 
             // Generator.prototype.return resumes the suspended yield with an
             // internal return signal. Route it through the same delayed-return
@@ -13774,31 +13686,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
                 MIR_reg_t return_value = jm_call_1(mt, "js_gen_return_signal_value", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->gen_input_reg));
-                int return_d = mt->try_ctx_depth - 1;
-                while (return_d >= 0 &&
-                       (mt->try_ctx_stack[return_d].yield_state_only ||
-                        !mt->try_ctx_stack[return_d].has_finally)) {
-                    return_d--;
-                }
-                if (return_d >= 0) {
-                    JsTryContext* tc = &mt->try_ctx_stack[return_d];
-                    MIR_label_t target = tc->finally_label;
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->return_val_reg),
-                        MIR_new_reg_op(mt->ctx, return_value)));
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->has_return_reg),
-                        MIR_new_int_op(mt->ctx, 1)));
-                    if (target) {
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                            MIR_new_label_op(mt->ctx, target)));
-                    } else {
-                        MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, return_value),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
-                        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
-                    }
-                } else {
+                if (!jm_emit_delayed_return_completion(mt, return_value,
+                        JS_MIR_COMPLETION_GENERATOR_RETURN_SIGNAL)) {
                     MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, return_value),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
@@ -13822,14 +13711,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
 
         // Phase 6: Async state machine — conditional suspend/resume
         if (mt->in_generator && mt->in_async) {
-            int next_state = ++mt->gen_yield_index;
-
-            // safety: if await count was underestimated, return the promise value directly
-            if (next_state > mt->gen_yield_count || next_state >= 64) {
-                log_error("js-mir: await index %d exceeds allocated state labels (%d) — returning value",
-                    next_state, mt->gen_yield_count);
-                return promise_val;
-            }
+            int next_state = jm_next_resume_state(mt, JS_MIR_SUSPEND_AWAIT);
+            if (next_state < 0) return promise_val;
 
             MIR_label_t suspend_label = jm_new_label(mt);
             MIR_label_t after_await_label = jm_new_label(mt);
@@ -13838,17 +13721,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             MIR_reg_t must_suspend = jm_call_1(mt, "js_async_must_suspend", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
 
-            // Check for exception (rejected promise sets exception flag, returns 0)
-            {
-                int d = mt->try_ctx_depth - 1;
-                while (d >= 0 && mt->try_ctx_stack[d].yield_state_only) d--;
-                if (d >= 0 && mt->try_ctx_stack[d].catch_label) {
-                    MIR_reg_t exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                        MIR_new_label_op(mt->ctx, mt->try_ctx_stack[d].catch_label),
-                        MIR_new_reg_op(mt->ctx, exc)));
-                }
-            }
+            jm_emit_pending_exception_check(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
 
             // If pending, jump to suspend path
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
@@ -13866,19 +13739,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
 
             // Suspend path: save locals, return [promise, next_state]
             jm_emit_label(mt, suspend_label);
-            for (int sd = 1; sd <= mt->scope_depth; sd++) {
-                if (!mt->var_scopes[sd]) continue;
-                size_t iter = 0; void* item;
-                while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
-                    JsVarScopeEntry* e = (JsVarScopeEntry*)item;
-                    if (e->var.env_slot >= 0 && e->var.from_env) {
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
-                            MIR_new_reg_op(mt->ctx, e->var.reg)));
-                    }
-                }
-            }
+            jm_emit_suspend_env_save(mt);
             MIR_reg_t await_target = jm_call_0(mt, "js_async_get_resolved", MIR_T_I64);
             MIR_reg_t suspend_result = jm_call_2(mt, "js_gen_await_result", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, await_target),
@@ -13887,44 +13748,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
 
             // Resume label: entered when the pending promise resolves
             jm_emit_label(mt, mt->gen_state_labels[next_state]);
-            for (int sd = 1; sd <= mt->scope_depth; sd++) {
-                if (!mt->var_scopes[sd]) continue;
-                size_t iter = 0; void* item;
-                while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
-                    JsVarScopeEntry* e = (JsVarScopeEntry*)item;
-                    if (e->var.env_slot >= 0 && e->var.from_env) {
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_reg_op(mt->ctx, e->var.reg),
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
-                    }
-                }
-            }
-            // Re-initialize try-block state registers after async resume
-            for (int td = 0; td < mt->try_ctx_depth; td++) {
-                JsTryContext* tc = &mt->try_ctx_stack[td];
-                if (tc->has_return_reg) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->has_return_reg),
-                        MIR_new_int_op(mt->ctx, 0)));
-                }
-                if (tc->return_val_reg) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->return_val_reg),
-                        MIR_new_int_op(mt->ctx, 0)));
-                }
-                if (tc->saved_exc_flag_reg) {
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->saved_exc_flag_reg),
-                        MIR_new_int_op(mt->ctx, 0)));
-                }
-                if (tc->saved_exc_val_reg) {
-                    MIR_reg_t null_val = jm_emit_null(mt);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_reg_op(mt->ctx, tc->saved_exc_val_reg),
-                        MIR_new_reg_op(mt->ctx, null_val)));
-                }
-            }
+            jm_emit_resume_env_restore(mt);
+            jm_emit_try_state_reset(mt);
             // Resume value comes from gen_input register (the resolved value)
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, await_result),
@@ -13936,23 +13761,8 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             // The gen_env reload above only restores the values we saved at
             // suspend time; scope_env holds the canonical, post-callback
             // value for any local also captured by a closure.
-            jm_scope_env_reload_vars(mt);
-            // Likewise, captures from a parent function's shared scope_env
-            // (if this async function is itself a nested closure) may have
-            // changed during suspension.
-            jm_env_reload_shared_captures(mt);
-
-            // Check for exception on resume (rejection case)
-            {
-                int d = mt->try_ctx_depth - 1;
-                while (d >= 0 && mt->try_ctx_stack[d].yield_state_only) d--;
-                if (d >= 0 && mt->try_ctx_stack[d].catch_label) {
-                    MIR_reg_t resume_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                        MIR_new_label_op(mt->ctx, mt->try_ctx_stack[d].catch_label),
-                        MIR_new_reg_op(mt->ctx, resume_exc)));
-                }
-            }
+            jm_emit_async_resume_refresh(mt);
+            jm_emit_pending_exception_check(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
 
             jm_emit_label(mt, after_await_label);
             return await_result;
@@ -14036,168 +13846,40 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, checked_heritage_val));
             jm_emit_exc_propagate_check(mt);
         }
-            // Inherit static methods from parent classes (base-first, then own overrides)
+            // Inherit static methods from parent classes (base-first, then own overrides).
             if (ce) {
-                {
-                    JsClassEntry* s_chain[32];
-                    int s_chain_len = 0;
-                    {
-                        JsClassEntry* p = ce->superclass;
-                        while (p && s_chain_len < 32) {
-                            s_chain[s_chain_len++] = p;
-                            p = p->superclass;
-                        }
-                    }
-                    for (int ci = s_chain_len - 1; ci >= 0; ci--) {
-                        JsClassEntry* parent = s_chain[ci];
-                            for (int mi = 0; mi < parent->method_count; mi++) {
-                                JsClassMethodEntry* me = &parent->methods[mi];
-                                if (!me->is_static || me->is_constructor) continue;
-                                if (me->name && jm_is_private_name(me->name)) continue;
-                                if (!me->fc || !me->fc->func_item) continue;
-                                if (!me->name && !(me->computed && me->key_expr)) continue;
-                            MIR_reg_t fn_item;
-                            if (me->fc->capture_count > 0) {
-                                fn_item = jm_build_closure_for_method(mt, me->fc, me->param_count);
-                            } else {
-                                fn_item = jm_call_2(mt, "js_new_method_function", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_ref_op(mt->ctx, me->fc->func_item),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, me->param_count));
-                            }
-                            // set function .name per spec
-                            if (me->name && !me->computed) {
-                                char fname[256];
-                                if (me->is_getter) snprintf(fname, sizeof(fname), "get %.*s", (int)me->name->len, me->name->chars);
-                                else if (me->is_setter) snprintf(fname, sizeof(fname), "set %.*s", (int)me->name->len, me->name->chars);
-                                else snprintf(fname, sizeof(fname), "%.*s", (int)me->name->len, me->name->chars);
-                                jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
-                            }
-                            if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
-                            jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                            MIR_reg_t parent_cls_obj = jm_emit_class_object_for_entry(mt, parent);
-                            if (!parent_cls_obj) parent_cls_obj = cls_obj;
-                            MIR_reg_t home_key = jm_box_string_literal(mt, "__home_class__", 14);
-                            jm_call_3(mt, "js_property_set", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, home_key),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_cls_obj));
-                            MIR_reg_t mk;
-                            if (me->computed && me->key_expr) {
-                                // generator spill: save cls_obj and fn_item before yield-containing key expr
-                                int cls_spill = -1, fn_spill = -1;
-                                if (mt->in_generator && jm_has_yield(me->key_expr)) {
-                                    cls_spill = jm_gen_spill_save(mt, cls_obj);
-                                    fn_spill = jm_gen_spill_save(mt, fn_item);
-                                }
-                                mk = jm_transpile_box_item(mt, me->key_expr);
-                                if (cls_spill >= 0) {
-                                    jm_gen_spill_load(mt, cls_obj, cls_spill);
-                                    jm_gen_spill_load(mt, fn_item, fn_spill);
-                                }
-                                // Phase-5C: no longer wrap with __get_/__set_;
-                                // accessor dispatch is handled below.
-                            } else if (me->is_getter || me->is_setter) {
-                                mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
-                            } else {
-                                mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
-                            }
-                            jm_emit_install_method_or_accessor(mt, cls_obj, mk, fn_item,
-                                me->is_getter, me->is_setter);
-                        }
+                JsClassEntry* static_chain[32];
+                int static_chain_length = 0;
+                for (JsClassEntry* parent = ce->superclass;
+                     parent && static_chain_length < 32; parent = parent->superclass) {
+                    static_chain[static_chain_length++] = parent;
+                }
+                for (int class_index = static_chain_length - 1; class_index >= 0; class_index--) {
+                    JsClassEntry* parent = static_chain[class_index];
+                    MIR_reg_t parent_class = jm_emit_class_object_for_entry(mt, parent);
+                    if (!parent_class) parent_class = cls_obj;
+                    for (int method_index = 0; method_index < parent->method_count; method_index++) {
+                        JsMirClassMethodInstallPolicy policy = {
+                            cls_obj, parent_class, 0, parent, method_index,
+                            JS_MIR_CLASS_METHOD_INHERITED_STATIC,
+                            JS_MIR_COMPUTED_KEY_AFTER_FUNCTION
+                        };
+                        jm_emit_class_method_install(mt, &policy);
                     }
                 }
-                // Register own static methods as properties on the class object
-                for (int mi = 0; mi < ce->method_count; mi++) {
-                    JsClassMethodEntry* me = &ce->methods[mi];
-                    if (!me->is_static || me->is_constructor) continue;
-                    if (!me->fc || !me->fc->func_item) continue;
-
-                    MIR_reg_t fn_item;
-                    if (me->fc->capture_count > 0) {
-                        fn_item = jm_build_closure_for_method(mt, me->fc, me->param_count);
-                    } else {
-                        fn_item = jm_call_2(mt, "js_new_method_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_ref_op(mt->ctx, me->fc->func_item),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, me->param_count));
-                    }
-                    // set function .name per spec
-                    if (me->name && !me->computed) {
-                        char fname[256];
-                        if (me->is_getter) snprintf(fname, sizeof(fname), "get %.*s", (int)me->name->len, me->name->chars);
-                        else if (me->is_setter) snprintf(fname, sizeof(fname), "set %.*s", (int)me->name->len, me->name->chars);
-                        else snprintf(fname, sizeof(fname), "%.*s", (int)me->name->len, me->name->chars);
-                        jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
-                    }
-                    if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
-                    jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                    MIR_reg_t home_key = jm_box_string_literal(mt, "__home_class__", 14);
-                    jm_call_3(mt, "js_property_set", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, home_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-
-                    MIR_reg_t mk = 0;
-                    if (me->computed && me->key_expr) {
-                        // generator spill: save cls_obj and fn_item before yield-containing key expr
-                        int cls_spill = -1, fn_spill = -1;
-                        if (mt->in_generator && jm_has_yield(me->key_expr)) {
-                            cls_spill = jm_gen_spill_save(mt, cls_obj);
-                            fn_spill = jm_gen_spill_save(mt, fn_item);
-                        }
-                        mk = jm_transpile_box_item(mt, me->key_expr);
-                        if (cls_spill >= 0) {
-                            jm_gen_spill_load(mt, cls_obj, cls_spill);
-                            jm_gen_spill_load(mt, fn_item, fn_spill);
-                        }
-                        // Phase-5C: no longer wrap key with __get_/__set_.
-                    } else if (me->name) {
-                        mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
-                    } else {
-                        continue;
-                    }
-
-                    jm_emit_install_method_or_accessor(mt, cls_obj, mk, fn_item,
-                        me->is_getter, me->is_setter);
-                    if (me->name && jm_is_private_name(me->name) &&
-                        !jm_private_static_method_brand_seen(ce, mi)) {
-                        jm_call_void_3(mt, "js_private_brand_add",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, mk),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-                    }
+                for (int method_index = 0; method_index < ce->method_count; method_index++) {
+                    JsMirClassMethodInstallPolicy policy = {
+                        cls_obj, cls_obj, 0, ce, method_index,
+                        JS_MIR_CLASS_METHOD_OWN_STATIC, JS_MIR_COMPUTED_KEY_AFTER_FUNCTION
+                    };
+                    jm_emit_class_method_install(mt, &policy);
                 }
             }
 
             // Store __ctor__ and __instance_proto__ on class object for dynamic instantiation
             // (new Type() where Type is a runtime variable holding this class object)
             if (ce) {
-                // Store constructor as __ctor__
-                JsClassMethodEntry* active_ctor = NULL;
-                if (ce->constructor && ce->constructor->fc && ce->constructor->fc->func_item) {
-                    active_ctor = ce->constructor;
-                } else if (ce->superclass) {
-                    JsClassEntry* p = ce->superclass;
-                    while (p && !active_ctor) {
-                        if (p->constructor && p->constructor->fc && p->constructor->fc->func_item) {
-                            active_ctor = p->constructor;
-                        }
-                        p = p->superclass;
-                    }
-                }
-                if (active_ctor) {
-                    MIR_reg_t ctor_fn;
-                    if (active_ctor->fc->capture_count > 0) {
-                        ctor_fn = jm_build_closure_for_method(mt, active_ctor->fc, active_ctor->param_count);
-                    } else {
-                        ctor_fn = jm_create_method_function(mt, active_ctor->fc, active_ctor->param_count);
-                    }
-                    MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
-                    jm_call_3(mt, "js_property_set", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn));
-                }
-                jm_emit_class_ctor_shape_metadata(mt, cls_obj, ce);
+                jm_emit_class_constructor_property(mt, cls_obj, ce, false);
                 // Create __instance_proto__ with all instance methods
                 MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                 jm_call_void_2(mt, "js_set_default_constructor_property",
@@ -14316,60 +13998,12 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     }
                 }
                 // Add own instance methods (overrides parents)
-                for (int mi = 0; mi < ce->method_count; mi++) {
-                    JsClassMethodEntry* me = &ce->methods[mi];
-                    if (me->is_constructor || me->is_static) continue;
-                    if (!me->fc || !me->fc->func_item) continue;
-                    if (!me->name && !(me->computed && me->key_expr)) continue;
-                    MIR_reg_t fn_item;
-                    if (me->fc->capture_count > 0) {
-                        fn_item = jm_build_closure_for_method(mt, me->fc, me->param_count);
-                    } else {
-                        fn_item = jm_call_2(mt, "js_new_method_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_ref_op(mt->ctx, me->fc->func_item),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, me->param_count));
-                    }
-                    // set function .name per spec
-                    if (me->name && !me->computed) {
-                        char fname[256];
-                        if (me->is_getter) snprintf(fname, sizeof(fname), "get %.*s", (int)me->name->len, me->name->chars);
-                        else if (me->is_setter) snprintf(fname, sizeof(fname), "set %.*s", (int)me->name->len, me->name->chars);
-                        else snprintf(fname, sizeof(fname), "%.*s", (int)me->name->len, me->name->chars);
-                        jm_emit_set_function_name(mt, fn_item, fname, me->fc ? me->fc->formal_length : -1);
-                    }
-                    if (me->fc) jm_emit_set_function_source(mt, fn_item, me->fc->node);
-                    jm_call_void_1(mt, "js_mark_method_func", MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                    MIR_reg_t home_key = jm_box_string_literal(mt, "__home_class__", 14);
-                    jm_call_3(mt, "js_property_set", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, home_key),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
-                    // old class lowering only sets mk for computed or named methods;
-                    // initialize it so stricter current debug builds can keep the
-                    // existing skip path for malformed method entries.
-                    MIR_reg_t mk = 0;
-                    if (me->computed && me->key_expr) {
-                        // generator spill: save proto_obj, cls_obj, fn_item before yield-containing key expr
-                        int proto_spill = -1, cls_spill2 = -1, fn_spill = -1;
-                        if (mt->in_generator && jm_has_yield(me->key_expr)) {
-                            proto_spill = jm_gen_spill_save(mt, proto_obj);
-                            cls_spill2 = jm_gen_spill_save(mt, cls_obj);
-                            fn_spill = jm_gen_spill_save(mt, fn_item);
-                        }
-                        mk = jm_transpile_box_item(mt, me->key_expr);
-                        if (proto_spill >= 0) {
-                            jm_gen_spill_load(mt, proto_obj, proto_spill);
-                            jm_gen_spill_load(mt, cls_obj, cls_spill2);
-                            jm_gen_spill_load(mt, fn_item, fn_spill);
-                        }
-                        // Phase-5C: no longer wrap key with __get_/__set_.
-                    } else if (me->name) {
-                        String* method_name = jm_class_private_name(mt, ce, me->name);
-                        mk = jm_box_string_literal(mt, method_name->chars, (int)method_name->len);
-                    }
-                    if (!mk) continue;
-                    jm_emit_install_method_or_accessor(mt, proto_obj, mk, fn_item,
-                        me->is_getter, me->is_setter);
+                for (int method_index = 0; method_index < ce->method_count; method_index++) {
+                    JsMirClassMethodInstallPolicy policy = {
+                        proto_obj, cls_obj, 0, ce, method_index,
+                        JS_MIR_CLASS_METHOD_OWN_INSTANCE, JS_MIR_COMPUTED_KEY_AFTER_FUNCTION
+                    };
+                    jm_emit_class_method_install(mt, &policy);
                 }
                 // Store __instance_proto__ on the class object
                 MIR_reg_t ip_key = jm_box_string_literal(mt, "__instance_proto__", 18);

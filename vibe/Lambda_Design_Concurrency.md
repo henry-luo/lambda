@@ -531,6 +531,8 @@ Notes that make the split principled: Lambda has *more* split points (suspension
 
 How the v3 concurrency model carries the lazy-stream design (`Lambda_Design_Data_Processing.md` §8, D9–D12; its §8.6 cross-references back here). Conclusion first: **the pieces compose with almost no friction, because each side was designed with properties the other needs** — and the five genuinely new decisions are small and recorded below.
 
+*Follow-on (2026-07-14): `Lambda_Design_Pipeline.md` (ledger PL1–PL11) extends this section to three pipeline kinds — text (a framing preset over the data pipeline), data (this design, unchanged), and binary (re-chunking license, flat sub-binaries, byte-metric queues, transducer stages, raw-byte process spawn) — with WHATWG byte-stream conformance and the Node shim split per K27/K28.*
+
 ### 11.1 Why the pieces click — four enablers and one convergence
 
 1. **Laziness supplies the plan** (D9/D10): a stream is a *recorded pipeline*, not running code — the executor is free to choose sequential or concurrent execution at forcing time, invisibly.
