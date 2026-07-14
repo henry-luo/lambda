@@ -2,7 +2,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how Radiant turns a run of DOM text plus inline elements (`<span>`, `<br>`, `<wbr>`, inline-block, images) into positioned line boxes. It describes the inline formatting entry (`layout_inline`), the single-function streaming line-breaker (`layout_text`) with its per-character `do…while` loop and `goto` back-edge, the `Linebox` break-cursor model tagged by `BreakKind`, whitespace collapsing / trailing / hanging spaces, the ASCII-Latin measurement fast path versus the per-codepoint glyph loop, codepoint-based kerning, and the two-pass vertical alignment performed in `line_break`. The actual font engine (rasterization, cache, fallback, GPOS tables) is a separate concern — see [RAD_07 — Fonts](RAD_07_Fonts.md).
 >
-> **Primary sources:** `radiant/layout_text.cpp` (`layout_text`, `line_break`, `output_text`, and the measurement helpers), `radiant/layout_text.hpp`, `radiant/layout_inline.cpp` (`layout_inline`, `compute_span_bounding_box`, block-in-inline splitting), `radiant/layout.hpp` (`struct Linebox`, `struct BlockContext`, `enum BreakKind`, `enum LineFillStatus`), and `radiant/render_text.cpp` (the re-measurement seam).
+> **Primary sources:** `radiant/layout_text.cpp` (`layout_text`, `line_break`, `output_text`, and the measurement helpers), `radiant/layout.hpp`, `radiant/layout_inline.cpp` (`layout_inline`, `compute_span_bounding_box`, block-in-inline splitting), `radiant/layout.hpp` (`struct Linebox`, `struct BlockContext`, `enum BreakKind`, `enum LineFillStatus`), and `radiant/render_text.cpp` (the re-measurement seam).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -155,7 +155,7 @@ Rendering does **not** consume a shaped buffer from layout. `render_text.cpp` re
 | File | Responsibility (this doc) |
 |---|---|
 | `radiant/layout_text.cpp` | `layout_text` (the streaming breaker), `line_break` (trim + vertical-align pass + advance), `output_text`, the Latin fast path and per-codepoint measurement helpers, UAX #14 break classification, kerning. |
-| `radiant/layout_text.hpp` | `get_white_space_value`, `text_codepoint_has_zero_advance` declarations. |
+| `radiant/layout.hpp` | `get_white_space_value`, `text_codepoint_has_zero_advance` declarations. |
 | `radiant/layout_inline.cpp` | `layout_inline` (spans, `<br>`, `<wbr>`), inline margin/border/padding edges, block-in-inline splitting, `compute_span_bounding_box` and fragment-union helpers. |
 | `radiant/layout.hpp` | `struct Linebox`, `struct BlockContext`, `enum BreakKind`, `enum LineFillStatus`. |
 | `radiant/render_text.cpp` | The re-measurement seam — re-decodes `TextRect` byte ranges and re-loads glyphs for painting. |

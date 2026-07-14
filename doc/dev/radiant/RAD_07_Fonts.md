@@ -2,7 +2,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the font layer as seen from Radiant. Its single most important message is a boundary: the real font engine — glyph rasterization, `cmap` lookup, GPOS/`kern` kerning, per-codepoint fallback, the glyph cache, WOFF2 decode, and COLR/CBDT color-emoji handling — is **not** in `radiant/`. It lives in the unified module under `lib/font/` (~30 files). Radiant's `font.cpp` and `font_face.cpp` are a thin CSS→engine bridge: they map a CSS-resolved `FontProp` to the engine's `FontStyleDesc`, resolve and cache the `FontHandle`, parse and register `@font-face` descriptors, and copy engine metrics back onto the `FontProp`. Everything typographic below the handle is the engine's concern.
 >
-> **Primary sources:** `radiant/font.cpp` (`setup_font`, handle caching, metric population), `radiant/font.h`, `radiant/font_face.cpp` / `font_face.h` (`@font-face` parse + `register_font_face` bridge), the `FontProp` / `FontBox` structs and `font_style_desc_from_prop` in `radiant/view.hpp`, `radiant/ui_context.cpp` (`FontContext` creation), and — for the boundary — the engine surface in `lib/font/font.h`.
+> **Primary sources:** `radiant/view.hpp` (font and `@font-face` declarations), `radiant/font.cpp` (`setup_font`, handle caching, metric population), `radiant/font_face.cpp` (`@font-face` parse + `register_font_face` bridge), `radiant/ui_context.cpp` (`FontContext` creation), and — for the boundary — the engine surface in `lib/font/font.h`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -88,7 +88,7 @@ Everything below the handle. Per-codepoint fallback is inside `font_load_glyph` 
 
 ## 5. `@font-face` — parse in Radiant, manage in the engine (`font_face.cpp`)
 
-Radiant owns `@font-face` *parsing*; the engine owns *management* (matching, loading, caching). `FontFaceDescriptor` (`font_face.h:26`) is Radiant's CSS-metadata struct — `family_name`, `src_local_path`, `src_local_name`, an ordered `src_entries` array of `FontFaceSrc` (`font_face.h:17`, each a resolved path plus a format hint), and the `font_style`/`font_weight`/`font_display` CssEnums.
+Radiant owns `@font-face` *parsing*; the engine owns *management* (matching, loading, caching). `FontFaceDescriptor` (`view.hpp`) is Radiant's CSS-metadata struct — `family_name`, `src_local_path`, `src_local_name`, an ordered `src_entries` array of `FontFaceSrc` (`view.hpp`, each a resolved path plus a format hint), and the `font_style`/`font_weight`/`font_display` CssEnums.
 
 Three entry points feed it:
 
@@ -133,10 +133,8 @@ This doc stops at the handle and its metrics; the consumers are documented elsew
 | File | Responsibility (this doc) |
 |---|---|
 | `radiant/font.cpp` | `setup_font` (resolve-and-cache), `font_handle_matches_prop`, `populate_font_prop_metrics`, `resolved_space_width`, `font_prop_release_handle`, `load_font_path`, `fontface_cleanup`. |
-| `radiant/font.h` | Bridge function declarations (`setup_font`, `fontface_cleanup`). |
 | `radiant/font_face.cpp` | `@font-face` parsing (`parse_font_face_rule`, `process_font_face_rules_from_stylesheet`, `process_document_font_faces`), the engine bridge (`register_font_face` → `font_face_register`), the dead `_OLD` path. |
-| `radiant/font_face.h` | `FontFaceDescriptor` / `FontFaceSrc` structs; parse/register API; text-flow log categories. |
-| `radiant/view.hpp` | `FontProp` (CSS style + derived metrics + cached handle), `FontBox`, `font_style_desc_from_prop`. |
+| `radiant/view.hpp` | `FontProp`/`FontBox`, `FontFaceDescriptor`/`FontFaceSrc`, and the bridge declarations including `setup_font`, `fontface_cleanup`, and the parse/register API. |
 | `radiant/ui_context.cpp` | `FontContext` creation (`FontContextConfig`), default fonts, teardown. |
 | `lib/font/font.h` | The engine surface Radiant calls (`font_resolve`, `font_load_glyph`, `font_get_kerning`, `font_get_metrics`, `font_face_register`, …); the boundary. Engine internals are out of scope. |
 
