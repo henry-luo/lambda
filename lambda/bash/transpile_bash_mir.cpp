@@ -16,6 +16,7 @@
 #include "bash_runtime.h"
 #include "bash_errors.h"
 #include "../lambda-data.hpp"
+#include "../mir_emitter_shared.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
@@ -51,23 +52,12 @@ typedef struct BashMirVar {
 
 HASHMAP_DEFINE_STRKEY(bash_var, BashMirVar, name)
 
-// MIR transpiler context
-typedef struct BashMirImportEntry {
-    char name[128];
-    MIR_item_t proto;
-    MIR_item_t import;
-} BashMirImportEntry;
-
-HASHMAP_DEFINE_STRKEY(bm_import, BashMirImportEntry, name)
-
 typedef struct BashMirTranspiler {
     BashTranspiler* tp;
-    MIR_context_t ctx;
+    MirEmitter em;
     MIR_module_t module;
 
     // current function being built
-    MIR_item_t current_func_item;
-    MIR_func_t current_func;
     MIR_reg_t result_reg;       // current expression result
 
     // variable table
@@ -80,12 +70,6 @@ typedef struct BashMirTranspiler {
 
     // user-defined function table (name → MIR func item)
     struct hashmap* user_funcs;
-
-    // import cache (proto + import items)
-    struct hashmap* import_cache;
-
-    // label counters
-    int label_counter;
 
     // loop control labels
     MIR_label_t loop_break_label;
@@ -204,22 +188,22 @@ static void bm_emit_errexit_check(BashMirTranspiler* mt) {
     MIR_label_t skip = bm_new_label(mt);
     // if should_exit == 0 (false), skip the return
     // NOTE: bash_check_errexit returns plain C int (0 or 1), NOT a tagged Item
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, skip),
-                     MIR_new_reg_op(mt->ctx, should_exit),
-                     MIR_new_int_op(mt->ctx, 0)));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_BEQ, MIR_new_label_op(mt->em.ctx, skip),
+                     MIR_new_reg_op(mt->em.ctx, should_exit),
+                     MIR_new_int_op(mt->em.ctx, 0)));
     if (mt->subshell_exit_label) {
         // inside subshell: jump to subshell exit instead of returning
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_JMP,
-                         MIR_new_label_op(mt->ctx, mt->subshell_exit_label)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_JMP,
+                         MIR_new_label_op(mt->em.ctx, mt->subshell_exit_label)));
     } else {
         // top-level or function: return exit code
         MIR_reg_t ec = bm_emit_call_0(mt, "bash_get_exit_code");
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, ec)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, ec)));
     }
-    MIR_append_insn(mt->ctx, mt->current_func_item, skip);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, skip);
 }
 
 // ============================================================================
@@ -246,9 +230,7 @@ static bool bm_is_assoc_var(BashMirTranspiler* mt, const char* name) {
 }
 
 static MIR_reg_t bm_new_temp(BashMirTranspiler* mt) {
-    char name[32];
-    snprintf(name, sizeof(name), "_bt%d", mt->tp->temp_var_counter++);
-    return MIR_new_func_reg(mt->ctx, mt->current_func, MIR_T_I64, name);
+    return em_new_reg(&mt->em, "_bt", MIR_T_I64);
 }
 
 static bool bm_statement_needs_debug_trap(BashAstNodeType node_type) {
@@ -277,181 +259,66 @@ static bool bm_emit_statement_debug_prelude(BashMirTranspiler* mt, BashAstNode* 
     if (!node) return false;
 
     TSPoint start = ts_node_start_point(node->node);
-    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, (int)start.row + 1));
+    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->em.ctx, (int)start.row + 1));
 
     if (!bm_statement_needs_debug_trap(node->node_type)) return false;
 
     *skip_label = bm_new_label(mt);
     MIR_reg_t debug_result = bm_emit_call_0(mt, "bash_run_debug_trap");
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_BEQ,
-                     MIR_new_label_op(mt->ctx, *skip_label),
-                     MIR_new_reg_op(mt->ctx, debug_result),
-                     MIR_new_uint_op(mt->ctx, i2it(2))));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_BEQ,
+                     MIR_new_label_op(mt->em.ctx, *skip_label),
+                     MIR_new_reg_op(mt->em.ctx, debug_result),
+                     MIR_new_uint_op(mt->em.ctx, i2it(2))));
     return true;
 }
 
 static MIR_label_t bm_new_label(BashMirTranspiler* mt) {
-    return MIR_new_label(mt->ctx);
-}
-
-// ensure a proto+import pair exists for a given function name, caching for reuse
-static BashMirImportEntry* bm_ensure_import(BashMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres) {
-    BashMirImportEntry key;
-    memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", fn_name);
-
-    BashMirImportEntry* found = (BashMirImportEntry*)hashmap_get(mt->import_cache, &key);
-    if (found) return found;
-
-    char proto_name[140];
-    snprintf(proto_name, sizeof(proto_name), "%s_p", fn_name);
-
-    MIR_type_t res_types[1] = { ret_type };
-    MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, nres, res_types, nargs, args);
-    MIR_item_t imp = MIR_new_import(mt->ctx, fn_name);
-
-    BashMirImportEntry new_entry;
-    memset(&new_entry, 0, sizeof(new_entry));
-    snprintf(new_entry.name, sizeof(new_entry.name), "%s", fn_name);
-    new_entry.proto = proto;
-    new_entry.import = imp;
-    hashmap_set(mt->import_cache, &new_entry);
-
-    return (BashMirImportEntry*)hashmap_get(mt->import_cache, &key);
-}
-
-// convenience wrappers
-static BashMirImportEntry* bm_ensure_import_v(BashMirTranspiler* mt, const char* fn_name) {
-    return bm_ensure_import(mt, fn_name, MIR_T_I64, 0, NULL, 0);
-}
-
-static BashMirImportEntry* bm_ensure_import_i(BashMirTranspiler* mt, const char* fn_name) {
-    return bm_ensure_import(mt, fn_name, MIR_T_I64, 0, NULL, 1);
-}
-
-static BashMirImportEntry* bm_ensure_import_i_i(BashMirTranspiler* mt, const char* fn_name) {
-    MIR_var_t args[1] = {{MIR_T_I64, "a", 0}};
-    return bm_ensure_import(mt, fn_name, MIR_T_I64, 1, args, 1);
-}
-
-static BashMirImportEntry* bm_ensure_import_ii_i(BashMirTranspiler* mt, const char* fn_name) {
-    MIR_var_t args[2] = {{MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0}};
-    return bm_ensure_import(mt, fn_name, MIR_T_I64, 2, args, 1);
-}
-
-static BashMirImportEntry* bm_ensure_import_ii_v(BashMirTranspiler* mt, const char* fn_name) {
-    MIR_var_t args[2] = {{MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0}};
-    return bm_ensure_import(mt, fn_name, MIR_T_I64, 2, args, 0);
-}
-
-static BashMirImportEntry* bm_ensure_import_iii_i(BashMirTranspiler* mt, const char* fn_name) {
-    MIR_var_t args[3] = {{MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0}, {MIR_T_I64, "c", 0}};
-    return bm_ensure_import(mt, fn_name, MIR_T_I64, 3, args, 1);
+    return em_new_label(&mt->em);
 }
 
 // high-level emit helpers: emit a call and return the result register
 static MIR_reg_t bm_emit_call_0(BashMirTranspiler* mt, const char* fn_name) {
-    BashMirImportEntry* ie = bm_ensure_import_i(mt, fn_name);
-    MIR_reg_t result = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_call_insn(mt->ctx, 3,
-            MIR_new_ref_op(mt->ctx, ie->proto),
-            MIR_new_ref_op(mt->ctx, ie->import),
-            MIR_new_reg_op(mt->ctx, result)));
-    return result;
+    return em_call_0(&mt->em, fn_name, MIR_T_I64, false);
 }
 
 static MIR_reg_t bm_emit_call_1(BashMirTranspiler* mt, const char* fn_name, MIR_op_t arg1) {
-    BashMirImportEntry* ie = bm_ensure_import_i_i(mt, fn_name);
-    MIR_reg_t result = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_call_insn(mt->ctx, 4,
-            MIR_new_ref_op(mt->ctx, ie->proto),
-            MIR_new_ref_op(mt->ctx, ie->import),
-            MIR_new_reg_op(mt->ctx, result),
-            arg1));
-    return result;
+    return em_call_1(&mt->em, fn_name, MIR_T_I64, MIR_T_I64, arg1, false);
 }
 
 static MIR_reg_t bm_emit_call_2(BashMirTranspiler* mt, const char* fn_name, MIR_op_t arg1, MIR_op_t arg2) {
-    BashMirImportEntry* ie = bm_ensure_import_ii_i(mt, fn_name);
-    MIR_reg_t result = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_call_insn(mt->ctx, 5,
-            MIR_new_ref_op(mt->ctx, ie->proto),
-            MIR_new_ref_op(mt->ctx, ie->import),
-            MIR_new_reg_op(mt->ctx, result),
-            arg1,
-            arg2));
-    return result;
+    return em_call_2(&mt->em, fn_name, MIR_T_I64,
+        MIR_T_I64, arg1, MIR_T_I64, arg2, false);
 }
 
 static MIR_reg_t bm_emit_call_3(BashMirTranspiler* mt, const char* fn_name,
                                   MIR_op_t arg1, MIR_op_t arg2, MIR_op_t arg3) {
-    BashMirImportEntry* ie = bm_ensure_import_iii_i(mt, fn_name);
-    MIR_reg_t result = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_call_insn(mt->ctx, 6,
-            MIR_new_ref_op(mt->ctx, ie->proto),
-            MIR_new_ref_op(mt->ctx, ie->import),
-            MIR_new_reg_op(mt->ctx, result),
-            arg1,
-            arg2,
-            arg3));
-    return result;
+    return em_call_3(&mt->em, fn_name, MIR_T_I64,
+        MIR_T_I64, arg1, MIR_T_I64, arg2, MIR_T_I64, arg3, false);
 }
 
 static void bm_emit_call_void_0(BashMirTranspiler* mt, const char* fn_name) {
-    BashMirImportEntry* ie = bm_ensure_import_v(mt, fn_name);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_call_insn(mt->ctx, 2,
-            MIR_new_ref_op(mt->ctx, ie->proto),
-            MIR_new_ref_op(mt->ctx, ie->import)));
+    em_call_void_0(&mt->em, fn_name, false);
 }
 
 static void bm_emit_call_void_1(BashMirTranspiler* mt, const char* fn_name, MIR_op_t arg1) {
-    MIR_var_t args[1] = {{MIR_T_I64, "a", 0}};
-    BashMirImportEntry* ie = bm_ensure_import(mt, fn_name, MIR_T_I64, 1, args, 0);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_call_insn(mt->ctx, 3,
-            MIR_new_ref_op(mt->ctx, ie->proto),
-            MIR_new_ref_op(mt->ctx, ie->import),
-            arg1));
+    em_call_void_1(&mt->em, fn_name, MIR_T_I64, arg1, false);
 }
 
 static void bm_emit_call_void_2(BashMirTranspiler* mt, const char* fn_name, MIR_op_t arg1, MIR_op_t arg2) {
-    BashMirImportEntry* ie = bm_ensure_import_ii_v(mt, fn_name);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_call_insn(mt->ctx, 4,
-            MIR_new_ref_op(mt->ctx, ie->proto),
-            MIR_new_ref_op(mt->ctx, ie->import),
-            arg1,
-            arg2));
+    em_call_void_2(&mt->em, fn_name, MIR_T_I64, arg1, MIR_T_I64, arg2, false);
 }
 
 static void bm_emit_call_void_3(BashMirTranspiler* mt, const char* fn_name,
                                  MIR_op_t arg1, MIR_op_t arg2, MIR_op_t arg3) {
-    MIR_var_t args[3] = {{MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0}, {MIR_T_I64, "c", 0}};
-    BashMirImportEntry* ie = bm_ensure_import(mt, fn_name, MIR_T_I64, 3, args, 0);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_call_insn(mt->ctx, 5,
-            MIR_new_ref_op(mt->ctx, ie->proto),
-            MIR_new_ref_op(mt->ctx, ie->import),
-            arg1, arg2, arg3));
+    em_call_void_3(&mt->em, fn_name,
+        MIR_T_I64, arg1, MIR_T_I64, arg2, MIR_T_I64, arg3, false);
 }
 
 static void bm_emit_call_void_4(BashMirTranspiler* mt, const char* fn_name,
                                  MIR_op_t arg1, MIR_op_t arg2, MIR_op_t arg3, MIR_op_t arg4) {
-    MIR_var_t args[4] = {{MIR_T_I64, "a", 0}, {MIR_T_I64, "b", 0},
-                          {MIR_T_I64, "c", 0}, {MIR_T_I64, "d", 0}};
-    BashMirImportEntry* ie = bm_ensure_import(mt, fn_name, MIR_T_I64, 4, args, 0);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_call_insn(mt->ctx, 6,
-            MIR_new_ref_op(mt->ctx, ie->proto),
-            MIR_new_ref_op(mt->ctx, ie->import),
-            arg1, arg2, arg3, arg4));
+    em_call_void_4(&mt->em, fn_name,
+        MIR_T_I64, arg1, MIR_T_I64, arg2, MIR_T_I64, arg3, MIR_T_I64, arg4, false);
 }
 
 // emit a varargs builtin call: func(Item* args, int argc) -> Item
@@ -509,7 +376,7 @@ static MIR_op_t bm_emit_ifs_split_cmd(BashMirTranspiler* mt, const char* cmd_nam
                                         int cmd_len, BashCommandNode* cmd) {
     // build array FIRST using current IFS (before prefix assignments)
     MIR_reg_t arr_reg = bm_emit_call_0(mt, "bash_array_new");
-    MIR_op_t arr_val = MIR_new_reg_op(mt->ctx, arr_reg);
+    MIR_op_t arr_val = MIR_new_reg_op(mt->em.ctx, arr_reg);
     BashAstNode* p = cmd->args;
     while (p) {
         int dat = arg_is_default_at_or_star(p);
@@ -520,20 +387,20 @@ static MIR_op_t bm_emit_ifs_split_cmd(BashMirTranspiler* mt, const char* cmd_nam
             const char* fn = (dat == 0) ? "bash_ifs_split_default_at"
                                         : "bash_ifs_split_default_star";
             MIR_reg_t new_arr = bm_emit_call_2(mt, fn, arr_val, var_val);
-            arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+            arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
         } else if (arg_is_at_splat(p)) {
             // $@, ${arr[@]:0:2}, ${@:1:2}, "${@:1:2}" etc.: splat array elements
             if (p->node_type == BASH_AST_NODE_SPECIAL_VARIABLE) {
                 // bare $@ — concat all positional args into array
                 MIR_reg_t new_arr = bm_emit_call_1(mt, "bash_array_concat_positional", arr_val);
-                arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
             } else if (p->node_type == BASH_AST_NODE_STRING) {
                 // quoted: "${arr[@]:0:2}" etc.
                 BashStringNode* sn = (BashStringNode*)p;
                 if (sn->parts && !sn->parts->next &&
                     sn->parts->node_type == BASH_AST_NODE_SPECIAL_VARIABLE) {
                     MIR_reg_t new_arr = bm_emit_call_1(mt, "bash_array_concat_positional", arr_val);
-                    arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                    arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
                 } else if (sn->parts && !sn->parts->next) {
                     // could be array slice or positional slice inside quotes
                     if (sn->parts->node_type == BASH_AST_NODE_EXPANSION) {
@@ -544,12 +411,12 @@ static MIR_op_t bm_emit_ifs_split_cmd(BashMirTranspiler* mt, const char* cmd_nam
                                                           : bm_emit_int_literal(mt, -1);
                         MIR_reg_t slice_arr = bm_emit_call_2(mt, "bash_positional_slice_array", offset, length);
                         MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_array_concat", arr_val,
-                                                            MIR_new_reg_op(mt->ctx, slice_arr));
-                        arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                                                            MIR_new_reg_op(mt->em.ctx, slice_arr));
+                        arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
                     } else {
                         MIR_op_t slice_val = bm_transpile_node(mt, sn->parts);
                         MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_array_concat", arr_val, slice_val);
-                        arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                        arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
                     }
                 }
             } else {
@@ -563,12 +430,12 @@ static MIR_op_t bm_emit_ifs_split_cmd(BashMirTranspiler* mt, const char* cmd_nam
                                                       : bm_emit_int_literal(mt, -1);
                     MIR_reg_t slice_arr = bm_emit_call_2(mt, "bash_positional_slice_array", offset, length);
                     MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_array_concat", arr_val,
-                                                        MIR_new_reg_op(mt->ctx, slice_arr));
-                    arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                                                        MIR_new_reg_op(mt->em.ctx, slice_arr));
+                    arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
                 } else {
                     MIR_op_t slice_val = bm_transpile_node(mt, p);
                     MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_array_concat", arr_val, slice_val);
-                    arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                    arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
                 }
             }
         } else {
@@ -576,10 +443,10 @@ static MIR_op_t bm_emit_ifs_split_cmd(BashMirTranspiler* mt, const char* cmd_nam
             MIR_op_t val = bm_transpile_cmd_arg(mt, p);
             if (needs_ifs_split) {
                 MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_ifs_split_into", arr_val, val);
-                arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
             } else {
                 MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_array_append", arr_val, val);
-                arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
             }
         }
         p = p->next;
@@ -603,9 +470,9 @@ static MIR_op_t bm_emit_ifs_split_cmd(BashMirTranspiler* mt, const char* cmd_nam
                                        : bm_emit_string_literal(mt, "", 0);
             if (a->is_append) {
                 // a+=val in prefix position: compute appended value using current var
-                MIR_op_t old_op = MIR_new_reg_op(mt->ctx, saved_vals[n_prefix]);
+                MIR_op_t old_op = MIR_new_reg_op(mt->em.ctx, saved_vals[n_prefix]);
                 MIR_reg_t r = bm_emit_call_3(mt, "bash_var_append", name_op, old_op, val_op);
-                val_op = MIR_new_reg_op(mt->ctx, r);
+                val_op = MIR_new_reg_op(mt->em.ctx, r);
             }
             bm_emit_call_void_2(mt, "bash_set_cmd_env_var", name_op, val_op);
             n_prefix++;
@@ -619,10 +486,10 @@ static MIR_op_t bm_emit_ifs_split_cmd(BashMirTranspiler* mt, const char* cmd_nam
     // restore prefix assignments (also restores OS environ)
     for (int i = 0; i < n_prefix; i++) {
         MIR_op_t name_op = bm_emit_string_literal(mt, saved_names[i]->chars, saved_names[i]->len);
-        bm_emit_call_void_2(mt, "bash_restore_cmd_env_var", name_op, MIR_new_reg_op(mt->ctx, saved_vals[i]));
+        bm_emit_call_void_2(mt, "bash_restore_cmd_env_var", name_op, MIR_new_reg_op(mt->em.ctx, saved_vals[i]));
     }
 
-    return MIR_new_reg_op(mt->ctx, result);
+    return MIR_new_reg_op(mt->em.ctx, result);
 }
 
 static MIR_op_t bm_emit_varargs_builtin(BashMirTranspiler* mt, const char* fn_name,
@@ -696,43 +563,43 @@ static MIR_op_t bm_emit_varargs_builtin(BashMirTranspiler* mt, const char* fn_na
         }
         MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
         MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                         MIR_new_reg_op(mt->ctx, ptr_r)));
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                         MIR_new_reg_op(mt->ctx, cnt_r)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                         MIR_new_reg_op(mt->em.ctx, ptr_r)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                         MIR_new_reg_op(mt->em.ctx, cnt_r)));
     } else if (argc > 0) {
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                         MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)mem_alloc(argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                         MIR_new_uint_op(mt->em.ctx, (uint64_t)(uintptr_t)mem_alloc(argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
         int i = 0;
         BashAstNode* arg = cmd->args;
         while (arg && i < argc) {
             MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
                                    args_ptr, 0, 1),
                     arg_val));
             arg = arg->next;
             i++;
         }
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                         MIR_new_int_op(mt->ctx, argc)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                         MIR_new_int_op(mt->em.ctx, argc)));
     } else {
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                         MIR_new_uint_op(mt->ctx, 0)));
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                         MIR_new_int_op(mt->ctx, 0)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                         MIR_new_uint_op(mt->em.ctx, 0)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                         MIR_new_int_op(mt->em.ctx, 0)));
     }
 
     MIR_reg_t result = bm_emit_call_2(mt, fn_name,
-        MIR_new_reg_op(mt->ctx, args_ptr), MIR_new_reg_op(mt->ctx, argc_reg));
-    return MIR_new_reg_op(mt->ctx, result);
+        MIR_new_reg_op(mt->em.ctx, args_ptr), MIR_new_reg_op(mt->em.ctx, argc_reg));
+    return MIR_new_reg_op(mt->em.ctx, result);
 }
 
 // get or create a variable slot index
@@ -750,62 +617,62 @@ static int bm_get_var_index(BashMirTranspiler* mt, const char* name) {
 static void bm_emit_set_var(BashMirTranspiler* mt, const char* name, MIR_op_t value) {
     String* name_str = heap_create_name(name);
     MIR_reg_t name_reg = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, name_reg),
-                     MIR_new_uint_op(mt->ctx, s2it(name_str))));
-    bm_emit_call_void_2(mt, "bash_set_var", MIR_new_reg_op(mt->ctx, name_reg), value);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, name_reg),
+                     MIR_new_uint_op(mt->em.ctx, s2it(name_str))));
+    bm_emit_call_void_2(mt, "bash_set_var", MIR_new_reg_op(mt->em.ctx, name_reg), value);
 }
 
 // emit a call to bash_set_local_var(name_item, value_item)
 static void bm_emit_set_local_var(BashMirTranspiler* mt, const char* name, MIR_op_t value) {
     String* name_str = heap_create_name(name);
     MIR_reg_t name_reg = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, name_reg),
-                     MIR_new_uint_op(mt->ctx, s2it(name_str))));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, name_reg),
+                     MIR_new_uint_op(mt->em.ctx, s2it(name_str))));
     // in POSIX mode local is treated as a global assignment
     const char* fn = bash_get_posix_mode() ? "bash_set_var" : "bash_set_local_var";
-    bm_emit_call_void_2(mt, fn, MIR_new_reg_op(mt->ctx, name_reg), value);
+    bm_emit_call_void_2(mt, fn, MIR_new_reg_op(mt->em.ctx, name_reg), value);
 }
 
 // emit a call to bash_get_var(name_item) → Item
 static MIR_op_t bm_emit_get_var(BashMirTranspiler* mt, const char* name) {
     String* name_str = heap_create_name(name);
     MIR_reg_t name_reg = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, name_reg),
-                     MIR_new_uint_op(mt->ctx, s2it(name_str))));
-    MIR_reg_t result = bm_emit_call_1(mt, "bash_get_var", MIR_new_reg_op(mt->ctx, name_reg));
-    return MIR_new_reg_op(mt->ctx, result);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, name_reg),
+                     MIR_new_uint_op(mt->em.ctx, s2it(name_str))));
+    MIR_reg_t result = bm_emit_call_1(mt, "bash_get_var", MIR_new_reg_op(mt->em.ctx, name_reg));
+    return MIR_new_reg_op(mt->em.ctx, result);
 }
 
 static MIR_op_t bm_emit_get_var_n(BashMirTranspiler* mt, const char* name, int len) {
     String* name_str = heap_create_name(name, len);
     MIR_reg_t name_reg = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, name_reg),
-                     MIR_new_uint_op(mt->ctx, s2it(name_str))));
-    MIR_reg_t result = bm_emit_call_1(mt, "bash_get_var", MIR_new_reg_op(mt->ctx, name_reg));
-    return MIR_new_reg_op(mt->ctx, result);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, name_reg),
+                     MIR_new_uint_op(mt->em.ctx, s2it(name_str))));
+    MIR_reg_t result = bm_emit_call_1(mt, "bash_get_var", MIR_new_reg_op(mt->em.ctx, name_reg));
+    return MIR_new_reg_op(mt->em.ctx, result);
 }
 
 // emit a string literal → Item
 static MIR_op_t bm_emit_string_literal(BashMirTranspiler* mt, const char* text, size_t len) {
     String* str = heap_create_name(text, len);
     MIR_reg_t reg = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, reg),
-                     MIR_new_uint_op(mt->ctx, s2it(str))));
-    return MIR_new_reg_op(mt->ctx, reg);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, reg),
+                     MIR_new_uint_op(mt->em.ctx, s2it(str))));
+    return MIR_new_reg_op(mt->em.ctx, reg);
 }
 
 // emit an int literal → Item
 static MIR_op_t bm_emit_int_literal(BashMirTranspiler* mt, int64_t value) {
     MIR_reg_t reg = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, reg),
-                     MIR_new_uint_op(mt->ctx, i2it(value))));
-    return MIR_new_reg_op(mt->ctx, reg);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, reg),
+                     MIR_new_uint_op(mt->em.ctx, i2it(value))));
+    return MIR_new_reg_op(mt->em.ctx, reg);
 }
 
 // ============================================================================
@@ -867,7 +734,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                 MIR_op_t filename = bm_transpile_node(mt, stdin_redir->target);
                 MIR_reg_t content = bm_emit_call_1(mt, "bash_redirect_read", filename);
                 bm_emit_call_void_1(mt, "bash_set_stdin_item",
-                    MIR_new_reg_op(mt->ctx, content));
+                    MIR_new_reg_op(mt->em.ctx, content));
             }
 
             // before command: set up stderr routing
@@ -877,7 +744,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                 MIR_op_t filename = bm_transpile_node(mt, stderr_redir->target);
                 int append = (stderr_redir->mode == BASH_REDIR_APPEND) ? 1 : 0;
                 bm_emit_call_void_2(mt, "bash_redir_stderr_to_file",
-                    filename, MIR_new_int_op(mt->ctx, append));
+                    filename, MIR_new_int_op(mt->em.ctx, append));
             }
 
             // before command: start capture for stdout redirect
@@ -894,7 +761,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                 MIR_op_t filename = bm_transpile_node(mt, stdout_redir->target);
                 const char* func = (stdout_redir->mode == BASH_REDIR_APPEND)
                     ? "bash_redirect_append" : "bash_redirect_write";
-                bm_emit_call_2(mt, func, filename, MIR_new_reg_op(mt->ctx, captured));
+                bm_emit_call_2(mt, func, filename, MIR_new_reg_op(mt->em.ctx, captured));
             }
 
             // after command: handle stderr file redirect flush
@@ -968,7 +835,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             MIR_op_t filename = bm_transpile_node(mt, stdin_redir->target);
             MIR_reg_t content = bm_emit_call_1(mt, "bash_redirect_read", filename);
             bm_emit_call_void_1(mt, "bash_set_stdin_item",
-                MIR_new_reg_op(mt->ctx, content));
+                MIR_new_reg_op(mt->em.ctx, content));
         }
 
         // herestring redirect: evaluate body, append newline, and set as stdin
@@ -976,7 +843,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             MIR_op_t body_val = bm_transpile_node(mt, herestring_redir->target);
             MIR_reg_t with_nl = bm_emit_call_1(mt, "bash_append_newline", body_val);
             bm_emit_call_void_1(mt, "bash_set_stdin_item",
-                MIR_new_reg_op(mt->ctx, with_nl));
+                MIR_new_reg_op(mt->em.ctx, with_nl));
         }
 
         // heredoc redirect on non-cat command: evaluate body and set as stdin
@@ -992,7 +859,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             MIR_op_t filename = bm_transpile_node(mt, stderr_redir->target);
             int append = (stderr_redir->mode == BASH_REDIR_APPEND) ? 1 : 0;
             bm_emit_call_void_2(mt, "bash_redir_stderr_to_file",
-                filename, MIR_new_int_op(mt->ctx, append));
+                filename, MIR_new_int_op(mt->em.ctx, append));
         }
 
         if (has_stdout_redir) {
@@ -1008,9 +875,9 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             MIR_op_t filename = bm_transpile_node(mt, stdout_redir->target);
             const char* func = (stdout_redir->mode == BASH_REDIR_APPEND)
                 ? "bash_redirect_append" : "bash_redirect_write";
-            bm_emit_call_2(mt, func, filename, MIR_new_reg_op(mt->ctx, captured));
+            bm_emit_call_2(mt, func, filename, MIR_new_reg_op(mt->em.ctx, captured));
             // restore exit code so the redirected statement's exit code is preserved
-            bm_emit_call_void_1(mt, "bash_restore_exit_code", MIR_new_reg_op(mt->ctx, saved_ec));
+            bm_emit_call_void_1(mt, "bash_restore_exit_code", MIR_new_reg_op(mt->em.ctx, saved_ec));
         }
 
         if (has_stdin_redir || has_herestring_redir || has_heredoc_redir) {
@@ -1029,7 +896,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         // in bash, standalone assignment sets $? to 0
         // UNLESS the RHS contains a command substitution — then $? is the comsub's exit code
         if (!node_has_command_sub(assign->value)) {
-            bm_emit_call_void_1(mt, "bash_set_exit_code", MIR_new_int_op(mt->ctx, 0));
+            bm_emit_call_void_1(mt, "bash_set_exit_code", MIR_new_int_op(mt->em.ctx, 0));
         }
         break;
     }
@@ -1073,7 +940,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             // multi-command pipeline: capture-and-pass chain
             // initialize PIPESTATUS for this pipeline
             bm_emit_call_void_1(mt, "bash_pipestatus_reset",
-                MIR_new_int_op(mt->ctx, pipeline->command_count));
+                MIR_new_int_op(mt->em.ctx, pipeline->command_count));
 
             int stage = 0;
             while (cmd) {
@@ -1093,7 +960,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                     bm_transpile_statement(mt, cmd);
 
                     // stage exit landing: pop subshell scope
-                    MIR_append_insn(mt->ctx, mt->current_func_item, stage_exit);
+                    MIR_append_insn(mt->em.ctx, mt->em.func_item, stage_exit);
                     bm_emit_call_void_0(mt, "bash_scope_pop_subshell");
                     mt->subshell_exit_label = old_sub_exit;
 
@@ -1102,12 +969,12 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                     // record this stage's exit code in PIPESTATUS
                     MIR_reg_t ec = bm_emit_call_0(mt, "bash_get_exit_code");
                     bm_emit_call_void_2(mt, "bash_pipestatus_set",
-                        MIR_new_int_op(mt->ctx, stage),
-                        MIR_new_reg_op(mt->ctx, ec));
+                        MIR_new_int_op(mt->em.ctx, stage),
+                        MIR_new_reg_op(mt->em.ctx, ec));
 
                     // pass captured output as stdin to next stage
                     bm_emit_call_void_1(mt, "bash_set_stdin_item",
-                        MIR_new_reg_op(mt->ctx, captured));
+                        MIR_new_reg_op(mt->em.ctx, captured));
                 } else {
                     // last stage: just execute (reads stdin_item if needed)
                     bm_transpile_statement(mt, cmd);
@@ -1117,8 +984,8 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                     // record last stage's exit code in PIPESTATUS
                     MIR_reg_t ec = bm_emit_call_0(mt, "bash_get_exit_code");
                     bm_emit_call_void_2(mt, "bash_pipestatus_set",
-                        MIR_new_int_op(mt->ctx, stage),
-                        MIR_new_reg_op(mt->ctx, ec));
+                        MIR_new_int_op(mt->em.ctx, stage),
+                        MIR_new_reg_op(mt->em.ctx, ec));
                 }
                 cmd = cmd->next;
                 stage++;
@@ -1127,13 +994,13 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             // pipefail: $? = rightmost non-zero exit or last exit
             MIR_reg_t pipefail = bm_emit_call_0(mt, "bash_get_option_pipefail");
             MIR_label_t skip_pipefail = bm_new_label(mt);
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, skip_pipefail),
-                             MIR_new_reg_op(mt->ctx, pipefail),
-                             MIR_new_int_op(mt->ctx, 0)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_BEQ, MIR_new_label_op(mt->em.ctx, skip_pipefail),
+                             MIR_new_reg_op(mt->em.ctx, pipefail),
+                             MIR_new_int_op(mt->em.ctx, 0)));
             // pipefail enabled: find rightmost non-zero exit code
             bm_emit_call_void_0(mt, "bash_pipestatus_apply_pipefail");
-            MIR_append_insn(mt->ctx, mt->current_func_item, skip_pipefail);
+            MIR_append_insn(mt->em.ctx, mt->em.func_item, skip_pipefail);
         }
 
         // handle negated pipeline (! pipeline)
@@ -1156,14 +1023,14 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             MIR_label_t skip = bm_new_label(mt);
             MIR_reg_t ec = bm_emit_call_0(mt, "bash_get_exit_code");
             // if exit code != 0, skip right side
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, skip),
-                             MIR_new_reg_op(mt->ctx, ec),
-                             MIR_new_uint_op(mt->ctx, i2it(0))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_BNE, MIR_new_label_op(mt->em.ctx, skip),
+                             MIR_new_reg_op(mt->em.ctx, ec),
+                             MIR_new_uint_op(mt->em.ctx, i2it(0))));
             bm_transpile_statement(mt, list->right);
             // check errexit after right side (not suppressed)
             bm_emit_errexit_check(mt);
-            MIR_append_insn(mt->ctx, mt->current_func_item, skip);
+            MIR_append_insn(mt->em.ctx, mt->em.func_item, skip);
         } else if (list->op == BASH_LIST_OR) {
             // || : suppress errexit for LEFT side only
             bm_emit_call_void_0(mt, "bash_errexit_push");
@@ -1171,13 +1038,13 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             bm_emit_call_void_0(mt, "bash_errexit_pop");
             MIR_label_t skip = bm_new_label(mt);
             MIR_reg_t ec = bm_emit_call_0(mt, "bash_get_exit_code");
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, skip),
-                             MIR_new_reg_op(mt->ctx, ec),
-                             MIR_new_uint_op(mt->ctx, i2it(0))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_BEQ, MIR_new_label_op(mt->em.ctx, skip),
+                             MIR_new_reg_op(mt->em.ctx, ec),
+                             MIR_new_uint_op(mt->em.ctx, i2it(0))));
             bm_transpile_statement(mt, list->right);
             bm_emit_errexit_check(mt);
-            MIR_append_insn(mt->ctx, mt->current_func_item, skip);
+            MIR_append_insn(mt->em.ctx, mt->em.func_item, skip);
         } else {
             // ; or & : execute sequentially
             bm_transpile_statement(mt, list->left);
@@ -1213,7 +1080,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         bm_emit_call_void_0(mt, "bash_scope_push_subshell");
         bm_transpile_statement(mt, subshell->body);
         // subshell exit landing: pop scope
-        MIR_append_insn(mt->ctx, mt->current_func_item, sub_exit);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, sub_exit);
         bm_emit_call_void_0(mt, "bash_scope_pop_subshell");
         mt->subshell_exit_label = old_sub_exit;
         // check errexit after subshell — if subshell exited non-zero and set -e is active
@@ -1226,9 +1093,9 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         if (ctrl->value) {
             MIR_op_t val = bm_transpile_node(mt, ctrl->value);
             MIR_reg_t result = bm_emit_call_1(mt, "bash_return_with_code", val);
-            ret_val = MIR_new_reg_op(mt->ctx, result);
+            ret_val = MIR_new_reg_op(mt->em.ctx, result);
         } else {
-            ret_val = MIR_new_uint_op(mt->ctx, i2it(0));
+            ret_val = MIR_new_uint_op(mt->em.ctx, i2it(0));
         }
         // pop scope frame before leaving the function
         bm_emit_call_void_0(mt, "bash_run_return_trap");
@@ -1236,8 +1103,8 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         bm_emit_call_void_0(mt, "bash_pop_funcname");
         bm_emit_call_void_0(mt, "bash_scope_pop");
         bm_emit_call_void_0(mt, "bash_pop_positional");
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_ret_insn(mt->ctx, 1, ret_val));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_ret_insn(mt->em.ctx, 1, ret_val));
         break;
     }
     case BASH_AST_NODE_EXIT: {
@@ -1249,17 +1116,17 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         if (mt->subshell_exit_label) {
             // inside subshell or pipeline stage: jump to exit label
             // (don't run EXIT trap or return from the whole function)
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_JMP,
-                             MIR_new_label_op(mt->ctx, mt->subshell_exit_label)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_JMP,
+                             MIR_new_label_op(mt->em.ctx, mt->subshell_exit_label)));
         } else {
             // top-level: run EXIT trap and terminate
             bm_emit_call_void_0(mt, "bash_trap_run_exit");
             bm_emit_call_void_0(mt, "bash_pop_bash_argv");
             bm_emit_call_void_0(mt, "bash_pop_funcname");
             MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, final_ec)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, final_ec)));
         }
         break;
     }
@@ -1267,10 +1134,10 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         if (mt->loop_break_label) {
             // break has exit status 0 (POSIX)
             bm_emit_call_void_1(mt, "bash_set_exit_code",
-                MIR_new_int_op(mt->ctx, 0));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_JMP,
-                             MIR_new_label_op(mt->ctx, mt->loop_break_label)));
+                MIR_new_int_op(mt->em.ctx, 0));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_JMP,
+                             MIR_new_label_op(mt->em.ctx, mt->loop_break_label)));
         }
         break;
     }
@@ -1278,10 +1145,10 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         if (mt->loop_continue_label) {
             // continue has exit status 0 (POSIX)
             bm_emit_call_void_1(mt, "bash_set_exit_code",
-                MIR_new_int_op(mt->ctx, 0));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_JMP,
-                             MIR_new_label_op(mt->ctx, mt->loop_continue_label)));
+                MIR_new_int_op(mt->em.ctx, 0));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_JMP,
+                             MIR_new_label_op(mt->em.ctx, mt->loop_continue_label)));
         }
         break;
     }
@@ -1308,23 +1175,23 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         MIR_reg_t ec_val = bm_new_temp(mt);
         MIR_label_t arith_zero = bm_new_label(mt);
         MIR_label_t arith_done = bm_new_label(mt);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, arith_zero),
-                         MIR_new_reg_op(mt->ctx, result_int),
-                         MIR_new_uint_op(mt->ctx, i2it(0))));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_BEQ, MIR_new_label_op(mt->em.ctx, arith_zero),
+                         MIR_new_reg_op(mt->em.ctx, result_int),
+                         MIR_new_uint_op(mt->em.ctx, i2it(0))));
         // non-zero: exit code = 0 (success)
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ec_val),
-                         MIR_new_int_op(mt->ctx, 0)));
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, arith_done)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, ec_val),
+                         MIR_new_int_op(mt->em.ctx, 0)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, arith_done)));
         // zero: exit code = 1 (failure)
-        MIR_append_insn(mt->ctx, mt->current_func_item, arith_zero);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ec_val),
-                         MIR_new_int_op(mt->ctx, 1)));
-        MIR_append_insn(mt->ctx, mt->current_func_item, arith_done);
-        bm_emit_call_void_1(mt, "bash_set_exit_code", MIR_new_reg_op(mt->ctx, ec_val));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, arith_zero);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, ec_val),
+                         MIR_new_int_op(mt->em.ctx, 1)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, arith_done);
+        bm_emit_call_void_1(mt, "bash_set_exit_code", MIR_new_reg_op(mt->em.ctx, ec_val));
         break;
     }
     case BASH_AST_NODE_TEST_COMMAND:
@@ -1350,7 +1217,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         if (heredoc->body) {
             MIR_op_t body_val = bm_transpile_node(mt, heredoc->body);
             bm_emit_call_void_2(mt, "bash_write_heredoc",
-                body_val, MIR_new_int_op(mt->ctx, node->node_type == BASH_AST_NODE_HERESTRING ? 1 : 0));
+                body_val, MIR_new_int_op(mt->em.ctx, node->node_type == BASH_AST_NODE_HERESTRING ? 1 : 0));
         }
         break;
     }
@@ -1360,7 +1227,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
     }
 
     if (has_debug_skip) {
-        MIR_append_insn(mt->ctx, mt->current_func_item, debug_skip);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, debug_skip);
     }
 }
 
@@ -1371,10 +1238,10 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
 static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
     if (!node) {
         MIR_reg_t reg = bm_new_temp(mt);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, reg),
-                         MIR_new_uint_op(mt->ctx, ITEM_NULL)));
-        return MIR_new_reg_op(mt->ctx, reg);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, reg),
+                         MIR_new_uint_op(mt->em.ctx, ITEM_NULL)));
+        return MIR_new_reg_op(mt->em.ctx, reg);
     }
 
     switch (node->node_type) {
@@ -1398,43 +1265,43 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         if (sv->special_id == BASH_SPECIAL_QUESTION) {
             // $? → bash_get_exit_code()
             MIR_reg_t result = bm_emit_call_0(mt, "bash_get_exit_code");
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         if (sv->special_id == BASH_SPECIAL_HASH) {
             // $# → bash_get_arg_count()
             MIR_reg_t result = bm_emit_call_0(mt, "bash_get_arg_count");
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         if (sv->special_id == BASH_SPECIAL_AT || sv->special_id == BASH_SPECIAL_STAR) {
             // $@ / $* → bash_get_all_args_string()
             MIR_reg_t result = bm_emit_call_0(mt, "bash_get_all_args_string");
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         if (sv->special_id >= BASH_SPECIAL_POS_1 && sv->special_id <= BASH_SPECIAL_POS_9) {
             // $1-$9 → bash_get_positional(n)
             int pos = sv->special_id - BASH_SPECIAL_POS_1 + 1;
             MIR_reg_t result = bm_emit_call_1(mt, "bash_get_positional",
-                MIR_new_int_op(mt->ctx, pos));
-            return MIR_new_reg_op(mt->ctx, result);
+                MIR_new_int_op(mt->em.ctx, pos));
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         if (sv->special_id == BASH_SPECIAL_ZERO) {
             MIR_reg_t result = bm_emit_call_0(mt, "bash_get_script_name");
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         if (sv->special_id == BASH_SPECIAL_DOLLAR) {
             // $$ — process ID (as string)
             MIR_reg_t result = bm_emit_call_0(mt, "bash_get_pid");
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         if (sv->special_id == BASH_SPECIAL_BANG) {
             // $! — last background process ID
             MIR_reg_t result = bm_emit_call_0(mt, "bash_get_last_bg_pid");
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         if (sv->special_id == BASH_SPECIAL_DASH) {
             // $- — current shell flags (himBHs)
             MIR_reg_t result = bm_emit_call_0(mt, "bash_get_shell_flags");
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         return bm_emit_string_literal(mt, "", 0);
     }
@@ -1465,13 +1332,13 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
             stmt = stmt->next;
         }
 
-        MIR_append_insn(mt->ctx, mt->current_func_item, cmd_sub_exit);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, cmd_sub_exit);
         mt->subshell_exit_label = old_sub_exit;
 
         MIR_reg_t result = bm_emit_call_0(mt, "bash_end_capture");
         bm_emit_call_void_0(mt, "bash_scope_pop_subshell");
         bm_emit_call_void_0(mt, "bash_cmd_sub_exit");
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_PROCESS_SUB: {
         BashProcessSubNode* ps = (BashProcessSubNode*)node;
@@ -1487,8 +1354,8 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         MIR_reg_t captured = bm_emit_call_0(mt, "bash_end_capture_raw");
         bm_emit_call_void_0(mt, "bash_cmd_sub_exit");
         const char* func = ps->is_output ? "bash_procsub_out" : "bash_procsub_in";
-        MIR_reg_t result = bm_emit_call_1(mt, func, MIR_new_reg_op(mt->ctx, captured));
-        return MIR_new_reg_op(mt->ctx, result);
+        MIR_reg_t result = bm_emit_call_1(mt, func, MIR_new_reg_op(mt->em.ctx, captured));
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_COMMAND: {
         MIR_op_t result = bm_transpile_command(mt, (BashCommandNode*)node);
@@ -1507,7 +1374,7 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
             // bare word: [[ expr ]] is equivalent to [[ -n expr ]]
             MIR_op_t val = bm_transpile_node(mt, test->expression);
             MIR_reg_t result = bm_emit_call_1(mt, "bash_test_n", val);
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         return bm_emit_int_literal(mt, 0);
     }
@@ -1527,16 +1394,16 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
             MIR_reg_t ec = bm_emit_call_0(mt, "bash_get_exit_code");
             if (bin->op == BASH_TEST_AND) {
                 // &&: skip right if left failed (exit code != 0)
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, skip),
-                                 MIR_new_reg_op(mt->ctx, ec),
-                                 MIR_new_uint_op(mt->ctx, i2it(0))));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_BNE, MIR_new_label_op(mt->em.ctx, skip),
+                                 MIR_new_reg_op(mt->em.ctx, ec),
+                                 MIR_new_uint_op(mt->em.ctx, i2it(0))));
             } else {
                 // ||: skip right if left succeeded (exit code == 0)
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, skip),
-                                 MIR_new_reg_op(mt->ctx, ec),
-                                 MIR_new_uint_op(mt->ctx, i2it(0))));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_BEQ, MIR_new_label_op(mt->em.ctx, skip),
+                                 MIR_new_reg_op(mt->em.ctx, ec),
+                                 MIR_new_uint_op(mt->em.ctx, i2it(0))));
             }
             // evaluate right side (sets exit code)
             MIR_op_t right_val = bm_transpile_node(mt, bin->right);
@@ -1545,7 +1412,7 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
                 && bin->right->node_type != BASH_AST_NODE_TEST_UNARY) {
                 bm_emit_call_1(mt, "bash_test_n", right_val);
             }
-            MIR_append_insn(mt->ctx, mt->current_func_item, skip);
+            MIR_append_insn(mt->em.ctx, mt->em.func_item, skip);
             // return dummy value; if-statement uses exit code
             return bm_emit_int_literal(mt, 0);
         }
@@ -1574,7 +1441,7 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         default: func = "bash_test_str_eq"; break;
         }
         MIR_reg_t result = bm_emit_call_2(mt, func, left, right);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_TEST_UNARY: {
         BashTestUnaryNode* unary = (BashTestUnaryNode*)node;
@@ -1605,7 +1472,7 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         default: func = "bash_test_n"; break;
         }
         MIR_reg_t result = bm_emit_call_1(mt, func, operand);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_ARRAY_ACCESS: {
         BashArrayAccessNode* access = (BashArrayAccessNode*)node;
@@ -1615,7 +1482,7 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
             if (sv && sv->access_fn) {
                 MIR_op_t idx_val = bm_transpile_node(mt, access->index);
                 MIR_reg_t result = bm_emit_call_1(mt, sv->access_fn, idx_val);
-                return MIR_new_reg_op(mt->ctx, result);
+                return MIR_new_reg_op(mt->em.ctx, result);
             }
         }
         MIR_op_t arr_val = bm_emit_get_var(mt, access->name->chars);
@@ -1628,11 +1495,11 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
             // for indexed arrays, evaluate subscript as arithmetic expression
             MIR_op_t raw_idx = bm_transpile_node(mt, access->index);
             MIR_reg_t arith_idx = bm_emit_call_1(mt, "bash_arith_eval_value", raw_idx);
-            idx_val = MIR_new_reg_op(mt->ctx, arith_idx);
+            idx_val = MIR_new_reg_op(mt->em.ctx, arith_idx);
         }
         const char* fn = is_assoc ? "bash_assoc_get" : "bash_array_get";
         MIR_reg_t result = bm_emit_call_2(mt, fn, arr_val, idx_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_ARRAY_ALL: {
         BashArrayAllNode* all_node = (BashArrayAllNode*)node;
@@ -1640,20 +1507,20 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
             const SpecialVarEntry* sv = bm_find_special_var(all_node->name->chars, all_node->name->len);
             if (sv && sv->all_fn) {
                 MIR_reg_t result = bm_emit_call_0(mt, sv->all_fn);
-                return MIR_new_reg_op(mt->ctx, result);
+                return MIR_new_reg_op(mt->em.ctx, result);
             }
         }
         MIR_op_t arr_val = bm_emit_get_var(mt, all_node->name->chars);
         const char* fn = bm_is_assoc_var(mt, all_node->name->chars)
                          ? "bash_assoc_values" : "bash_array_all";
         MIR_reg_t result = bm_emit_call_1(mt, fn, arr_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_ARRAY_KEYS: {
         BashArrayKeysNode* keys_node = (BashArrayKeysNode*)node;
         MIR_op_t arr_val = bm_emit_get_var(mt, keys_node->name->chars);
         MIR_reg_t result = bm_emit_call_1(mt, "bash_assoc_keys", arr_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_ARRAY_LENGTH: {
         BashArrayLengthNode* len_node = (BashArrayLengthNode*)node;
@@ -1661,23 +1528,23 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
             const SpecialVarEntry* sv = bm_find_special_var(len_node->name->chars, len_node->name->len);
             if (sv && sv->count_fn) {
                 MIR_reg_t result = bm_emit_call_0(mt, sv->count_fn);
-                return MIR_new_reg_op(mt->ctx, result);
+                return MIR_new_reg_op(mt->em.ctx, result);
             }
         }
         MIR_op_t arr_val = bm_emit_get_var(mt, len_node->name->chars);
         const char* fn = bm_is_assoc_var(mt, len_node->name->chars)
                          ? "bash_assoc_length" : "bash_array_length";
         MIR_reg_t result = bm_emit_call_1(mt, fn, arr_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_ARRAY_SLICE: {
         BashArraySliceNode* slice = (BashArraySliceNode*)node;
         MIR_op_t arr_val = bm_emit_get_var(mt, slice->name->chars);
         MIR_op_t off_val = bm_transpile_node(mt, slice->offset);
         MIR_op_t len_val = slice->length ? bm_transpile_node(mt, slice->length)
-                                         : MIR_new_int_op(mt->ctx, -1);
+                                         : MIR_new_int_op(mt->em.ctx, -1);
         MIR_reg_t result = bm_emit_call_3(mt, "bash_array_slice", arr_val, off_val, len_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_ARRAY_LITERAL: {
         BashArrayLiteralNode* arr = (BashArrayLiteralNode*)node;
@@ -1686,10 +1553,10 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         while (elem) {
             MIR_op_t elem_val = bm_transpile_node(mt, elem);
             bm_emit_call_2(mt, "bash_array_append",
-                MIR_new_reg_op(mt->ctx, arr_reg), elem_val);
+                MIR_new_reg_op(mt->em.ctx, arr_reg), elem_val);
             elem = elem->next;
         }
-        return MIR_new_reg_op(mt->ctx, arr_reg);
+        return MIR_new_reg_op(mt->em.ctx, arr_reg);
     }
     default:
         log_debug("bash-mir: unhandled expression type %d", node->node_type);
@@ -1783,7 +1650,7 @@ static MIR_op_t bm_transpile_word(BashMirTranspiler* mt, BashAstNode* node, bool
         if (tilde_eligible) {
             MIR_op_t word_val = bm_emit_string_literal(mt, chars, len);
             MIR_reg_t result = bm_emit_call_1(mt, "bash_expand_tilde", word_val);
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
 
         if (has_backslash) {
@@ -1866,13 +1733,13 @@ static MIR_op_t bm_transpile_cmd_arg(BashMirTranspiler* mt, BashAstNode* node) {
             if (word_is_brace(chars, len)) {
                 MIR_op_t word_val = bm_emit_string_literal(mt, chars, len);
                 MIR_reg_t result = bm_emit_call_1(mt, "bash_expand_brace", word_val);
-                return MIR_new_reg_op(mt->ctx, result);
+                return MIR_new_reg_op(mt->em.ctx, result);
             }
             // glob expansion: *.txt etc.
             if (word_has_glob(chars, len)) {
                 MIR_op_t word_val = bm_emit_string_literal(mt, chars, len);
                 MIR_reg_t result = bm_emit_call_1(mt, "bash_glob_expand", word_val);
-                return MIR_new_reg_op(mt->ctx, result);
+                return MIR_new_reg_op(mt->em.ctx, result);
             }
             // tilde-assign expansion for assignment-like args (FOO=~/bin)
             // only for unquoted words containing '~' with '=' (non-posix mode)
@@ -1885,7 +1752,7 @@ static MIR_op_t bm_transpile_cmd_arg(BashMirTranspiler* mt, BashAstNode* node) {
             if (has_tilde && has_eq && !word->no_backslash_escape) {
                 MIR_op_t val = bm_transpile_node(mt, node);
                 MIR_reg_t tilde_res = bm_emit_call_1(mt, "bash_expand_tilde_assign_arg", val);
-                return MIR_new_reg_op(mt->ctx, tilde_res);
+                return MIR_new_reg_op(mt->em.ctx, tilde_res);
             }
         }
     }
@@ -1893,7 +1760,7 @@ static MIR_op_t bm_transpile_cmd_arg(BashMirTranspiler* mt, BashAstNode* node) {
     if (node->node_type == BASH_AST_NODE_COMMAND_SUB) {
         MIR_op_t raw = bm_transpile_node(mt, node);
         MIR_reg_t split = bm_emit_call_1(mt, "bash_cmd_sub_word_split", raw);
-        return MIR_new_reg_op(mt->ctx, split);
+        return MIR_new_reg_op(mt->em.ctx, split);
     }
     // process substitution: transpile to get /dev/fd path
     if (node->node_type == BASH_AST_NODE_PROCESS_SUB) {
@@ -1907,12 +1774,12 @@ static MIR_op_t bm_transpile_varref(BashMirTranspiler* mt, BashVarRefNode* node)
         const SpecialVarEntry* sv = bm_find_special_var(node->name->chars, node->name->len);
         if (sv && sv->scalar_fn) {
             if (sv->scalar_takes_idx) {
-                MIR_op_t idx = MIR_new_uint_op(mt->ctx, i2it(0));
+                MIR_op_t idx = MIR_new_uint_op(mt->em.ctx, i2it(0));
                 MIR_reg_t result = bm_emit_call_1(mt, sv->scalar_fn, idx);
-                return MIR_new_reg_op(mt->ctx, result);
+                return MIR_new_reg_op(mt->em.ctx, result);
             } else {
                 MIR_reg_t result = bm_emit_call_0(mt, sv->scalar_fn);
-                return MIR_new_reg_op(mt->ctx, result);
+                return MIR_new_reg_op(mt->em.ctx, result);
             }
         }
         return bm_emit_get_var(mt, node->name->chars);
@@ -1932,7 +1799,7 @@ static MIR_op_t bm_transpile_string(BashMirTranspiler* mt, BashStringNode* node)
     while (part) {
         MIR_op_t next_val = bm_transpile_node(mt, part);
         MIR_reg_t concat_result = bm_emit_call_2(mt, "bash_string_concat", result, next_val);
-        result = MIR_new_reg_op(mt->ctx, concat_result);
+        result = MIR_new_reg_op(mt->em.ctx, concat_result);
         part = part->next;
     }
     return result;
@@ -1981,7 +1848,7 @@ static MIR_op_t bm_transpile_concat(BashMirTranspiler* mt, BashConcatNode* node)
             next_val = bm_transpile_node(mt, part);
         }
         MIR_reg_t concat_result = bm_emit_call_2(mt, "bash_string_concat", result, next_val);
-        result = MIR_new_reg_op(mt->ctx, concat_result);
+        result = MIR_new_reg_op(mt->em.ctx, concat_result);
         part = part->next;
     }
     return result;
@@ -1999,7 +1866,7 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
     } else if (exp->variable->len == 1 && (exp->variable->chars[0] == '*' || exp->variable->chars[0] == '@')) {
         // ${*} / ${@} / ${*-default} / ${#*} etc. — get all positional args
         MIR_reg_t all_args = bm_emit_call_0(mt, "bash_get_all_args_string");
-        var_val = MIR_new_reg_op(mt->ctx, all_args);
+        var_val = MIR_new_reg_op(mt->em.ctx, all_args);
     } else if (exp->variable->len >= 1 && exp->variable->chars[0] >= '1' && exp->variable->chars[0] <= '9') {
         // check if ALL chars are digits (positional param)
         bool all_digits = true;
@@ -2015,8 +1882,8 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
                 pos = pos * 10 + (exp->variable->chars[i] - '0');
             }
             MIR_reg_t positional = bm_emit_call_1(mt, "bash_get_positional",
-                MIR_new_int_op(mt->ctx, pos));
-            var_val = MIR_new_reg_op(mt->ctx, positional);
+                MIR_new_int_op(mt->em.ctx, pos));
+            var_val = MIR_new_reg_op(mt->em.ctx, positional);
         } else {
             var_val = bm_emit_get_var(mt, exp->variable->chars);
         }
@@ -2027,14 +1894,14 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
     switch (exp->expand_type) {
     case BASH_EXPAND_LENGTH: {
         MIR_reg_t result = bm_emit_call_1(mt, "bash_string_length", var_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_EXPAND_DEFAULT: {
         MIR_op_t def_val = exp->argument ? bm_transpile_node(mt, exp->argument)
                                          : bm_emit_string_literal(mt, "", 0);
         const char* func = exp->has_colon ? "bash_expand_default" : "bash_expand_default_nocolon";
         MIR_reg_t result = bm_emit_call_2(mt, func, var_val, def_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_EXPAND_ASSIGN_DEFAULT: {
         MIR_op_t def_val = exp->argument ? bm_transpile_node(mt, exp->argument)
@@ -2043,14 +1910,14 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
         const char* func = exp->has_colon ? "bash_expand_assign_default" : "bash_expand_assign_default_nocolon";
         MIR_reg_t result = bm_emit_call_3(mt, func,
             var_name, var_val, def_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_EXPAND_ALT: {
         MIR_op_t alt_val = exp->argument ? bm_transpile_node(mt, exp->argument)
                                          : bm_emit_string_literal(mt, "", 0);
         const char* func = exp->has_colon ? "bash_expand_alt" : "bash_expand_alt_nocolon";
         MIR_reg_t result = bm_emit_call_2(mt, func, var_val, alt_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_EXPAND_TRIM_PREFIX:
     case BASH_EXPAND_TRIM_PREFIX_LONG:
@@ -2067,7 +1934,7 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
         default: break;
         }
         MIR_reg_t result = bm_emit_call_2(mt, func, var_val, pat);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_EXPAND_REPLACE:
     case BASH_EXPAND_REPLACE_ALL:
@@ -2085,7 +1952,7 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
             default:                         func = "bash_expand_replace"; break;
         }
         MIR_reg_t result = bm_emit_call_3(mt, func, var_val, pat, repl);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_EXPAND_SUBSTRING: {
         MIR_op_t offset = exp->argument ? bm_transpile_node(mt, exp->argument)
@@ -2097,10 +1964,10 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
             exp->variable->len == 1 && (exp->variable->chars[0] == '*' || exp->variable->chars[0] == '@'));
         if (is_positional_star_at) {
             MIR_reg_t result = bm_emit_call_2(mt, "bash_positional_slice", offset, length);
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         MIR_reg_t result = bm_emit_call_3(mt, "bash_expand_substring", var_val, offset, length);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_EXPAND_UPPER_FIRST:
     case BASH_EXPAND_UPPER_ALL:
@@ -2137,8 +2004,8 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
                 arr_val = bm_emit_call_0(mt, "bash_get_positional_array");
             }
             MIR_reg_t result = bm_emit_call_3(mt, "bash_array_casemod",
-                MIR_new_reg_op(mt->ctx, arr_val), pat_op, MIR_new_int_op(mt->ctx, mode));
-            return MIR_new_reg_op(mt->ctx, result);
+                MIR_new_reg_op(mt->em.ctx, arr_val), pat_op, MIR_new_int_op(mt->em.ctx, mode));
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         const char* func = NULL;
         switch (exp->expand_type) {
@@ -2151,17 +2018,17 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
         default: break;
         }
         MIR_reg_t result = bm_emit_call_2(mt, func, var_val, pat_op);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_EXPAND_INDIRECT: {
         // ${!var} — indirect expansion: look up value of var, then use that as var name
         MIR_reg_t result = bm_emit_call_1(mt, "bash_expand_indirect", var_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_EXPAND_PREFIX_NAMES: {
         // ${!prefix@} / ${!prefix*} — list variable names matching prefix
         MIR_reg_t result = bm_emit_call_1(mt, "bash_expand_prefix_names", var_val);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     default:
         return var_val;
@@ -2225,81 +2092,81 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         int argc = cmd->arg_count;
         MIR_reg_t dyn_args_ptr = bm_new_temp(mt);
         if (argc > 0) {
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, dyn_args_ptr),
-                             MIR_new_int_op(mt->ctx, argc * (int)sizeof(Item))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, dyn_args_ptr),
+                             MIR_new_int_op(mt->em.ctx, argc * (int)sizeof(Item))));
             int i = 0;
             BashAstNode* arg = cmd->args;
             while (arg && i < argc) {
                 MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
                                        dyn_args_ptr, 0, 1),
                         arg_val));
                 arg = arg->next;
                 i++;
             }
         } else {
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, dyn_args_ptr),
-                             MIR_new_uint_op(mt->ctx, 0)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, dyn_args_ptr),
+                             MIR_new_uint_op(mt->em.ctx, 0)));
         }
 
         // try runtime function first
         MIR_reg_t dyn_result = bm_new_temp(mt);
         MIR_reg_t rt_res = bm_emit_call_3(mt, "bash_call_rt_func",
             dyn_name,
-            MIR_new_reg_op(mt->ctx, dyn_args_ptr),
-            MIR_new_int_op(mt->ctx, argc));
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, dyn_result),
-                         MIR_new_reg_op(mt->ctx, rt_res)));
+            MIR_new_reg_op(mt->em.ctx, dyn_args_ptr),
+            MIR_new_int_op(mt->em.ctx, argc));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, dyn_result),
+                         MIR_new_reg_op(mt->em.ctx, rt_res)));
 
         // if exit code == 127, function not found → try external
         MIR_label_t dyn_try_ext = bm_new_label(mt);
         MIR_label_t dyn_done = bm_new_label(mt);
         MIR_reg_t dyn_ec = bm_emit_call_0(mt, "bash_get_exit_code");
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_BEQ,
-                MIR_new_label_op(mt->ctx, dyn_try_ext),
-                MIR_new_reg_op(mt->ctx, dyn_ec),
-                MIR_new_uint_op(mt->ctx, i2it(127))));
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, dyn_done)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_BEQ,
+                MIR_new_label_op(mt->em.ctx, dyn_try_ext),
+                MIR_new_reg_op(mt->em.ctx, dyn_ec),
+                MIR_new_uint_op(mt->em.ctx, i2it(127))));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, dyn_done)));
 
         // external fallback
-        MIR_append_insn(mt->ctx, mt->current_func_item, dyn_try_ext);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, dyn_try_ext);
         {
             int total_argc = 1 + argc;
             MIR_reg_t ext_args = bm_new_temp(mt);
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, ext_args),
-                             MIR_new_int_op(mt->ctx, total_argc * (int)sizeof(Item))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, ext_args),
+                             MIR_new_int_op(mt->em.ctx, total_argc * (int)sizeof(Item))));
             // argv[0] = dynamic name
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ext_args, 0, 1),
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->em.ctx, MIR_T_I64, 0, ext_args, 0, 1),
                     dyn_name));
             // argv[1..] = arguments
             for (int i = 0; i < argc; i++) {
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, (i + 1) * (int)sizeof(Item),
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, (i + 1) * (int)sizeof(Item),
                                        ext_args, 0, 1),
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
                                        dyn_args_ptr, 0, 1)));
             }
             MIR_reg_t ext_res = bm_emit_call_2(mt, "bash_exec_external",
-                MIR_new_reg_op(mt->ctx, ext_args),
-                MIR_new_int_op(mt->ctx, total_argc));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, dyn_result),
-                             MIR_new_reg_op(mt->ctx, ext_res)));
+                MIR_new_reg_op(mt->em.ctx, ext_args),
+                MIR_new_int_op(mt->em.ctx, total_argc));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, dyn_result),
+                             MIR_new_reg_op(mt->em.ctx, ext_res)));
         }
 
-        MIR_append_insn(mt->ctx, mt->current_func_item, dyn_done);
-        return MIR_new_reg_op(mt->ctx, dyn_result);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, dyn_done);
+        return MIR_new_reg_op(mt->em.ctx, dyn_result);
     }
 
     const char* cmd_name = name_node->text->chars;
@@ -2334,8 +2201,8 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         int argc = cmd->arg_count;
         if (argc == 0) {
             MIR_reg_t result = bm_emit_call_2(mt, "bash_builtin_echo",
-                MIR_new_uint_op(mt->ctx, 0), MIR_new_int_op(mt->ctx, 0));
-            return MIR_new_reg_op(mt->ctx, result);
+                MIR_new_uint_op(mt->em.ctx, 0), MIR_new_int_op(mt->em.ctx, 0));
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
 
         // check if any arg needs $@ splatting
@@ -2365,37 +2232,37 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             }
             MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
             MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_reg_op(mt->ctx, ptr_r)));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                             MIR_new_reg_op(mt->ctx, cnt_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
         } else {
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)mem_alloc(argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                             MIR_new_uint_op(mt->em.ctx, (uint64_t)(uintptr_t)mem_alloc(argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
 
             int i = 0;
             BashAstNode* arg = cmd->args;
             while (arg && i < argc) {
                 MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
                                        args_ptr, 0, 1),
                         arg_val));
                 arg = arg->next;
                 i++;
             }
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                             MIR_new_int_op(mt->ctx, argc)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                             MIR_new_int_op(mt->em.ctx, argc)));
         }
 
         MIR_reg_t result = bm_emit_call_2(mt, "bash_builtin_echo",
-            MIR_new_reg_op(mt->ctx, args_ptr), MIR_new_reg_op(mt->ctx, argc_reg));
-        return MIR_new_reg_op(mt->ctx, result);
+            MIR_new_reg_op(mt->em.ctx, args_ptr), MIR_new_reg_op(mt->em.ctx, argc_reg));
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
 
     if (cmd_len == 6 && memcmp(cmd_name, "printf", 6) == 0) {
@@ -2429,38 +2296,38 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             }
             MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
             MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_reg_op(mt->ctx, ptr_r)));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                             MIR_new_reg_op(mt->ctx, cnt_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
         } else {
             int total_argc = cmd->arg_count;
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)mem_alloc(total_argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                             MIR_new_uint_op(mt->em.ctx, (uint64_t)(uintptr_t)mem_alloc(total_argc * sizeof(Item), MEM_CAT_BASH_RUNTIME))));
             int i = 0;
             BashAstNode* arg = cmd->args;
             while (arg && i < total_argc) {
                 MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
                                        args_ptr, 0, 1),
                         arg_val));
                 arg = arg->next;
                 i++;
             }
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                             MIR_new_int_op(mt->ctx, total_argc)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                             MIR_new_int_op(mt->em.ctx, total_argc)));
         }
 
         MIR_reg_t result = bm_emit_call_2(mt, "bash_builtin_printf",
-            MIR_new_reg_op(mt->ctx, args_ptr),
-            MIR_new_reg_op(mt->ctx, argc_reg));
-        return MIR_new_reg_op(mt->ctx, result);
+            MIR_new_reg_op(mt->em.ctx, args_ptr),
+            MIR_new_reg_op(mt->em.ctx, argc_reg));
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
 
     // : (colon) — no-op, always returns 0
@@ -2472,24 +2339,24 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             arg = arg->next;
         }
         MIR_reg_t result = bm_emit_call_0(mt, "bash_builtin_true");
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
 
     if (cmd_len == 4 && memcmp(cmd_name, "true", 4) == 0) {
         MIR_reg_t result = bm_emit_call_0(mt, "bash_builtin_true");
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
 
     if (cmd_len == 5 && memcmp(cmd_name, "false", 5) == 0) {
         MIR_reg_t result = bm_emit_call_0(mt, "bash_builtin_false");
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
 
     // eval — concatenate args with spaces and evaluate as bash code
     if (cmd_len == 4 && memcmp(cmd_name, "eval", 4) == 0) {
         if (!cmd->args) {
             MIR_reg_t result = bm_emit_call_0(mt, "bash_builtin_true");
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         // build concatenated string from args
         MIR_op_t combined = bm_transpile_cmd_arg(mt, cmd->args);
@@ -2500,8 +2367,8 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             MIR_reg_t with_space = bm_emit_call_2(mt, "bash_string_concat", combined, space);
             MIR_op_t next_val = bm_transpile_cmd_arg(mt, arg);
             MIR_reg_t concatenated = bm_emit_call_2(mt, "bash_string_concat",
-                MIR_new_reg_op(mt->ctx, with_space), next_val);
-            combined = MIR_new_reg_op(mt->ctx, concatenated);
+                MIR_new_reg_op(mt->em.ctx, with_space), next_val);
+            combined = MIR_new_reg_op(mt->em.ctx, concatenated);
             arg = arg->next;
         }
 
@@ -2520,9 +2387,9 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                                         : bm_emit_string_literal(mt, "", 0);
                 if (a->is_append) {
                     // a+=val in prefix position: compute appended value using current var
-                    MIR_op_t old_op = MIR_new_reg_op(mt->ctx, pa_eval_saved[n_pa_eval]);
+                    MIR_op_t old_op = MIR_new_reg_op(mt->em.ctx, pa_eval_saved[n_pa_eval]);
                     MIR_reg_t r = bm_emit_call_3(mt, "bash_var_append", nop, old_op, vop);
-                    vop = MIR_new_reg_op(mt->ctx, r);
+                    vop = MIR_new_reg_op(mt->em.ctx, r);
                 }
                 bm_emit_call_void_2(mt, "bash_set_var", nop, vop);
                 n_pa_eval++;
@@ -2535,10 +2402,10 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         // restore prefix assignments (skip if POSIXLY_CORRECT: builtins get permanent prefix assigns)
         for (int i = 0; i < n_pa_eval; i++) {
             MIR_op_t nop = bm_emit_string_literal(mt, pa_eval_names[i]->chars, pa_eval_names[i]->len);
-            bm_emit_call_void_2(mt, "bash_restore_var_if_not_posix", nop, MIR_new_reg_op(mt->ctx, pa_eval_saved[i]));
+            bm_emit_call_void_2(mt, "bash_restore_var_if_not_posix", nop, MIR_new_reg_op(mt->em.ctx, pa_eval_saved[i]));
         }
 
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
 
     if (cmd_len == 5 && memcmp(cmd_name, "shift", 5) == 0) {
@@ -2547,12 +2414,12 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             MIR_op_t arg_val = bm_transpile_cmd_arg(mt, cmd->args);
             MIR_reg_t n_reg = bm_emit_call_1(mt, "bash_to_int_val", arg_val);
             MIR_reg_t result = bm_emit_call_1(mt, "bash_shift_args",
-                MIR_new_reg_op(mt->ctx, n_reg));
-            return MIR_new_reg_op(mt->ctx, result);
+                MIR_new_reg_op(mt->em.ctx, n_reg));
+            return MIR_new_reg_op(mt->em.ctx, result);
         } else {
             MIR_reg_t result = bm_emit_call_1(mt, "bash_shift_args",
-                MIR_new_int_op(mt->ctx, 1));
-            return MIR_new_reg_op(mt->ctx, result);
+                MIR_new_int_op(mt->em.ctx, 1));
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
     }
 
@@ -2594,7 +2461,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             dir_arg = bm_emit_string_literal(mt, "", 0);
         }
         MIR_reg_t result = bm_emit_call_1(mt, "bash_builtin_cd", dir_arg);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
 
     if (cmd_len == 5 && memcmp(cmd_name, "unset", 5) == 0) {
@@ -2722,7 +2589,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         // restore prefix assignments
         for (int i = 0; i < n_prefix; i++) {
             MIR_op_t name_op = bm_emit_string_literal(mt, saved_names[i]->chars, saved_names[i]->len);
-            bm_emit_call_void_2(mt, "bash_set_var", name_op, MIR_new_reg_op(mt->ctx, saved_vals[i]));
+            bm_emit_call_void_2(mt, "bash_set_var", name_op, MIR_new_reg_op(mt->em.ctx, saved_vals[i]));
         }
         return result;
     }
@@ -2754,7 +2621,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         if (cmd->args) {
             MIR_op_t filename = bm_transpile_cmd_arg(mt, cmd->args);
             MIR_reg_t result = bm_emit_call_1(mt, "bash_source_file", filename);
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         return bm_emit_int_literal(mt, 1);
     }
@@ -2843,7 +2710,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             // Use array-based approach with IFS splitting for unquoted expansions.
             // This supports: set x $var (splits $var by IFS into positional params)
             MIR_reg_t arr_reg = bm_emit_call_0(mt, "bash_array_new");
-            MIR_op_t arr_val = MIR_new_reg_op(mt->ctx, arr_reg);
+            MIR_op_t arr_val = MIR_new_reg_op(mt->em.ctx, arr_reg);
             BashAstNode* p = pos_args;
             while (p) {
                 // check if this arg is an unquoted variable reference or expansion
@@ -2859,10 +2726,10 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                 MIR_op_t val = bm_transpile_cmd_arg(mt, p);
                 if (needs_ifs_split) {
                     MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_ifs_split_into", arr_val, val);
-                    arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                    arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
                 } else {
                     MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_array_append", arr_val, val);
-                    arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+                    arr_val = MIR_new_reg_op(mt->em.ctx, new_arr);
                 }
                 p = p->next;
             }
@@ -2884,7 +2751,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                             if (opt->text) {
                                 MIR_op_t opt_val = bm_emit_string_literal(mt, opt->text->chars, opt->text->len);
                                 bm_emit_call_void_2(mt, "bash_set_option", opt_val,
-                                    MIR_new_uint_op(mt->ctx, 1));
+                                    MIR_new_uint_op(mt->em.ctx, 1));
                             }
                         }
                     } else if (flag[0] == '+' && flag[1] == 'o') {
@@ -2895,7 +2762,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                             if (opt->text) {
                                 MIR_op_t opt_val = bm_emit_string_literal(mt, opt->text->chars, opt->text->len);
                                 bm_emit_call_void_2(mt, "bash_set_option", opt_val,
-                                    MIR_new_uint_op(mt->ctx, 0));
+                                    MIR_new_uint_op(mt->em.ctx, 0));
                             }
                         }
                     } else if (flag[0] == '-') {
@@ -2904,7 +2771,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                             char opt_ch[2] = {flag[i], '\0'};
                             MIR_op_t opt_val = bm_emit_string_literal(mt, opt_ch, 1);
                             bm_emit_call_void_2(mt, "bash_set_option", opt_val,
-                                MIR_new_uint_op(mt->ctx, 1));
+                                MIR_new_uint_op(mt->em.ctx, 1));
                         }
                     } else if (flag[0] == '+') {
                         // set +eux etc. — disable each flag
@@ -2912,14 +2779,14 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                             char opt_ch[2] = {flag[i], '\0'};
                             MIR_op_t opt_val = bm_emit_string_literal(mt, opt_ch, 1);
                             bm_emit_call_void_2(mt, "bash_set_option", opt_val,
-                                MIR_new_uint_op(mt->ctx, 0));
+                                MIR_new_uint_op(mt->em.ctx, 0));
                         }
                     }
                 }
             }
             if (arg) arg = arg->next;
         }
-        bm_emit_call_void_1(mt, "bash_set_exit_code", MIR_new_int_op(mt->ctx, 0));
+        bm_emit_call_void_1(mt, "bash_set_exit_code", MIR_new_int_op(mt->em.ctx, 0));
         return bm_emit_int_literal(mt, 0);
     }
 
@@ -2936,7 +2803,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                 if (enable || disable) {
                     MIR_op_t opt_val = bm_emit_string_literal(mt, "extdebug", 8);
                     bm_emit_call_void_2(mt, "bash_set_option", opt_val,
-                        MIR_new_int_op(mt->ctx, enable ? 1 : 0));
+                        MIR_new_int_op(mt->em.ctx, enable ? 1 : 0));
                     return bm_emit_int_literal(mt, 0);
                 }
             }
@@ -2950,25 +2817,25 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         if (argc == 0) return bm_emit_int_literal(mt, 0);
 
         MIR_reg_t args_ptr = bm_new_temp(mt);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, args_ptr),
-                         MIR_new_int_op(mt->ctx, argc * (int)sizeof(Item))));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                         MIR_new_int_op(mt->em.ctx, argc * (int)sizeof(Item))));
         int i = 0;
         BashAstNode* arg = cmd->args;
         while (arg && i < argc) {
             MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
                                    args_ptr, 0, 1),
                     arg_val));
             arg = arg->next;
             i++;
         }
         MIR_reg_t result = bm_emit_call_2(mt, "bash_builtin_let",
-            MIR_new_reg_op(mt->ctx, args_ptr),
-            MIR_new_int_op(mt->ctx, argc));
-        return MIR_new_reg_op(mt->ctx, result);
+            MIR_new_reg_op(mt->em.ctx, args_ptr),
+            MIR_new_int_op(mt->em.ctx, argc));
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
 
     // type — describe command type
@@ -3099,7 +2966,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                 // apply readonly/export to the assigned variable
                 if (is_readonly) {
                     bm_emit_call_void_2(mt, "bash_declare_var", nop,
-                        MIR_new_int_op(mt->ctx, BASH_ATTR_READONLY));
+                        MIR_new_int_op(mt->em.ctx, BASH_ATTR_READONLY));
                 } else {
                     bm_emit_call_void_1(mt, "bash_export_var", nop);
                 }
@@ -3123,7 +2990,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                     MIR_op_t name_op = bm_emit_string_literal(mt, w->text->chars, w->text->len);
                     if (is_readonly) {
                         bm_emit_call_void_2(mt, "bash_declare_var", name_op,
-                            MIR_new_int_op(mt->ctx, BASH_ATTR_READONLY));
+                            MIR_new_int_op(mt->em.ctx, BASH_ATTR_READONLY));
                     } else {
                         bm_emit_call_void_1(mt, "bash_export_var", name_op);
                     }
@@ -3142,8 +3009,8 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         } else {
             ret_val = bm_emit_int_literal(mt, 0);
         }
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_ret_insn(mt->ctx, 1, ret_val));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_ret_insn(mt->em.ctx, 1, ret_val));
         return ret_val;
     }
 
@@ -3184,39 +3051,39 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             }
             MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
             MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_reg_op(mt->ctx, ptr_r)));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                             MIR_new_reg_op(mt->ctx, cnt_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
         } else if (argc > 0) {
             // static arg count: allocate args buffer on stack
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_int_op(mt->ctx, argc * (int)sizeof(Item))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                             MIR_new_int_op(mt->em.ctx, argc * (int)sizeof(Item))));
             int i = 0;
             BashAstNode* arg = cmd->args;
             while (arg && i < argc) {
                 MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
                                        args_ptr, 0, 1),
                         arg_val));
                 arg = arg->next;
                 i++;
             }
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                             MIR_new_int_op(mt->ctx, argc)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                             MIR_new_int_op(mt->em.ctx, argc)));
         } else {
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_uint_op(mt->ctx, 0)));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, argc_reg),
-                             MIR_new_int_op(mt->ctx, 0)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, args_ptr),
+                             MIR_new_uint_op(mt->em.ctx, 0)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, argc_reg),
+                             MIR_new_int_op(mt->em.ctx, 0)));
         }
 
         // handle prefix assignments (e.g., IFS=: ff args)
@@ -3244,34 +3111,34 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
 
         // create proto + forward reference
         char proto_name[160];
-        snprintf(proto_name, sizeof(proto_name), "p_%s_call_%d", mir_name, mt->label_counter++);
+        snprintf(proto_name, sizeof(proto_name), "p_%s_call_%d", mir_name, mt->em.label_counter++);
         MIR_type_t res_type = MIR_T_I64;
         MIR_var_t call_params[2] = {
             {MIR_T_I64, "a", 0},
             {MIR_T_I64, "b", 0}
         };
-        MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, &res_type, 2, call_params);
+        MIR_item_t proto = MIR_new_proto_arr(mt->em.ctx, proto_name, 1, &res_type, 2, call_params);
 
         bm_emit_call_void_0(mt, "bash_push_call_frame");
 
         MIR_reg_t result = bm_new_temp(mt);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_call_insn(mt->ctx, 5,
-                MIR_new_ref_op(mt->ctx, proto),
-                MIR_new_ref_op(mt->ctx, uf->func_item),
-                MIR_new_reg_op(mt->ctx, result),
-                MIR_new_reg_op(mt->ctx, args_ptr),
-                MIR_new_reg_op(mt->ctx, argc_reg)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_call_insn(mt->em.ctx, 5,
+                MIR_new_ref_op(mt->em.ctx, proto),
+                MIR_new_ref_op(mt->em.ctx, uf->func_item),
+                MIR_new_reg_op(mt->em.ctx, result),
+                MIR_new_reg_op(mt->em.ctx, args_ptr),
+                MIR_new_reg_op(mt->em.ctx, argc_reg)));
 
             bm_emit_call_void_0(mt, "bash_pop_call_frame");
 
         // restore prefix assignments
         for (int i = 0; i < n_pa; i++) {
             MIR_op_t nop = bm_emit_string_literal(mt, pa_names[i]->chars, pa_names[i]->len);
-            bm_emit_call_void_2(mt, "bash_set_var", nop, MIR_new_reg_op(mt->ctx, pa_saved[i]));
+            bm_emit_call_void_2(mt, "bash_set_var", nop, MIR_new_reg_op(mt->em.ctx, pa_saved[i]));
         }
 
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
 
     // handle prefix assignments for runtime/external commands (e.g., IFS=: cmd args)
@@ -3291,9 +3158,9 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                                         : bm_emit_string_literal(mt, "", 0);
                 if (a->is_append) {
                     // a+=val in prefix position: compute appended value using current var
-                    MIR_op_t old_op = MIR_new_reg_op(mt->ctx, pa_ext_saved[n_pa_ext]);
+                    MIR_op_t old_op = MIR_new_reg_op(mt->em.ctx, pa_ext_saved[n_pa_ext]);
                     MIR_reg_t r = bm_emit_call_3(mt, "bash_var_append", nop, old_op, vop);
-                    vop = MIR_new_reg_op(mt->ctx, r);
+                    vop = MIR_new_reg_op(mt->em.ctx, r);
                 }
                 bm_emit_call_void_2(mt, "bash_set_cmd_env_var", nop, vop);
                 n_pa_ext++;
@@ -3339,61 +3206,61 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             }
             MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
             MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_args_ptr),
-                             MIR_new_reg_op(mt->ctx, ptr_r)));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_argc_reg),
-                             MIR_new_reg_op(mt->ctx, cnt_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_args_ptr),
+                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_argc_reg),
+                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
         } else if (argc > 0) {
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, rt_args_ptr),
-                             MIR_new_int_op(mt->ctx, argc * (int)sizeof(Item))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, rt_args_ptr),
+                             MIR_new_int_op(mt->em.ctx, argc * (int)sizeof(Item))));
             int i = 0;
             BashAstNode* arg = cmd->args;
             while (arg && i < argc) {
                 MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
                                        rt_args_ptr, 0, 1),
                         arg_val));
                 arg = arg->next;
                 i++;
             }
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_argc_reg),
-                             MIR_new_int_op(mt->ctx, argc)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_argc_reg),
+                             MIR_new_int_op(mt->em.ctx, argc)));
         } else {
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_args_ptr),
-                             MIR_new_uint_op(mt->ctx, 0)));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_argc_reg),
-                             MIR_new_int_op(mt->ctx, 0)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_args_ptr),
+                             MIR_new_uint_op(mt->em.ctx, 0)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_argc_reg),
+                             MIR_new_int_op(mt->em.ctx, 0)));
         }
 
         MIR_reg_t rt_res = bm_emit_call_3(mt, "bash_call_rt_func",
             rt_name_val,
-            MIR_new_reg_op(mt->ctx, rt_args_ptr),
-            MIR_new_reg_op(mt->ctx, rt_argc_reg));
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_result_reg),
-                         MIR_new_reg_op(mt->ctx, rt_res)));
+            MIR_new_reg_op(mt->em.ctx, rt_args_ptr),
+            MIR_new_reg_op(mt->em.ctx, rt_argc_reg));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_result_reg),
+                         MIR_new_reg_op(mt->em.ctx, rt_res)));
         // if exit code == 127, function not found → try external
         MIR_reg_t rt_ec = bm_emit_call_0(mt, "bash_get_exit_code");
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_BEQ,
-                MIR_new_label_op(mt->ctx, try_external_label),
-                MIR_new_reg_op(mt->ctx, rt_ec),
-                MIR_new_uint_op(mt->ctx, i2it(127))));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_BEQ,
+                MIR_new_label_op(mt->em.ctx, try_external_label),
+                MIR_new_reg_op(mt->em.ctx, rt_ec),
+                MIR_new_uint_op(mt->em.ctx, i2it(127))));
         // runtime function ran — jump to done
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done_label_rt)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, done_label_rt)));
     }
 
     // label: try external command execution via posix_spawn
-    MIR_append_insn(mt->ctx, mt->current_func_item, try_external_label);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, try_external_label);
     // fallback: external command execution via posix_spawn
     // build argv[] with command name as argv[0] + all arguments
     {
@@ -3427,22 +3294,22 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             }
             MIR_reg_t ptr_r = bm_emit_call_0(mt, "bash_arg_builder_get_ptr");
             MIR_reg_t cnt_r = bm_emit_call_0(mt, "bash_arg_builder_get_count");
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ext_args_ptr),
-                             MIR_new_reg_op(mt->ctx, ptr_r)));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ext_argc_reg),
-                             MIR_new_reg_op(mt->ctx, cnt_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, ext_args_ptr),
+                             MIR_new_reg_op(mt->em.ctx, ptr_r)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, ext_argc_reg),
+                             MIR_new_reg_op(mt->em.ctx, cnt_r)));
         } else {
             int total_argc = 1 + cmd->arg_count;
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, ext_args_ptr),
-                             MIR_new_int_op(mt->ctx, total_argc * (int)sizeof(Item))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_ALLOCA, MIR_new_reg_op(mt->em.ctx, ext_args_ptr),
+                             MIR_new_int_op(mt->em.ctx, total_argc * (int)sizeof(Item))));
 
             // argv[0] = command name
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV,
-                    MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ext_args_ptr, 0, 1),
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->em.ctx, MIR_T_I64, 0, ext_args_ptr, 0, 1),
                     name_val));
 
             // argv[1..] = arguments
@@ -3450,37 +3317,37 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             BashAstNode* arg = cmd->args;
             while (arg && i < total_argc) {
                 MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->em.ctx, MIR_T_I64, i * (int)sizeof(Item),
                                        ext_args_ptr, 0, 1),
                         arg_val));
                 arg = arg->next;
                 i++;
             }
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ext_argc_reg),
-                             MIR_new_int_op(mt->ctx, total_argc)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, ext_argc_reg),
+                             MIR_new_int_op(mt->em.ctx, total_argc)));
         }
 
         MIR_reg_t ext_result = bm_emit_call_2(mt, "bash_exec_external",
-            MIR_new_reg_op(mt->ctx, ext_args_ptr),
-            MIR_new_reg_op(mt->ctx, ext_argc_reg));
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_result_reg),
-                         MIR_new_reg_op(mt->ctx, ext_result)));
+            MIR_new_reg_op(mt->em.ctx, ext_args_ptr),
+            MIR_new_reg_op(mt->em.ctx, ext_argc_reg));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, rt_result_reg),
+                         MIR_new_reg_op(mt->em.ctx, ext_result)));
     }
 
     // done: rt_result_reg holds the final result
-    MIR_append_insn(mt->ctx, mt->current_func_item, done_label_rt);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, done_label_rt);
 
     // restore prefix assignments for runtime/external commands (also restores OS environ)
     for (int i = 0; i < n_pa_ext; i++) {
         MIR_op_t nop = bm_emit_string_literal(mt, pa_ext_names[i]->chars, pa_ext_names[i]->len);
-        bm_emit_call_void_2(mt, "bash_restore_cmd_env_var", nop, MIR_new_reg_op(mt->ctx, pa_ext_saved[i]));
+        bm_emit_call_void_2(mt, "bash_restore_cmd_env_var", nop, MIR_new_reg_op(mt->em.ctx, pa_ext_saved[i]));
     }
 
-    return MIR_new_reg_op(mt->ctx, rt_result_reg);
+    return MIR_new_reg_op(mt->em.ctx, rt_result_reg);
 }
 
 // ============================================================================
@@ -3546,7 +3413,7 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
                 // declare -n ref (no value yet): just set NAMEREF flag
                 const char* declare_fn = node->is_local ? "bash_declare_local_var" : "bash_declare_var";
                 bm_emit_call_void_2(mt, declare_fn, name_op,
-                    MIR_new_int_op(mt->ctx, BASH_ATTR_NAMEREF));
+                    MIR_new_int_op(mt->em.ctx, BASH_ATTR_NAMEREF));
             }
             return;
         }
@@ -3563,26 +3430,26 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
             int attrs_first = node->declare_flags & ~BASH_ATTR_READONLY;
             if (attrs_first) {
                 bm_emit_call_void_2(mt, declare_fn, name_op,
-                    MIR_new_int_op(mt->ctx, attrs_first));
+                    MIR_new_int_op(mt->em.ctx, attrs_first));
             }
             // readonly will be added after value assignment (see below)
         } else {
             // no value: set all attrs including readonly
             bm_emit_call_void_2(mt, declare_fn, name_op,
-                MIR_new_int_op(mt->ctx, node->declare_flags));
+                MIR_new_int_op(mt->em.ctx, node->declare_flags));
         }
 
         // declare -A map → create assoc array if no value assigned
         if ((node->declare_flags & BASH_ATTR_ASSOC_ARRAY) && !node->value) {
             MIR_reg_t assoc_reg = bm_emit_call_0(mt, "bash_assoc_new");
-            bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, assoc_reg));
+            bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->em.ctx, assoc_reg));
             return;
         }
         // declare -A map=([key]=val ...) → create assoc array and init pairs
         if ((node->declare_flags & BASH_ATTR_ASSOC_ARRAY) && node->value &&
             node->value->node_type == BASH_AST_NODE_ARRAY_LITERAL && !node->is_append) {
             MIR_reg_t assoc_reg = bm_emit_call_0(mt, "bash_assoc_new");
-            MIR_op_t assoc_val = MIR_new_reg_op(mt->ctx, assoc_reg);
+            MIR_op_t assoc_val = MIR_new_reg_op(mt->em.ctx, assoc_reg);
             BashArrayLiteralNode* arr_lit = (BashArrayLiteralNode*)node->value;
             BashAstNode* elem = arr_lit->elements;
             while (elem) {
@@ -3595,14 +3462,14 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
             if (node->declare_flags & BASH_ATTR_READONLY) {
                 MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
                 const char* rfn = node->is_local ? "bash_declare_local_var" : "bash_declare_var";
-                bm_emit_call_void_2(mt, rfn, name_op, MIR_new_int_op(mt->ctx, BASH_ATTR_READONLY));
+                bm_emit_call_void_2(mt, rfn, name_op, MIR_new_int_op(mt->em.ctx, BASH_ATTR_READONLY));
             }
             return;
         }
         // declare -a arr → create indexed array if no value assigned
         if ((node->declare_flags & BASH_ATTR_INDEXED_ARRAY) && !node->value) {
             MIR_reg_t arr_reg = bm_emit_call_0(mt, "bash_array_new");
-            bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, arr_reg));
+            bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->em.ctx, arr_reg));
             return;
         }
         // declare -a arr=([0]=val ...) or typeset -ia arr=(...) → use init_word for each element
@@ -3611,7 +3478,7 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
             node->value && node->value->node_type == BASH_AST_NODE_ARRAY_LITERAL &&
             !node->is_append) {
             MIR_reg_t arr_reg = bm_emit_call_0(mt, "bash_array_new");
-            MIR_op_t arr_val = MIR_new_reg_op(mt->ctx, arr_reg);
+            MIR_op_t arr_val = MIR_new_reg_op(mt->em.ctx, arr_reg);
             MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
             BashArrayLiteralNode* arr_lit = (BashArrayLiteralNode*)node->value;
             BashAstNode* elem = arr_lit->elements;
@@ -3623,7 +3490,7 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
             bm_emit_set_var(mt, node->name->chars, arr_val);
             if (node->declare_flags & BASH_ATTR_READONLY) {
                 const char* rfn = node->is_local ? "bash_declare_local_var" : "bash_declare_var";
-                bm_emit_call_void_2(mt, rfn, name_op, MIR_new_int_op(mt->ctx, BASH_ATTR_READONLY));
+                bm_emit_call_void_2(mt, rfn, name_op, MIR_new_int_op(mt->em.ctx, BASH_ATTR_READONLY));
             }
             return;
         }
@@ -3642,7 +3509,7 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
             node->value->node_type != BASH_AST_NODE_RAW_STRING &&
             node->value->node_type != BASH_AST_NODE_ARRAY_LITERAL) {
             MIR_reg_t tilde_res = bm_emit_call_1(mt, "bash_expand_tilde_assign", value);
-            value = MIR_new_reg_op(mt->ctx, tilde_res);
+            value = MIR_new_reg_op(mt->em.ctx, tilde_res);
         }
     } else if (node->is_export) {
         // export var (no value) — just mark as exported, don't overwrite existing value
@@ -3668,10 +3535,10 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
         if (node->is_append && !is_assoc) {
             // arr[idx]+=val → single runtime call handles get+append+set
             bm_emit_call_void_4(mt, "bash_array_elem_append",
-                MIR_new_reg_op(mt->ctx, arr_reg), idx_val, value, name_op);
+                MIR_new_reg_op(mt->em.ctx, arr_reg), idx_val, value, name_op);
         } else {
             const char* fn = is_assoc ? "bash_assoc_set" : "bash_array_set";
-            bm_emit_call_3(mt, fn, MIR_new_reg_op(mt->ctx, arr_reg), idx_val, value);
+            bm_emit_call_3(mt, fn, MIR_new_reg_op(mt->em.ctx, arr_reg), idx_val, value);
         }
     } else if (node->is_append && node->value &&
                node->value->node_type == BASH_AST_NODE_ARRAY_LITERAL) {
@@ -3691,7 +3558,7 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
         // plain array literal assignment: x=([0]=7+11) or x=(1 2 3)
         // use bash_array_init_word so runtime can apply integer coercion if needed
         MIR_reg_t arr_reg = bm_emit_call_0(mt, "bash_array_new");
-        MIR_op_t arr_val = MIR_new_reg_op(mt->ctx, arr_reg);
+        MIR_op_t arr_val = MIR_new_reg_op(mt->em.ctx, arr_reg);
         MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
         BashArrayLiteralNode* arr_lit = (BashArrayLiteralNode*)node->value;
         BashAstNode* elem = arr_lit->elements;
@@ -3710,9 +3577,9 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
         MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
         MIR_reg_t result = bm_emit_call_3(mt, "bash_var_append", name_op, old_val, value);
         if (node->is_local)
-            bm_emit_set_local_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, result));
+            bm_emit_set_local_var(mt, node->name->chars, MIR_new_reg_op(mt->em.ctx, result));
         else
-            bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, result));
+            bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->em.ctx, result));
     } else {
         if (node->is_local)
             bm_emit_set_local_var(mt, node->name->chars, value);
@@ -3731,7 +3598,7 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
         MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
         const char* readonly_fn = node->is_local ? "bash_declare_local_var" : "bash_declare_var";
         bm_emit_call_void_2(mt, readonly_fn, name_op,
-            MIR_new_int_op(mt->ctx, BASH_ATTR_READONLY));
+            MIR_new_int_op(mt->em.ctx, BASH_ATTR_READONLY));
     }
 }
 
@@ -3763,20 +3630,20 @@ static void bm_transpile_if(BashMirTranspiler* mt, BashIfNode* node) {
     else
         false_target = no_branch_label;   // no branch → reset exit code
 
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_BNE,
-                     MIR_new_label_op(mt->ctx, false_target),
-                     MIR_new_reg_op(mt->ctx, ec),
-                     MIR_new_uint_op(mt->ctx, i2it(0))));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_BNE,
+                     MIR_new_label_op(mt->em.ctx, false_target),
+                     MIR_new_reg_op(mt->em.ctx, ec),
+                     MIR_new_uint_op(mt->em.ctx, i2it(0))));
 
     // then body
     bm_transpile_statement(mt, node->then_body);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, end_label)));
 
     // elif clauses
     if (node->elif_clauses) {
-        MIR_append_insn(mt->ctx, mt->current_func_item, false_target);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, false_target);
 
         BashAstNode* elif = node->elif_clauses;
         while (elif) {
@@ -3796,18 +3663,18 @@ static void bm_transpile_if(BashMirTranspiler* mt, BashIfNode* node) {
 
             MIR_reg_t elif_ec = bm_emit_call_0(mt, "bash_get_exit_code");
 
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_BNE,
-                             MIR_new_label_op(mt->ctx, next_elif),
-                             MIR_new_reg_op(mt->ctx, elif_ec),
-                             MIR_new_uint_op(mt->ctx, i2it(0))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_BNE,
+                             MIR_new_label_op(mt->em.ctx, next_elif),
+                             MIR_new_reg_op(mt->em.ctx, elif_ec),
+                             MIR_new_uint_op(mt->em.ctx, i2it(0))));
 
             bm_transpile_statement(mt, elif_node->body);
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, end_label)));
 
             if (elif->next) {
-                MIR_append_insn(mt->ctx, mt->current_func_item, next_elif);
+                MIR_append_insn(mt->em.ctx, mt->em.func_item, next_elif);
             }
             elif = elif->next;
         }
@@ -3815,17 +3682,17 @@ static void bm_transpile_if(BashMirTranspiler* mt, BashIfNode* node) {
 
     // else body
     if (node->else_body) {
-        MIR_append_insn(mt->ctx, mt->current_func_item, else_label);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, else_label);
         bm_transpile_statement(mt, node->else_body);
     }
 
     // no-branch path: reset exit code to 0 (condition's exit code shouldn't leak)
     if (need_no_branch) {
-        MIR_append_insn(mt->ctx, mt->current_func_item, no_branch_label);
-        bm_emit_call_void_1(mt, "bash_set_exit_code", MIR_new_int_op(mt->ctx, 0));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, no_branch_label);
+        bm_emit_call_void_1(mt, "bash_set_exit_code", MIR_new_int_op(mt->em.ctx, 0));
     }
 
-    MIR_append_insn(mt->ctx, mt->current_func_item, end_label);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, end_label);
 }
 
 // ============================================================================
@@ -3878,7 +3745,7 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
     if (array_name || is_at_iter) {
         // POSIX: for loop exit code is 0 if body never runs, else body's last exit code
         bm_emit_call_void_1(mt, "bash_set_exit_code",
-            MIR_new_int_op(mt->ctx, 0));
+            MIR_new_int_op(mt->em.ctx, 0));
 
         // for assoc arrays, first materialize values/keys as an indexed array
         MIR_op_t arr_val;
@@ -3886,22 +3753,22 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
         if (is_at_iter) {
             // for var in "$@" → iterate over positional parameters
             MIR_reg_t r = bm_emit_call_0(mt, "bash_get_all_args");
-            arr_val = MIR_new_reg_op(mt->ctx, r);
+            arr_val = MIR_new_reg_op(mt->em.ctx, r);
             is_special_array = true;
         } else if (is_keys_iter) {
             MIR_op_t map_val = bm_emit_get_var(mt, array_name->chars);
             MIR_reg_t keys_reg = bm_emit_call_1(mt, "bash_assoc_keys", map_val);
-            arr_val = MIR_new_reg_op(mt->ctx, keys_reg);
+            arr_val = MIR_new_reg_op(mt->em.ctx, keys_reg);
         } else if (is_assoc_iter) {
             MIR_op_t map_val = bm_emit_get_var(mt, array_name->chars);
             MIR_reg_t vals_reg = bm_emit_call_1(mt, "bash_assoc_values", map_val);
-            arr_val = MIR_new_reg_op(mt->ctx, vals_reg);
+            arr_val = MIR_new_reg_op(mt->em.ctx, vals_reg);
         } else {
             // check special variable registry for array-like pseudo-vars
             const SpecialVarEntry* sv = bm_find_special_var(array_name->chars, array_name->len);
             if (sv && sv->all_fn) {
                 MIR_reg_t r = bm_emit_call_0(mt, sv->all_fn);
-                arr_val = MIR_new_reg_op(mt->ctx, r);
+                arr_val = MIR_new_reg_op(mt->em.ctx, r);
                 is_special_array = true;
             } else {
                 arr_val = bm_emit_get_var(mt, array_name->chars);
@@ -3912,7 +3779,7 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
         const char* iter_arr_name = NULL;
         char temp_name[64];
         if (is_keys_iter || is_assoc_iter || is_special_array) {
-            snprintf(temp_name, sizeof(temp_name), "__iter_arr_%d", mt->label_counter++);
+            snprintf(temp_name, sizeof(temp_name), "__iter_arr_%d", mt->em.label_counter++);
             iter_arr_name = temp_name;
             bm_emit_set_var(mt, iter_arr_name, arr_val);
             arr_val = bm_emit_get_var(mt, iter_arr_name);
@@ -3922,80 +3789,80 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
 
         // get raw count (int64, not Item)
         char count_proto_name[64];
-        snprintf(count_proto_name, sizeof(count_proto_name), "p_array_count_%d", mt->label_counter++);
+        snprintf(count_proto_name, sizeof(count_proto_name), "p_array_count_%d", mt->em.label_counter++);
         MIR_type_t count_res_type = MIR_T_I64;
         MIR_var_t count_params[1] = {{MIR_T_I64, "a", 0}};
-        MIR_item_t count_proto = MIR_new_proto_arr(mt->ctx, count_proto_name, 1, &count_res_type, 1, count_params);
-        MIR_item_t count_import = MIR_new_import(mt->ctx, "bash_array_count");
+        MIR_item_t count_proto = MIR_new_proto_arr(mt->em.ctx, count_proto_name, 1, &count_res_type, 1, count_params);
+        MIR_item_t count_import = MIR_new_import(mt->em.ctx, "bash_array_count");
         MIR_reg_t count_reg = bm_new_temp(mt);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_call_insn(mt->ctx, 4,
-                MIR_new_ref_op(mt->ctx, count_proto),
-                MIR_new_ref_op(mt->ctx, count_import),
-                MIR_new_reg_op(mt->ctx, count_reg),
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_call_insn(mt->em.ctx, 4,
+                MIR_new_ref_op(mt->em.ctx, count_proto),
+                MIR_new_ref_op(mt->em.ctx, count_import),
+                MIR_new_reg_op(mt->em.ctx, count_reg),
                 arr_val));
 
         MIR_reg_t idx_reg = bm_new_temp(mt);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx_reg),
-                         MIR_new_int_op(mt->ctx, 0)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, idx_reg),
+                         MIR_new_int_op(mt->em.ctx, 0)));
 
         // loop_start:
-        MIR_append_insn(mt->ctx, mt->current_func_item, loop_start);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_start);
 
         // if idx >= count goto loop_end
         // bash_array_length returns Item (i2it), so compare as uint64
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_BGE,
-                         MIR_new_label_op(mt->ctx, loop_end),
-                         MIR_new_reg_op(mt->ctx, idx_reg),
-                         MIR_new_reg_op(mt->ctx, count_reg)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_BGE,
+                         MIR_new_label_op(mt->em.ctx, loop_end),
+                         MIR_new_reg_op(mt->em.ctx, idx_reg),
+                         MIR_new_reg_op(mt->em.ctx, count_reg)));
 
         // debug trap: fires at for statement line before each iteration
         {
             TSPoint start = ts_node_start_point(node->base.node);
-            bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, (int)start.row + 1));
+            bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->em.ctx, (int)start.row + 1));
             MIR_label_t skip_iter = bm_new_label(mt);
             MIR_reg_t dbg_res = bm_emit_call_0(mt, "bash_run_debug_trap");
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_BEQ,
-                             MIR_new_label_op(mt->ctx, loop_continue),
-                             MIR_new_reg_op(mt->ctx, dbg_res),
-                             MIR_new_uint_op(mt->ctx, i2it(2))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_BEQ,
+                             MIR_new_label_op(mt->em.ctx, loop_continue),
+                             MIR_new_reg_op(mt->em.ctx, dbg_res),
+                             MIR_new_uint_op(mt->em.ctx, i2it(2))));
             (void)skip_iter;
         }
 
         // elem = bash_array_get(arr, i2it(idx))
         MIR_reg_t idx_item_reg = bm_emit_call_1(mt, "bash_int_to_item",
-            MIR_new_reg_op(mt->ctx, idx_reg));
+            MIR_new_reg_op(mt->em.ctx, idx_reg));
         // re-fetch arr each iteration (in case it changes)
         const char* refetch_name = iter_arr_name ? iter_arr_name : array_name->chars;
         MIR_op_t arr_val2 = bm_emit_get_var(mt, refetch_name);
         MIR_reg_t elem_reg = bm_emit_call_2(mt, "bash_array_get",
-            arr_val2, MIR_new_reg_op(mt->ctx, idx_item_reg));
-        bm_emit_set_var(mt, node->variable->chars, MIR_new_reg_op(mt->ctx, elem_reg));
+            arr_val2, MIR_new_reg_op(mt->em.ctx, idx_item_reg));
+        bm_emit_set_var(mt, node->variable->chars, MIR_new_reg_op(mt->em.ctx, elem_reg));
 
         // body
         bm_transpile_statement(mt, node->body);
 
         // continue label
-        MIR_append_insn(mt->ctx, mt->current_func_item, loop_continue);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_continue);
 
         // idx++
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx_reg),
-                         MIR_new_reg_op(mt->ctx, idx_reg),
-                         MIR_new_int_op(mt->ctx, 1)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_ADD, MIR_new_reg_op(mt->em.ctx, idx_reg),
+                         MIR_new_reg_op(mt->em.ctx, idx_reg),
+                         MIR_new_int_op(mt->em.ctx, 1)));
 
         // goto loop_start
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, loop_start)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, loop_start)));
 
-        MIR_append_insn(mt->ctx, mt->current_func_item, loop_end);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_end);
     } else {
         // POSIX: for loop exit code is 0 if body never runs, else body's last exit code
         bm_emit_call_void_1(mt, "bash_set_exit_code",
-            MIR_new_int_op(mt->ctx, 0));
+            MIR_new_int_op(mt->em.ctx, 0));
 
         // compile-time unrolled iteration over word list
         // but if any word requires brace/glob expansion or IFS splitting
@@ -4031,10 +3898,10 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
         if (needs_runtime_array) {
             // build a runtime array of all expanded words, then do array iteration
             char arr_var[64];
-            snprintf(arr_var, sizeof(arr_var), "__for_words_%d", mt->label_counter++);
+            snprintf(arr_var, sizeof(arr_var), "__for_words_%d", mt->em.label_counter++);
 
             MIR_reg_t new_arr_reg = bm_emit_call_0(mt, "bash_array_new");
-            MIR_op_t arr_val = MIR_new_reg_op(mt->ctx, new_arr_reg);
+            MIR_op_t arr_val = MIR_new_reg_op(mt->em.ctx, new_arr_reg);
             bm_emit_set_var(mt, arr_var, arr_val);
 
             for (BashAstNode* w = word; w; w = w->next) {
@@ -4042,7 +3909,7 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
                 // handle $@ / "$@" — append each positional param individually
                 if (arg_is_at_splat(w)) {
                     MIR_reg_t at_arr = bm_emit_call_0(mt, "bash_get_all_args");
-                    bm_emit_call_2(mt, "bash_array_concat", cur_arr, MIR_new_reg_op(mt->ctx, at_arr));
+                    bm_emit_call_2(mt, "bash_array_concat", cur_arr, MIR_new_reg_op(mt->em.ctx, at_arr));
                     continue;
                 }
                 bool is_expand_word = false;
@@ -4066,7 +3933,7 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
                         expanded_reg = bm_emit_call_1(mt, "bash_glob_expand", pat_val);
                     }
                     bm_emit_call_2(mt, "bash_words_split_into", cur_arr,
-                        MIR_new_reg_op(mt->ctx, expanded_reg));
+                        MIR_new_reg_op(mt->em.ctx, expanded_reg));
                 } else {
                     MIR_op_t wval = bm_transpile_cmd_arg(mt, w);
                     if (arg_needs_ifs_split(w)) {
@@ -4082,56 +3949,56 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
             MIR_op_t arr_val2 = bm_emit_get_var(mt, arr_var);
 
             char count_proto_name2[64];
-            snprintf(count_proto_name2, sizeof(count_proto_name2), "p_array_count_%d", mt->label_counter++);
+            snprintf(count_proto_name2, sizeof(count_proto_name2), "p_array_count_%d", mt->em.label_counter++);
             MIR_type_t count_res_type2 = MIR_T_I64;
             MIR_var_t count_params2[1] = {{MIR_T_I64, "a", 0}};
-            MIR_item_t count_proto2 = MIR_new_proto_arr(mt->ctx, count_proto_name2, 1, &count_res_type2, 1, count_params2);
-            MIR_item_t count_import2 = MIR_new_import(mt->ctx, "bash_array_count");
+            MIR_item_t count_proto2 = MIR_new_proto_arr(mt->em.ctx, count_proto_name2, 1, &count_res_type2, 1, count_params2);
+            MIR_item_t count_import2 = MIR_new_import(mt->em.ctx, "bash_array_count");
             MIR_reg_t count_reg2 = bm_new_temp(mt);
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_call_insn(mt->ctx, 4,
-                    MIR_new_ref_op(mt->ctx, count_proto2),
-                    MIR_new_ref_op(mt->ctx, count_import2),
-                    MIR_new_reg_op(mt->ctx, count_reg2),
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_call_insn(mt->em.ctx, 4,
+                    MIR_new_ref_op(mt->em.ctx, count_proto2),
+                    MIR_new_ref_op(mt->em.ctx, count_import2),
+                    MIR_new_reg_op(mt->em.ctx, count_reg2),
                     arr_val2));
 
             MIR_reg_t idx_reg2 = bm_new_temp(mt);
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx_reg2),
-                             MIR_new_int_op(mt->ctx, 0)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, idx_reg2),
+                             MIR_new_int_op(mt->em.ctx, 0)));
 
-            MIR_append_insn(mt->ctx, mt->current_func_item, loop_start);
+            MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_start);
 
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_BGE,
-                             MIR_new_label_op(mt->ctx, loop_end),
-                             MIR_new_reg_op(mt->ctx, idx_reg2),
-                             MIR_new_reg_op(mt->ctx, count_reg2)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_BGE,
+                             MIR_new_label_op(mt->em.ctx, loop_end),
+                             MIR_new_reg_op(mt->em.ctx, idx_reg2),
+                             MIR_new_reg_op(mt->em.ctx, count_reg2)));
 
             // debug trap
             {
                 TSPoint start = ts_node_start_point(node->base.node);
-                bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, (int)start.row + 1));
+                bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->em.ctx, (int)start.row + 1));
                 bm_emit_call_0(mt, "bash_run_debug_trap");
             }
 
             MIR_reg_t idx_item_reg2 = bm_emit_call_1(mt, "bash_int_to_item",
-                MIR_new_reg_op(mt->ctx, idx_reg2));
+                MIR_new_reg_op(mt->em.ctx, idx_reg2));
             MIR_op_t arr_val3 = bm_emit_get_var(mt, arr_var);
             MIR_reg_t elem_reg2 = bm_emit_call_2(mt, "bash_array_get",
-                arr_val3, MIR_new_reg_op(mt->ctx, idx_item_reg2));
-            bm_emit_set_var(mt, node->variable->chars, MIR_new_reg_op(mt->ctx, elem_reg2));
+                arr_val3, MIR_new_reg_op(mt->em.ctx, idx_item_reg2));
+            bm_emit_set_var(mt, node->variable->chars, MIR_new_reg_op(mt->em.ctx, elem_reg2));
 
             bm_transpile_statement(mt, node->body);
 
-            MIR_append_insn(mt->ctx, mt->current_func_item, loop_continue);
+            MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_continue);
 
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx_reg2),
-                             MIR_new_reg_op(mt->ctx, idx_reg2),
-                             MIR_new_int_op(mt->ctx, 1)));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, loop_start)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_ADD, MIR_new_reg_op(mt->em.ctx, idx_reg2),
+                             MIR_new_reg_op(mt->em.ctx, idx_reg2),
+                             MIR_new_int_op(mt->em.ctx, 1)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, loop_start)));
 
         } else {
         word = node->words;
@@ -4139,14 +4006,14 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
             // debug trap: fires at for statement line before each iteration
             {
                 TSPoint start = ts_node_start_point(node->base.node);
-                bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, (int)start.row + 1));
+                bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->em.ctx, (int)start.row + 1));
                 MIR_label_t iter_skip = bm_new_label(mt);
                 MIR_reg_t dbg_res = bm_emit_call_0(mt, "bash_run_debug_trap");
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_BEQ,
-                                 MIR_new_label_op(mt->ctx, loop_end),
-                                 MIR_new_reg_op(mt->ctx, dbg_res),
-                                 MIR_new_uint_op(mt->ctx, i2it(2))));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_BEQ,
+                                 MIR_new_label_op(mt->em.ctx, loop_end),
+                                 MIR_new_reg_op(mt->em.ctx, dbg_res),
+                                 MIR_new_uint_op(mt->em.ctx, i2it(2))));
                 (void)iter_skip;
             }
 
@@ -4158,13 +4025,13 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
 
             bm_transpile_statement(mt, node->body);
 
-            MIR_append_insn(mt->ctx, mt->current_func_item, iter_continue);
+            MIR_append_insn(mt->em.ctx, mt->em.func_item, iter_continue);
 
             word = word->next;
         }
         } // end needs_runtime_array else
 
-        MIR_append_insn(mt->ctx, mt->current_func_item, loop_end);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_end);
     }
 
     // restore old loop labels
@@ -4188,51 +4055,51 @@ static void bm_transpile_for_arith(BashMirTranspiler* mt, BashForArithNode* node
     int for_line = (int)ts_node_start_point(node->base.node).row + 1;
 
     // debug prelude before init (for the for statement itself)
-    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, for_line));
+    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->em.ctx, for_line));
     bm_emit_call_0(mt, "bash_run_debug_trap");
 
     // POSIX: for loop exit code is 0 if body never runs, else body's last exit code
     bm_emit_call_void_1(mt, "bash_set_exit_code",
-        MIR_new_int_op(mt->ctx, 0));
+        MIR_new_int_op(mt->em.ctx, 0));
 
     // init
     if (node->init) bm_transpile_arith(mt, node->init);
 
     // loop start
-    MIR_append_insn(mt->ctx, mt->current_func_item, loop_start);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_start);
 
     // condition — emit debug prelude for condition check
     if (node->condition) {
-        bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, for_line));
+        bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->em.ctx, for_line));
         bm_emit_call_0(mt, "bash_run_debug_trap");
 
         MIR_op_t cond = bm_transpile_arith(mt, node->condition);
         // if condition is 0, exit loop
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_BEQ,
-                         MIR_new_label_op(mt->ctx, loop_end),
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_BEQ,
+                         MIR_new_label_op(mt->em.ctx, loop_end),
                          cond,
-                         MIR_new_uint_op(mt->ctx, i2it(0))));
+                         MIR_new_uint_op(mt->em.ctx, i2it(0))));
     }
 
     // body
     bm_transpile_statement(mt, node->body);
 
     // continue point
-    MIR_append_insn(mt->ctx, mt->current_func_item, loop_continue);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_continue);
 
     // step — emit debug prelude for step expression
     if (node->step) {
-        bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, for_line));
+        bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->em.ctx, for_line));
         bm_emit_call_0(mt, "bash_run_debug_trap");
         bm_transpile_arith(mt, node->step);
     }
 
     // jump back
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, loop_start)));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, loop_start)));
 
-    MIR_append_insn(mt->ctx, mt->current_func_item, loop_end);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_end);
 
     mt->loop_break_label = old_break;
     mt->loop_continue_label = old_continue;
@@ -4259,12 +4126,12 @@ static void bm_transpile_while(BashMirTranspiler* mt, BashWhileNode* node) {
 
     // POSIX: while/until exit code is body's last command, or 0 if body never runs
     MIR_reg_t body_ec = bm_new_temp(mt);
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, body_ec),
-                     MIR_new_int_op(mt->ctx, 0)));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, body_ec),
+                     MIR_new_int_op(mt->em.ctx, 0)));
 
     // loop start
-    MIR_append_insn(mt->ctx, mt->current_func_item, loop_start);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_start);
 
     // check for pending signal traps at each iteration
     bm_emit_call_void_0(mt, "bash_trap_check");
@@ -4278,18 +4145,18 @@ static void bm_transpile_while(BashMirTranspiler* mt, BashWhileNode* node) {
 
     if (is_until) {
         // until: exit when condition succeeds (exit code 0)
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_BEQ,
-                         MIR_new_label_op(mt->ctx, condition_exit),
-                         MIR_new_reg_op(mt->ctx, ec),
-                         MIR_new_uint_op(mt->ctx, i2it(0))));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_BEQ,
+                         MIR_new_label_op(mt->em.ctx, condition_exit),
+                         MIR_new_reg_op(mt->em.ctx, ec),
+                         MIR_new_uint_op(mt->em.ctx, i2it(0))));
     } else {
         // while: exit when condition fails (exit code != 0)
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_BNE,
-                         MIR_new_label_op(mt->ctx, condition_exit),
-                         MIR_new_reg_op(mt->ctx, ec),
-                         MIR_new_uint_op(mt->ctx, i2it(0))));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_BNE,
+                         MIR_new_label_op(mt->em.ctx, condition_exit),
+                         MIR_new_reg_op(mt->em.ctx, ec),
+                         MIR_new_uint_op(mt->em.ctx, i2it(0))));
     }
 
     // body
@@ -4297,23 +4164,23 @@ static void bm_transpile_while(BashMirTranspiler* mt, BashWhileNode* node) {
 
     // save body's exit code for when condition terminates the loop
     MIR_reg_t body_last_ec = bm_emit_call_0(mt, "bash_get_exit_code");
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, body_ec),
-                     MIR_new_reg_op(mt->ctx, body_last_ec)));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, body_ec),
+                     MIR_new_reg_op(mt->em.ctx, body_last_ec)));
 
     // continue point
-    MIR_append_insn(mt->ctx, mt->current_func_item, loop_continue);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_continue);
 
     // jump back
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, loop_start)));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, loop_start)));
 
     // condition_exit: restore body's exit code when condition terminates loop
-    MIR_append_insn(mt->ctx, mt->current_func_item, condition_exit);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, condition_exit);
     bm_emit_call_void_1(mt, "bash_set_exit_code",
-        MIR_new_reg_op(mt->ctx, body_ec));
+        MIR_new_reg_op(mt->em.ctx, body_ec));
 
-    MIR_append_insn(mt->ctx, mt->current_func_item, loop_end);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, loop_end);
 
     mt->loop_break_label = old_break;
     mt->loop_continue_label = old_continue;
@@ -4383,7 +4250,7 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
                     // tilde expansion: delegate to bash_expand_tilde
                     MIR_op_t tilde_str = bm_emit_string_literal(mt, pw->text->chars, pw->text->len);
                     MIR_reg_t result = bm_emit_call_1(mt, "bash_expand_tilde", tilde_str);
-                    pat_val = MIR_new_reg_op(mt->ctx, result);
+                    pat_val = MIR_new_reg_op(mt->em.ctx, result);
                 } else if (pw->text) {
                     // raw text — no backslash stripping so glob engine sees \x intact
                     pat_val = bm_emit_string_literal(mt, pw->text->chars, pw->text->len);
@@ -4405,12 +4272,12 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
                         // quoted content — escape glob metacharacters
                         MIR_op_t raw = bm_transpile_node(mt, part);
                         MIR_reg_t quoted = bm_emit_call_1(mt, "bash_glob_quote_str", raw);
-                        part_val = MIR_new_reg_op(mt->ctx, quoted);
+                        part_val = MIR_new_reg_op(mt->em.ctx, quoted);
                     } else {
                         part_val = bm_transpile_node(mt, part);
                     }
                     MIR_reg_t cat = bm_emit_call_2(mt, "bash_string_concat", accum, part_val);
-                    accum = MIR_new_reg_op(mt->ctx, cat);
+                    accum = MIR_new_reg_op(mt->em.ctx, cat);
                     part = part->next;
                 }
                 pat_val = accum;
@@ -4421,29 +4288,29 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
                 // for pattern matching (e.g., case 1 in $((x=1)) ) should match "1")
                 if (pattern->node_type == BASH_AST_NODE_ARITHMETIC_EXPR) {
                     MIR_reg_t str_reg = bm_emit_call_1(mt, "bash_to_string", pat_val);
-                    pat_val = MIR_new_reg_op(mt->ctx, str_reg);
+                    pat_val = MIR_new_reg_op(mt->em.ctx, str_reg);
                 }
             }
             MIR_reg_t cmp_result = bm_emit_call_2(mt, match_fn, value, pat_val);
 
             // if match, jump to match body
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_BNE,
-                             MIR_new_label_op(mt->ctx, body_labels[idx]),
-                             MIR_new_reg_op(mt->ctx, cmp_result),
-                             MIR_new_uint_op(mt->ctx, b2it(false))));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_BNE,
+                             MIR_new_label_op(mt->em.ctx, body_labels[idx]),
+                             MIR_new_reg_op(mt->em.ctx, cmp_result),
+                             MIR_new_uint_op(mt->em.ctx, b2it(false))));
 
             pattern = pattern->next;
         }
 
         if (!has_wildcard) {
             // no match — skip to next item
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, next_labels[idx])));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, next_labels[idx])));
         }
 
         // match body
-        MIR_append_insn(mt->ctx, mt->current_func_item, body_labels[idx]);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, body_labels[idx]);
         {
             BashAstNode* body_stmt = case_item->body;
             while (body_stmt) {
@@ -4456,33 +4323,33 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
         if (case_item->terminator == 1) {
             // ;& — fall through to next item's body directly (skip pattern check)
             if (item->next) {
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, body_labels[idx + 1])));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, body_labels[idx + 1])));
             } else {
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, end_label)));
             }
         } else if (case_item->terminator == 2) {
             // ;;& — continue testing next patterns
             if (item->next) {
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, next_labels[idx])));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, next_labels[idx])));
             } else {
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, end_label)));
             }
         } else {
             // ;; — done, jump to end
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, end_label)));
         }
 
-        MIR_append_insn(mt->ctx, mt->current_func_item, next_labels[idx]);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, next_labels[idx]);
         item = item->next;
         idx++;
     }
 
-    MIR_append_insn(mt->ctx, mt->current_func_item, end_label);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item, end_label);
 }
 
 // ============================================================================
@@ -4500,14 +4367,14 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
     snprintf(lookup_key.name, sizeof(lookup_key.name), "%.*s", (int)node->name->len, node->name->chars);
     if (hashmap_get(mt->user_funcs, &lookup_key)) {
         snprintf(func_name, sizeof(func_name), "bash_uf_%.*s_r%d",
-                 (int)node->name->len, node->name->chars, mt->label_counter++);
+                 (int)node->name->len, node->name->chars, mt->em.label_counter++);
     } else {
         snprintf(func_name, sizeof(func_name), "bash_uf_%.*s", (int)node->name->len, node->name->chars);
     }
 
     // save current function context
-    MIR_item_t saved_func_item = mt->current_func_item;
-    MIR_func_t saved_func = mt->current_func;
+    MIR_item_t saved_func_item = mt->em.func_item;
+    MIR_func_t saved_func = mt->em.func;
     struct hashmap* saved_vars = mt->vars;
     int saved_var_count = mt->var_count;
     MIR_label_t saved_break = mt->loop_break_label;
@@ -4527,14 +4394,14 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
         {MIR_T_I64, "args_ptr", 0},
         {MIR_T_I64, "argc", 0}
     };
-    mt->current_func_item = MIR_new_func_arr(mt->ctx, func_name, 1, &func_ret, 2, params);
-    mt->current_func = mt->current_func_item->u.func;
+    mt->em.func_item = MIR_new_func_arr(mt->em.ctx, func_name, 1, &func_ret, 2, params);
+    mt->em.func = mt->em.func_item->u.func;
 
     // register in user function table BEFORE transpiling body (enables recursion)
     BashMirUserFunc entry;
     memset(&entry, 0, sizeof(entry));
     snprintf(entry.name, sizeof(entry.name), "%.*s", (int)node->name->len, node->name->chars);
-    entry.func_item = mt->current_func_item;
+    entry.func_item = mt->em.func_item;
     entry.ast_node = node;
 
     // extract and format function source for `type`/`declare -f` output
@@ -4618,10 +4485,10 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
     hashmap_set(mt->user_funcs, &entry);
 
     // emit: bash_set_positional(args_ptr, argc)
-    MIR_reg_t args_reg = MIR_reg(mt->ctx, "args_ptr", mt->current_func);
-    MIR_reg_t argc_reg = MIR_reg(mt->ctx, "argc", mt->current_func);
+    MIR_reg_t args_reg = MIR_reg(mt->em.ctx, "args_ptr", mt->em.func);
+    MIR_reg_t argc_reg = MIR_reg(mt->em.ctx, "argc", mt->em.func);
     bm_emit_call_void_2(mt, "bash_push_positional",
-        MIR_new_reg_op(mt->ctx, args_reg), MIR_new_reg_op(mt->ctx, argc_reg));
+        MIR_new_reg_op(mt->em.ctx, args_reg), MIR_new_reg_op(mt->em.ctx, argc_reg));
     // push a new dynamic scope frame for local variables
     bm_emit_call_void_0(mt, "bash_scope_push");
     MIR_op_t func_name_val = bm_emit_string_literal(mt, node->name->chars, node->name->len);
@@ -4629,18 +4496,18 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
 
     // push function arguments onto BASH_ARGV stack (in reverse order, per bash spec)
     bm_emit_call_void_2(mt, "bash_push_argv_frame",
-        MIR_new_reg_op(mt->ctx, args_reg), MIR_new_reg_op(mt->ctx, argc_reg));
+        MIR_new_reg_op(mt->em.ctx, args_reg), MIR_new_reg_op(mt->em.ctx, argc_reg));
 
     // function-entry debug trap: fire with LINENO = function def start line
     int func_start_line = (int)ts_node_start_point(node->base.node).row + 1;
-    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, func_start_line));
+    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->em.ctx, func_start_line));
     bm_emit_call_0(mt, "bash_run_debug_trap");
 
     // transpile function body
     bm_transpile_statement(mt, node->body);
 
     // function-exit debug trap: fire with LINENO = function def start line
-    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, func_start_line));
+    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->em.ctx, func_start_line));
     bm_emit_call_0(mt, "bash_run_debug_trap");
 
     // pop scope frame and restore positional params
@@ -4652,9 +4519,9 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
 
     // default return 0
     MIR_reg_t ec = bm_emit_call_0(mt, "bash_get_exit_code");
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, ec)));
-    MIR_finish_func(mt->ctx);
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, ec)));
+    MIR_finish_func(mt->em.ctx);
 
     log_debug("bash-mir: compiled function '%.*s'", (int)node->name->len, node->name->chars);
 
@@ -4662,8 +4529,8 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
     hashmap_free(mt->vars);
     mt->vars = saved_vars;
     mt->var_count = saved_var_count;
-    mt->current_func_item = saved_func_item;
-    mt->current_func = saved_func;
+    mt->em.func_item = saved_func_item;
+    mt->em.func = saved_func;
     mt->loop_break_label = saved_break;
     mt->loop_continue_label = saved_continue;
     mt->loop_depth = saved_loop_depth;
@@ -4704,40 +4571,40 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
             MIR_op_t left = bm_transpile_arith(mt, bin->left);
             MIR_reg_t left_int = bm_emit_call_1(mt, "bash_to_int", left);
             // zero value for comparison
-            MIR_op_t zero = MIR_new_uint_op(mt->ctx, i2it(0));
+            MIR_op_t zero = MIR_new_uint_op(mt->em.ctx, i2it(0));
 
             if (bin->op == BASH_OP_LOGICAL_AND) {
                 // &&: if left == 0, result is 0 (skip right)
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), zero));
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, end_label),
-                                 MIR_new_reg_op(mt->ctx, left_int), zero));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result_reg), zero));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_BEQ, MIR_new_label_op(mt->em.ctx, end_label),
+                                 MIR_new_reg_op(mt->em.ctx, left_int), zero));
             } else {
                 // ||: if left != 0, result is 1 (skip right)
-                MIR_op_t one = MIR_new_uint_op(mt->ctx, i2it(1));
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), one));
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, end_label),
-                                 MIR_new_reg_op(mt->ctx, left_int), zero));
+                MIR_op_t one = MIR_new_uint_op(mt->em.ctx, i2it(1));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result_reg), one));
+                MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                    MIR_new_insn(mt->em.ctx, MIR_BNE, MIR_new_label_op(mt->em.ctx, end_label),
+                                 MIR_new_reg_op(mt->em.ctx, left_int), zero));
             }
 
             // evaluate right
             MIR_op_t right = bm_transpile_arith(mt, bin->right);
             MIR_reg_t right_int = bm_emit_call_1(mt, "bash_to_int", right);
             // result = (right != 0) ? 1 : 0
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), zero));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, end_label),
-                             MIR_new_reg_op(mt->ctx, right_int), zero));
-            MIR_op_t one = MIR_new_uint_op(mt->ctx, i2it(1));
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), one));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result_reg), zero));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_BEQ, MIR_new_label_op(mt->em.ctx, end_label),
+                             MIR_new_reg_op(mt->em.ctx, right_int), zero));
+            MIR_op_t one = MIR_new_uint_op(mt->em.ctx, i2it(1));
+            MIR_append_insn(mt->em.ctx, mt->em.func_item,
+                MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result_reg), one));
 
-            MIR_append_insn(mt->ctx, mt->current_func_item, end_label);
-            return MIR_new_reg_op(mt->ctx, result_reg);
+            MIR_append_insn(mt->em.ctx, mt->em.func_item, end_label);
+            return MIR_new_reg_op(mt->em.ctx, result_reg);
         }
 
         MIR_op_t left = bm_transpile_arith(mt, bin->left);
@@ -4767,7 +4634,7 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
         }
 
         MIR_reg_t result = bm_emit_call_2(mt, func_name, left, right);
-        return MIR_new_reg_op(mt->ctx, result);
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_ARITH_UNARY: {
         BashArithUnaryNode* unary = (BashArithUnaryNode*)node;
@@ -4782,8 +4649,8 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
                     MIR_op_t one = bm_emit_int_literal(mt, 1);
                     const char* fn = (unary->op == BASH_OP_INC) ? "bash_add" : "bash_subtract";
                     MIR_reg_t result = bm_emit_call_2(mt, fn, cur, one);
-                    bm_emit_set_var(mt, var->name->chars, MIR_new_reg_op(mt->ctx, result));
-                    return MIR_new_reg_op(mt->ctx, result); // prefix: return new value
+                    bm_emit_set_var(mt, var->name->chars, MIR_new_reg_op(mt->em.ctx, result));
+                    return MIR_new_reg_op(mt->em.ctx, result); // prefix: return new value
                 }
             }
             // fallback: just evaluate the operand
@@ -4794,15 +4661,15 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
 
         if (unary->op == BASH_OP_NEGATE || unary->op == BASH_OP_SUB) {
             MIR_reg_t result = bm_emit_call_1(mt, "bash_negate", operand);
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         if (unary->op == BASH_OP_BIT_NOT) {
             MIR_reg_t result = bm_emit_call_1(mt, "bash_bit_not", operand);
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         if (unary->op == BASH_OP_LOGICAL_NOT) {
             MIR_reg_t result = bm_emit_call_1(mt, "bash_logical_not", operand);
-            return MIR_new_reg_op(mt->ctx, result);
+            return MIR_new_reg_op(mt->em.ctx, result);
         }
         return operand;
     }
@@ -4817,8 +4684,8 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
             const char* fn = (assign->op == BASH_OP_INC) ? "bash_add" : "bash_subtract";
             MIR_reg_t result = bm_emit_call_2(mt, fn, cur, one);
             // bash variables are always strings — convert arithmetic result before storing
-            MIR_reg_t str_result = bm_emit_call_1(mt, "bash_to_string", MIR_new_reg_op(mt->ctx, result));
-            bm_emit_set_var(mt, assign->name->chars, MIR_new_reg_op(mt->ctx, str_result));
+            MIR_reg_t str_result = bm_emit_call_1(mt, "bash_to_string", MIR_new_reg_op(mt->em.ctx, result));
+            bm_emit_set_var(mt, assign->name->chars, MIR_new_reg_op(mt->em.ctx, str_result));
             return cur; // postfix: return old value
         }
 
@@ -4828,7 +4695,7 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
                                          : bm_emit_int_literal(mt, 0);
             // bash variables are always strings — convert arithmetic result before storing
             MIR_reg_t str_val = bm_emit_call_1(mt, "bash_to_string", val);
-            bm_emit_set_var(mt, assign->name->chars, MIR_new_reg_op(mt->ctx, str_val));
+            bm_emit_set_var(mt, assign->name->chars, MIR_new_reg_op(mt->em.ctx, str_val));
             return val;
         }
 
@@ -4847,9 +4714,9 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
         }
         MIR_reg_t result = bm_emit_call_2(mt, fn, cur, rhs);
         // bash variables are always strings — convert arithmetic result before storing
-        MIR_reg_t str_result = bm_emit_call_1(mt, "bash_to_string", MIR_new_reg_op(mt->ctx, result));
-        bm_emit_set_var(mt, assign->name->chars, MIR_new_reg_op(mt->ctx, str_result));
-        return MIR_new_reg_op(mt->ctx, result);
+        MIR_reg_t str_result = bm_emit_call_1(mt, "bash_to_string", MIR_new_reg_op(mt->em.ctx, result));
+        bm_emit_set_var(mt, assign->name->chars, MIR_new_reg_op(mt->em.ctx, str_result));
+        return MIR_new_reg_op(mt->em.ctx, result);
     }
     case BASH_AST_NODE_ARITH_TERNARY: {
         BashArithTernaryNode* tern = (BashArithTernaryNode*)node;
@@ -4860,28 +4727,28 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
         // evaluate condition
         MIR_op_t cond = bm_transpile_arith(mt, tern->condition);
         MIR_reg_t cond_int = bm_emit_call_1(mt, "bash_to_int", cond);
-        MIR_op_t zero = MIR_new_uint_op(mt->ctx, i2it(0));
+        MIR_op_t zero = MIR_new_uint_op(mt->em.ctx, i2it(0));
 
         // if condition == 0, jump to else
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, else_label),
-                         MIR_new_reg_op(mt->ctx, cond_int), zero));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_BEQ, MIR_new_label_op(mt->em.ctx, else_label),
+                         MIR_new_reg_op(mt->em.ctx, cond_int), zero));
 
         // then branch
         MIR_op_t then_val = bm_transpile_arith(mt, tern->then_expr);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), then_val));
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result_reg), then_val));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, end_label)));
 
         // else branch
-        MIR_append_insn(mt->ctx, mt->current_func_item, else_label);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, else_label);
         MIR_op_t else_val = bm_transpile_arith(mt, tern->else_expr);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), else_val));
+        MIR_append_insn(mt->em.ctx, mt->em.func_item,
+            MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result_reg), else_val));
 
-        MIR_append_insn(mt->ctx, mt->current_func_item, end_label);
-        return MIR_new_reg_op(mt->ctx, result_reg);
+        MIR_append_insn(mt->em.ctx, mt->em.func_item, end_label);
+        return MIR_new_reg_op(mt->em.ctx, result_reg);
     }
     default:
         return bm_transpile_node(mt, node);
@@ -5008,12 +4875,12 @@ extern "C" Item bash_source_file(Item filename) {
     BashMirTranspiler* mt = (BashMirTranspiler*)mem_alloc(sizeof(BashMirTranspiler), MEM_CAT_BASH_RUNTIME);
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
-    mt->ctx = ctx;
+    mt->em.ctx = ctx;
     mt->vars         = bash_var_new(64);
-    mt->import_cache = bm_import_new(64);
+    mt->em.import_cache = em_import_cache_new(64);
     mt->user_funcs   = bm_user_func_new(16);
     mt->var_count = 0;
-    mt->label_counter = 0;
+    mt->em.label_counter = 0;
     mt->loop_depth = 0;
 
     mt->module = MIR_new_module(ctx, "bash_source");
@@ -5030,8 +4897,8 @@ extern "C" Item bash_source_file(Item filename) {
 
     // Pass 2: main body
     MIR_type_t ret_type = MIR_T_I64;
-    mt->current_func_item = MIR_new_func(ctx, "bash_source_entry", 1, &ret_type, 0);
-    mt->current_func = mt->current_func_item->u.func;
+    mt->em.func_item = MIR_new_func(ctx, "bash_source_entry", 1, &ret_type, 0);
+    mt->em.func = mt->em.func_item->u.func;
     mt->result_reg = bm_new_temp(mt);
 
     stmt = program->body;
@@ -5044,8 +4911,8 @@ extern "C" Item bash_source_file(Item filename) {
     }
 
     MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, final_ec)));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, final_ec)));
 
     MIR_finish_func(ctx);
     MIR_finish_module(ctx);
@@ -5102,7 +4969,7 @@ extern "C" Item bash_source_file(Item filename) {
 
     // cleanup everything except ctx
     hashmap_free(mt->vars);
-    hashmap_free(mt->import_cache);
+    hashmap_free(mt->em.import_cache);
     hashmap_free(mt->user_funcs);
     mem_free(mt);
     ts_tree_delete(tree);
@@ -5274,12 +5141,12 @@ extern "C" Item bash_eval_string(Item code) {
     BashMirTranspiler* mt = (BashMirTranspiler*)mem_alloc(sizeof(BashMirTranspiler), MEM_CAT_BASH_RUNTIME);
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
-    mt->ctx = ctx;
+    mt->em.ctx = ctx;
     mt->vars         = bash_var_new(32);
-    mt->import_cache = bm_import_new(32);
+    mt->em.import_cache = em_import_cache_new(32);
     mt->user_funcs   = bm_user_func_new(8);
     mt->var_count = 0;
-    mt->label_counter = 0;
+    mt->em.label_counter = 0;
     mt->loop_depth = 0;
 
     // give each eval module a unique name
@@ -5301,8 +5168,8 @@ extern "C" Item bash_eval_string(Item code) {
     char func_name[48];
     snprintf(func_name, sizeof(func_name), "bash_eval_entry_%d", bash_eval_counter - 1);
     MIR_type_t ret_type = MIR_T_I64;
-    mt->current_func_item = MIR_new_func(ctx, func_name, 1, &ret_type, 0);
-    mt->current_func = mt->current_func_item->u.func;
+    mt->em.func_item = MIR_new_func(ctx, func_name, 1, &ret_type, 0);
+    mt->em.func = mt->em.func_item->u.func;
     mt->result_reg = bm_new_temp(mt);
 
     stmt = program->body;
@@ -5315,8 +5182,8 @@ extern "C" Item bash_eval_string(Item code) {
     }
 
     MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, final_ec)));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, final_ec)));
 
     MIR_finish_func(ctx);
     MIR_finish_module(ctx);
@@ -5362,7 +5229,7 @@ extern "C" Item bash_eval_string(Item code) {
     }
 
     hashmap_free(mt->vars);
-    hashmap_free(mt->import_cache);
+    hashmap_free(mt->em.import_cache);
     hashmap_free(mt->user_funcs);
     mem_free(mt);
     ts_tree_delete(tree);
@@ -6362,12 +6229,12 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     BashMirTranspiler* mt = (BashMirTranspiler*)mem_alloc(sizeof(BashMirTranspiler), MEM_CAT_BASH_RUNTIME);
     memset(mt, 0, sizeof(BashMirTranspiler));
     mt->tp = tp;
-    mt->ctx = ctx;
+    mt->em.ctx = ctx;
     mt->vars         = bash_var_new(64);
-    mt->import_cache = bm_import_new(64);
+    mt->em.import_cache = em_import_cache_new(64);
     mt->user_funcs   = bm_user_func_new(16);
     mt->var_count = 0;
-    mt->label_counter = 0;
+    mt->em.label_counter = 0;
     mt->loop_depth = 0;
 
     // create module
@@ -6385,8 +6252,8 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
 
     // === Pass 2: Compile bash_main (function defs become no-ops) ===
     MIR_type_t ret_type = MIR_T_I64;
-    mt->current_func_item = MIR_new_func(ctx, "bash_main", 1, &ret_type, 0);
-    mt->current_func = mt->current_func_item->u.func;
+    mt->em.func_item = MIR_new_func(ctx, "bash_main", 1, &ret_type, 0);
+    mt->em.func = mt->em.func_item->u.func;
     mt->result_reg = bm_new_temp(mt);
     MIR_op_t script_name_str = bm_emit_string_literal(mt, filename ? filename : "", filename ? (int)strlen(filename) : 0);
     bm_emit_call_void_1(mt, "bash_push_source", script_name_str);
@@ -6412,8 +6279,8 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     // return exit code
     MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
 
-    MIR_append_insn(mt->ctx, mt->current_func_item,
-        MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, final_ec)));
+    MIR_append_insn(mt->em.ctx, mt->em.func_item,
+        MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, final_ec)));
 
     MIR_finish_func(ctx);
     MIR_finish_module(ctx);
@@ -6461,7 +6328,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     bash_source_runtime = NULL;
     bash_runtime_cleanup();
     hashmap_free(mt->vars);
-    hashmap_free(mt->import_cache);
+    hashmap_free(mt->em.import_cache);
     mem_free(mt);
 
     MIR_finish(ctx);
