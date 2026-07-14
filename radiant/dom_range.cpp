@@ -14,6 +14,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
 #include "../lib/tagged.hpp"
+#include "../lib/utf.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "view.hpp"  // For HTM_TAG_* constants
@@ -3330,7 +3331,7 @@ static int range_first_strong_direction(DomRange* r) {
         if (dom_boundary_compare(&before, &r->end) != DOM_BOUNDARY_BEFORE) {
             return 0;
         }
-        int strong = bidi_strong_class(cp.cp);
+        int strong = utf_bidi_strong_class(cp.cp);
         if (strong != 0) return strong;
         DomBoundary after = boundary_after_codepoint(cp);
         if (same_boundary(after, scan)) return 0;

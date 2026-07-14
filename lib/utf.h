@@ -115,6 +115,12 @@ bool utf_is_cjk(uint32_t cp);
 bool utf_is_hangul(uint32_t cp);
 
 /**
+ * Coarse Unicode Bidirectional Algorithm first-strong classification.
+ * @return 1 for RTL (R/AL), -1 for LTR (L), or 0 for neutral codepoints.
+ */
+int utf_bidi_strong_class(uint32_t cp);
+
+/**
  * Emoji that participates in ZWJ composition sequences.
  * SMP emoji blocks, Misc Symbols, Dingbats, Misc Technical, ZWJ, Heavy Heart.
  */
