@@ -7,7 +7,6 @@
     {"type": "log", "message": "--- Click clear completed directly ---"},
     {"type": "wait", "ms": 300},
     {"type": "click", "target": {"selector": ".clear-done-btn"}},
-    {"type": "wait", "ms": 300},
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 7},
     {"type": "log", "message": "--- Done ---"}
   ]

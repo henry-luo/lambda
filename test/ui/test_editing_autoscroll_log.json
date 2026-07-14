@@ -4,14 +4,12 @@
   "viewport": {"width": 600, "height": 420},
   "events": [
     {"type": "log", "message": "=== editing_autoscroll_log ==="},
-    {"type": "wait", "ms": 250},
     {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 5},
     {"type": "mouse_down", "target": {"selector": "#drag-start"}, "button": 0},
     {"type": "mouse_move", "target": {"selector": "#drag-end"}},
     {"type": "mouse_move", "x": 580, "y": 414},
     {"type": "advance_time", "ms": 96, "steps": 4},
     {"type": "mouse_up", "x": 580, "y": 414, "button": 0},
-    {"type": "wait", "ms": 80},
     {"type": "assert_selection", "is_collapsed": false},
     {"type": "assert_scroll", "y": 135, "tolerance": 70}
   ]

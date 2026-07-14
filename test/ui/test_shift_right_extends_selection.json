@@ -2,7 +2,6 @@
   "name": "Shift+Right extends selection from caret",
   "html": "test/layout/data/form/form_state.html",
   "events": [
-    {"type": "wait", "ms": 50},
     {"type": "log", "message": "Click to place caret (collapsed)"},
     {"type": "mouse_down", "target": {"text": "navigate between focusable"}, "button": 0},
     {"type": "wait", "ms": 20},
@@ -12,7 +11,6 @@
     {"type": "key_press", "key": "Right", "mods_str": "shift"},
     {"type": "key_press", "key": "Right", "mods_str": "shift"},
     {"type": "key_press", "key": "Right", "mods_str": "shift"},
-    {"type": "wait", "ms": 20},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true}
   ]
 }

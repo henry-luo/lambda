@@ -4,34 +4,27 @@
   "viewport": {"width": 600, "height": 600},
   "events": [
     {"type": "log", "message": "=== form_input_shift_selection ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "click", "target": {"selector": "#name"}},
     {"type": "wait", "ms": 80},
     {"type": "type", "target": {"selector": "#name"}, "text": "abc"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "abc"},
     {"type": "assert_caret", "char_offset": 3},
 
     {"type": "key_press", "key": "Home"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_caret", "char_offset": 0},
 
     {"type": "key_press", "key": "Right", "mods_str": "shift"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_selection", "is_collapsed": false},
 
     {"type": "type", "target": {"selector": "#name"}, "text": "X"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "Xbc"},
     {"type": "assert_caret", "char_offset": 1},
 
     {"type": "key_press", "key": "End", "mods_str": "shift"},
-    {"type": "wait", "ms": 60},
     {"type": "assert_selection", "is_collapsed": false},
 
     {"type": "type", "target": {"selector": "#name"}, "text": "Y"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "XY"},
     {"type": "assert_state_dump", "reference": "test/ui/state/test_form_input_shift_selection_final.mark"}
   ]

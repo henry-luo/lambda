@@ -4,7 +4,6 @@
   "viewport": {"width": 640, "height": 520},
   "events": [
     {"type": "log", "message": "=== editing_ime_focus_change ==="},
-    {"type": "wait", "ms": 150},
 
     {"type": "click", "target": {"selector": "#field"}},
     {"type": "ime_compose", "phase": "begin"},
@@ -12,7 +11,6 @@
     {"type": "click", "target": {"selector": "#other"}},
     {"type": "assert_focus", "target": {"selector": "#other"}},
     {"type": "ime_compose", "phase": "commit", "commit": "done"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#formLog"}, "equals": "compositionstart:|compositionupdate:pre|beforeinput:insertCompositionText:pre:1|input:insertCompositionText:pre:1|compositionend:done|beforeinput:insertFromComposition:done:0|input:insertFromComposition:done:0"},
 
     {"type": "assert_event_log", "contains": "\"transition\":\"focus_element\"", "min": 2},

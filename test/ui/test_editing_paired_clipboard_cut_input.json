@@ -4,11 +4,9 @@
   "viewport": {"width": 640, "height": 360},
   "events": [
     {"type": "log", "message": "=== editing_paired_clipboard_cut_input ==="},
-    {"type": "wait", "ms": 150},
     {"type": "assert_editing_value", "target": {"selector": "#nav-input"}, "equals": "one two three"},
     {"type": "set_editing_selection", "target": {"selector": "#nav-input"}, "start": 0, "end": 3},
     {"type": "key_combo", "key": "x", "mods_str": "super"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_editing_value", "target": {"selector": "#nav-input"}, "equals": " two three"},
     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "deleteByCut", "surface": "text_control", "prevented": false, "min": 1},
     {"type": "assert_event_log", "contains": "\"operation\":\"cut\"", "min": 1},

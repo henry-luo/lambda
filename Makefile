@@ -1214,8 +1214,8 @@ test-radiant-baseline: build-radiant-baseline
 	@$(MAKE) --no-print-directory run-radiant-baseline
 
 # Run radiant tests without rebuilding (use when test executables are already built).
-# Poll children once per second so progress reporting never adds a 5-10 second
-# tail delay, and keep the fuzzy runner name aligned with the configured binary.
+# Commands wait directly on their child process; periodic polling used to round
+# every short phase up to the next second and accumulated substantial tail time.
 run-radiant-baseline:
 	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	radiant_view_passed=0; radiant_view_failed=0; radiant_view_status="⏭️  SKIP"; \
@@ -1228,23 +1228,10 @@ run-radiant-baseline:
 	layout_overall_status="✅ PASS"; \
 	mkdir -p temp; \
 	> temp/_layout_baseline_results.txt; \
-	run_with_progress() { \
-		label="$$1"; log_file="$$2"; shift 2; \
+	run_logged() { \
+		log_file="$$1"; shift; \
 		rm -f "$$log_file"; \
-		"$$@" > "$$log_file" 2>&1 & \
-		child_pid=$$!; elapsed=0; \
-		while kill -0 $$child_pid 2>/dev/null; do \
-			sleep 1; elapsed=$$((elapsed + 1)); \
-			if kill -0 $$child_pid 2>/dev/null && [ $$((elapsed % 10)) -eq 0 ]; then \
-				latest=$$(grep -E '^\[ RUN      \]|^\[[[:space:]]*[0-9]+/[0-9]+\]|^\[  PASSED  \]|^\[  FAILED  \]|PASS|FAIL|Results:' "$$log_file" | tail -1); \
-				if [ -n "$$latest" ]; then \
-					echo "   ... $$label ($${elapsed}s): $$latest"; \
-				else \
-					echo "   ... $$label ($${elapsed}s)"; \
-				fi; \
-			fi; \
-		done; \
-		wait $$child_pid; \
+		"$$@" > "$$log_file" 2>&1; \
 	}; \
 	\
 	echo ""; \
@@ -1259,21 +1246,7 @@ run-radiant-baseline:
 		echo "  ▸ $$suite:"; \
 		log_file="temp/_layout_baseline_$${suite}.log"; \
 		rm -f "$$log_file"; \
-		$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js -c $$suite > "$$log_file" 2>&1 & \
-		suite_pid=$$!; \
-		poll_elapsed=0; \
-		while kill -0 $$suite_pid 2>/dev/null; do \
-			sleep 1; poll_elapsed=$$((poll_elapsed + 1)); \
-			if kill -0 $$suite_pid 2>/dev/null && [ $$((poll_elapsed % 5)) -eq 0 ]; then \
-				last_test=$$(grep "📊 Test Case:" "$$log_file" | tail -1 | sed 's/^.*Test Case: //'); \
-				if [ -n "$$last_test" ]; then \
-					echo "     ... running, latest: $$last_test"; \
-				else \
-					echo "     ... running"; \
-				fi; \
-			fi; \
-		done; \
-		wait $$suite_pid || true; \
+		$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js -c $$suite > "$$log_file" 2>&1 || true; \
 		output=$$(cat "$$log_file"); \
 		echo "$$output" | tail -8; \
 		s_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
@@ -1310,7 +1283,7 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 UI Automation Tests:"; \
 	if [ -f "test/test_ui_automation_gtest.exe" ]; then \
-		run_with_progress "UI Automation" "temp/_radiant_ui_automation.log" ./test/test_ui_automation_gtest.exe || true; \
+		run_logged "temp/_radiant_ui_automation.log" ./test/test_ui_automation_gtest.exe || true; \
 		output=$$(cat "temp/_radiant_ui_automation.log"); \
 		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
 		ui_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1324,7 +1297,7 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 Radiant View Command Tests:"; \
 	if [ -f "test/test_radiant_view_gtest.exe" ]; then \
-		run_with_progress "Radiant View Cmd" "temp/_radiant_view_cmd.log" ./test/test_radiant_view_gtest.exe || true; \
+		run_logged "temp/_radiant_view_cmd.log" ./test/test_radiant_view_gtest.exe || true; \
 		output=$$(cat "temp/_radiant_view_cmd.log"); \
 		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
 		radiant_view_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1338,7 +1311,7 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 View Page and Markdown (Headless) Tests:"; \
 	if [ -f "test/test_page_load_gtest.exe" ]; then \
-		run_with_progress "View Page & Markdown" "temp/_radiant_page_load.log" ./test/test_page_load_gtest.exe || true; \
+		run_logged "temp/_radiant_page_load.log" ./test/test_page_load_gtest.exe || true; \
 		output=$$(cat "temp/_radiant_page_load.log"); \
 		echo "$$output" | grep -E "^\[|pages loaded" | tail -5; \
 		page_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1366,7 +1339,7 @@ run-radiant-baseline:
 	echo "📦 Render Visual Tests:"; \
 	if [ -f "test/render/test_radiant_render.js" ]; then \
 		echo "   workers: $(RADIANT_RENDER_JOBS)"; \
-		run_with_progress "Render Visual" "temp/_radiant_render_visual.log" sh -c 'cd test/render && LAMBDA_ROOT="$(CURDIR)" node test_radiant_render.js -j $(RADIANT_RENDER_JOBS) --baseline' || true; \
+		run_logged "temp/_radiant_render_visual.log" sh -c 'cd test/render && LAMBDA_ROOT="$(CURDIR)" node test_radiant_render.js -j $(RADIANT_RENDER_JOBS) --baseline' || true; \
 		output=$$(cat "temp/_radiant_render_visual.log"); \
 		echo "$$output" | grep -E "PASS|FAIL|ERROR|Results:|Baseline Regressions|baseline tests passed" | tail -15; \
 		render_line=$$(echo "$$output" | grep "^Results:" | tail -1); \
@@ -1399,7 +1372,7 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 WPT CSS Syntax Conformance:"; \
 	if [ -f "test/test_wpt_css_syntax_gtest.exe" ]; then \
-		run_with_progress "WPT CSS Syntax" "temp/_radiant_wpt_css_syntax.log" ./test/test_wpt_css_syntax_gtest.exe || true; \
+		run_logged "temp/_radiant_wpt_css_syntax.log" ./test/test_wpt_css_syntax_gtest.exe || true; \
 		output=$$(cat "temp/_radiant_wpt_css_syntax.log"); \
 		echo "$$output" | grep -E "^\[  PASSED|^\[  FAILED|^\[  SKIPPED" | tail -5; \
 		wpt_syntax_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \

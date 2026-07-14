@@ -4,17 +4,14 @@
   "viewport": {"width": 640, "height": 320},
   "events": [
     {"type": "log", "message": "=== editing_paired_input ==="},
-    {"type": "wait", "ms": 150},
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "wait", "ms": 60},
     {"type": "type", "target": {"selector": "#surface"}, "text": "Y"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#before-log"}, "equals": "before:insertText|Y|1|0-0"},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertText|Y|Y"},
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "wait", "ms": 60},
     {"type": "type", "target": {"selector": "#surface"}, "text": "X"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_text", "target": {"selector": "#blocked-log"}, "equals": "blocked:insertText|X|1|0-1"},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertText|Y|Y"}
   ]

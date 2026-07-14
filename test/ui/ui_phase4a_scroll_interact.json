@@ -4,7 +4,6 @@
   "description": "Scroll down to bring Section A into view, click it, and verify text content",
   "events": [
     {"type": "log", "message": "=== Phase 4a: Scroll + Layout Interaction ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "Step 1: Verify initial scroll at top"},
     {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 5},
@@ -14,14 +13,12 @@
 
     {"type": "log", "message": "Step 3: Scroll down to reveal Section A (~600px offset)"},
     {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -15},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 4: Verify scroll moved"},
     {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 5, "negate": true},
 
     {"type": "log", "message": "Step 5: Click on Section A"},
     {"type": "click", "target": {"selector": "#sec-a h2"}},
-    {"type": "wait", "ms": 100},
 
     {"type": "log", "message": "Step 6: Assert Section A is visible"},
     {"type": "assert_visible", "target": {"selector": "#sec-a"}, "visible": true},
@@ -35,7 +32,6 @@
 
     {"type": "log", "message": "Step 9: Click Section B"},
     {"type": "click", "target": {"selector": "#sec-b h2"}},
-    {"type": "wait", "ms": 100},
 
     {"type": "log", "message": "Step 10: Assert Section B visible and has correct text"},
     {"type": "assert_visible", "target": {"selector": "#sec-b"}, "visible": true},

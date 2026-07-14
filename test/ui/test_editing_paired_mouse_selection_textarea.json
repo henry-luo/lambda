@@ -4,12 +4,9 @@
   "viewport": {"width": 640, "height": 360},
   "events": [
     {"type": "log", "message": "=== editing_paired_mouse_selection_textarea ==="},
-    {"type": "wait", "ms": 150},
     {"type": "dblclick", "target": {"selector": "#nav-area", "offset_x": 16, "offset_y": 14}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_editing_selection", "target": {"selector": "#nav-area"}, "start": 0, "end": 2},
     {"type": "tripleclick", "target": {"selector": "#nav-area", "offset_x": 16, "offset_y": 14}},
-    {"type": "wait", "ms": 80},
     {"type": "assert_editing_selection", "target": {"selector": "#nav-area"}, "start": 0, "end": 2}
   ]
 }

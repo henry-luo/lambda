@@ -4,7 +4,6 @@
   "viewport": {"width": 600, "height": 800},
   "events": [
     {"type": "log", "message": "=== Todo Add Item Test ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 1: Verify initial item count (3+3+2=8)"},
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
@@ -25,7 +24,6 @@
 
     {"type": "log", "message": "Step 6: Click Add button"},
     {"type": "click", "target": {"selector": ".add-btn"}},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 7: Verify item count increased (8+1=9)"},
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 9},

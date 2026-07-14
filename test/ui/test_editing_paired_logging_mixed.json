@@ -4,13 +4,10 @@
   "viewport": {"width": 760, "height": 420},
   "events": [
     {"type": "log", "message": "=== editing_paired_logging_mixed ==="},
-    {"type": "wait", "ms": 150},
     {"type": "mouse_down", "target": {"selector": "#embedded-input", "offset_x": 1, "offset_y": 12}, "button": 0},
     {"type": "mouse_move", "target": {"selector": "#surface", "offset_x": 560, "offset_y": 20}},
-    {"type": "wait", "ms": 40},
     {"type": "assert_form_selection", "target": {"selector": "#embedded-input"}, "start": 0, "end": 5},
     {"type": "mouse_up", "target": {"selector": "#surface", "offset_x": 560, "offset_y": 20}, "button": 0},
-    {"type": "wait", "ms": 60},
     {"type": "assert_event_log", "contains": "\"type\":\"editing.selection\"", "min": 1},
     {"type": "assert_event_log", "contains": "\"operation\":\"dragExtend\"", "min": 1}
   ]

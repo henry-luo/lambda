@@ -375,6 +375,13 @@ struct EventSimContext {
     int viewport_width;          // 0 = use default (1200)
     int viewport_height;         // 0 = use default (800)
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
+    // Assertion retries must yield to the host loop so queued JS and layout work
+    // can make the condition true instead of sleeping inside event_sim_update().
+    bool assertion_retry_pending;
+    double assertion_retry_deadline;
+    double assertion_retry_time;
+    int assertion_saved_pass_count;
+    int assertion_saved_fail_count;
     // Phase 5b: navigation history stack
     void* nav_history[16];       // stack of DomDocument* for navigate_back
     int nav_history_depth;       // current depth in nav_history
@@ -421,6 +428,12 @@ void event_sim_free(EventSimContext* ctx);
 // Returns true if simulation is still running
 // uicon is cast to UiContext* internally
 bool event_sim_update(EventSimContext* ctx, void* uicon, GLFWwindow* window, double current_time);
+
+// Headless hosts use these to wait on the JS loop until the next assertion
+// attempt, while waking early when an actual timer or task becomes ready.
+bool event_sim_assertion_retry_pending(EventSimContext* ctx);
+int event_sim_assertion_retry_wait_ms(EventSimContext* ctx);
+void event_sim_wake_assertion_retry(EventSimContext* ctx);
 
 // Get simulation results summary
 void event_sim_print_results(EventSimContext* ctx);

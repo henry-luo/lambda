@@ -88,6 +88,13 @@ void parse_json(Input* input, const char* json_string);
 
 static bool g_replay_assert_state = false;
 
+static bool sim_event_is_assertion(SimEventType type) {
+    // Clipboard assertion predates the contiguous assertion enum block; keep it
+    // in the common retry/schema path instead of requiring fixed waits around it.
+    return type == SIM_EVENT_ASSERT_CLIPBOARD ||
+           (type >= SIM_EVENT_ASSERT_CARET && type <= SIM_EVENT_ASSERT_SNAPSHOT);
+}
+
 typedef struct EventSimStateStoreSnapshot {
     char* name;
     uint32_t dom_id;
@@ -1933,10 +1940,12 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         return NULL;
     }
 
-    // Parse optional auto-waiting fields for assertion events
-    if ((ev->type >= SIM_EVENT_ASSERT_CARET && ev->type <= SIM_EVENT_ASSERT_SNAPSHOT)) {
-        ev->assert_timeout = reader.get("timeout").asInt32();
-        ev->assert_interval = reader.get("interval").asInt32();
+    // Parse optional auto-waiting fields for assertion events. The fixtures use
+    // assertion-specific names; accepting unrelated "timeout" fields here made
+    // their intended bounds silently ineffective.
+    if (sim_event_is_assertion(ev->type)) {
+        ev->assert_timeout = reader.get("assert_timeout").asInt32();
+        ev->assert_interval = reader.get("assert_interval").asInt32();
         if (ev->assert_interval <= 0) ev->assert_interval = 100; // default 100ms
     }
 
@@ -5682,52 +5691,72 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
     }
 }
 
-// Auto-waiting wrapper: retries assertion events until they pass or timeout expires
-static void process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
+// Auto-waiting wrapper: attempt an assertion once per host-loop turn. Blocking
+// here used to prevent JS timers and microtasks from running between attempts,
+// forcing fixtures to add fixed sleeps before otherwise auto-waiting assertions.
+static bool process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     // Non-assertion events execute directly
-    if (ev->type < SIM_EVENT_ASSERT_CARET || ev->type > SIM_EVENT_ASSERT_SNAPSHOT) {
+    if (!sim_event_is_assertion(ev->type)) {
         process_sim_event(ctx, ev, uicon, window);
-        return;
+        return true;
     }
 
     // Determine effective timeout
     int timeout = ev->assert_timeout > 0 ? ev->assert_timeout : ctx->default_timeout;
     if (timeout <= 0) {
         process_sim_event(ctx, ev, uicon, window);
-        return;
+        return true;
     }
 
     int interval = ev->assert_interval > 0 ? ev->assert_interval : 100;
-    int elapsed = 0;
-
-    while (true) {
-        int saved_pass = ctx->pass_count;
-        int saved_fail = ctx->fail_count;
-
-        process_sim_event(ctx, ev, uicon, window);
-
-        // Passed if pass_count increased without fail_count increasing
-        if (ctx->pass_count > saved_pass && ctx->fail_count == saved_fail) {
-            return;
-        }
-
-        // Timeout expired — keep the failure
-        if (elapsed >= timeout) {
-            return;
-        }
-
-        // Restore counts and retry after sleeping
-        ctx->pass_count = saved_pass;
-        ctx->fail_count = saved_fail;
-
-        struct timespec ts;
-        ts.tv_sec = interval / 1000;
-        ts.tv_nsec = (interval % 1000) * 1000000L;
-        nanosleep(&ts, NULL);
-        elapsed += interval;
-
-        log_info("event_sim: auto-wait retry after %dms (timeout=%dms)", elapsed, timeout);
+    double now = get_monotonic_time();
+    if (ctx->assertion_retry_pending && now < ctx->assertion_retry_time) {
+        return false;
     }
+
+    if (!ctx->assertion_retry_pending) {
+        ctx->assertion_saved_pass_count = ctx->pass_count;
+        ctx->assertion_saved_fail_count = ctx->fail_count;
+        ctx->assertion_retry_deadline = now + ((double)timeout / 1000.0);
+    }
+
+    process_sim_event(ctx, ev, uicon, window);
+    now = get_monotonic_time();
+
+    // Passed if pass_count increased without fail_count increasing.
+    if (ctx->pass_count > ctx->assertion_saved_pass_count &&
+        ctx->fail_count == ctx->assertion_saved_fail_count) {
+        ctx->assertion_retry_pending = false;
+        return true;
+    }
+
+    // Keep only the terminal failure; intermediate attempts are observational.
+    if (now >= ctx->assertion_retry_deadline) {
+        ctx->assertion_retry_pending = false;
+        return true;
+    }
+
+    ctx->pass_count = ctx->assertion_saved_pass_count;
+    ctx->fail_count = ctx->assertion_saved_fail_count;
+    ctx->assertion_retry_pending = true;
+    ctx->assertion_retry_time = now + ((double)interval / 1000.0);
+    return false;
+}
+
+bool event_sim_assertion_retry_pending(EventSimContext* ctx) {
+    return ctx && ctx->assertion_retry_pending;
+}
+
+int event_sim_assertion_retry_wait_ms(EventSimContext* ctx) {
+    if (!ctx || !ctx->assertion_retry_pending) return 0;
+    double remaining_ms = (ctx->assertion_retry_time - get_monotonic_time()) * 1000.0;
+    if (remaining_ms <= 0.0) return 0;
+    int wait_ms = (int)remaining_ms; // INT_CAST_OK: bounded retry delay in milliseconds.
+    return wait_ms > 0 ? wait_ms : 1;
+}
+
+void event_sim_wake_assertion_retry(EventSimContext* ctx) {
+    if (ctx && ctx->assertion_retry_pending) ctx->assertion_retry_time = 0.0;
 }
 
 static void replay_emit_mismatch(EventSimContext* ctx, UiContext* uicon,
@@ -5836,7 +5865,9 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window,
 
     // Process current event (with auto-wait retry for assertions)
     SimEvent* ev = (SimEvent*)ctx->events->data[ctx->current_index];
-    process_sim_event_with_retry(ctx, ev, uicon, window);
+    if (!process_sim_event_with_retry(ctx, ev, uicon, window)) {
+        return true;
+    }
     if (ctx->replay_assert_state && ev->type == SIM_EVENT_REPLAY_INPUT) {
         event_sim_assert_schema(ctx, uicon, "replay_input");
     }

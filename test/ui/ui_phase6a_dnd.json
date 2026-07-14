@@ -3,7 +3,6 @@
   "html": "test/ui/test_phase6a_dnd.html",
   "events": [
     {"type": "log", "message": "=== Phase 6a: Drag and Drop ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "--- Verify draggable attributes ---"},
     {"type": "assert_attribute", "target": {"selector": "#drag-src"},

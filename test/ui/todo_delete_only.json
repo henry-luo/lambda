@@ -6,7 +6,6 @@
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
     {"type": "log", "message": "--- DELETE: click delete button ---"},
     {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
-    {"type": "wait", "ms": 300},
     {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 7},
     {"type": "log", "message": "--- Done ---"}
   ]

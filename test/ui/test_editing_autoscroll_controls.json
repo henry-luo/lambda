@@ -4,7 +4,6 @@
   "viewport": {"width": 640, "height": 420},
   "events": [
     {"type": "log", "message": "=== editing_autoscroll_controls ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Rich drag autoscroll uses the nearest scroll container, not the document viewport"},
     {"type": "mouse_move", "target": {"selector": "#scrollHost", "offset_x": 216, "offset_y": 20}},
@@ -15,7 +14,6 @@
     {"type": "assert_selection", "is_collapsed": false},
     {"type": "advance_time", "ms": 128, "steps": 4},
     {"type": "mouse_up", "target": {"selector": "#scrollHost", "offset_x": 100, "offset_y": 140}, "button": 0},
-    {"type": "wait", "ms": 80},
     {"type": "assert_state_store", "target": {"selector": "#scrollHost"}, "view_scroll_y": 120, "tolerance": 90},
     {"type": "assert_state_store", "doc_scroll_y": 0, "tolerance": 2},
 
@@ -24,7 +22,6 @@
     {"type": "mouse_move", "target": {"selector": "#longInput", "offset_x": 148, "offset_y": 11}},
     {"type": "advance_time", "ms": 128, "steps": 4},
     {"type": "mouse_up", "target": {"selector": "#longInput", "offset_x": 148, "offset_y": 11}, "button": 0},
-    {"type": "wait", "ms": 60},
     {"type": "assert_form_selection", "target": {"selector": "#longInput"}, "start": 0, "end": 41},
 
     {"type": "log", "message": "Textarea drag autoscroll extends selection downward through internal scroll"},
@@ -32,7 +29,6 @@
     {"type": "mouse_move", "target": {"selector": "#longArea", "offset_x": 170, "offset_y": 54}},
     {"type": "advance_time", "ms": 128, "steps": 4},
     {"type": "mouse_up", "target": {"selector": "#longArea", "offset_x": 170, "offset_y": 54}, "button": 0},
-    {"type": "wait", "ms": 60},
     {"type": "assert_form_selection", "target": {"selector": "#longArea"}, "start": 0, "end": 35}
   ]
 }

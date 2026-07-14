@@ -3,13 +3,11 @@
   "html": "test/layout/data/form/form_state.html",
   "description": "Regression: selecting a new radio in a group must clear the old radio's :checked outline styling.",
   "events": [
-    {"type": "wait", "ms": 120},
     {"type": "assert_state", "target": {"selector": "#radio2"}, "state": ":checked", "value": true},
     {"type": "assert_style", "target": {"selector": "#radio2"}, "property": "outline-style", "equals": "solid"},
     {"type": "assert_style", "target": {"selector": "#radio2"}, "property": "outline-width", "equals": "2px"},
 
     {"type": "click", "target": {"selector": "#radio3"}},
-    {"type": "wait", "ms": 80},
 
     {"type": "assert_state", "target": {"selector": "#radio2"}, "state": ":checked", "value": false},
     {"type": "assert_state", "target": {"selector": "#radio3"}, "state": ":checked", "value": true},

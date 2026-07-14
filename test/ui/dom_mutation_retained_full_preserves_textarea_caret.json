@@ -3,7 +3,6 @@
   "html": "test/ui/dom_mutation_retained_full_preserves_textarea_caret.html",
   "viewport": {"width": 640, "height": 320},
   "events": [
-    {"type": "wait", "ms": 200},
     {"type": "click", "target": {"selector": "#editor"}},
     {"type": "wait", "ms": 80},
     {"type": "set_editing_selection", "target": {"selector": "#editor"}, "start": 2},
@@ -11,7 +10,6 @@
     {"type": "assert_state_store", "target": {"selector": "#editor"}, "view_state": true, "kind": "form", "weak_ref": true},
     {"type": "snapshot_state_store", "name": "editor-form", "target": {"selector": "#editor"}},
     {"type": "type", "target": {"selector": "#editor"}, "text": "X"},
-    {"type": "wait", "ms": 180},
     {"type": "assert_value", "target": {"selector": "#editor"}, "equals": "abXcd"},
     {"type": "assert_caret", "target": {"selector": "#editor"}, "char_offset": 3},
     {"type": "assert_reconcile_mode", "mode": "retained_full_layout", "reason": "stylesheet-mutation"},

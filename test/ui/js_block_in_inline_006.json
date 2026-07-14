@@ -4,21 +4,18 @@
   "description": "Click on body toggles #test between display:inline and display:block. Text should split into three separate lines when #test becomes block.",
   "events": [
     {"type": "log", "message": "=== block-in-inline-006: onclick toggles display ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "log", "message": "Step 1: Verify initial state — #test has class 'inline' (display:inline)"},
     {"type": "assert_style", "target": {"selector": "#test"}, "property": "display", "equals": "inline"},
 
     {"type": "log", "message": "Step 2: Click body to toggle #test to block"},
     {"type": "click", "target": {"selector": "body"}},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 3: Verify #test is now block"},
     {"type": "assert_style", "target": {"selector": "#test"}, "property": "display", "equals": "block", "assert_timeout": 500},
 
     {"type": "log", "message": "Step 4: Click body again to toggle #test back to inline"},
     {"type": "click", "target": {"selector": "body"}},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 5: Verify #test is back to inline"},
     {"type": "assert_style", "target": {"selector": "#test"}, "property": "display", "equals": "inline", "assert_timeout": 500},

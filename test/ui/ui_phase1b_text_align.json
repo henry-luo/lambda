@@ -3,7 +3,6 @@
   "html": "test/ui/baseline_809_text_align.html",
   "events": [
     {"type": "log", "message": "=== Phase 1b: assert_visible + assert_text on baseline_809_text_align ==="},
-    {"type": "wait", "ms": 300},
 
     {"type": "assert_visible", "target": {"selector": ".left"},   "visible": true},
     {"type": "assert_visible", "target": {"selector": ".center"}, "visible": true},

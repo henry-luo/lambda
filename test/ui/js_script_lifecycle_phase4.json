@@ -4,7 +4,6 @@
   "description": "Covers the default tasks-postdom pipeline: persistent globals, per-script exception recovery, defer before DOMContentLoaded, readyState completion, load listener, body onload, and window.onload.",
   "events": [
     {"type": "log", "message": "=== js_script_lifecycle_phase4 ==="},
-    {"type": "wait", "ms": 200},
     {
       "type": "assert_text",
       "target": {"selector": "#result"},

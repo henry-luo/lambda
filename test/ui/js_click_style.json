@@ -4,7 +4,6 @@
   "description": "Tests onclick handler that sets inline style properties (width, backgroundColor). Verifies style changes propagate through CSS cascade and relayout.",
   "events": [
     {"type": "log", "message": "=== js_click_style: inline style mutation ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 1: Click 'Set Width 200' — #target width should change"},
     {"type": "click", "target": {"selector": "#btn-width"}},

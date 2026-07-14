@@ -4,7 +4,6 @@
   "description": "Tests onclick handler that uses getElementsByTagName to batch-update style.fontFamily on multiple elements. Mirrors the CSS2.1 text-transform-bicameral pattern.",
   "events": [
     {"type": "log", "message": "=== js_click_batch_style: getElementsByTagName batch update ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "log", "message": "Step 1: Click 'Set Monospace' — all divs should get font-family: monospace"},
     {"type": "click", "target": {"selector": "#btn-mono"}},

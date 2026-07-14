@@ -4,7 +4,6 @@
   "viewport": {"width": 600, "height": 600},
   "events": [
     {"type": "log", "message": "=== form_context_menu ==="},
-    {"type": "wait", "ms": 200},
 
     {"type": "click", "target": {"selector": "#name"}},
     {"type": "wait", "ms": 80},
@@ -17,7 +16,6 @@
 
     {"type": "log", "message": "Esc closes the menu without modifying value"},
     {"type": "key_press", "key": "escape"},
-    {"type": "wait", "ms": 80},
     {"type": "assert_value", "target": {"selector": "#name"}, "equals": "ctxmenu"},
     {"type": "assert_state_dump", "reference": "test/ui/state/test_form_context_menu_final.mark"}
   ]

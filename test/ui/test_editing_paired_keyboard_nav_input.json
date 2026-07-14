@@ -4,22 +4,16 @@
   "viewport": {"width": 640, "height": 360},
   "events": [
     {"type": "log", "message": "=== editing_paired_keyboard_nav_input ==="},
-    {"type": "wait", "ms": 150},
     {"type": "set_editing_selection", "target": {"selector": "#nav-input"}, "start": 8, "end": 8},
     {"type": "key_press", "key": "Left", "mods_str": "alt"},
-    {"type": "wait", "ms": 40},
     {"type": "assert_editing_selection", "target": {"selector": "#nav-input"}, "start": 4, "end": 4},
     {"type": "key_press", "key": "Right", "mods_str": "alt"},
-    {"type": "wait", "ms": 40},
     {"type": "assert_editing_selection", "target": {"selector": "#nav-input"}, "start": 7, "end": 7},
     {"type": "key_press", "key": "Right", "mods_str": "super"},
-    {"type": "wait", "ms": 40},
     {"type": "assert_editing_selection", "target": {"selector": "#nav-input"}, "start": 13, "end": 13},
     {"type": "key_press", "key": "Left", "mods_str": "super"},
-    {"type": "wait", "ms": 40},
     {"type": "assert_editing_selection", "target": {"selector": "#nav-input"}, "start": 0, "end": 0},
     {"type": "key_press", "key": "Down", "mods_str": "shift"},
-    {"type": "wait", "ms": 40},
     {"type": "assert_editing_selection", "target": {"selector": "#nav-input"}, "start": 0, "end": 13}
   ]
 }
