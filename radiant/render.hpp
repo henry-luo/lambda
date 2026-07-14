@@ -1746,6 +1746,9 @@ Bound render_geometry_rect_to_bound(Rect rect);
 bool render_geometry_bounds_intersect(Bound a, Bound b);
 float render_geometry_filter_effect_expand(const FilterProp* filter);
 float render_geometry_block_visual_overflow(const ViewBlock* block);
+bool render_geometry_transform_matrix(const TransformProp* transform,
+                                      float x, float y, float width, float height,
+                                      RdtMatrix* out_matrix);
 
 // ===== display_list_bounds.hpp =====
 static const float DL_UNBOUNDED_EXTENT = 99999.0f;
@@ -3334,8 +3337,21 @@ typedef struct RenderOutputTarget {
     float pixel_ratio;
 } RenderOutputTarget;
 
+typedef struct RenderExportSession {
+    UiContext* ui_context;
+    Url* base_url;
+    DomDocument* document;
+    float scale;
+    int content_width;
+    int content_height;
+} RenderExportSession;
+
 void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind,
                                const char* output_file);
+bool render_export_session_begin(RenderExportSession* session, const char* html_file,
+                                 int viewport_width, int viewport_height,
+                                 int fallback_width, int fallback_height, float scale);
+void render_export_session_end(RenderExportSession* session);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
 int render_html_to_output_target(const char* html_file, const char* output_file,

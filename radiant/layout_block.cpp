@@ -2018,43 +2018,44 @@ static ViewBlock* find_line_clamped_descendant_in_view(View* view) {
     return nullptr;
 }
 
+enum FormattedLineContent {
+    FORMATTED_LINE_EMPTY,
+    FORMATTED_LINE_INLINE,
+    FORMATTED_LINE_BLOCK
+};
+
+static FormattedLineContent classify_formatted_line_content(ViewBlock* container) {
+    bool has_inline_content = false;
+    View* child = container->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* block = lam::view_require_block(child);
+            if (!is_out_of_flow_block(block) && !is_inline_level_atomic_block(child, block)) {
+                return FORMATTED_LINE_BLOCK;
+            }
+            if (is_inline_level_atomic_block(child, block)) {
+                has_inline_content = true;
+            }
+        } else if (find_first_block_in_inline(child)) {
+            return FORMATTED_LINE_BLOCK;
+        } else if (child->view_type == RDT_VIEW_TEXT || child->view_type == RDT_VIEW_INLINE) {
+            has_inline_content = true;
+        }
+        child = child->next();
+    }
+    // First/last direction matters only after the shared block-vs-inline classification.
+    return has_inline_content ? FORMATTED_LINE_INLINE : FORMATTED_LINE_EMPTY;
+}
+
 // Find the block containing the first formatted line, following CSS Inline 3 §5 rules.
 // For a block container with block-level content, the first formatted line is
 // the first formatted line of its first in-flow block-level child.
 // Also handles block-in-inline: an inline wrapper (span) containing a block child.
 // Returns nullptr if no first formatted line exists.
 static ViewBlock* find_first_formatted_line_block(ViewBlock* container) {
-    // Check if container has any in-flow block children (direct or via inline wrapper).
-    bool has_block_child = false;
-    View* child = container->first_placed_child();
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                has_block_child = true;
-                break;
-            }
-        } else if (find_first_block_in_inline(child)) {
-            has_block_child = true;
-            break;
-        }
-        child = child->next();
-    }
-
-    if (!has_block_child) {
-        // Pure inline content container: check if there's any content
-        child = container->first_placed_child();
-        while (child) {
-            if (child->view_type == RDT_VIEW_TEXT || child->view_type == RDT_VIEW_INLINE) {
-                return container;
-            }
-            if (child->is_block()) {
-                ViewBlock* vb = lam::view_require_block(child);
-                if (is_inline_level_atomic_block(child, vb)) return container;
-            }
-            child = child->next();
-        }
-        return nullptr; // empty container
+    FormattedLineContent content = classify_formatted_line_content(container);
+    if (content != FORMATTED_LINE_BLOCK) {
+        return content == FORMATTED_LINE_INLINE ? container : nullptr;
     }
 
     // Container has block children. Per CSS 2.1 §9.2.1.1, inline content
@@ -2077,7 +2078,7 @@ static ViewBlock* find_first_formatted_line_block(ViewBlock* container) {
 
     // No inline content before first block child — walk to it and recurse.
     // Also handles block-in-inline: recurse into blocks found inside inline wrappers.
-    child = container->first_placed_child();
+    View* child = container->first_placed_child();
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
@@ -2110,37 +2111,9 @@ static ViewBlock* find_last_formatted_line_block(ViewBlock* container) {
         }
     }
 
-    // Check if container has any in-flow block children (direct or via inline wrapper).
-    bool has_block_child = false;
-    View* child = container->first_placed_child();
-    while (child) {
-        if (child->is_block()) {
-            ViewBlock* vb = lam::view_require_block(child);
-            if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                has_block_child = true;
-                break;
-            }
-        } else if (find_first_block_in_inline(child)) {
-            has_block_child = true;
-            break;
-        }
-        child = child->next();
-    }
-
-    if (!has_block_child) {
-        // Pure inline content container
-        child = container->first_placed_child();
-        while (child) {
-            if (child->view_type == RDT_VIEW_TEXT || child->view_type == RDT_VIEW_INLINE) {
-                return container;
-            }
-            if (child->is_block()) {
-                ViewBlock* vb = lam::view_require_block(child);
-                if (is_inline_level_atomic_block(child, vb)) return container;
-            }
-            child = child->next();
-        }
-        return nullptr;
+    FormattedLineContent content = classify_formatted_line_content(container);
+    if (content != FORMATTED_LINE_BLOCK) {
+        return content == FORMATTED_LINE_INLINE ? container : nullptr;
     }
 
     // Container has block children. Check if inline content after last block
@@ -2155,32 +2128,23 @@ static ViewBlock* find_last_formatted_line_block(ViewBlock* container) {
 
     // Find last in-flow block child and recurse.
     // Also handles block-in-inline: check inline wrappers for block children.
-    View* last_in_flow = nullptr;
-    bool last_is_in_inline = false;
-    child = container->first_placed_child();
+    ViewBlock* last_in_flow = nullptr;
+    View* child = container->first_placed_child();
     while (child) {
         if (child->is_block()) {
             ViewBlock* vb = lam::view_require_block(child);
             if (!is_out_of_flow_block(vb) && !is_inline_level_atomic_block(child, vb)) {
-                last_in_flow = child;
-                last_is_in_inline = false;
+                last_in_flow = vb;
             }
         } else {
             ViewBlock* bii = find_last_block_in_inline(child);
             if (bii) {
-                last_in_flow = static_cast<View*>(bii);
-                last_is_in_inline = true;
+                last_in_flow = bii;
             }
         }
         child = child->next();
     }
-    if (last_in_flow) {
-        if (last_is_in_inline) {
-            return find_last_formatted_line_block(lam::view_require_block(last_in_flow));
-        }
-        return find_last_formatted_line_block(lam::view_require_block(last_in_flow));
-    }
-    return nullptr;
+    return last_in_flow ? find_last_formatted_line_block(last_in_flow) : nullptr;
 }
 
 // Get text-box-edge values from a block, walking up to ancestors if not set.
