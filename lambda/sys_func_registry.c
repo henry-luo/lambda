@@ -1717,6 +1717,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_method_function", FPTR(js_new_method_function)},
     {"js_new_closure", FPTR(js_new_closure)},
     {"js_alloc_env", FPTR(js_alloc_env)},
+    {"js_env_rehome_scalars", FPTR(js_env_rehome_scalars)},
     {"js_args_push", FPTR(js_args_push)},
     {"js_args_save", FPTR(js_args_save)},
     {"js_args_restore", FPTR(js_args_restore)},

@@ -477,20 +477,30 @@ fn prefix_width(nodes, index, node_sep, clusters) {
     sum([for (i in 1 to index) node_gap(nodes[i - 1], nodes[i], node_sep, clusters)])
 }
 
-fn position_layer(layer, node_sep, rank_sep, clusters) {
+fn layer_height(layer) =>
+  if (len(layer.nodes) == 0) 0.0 else max([for (node in layer.nodes) node.height])
+
+fn rank_center(layers, index, rank_sep) =>
+  sum([for (i, layer in layers where i < index) layer_height(layer)]) +
+    float(index) * rank_sep + layer_height(layers[index]) / 2.0
+
+fn position_layer(layer, node_sep, rank_y, clusters) {
   let total_width = layer_total_width(layer.nodes, node_sep, clusters);
   let result = [for (i, node in layer.nodes) {*:node,
     order: i,
     x: 0.0 - total_width / 2.0 + prefix_width(layer.nodes, i, node_sep, clusters) +
       node.width / 2.0,
-    y: float(layer.rank) * rank_sep
+    y: rank_y
   }];
   result
 }
 
 fn position_nodes(layers, opts, clusters) {
-  let placed = [for (layer in layers,
-    node in position_layer(layer, opts.node_sep, opts.rank_sep, clusters)) node];
+  // Rank separation is a box-to-box gap; center-only spacing makes wide LR
+  // nodes touch and collapses clipped routes to a single point.
+  let placed = [for (i, layer in layers,
+    node in position_layer(layer, opts.node_sep,
+      rank_center(layers, i, opts.rank_sep), clusters)) node];
   if (len(placed) == 0) { [] }
   else {
     let min_x = min([for (node in placed) node.x - node.width / 2.0]);
@@ -669,14 +679,30 @@ fn clip_polygon(cx, cy, tx, ty, vertices) {
   {x: point.x, y: point.y}
 }
 
+fn shape_port(node) {
+  let matches = [for (port in node.ports where port.side == "shape") port];
+  if (len(matches) > 0) matches[0] else null
+}
+
+fn dimensions(width, height) => {width: width, height: height}
+
+fn shape_size(node) {
+  let port = shape_port(node);
+  if (port == null) dimensions(node.width, node.height)
+  else dimensions(node.width * port.x_offset, node.height * port.y_offset)
+}
+
 fn shape_vertices(node) {
-  let left = node.x - node.width / 2.0;
-  let right = node.x + node.width / 2.0;
-  let top = node.y - node.height / 2.0;
-  let bottom = node.y + node.height / 2.0;
-  let quarter = node.width / 4.0;
+  let size = shape_size(node);
+  let width = size.width;
+  let height = size.height;
+  let left = node.x - width / 2.0;
+  let right = node.x + width / 2.0;
+  let top = node.y - height / 2.0;
+  let bottom = node.y + height / 2.0;
+  let quarter = width / 4.0;
   let vertices = if (node.polygon_sides != null) polygon.vertices(
-    node.x, node.y, node.width, node.height, node.polygon_sides,
+    node.x, node.y, width, height, node.polygon_sides,
     node.polygon_orientation, node.polygon_skew, node.polygon_distortion)
   else if (node.shape == "hexagon") [
     {x: left + quarter, y: top}, {x: right - quarter, y: top},
@@ -685,9 +711,9 @@ fn shape_vertices(node) {
   ]
   else if (node.shape == "octagon") [
     {x: left + quarter, y: top}, {x: right - quarter, y: top},
-    {x: right, y: top + node.height / 4.0}, {x: right, y: bottom - node.height / 4.0},
+    {x: right, y: top + height / 4.0}, {x: right, y: bottom - height / 4.0},
     {x: right - quarter, y: bottom}, {x: left + quarter, y: bottom},
-    {x: left, y: bottom - node.height / 4.0}, {x: left, y: top + node.height / 4.0}
+    {x: left, y: bottom - height / 4.0}, {x: left, y: top + height / 4.0}
   ]
   else if (node.shape == "house") [
     {x: node.x, y: top}, {x: right, y: node.y}, {x: right, y: bottom},
@@ -710,6 +736,11 @@ fn shape_vertices(node) {
     {x: right, y: node.y}, {x: right - quarter / 2.0, y: bottom},
     {x: left, y: bottom}, {x: left + quarter / 2.0, y: node.y}
   ]
+  else if (node.shape == "asymmetric-left") [
+    {x: left + quarter / 2.0, y: top}, {x: right, y: top},
+    {x: right - quarter / 2.0, y: node.y}, {x: right, y: bottom},
+    {x: left + quarter / 2.0, y: bottom}, {x: left, y: node.y}
+  ]
   else if (node.shape == "lean-r") [
     {x: left + quarter / 2.0, y: top}, {x: right, y: top},
     {x: right - quarter / 2.0, y: bottom}, {x: left, y: bottom}
@@ -730,24 +761,32 @@ fn shape_vertices(node) {
   ]
   else if (node.shape == "notch-rect" or node.shape == "card") [
     {x: left + quarter / 2.0, y: top}, {x: right, y: top}, {x: right, y: bottom},
-    {x: left, y: bottom}, {x: left, y: top + node.height / 4.0}
+    {x: left, y: bottom}, {x: left, y: top + height / 4.0}
+  ]
+  else if (node.shape == "notch-rect-right") [
+    {x: left, y: top}, {x: right - quarter / 2.0, y: top},
+    {x: right, y: top + height / 4.0}, {x: right, y: bottom}, {x: left, y: bottom}
   ]
   else if (node.shape == "notch-pent") [
     {x: left + quarter / 2.0, y: top}, {x: right, y: top},
-    {x: right, y: node.y + node.height / 4.0}, {x: node.x, y: bottom},
-    {x: left, y: node.y + node.height / 4.0}, {x: left, y: top + node.height / 4.0}
+    {x: right, y: node.y + height / 4.0}, {x: node.x, y: bottom},
+    {x: left, y: node.y + height / 4.0}, {x: left, y: top + height / 4.0}
   ]
   else if (node.shape == "tag-rect" or node.shape == "tag-doc") [
     {x: left, y: top}, {x: right - quarter / 2.0, y: top},
     {x: right, y: node.y}, {x: right - quarter / 2.0, y: bottom}, {x: left, y: bottom}
   ]
+  else if (node.shape == "tag-rect-left") [
+    {x: left + quarter / 2.0, y: top}, {x: right, y: top}, {x: right, y: bottom},
+    {x: left + quarter / 2.0, y: bottom}, {x: left, y: node.y}
+  ]
   else if (node.shape == "bolt") [
     {x: node.x - quarter / 4.0, y: top}, {x: right, y: top},
-    {x: node.x + quarter / 2.0, y: node.y - node.height / 12.0},
-    {x: right - quarter / 2.0, y: node.y - node.height / 12.0},
+    {x: node.x + quarter / 2.0, y: node.y - height / 12.0},
+    {x: right - quarter / 2.0, y: node.y - height / 12.0},
     {x: node.x - quarter / 2.0, y: bottom},
-    {x: node.x - quarter / 4.0, y: node.y + node.height / 12.0},
-    {x: left + quarter / 2.0, y: node.y + node.height / 12.0}
+    {x: node.x - quarter / 4.0, y: node.y + height / 12.0},
+    {x: left + quarter / 2.0, y: node.y + height / 12.0}
   ]
   else [];
   vertices
@@ -791,8 +830,9 @@ fn port_point(node, port, target_x, target_y) {
 }
 
 fn clip_shape(node, target_x, target_y) {
-  let half_w = node.width / 2.0;
-  let half_h = node.height / 2.0;
+  let size = shape_size(node);
+  let half_w = size.width / 2.0;
+  let half_h = size.height / 2.0;
   let vertices = shape_vertices(node);
   if (contains(["circle", "doublecircle", "ellipse", "f-circ", "stadium",
       "cloud", "delay", "h-cyl", "curv-trap"], node.shape))
@@ -813,7 +853,8 @@ fn compass_point(node, compass, target_x, target_y) {
       else if (contains(["nw", "w", "sw"], value)) -1.0 else 0.0;
     let dy = if (contains(["sw", "s", "se"], value)) 1.0
       else if (contains(["nw", "n", "ne"], value)) -1.0 else 0.0;
-    clip_shape(node, node.x + dx * node.width, node.y + dy * node.height)
+    let size = shape_size(node);
+    clip_shape(node, node.x + dx * size.width, node.y + dy * size.height)
   }
 }
 

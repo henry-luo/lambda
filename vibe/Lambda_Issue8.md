@@ -338,3 +338,47 @@ did identify the comparison, but did not explain why a comparison as a block's
 final expression required grouping here. The grammar should accept the
 expression consistently or suggest parentheses at the actual ambiguous
 boundary.
+
+## Parent-relative module imports are parsed as path expressions
+
+Graph conformance runners in sibling test directories needed one shared module
+from their parent directory. The intuitive import below is rejected:
+
+```lambda
+import conformance: ..conformance
+```
+
+The compiler reports `Unexpected syntax near '..' [path_parent]`. Relative
+module names support `.same_directory` and nested descendants, while `..` is
+reserved for path/parent expressions; there is no documented parent-relative
+module spelling and the diagnostic does not suggest one. The helper had to move
+under the absolute `lambda.package.graph` namespace to remain shared. Lambda
+should either support parent-relative imports or explicitly diagnose this as an
+unsupported module path and point to the available import forms.
+## Runtime map attribute spread creates a nested element child
+
+While lowering optional Graphviz annotation fonts, this construction:
+
+```lambda
+let attrs = {"font-name": "Helvetica"};
+<annotation *:attrs>
+```
+
+produced an element containing a `[null nested map]` child instead of a
+`font-name` attribute. There was no parse or runtime error, and ordinary
+literal attribute spreads make the syntax look valid. Until runtime map
+attribute spreading is defined or rejected clearly, element constructors must
+spell dynamic optional attributes explicitly.
+
+## Added map lanes fail only in retained custom-layout JIT calls
+
+Adding nullable `shape_width` and `shape_height` fields to graph node maps
+worked in direct Lambda calls to `layout.compute()`, but the same module called
+through Radiant's retained custom-layout function produced error-valued route
+coordinates and invalid placements. Making both fields numeric did not change
+the retained failure. No Lambda error identified the record-shape mismatch; the
+observable messages were downstream `unknown range type: int, error` and
+`CUSTOM_LAYOUT_LAMBDA_PLACEMENT` errors. The graph package currently carries
+fixed-shape ratios in its already-established port record instead. The retained
+JIT should either support compatible map-shape extension or reject the call at
+the actual field boundary.

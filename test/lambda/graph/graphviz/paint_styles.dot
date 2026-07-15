@@ -1,0 +1,11 @@
+digraph PaintStyles {
+  node [colorscheme=set19, style=filled]
+  a [fillcolor=1, fontcolor=2]
+  b [style=striped, fillcolor="1;0.25:2;0.25:3;0.5"]
+  c [style=wedged, fillcolor="/set19/4;0.2:/set19/5;0.8"]
+  d [style=radial, fillcolor="1:2:3"]
+  e [fillcolor="/svg/red"]
+  f [colorscheme=unknown, fillcolor=1]
+  g [fontname="Times-BoldItalic"]
+  a -> b [colorscheme=set19, color=6, fontcolor=7]
+}

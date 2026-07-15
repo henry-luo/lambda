@@ -25,7 +25,7 @@ The control/data flow, step by step (CLI `lambda js script.js`):
 2. Copy source into an owned buffer; for a real file lacking an explicit `var __filename`, compute the realpath and **inject `var __filename` / `var __dirname`** after the directive prologue (CommonJS ergonomics) (`js_mir_entrypoints_require.cpp:374`).
 3. Resolve interpreter env flags once and cache them (`:421`).
 4. `js_transpiler_create` → `js_transpiler_parse` (Tree-sitter) → `build_js_ast` → `js_check_early_errors` (`:449`–`:474`), each timed.
-5. Set up or **reuse** the `EvalContext` + GC heap + nursery + name pool + `Input` (reuse is the batch hot-reload fast path); set the `_lambda_rt` runtime pointer (`:483`–`:519`).
+5. Set up or **reuse** the `EvalContext` + GC heap + name pool + `Input` (reuse is the batch hot-reload fast path); set the `_lambda_rt` runtime pointer (`:483`–`:519`).
 6. Resolve imports: a fast-path skip unless the source contains `import `, else parallel precompile (`jm_precompile_js_imports`) then serial fallback (`jm_load_imports`) (`:521`).
 7. `jit_init(g_js_mir_optimize_level)` → `MIR_init` (+ `MIR_gen_init` unless pure-interpreter) (`mir.c:128`).
 8. `jm_create_mir_transpiler` allocates the transpiler state and opens a MIR module (`:560`; see [§4](#4-the-transpiler-context-jsmirtranspiler)).

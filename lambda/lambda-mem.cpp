@@ -22,6 +22,7 @@
 #include <stdlib.h>
 
 extern __thread EvalContext* context;
+extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc);
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
 extern "C" void vmap_gc_destroy(void* obj, void* data);
@@ -89,6 +90,7 @@ static JsTypedArray* gc_typed_array_from_map(Map* map) {
 static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     Map* map = (Map*)data;
     if (!map || !gc) return;
+    js_generator_map_gc_trace(map, gc);
     if (map->type_id != LMD_TYPE_MAP || map->map_kind != MAP_KIND_TYPED_ARRAY) return;
 
     JsTypedArray* ta = gc_typed_array_from_map(map);
@@ -177,6 +179,7 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
 extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void err_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void err_gc_destroy(void* data);
+extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
 // ── Interned single-char ASCII strings (Optimization 4) ──────────────
@@ -227,6 +230,7 @@ void heap_init() {
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
+    context->heap->gc->js_function_trace = js_function_gc_trace;
     context->heap->gc->external_destroy = gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
 
@@ -250,6 +254,7 @@ void heap_init_with_pool(Pool* pool) {
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
+    context->heap->gc->js_function_trace = js_function_gc_trace;
     context->heap->gc->external_destroy = gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
 
@@ -355,6 +360,14 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     }
     heap_assert_raw_item_allocation(ptr, type_id);
     return ptr;
+}
+
+extern "C" void* heap_calloc_js_env(size_t size) {
+    if (!context || !context->heap || !context->heap->gc || size == 0) return NULL;
+    if (size > SIZE_MAX / 2) return NULL;
+    // JS env slots own a parallel scalar tail so captured wide numbers never
+    // retain pointers into a completed invocation's number frame.
+    return gc_heap_calloc(context->heap->gc, size * 2, GC_TYPE_JS_ENV);
 }
 
 // Specialized allocator for JIT: uses bump-pointer fast path with pre-computed
@@ -603,6 +616,35 @@ extern "C" Item lambda_item_from_scalar_lane(Item item, uint64_t scalar_lane) {
         DateTime value;
         memcpy(&value, &scalar_lane, sizeof(value));
         return push_k(value);
+    }
+    default:
+        return item;
+    }
+}
+
+extern "C" Item lambda_item_heap_rehome(Item item) {
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64: {
+        if (item.is_inline_int64()) return item;
+        int64_t* value = (int64_t*)heap_alloc(sizeof(int64_t), LMD_TYPE_INT64);
+        if (!value) return ItemError;
+        *value = item.get_int64();
+        return {.item = l2it(value)};
+    }
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
+        if ((item.item & ITEM_DBL_MASK) || item.item == ITEM_FLOAT_P0 ||
+                item.item == ITEM_FLOAT_N0) return item;
+        double* value = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        if (!value) return ItemError;
+        *value = item.get_double();
+        return {.item = d2it(value)};
+    }
+    case LMD_TYPE_DTIME: {
+        DateTime* value = (DateTime*)heap_alloc(sizeof(DateTime), LMD_TYPE_DTIME);
+        if (!value) return ItemError;
+        *value = item.get_datetime();
+        return {.item = k2it(value)};
     }
     default:
         return item;

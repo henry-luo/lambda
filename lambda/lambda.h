@@ -855,6 +855,7 @@ Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
 uint64_t lambda_item_scalar_lane(Item item);
 Item lambda_item_from_scalar_lane(Item item, uint64_t scalar_lane);
+Item lambda_item_heap_rehome(Item item);
 #ifdef __cplusplus
 }
 #endif
@@ -956,6 +957,7 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 extern "C" {
 #endif
 void* heap_calloc(size_t size, TypeId type_id);
+void* heap_calloc_js_env(size_t size);
 void* heap_calloc_class(size_t size, TypeId type_id, int cls);  // allocate with pre-computed size class
 void* heap_data_calloc(size_t size);  // allocate GC-managed data buffer (for map/object data)
 uint64_t* heap_gc_root_slot_new(uint64_t value);

@@ -1,9 +1,9 @@
 flowchart LR
   subgraph ROOTSET["Root set gathered in gc_collect"]
     SLOTS["Registered root SLOTS\nuint64_t* to single boxed Items\nBSS module-level let, result_root\ngc_register_root"]
-    RANGES["Registered root RANGES\ncontiguous Item[]\nJS closure envs\ngc_register_root_range"]
-    JITF["JIT root frames\nper-call heap-backed JitGcRootBlock\n64 slots each, snapshotted as extra_roots"]
-    EXTRA["Caller extra_roots"]
+    RANGES["Registered root RANGES\npersistent contiguous Item[]\nmodule vars and JS args stack"]
+    SIDE["Execution root side-stack\nlive base..top Item slice\nstatic per-function slots"]
+    EXTRA["Other caller extra_roots"]
     STACK["Conservative C-stack scan (gc_scan_stack)\nevery aligned 8-byte word SP -> stack_base\nitem_to_ptr decode, mark if GC object"]
   end
 
@@ -12,7 +12,7 @@ flowchart LR
 
   SLOTS --> MARK["gc_mark_item / gc_trace_object\n(precise per TypeId)"]
   RANGES --> MARK
-  JITF --> MARK
+  SIDE --> MARK
   EXTRA --> MARK
   STACK --> MARK
 

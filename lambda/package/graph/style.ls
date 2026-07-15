@@ -69,6 +69,26 @@ pub fn safe_font_family(value) {
   else null
 }
 
+pub fn font_family_stack(value) {
+  let safe = safe_font_family(value);
+  let text = lower(string(if (safe != null) safe else ""));
+  if (safe == null) null
+  else if (starts_with(text, "times-") or text == "times")
+    "Times New Roman,Times,serif"
+  else if (starts_with(text, "helvetica")) "Helvetica,Arial,sans-serif"
+  else if (starts_with(text, "courier")) "Courier New,Courier,monospace"
+  else if (contains(text, "sans")) safe ++ ",sans-serif"
+  else if (contains(text, "mono")) safe ++ ",monospace"
+  else safe ++ ",Times New Roman,Times,serif"
+}
+
+pub fn font_variant_css(value) {
+  let text = lower(string(if (safe_font_family(value) != null) value else ""));
+  (if (contains(text, "bold")) "font-weight:bold;" else "") ++
+    (if (contains(text, "italic") or contains(text, "oblique"))
+      "font-style:italic;" else "")
+}
+
 fn valid_unsigned_decimal_at(text, i, dots, digits) {
   if (i >= len(text)) { if (digits > 0) true else false }
   else {

@@ -26,7 +26,7 @@ Every runtime builtin reaches its allocators, its GC heap, and its error slot th
 `EvalContext` (`lambda-data.hpp:77`) extends the slim `struct Context` (`lambda.h:1177`, which carries `pool`, `arena`, `consts`, `type_list`, `cwd`, `stack_limit`, `ui_mode`) with the runtime-only fields:
 
 - `Heap* heap` (`:78`) — the GC heap that backs strings, decimals, datetimes, errors, and containers; reached by the builtins via `heap_alloc`/`heap_strcpy` and by the JIT prologue via the `heap->gc` offset ([LR_07 §Known Issues #14](LR_07_MIR_Transpiler_JIT.md#known-issues--future-improvements)).
-- `gc_nursery_t* nursery` (`:81`) — the bump-pointer region for numeric temporaries (`int64`, `double`, `DateTime`) into which `push_l`/`push_d`/`push_k` box; distinct from the GC data nursery ([LR_03](LR_03_Value_and_Type_Model.md), [LR_08](LR_08_Memory_and_GC.md)).
+- Numeric temporaries (`int64`, `double`, `DateTime`) are **not** an `EvalContext` field: `push_l`/`push_d`/`push_k` box into the per-thread number execution side-stack owned by `lambda-mem.cpp`, watermark-scoped to the executing frame; distinct from the GC data nursery ([LR_03](LR_03_Value_and_Type_Model.md), [LR_08](LR_08_Memory_and_GC.md)).
 - `mpd_context_t* decimal_ctx` (`:84`) — the libmpdec context used by decimal arithmetic ([LR_04](LR_04_Numbers_Decimal_DateTime.md)).
 - `void* type_info` (`:82`) and `Item result` (`:83`) — the base-type metadata and the final execution result.
 - `ArrayList* debug_info` (`:88`), `const char* current_file` (`:89`), `LambdaError* last_error` (`:90`) — the error/stack-trace state. `set_runtime_error` (`lambda-eval.cpp:75`) builds a `LambdaError` against `current_file`, captures a native stack trace via `err_capture_stack_trace(context->debug_info, 32)`, frees any prior `last_error`, and stores the new one. The stack-trace machinery is detailed in [LR_10](LR_10_Error_Handling.md).
@@ -146,7 +146,7 @@ The one table feeds two unrelated consumers.
 | `lambda/lambda-eval.cpp` | The `fn_*` C-ABI support library: comparison (`fn_eq`/`fn_eq_depth`/`fn_lt`/`fn_gt`/scalar comparators), indexing/member (`fn_index`/`fn_member`/`fn_len`/`item_at`), string ops, datetime constructors, `fn_call`/`fn_input`, `fn_error`/`set_runtime_error`. |
 | `lambda/sys_func_registry.h` | `SysFuncInfo` struct, `CRetType`/`CArgConvention` enums, `FPTR()`/`NPTR()` and `LAMBDA_STATIC` stubbing, table externs. |
 | `lambda/sys_func_registry.c` | The 174-row `sys_func_defs[]` table (AST metadata + JIT pointers) and the `jit_runtime_imports[]` table. |
-| `lambda/lambda-data.hpp` | `EvalContext` (the `__thread` runtime state: heap/nursery/decimal_ctx/last_error/debug_info). |
+| `lambda/lambda-data.hpp` | `EvalContext` (the `__thread` runtime state: heap/decimal_ctx/last_error/debug_info). |
 | `lambda/lambda.hpp` | The `GUARD_ERROR*`/`GUARD_BOOL_ERROR*`/`GUARD_DATETIME_ERROR*` propagation macros. |
 | `lambda/build_ast.cpp` | Registry consumption at AST-build time: `init_sys_func_maps`, `get_sys_func_info`, `get_sys_func_for_method`, `is_sys_func_name`. |
 | `lambda/mir.c` | Registry consumption at JIT time: `init_func_map` building the import hashmap from `c_func_name`/`native_c_name`, and `import_resolver`. |

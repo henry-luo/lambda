@@ -5,11 +5,11 @@ flowchart TB
 
   CB --> SJ["setjmp: flush callee-saved registers to C stack"]
   SJ --> SB["read _lambda_stack_base / SP bounds"]
-  SB --> JF["register active JIT root frames"]
-  JF --> GC["gc_collect (gc->collecting = true)"]
+  SB --> JF["derive live Context root-side-stack slice"]
+  JF --> GC["gc_collect_with_root_region"]
 
-  GC --> ROOTS["gather roots:\nroot_slots[] + root_ranges[]\n+ JIT frame slot blocks\n+ extra_roots\n+ conservative C-stack scan (gc_scan_stack)"]
-  ROOTS --> MARK["MARK: gc_mark_item -> mark_stack\ngc_trace_object precise per TypeId\n(items[], shape chains, closure_env, VMap callback)"]
+  GC --> ROOTS["gather roots:\nroot_slots[] + root_ranges[]\n+ live execution root slice\n+ extra_roots\n+ conservative C-stack scan"]
+  ROOTS --> MARK["MARK: precise per TypeId\nitems[], shapes, Lambda/JS functions\nJS env Item halves, VMap callback"]
   MARK --> COMPACT["COMPACT data zone: gc_compact_data\ncopy live buffers nursery -> tenured\nrewrite owner pointers, fixup embedded numerics"]
   COMPACT --> RESET["gc_data_zone_reset (wholesale nursery reset)"]
   RESET --> SWEEP["SWEEP: walk all_objects\nfinalize dead externals (gc_finalize_dead_object)\nreturn slots to free lists / free large / unlink bump\nclear marked on survivors"]

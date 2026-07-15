@@ -13969,7 +13969,7 @@ static Item js_delete_function_property(Item obj, Item key) {
     // Ensure properties_map exists
     if (fn->properties_map.item == 0) {
         fn->properties_map = js_new_object();
-        heap_register_gc_root(&fn->properties_map.item);
+        js_function_root_item_if_needed(fn, &fn->properties_map);
     }
     // Check non-configurable: prototype is non-configurable by default for constructors
     if (get_type_id(key) == LMD_TYPE_STRING) {
@@ -16163,7 +16163,7 @@ extern "C" void js_with_set_stack(Item* stack, int depth) {
 extern "C" Item* js_with_capture_stack(int* out_depth) {
     if (out_depth) *out_depth = js_with_stack_depth;
     if (js_with_stack_depth <= 0) return NULL;
-    Item* captured = (Item*)pool_calloc(js_input->pool, sizeof(Item) * js_with_stack_depth);
+    Item* captured = js_alloc_env(js_with_stack_depth);
     // async cleanup can create handlers after the input pool stops accepting
     // allocations; a missing capture is safer than dereferencing null storage.
     if (!captured) {
@@ -16173,7 +16173,6 @@ extern "C" Item* js_with_capture_stack(int* out_depth) {
     for (int i = 0; i < js_with_stack_depth; i++) {
         captured[i] = js_with_stack[i];
     }
-    heap_register_gc_root_range((uint64_t*)captured, js_with_stack_depth);
     return captured;
 }
 

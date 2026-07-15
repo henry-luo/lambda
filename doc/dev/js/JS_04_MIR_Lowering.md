@@ -28,7 +28,7 @@ The discriminator is `jm_get_effective_type` (the per-node inferred `TypeId`, fe
 Boxing and unboxing of the common scalars is emitted **inline as MIR bit-ops**, not as runtime calls, so the fast paths stay branch-light.
 
 - **Box int** — `jm_box_int_reg` (`js_mir_calls_boxing_types.cpp:356`) masks to 56 bits and ORs in `ITEM_INT_TAG`, but first range-checks against `INT56_MAX/MIN` and the symbol limit `-(JS_SYMBOL_BASE)`; out-of-range integers are promoted to a boxed float via `MIR_I2D` + `push_d` rather than truncated. `jm_box_int_const` (`:329`) is the constant-folded variant: a pure `MIR_MOV` of `ITEM_INT_TAG | (value & MASK56)`.
-- **Box float** — `jm_box_float` (`:406`) is a single `push_d` call (the GC nursery bump-allocates the double; see [JS_03](JS_03_Value_Model.md)).
+- **Box float** — `jm_box_float` is a single `push_d` call. Inline encodings stay in the Item; only the out-of-band residue consumes one raw slot in the current number side-stack (see [JS_03](JS_03_Value_Model.md)).
 - **Box string** — `jm_box_string` (`:411`) ORs `STR_TAG` onto a non-null pointer (NULL maps to `ITEM_NULL`); `jm_box_string_literal` (`:429`) interns into the name pool at transpile time and bakes `s2it(interned)` as a raw `MIR_MOV` constant — valid because the interned `String*` outlives the transpiler.
 - **Box bool** — handled in `jm_box_native` (`:767`) by ORing `LMD_TYPE_BOOL << 56` onto the 0/1 reg.
 - **Unbox int** — `jm_emit_unbox_int` (`:709`) is `LSH 8` then arithmetic `RSH 8` to sign-extend the low 56 bits.
@@ -94,6 +94,8 @@ Dead-branch elimination lives in `jm_transpile_if` (`js_mir_statement_lowering.c
 
 Runtime helpers are referenced by name and resolved at link time. The emit side is `jm_ensure_import` (`js_mir_calls_boxing_types.cpp:97`), which lazily builds one `MIR_new_proto_arr` + `MIR_new_import` per distinct `(name, return type, nres, nargs, arg types)` signature and caches both keyed by a string like `name#r<ret>#n<nres>#a<nargs>#<argtype>…` (`:104`). The arity-specialized wrappers `jm_call_0`…`jm_call_6` and `jm_call_void_0`…`jm_call_void_5` (`:154`–`:299`) build the actual call instruction. The resolution side (`import_resolver`, `func_map`, `jit_runtime_imports[]`) is documented in [JS_01](JS_01_Compilation_Pipeline.md) §7.
 
+Every generated entry point also uses the shared Lambda side-stack emitter. `jm_begin_function_frame` inserts one checked prologue that binds the context stacks, saves root/number watermarks, and reserves the function's static root count. Heap-capable locals and raw env/args pointers publish into root slots; assignments refresh their slots and helper calls first publish all live scope variables. `jm_emit` rewrites every `MIR_RET` to one return label. `jm_finish_function_frame` re-homes owned env scalars, extracts any escaping scalar lane, restores the number watermark, rebuilds the return Item in the caller extent, restores the root watermark, and returns. Generator and async state-machine entries use the same discipline, so suspension state owns no pointer into a reclaimed invocation.
+
 `jm_transpile_call` (`js_mir_expression_lowering.cpp:6458`) is a large dispatcher that recognizes special callees before the generic path: `console.log` (`:6462`), `require(literal)` resolved to `js_require` at transpile time (`:6482`), dynamic `import()` (`:6519`), and `super.method(...)` (`:6611`). The generic user-function call boxes the callee and `this`, builds an argument array via `jm_build_args_array`, and emits `js_call_function(fn, this, args, argc)` (e.g. `:6879`); spread-or-apply forms route through `js_apply_function`. Every call site that can observe side effects is wrapped, in `jm_transpile_expression`'s call case (`:12474`), by `js_args_save`/`js_args_restore` (to reset the transient argument stack), `jm_scope_env_reload_vars` / `jm_env_reload_shared_captures` (to re-read captured variables a callee may have mutated — see [JS_05](JS_05_Functions_Closures.md)), and `jm_emit_exc_propagate_check` (§9).
 
 ---
@@ -102,7 +104,7 @@ Runtime helpers are referenced by name and resolved at link time. The emit side 
 
 LambdaJS does not use C++ exceptions or `longjmp` for ordinary JS throws. Instead it uses a **thread-global pending-exception flag** plus emitted check-and-branch sequences, so JIT'd frames unwind by returning normally.
 
-**State** (`js_runtime_state.cpp`): `js_throw_value(v)` (`:192`) sets `js_exception_pending = true`, stores `js_exception_value`, and caches a human-readable message; `js_check_exception` (`:226`) reads the flag; `js_clear_exception` (`:230`) reads-and-clears, returning the value. `js_exception_value` is registered as a GC root (`:703`). The convenience throwers (`js_throw_type_error`, `js_throw_named_error`, `js_check_tdz`, `js_throw_const_assign`, …) all funnel into `js_throw_value`.
+**State** (`js_runtime_state.cpp`): `js_throw_value(v)` sets `js_exception_pending = true`, re-homes a pointer-backed wide scalar to traced heap storage, stores `js_exception_value`, and caches a human-readable message; `js_check_exception` reads the flag; `js_clear_exception` reads-and-clears, returning the value. `js_exception_value` is registered as a GC root. The heap re-home is necessary because this singleton outlives the throwing frame's number watermark. The convenience throwers (`js_throw_type_error`, `js_throw_named_error`, `js_check_tdz`, `js_throw_const_assign`, …) all funnel into `js_throw_value`.
 
 **Propagation** is emitted by `jm_emit_exc_propagate_check` (`js_mir_statement_lowering.cpp:1307`), called after essentially every runtime call that can throw. It finds the topmost non-`yield_state_only` entry on `try_ctx_stack` (the fixed-depth-16 stack in `JsMirTranspiler`): inside a try it emits `MIR_BT` to the catch (or finally) label; outside any try it emits `MIR_BT` to a per-function `func_except_label` that returns null (`:1322`). This is what makes exceptions propagate correctly through nested calls, loops and if/else even without an explicit `try`.
 
@@ -160,7 +162,7 @@ Grounded in the current code; candidates for cleanup, not necessarily bugs.
 ## Appendix B — Related documents
 
 - [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md) — phases 1–3, interp/JIT selection, MIR import resolution.
-- [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) — the tagged `Item`, tag layout, GC nursery for boxed numerics.
+- [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) — the tagged `Item`, tag layout, execution side stacks for boxed numerics.
 - [JS_05 — Functions, Closures & Scope](JS_05_Functions_Closures.md) — capture analysis, scope-env reload around calls, native/boxed dual versions.
 - [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md) — generator yield-state lowering and the spill mechanism.
 - [JS_15 — Performance & Optimization](JS_15_Performance.md) — fast-path measurements, link cost, opt-level trade-offs.

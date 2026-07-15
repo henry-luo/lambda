@@ -1707,6 +1707,8 @@ test-graph-graphviz: build-graph-graphviz-test
 	@./test/test_graph_parser_gtest.exe --gtest_filter='GraphParserTest.ParserLocBudget:GraphParserTest.ParseDOTGraph:GraphParserTest.ParseComplexDOTGraph:GraphParserTest.ParseUndirectedGraph:GraphParserTest.ParseEmptyGraph'
 	@echo "Running manifest-driven Graphviz package fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*graphviz*'
+	@echo "Running headless .gv view bridge..."
+	@./lambda.exe view test/lambda/graph/graphviz/view.gv --headless --no-log
 
 test-validator: build
 	@echo "Running validator test suite..."

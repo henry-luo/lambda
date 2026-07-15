@@ -366,7 +366,10 @@ extern "C" void js_require_object_coercible(Item value) {
 
 extern "C" void js_throw_value(Item value) {
     js_exception_pending = true;
-    js_exception_value = value;
+    // The exception slot outlives the throwing JS frame, so pointer-backed
+    // scalars must move to traced heap storage before that frame is reclaimed.
+    js_exception_value = lambda_item_heap_rehome(value);
+    value = js_exception_value;
     // Capture exception message into static buffer while context is alive
     js_exception_msg_buf[0] = '\0';
     if (get_type_id(value) == LMD_TYPE_MAP) {

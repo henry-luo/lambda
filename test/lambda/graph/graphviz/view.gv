@@ -1,0 +1,7 @@
+digraph ViewSmoke {
+  graph [rankdir=LR]
+  node [shape=box]
+  source [label="GV source"]
+  target [label="Lambda graph"]
+  source -> target [label="view"]
+}
