@@ -93,6 +93,20 @@
         declarations: 'stroke:#0f766e,stroke-width:2px'>
     >
   >
+  <case id: 'source-fidelity', source: 'source_fidelity.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir',
+      features: 'front-matter,init,statement-separators,provenance,edge-properties,interactions';
+    <expect direction: 'LR', nodes: 6, edges: 4, style-rules: 1,
+        class-assignments: 1, interactions: 2, edge-properties: 3,
+        front-matters: 1, init-directives: 1;
+      <edge id: 'e1:0', from: 'A', to: 'C', source-id: 'e1',
+        source-segment-index: 0, source-expansion-index: 0, source-expansion-count: 3>
+      <class-assignment target-kind: 'edge', targets: 'e1', class: 'animate'>
+      <interaction target: 'A', action: 'link', href: 'https://example.com',
+        tooltip: 'Open details', target-window: '_blank'>
+      <edge-property target: 'e1', key: 'animate', value: 'true'>
+    >
+  >
   <case id: 'chart-routing', source: 'chart_routing.mmd',
       origin: 'lambda', status: 'unsupported', policy: 'ir', features: 'chart-dispatch';
     <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0;
@@ -125,5 +139,131 @@
       upstream-test: 'should handle subgraph with id and title notation', reference-version: '11.16.0';
     <expect direction: 'TB', nodes: 2, edges: 1, subgraphs: 1>
     <subgraph id: 'some-id', label: 'Some Title'>
+  >
+  <case id: 'upstream-single-circle',
+      source: 'cases/flowchart/nodes/upstream_single_circle.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'scene-semantic',
+      features: 'nodes,circle', expected-scene: 'expected/scene/upstream_single_circle.mark',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js',
+      upstream-test: 'should handle a single circle node', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 1, edges: 0>
+    <node id: 'a', label: 'A', shape: 'circle'>
+  >
+  <case id: 'upstream-single-round',
+      source: 'cases/flowchart/nodes/upstream_single_round.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'nodes,rounded',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js',
+      upstream-test: 'should handle a single round node', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 1, edges: 0>
+    <node id: 'a', label: 'A', shape: 'rounded'>
+  >
+  <case id: 'upstream-single-odd',
+      source: 'cases/flowchart/nodes/upstream_single_odd.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'nodes,asymmetric',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js',
+      upstream-test: 'should handle a single odd node', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 1, edges: 0>
+    <node id: 'a', label: 'A', shape: 'asymmetric'>
+  >
+  <case id: 'upstream-single-hexagon',
+      source: 'cases/flowchart/nodes/upstream_single_hexagon.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'nodes,hexagon',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js',
+      upstream-test: 'should handle a single hexagon node', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 1, edges: 0>
+    <node id: 'a', label: 'A', shape: 'hexagon'>
+  >
+  <case id: 'upstream-single-doublecircle',
+      source: 'cases/flowchart/nodes/upstream_single_doublecircle.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'nodes,doublecircle',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js',
+      upstream-test: 'should handle a single double circle node', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 1, edges: 0>
+    <node id: 'a', label: 'A', shape: 'doublecircle'>
+  >
+  <case id: 'upstream-shape-data',
+      source: 'cases/flowchart/nodes/upstream_shape_data.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'scene-semantic',
+      features: 'nodes,general-shape,label', expected-scene: 'expected/scene/upstream_shape_data.mark',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-node-data.spec.js',
+      upstream-test: 'should be possible to add multiple properties on the same line',
+      reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 1, edges: 0>
+    <node id: 'D', label: 'DD', shape: 'rounded'>
+  >
+  <case id: 'upstream-open-edge', source: 'cases/flowchart/edges/upstream_open_edge.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'edges,open',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-edges.spec.js',
+      upstream-test: 'should handle open ended edges', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1>
+    <edge from: 'A', to: 'B', arrow-head: 'none'>
+  >
+  <case id: 'upstream-cross-edge', source: 'cases/flowchart/edges/upstream_cross_edge.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'edges,cross-marker',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-edges.spec.js',
+      upstream-test: 'should handle cross ended edges', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1>
+    <edge from: 'A', to: 'B', arrow-head: 'cross'>
+  >
+  <case id: 'upstream-circle-edge', source: 'cases/flowchart/edges/upstream_circle_edge.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'edges,circle-marker',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-edges.spec.js',
+      upstream-test: 'should handle open ended edges', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1>
+    <edge from: 'A', to: 'B', arrow-head: 'circle'>
+  >
+  <case id: 'upstream-inline-label',
+      source: 'cases/flowchart/edges/upstream_inline_label.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'scene-semantic',
+      features: 'edges,inline-label', expected-scene: 'expected/scene/upstream_inline_label.mark',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-text.spec.js',
+      upstream-test: 'should handle normal text on lines', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1>
+    <edge from: 'A', to: 'B', label: 'test text with ==', arrow-head: 'normal'>
+  >
+  <case id: 'upstream-dotted-label',
+      source: 'cases/flowchart/edges/upstream_dotted_label.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'edges,dotted,inline-label',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-text.spec.js',
+      upstream-test: 'should handle dotted text on lines (TD3)', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1>
+    <edge from: 'A', to: 'B', label: 'test text with ==', style: 'dotted'>
+  >
+  <case id: 'upstream-thick-label',
+      source: 'cases/flowchart/edges/upstream_thick_label.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'edges,thick,inline-label',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-text.spec.js',
+      upstream-test: 'should handle thick text on lines', reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1>
+    <edge from: 'A', to: 'B', label: 'test text with -', style: 'thick'>
+  >
+  <case id: 'upstream-link-tooltip-target',
+      source: 'cases/flowchart/interactions/upstream_link_tooltip_target.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'interactions,link,tooltip',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-interactions.spec.js',
+      upstream-test: 'should handle interaction - click to a click and href link with tooltip and target',
+      reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1, interactions: 1;
+      <interaction target: 'A', action: 'link', href: 'click.html', tooltip: 'tooltip',
+        target-window: '_blank'>
+    >
+  >
+  <case id: 'upstream-callback-args',
+      source: 'cases/flowchart/interactions/upstream_callback_args.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'interactions,callback',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-interactions.spec.js',
+      upstream-test: 'should be possible to use click to a callback with an arbitrary number of args',
+      reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1, interactions: 1;
+      <interaction target: 'A', action: 'callback', callback: 'callback("test0", test1, test2)'>
+    >
+  >
+  <case id: 'upstream-embedded-comment',
+      source: 'cases/flowchart/comments/upstream_embedded_comment.mmd',
+      origin: 'mermaid', status: 'baseline', policy: 'ir', features: 'comments',
+      upstream-file: 'packages/mermaid/src/diagrams/flowchart/parser/flow-comments.spec.js',
+      upstream-test: 'should handle a comment with mermaid flowchart code in them',
+      reference-version: '11.16.0';
+    <expect direction: 'TB', nodes: 2, edges: 1>
   >
 >

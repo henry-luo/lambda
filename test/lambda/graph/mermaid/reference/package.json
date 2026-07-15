@@ -1,0 +1,17 @@
+{
+  "name": "lambda-mermaid-reference",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "extract": "node extract_cases.mjs --check",
+    "extract:write": "node extract_cases.mjs --write",
+    "references": "node generate_scene_refs.mjs --check",
+    "references:write": "node generate_scene_refs.mjs --write"
+  },
+  "dependencies": {
+    "acorn": "8.15.0",
+    "acorn-walk": "8.3.4",
+    "mermaid": "11.16.0",
+    "puppeteer": "24.36.0"
+  }
+}

@@ -1196,7 +1196,9 @@ static const char* SVG_GRAPH_SEMANTIC_ATTRS[] = {
     "data-parent-cluster-id", "data-subgraph-id", "data-shape",
     "data-label",
     "data-direction", "data-marker-start", "data-marker-end",
-    "data-route", "data-route-kind", "data-from", "data-to"
+    "data-route", "data-route-kind", "data-from", "data-to",
+    "data-fill", "data-stroke", "data-stroke-width", "data-color",
+    "data-opacity", "data-dash-array"
 };
 
 static void svg_append_graph_semantic_attrs(SvgRenderContext* ctx,

@@ -102,6 +102,10 @@ pub fn class_assignments(graph) => metadata_entries(graph, "class-assignment")
 
 pub fn style_assignments(graph) => metadata_entries(graph, "style-assignment")
 
+pub fn interactions(graph) => metadata_entries(graph, "interaction")
+
+pub fn edge_properties(graph) => metadata_entries(graph, "edge-property")
+
 fn meta_values(graph, wanted_tag) {
   [for (child in element_children(graph),
     meta_child in if (tag(child) == "meta") element_children(child) else []
@@ -145,15 +149,24 @@ fn diagnostic_entries(container) {
 
 pub fn diagnostics(graph) => diagnostic_entries(graph)
 
-pub fn classes_for(graph, node_id) {
+fn classes_for_kind(graph, target_kind, target_ids) {
   [for (assignment in class_assignments(graph),
     let targets = assignment_targets(assignment)
-    where contains(targets, string(node_id)) and assignment.class != null)
+    where (assignment["target-kind"] == null or
+      assignment["target-kind"] == target_kind) and
+      len([for (target_id in target_ids where contains(targets, string(target_id))) target_id]) > 0 and
+      assignment.class != null)
     string(assignment.class)]
 }
 
-fn class_style_declarations_for(graph, node_id) {
-  let classes = classes_for(graph, node_id);
+pub fn classes_for(graph, node_id) => classes_for_kind(graph, "node", [node_id])
+
+pub fn edge_classes_for(graph, edge_id, source_id = null) =>
+  classes_for_kind(graph, "edge", [edge_id,
+    for (value in [source_id] where value != null and value != edge_id) value])
+
+fn class_style_declarations_for(graph, target_kind, target_id) {
+  let classes = classes_for_kind(graph, target_kind, [target_id]);
   [for (rule in style_rules(graph)
     where rule.class != null and contains(classes, string(rule.class)) and
       rule.declarations != null) string(rule.declarations)]
@@ -162,9 +175,37 @@ fn class_style_declarations_for(graph, node_id) {
 pub fn node_style_declarations_for(graph, node_id) {
   let assigned = style_declarations_for(graph, "node", [string(node_id)]);
   join([
-    *class_style_declarations_for(graph, node_id),
+    *class_style_declarations_for(graph, "node", node_id),
     for (value in [assigned] where value != "") value
   ], ";")
+}
+
+pub fn edge_style_declarations_for(graph, edge_id, source_id, edge_index) {
+  let assigned = style_declarations_for(graph, "edge", [string(edge_index), string(edge_id)]);
+  let classes = edge_classes_for(graph, edge_id, source_id);
+  join([
+    for (rule in style_rules(graph)
+      where rule.class != null and contains(classes, string(rule.class)) and
+        rule.declarations != null) string(rule.declarations),
+    for (value in [assigned] where value != "") value
+  ], ";")
+}
+
+pub fn interaction_for(graph, target_id) {
+  let matches = [for (interaction in interactions(graph)
+    where interaction.target != null and string(interaction.target) == string(target_id))
+    interaction];
+  if (len(matches) > 0) matches[len(matches) - 1] else null
+}
+
+pub fn edge_property(graph, edge_id, source_id, key, fallback = null) {
+  let target_ids = [edge_id,
+    for (value in [source_id] where value != null and value != edge_id) value];
+  let matches = [for (property in edge_properties(graph)
+    where property.target != null and property.key != null and
+      contains(target_ids, string(property.target)) and string(property.key) == string(key))
+    property.value];
+  if (len(matches) > 0) matches[len(matches) - 1] else fallback
 }
 
 pub fn direction(graph) {

@@ -1,63 +1,56 @@
 import graph_transform: lambda.package.graph.transform
+import model: lambda.package.graph.model
 
 fn scene_children(value, wanted_tag) => [
-  for (i in 0 to (len(value) - 1), let child = value[i]
-    where child is element and string(name(child)) == wanted_tag) child
+  for (child in model.element_children(value) where model.tag(child) == wanted_tag) child
 ]
 
 fn route_points(edge) => [
-  for (route in scene_children(edge, "route"),
-       point in scene_children(route, "point")) point
+  for (route in scene_children(edge, "route"), point in scene_children(route, "point")) point
 ]
 
+fn scene_case(test_case) => string(test_case.policy) == "scene-semantic"
+
+fn comparison_policy(test_case) => {
+  'geometry-tolerance': if (test_case["geometry-tolerance"] != null)
+    test_case["geometry-tolerance"] else 1.5,
+  'route-tolerance': if (test_case["route-tolerance"] != null)
+    test_case["route-tolerance"] else 2.0,
+  relations: if (test_case.relations != null) test_case.relations else true,
+  'rank-order': if (test_case["rank-order"] != null) test_case["rank-order"] else true
+}
+
+fn run_case(test_case) {
+  let source_path = "test/lambda/graph/mermaid/" ++ string(test_case.source);
+  let expected_path = "test/lambda/graph/mermaid/" ++ string(test_case["expected-scene"]);
+  let graph^graph_error = input(source_path, {type: "graph", flavor: "mermaid"});
+  let expected^expected_error = input(expected_path, {type: "mark"});
+  let rendered = graph_transform.render_scene(graph, 800, 600);
+  let comparison = graph_transform.compare_scenes(
+    rendered.scene, expected, comparison_policy(test_case));
+  let nodes = scene_children(rendered.scene, "node");
+  let edges = scene_children(rendered.scene, "edge");
+  {
+    id: string(test_case.id),
+    equal: comparison["equal"],
+    metadata: contains(rendered.svg, "data-graph-role=\"graph\"") and
+      all([for (node in nodes) node.width > 0.0 and node.height > 0.0]) and
+      all([for (edge in edges) len(route_points(edge)) >= 2]),
+    diagnostics: comparison.diagnostics
+  }
+}
+
 let installed = graph_transform.install()
-let rendered = graph_transform.render_scene(input(
-  "test/lambda/graph/mermaid/shapes_and_labels.mmd", {type: "graph", flavor: "mermaid"}),
-  800, 600)
-let expected^expected_error = input(
-  "test/lambda/graph/mermaid/expected/scene/shapes_and_labels.mark", {type: "mark"})
-let comparison = graph_transform.compare_scenes(rendered.scene, expected)
-let nodes = scene_children(rendered.scene, "node")
-let edges = scene_children(rendered.scene, "edge")
-
-let upstream = graph_transform.render_scene(input(
-  "test/lambda/graph/mermaid/cases/flowchart/nodes/upstream_single_diamond.mmd",
-  {type: "graph", flavor: "mermaid"}), 800, 600)
-let upstream_expected^upstream_expected_error = input(
-  "test/lambda/graph/mermaid/expected/scene/upstream_single_diamond.mark", {type: "mark"})
-let upstream_comparison = graph_transform.compare_scenes(upstream.scene, upstream_expected)
-
-let geometry_actual = <'graph-scene' direction: "LR";
-  <node id: "n", shape: "box", x: 10.0, y: 20.0, width: 40.0, height: 30.0>
-  <edge id: "e", 'from': "n", 'to': "n", 'marker-start': "none", 'marker-end': "normal",
-      'route-kind': "self-loop";
-    <route; <point x: 50.0, y: 35.0> <point x: 70.0, y: 35.0>>
-  >
->
-let geometry_expected = <'graph-scene' direction: "LR";
-  <node id: "n", shape: "box", x: 11.4, y: 19.0, width: 40.8, height: 29.0>
-  <edge id: "e", 'from': "n", 'to': "n", 'marker-start': "none", 'marker-end': "normal",
-      'route-kind': "self-loop";
-    <route; <point x: 51.9, y: 34.0> <point x: 68.2, y: 36.0>>
-  >
->
-let geometry_comparison = graph_transform.compare_scenes(geometry_actual, geometry_expected)
-let strict_geometry_comparison = graph_transform.compare_scenes(
-  geometry_actual, geometry_expected,
-  {'geometry-tolerance': 0.5, 'route-tolerance': 0.5})
+let manifest^manifest_error = input(
+  "test/lambda/graph/mermaid/manifest.mark", {type: "mark"})
+let cases = [for (test_case in model.element_children(manifest)
+  where model.tag(test_case) == "case" and scene_case(test_case)) test_case]
+let results = [for (test_case in cases) run_case(test_case)]
 
 {
   installed: installed,
-  metadata: contains(rendered.svg, "data-graph-role=\"graph\"") and
-    contains(rendered.svg, "data-node-id=\"A\"") and
-    contains(rendered.svg, "data-route="),
-  nodes: len(nodes),
-  edges: len(edges),
-  measured: all([for (node in nodes) node.width > 0.0 and node.height > 0.0]),
-  routes: all([for (edge in edges) len(route_points(edge)) >= 2]),
-  semantic: comparison["equal"],
-  diagnostics: comparison.diagnostics,
-  upstream_semantic: upstream_comparison["equal"],
-  tolerant_geometry: geometry_comparison["equal"],
-  strict_geometry: strict_geometry_comparison["equal"]
+  retained_runs: len(results),
+  cases: [for (result in results) [result.id, result.equal, result.metadata]],
+  diagnostics: [for (result in results where not result.equal)
+    {id: result.id, issues: result.diagnostics}]
 }
