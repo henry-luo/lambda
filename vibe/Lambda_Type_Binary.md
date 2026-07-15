@@ -1,22 +1,26 @@
 # Lambda Binary Type — Enhancement Proposal
 
-> **Status:** Proposal
+> **Status:** Proposal — **Tier 1 core (decoded representation) + JS/Node copy bridge IMPLEMENTED 2026-07-15** via [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) (decisions B1–B8). Indexing/slicing/iteration/concat and Tiers 2–4 remain proposal. Design decisions recorded 2026-07-15: **§9** streams alignment (WHATWG/Node), **§10** Uint8Array type-unification **rejected**, **§5.2** encode/decode selector API.
 > **Scope:** Lambda Script `binary` primitive type — runtime representation, language surface, and stdlib roadmap.
 > **Related:**
 > - [Lambda_Data.md](../doc/Lambda_Data.md#binary-literals) — binary literal syntax
 > - [Lambda_Type.md](../doc/Lambda_Type.md) — type hierarchy
-> - [Lamdba_Runtime.md](../doc/dev/Lamdba_Runtime.md) — current `String*` storage
-> - [JS_Runtime_Detailed.md](../doc/dev/JS_Runtime_Detailed.md) — existing `ArrayBuffer`/`Uint8Array`/`DataView` machinery in the JS jube
+> - [LR_00_Overview.md](../doc/dev/lambda/LR_00_Overview.md) — runtime value model (`String*`-backed storage)
+> - [JS_00_Overview.md](../doc/dev/js/JS_00_Overview.md) — `ArrayBuffer`/`Uint8Array`/`DataView` machinery in the JS jube (`lambda/js/js_typed_array.{h,cpp}`, `js_buffer.cpp`)
+> - [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) — the executed Tier-1 implementation plan (B1–B8, Phases 1–6)
+> - [Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) — binary pipelines/streams (PL1–PL11); PL5 flat-buffer representation is this doc's Tier 3.1
+> - [Lambda_Type_Binary_Schema.md](Lambda_Type_Binary_Schema.md) — schema-driven structured views (`Velmt`) over binary
 
 ---
 
 ## 1. Motivation
 
-Lambda already has a `binary` primitive type with hex and base64 literal syntax (`b'\xDEADBEEF'`, `b'\64A0FE'`), but the surface stops there:
+Lambda already has a `binary` primitive type with hex and base64 literal syntax (`b'\xDEADBEEF'`, `b'\64A0FE'`). **As of 2026-07-15 the foundation defect is fixed** ([Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) Phases 1–5): literals and Mark input decode to real bytes, `len` is the byte count, printing is canonical and NUL-safe, `binary()` returns real binary, and a copy bridge to JS `Uint8Array`/`Buffer`/`DataView` exists. What the surface still lacks:
 
-- The runtime stores `binary` as a `String*` holding the **raw, undecoded source text** (`build_lit_string` in `lambda/lambda/build_ast.cpp` copies the literal characters between `b'` and `'` verbatim, hex/base64 prefix included). Length and content reported by the runtime are therefore the encoded string, not the bytes.
-- There are no operations: no indexing, slicing, iteration, concatenation, encoding round‑trips, struct packing, hashing, or I/O.
-- The JS jube already implements `ArrayBuffer`/`Uint8Array`/`DataView` (see [JS_Runtime_Detailed.md](../doc/dev/JS_Runtime_Detailed.md)) but those buffers are not bridged to Lambda's `binary`.
+- ~~The runtime stores the raw, undecoded source text~~ **(fixed — decoded bytes are the only payload; storage remains `String*`-shaped per B1).**
+- Still no element operations: indexing currently returns `null` (the `// todo` at `lambda-data-runtime.cpp:2157`), no slicing, no iteration; `b1 ++ b2` currently *stringifies* (canonical text concat per B5) rather than concatenating bytes.
+- No encoding stdlib surface (§5.2), struct packing, hashing, or binary-specific I/O helpers.
+- The JS bridge is **copy-based** (B8); zero-copy sharing awaits the Tier-3.1 / PL5 flat-buffer representation.
 - Python jube docs explicitly mark `bytes`/`bytearray` as **not supported** ([Python_Support.md](../doc/Python_Support.md)).
 
 This proposal surveys prior art across scripting languages, identifies the highest‑leverage features to borrow, and lays out a tiered implementation plan starting with a representation refactor.
@@ -60,19 +64,23 @@ This proposal surveys prior art across scripting languages, identifies the highe
 
 ---
 
-## 3. Current State in Lambda
+## 3. Current State in Lambda (updated 2026-07-15, post-implementation)
 
 | Aspect | Today | Source |
 |---|---|---|
-| Type id | `LMD_TYPE_BINARY` | `lambda/lambda/lambda-data.hpp` |
-| Storage | `String*` (heap, GC‑managed, tagged pointer) | `lambda/doc/dev/Lamdba_Runtime.md` |
-| Literal parsing | Stores **raw source text** between `b'…'`, including `\x` / `\64` prefix | `build_lit_string()` in `lambda/lambda/build_ast.cpp` (line ~1908) |
-| Decoding | None — never converted to bytes at parse time | — |
-| Operations | Only `binary(x)` constructor (no slicing, indexing, iteration, concat) | `lambda/doc/Lambda_Sys_Func.md` |
-| JS bridge | JS `Uint8Array`/`DataView` exists but does not share storage with Lambda `binary` | `lambda/doc/dev/JS_Runtime_Detailed.md` |
-| Python bridge | `bytes`/`bytearray` marked **not supported** | `lambda/doc/Python_Support.md` |
+| Type id | `LMD_TYPE_BINARY` | `lambda/lambda-data.hpp` |
+| Storage | `String*`-shaped (heap, GC‑managed, tagged pointer), payload = **decoded bytes**, `len` = byte count, embedded NULs legal (B1) | `lambda/lambda.h` (`typedef String Binary`) |
+| Literal parsing | **Decodes** `\x` hex / `\64` base64 / bare-hex default, whitespace ignored; malformed literal = compile error | shared `str_binary_payload_decode` in `lib/str_binary.c`, called from `build_lit_string()` and Mark `parse_binary` |
+| Printing | Canonical `b'\x<UPPERCASE HEX>'`, NUL-safe, one shared helper (B3) | `format_binary_literal` in `lambda/print.cpp:32` |
+| `len(b)` | Byte count (`len(b'\xDEADBEEF')` == 4) (B4) | `fn_len`, `lambda-eval.cpp` |
+| `binary(x)` | Returns real binary (`x2it`): UTF-8 bytes for string/symbol, identity for binary (B6) | `fn_binary`, `lambda-eval-num.cpp` |
+| Formatters | Mark: native `b'\x…'` literal (round-trips); JSON/YAML/text formats: padded standard base64 (B7) | `lambda/format/` |
+| File I/O | `output(bin, path)` writes exact bytes; file reads produce byte binaries | `lambda-proc.cpp` |
+| Element ops | **Missing:** `b[i]` returns `null` (`lambda-data-runtime.cpp:2157` todo); no slicing/iteration; `++` stringifies (§4.4) | — |
+| JS bridge | **Copy bridge** to `Uint8Array`/`Uint8ClampedArray`/`Buffer`/`DataView` with mutation isolation (B8); zero-copy = Tier 3.1/PL5 | `lambda/js/js_typed_array.cpp`, `js_buffer.cpp` |
+| Python bridge | `bytes`/`bytearray` marked **not supported** | `doc/Python_Support.md` |
 
-**Implication:** Today, `len(b'\xDEADBEEF')` and `b'\xDEADBEEF'[0]` (if it worked) would operate on the **encoded string** (`\xDEADBEEF` = 9 chars), not the 4 decoded bytes. This is a correctness bug waiting to surface as soon as anyone does anything with `binary`.
+**The 2026-07-14 audit that triggered the fix** (kept for the record): literals stored the encoded source text (`len(b'\xDEADBEEF')` was 9-ish source chars, not 4 bytes) while file reads stored real bytes — two producers, inconsistent payloads; two printers disagreed (`b'%s'` vs `0x%s`, both NUL-unsafe); `binary()` and Mark's `parse_binary` returned strings. All fixed; full inventory and verification in [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md).
 
 ---
 
@@ -80,9 +88,11 @@ This proposal surveys prior art across scripting languages, identifies the highe
 
 ### 4.1 Refactor: decode binary literals into actual bytes at parse time
 
+> **✅ IMPLEMENTED 2026-07-15** ([Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) Phases 1–4), with two deliberate deltas from the sketch below: (1) **storage stays `String*`-shaped** (B1) — the dedicated `Binary` struct with the `owner` field is *deferred to Tier 3.1*, where it merges with the PL5 refcounted-flat-buffer design ([Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) PL5) rather than being introduced twice; (2) the canonical print form is **uppercase, ungrouped** `b'\xDEADBEEF'` (B3), not lowercase/grouped as originally sketched in §7.1. The decoder lives in `lib/str_binary.c` (`str_binary_payload_decode`), shared by the compiler and Mark input.
+
 **The core fix.** Replace the "store raw source text in a `String*`" model with a real byte buffer.
 
-#### New runtime representation
+#### New runtime representation *(now the Tier-3.1 target shape, see note above)*
 
 ```c
 // lambda/lambda/lambda-data.hpp
@@ -121,7 +131,7 @@ typedef struct Binary {
 | `lambda/lambda/emit_sexpr.cpp` | Pretty‑print as `b'\x…'` (canonical hex, lowercase, grouped 2/byte). |
 | `lambda/lambda/lambda-proc.cpp` | Update conversion paths (`source_type == LMD_TYPE_BINARY`). |
 | `lambda/lambda/mark_editor.cpp` | Update editor read paths. |
-| Stdlib | New `binary(x)` semantics: from `string` → utf‑8 encode; from `[u8]` → copy; from `int` → encode as min bytes (configurable endianness). |
+| Stdlib | New `binary(x)` semantics — **as landed (B6):** from `string`/`symbol` → UTF-8 bytes; from `binary` → identity; from numbers → bytes of the decimal text (revisit toward explicit `to_bytes(n, 'u32le')`-style encodings with §5.3). |
 | Tests | Add round‑trip: `decode(b'\xDE AD BE EF') == [222, 173, 190, 239]` (i.e. `0xDE 0xAD 0xBE 0xEF`); `len(b'\xDEADBEEF') == 4`. Note: Lambda has no hex integer literal syntax yet — tests must use decimal. |
 
 #### Migration risk
@@ -147,10 +157,12 @@ b[0 to len(b)-1]  // full copy
 
 Semantics:
 
-- Element type at a single index is `u8`.
+- Element type at a single index is `u8`. *(Open detail: Lambda has no `u8` scalar type today — until the fixed-width numerics of §5.3 exist, `b[i]` should return `int` in 0–255; revisit when `uint8` lands.)*
 - Range slices return `binary`.
 - Out‑of‑range indices raise `error` (consistent with array access).
 - Tier 1 does an honest copy on slice; Tier 3 promotes slices to zero‑copy sub‑views.
+
+> **Status 2026-07-15:** not yet implemented — `b[i]` currently returns `null` (the `// todo - proper binary data access` at `lambda-data-runtime.cpp:2157`). This is the highest-value remaining Tier-1 item.
 
 ### 4.3 Iteration
 
@@ -173,20 +185,23 @@ b1 ++ b2 ++ b3                    // associative
 ```
 
 - Choose `++` (rather than overloading `+`) to keep numeric `+` unambiguous and to leave room for a future `+` doing element‑wise addition on `u8[]`.
-- Type rule: `binary ++ binary → binary`. Mixed `binary ++ string` is a type error in Tier 1 (force an explicit `utf8.encode(s)` once Tier 2 lands).
+- Type rule: `binary ++ binary → binary`. Mixed `binary ++ string` stays a *string* concat (the binary contributes its canonical `b'\x…'` text per B5) — explicit `encode(s, 'utf-8')` (§5.2) when byte concat with text content is meant.
 - Implementation: allocate destination `Binary` of summed length, two `memcpy`s. Tier 3 may replace this with an `iolist`‑style rope.
 
-### 4.5 Tier 1 deliverables checklist
+> **Status 2026-07-15:** not yet implemented — `b1 ++ b2` currently routes both operands through string conversion (B5 canonical text), yielding `"b'\xDEAD'b'\xBEEF'"`. Changing `binary ++ binary` to byte concatenation is a **behavior change to landed semantics** and should ship together with indexing/slicing (§4.2–4.3) as the Tier-1 element-ops batch, with goldens updated in the same commit.
 
-- [ ] `Binary` struct + allocator + GC integration
-- [ ] Parser decodes hex / base64 literals to raw bytes
-- [ ] Pretty‑print canonical `b'\x…'` form
-- [ ] `len(b)`, `b[i]`, `b[a to b]`, `x in b`
-- [ ] `for byte in b { … }` and comprehension support
-- [ ] `b1 ++ b2`
-- [ ] Update transpile/MIR/emit/proc/editor switch tables
-- [ ] Test suite: literal round‑trip, indexing, slicing, iteration, concat, error paths
-- [ ] Doc updates: [Lambda_Data.md](../doc/Lambda_Data.md), [Lambda_Type.md](../doc/Lambda_Type.md), [Lambda_Sys_Func.md](../doc/Lambda_Sys_Func.md)
+### 4.5 Tier 1 deliverables checklist (status 2026-07-15)
+
+- [x] ~~`Binary` struct~~ decoded-bytes payload on `String*` storage (B1; dedicated struct deferred to Tier 3.1/PL5)
+- [x] Parser decodes hex / base64 literals to raw bytes (`lib/str_binary.c`, both producers)
+- [x] Pretty‑print canonical `b'\x…'` form (uppercase, NUL-safe, shared helper)
+- [x] `len(b)` = byte count
+- [ ] `b[i]`, `b[a to b]`, `x in b` — **remaining**
+- [ ] `for byte in b { … }` and comprehension support — **remaining**
+- [ ] `b1 ++ b2` byte concat — **remaining** (currently stringifies; see §4.4 note)
+- [x] Update transpile/MIR/emit/proc/editor switch tables (incl. `pn_output` binary-safe accessor fix)
+- [x] Test suite: literal round‑trip, decode errors, Mark/JSON egress, byte-exact output, fuzz fixture
+- [x] Doc updates for landed semantics; element-ops docs pending with their implementation
 
 ---
 
@@ -208,31 +223,46 @@ let out: binary = bld.freeze()        // immutable snapshot
 - `freeze()` transfers ownership into an immutable `binary` (zero‑copy when capacity ≈ length, otherwise truncating copy).
 - Internally implemented as a thin wrapper around the existing `StringBuf` machinery (see `strbuf_append_str_n` in [Lambda_Transpiler.md](../doc/dev/Lambda_Transpiler.md)).
 
-### 5.2 Encoding stdlib
+### 5.2 Encoding stdlib — `encode`/`decode` with a codec selector *(API decided 2026-07-15)*
 
-Keep encodings as **functions over `binary` and `string`**, not separate types. This matches JS `TextEncoder`/`atob`/`btoa` and keeps `binary` semantically pure.
+Keep encodings as **functions over `binary` and `string`**, not separate types — and expose them as **two functions with a codec-symbol selector**, not per-codec namespaces (`hex.encode(b)` style **rejected**):
 
 ```lambda
-hex.encode(b)       -> string                      // "deadbeef"
-hex.decode(s)       -> binary | error              // accepts whitespace, mixed case
-hex.encode(b, sep: " ", upper: true)               // "DE AD BE EF"
-
-base64.encode(b)    -> string
-base64.decode(s)    -> binary | error
-base64.url_encode(b) / base64.url_decode(s)        // URL‑safe alphabet, no padding
-
-base32.encode(b)    -> string                      // RFC 4648
-base32.decode(s)    -> binary | error
-
-base85.encode(b)    -> string                      // ASCII‑85 / Z85
-base85.decode(s)    -> binary | error
-
-utf8.encode(s: string)  -> binary
-utf8.decode(b: binary)  -> string | error
-ascii.encode/decode, latin1.encode/decode
+encode(x, 'hex')                 // codec as a symbol argument
+decode(x, 'base64')
 ```
 
-All decoders return `binary | error`; all encoders are total.
+**Why selector beats namespace** (decision rationale):
+
+1. **Consistency with the existing family.** Lambda already selects behavior by symbol everywhere at the data boundary: `input(path, 'json')`, `format(x, 'mark')`, `convert -t yaml` — and the pipeline design's stream stages (`decode('utf-8')`, PL6 rung table in [Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) §5) already use *these exact names*: the stream stage is simply the incremental form of the same codec. Node's `Buffer` is the direct precedent for the shape: `buf.toString('hex')` / `Buffer.from(s, 'base64')`.
+2. **The codec is a value.** A symbol selector can live in config, arrive in a message, be computed by a pipeline (`encode(b, cfg.wire_encoding)`). A namespace (`hex.encode`) makes the codec *code* — selecting it at runtime needs reflection.
+3. **One registry, like formatters.** Codecs become a name→vtable table mirroring the input/format dispatcher architecture — extensible (add `'base32'`, `'z85'`) without minting global names, and the stdlib namespace stays flat.
+4. **Discoverability:** two functions to learn, not 2×N.
+
+**The direction rule** (kills the classic encode/decode ambiguity): every codec has a *plain* side and an *encoded* side; **`encode` always maps plain→encoded, `decode` encoded→plain.**
+
+- For byte-to-text codecs (`'hex'`, `'base64'`, …): plain = `binary`, encoded = `string`.
+- For charsets (`'utf-8'`, `'latin1'`, …): plain = `string`, encoded = `binary` (Python 3's `str.encode`/`bytes.decode` convention).
+
+```lambda
+// byte ⇄ text codecs: plain side is binary
+encode(b, 'hex')          // -> string   "DEADBEEF" (uppercase, matches canonical print)
+decode(s, 'hex')          // -> binary^error   accepts whitespace + mixed case
+encode(b, 'base64')       // -> string   RFC 4648, padded
+decode(s, 'base64')       // -> binary^error   padded or unpadded accepted
+encode(b, 'base64url')    // URL-safe alphabet, no padding — a codec NAME, not an option
+decode(s, 'base64url')
+encode(b, 'base32')  / decode(s, 'base32')     // RFC 4648
+encode(b, 'base85')  / decode(s, 'base85')     // ASCII-85 / Z85 as separate names
+
+// charset codecs: plain side is string
+encode(s, 'utf-8')        // -> binary   (total — Lambda strings are UTF-8)
+decode(b, 'utf-8')        // -> string^error
+encode(s, 'latin1') / decode(b, 'latin1')
+encode(s, 'ascii')  / decode(b, 'ascii')       // strict 7-bit; error on violation
+```
+
+Conventions: decoders return `T^E` (`binary^error` / `string^error` — the standard error-value model, not a union with bare `error`); encoders are total per codec (unknown codec name → error value from either function). Variant behavior is expressed as **distinct codec names** (`'base64url'`, not `url: true`) so the selector stays pure data; cosmetic formatting options (`encode(b, 'hex', sep: " ")`) may be added as named args later without disturbing the model. The same selector principle extends to the neighboring stdlib families: `hash(b, 'sha256')`, `compress(b, 'gzip')` (§6.4–6.5), and the streaming stages of PL6 — one vocabulary from scalar call to pipeline stage.
 
 ### 5.3 Endianness‑aware accessors (DataView equivalent)
 
@@ -335,34 +365,35 @@ Pairs naturally with sub‑binary slicing; works for multi‑GB files without RA
 
 ### 6.4 Crypto / hash stdlib
 
+Same selector principle as §5.2 — the algorithm is a symbol argument, not a namespace:
+
 ```lambda
-crypto.sha256(b)              -> binary       // 32 bytes
-crypto.sha1(b)                -> binary
-crypto.md5(b)                 -> binary
-crypto.hmac(key: binary, b: binary, alg: 'sha256') -> binary
-crypto.crc32(b)               -> u32
-crypto.random_bytes(n: int)   -> binary
-crypto.constant_time_eq(a: binary, b: binary) -> bool
+hash(b, 'sha256')             -> binary       // 32 bytes
+hash(b, 'sha1') / hash(b, 'md5') / hash(b, 'crc32')
+hmac(key: binary, b, 'sha256') -> binary
+random_bytes(n: int)          -> binary
+constant_time_eq(a: binary, b: binary) -> bool
 ```
 
 ### 6.5 Compression
 
 ```lambda
-gzip.compress(b, level: int? = 6)   -> binary
-gzip.decompress(b)                   -> binary | error
-zstd.compress(b)                     -> binary
-zstd.decompress(b)                   -> binary | error
-deflate.compress(b) / deflate.decompress(b)
+compress(b, 'gzip', level: 6)   -> binary
+decompress(b, 'gzip')            -> binary^error
+compress(b, 'zstd') / decompress(b, 'zstd')
+compress(b, 'deflate') / decompress(b, 'deflate')
 ```
 
-Each entry takes `binary → binary` and is trivially streamable in Tier 3.
+Each entry takes `binary → binary`; the streaming forms are exactly the PL6 transducer stages of [Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) §5 (`|> gunzip()` etc.), same names, incremental with flush.
 
 ### 6.6 Cross‑runtime zero‑copy bridge
 
-Make Lambda `binary` the **same physical buffer** as JS `Uint8Array` and (future) Python `bytes`/`bytearray`. Lambda's [Jube runtime](../doc/Lambda_Jube_Runtime.md) is the right place to define the contract:
+> **Status 2026-07-15:** the **copy** bridge shipped ([Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) Phase 5, decision B8): `Buffer.from`/`Uint8Array`/`Uint8ClampedArray`/`DataView` interop with mutation isolation. Copying is *required* today, not provisional laziness — Lambda binary is immutable while `JsArrayBuffer.data` is mutable and manually freed on detach/transfer; aliasing would let JS mutate or dangle a Lambda value. The zero-copy end-state below is the PL5 flat-buffer work, where detach becomes drop-ref and sharing becomes sound. **Note the type stays distinct — see §10; only the buffer unifies.**
 
-- A shared `BufferDescriptor { ptr; len; owner; refcount; readonly }` ABI.
-- `js.Uint8Array` constructed from a Lambda `binary` shares storage.
+Make Lambda `binary` share the **same physical buffer** as JS `Uint8Array` and (future) Python `bytes`/`bytearray`. Lambda's [Jube runtime](../doc/Lambda_Jube_Runtime.md) is the right place to define the contract:
+
+- A shared refcounted buffer ABI — this is exactly PL5's refcounted immutable flat buffer ([Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) §4); the `BufferDescriptor { ptr; len; owner; refcount; readonly }` sketched here and PL5 are one design, and the `ArrayNum` external-view machinery (`is_view`/`is_pinned`/`ArrayNumShape`, already GC-aware and already backing every JS typed array) is the implementation template.
+- `js.Uint8Array` constructed from a Lambda `binary` shares storage (read-only pages or COW).
 - Python `bytes` (when implemented) likewise.
 - Eliminates the marshal cost that currently makes binary‑heavy cross‑language workflows untenable.
 
@@ -376,8 +407,8 @@ Expose a stable C ABI matching the descriptor above so MIR‑JIT‑emitted code 
 
 ### 7.1 Pretty printing & REPL display
 
-- Default `print(b)` → `b'\xDE AD BE EF'` with two‑hex‑per‑byte grouping.
-- `binary.hexdump(b)` → canonical 16‑bytes‑per‑row display with offset gutter and ASCII column:
+- ~~Default `print(b)` → `b'\xDE AD BE EF'` with two‑hex‑per‑byte grouping.~~ **Decided & shipped as B3:** canonical form is `b'\xDEADBEEF'` — uppercase, **ungrouped** (round-trips as a literal since whitespace is ignored on decode; grouping remains available as a future `encode(b, 'hex', sep: " ")` cosmetic, §5.2).
+- `hexdump(b)` → canonical 16‑bytes‑per‑row display with offset gutter and ASCII column:
   ```
   00000000  de ad be ef 48 65 6c 6c  6f 20 77 6f 72 6c 64 21  |....Hello world!|
   ```
@@ -421,11 +452,49 @@ Lock down each codec with property tests:
 
 ## 8. Phased Rollout Summary
 
-| Tier | Theme | Ship‑gating items |
-|---|---|---|
-| **1** | Foundation | Decoded representation; indexing; slicing; iteration; `++` |
-| **2** | Structured access | Builder; encoding stdlib (hex, base64, utf8, …); endian accessors; `pack`/`unpack`; bit‑pattern `match` |
-| **3** | Performance & ecosystem | Sub‑binary zero‑copy slicing; file I/O; `mmap`; crypto; compression; cross‑runtime buffer bridge; FFI |
-| **4** | Polish | Hexdump; validators; constant‑time eq; round‑trip / fuzz tests; full docs |
+| Tier | Theme | Ship‑gating items | Status |
+|---|---|---|---|
+| **1** | Foundation | Decoded representation ✅; canonical print ✅; `len` ✅; `binary()` ✅; formatter/I-O egress ✅; JS copy bridge ✅ (impl plan Phases 1–5) — **remaining: indexing, slicing, iteration, `++` byte concat** | **core landed 2026-07-15** |
+| **2** | Structured access | Builder; encoding stdlib (`encode`/`decode` selector API, §5.2); endian accessors; `pack`/`unpack`; bit‑pattern `match` | proposal |
+| **3** | Performance & ecosystem | Sub‑binary zero‑copy slicing (**= PL5 flat buffer**, one work item); file I/O; `mmap`; crypto; compression (= PL6 transducers streaming); cross‑runtime zero-copy buffer; FFI | proposal; PL5/PL6 designs exist |
+| **4** | Polish | Hexdump; validators; constant‑time eq; round‑trip / fuzz tests; full docs | proposal |
 
-Tier 1 is the unblocker: every later tier assumes binaries are real bytes, not source‑text shadows. Once it ships, Tiers 2–4 can land independently and incrementally.
+Tier 1's decode core was the unblocker: every later tier assumes binaries are real bytes, not source‑text shadows. The remaining Tier-1 element ops (indexing/slicing/iteration/concat) are the next batch; Tiers 2–4 can then land independently and incrementally.
+
+---
+
+## 9. Streams alignment — WHATWG byte streams and Node streams
+
+*(Recorded 2026-07-15; authoritative design in [Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) Parts 2–3 and `Lambda_Design_Concurrency.md` §11 K27/K28. This section is the binary-type-eye view.)*
+
+The `binary` type is the **chunk currency** of Lambda's binary pipelines: a binary stream is the K27 bounded Item chunk-queue carrying binary Items, with chunk boundaries *semantically invisible* (PL3 re-chunking license) and no `~` auto-mapping (PL4). What the type must provide for streaming — zero-copy sub-views (Tier 3.1/PL5), byte-length measurement (PL7 queues bound by `sum(len)`), and transducer stages with flush (PL6) — is exactly this doc's Tier-3 roadmap; the pipeline design and this proposal converge on the same representation work.
+
+**WHATWG byte streams — the conformance target (PL10a).** Lambda commits to WHATWG Web Streams at 100% spec conformance (K28), *including readable byte streams*, and the binary type maps one-to-one onto the spec's concepts:
+
+| WHATWG | Lambda binary |
+|---|---|
+| chunk = `ArrayBuffer`/`Uint8Array` view | `binary` value; sub-binary view (buffer, offset, len) under Tier 3.1/PL5 |
+| `ByteLengthQueuingStrategy` / `desiredSize` | PL7 byte-metric queue bound / remaining byte capacity |
+| `TransformStream` `transform`/`flush`/`cancel` | PL6 transducer contract (decompress, decrypt, charset decode, frame-split) |
+| `TextDecoderStream` / `CompressionStream` | `decode(…, 'utf-8')` / `gunzip()` stages — same codec vocabulary as §5.2 |
+| BYOB reader / `autoAllocateChunkSize` | PL11 pooled reads (deferred; Layer-0 API seam reserved) |
+
+**Node streams — best-effort through the shim (PL10b).** Legacy Node streams re-base as a compat shim over the Web-Streams-shaped core (K27 Layer 2); they are *best-effort by commitment* (K28) — shim gaps are fixed when real packages need them, never chased to 100%. The binary-relevant mappings: a Node `Buffer` chunk and a Lambda binary chunk are the same bytes riding the same queue (Buffer ≡ Uint8Array ≡ `ELEM_UINT8` view — §1.2 of the impl plan; under PL5, literally the same flat buffer); `highWaterMark` in bytes ≡ PL7 byte mode, `objectMode` ≡ count mode; flowing/paused mode-switching and event-timing folklore stay shim-only, regression-gated by the node baseline.
+
+---
+
+## 10. Design decision: unification with `Uint8Array` — REJECTED
+
+*(Discussed and decided 2026-07-15, user-confirmed. Context: after the Tier-1 fix, both `binary` and JS `Uint8Array` hold real bytes, and LambdaJS typed arrays are already `ArrayNum` external views — so "make `LMD_TYPE_BINARY` be a u8 array" was the obvious question.)*
+
+**The idea.** Re-base `LMD_TYPE_BINARY` on `ArrayNum` `ELEM_UINT8` (or otherwise merge it with the `Uint8Array` representation), so Lambda binary *is* a byte array — one type, free element ops, free JS interop.
+
+**Rejected — the fundamental reason: `binary` represents just the raw bytes, and raw bytes are interpretation-free.** A byte buffer can be read as a `Uint8Array`, but equally as a `Uint16Array`/`Float64Array`, a `DataView` with per-access endianness, a UTF-8 or Latin-1 text, a length-prefixed frame sequence — or as **structured, non-array data** through a binary schema: [Lambda_Type_Binary_Schema.md](Lambda_Type_Binary_Schema.md) builds typed layouts over `binary` where, quoting its §5.1, *"`Velmt` is to `Element` what `VMap` is to `Map`: a vtable-dispatched virtual node that presents the standard element API while storing nothing but a buffer, a schema, and an offset."* A PNG held in a `binary` is *presented as an element tree* — no array in sight. `Uint8Array` is therefore **one possible view among many**, and baking it into the value model would wrongly promote a particular interpretation into the identity of the uninterpreted value. The correct layering is: **`binary` = the interpretation-free bytes; every view — typed arrays, DataView, text decodings, `Velmt` schemas — is constructed on top.**
+
+**Supporting reasons (each independently sufficient):**
+
+1. **Value vs. container semantics.** `binary` is a compound *scalar*: immutable, `memcmp` value equality, a rank in the total order, validator-matchable, map-key-safe. `Uint8Array` is a mutable *container* with identity semantics, reference equality, and a detach/resize lifecycle. Merging would import `ArrayNum`'s representation-sensitive `==` (a known defect for numeric arrays) into a scalar where `b'\xDEAD' == b'\xDEAD'` must hold unconditionally, and would add a mutation surface to a value whose immutability is load-bearing — for K5 flat-sharing across isolates and for PL3's "streams equal on their byte concatenation."
+2. **Precedent.** Python deliberately keeps `bytes` ≠ `bytearray` ≠ `memoryview` along exactly this axis; Rust's ecosystem converged on `bytes::Bytes` (refcounted immutable) vs `Vec<u8>`; JS itself demonstrates the gap from the other side — it *lacks* an immutable byte value, which is why "immutable ArrayBuffer" proposals keep appearing at TC39. Lambda already has the pair right: `binary` ≙ `bytes`, u8 `ArrayNum`/`Uint8Array` ≙ `bytearray`.
+3. **The number-model contrast.** JS `number` ⇔ Lambda `float` were unified (N1) because their semantics are *identical*. `binary` vs `Uint8Array` differ on mutability, equality, and identity — the precondition for type unification fails.
+
+**What IS unified instead — the storage, not the type** (the K27 "one core, separate faces" pattern): today a copy bridge at the immutability boundary (B8, shipped); under Tier 3.1/PL5, one refcounted flat byte buffer beneath both `binary` (immutable view) and `JsArrayBuffer.data` (mutable pages, detach = drop-ref), making conversion view-flipping — with the one permanent rule that handing JS a *mutable alias* of a Lambda binary is never allowed, or immutability is a lie.

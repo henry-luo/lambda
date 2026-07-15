@@ -1,12 +1,57 @@
 # Lambda Binary Type — Implementation Plan: Decoded Bytes + JS/Node Buffer Unification
 
-**Status:** implementation plan — ready to execute (decisions B1–B8; Phases 1–6)
-**Date:** 2026-07-14
-**Context:** executes the latent-defect fix recorded in `Lambda_Design_Pipeline.md` §4 / O-PL5, and scopes the JS unification it unlocks. Today `LMD_TYPE_BINARY` has **two producers with inconsistent payloads**: literals store the raw source text undecoded (`b'\xDEADBEEF'` holds the 10 chars `\xDEADBEEF`), while file reads store real bytes. This plan makes decoded bytes the only payload, fixes every consumer, and bridges the type to the JS side — where a complete typed-array stack already exists and is already unified with `ArrayNum`.
+**Status:** Phases 1–5 implemented; Phase 6 remains the explicitly deferred PL5 follow-up
+**Plan date:** 2026-07-14
+**Implementation completed:** 2026-07-15
+**Context:** executes the latent-defect fix recorded in `Lambda_Design_Pipeline.md` §4 / O-PL5, and scopes the JS unification it unlocks. Before this implementation, `LMD_TYPE_BINARY` had **two producers with inconsistent payloads**: literals stored the raw source text undecoded (`b'\xDEADBEEF'` held the 10 chars `\xDEADBEEF`), while file reads stored real bytes. Phases 1–5 make decoded bytes the only payload, fix every consumer, and bridge the type to the JS side — where a complete typed-array stack already exists and is already unified with `ArrayNum`.
+
+## 0. Completion record (2026-07-15)
+
+The inconsistency described above is fixed. Every Lambda binary producer now
+creates a length-delimited `LMD_TYPE_BINARY` containing decoded bytes, every
+textual representation is explicit, and the JS/Node bridge copies at the
+immutability boundary as required by B8.
+
+| Phase | Status | Landed behavior |
+|---|---|---|
+| 1 — decoder and producers | **complete** | one shared decoder in `lib/str_binary.c`; compiler literals and Mark input both decode hex/base64 and reject malformed payloads |
+| 2 — consumers | **complete** | byte length, canonical NUL-safe printing/string conversion, real `binary()` values, and a string-like consumer audit |
+| 3 — formatters and I/O | **complete** | native Mark literals, padded standard base64 for non-binary text formats, and byte-exact raw output |
+| 4 — tests and goldens | **complete** | decoder unit tests, positive/negative scripts, Mark/JSON/output regressions, corrected goldens, and a repaired runnable fuzz fixture |
+| 5 — JS/Node copy bridge | **complete** | `Buffer`, `Uint8Array`, `Uint8ClampedArray`, and `DataView` copy interop with mutation isolation |
+| 6 — PL5 convergence | **deferred by design** | unchanged: refcounted flat storage and zero-copy views remain a separate representation project |
+
+Two implementation details differ from the original mechanical forecast while
+preserving all B1–B8 decisions:
+
+- The decoder lives in `lib/str_binary.c`, not `lib/str.c`, so small users of the
+  foundational string library do not acquire the base64 allocator as a link-time
+  dependency. `build_lambda_config.json` wires it into the full Lambda input/runtime.
+- `pn_output` required a real fix: its old `it2s(source)` call accepts only text
+  tags and discarded a correctly tagged binary. It now uses the binary-safe
+  accessor before the existing length-delimited write.
+
+### Verification snapshot
+
+- `make build`: **pass**, 0 errors / 0 warnings.
+- Decoder GTest and focused binary/Mark/JS/output regressions: **pass**.
+- Direct MIR and legacy C2MIR binary regressions: **pass**.
+- `test/fuzzy/lambda/corpus/valid/data_types.ls`: **pass**, including decoded binary construction.
+- `make test-lambda-baseline`: **pass**, 3333/3333 script cases plus
+  490/490 Lambda GTests, 311/311 JS GTests, and 110/110 preliminary Node
+  GTests.
+- `make node-baseline`: all binary/Buffer coverage passes and the run produced
+  no semantic failures or crashes. The loaded official set reported 3524
+  passes and four 60-second timeouts under parallel host load; isolated reruns
+  passed three. The remaining `test-http-set-trailers.js` timeout is a verified
+  pre-existing stale-baseline issue: both this implementation and an isolated
+  executable built from untouched `HEAD` fail identically because
+  `ServerResponse.addTrailers` is absent. The harness-generated slow-list edits
+  were discarded; no unrelated baseline policy was changed to hide it.
 
 ---
 
-## 1. Current state (audited 2026-07-14)
+## 1. Pre-implementation state (audited 2026-07-14)
 
 ### 1.1 The Lambda side — what's broken
 
@@ -55,7 +100,7 @@ The unification substrate is **already built**, and better than hoped:
 
 ## 3. Phase 1 — the decoder, wired into both producers
 
-**New shared helper** (one decoder, two callers — never two copies):
+**Implemented shared helper** (one decoder, two callers — never two copies):
 
 ```c
 // lib/str.h — decode a Lambda binary-literal payload (content between b' and ').
@@ -64,7 +109,11 @@ The unification substrate is **already built**, and better than hoped:
 int str_binary_payload_decode(const char* content, int len, StrBuf* out, int* err_off);
 ```
 
-Implementation in `lib/str.c` on top of the existing `hex_decode_byte` (`lib/hex.h`) and `base64_decode_variant` (`lib/base64.h`); whitespace-skipping loop shared across both branches. Unit-tested directly (GTest, Phase 4).
+Implementation in `lib/str_binary.c` on top of the existing `hex_decode_byte`
+(`lib/hex.h`) and `base64_decode_variant` (`lib/base64.h`); the separate source
+file avoids adding base64 linkage to small `str.c`-only targets. The
+whitespace-skipping behavior is shared across both branches and is unit-tested
+directly (GTest, Phase 4).
 
 **Callers:**
 1. `build_ast.cpp` `build_lit_string` SYM_BINARY branch: decode into a StrBuf, `pool_alloc` the `String` at decoded size, set `len`/`is_ascii` from bytes, keep the existing `const_list`/`const_index` flow (transpile/JIT const-load paths — `transpile.cpp:82` `const_x2it`, `transpile-mir.cpp:9000` — are index-based and untouched). Decode failure → compile error with `err_off` mapped to the source offset (follow the existing malformed-literal error pattern in build_ast; do not silently fall back).
@@ -86,7 +135,10 @@ Implementation in `lib/str.c` on top of the existing `hex_decode_byte` (`lib/hex
 
 1. **`format-mark`**: add the `LMD_TYPE_BINARY` case emitting the canonical literal (shares `format_binary_literal`). Round-trip property: `parse(format(x, 'mark'), 'mark') == x` for binary values.
 2. **`format-json` / `format-yaml` / other text formats**: binary → base64 string (`base64_encode` from lib) per B7. Document the choice in each formatter's header comment (asymmetric by design: JSON has no binary notion; ingress does not auto-detect base64).
-3. **`pn_output`** (`lambda-proc.cpp:255`): no code change — verify with a test that `output(b'\xDEADBEEF', path)` now writes exactly 4 bytes `DE AD BE EF` (this is the user-visible headline fix).
+3. **`pn_output`** (`lambda-proc.cpp:255`): changed the accessor from text-only
+   `it2s` to `get_safe_binary`; the old accessor returned null after binaries
+   became correctly tagged. The regression verifies that
+   `output(b'\xDEADBEEF', path)` writes exactly 4 bytes `DE AD BE EF`.
 4. `doc/Lambda_Data.md` (literal semantics — add the no-marker-default-hex rule and canonical form) and `doc/Lambda_Sys_Func.md` (`binary()` now truthful) updated in the same commit as the behavior.
 
 **Exit gate:** mark round-trip test green; JSON egress test green; byte-exact file-output test green.
@@ -96,7 +148,8 @@ Implementation in `lib/str.c` on top of the existing `hex_decode_byte` (`lib/hex
 Golden updates (all currently encode the defect):
 - `test/std/core/datatypes/binary_basic.expected` — `len` lines become byte counts (6→2 etc.), `binary("hello") is binary` flips to `true`, `len(binary("hello"))` stays 5 (UTF-8 bytes).
 - `test/lambda/value.txt:6–7,30` — literals now print canonically: `b'A0FE'`/`b'\xA0FE'` → `b'\xA0FE'`; `b'\xA0FE af0d'` → `b'\xA0FEAF0D'`; the three base64 forms print as their hex equivalents.
-- `test/lambda/expr.txt` — the map-field binary likewise.
+- `test/lambda/expr.txt` — audited; it was already in the canonical form and
+  required no content change.
 
 New tests (per CLAUDE.md rule 8, each `.ls` with expected output):
 - `binary_decode.ls`: hex default, `\x`, `\64` padded/unpadded, interior whitespace, case-insensitive hex, equality across encodings, `len`, embedded NUL (`b'\x00FF00'` — len 3, prints correctly), `string(bin)`, `binary()` conversions.
@@ -115,7 +168,11 @@ Now that both sides hold real bytes, the bridge is a pair of memcpys:
 3. **Wire-up (minimal, demand-driven):** (a) LambdaJS `Buffer.from(x)` / `Uint8Array.from(x)` / the `new Uint8Array(x)` constructor path accept a Lambda binary Item (one added type check where they already discriminate array-likes in `js_buffer.cpp` / `js_typed_array.cpp`); (b) a Lambda-side `binary(x)` overload accepting a typed-array Item (one case in `fn_binary`); (c) the four `lambda/js/` slot-writer sites keep String-slot semantics (they store *Lambda-shaped* fields — not a JS-value crossing; leave until a real consumer needs Uint8Array projection there).
 4. Explicitly **not** in scope: auto-projection of binary as Uint8Array in general JS property access, and any zero-copy aliasing (B8 rationale — mutability + detach `mem_free` would dangle immutable Lambda values).
 
-**Exit gate:** interop gtest (Lambda binary → JS `Buffer.from` → mutate copy → Lambda value unchanged → round-trip bytes equal); `make node-baseline` no regressions (this is additive; expect no delta).
+**Exit gate:** the interop regression (Lambda binary → JS `Buffer.from` →
+mutate copy → Lambda value unchanged → round-trip bytes equal) passes. The
+official Node run has no binary-related regression; its sole reproducible
+timeout is unchanged in a clean-`HEAD` A/B executable, as recorded in the
+verification snapshot above.
 
 ## 8. Phase 6 — convergence sketch (PL5 pointer, not this plan's scope)
 

@@ -2118,6 +2118,42 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     return (Item){.map = m};
 }
 
+extern "C" Item js_typed_array_from_binary(String* bin) {
+    if (!bin) return js_typed_array_new(JS_TYPED_UINT8, 0);
+    Item result = js_typed_array_new(JS_TYPED_UINT8, (int)bin->len);
+    void* data = js_typed_array_current_data_ptr(result);
+    if (data && bin->len > 0) memcpy(data, bin->chars, bin->len);
+    return result;
+}
+
+extern "C" Item binary_from_typed_array(JsTypedArray* ta) {
+    if (!ta || (ta->element_type != JS_TYPED_UINT8 &&
+                ta->element_type != JS_TYPED_UINT8_CLAMPED)) {
+        return ItemError;
+    }
+    js_typed_array_refresh_arraynum_view(ta);
+    int byte_length = js_typed_array_current_byte_length(ta);
+    void* data = js_typed_array_current_data(ta);
+    if (byte_length == 0) return ItemNull;
+    if (!data) return ItemError;
+    // Crossing from mutable/detachable JS storage must copy so the immutable
+    // Lambda binary cannot be changed or dangled by later JS operations.
+    String* bin = heap_binary_from_bytes((const char*)data, byte_length);
+    return bin ? (Item){.item = x2it(bin)} : ItemError;
+}
+
+extern "C" Item binary_from_dataview(JsDataView* dv) {
+    if (!dv || !dv->buffer || dv->buffer->detached) return ItemError;
+    int byte_length = dv->length_tracking ?
+        dv->buffer->byte_length - dv->byte_offset : dv->byte_length;
+    if (byte_length < 0 || dv->byte_offset < 0 ||
+        dv->byte_offset + byte_length > dv->buffer->byte_length) return ItemError;
+    if (byte_length == 0) return ItemNull;
+    const char* data = (const char*)dv->buffer->data + dv->byte_offset;
+    String* bin = heap_binary_from_bytes(data, byte_length);
+    return bin ? (Item){.item = x2it(bin)} : ItemError;
+}
+
 // Create a typed array as a view over an ArrayBuffer
 extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length) {
     if (!js_is_arraybuffer(buffer_item)) {
@@ -2252,6 +2288,16 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
 extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset_item, Item length_item, int argc) {
     if (argc == 0) {
         return js_typed_array_new(type_id, 0);
+    }
+
+    if (get_type_id(arg) == LMD_TYPE_BINARY &&
+        (type_id == JS_TYPED_UINT8 || type_id == JS_TYPED_UINT8_CLAMPED)) {
+        String* bin = arg.get_safe_binary();
+        if (type_id == JS_TYPED_UINT8) return js_typed_array_from_binary(bin);
+        Item result = js_typed_array_new(type_id, bin ? (int)bin->len : 0);
+        void* data = js_typed_array_current_data_ptr(result);
+        if (data && bin && bin->len > 0) memcpy(data, bin->chars, bin->len);
+        return result;
     }
 
     // Check if arg is an ArrayBuffer

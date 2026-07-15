@@ -588,6 +588,21 @@ extern "C" String* heap_strcpy(const char* src, int64_t len) {
     return str;
 }
 
+extern "C" String* heap_binary_from_bytes(const char* src, int64_t len) {
+    if (!src || len < 0 || (uint64_t)len + 1 + sizeof(String) > (uint64_t)INT_MAX) {
+        return NULL;
+    }
+    // Binary owns immutable length-delimited bytes; using the binary allocation
+    // tag prevents text conversions from silently erasing that distinction.
+    String* bin = (String*)heap_alloc((int)(sizeof(String) + len + 1), LMD_TYPE_BINARY);
+    if (!bin) return NULL;
+    memcpy(bin->chars, src, (size_t)len);
+    bin->chars[len] = '\0';
+    bin->len = (uint32_t)len;
+    bin->is_ascii = str_is_ascii(bin->chars, (size_t)len) ? 1 : 0;
+    return bin;
+}
+
 // create a name string using runtime name_pool (ALWAYS pooled via string interning)
 // use this for structural identifiers: map keys, element tags, attribute names, etc.
 // same name string will always return the same pointer (enables identity comparison)

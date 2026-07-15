@@ -237,16 +237,31 @@ sym[0 to 4]        // 'hello' — full symbol
 
 ### Binary Literals
 
+Binary literals contain decoded bytes, not their hexadecimal or base64 source text.
+Hexadecimal is the default encoding; `\x` selects it explicitly and `\64`
+selects standard base64. ASCII whitespace may appear anywhere in either payload.
+
 ```lambda
-// Hexadecimal
+// Hexadecimal (the first two values are equal)
+b'DEADBEEF'
 b'\xDEADBEEF'
 b'\xA0FE af0d'
 
-// Base64
-b'\64A0FE'
-b'\64A0FE gh8='
-b'\64A0FE gh=='
+// Base64, padded or unpadded
+b'\643q2+7w=='
+b'\643q2+7w'
 ```
+
+Hexadecimal payloads must contain complete byte pairs. Invalid hexadecimal or
+base64 input is a syntax error. An empty decoded payload represents the absent
+binary value.
+
+Binary values are immutable and their length is measured in bytes, so
+`len(b'\x00FF00')` is `3`. Embedded NUL bytes are preserved. Printing a binary,
+or converting it with `string(binary_value)`, always uses the canonical uppercase
+form `b'\x<HEX>'`, independent of how it was authored. Mark formatting uses the
+same form and round-trips it; text formats without a native binary type, including
+JSON and YAML, emit the bytes as a standard base64 string.
 
 ### DateTime Literals
 

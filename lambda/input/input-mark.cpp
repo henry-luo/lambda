@@ -18,14 +18,6 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth = 
 static Item parse_value(InputContext& ctx, const char **mark, int depth = 0);
 static Item parse_content(InputContext& ctx, const char **mark, int depth = 0);
 
-static inline bool mark_is_binary_space(char c) {
-    return c == ' ' || c == '\t' || c == '\n';
-}
-
-static inline bool mark_is_base64_char(char c) {
-    return str_char_is_alnum(c) || c == '+' || c == '/' || c == '=';
-}
-
 static void skip_comments(const char **mark) {
     skip_whitespace_and_comment_markers(mark, "//", nullptr, true);
 }
@@ -193,54 +185,36 @@ static String* parse_unquoted_identifier(InputContext& ctx, const char **mark) {
 static Item parse_binary(InputContext& ctx, const char **mark) {
     if (**mark != 'b' || *(*mark + 1) != '\'') return {.item = ITEM_ERROR};
 
-    *mark += 2; // Skip b'
-    skip_whitespace(mark);
-
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);  // Reset buffer before use
-
-    // Check for hex format
-    if (**mark == '\\' && *(*mark + 1) == 'x') {
-        *mark += 2; // Skip \x
-        while (**mark && **mark != '\'') {
-            if (str_is_hex(**mark)) {
-                stringbuf_append_char(sb, **mark);
-            } else if (!mark_is_binary_space(**mark)) {
-                break; // Invalid hex character
-            }
-            (*mark)++;
-        }
-    }
-    // Check for base64 format
-    else if (**mark == '\\' && (*(*mark + 1) == '6' && *(*mark + 2) == '4')) {
-        *mark += 3; // Skip \64
-        while (**mark && **mark != '\'') {
-            if (mark_is_base64_char(**mark)) {
-                stringbuf_append_char(sb, **mark);
-            } else if (!mark_is_binary_space(**mark)) {
-                break; // Invalid base64 character
-            }
-            (*mark)++;
-        }
-    }
-    // Default hex format without \x prefix
-    else {
-        while (**mark && **mark != '\'') {
-            if (str_is_hex(**mark)) {
-                stringbuf_append_char(sb, **mark);
-            } else if (!mark_is_binary_space(**mark)) {
-                break; // Invalid hex character
-            }
-            (*mark)++;
-        }
+    const char* content = *mark + 2;
+    const char* close = content;
+    while (*close && *close != '\'') close++;
+    if (*close != '\'') {
+        ctx.addError(ctx.tracker.location(), "unterminated binary literal");
+        *mark = close;
+        return {.item = ITEM_ERROR};
     }
 
-    if (**mark == '\'') {
-        (*mark)++; // skip closing quote
+    StrBuf* decoded = strbuf_new_cap((size_t)(close - content) + 1);
+    int err_off = 0;
+    int decoded_len = decoded ? str_binary_payload_decode(
+        content, (int)(close - content), decoded, &err_off) : -1;
+    *mark = close + 1;
+    if (decoded_len < 0) {
+        // Mark input must share the compiler's byte invariant; accepting encoded
+        // text here previously produced a string-tagged lookalike value.
+        ctx.addError(ctx.tracker.location(),
+            "invalid binary literal payload at byte %d", err_off);
+        if (decoded) strbuf_free(decoded);
+        return {.item = ITEM_ERROR};
+    }
+    if (decoded_len == 0) {
+        strbuf_free(decoded);
+        return ItemNull;
     }
 
-    String* binary_str = stringbuf_to_string(sb);
-    return binary_str ? (Item){.item = s2it(binary_str)} : (Item){.item = ITEM_ERROR};
+    String* binary = ctx.builder.createString(decoded->str, (size_t)decoded_len);
+    strbuf_free(decoded);
+    return binary ? (Item){.item = x2it(binary)} : (Item){.item = ITEM_ERROR};
 }
 
 static Item parse_datetime(InputContext& ctx, const char **mark) {

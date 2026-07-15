@@ -107,6 +107,13 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
             if (str) format_xml_string(ctx_, str);
             ctx_.emit("</%N>", tag_name_);
         }
+        void binary_value(const ItemReader& item, String* bin) override {
+            (void)item;
+            // XML has no native binary scalar; element text is standard base64.
+            ctx_.emit("<%N>", tag_name_);
+            format_binary_base64_string(ctx_.output(), bin);
+            ctx_.emit("</%N>", tag_name_);
+        }
         void array_value(const ItemReader& item, ArrayReader arr) override {
             if (!item.isArray()) {
                 unknown_value(item);

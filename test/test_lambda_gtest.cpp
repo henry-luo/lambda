@@ -454,6 +454,25 @@ TEST(LambdaNegativeTests, test_typed_array_coercion_error) {
     test_lambda_proc_script_expects_error("test/lambda/negative/runtime/typed_array_coercion_error.ls");
 }
 
+TEST(LambdaBinaryTests, output_writes_decoded_bytes) {
+    const char* script_path = "test/lambda/proc/proc_binary_output.ls";
+    const char* args[] = {LAMBDA_EXE, "--no-log", "run", script_path, NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
+    ASSERT_EQ(shell_result.exit_code, 0);
+    shell_result_free(&shell_result);
+
+    FILE* file = fopen("./temp/binary_output.bin", "rb");
+    ASSERT_NE(file, nullptr);
+    unsigned char bytes[5] = {0};
+    size_t count = fread(bytes, 1, sizeof(bytes), file);
+    fclose(file);
+    const unsigned char expected[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    ASSERT_EQ(count, sizeof(expected));
+    EXPECT_EQ(memcmp(bytes, expected, sizeof(expected)), 0);
+}
+
 static void patch_lambda_gtest_json_case_times() {
     std::string output = ::testing::GTEST_FLAG(output);
     const char* json_prefix = "json:";

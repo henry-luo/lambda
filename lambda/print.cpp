@@ -10,6 +10,43 @@
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
 
+static char* binary_literal_text(String* bin, size_t* text_len) {
+    size_t byte_len = bin ? bin->len : 0;
+    if (byte_len > (SIZE_MAX - 6) / 2) return NULL;
+    size_t len = byte_len * 2 + 5;
+    char* text = (char*)mem_alloc(len + 1, MEM_CAT_TEMP);
+    if (!text) return NULL;
+    static const char HEX[] = "0123456789ABCDEF";
+    text[0] = 'b'; text[1] = '\''; text[2] = '\\'; text[3] = 'x';
+    for (size_t i = 0; i < byte_len; i++) {
+        unsigned char byte = (unsigned char)bin->chars[i];
+        text[4 + i * 2] = HEX[byte >> 4];
+        text[5 + i * 2] = HEX[byte & 0x0F];
+    }
+    text[len - 1] = '\'';
+    text[len] = '\0';
+    if (text_len) *text_len = len;
+    return text;
+}
+
+void format_binary_literal(StrBuf* strbuf, String* bin) {
+    if (!strbuf) return;
+    size_t len = 0;
+    char* text = binary_literal_text(bin, &len);
+    if (!text) return;
+    strbuf_append_str_n(strbuf, text, len);
+    mem_free(text);
+}
+
+void format_binary_literal_stringbuf(StringBuf* sb, String* bin) {
+    if (!sb) return;
+    size_t len = 0;
+    char* text = binary_literal_text(bin, &len);
+    if (!text) return;
+    stringbuf_append_str_n(sb, text, len);
+    mem_free(text);
+}
+
 void print_typeditem(StrBuf *strbuf, TypedItem* citem, int depth, const char* indent);
 
 // print the syntax tree as an s-expr
@@ -316,11 +353,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, const char* in
         }
         break;
     case LMD_TYPE_BINARY:
-        if (titem->string) {
-            strbuf_append_format(strbuf, "0x%s", titem->string->chars);
-        } else {
-            strbuf_append_str(strbuf, "0x");
-        }
+        format_binary_literal(strbuf, titem->string);
         break;
     case LMD_TYPE_PATH:
         path_to_string(titem->path, strbuf);
@@ -446,8 +479,7 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_BINARY> item) const {
         String* string = item.ptr();
-        if (string) strbuf_append_format(strbuf, "b'%s'", string->chars);
-        else strbuf_append_str(strbuf, "b''");
+        format_binary_literal(strbuf, string);
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_RANGE> item) const {
@@ -851,10 +883,20 @@ void print_const(Script *script, Type* type) {
         strbuf_free(strbuf);
         break;
     }
-    case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
+    case LMD_TYPE_STRING: {
         String* string = (String*)data;
         log_debug("[const@%d, %s, %p, '%.*s']", const_type->const_index,
             type_name, string, (int)string->len, string->chars);
+        break;
+    }
+    case LMD_TYPE_BINARY: {
+        String* binary = (String*)data;
+        StrBuf* literal = strbuf_new();
+        // binary constants may contain NUL, so diagnostics must remain length-based too.
+        format_binary_literal(literal, binary);
+        log_debug("[const@%d, %s, %p, %s]", const_type->const_index,
+            type_name, binary, literal->str);
+        strbuf_free(literal);
         break;
     }
     case LMD_TYPE_SYMBOL: {

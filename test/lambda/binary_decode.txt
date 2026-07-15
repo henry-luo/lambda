@@ -1,0 +1,1 @@
+[b'\xA0FE', b'\xA0FE', b'\xA0FE', true, true, true, b'\x00FF00', 3, 3, "b'\x00FF00'", "prefix: b'\x00FF00'", b'\x68656C6C6F', true, 5, b'\x3432', b'\x312E35', true, true]

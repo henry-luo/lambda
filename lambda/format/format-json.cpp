@@ -153,6 +153,13 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
                 ctx_.write_text("null");
             }
         }
+        void binary_value(const ItemReader& item, String* bin) override {
+            (void)item;
+            // JSON has no binary scalar, so egress uses an explicit base64 string.
+            ctx_.write_char('"');
+            format_binary_base64_string(ctx_.output(), bin);
+            ctx_.write_char('"');
+        }
         void symbol_value(const ItemReader& item, Symbol* sym) override {
             (void)item;
             if (sym) {

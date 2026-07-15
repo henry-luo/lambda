@@ -30,7 +30,7 @@ Functions for type conversion and inspection.
 | `decimal(x)` | Convert to arbitrary precision decimal | `decimal("123.456")` | `123.456m` |
 | `string(x)` | Convert to string | `string(42)` | `"42"` |
 | `symbol(x)` | Convert to symbol | `symbol("text")` | `'text'` |
-| `binary(x)` | Convert to binary | `binary("hello")` | `b'...'` |
+| `binary(x)` | Convert to immutable bytes | `binary("hello")` | `b'\x68656C6C6F'` |
 | `number(x)` | Convert to number (int or float) | `number("3.14")` | `3.14` |
 
 ### Type Inspection
@@ -47,6 +47,8 @@ int("42")          // 42
 float("3.14")      // 3.14
 string(42)         // "42"
 symbol("text")     // 'text'
+binary("hello")    // b'\x68656C6C6F' (UTF-8 bytes)
+string(b'\x00FF')  // "b'\x00FF'" (canonical, lossless text)
 
 // Type inspection
 type(42)           // 'int'
@@ -56,7 +58,15 @@ name(<div>)        // 'div'
 name(type(42))     // 'int'
 len([1, 2, 3])     // 3
 len("hello")       // 5
+len(b'\x00FF00')   // 3 (byte count)
 ```
+
+`binary(x)` preserves a binary input, encodes string and symbol inputs as UTF-8,
+and encodes numeric inputs from their decimal text. A LambdaJS `Uint8Array`,
+`Uint8ClampedArray`, Node `Buffer`, or `DataView` is copied into an immutable
+binary. In the other direction, `new Uint8Array(binary_value)`,
+`Uint8Array.from(binary_value)`, and `Buffer.from(binary_value)` copy the bytes;
+mutating the JavaScript result cannot mutate the original Lambda value.
 
 ---
 
