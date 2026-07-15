@@ -101,7 +101,7 @@ struct HashMapEntry {
 struct HashMapData {
     HashMap* table;              // lib/hashmap.h instance
     ArrayList* key_order;        // insertion-order list of Item keys
-    ArrayList* num_values;       // heap-allocated numeric value storage (survives frame_end)
+    ArrayList* num_values;       // heap-owned numeric key/value storage
     int64_t count;
 };
 
@@ -150,8 +150,8 @@ static void hashmap_data_free(HashMapData* hd) {
     mem_free(hd);
 }
 
-// Stabilize numeric values: float/int64/datetime use tagged pointers into nursery memory.
-// Copy them to heap-owned storage so they survive independent of nursery lifecycle.
+// Stabilize numeric values whose Items may point into a caller's number frame.
+// VMap storage is non-LIFO, so keys and values must own those payloads.
 static Item stabilize_value(HashMapData* hd, Item value) {
     TypeId vtype = get_type_id(value);
     if (vtype == LMD_TYPE_FLOAT) {
@@ -181,11 +181,12 @@ static void hashmap_data_set(HashMapData* hd, Item key, Item value) {
     value = stabilize_value(hd, value);
     HashMapEntry probe = { .key = key };
     const HashMapEntry* existing = (const HashMapEntry*)hashmap_get(hd->table, &probe);
-    HashMapEntry entry = { .key = key, .value = value };
+    Item stored_key = existing ? existing->key : stabilize_value(hd, key);
+    HashMapEntry entry = { .key = stored_key, .value = value };
     hashmap_set(hd->table, &entry);
     if (!existing) {
         // new key — add to insertion order
-        arraylist_append(hd->key_order, (void*)key.item);
+        arraylist_append(hd->key_order, (void*)stored_key.item);
         hd->count++;
     }
 }
@@ -195,7 +196,7 @@ static Item hashmap_data_get(HashMapData* hd, Item key) {
     if (!hd) return ItemNull;
     HashMapEntry probe = { .key = key };
     const HashMapEntry* found = (const HashMapEntry*)hashmap_get(hd->table, &probe);
-    if (found) return found->value;
+    if (found) return scalar_storage_read(found->value, false);
     return ItemNull;
 }
 
@@ -257,7 +258,8 @@ static Item hashmap_vmap_key_at(void* data, int64_t index) {
     HashMapData* hd = (HashMapData*)data;
     if (!hd) return ItemNull;
     if (index < 0 || index >= hd->key_order->length) return ItemNull;
-    return *(Item*)&hd->key_order->data[index];
+    Item key = *(Item*)&hd->key_order->data[index];
+    return scalar_storage_read(key, false);
 }
 
 static Item hashmap_vmap_value_at(void* data, int64_t index) {

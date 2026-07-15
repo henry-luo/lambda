@@ -748,7 +748,8 @@ static CGFloat font_platform_ct_weight_trait(int css_weight) {
     if      (css_weight >= 900) return 0.62f;
     else if (css_weight >= 800) return 0.56f;
     else if (css_weight >= 700) return 0.40f;
-    return 0.30f;  // 600 SemiBold (kCTFontWeightSemibold)
+    else if (css_weight >= 600) return 0.30f;
+    return 0.23f;  // 500 Medium (kCTFontWeightMedium)
 }
 
 static CFMutableDictionaryRef font_platform_create_css_traits(int css_weight,
@@ -757,7 +758,8 @@ static CFMutableDictionaryRef font_platform_create_css_traits(int css_weight,
         NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     if (!traits) return NULL;
 
-    if (css_weight > 500) {
+    // CSS weight 500 is a distinct match and must not fall back to Regular metrics.
+    if (css_weight >= 500) {
         CGFloat ct_weight = font_platform_ct_weight_trait(css_weight);
         CFNumberRef wt_num = CFNumberCreate(NULL, kCFNumberCGFloatType, &ct_weight);
         if (wt_num) {
@@ -834,7 +836,7 @@ void* font_platform_create_ct_font(const char* postscript_name,
         // kCTFontWeight* constants: Semibold≈0.30, Bold≈0.40, Heavy≈0.56, Black≈0.62
         ct_font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,
                                                 (CGFloat)size_px, NULL);
-        if (ct_font && (css_weight > 500 ||
+        if (ct_font && (css_weight >= 500 ||
                         css_slant == FONT_SLANT_ITALIC ||
                         css_slant == FONT_SLANT_OBLIQUE)) {
             // For semibold/bold and italic/oblique, create a copy with CSS
@@ -850,10 +852,10 @@ void* font_platform_create_ct_font(const char* postscript_name,
     // For concrete families loaded through a regular face path (for example
     // Arial.ttf), the PostScript name points at that exact regular face.
     // Browser font matching still chooses the family's heavier face for
-    // font-weight:600+. Resolve a CoreText font by family + weight traits for
+    // font-weight:500+. Resolve a CoreText font by family + weight traits for
     // layout advances so text metrics follow the CSS font matching result.
     if (!ct_font && family_name && family_name[0] &&
-        (css_weight > 500 || css_slant == FONT_SLANT_ITALIC ||
+        (css_weight >= 500 || css_slant == FONT_SLANT_ITALIC ||
          css_slant == FONT_SLANT_OBLIQUE)) {
         CFStringRef fam = CFStringCreateWithCString(NULL, family_name, kCFStringEncodingUTF8);
         CFMutableDictionaryRef traits = font_platform_create_css_traits(css_weight, css_slant);

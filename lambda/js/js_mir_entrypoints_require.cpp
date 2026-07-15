@@ -210,10 +210,6 @@ static void js_mir_destroy_unowned_eval_context(EvalContext* local_context, Eval
             heap_destroy();
             local_context->heap = NULL;
         }
-        if (local_context->nursery) {
-            gc_nursery_destroy(local_context->nursery);
-            local_context->nursery = NULL;
-        }
     }
     context = old_context;
 }
@@ -232,16 +228,12 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     if (old_context && old_context->heap) {
         context = old_context;
         reusing_context = true;
-        if (!context->nursery) {
-            context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
-        }
         if (!context->type_list) {
             context->type_list = runtime && runtime->type_list
                 ? runtime->type_list
                 : arraylist_new(64);
         }
     } else {
-        js_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         context = &js_context;
         if (runtime->reuse_pool) {
             heap_init_with_pool(runtime->reuse_pool);
@@ -379,7 +371,6 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // stash ephemeral GC heap on Runtime for caller cleanup
     if (!reusing_context) {
         runtime->heap = js_context.heap;
-        runtime->nursery = js_context.nursery;
     }
     if (runtime) {
         runtime->type_list = result_type_list;
@@ -661,16 +652,12 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     if (old_context && old_context->heap) {
         context = old_context;
         reusing_context = true;
-        if (!context->nursery) {
-            context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
-        }
         if (!context->type_list) {
             context->type_list = runtime && runtime->type_list
                 ? runtime->type_list
                 : arraylist_new(64);
         }
     } else {
-        js_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         context = &js_context;
         if (runtime->reuse_pool) {
             heap_init_with_pool(runtime->reuse_pool);
@@ -1167,7 +1154,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     // for interactive event handler compilation (needs heap for reusing_context).
     if (!reusing_context) {
         runtime->heap = js_context.heap;
-        runtime->nursery = js_context.nursery;
         runtime->name_pool = js_context.name_pool;
     }
     if (runtime) {
@@ -1277,7 +1263,6 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
 
     EvalContext task_context = {};
     task_context.heap = runtime->heap;
-    task_context.nursery = runtime->nursery;
     task_context.name_pool = runtime->name_pool;
     task_context.type_list = runtime->type_list;
     task_context.pool = runtime->heap->pool;
@@ -1347,7 +1332,6 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     }
 
     EvalContext js_context = {};
-    js_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
     context = &js_context;
     if (runtime->reuse_pool) {
         heap_init_with_pool(runtime->reuse_pool);
@@ -1355,7 +1339,7 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     } else {
         heap_init();
     }
-    if (!context->heap || !context->nursery) {
+    if (!context->heap) {
         preamble_state_destroy(out_state);
         js_mir_destroy_unowned_eval_context(&js_context, old_context, false);
         return ItemError;
@@ -1392,7 +1376,6 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     js_microtask_flush();
 
     runtime->heap = js_context.heap;
-    runtime->nursery = js_context.nursery;
     runtime->name_pool = js_context.name_pool;
     runtime->type_list = (ArrayList*)js_context.type_list;
     context = old_context;
@@ -1473,7 +1456,6 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
         EvalContext* temp_ctx = (EvalContext*)mem_calloc(1, sizeof(EvalContext), MEM_CAT_JS_RUNTIME);
         temp_ctx->pool = mem_pool_create(NULL, MEM_ROLE_RUNTIME_HEAP, "js.runtime");
         temp_ctx->result = ItemNull;
-        temp_ctx->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "js.nursery");
         context = temp_ctx;
         heap_init();
         context->pool = context->heap->pool;
@@ -1484,7 +1466,6 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
         // Transfer the bootstrap heap to Runtime; runner_setup_context will
         // adopt its resources and release only this temporary context shell.
         runtime->heap = context->heap;
-        runtime->nursery = context->nursery;
         runtime->name_pool = context->name_pool;
         runtime->type_list = (ArrayList*)context->type_list;
         runtime->js_bootstrap_context = temp_ctx;

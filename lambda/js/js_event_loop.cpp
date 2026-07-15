@@ -322,7 +322,6 @@ typedef struct JsTimerHandle {
     Item       extra_args[8];   // extra args to pass to callback
     int        extra_count;     // number of extra args
     Heap*      runtime_heap;
-    gc_nursery_t* runtime_nursery;
     NamePool*  runtime_name_pool;
     Pool*      runtime_pool;
     void*      runtime_doc;
@@ -374,7 +373,6 @@ static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, 
     th->domain = js_domain_capture_async_stack();
     if (context) {
         th->runtime_heap = context->heap;
-        th->runtime_nursery = context->nursery;
         th->runtime_name_pool = context->name_pool;
         th->runtime_pool = context->pool;
     }
@@ -388,11 +386,10 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
     bool needs_runtime_scope =
         !context || (th->runtime_heap && context->heap != th->runtime_heap);
     if (needs_runtime_scope) {
-        if (!th->runtime_heap || !th->runtime_nursery || !th->runtime_name_pool) {
+        if (!th->runtime_heap || !th->runtime_name_pool) {
             return false;
         }
         scope->runtime_ctx.heap = th->runtime_heap;
-        scope->runtime_ctx.nursery = th->runtime_nursery;
         scope->runtime_ctx.name_pool = th->runtime_name_pool;
         scope->runtime_ctx.pool = th->runtime_pool ?
             th->runtime_pool : th->runtime_heap->pool;
@@ -525,7 +522,6 @@ static void timer_forget_unsafe_handle(JsTimerHandle* th) {
     if (!th) return;
     th->runtime_doc = nullptr;
     th->runtime_heap = nullptr;
-    th->runtime_nursery = nullptr;
     th->runtime_name_pool = nullptr;
     th->runtime_pool = nullptr;
     th->roots_registered = false;

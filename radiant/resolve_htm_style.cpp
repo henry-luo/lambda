@@ -494,14 +494,29 @@ static float html_font_size_for_level(int level) {
     return 16.0f;
 }
 
-static int html_font_level_for_size(float current) {
-    if (current <= 10.0f) return 1;
-    if (current <= 13.0f) return 2;
-    if (current <= 16.0f) return 3;
-    if (current <= 18.0f) return 4;
-    if (current <= 24.0f) return 5;
-    if (current <= 32.0f) return 6;
-    return 7;
+static bool parse_legacy_font_size_level(const char* input, int* out_level) {
+    const char* cursor = str_skip_ascii_space(input);
+    bool relative_plus = false;
+    bool relative_minus = false;
+    if (*cursor == '+' || *cursor == '-') {
+        relative_plus = *cursor == '+';
+        relative_minus = *cursor == '-';
+        cursor++;
+    }
+    if (*cursor < '0' || *cursor > '9') return false;
+
+    int value = 0;
+    while (*cursor >= '0' && *cursor <= '9') {
+        // only the 1..7 range matters; saturating also avoids integer overflow
+        value = value > 7 ? 8 : value * 10 + (*cursor - '0');
+        cursor++;
+    }
+    if (relative_plus) value += 3;
+    if (relative_minus) value = 3 - value;
+    if (value < 1) value = 1;
+    if (value > 7) value = 7;
+    *out_level = value;
+    return true;
 }
 
 static void apply_table_cell_width_attribute(DomElement* elmt, ViewBlock* block) {
@@ -1182,18 +1197,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // size="4" = large (18px), size="5" = x-large (24px), size="6" = xx-large (32px), size="7" = 48px
         const char* size_attr = span->get_attribute("size");
         if (size_attr) {
-            bool relative_size = size_attr[0] == '+' || size_attr[0] == '-';
-            int size_value = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
-            float font_size = 16.0f;  // default medium
-            if (relative_size) {
-                int level = html_font_level_for_size(lycon->font.style->font_size);
-                level += size_value;
-                font_size = html_font_size_for_level(level);
-            } else {
-                font_size = html_font_size_for_level(size_value);
+            int level = 0;
+            if (parse_legacy_font_size_level(size_attr, &level)) {
+                // HTML relative font sizes are offsets from legacy level 3, not inherited CSS size
+                float font_size = html_font_size_for_level(level);
+                apply_html_span_font_size(lycon, span, font_size, false);  // CSS logical pixels
+                log_debug("HTM_TAG_FONT size='%s' -> %.1fpx", size_attr, span->font->font_size);
             }
-            apply_html_span_font_size(lycon, span, font_size, false);  // CSS logical pixels
-            log_debug("HTM_TAG_FONT size='%s' -> %.1fpx", size_attr, span->font->font_size);
         }
         // Handle font face attribute
         const char* face_attr = span->get_attribute("face");
@@ -1757,6 +1767,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->display.inner = RDT_DISPLAY_REPLACED;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+        // Chrome's select UA rule resets the font; inheriting the page font
+        // corrupts both the computed style and option-based intrinsic width.
+        apply_html_form_control_font(lycon, block);
         // Set intrinsic_width to UA default only on first resolve. Later passes
         // (e.g. intrinsic sizing in flex/grid) measure option text and write a
         // larger value here; we must not clobber it.

@@ -18,7 +18,7 @@
 #include "../lambda/render_map.h"
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
-#include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
+#include "../lambda/transpiler.hpp"   // Runtime (heap and name_pool)
 #include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
 #include "../lambda/js/js_dom_events.h" // js_dom_dispatch_event + native event factories
@@ -2040,7 +2040,6 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 Context* saved_input_context = input_context;
                                 if (rt && rt->heap) {
                                     handler_ctx.heap = rt->heap;
-                                    handler_ctx.nursery = rt->nursery;
                                     handler_ctx.name_pool = rt->name_pool;
                                     handler_ctx.pool = rt->reuse_pool ?
                                         rt->reuse_pool : rt->heap->pool;
@@ -4709,7 +4708,7 @@ static DomElement* radiant_view_to_dom_element(View* v) {
 
 // Internal: enter/exit the JS EvalContext that DOM event callbacks run under.
 // Both factories AND dispatch must run between enter/exit because Item creation
-// allocates from the JS runtime's GC nursery.
+// allocates from the active JS runtime heap and number-stack base frame.
 typedef struct {
     EvalContext  handler_ctx;
     EvalContext* saved_ctx;
@@ -4737,7 +4736,6 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     memset(&s->handler_ctx, 0, sizeof(s->handler_ctx));
     Heap* heap = (Heap*)s->doc->js_runtime_heap;
     s->handler_ctx.heap = heap;
-    s->handler_ctx.nursery = (gc_nursery_t*)s->doc->js_runtime_nursery;
     s->handler_ctx.name_pool = (NamePool*)s->doc->js_runtime_name_pool;
     s->handler_ctx.pool = s->doc->js_runtime_pool ?
         (Pool*)s->doc->js_runtime_pool : heap->pool;

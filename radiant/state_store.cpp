@@ -379,8 +379,8 @@ static bool state_dump_item_int(Item item, int64_t* out_value) {
         *out_value = item.int_val;
         return true;
     }
-    if (type == LMD_TYPE_INT64 && item.int64_ptr) {
-        *out_value = *(int64_t*)(uintptr_t)item.int64_ptr;
+    if (type == LMD_TYPE_INT64) {
+        *out_value = item.get_int64();
         return true;
     }
     return false;

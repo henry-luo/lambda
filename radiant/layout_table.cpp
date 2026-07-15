@@ -932,8 +932,18 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
         view->view_type == RDT_VIEW_TABLE) {
         float child_top = view->y;
         table_note_cell_content_extent(extent, child_top, child_top + view->height);
+        if (view->view_type != RDT_VIEW_INLINE_BLOCK) {
+            // A block inside a split inline occupies the missing stack position;
+            // omitting it makes the surrounding text gap look like a double line pitch.
+            table_note_cell_line_position(extent, child_top, cell_line_height);
+        }
     }
 }
+
+static bool table_empty_inline_atomic_line_top(LayoutContext* lycon,
+                                               ViewTableCell* tcell,
+                                               ViewBlock* block,
+                                               float* line_top);
 
 // Measure content height from cell's children
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
@@ -943,6 +953,16 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     bool has_inline_content = false;
     float inline_content_min_y = 0.0f;  // Track min y of inline/text content
     float inline_content_max_y = 0.0f;  // Track max bottom of inline/text content
+    View* last_sizing_child = nullptr;
+    for_each_table_cell_vertical_align_child(
+        lam::view_require_element(tcell), [&](View* child) { last_sizing_child = child; });
+    float ignored_quirky_margin_bottom = 0.0f;
+    ViewBlock* last_sizing_block = lam::view_as_block(last_sizing_child);
+    if (last_sizing_block && last_sizing_block->bound &&
+        layout_quirky_container_ignores_child_margin_bottom(
+            lycon, tcell, last_sizing_block)) {
+        ignored_quirky_margin_bottom = last_sizing_block->bound->margin.bottom;
+    }
 
     // Set up line-height for this cell so we can use it for text content measurement
     // This ensures we use the cell's own line-height, not a stale value from lycon
@@ -1027,6 +1047,12 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // (stored in content_height during layout_inline).
             float child_top = child->y;
             float child_bottom = child->y + child_height;
+            if (child->view_type == RDT_VIEW_INLINE_BLOCK &&
+                table_empty_inline_atomic_line_top(
+                    lycon, tcell, lam::view_require_block(child), &child_top)) {
+                // An empty atomic inline still generates the cell strut's line box.
+                child_bottom = child_top + cell_line_height;
+            }
             if (child->view_type == RDT_VIEW_INLINE) {
                 TableCellContentExtent inline_extent = {};
                 // inline child coordinates are already relative to the table cell;
@@ -1075,7 +1101,12 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
                 }
                 if (!is_self_collapsing) {
                     child_top -= block->bound->margin.top;
-                    child_bottom += block->bound->margin.bottom;
+                    float margin_bottom = block->bound->margin.bottom;
+                    if (child == last_sizing_child && ignored_quirky_margin_bottom > 0.0f) {
+                        // quirks table cells suppress a last UA quirky margin during row sizing.
+                        margin_bottom = 0.0f;
+                    }
+                    child_bottom += margin_bottom;
                 }
             }
             if (!has_block_content || child_top < block_content_min_y) {
@@ -1127,10 +1158,13 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
         has_any = true;
     }
     float content_height = has_any ? (overall_max_y - overall_min_y) : 0.0f;
-    if (has_inline_content && tcell->content_height > content_height) {
+    float flow_content_height = max(
+        0.0f, tcell->content_height - ignored_quirky_margin_bottom);
+    if (has_inline_content && flow_content_height > content_height) {
         // table cell row sizing is based on line boxes; inline DOMRects only
-        // cover glyph ink and can drop explicit line-height leading.
-        content_height = tcell->content_height;
+        // cover glyph ink and can drop explicit line-height leading. Keep the
+        // quirks-adjusted trailing extent consistent with the child-box path.
+        content_height = flow_content_height;
     }
     if (!has_any && tcell->content_height > content_height) {
         // Replaced-only spacer cells measure from their child boxes; the line
@@ -1442,22 +1476,33 @@ static float compute_inline_atomic_baseline_for_cell(LayoutContext* lycon, ViewB
     return item_height;
 }
 
+static bool table_empty_inline_atomic_line_top(LayoutContext* lycon,
+                                               ViewTableCell* tcell,
+                                               ViewBlock* block,
+                                               float* line_top) {
+    if (!block || !line_top) return false;
+    float item_height = block->height + (block->bound ?
+        block->bound->margin.top + block->bound->margin.bottom : 0.0f);
+    if (item_height > 0.5f) return false;
+
+    float strut_baseline = compute_cell_strut_baseline(lycon, tcell);
+    if (strut_baseline <= 0.0f) return false;
+    float item_baseline = compute_inline_atomic_baseline_for_cell(lycon, block);
+    *line_top = block->y + item_baseline - strut_baseline;
+    return true;
+}
+
 static float find_cell_content_top_for_vertical_align(LayoutContext* lycon, ViewTableCell* tcell,
                                                       float fallback_top) {
     float content_top = fallback_top;
     bool found_line_box_top = false;
-    float strut_baseline = compute_cell_strut_baseline(lycon, tcell);
-    if (strut_baseline <= 0.0f) return content_top;
 
     for (View* child = lam::view_require_element(tcell)->first_child; child; child = child->next_sibling) {
         if (!child->view_type) continue;
         if (child->view_type == RDT_VIEW_INLINE_BLOCK || child->view_type == RDT_VIEW_TABLE) {
             ViewBlock* block = lam::view_require_block(child);
-            float item_height = block->height + (block->bound ?
-                block->bound->margin.top + block->bound->margin.bottom : 0.0f);
-            if (item_height > 0.5f) continue;
-            float item_baseline = compute_inline_atomic_baseline_for_cell(lycon, block);
-            float line_top = child->y + item_baseline - strut_baseline;
+            float line_top = 0.0f;
+            if (!table_empty_inline_atomic_line_top(lycon, tcell, block, &line_top)) continue;
             if (!found_line_box_top || line_top < content_top) {
                 content_top = line_top;
                 found_line_box_top = true;
@@ -3971,6 +4016,11 @@ static bool table_cell_apply_vertical_align_keyword(ViewTableCell* cell,
 #endif
         break;
     case CSS_VALUE_BASELINE:
+    case CSS_VALUE_SUB:
+    case CSS_VALUE_SUPER:
+    case CSS_VALUE_TEXT_TOP:
+    case CSS_VALUE_TEXT_BOTTOM:
+        // CSS table cells treat inline-only vertical-align keywords as baseline.
         cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
 #ifndef NDEBUG
         align_name = "baseline";

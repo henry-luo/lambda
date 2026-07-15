@@ -150,18 +150,15 @@ static bool public_id_matches_list(const char* public_id, const char* const* ids
     return false;
 }
 
-// Determine quirks mode from DOCTYPE token
+// Determine quirks mode from DOCTYPE fields
 // Returns: 0 = no-quirks (standards), 1 = quirks, 2 = limited-quirks
-static int html5_determine_quirks_mode(Html5Token* token) {
+int html5_determine_quirks_mode(const char* name, const char* public_id,
+                                const char* system_id, bool force_quirks) {
     // Per WHATWG spec 13.2.6.4.1:
     // 1. If force-quirks flag is set -> quirks mode
-    if (token->force_quirks) {
+    if (force_quirks) {
         return 1;
     }
-
-    const char* name = token->doctype_name ? token->doctype_name->chars : nullptr;
-    const char* public_id = token->public_identifier ? token->public_identifier->chars : nullptr;
-    const char* system_id = token->system_identifier ? token->system_identifier->chars : nullptr;
 
     // 2. If name is not "html" (case-insensitive) -> quirks mode
     if (name == nullptr || !strcasecmp_eq(name, "html")) {
@@ -198,6 +195,14 @@ static int html5_determine_quirks_mode(Html5Token* token) {
 
     // 7. Otherwise -> no-quirks (standards mode)
     return 0;
+}
+
+static int html5_determine_token_quirks_mode(Html5Token* token) {
+    return html5_determine_quirks_mode(
+        token->doctype_name ? token->doctype_name->chars : nullptr,
+        token->public_identifier ? token->public_identifier->chars : nullptr,
+        token->system_identifier ? token->system_identifier->chars : nullptr,
+        token->force_quirks);
 }
 
 // ============================================================================
@@ -669,7 +674,7 @@ static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token
         array_append(parser->document, Item{.element = doctype}, parser->pool, parser->arena);
 
         // Set quirks mode based on DOCTYPE per WHATWG spec 13.2.6.4.1
-        int quirks = html5_determine_quirks_mode(token);
+        int quirks = html5_determine_token_quirks_mode(token);
         if (quirks == 1) {
             parser->quirks_mode = true;
             parser->limited_quirks_mode = false;

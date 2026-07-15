@@ -142,29 +142,16 @@ Array* array_fill(Array* arr, int count, ...) {
     return arr;
 }
 
+static Item container_scalar_read(Container* owner, Item item) {
+    return scalar_storage_read(item, owner && owner->is_immortal);
+}
+
 Item array_get(Array *array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     if (index < 0 || index >= array->length) {
         return ItemNull;  // return null instead of error
     }
-    Item item = array->items[index];
-    switch (item._type_id) {
-    case LMD_TYPE_INT64: {
-        int64_t lval = item.get_int64();
-        return push_l(lval); // need to push to num_stack, as long values are not ref counted
-    }
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
-        double dval = item.get_double();
-        return push_d(dval); // need to push to num_stack, as float values are not ref counted
-    }
-    case LMD_TYPE_DTIME: {
-        DateTime dtval = item.get_datetime();
-        return push_k(dtval); // need to push to num_stack, as datetime values are not ref counted
-    }
-    default:
-        return item;
-    }
+    return container_scalar_read((Container*)array, array->items[index]);
 }
 
 // ============================================================================
@@ -215,6 +202,8 @@ ArrayNum* array_num_new_external_view(Container* base, void* data_base,
 
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return NULL;
+    LambdaRootGuard view_root((Context*)context);
+    if (!view_root.root(Item{.array_num = view})) return NULL;
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
     ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     if (!shape) return NULL;
@@ -242,6 +231,8 @@ ArrayNum* array_num_new_buffer_view(Container* base, ByteBufferHandle* handle,
     }
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return NULL;
+    LambdaRootGuard view_root((Context*)context);
+    if (!view_root.root(Item{.array_num = view})) return NULL;
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
     ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     if (!shape) return NULL;
@@ -261,6 +252,8 @@ ArrayNum* array_num_new_storage_view(ByteStorage* storage,
         bool mutable_view) {
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return NULL;
+    LambdaRootGuard view_root((Context*)context);
+    if (!view_root.root(Item{.array_num = view})) return NULL;
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
     ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     if (!shape) return NULL;
@@ -417,7 +410,7 @@ Item array_num_read_item(ArrayNum* array, int64_t offset) {
     if (!array_num_resolve_data(array, false) && array->length > 0) return ItemNull;
     switch (array->get_elem_type()) {
         case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
-        case ELEM_INT64:   return push_l(array->items[offset]);
+        case ELEM_INT64:   return box_int64_value(array->items[offset]);
         case ELEM_FLOAT64:   return push_d(array->float_items[offset]);
         case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[offset])};
         case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[offset])};
@@ -688,7 +681,7 @@ Item array_int64_get(ArrayNum* array, int64_t index) {
         log_debug("array_int64_get: index out of bounds: %lld", (long long)index);
         return ItemNull;
     }
-    return push_l(array->items[index]);
+    return box_int64_value(array->items[index]);
 }
 
 // Fast path: return raw int64_t without boxing
@@ -1444,6 +1437,10 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
         }
         return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
     }
+    case LMD_TYPE_DTIME: {
+        DateTime value = key.get_datetime();
+        return hashmap_sip(&value, sizeof(value), seed0, seed1);
+    }
     case LMD_TYPE_STRING: {
         String* s = key.get_safe_string();
         if (s) return hashmap_sip(s->chars, s->len, seed0, seed1);
@@ -1503,6 +1500,11 @@ int lambda_item_compare(Item a, Item b) {
             if (lambda_item_compare(aa->items[i], ab->items[i]) != 0) return 1;
         }
         return 0;
+    }
+    case LMD_TYPE_DTIME: {
+        DateTime da = a.get_datetime();
+        DateTime db = b.get_datetime();
+        return datetime_compare(&da, &db);
     }
     default:
         return (a.item == b.item) ? 0 : 1;  // RAW_ITEM_EQ_OK: non-numeric scalar/container fallback matches existing VMap key identity.
@@ -1825,20 +1827,7 @@ Item list_fill(List *list, int count, ...) {
 Item list_get(List *list, int64_t index) {
     if (!list || ((uintptr_t)list >> 56)) { return ItemNull; }
     if (index < 0 || index >= list->length) { return ItemNull; }
-    Item item = list->items[index];
-    switch (item._type_id) {
-    case LMD_TYPE_INT64: {
-        int64_t lval = item.get_int64();
-        return push_l(lval);
-    }
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
-        double dval = item.get_double();
-        return push_d(dval);
-    }
-    default:
-        return item;
-    }
+    return container_scalar_read((Container*)list, list->items[index]);
 }
 
 Map* map(int64_t type_index) {
@@ -1901,7 +1890,9 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
     void* ptr_val = nullptr;
     switch (type_id) {
     case LMD_TYPE_NULL: {
-        return ItemNull;
+        // unresolved map fields store a raw tagged Item; returning a literal
+        // null here discarded valid values written by set_fields().
+        return map_field_to_item(field_ptr, type_id);
     }
     case LMD_TYPE_BOOL:
         return {.item = b2it(*(bool*)field_ptr)};
@@ -1910,7 +1901,7 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
     case LMD_TYPE_INT:
         return {.item = i2it(*(int64_t*)field_ptr)};
     case LMD_TYPE_INT64:
-        return push_l(*(int64_t*)field_ptr);
+        return box_int64_value(*(int64_t*)field_ptr);
     case LMD_TYPE_FLOAT:
         return push_d(*(double*)field_ptr);
     case LMD_TYPE_DTIME: {
@@ -1961,6 +1952,52 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
     }
 }
 
+static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
+                                     void* map_data) {
+    if (!owner || !owner->is_immortal) return _map_read_field(field, map_data);
+    void* field_ptr = (char*)map_data + field->byte_offset;
+    switch (field->type->type_id) {
+    case LMD_TYPE_INT64: {
+        int64_t value = *(int64_t*)field_ptr;
+        return lambda_int64_fits_inline(value)
+            ? Item{.item = lambda_inline_int64_to_item_bits(value)}
+            : Item{.item = l2it(field_ptr)};
+    }
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
+        return lambda_float_ptr_to_item((double*)field_ptr);
+    case LMD_TYPE_DTIME:
+        return Item{.item = k2it(field_ptr)};
+    default:
+        return _map_read_field(field, map_data);
+    }
+}
+
+static Item map_get_for_owner(Container* owner, TypeMap* map_type, void* map_data,
+                              const char* key, bool* is_found) {
+    Item result = ItemNull;
+    *is_found = false;
+    FOR_EACH_MAP_FIELD(map_type, field) {
+        if (!field->name) {
+            Map* nested_map = map_shape_field_to_map(map_data, field);
+            if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
+                bool nested_found;
+                Item nested_result = map_get_for_owner((Container*)nested_map,
+                    (TypeMap*)nested_map->type, nested_map->data, key, &nested_found);
+                if (nested_found) {
+                    *is_found = true;
+                    result = nested_result;
+                }
+            }
+        } else if (field->name->length == strlen(key) &&
+                   memcmp(field->name->str, key, field->name->length) == 0) {
+            *is_found = true;
+            result = map_read_field_for_owner(owner, field, map_data);
+        }
+    }
+    return result;
+}
+
 // last-writer-wins: scan all entries in declaration order, keep the last match
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
     Item result = ItemNull;
@@ -2003,7 +2040,8 @@ Item map_get(Map* map, Item key) {
         log_error("map_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return ItemNull;  // only string or symbol keys are supported
     }
-    return _map_get((TypeMap*)map->type, map->data, key_str, &is_found);
+    return map_get_for_owner((Container*)map, (TypeMap*)map->type,
+                             map->data, key_str, &is_found);
 }
 
 Element* elmt(int64_t type_index) {
@@ -2142,7 +2180,8 @@ Item object_get(Object* obj, Item key) {
         log_error("object_get: key must be string or symbol, got type %s", get_type_name(key._type_id));
         return ItemNull;
     }
-    return _map_get((TypeMap*)obj->type, obj->data, key_str, &is_found);
+    return map_get_for_owner((Container*)obj, (TypeMap*)obj->type,
+                             obj->data, key_str, &is_found);
 }
 
 // Register a compiled method function pointer on a TypeObject's method table
@@ -2217,7 +2256,8 @@ Item elmt_get(Element* elmt, Item key) {
     }
 
     // PRIORITY 1: First try to get user-defined attribute
-    Item result = _map_get((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
+    Item result = map_get_for_owner((Container*)elmt, (TypeMap*)elmt->type,
+                                    elmt->data, key_str, &is_found);
     if (is_found) {
         return result;
     }

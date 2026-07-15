@@ -54,7 +54,6 @@ static bool view_pump_js_event_loop(DomDocument* doc, int wait_ms) {
     Heap* heap = (Heap*)doc->js_runtime_heap;
     EvalContext pump_ctx = {};
     pump_ctx.heap = heap;
-    pump_ctx.nursery = (gc_nursery_t*)doc->js_runtime_nursery;
     pump_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
     pump_ctx.type_list = (ArrayList*)doc->js_runtime_type_list;
     pump_ctx.pool = doc->js_runtime_pool ? (Pool*)doc->js_runtime_pool : heap->pool;

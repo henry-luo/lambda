@@ -2,6 +2,32 @@
 
 #include "../../lib/font/font_internal.h"
 
+TEST(FontContextTest, FamilyListParserPreservesOrderAndQuotedNames) {
+    const char* cursor = "  \"Open Sans\", Arial , ' Noto, Serif ', sans-serif";
+    char family[64];
+
+    ASSERT_TRUE(font_family_list_next(&cursor, family, sizeof(family)));
+    EXPECT_STREQ(family, "Open Sans");
+    ASSERT_TRUE(font_family_list_next(&cursor, family, sizeof(family)));
+    EXPECT_STREQ(family, "Arial");
+    ASSERT_TRUE(font_family_list_next(&cursor, family, sizeof(family)));
+    EXPECT_STREQ(family, " Noto, Serif ");
+    ASSERT_TRUE(font_family_list_next(&cursor, family, sizeof(family)));
+    EXPECT_STREQ(family, "sans-serif");
+    EXPECT_FALSE(font_family_list_next(&cursor, family, sizeof(family)));
+}
+
+TEST(FontContextTest, FamilyListParserSkipsEmptyCandidatesAndUnescapesQuotes) {
+    const char* cursor = ", , \"A\\\" B\", Helvetica, ";
+    char family[64];
+
+    ASSERT_TRUE(font_family_list_next(&cursor, family, sizeof(family)));
+    EXPECT_STREQ(family, "A\" B");
+    ASSERT_TRUE(font_family_list_next(&cursor, family, sizeof(family)));
+    EXPECT_STREQ(family, "Helvetica");
+    EXPECT_FALSE(font_family_list_next(&cursor, family, sizeof(family)));
+}
+
 TEST(FontContextTest, GlyphArenaLimitResetReclaimsArenaChunks) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);

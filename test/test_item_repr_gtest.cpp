@@ -74,6 +74,66 @@ TEST(ItemRepresentation, SharedMasksKeepSentinelsOutOfDoubleSpace) {
     EXPECT_EQ((uint8_t)(ITEM_FLOAT_N0 >> 56), LMD_TYPE_FLOAT);
 }
 
+TEST(ItemRepresentation, CompactInt64KeepsTypeAndSignedValue) {
+    const int64_t values[] = {
+        INT56_MIN, -1, 0, 1, INT56_MAX,
+    };
+    for (int64_t value : values) {
+        Item item = {.item = lambda_inline_int64_to_item_bits(value)};
+        EXPECT_TRUE(item.is_inline_int64());
+        EXPECT_EQ(get_type_id(item), LMD_TYPE_INT64);
+        EXPECT_EQ(item.get_int64(), value);
+        EXPECT_EQ(it2l(item), value);
+    }
+    EXPECT_EQ(lambda_inline_int64_to_item_bits(INT56_MIN - 1), ITEM_ERROR);
+    EXPECT_EQ(lambda_inline_int64_to_item_bits(INT56_MAX + 1), ITEM_ERROR);
+}
+
+TEST(ItemRepresentation, PointerBackedInt64KeepsWideValue) {
+    int64_t value = INT64_MIN + 1;
+    Item item = {.item = l2it(&value)};
+
+    EXPECT_FALSE(item.is_inline_int64());
+    EXPECT_EQ(get_type_id(item), LMD_TYPE_INT64);
+    EXPECT_EQ(item.get_int64(), value);
+    EXPECT_EQ(it2l(item), value);
+}
+
+TEST(ItemRepresentation, ArrayOwnedCopyRebasesWideScalarPayloads) {
+    Item source_storage[4] = {};
+    Array source = {};
+    source.type_id = LMD_TYPE_ARRAY;
+    source.items = source_storage;
+    source.length = 2;
+    source.capacity = 4;
+    source.extra = 2;
+    int64_t* source_long = (int64_t*)&source_storage[3];
+    double* source_double = (double*)&source_storage[2];
+    *source_long = INT64_MAX - 1;
+    *source_double = ldexp(1.0, -1074);
+    source_storage[0] = {.item = l2it(source_long)};
+    source_storage[1] = {.item = d2it(source_double)};
+
+    Item destination_storage[4] = {};
+    Array destination = {};
+    destination.type_id = LMD_TYPE_ARRAY;
+    destination.items = destination_storage;
+    destination.length = 2;
+    destination.capacity = 4;
+
+    array_copy_owned_items(&destination, 0, source.items, source.length);
+
+    EXPECT_EQ(destination.extra, 2);
+    EXPECT_EQ(destination.items[0].get_int64(), *source_long);
+    EXPECT_EQ(destination.items[1].get_double(), *source_double);
+    EXPECT_NE(destination.items[0].int64_ptr, source.items[0].int64_ptr);
+    EXPECT_NE(destination.items[1].double_ptr, source.items[1].double_ptr);
+    EXPECT_EQ((int64_t*)destination.items[0].int64_ptr,
+              (int64_t*)&destination_storage[3]);
+    EXPECT_EQ((double*)destination.items[1].double_ptr,
+              (double*)&destination_storage[2]);
+}
+
 TEST(ItemRepresentation, ContainerPointersAreBitIdenticalItems) {
     Range range = {};
     range.type_id = LMD_TYPE_RANGE;

@@ -30,6 +30,7 @@
 #endif
 #endif
 #include "../lib/log.h"  // Add logging support
+#include "../lib/side_stack.h"
 #include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
@@ -219,7 +220,6 @@ static Item js_cli_transpile_with_execution_stack(
 static void js_test262_hot_context_create(EvalContext* batch_context) {
     memset(batch_context, 0, sizeof(EvalContext));
     context = batch_context;
-    batch_context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "batch.nursery");
     heap_init();
     batch_context->pool = batch_context->heap->pool;
     batch_context->name_pool = name_pool_create(batch_context->pool, nullptr);
@@ -237,10 +237,6 @@ static void js_test262_hot_context_destroy(EvalContext* batch_context) {
     if (batch_context->heap) {
         heap_destroy();
         batch_context->heap = NULL;
-    }
-    if (batch_context->nursery) {
-        gc_nursery_destroy(batch_context->nursery);
-        batch_context->nursery = NULL;
     }
     if (batch_context->type_list) {
         arraylist_free((ArrayList*)batch_context->type_list);
@@ -3865,7 +3861,7 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_END %d\n", result);
             fflush(stdout);
 
-            // Reset heap/nursery/name_pool so the next test starts clean.
+            // Reset heap/name_pool so the next test starts clean.
             // Must happen BEFORE pool_destroy: name_pool was allocated from
             // the script pool, so pool_destroy would unmap its memory.
             runtime_reset_heap(&runtime);
@@ -3942,12 +3938,11 @@ int main(int argc, char *argv[]) {
 
         // Set up a persistent EvalContext with pre-initialized heap (hot reload mode).
         // Enables the reusing_context fast-path in transpile_js_to_mir,
-        // avoiding heap/nursery/name_pool teardown+recreation between tests.
+        // avoiding heap/name_pool teardown+recreation between tests.
         EvalContext batch_context;
         memset(&batch_context, 0, sizeof(EvalContext));
         if (hot_reload) {
             context = &batch_context;
-            batch_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "batch.nursery");
             heap_init();
             batch_context.pool = batch_context.heap->pool;
             batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
@@ -4141,6 +4136,12 @@ int main(int argc, char *argv[]) {
             // depend on process.on('exit') flushing expected output.
             js_batch_execution_mode = (inline_source || inline_module_source || has_preamble) ? 1 : 0;
 
+            if (!batch_context.side_root_base &&
+                !lambda_side_stack_bind(&batch_context)) {
+                log_error("batch side-stack: failed to initialize execution regions");
+            }
+            LambdaSideStackSnapshot batch_side_stack_snapshot =
+                lambda_side_stack_snapshot(&batch_context);
             int result = 0;
 #ifndef _WIN32
             // Per-test crash recovery via sigsetjmp.
@@ -4246,6 +4247,11 @@ int main(int argc, char *argv[]) {
                 fflush(stdout);
             }
 
+            // Crash, timeout, and MIR-error longjmps bypass generated
+            // epilogues, so every batch path returns to its test watermark.
+            lambda_side_stack_restore(&batch_context,
+                                      batch_side_stack_snapshot);
+
             gettimeofday(&tv_end, NULL);
             long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
             size_t rss_after = get_rss_bytes();
@@ -4307,10 +4313,8 @@ int main(int argc, char *argv[]) {
                     // (never deferred because transpile_js_to_mir_core didn't finish).
                     extern void jm_cleanup_active_mir(void);
                     jm_cleanup_active_mir();
-                    if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
                     memset(&batch_context, 0, sizeof(EvalContext));
                     context = &batch_context;
-                    batch_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "batch.nursery");
                     heap_init();
                     batch_context.pool = batch_context.heap->pool;
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
@@ -4353,10 +4357,8 @@ int main(int argc, char *argv[]) {
                     }
                     heap_destroy();
                     jm_cleanup_deferred_mir();
-                    if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
                     memset(&batch_context, 0, sizeof(EvalContext));
                     context = &batch_context;
-                    batch_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "batch.nursery");
                     heap_init();
                     batch_context.pool = batch_context.heap->pool;
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);

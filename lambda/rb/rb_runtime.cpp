@@ -16,7 +16,7 @@ extern "C" Item rb_call_spaceship(Item left, Item right);
 #include <re2/re2.h>
 #include "../re2_wrapper.hpp"
 
-// push_d boxes a double into an Item via GC nursery allocation (C linkage)
+// push_d boxes a double into an Item via the shared number-stack API (C linkage)
 extern "C" Item push_d(double dval);
 extern "C" void* heap_data_alloc(size_t size);
 extern "C" void heap_register_gc_root(uint64_t* slot);

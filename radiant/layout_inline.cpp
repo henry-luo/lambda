@@ -360,6 +360,28 @@ static void span_record_split_inline_fragment(ViewSpan* span, float min_x, float
     }
 }
 
+static void span_record_current_split_line_fragment(LayoutContext* lycon, ViewSpan* span,
+                                                    float span_line_height) {
+    if (!lycon || !span || lycon->line.is_line_start) return;
+    FontProp* font = span->font ? span->font : lycon->font.style;
+    FontHandle* font_handle = span->font ? span->font->font_handle : lycon->font.font_handle;
+    if (!font || !font_handle || span_line_height <= 0.0f) return;
+
+    float line_height = 0.0f;
+    float baseline_pos = line_baseline_position(lycon, &line_height);
+    float fragment_y = layout_inline_font_box_y(
+        lycon, span, span_line_height,
+        font->ascender, font->descender, baseline_pos, 0.0f, 0.0f);
+    float fragment_height = font_get_cell_height(font_handle);
+    if (fragment_height <= 0.0f) fragment_height = font->ascender + font->descender;
+    if (fragment_height <= 0.0f) fragment_height = span_line_height;
+
+    // A split inline contributes its own font box; tall atomic descendants may
+    // enlarge the line box but do not enlarge the element's client rect fragment.
+    span_record_split_inline_fragment(span, lycon->line.left, lycon->line.right,
+                                      fragment_y, fragment_y + fragment_height);
+}
+
 static void span_vertical_decoration_edges(ViewSpan* span, float* top_edge, float* bottom_edge) {
     float border_top = 0.0f, border_bottom = 0.0f;
     float pad_top = 0.0f, pad_bottom = 0.0f;
@@ -816,7 +838,7 @@ static void layout_math_span(LayoutContext* lycon, DomElement* elem, bool is_dis
  */
 void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_elem,
                                         ViewSpan* span, DomNode* first_child,
-                                        float inline_start_edge) {
+                                        float inline_start_edge, float span_line_height) {
     log_debug("block-in-inline: splitting inline box for %s", inline_elem->source_loc());
 
     // Save inline formatting context state
@@ -891,6 +913,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                 }
                 start_edge_pending_active = false;
                 if (!lycon->line.is_line_start) {
+                    span_record_current_split_line_fragment(lycon, span, span_line_height);
                     log_debug("%s block-in-inline: calling line_break before block, advance_x=%.1f, max_width=%.1f", inline_elem->source_loc(),
                              lycon->line.advance_x, lycon->block.max_width);
                     line_break(lycon);
@@ -907,6 +930,19 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             float saved_max_width = lycon->block.max_width;
             log_debug("%s block-in-inline: laying out block child %s", inline_elem->source_loc(), child->node_name());
             layout_block(lycon, child, child_display);
+            View* block_fragment = static_cast<View*>(child);
+            if (block_fragment->width > 0.0f || block_fragment->height > 0.0f) {
+                float relative_x = 0.0f, relative_y = 0.0f;
+                if (ViewBlock* fragment_block = lam::view_as_block(block_fragment)) {
+                    layout_relative_position_offset(fragment_block, &relative_x, &relative_y);
+                }
+                // Relative positioning moves the child visually but leaves the
+                // split ancestor's client rect at the normal-flow fragment.
+                span_record_split_inline_fragment(
+                    span, lycon->line.left, lycon->line.right,
+                    block_fragment->y - relative_y,
+                    block_fragment->y - relative_y + block_fragment->height);
+            }
             visible_inline_after_last_block = false;
             lycon->block.max_width = saved_max_width; // Restore inline content width
             lycon->line.inline_start_edge_pending = 0.0f;
@@ -1010,6 +1046,10 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         }
 
         child = child->next_sibling;
+    }
+
+    if (in_inline_sequence && !lycon->line.is_line_start) {
+        span_record_current_split_line_fragment(lycon, span, span_line_height);
     }
 
     // CSS 2.1 §9.2.1.1 + §8.3.1: Bottom margin collapse for block-in-inline.
@@ -1486,7 +1526,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         // Handle block-in-inline splitting
         float pre_split_advance_y = lycon->block.advance_y;
-        layout_inline_with_block_children(lycon, elmt_elem, span, child, inline_left_edge);
+        layout_inline_with_block_children(
+            lycon, elmt_elem, span, child, inline_left_edge, span_resolved_line_height);
 
         // Advance past the right border+padding
         lycon->line.advance_x += inline_right_edge;
@@ -1652,6 +1693,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // When children produce text output, output_text() applies the half-leading;
     // for empty inlines (no children at all), we must apply it here explicitly.
     if (!had_children) {
+        if (lycon->line.is_line_start && !lycon->line.has_phantom_inline_fragment) {
+            // CSS 2.1 §16.2: phantom empty inlines retain an aligned static
+            // position even though §9.4.2 suppresses their line-box height.
+            lycon->line.start_view = layout_inline_fragment_root(static_cast<View*>(span));
+            lycon->line.has_phantom_inline_fragment = true;
+        }
         contribute_inline_strut(lycon, elmt, span);
         // Mark empty inline span for height fixup in view_vertical_align.
         // compute_span_bounding_box sets height=0, but the inline box should

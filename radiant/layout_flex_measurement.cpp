@@ -1474,10 +1474,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 }
                 float max_text_width = flex_measure_select_max_option_text_width(lycon, elem);
                 lycon->font = saved_font;
-                float overhead = FormDefaults::SELECT_ARROW_WIDTH + 1.0f;
-                float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f;
-                float calculated = max_text_width + overhead;
-                float new_w = calculated > min_select_width ? calculated : min_select_width;
+                float new_w = layout_select_combo_intrinsic_width(
+                    max_text_width, !elem->form->appearance_none);
                 if (new_w > content_width) {
                     content_width = new_w;
                     elem->form->intrinsic_width = new_w;

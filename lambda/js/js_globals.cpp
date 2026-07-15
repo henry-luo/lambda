@@ -1469,11 +1469,6 @@ extern "C" Item js_process_hrtime(Item prev) {
 }
 
 // performance.now() — returns milliseconds (monotonic, high-resolution)
-// Uses static buffer (not GC heap) because the returned float must survive GC cycles.
-// MIR-generated code stores the Item value in registers/stack, where the conservative
-// GC scanner may not find it (nursery floats get overwritten; heap floats get collected).
-static double js_perf_now_buf[64];
-static int js_perf_now_idx = 0;
 
 extern "C" Item js_performance_now(void) {
 #ifdef __APPLE__
@@ -1489,10 +1484,7 @@ extern "C" Item js_performance_now(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 #endif
-    double* fp = &js_perf_now_buf[js_perf_now_idx % 64];
-    js_perf_now_idx++;
-    *fp = ms;
-    return lambda_float_ptr_to_item(fp);
+    return push_d(ms);
 }
 
 static Item js_performance_observer_string(const char* str) {

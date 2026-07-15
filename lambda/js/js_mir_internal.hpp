@@ -390,6 +390,8 @@ MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                                             String* method, TypeId target_type);
 String* jm_get_math_method(JsCallNode* call);
 void jm_readback_closure_env(JsMirTranspiler* mt);
+bool jm_resolve_transitive_capture_env(JsMirVarEntry* var,
+    MIR_reg_t* env_reg, int* env_slot);
 void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
         const char* name, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
 bool jm_should_inline(JsFuncCollected* fc);

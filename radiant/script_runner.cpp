@@ -1510,7 +1510,6 @@ static const char* script_task_filename(JsScriptTask* task, char* scratch, size_
 
 static void script_eval_context_init(Runtime* runtime, EvalContext* eval_context) {
     eval_context->heap = runtime->heap;
-    eval_context->nursery = runtime->nursery;
     eval_context->name_pool = runtime->name_pool;
     if (!runtime->type_list) runtime->type_list = arraylist_new(64);
     eval_context->type_list = runtime->type_list;
@@ -2334,7 +2333,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 
     phase_start_us = timing ? time_now_us() : 0;
     // Retain JS state on DomDocument for interactive event handler dispatch.
-    // The MIR context, heap, nursery, and name_pool stay alive so compiled
+    // The MIR context, heap, and name_pool stay alive so compiled
     // functions (clicked(), toggle(), setFontFamily(), etc.) can be invoked
     // at event time without re-compilation.
     if (preamble && preamble->mir_ctx) {
@@ -2344,13 +2343,12 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         dom_doc->js_preamble_state = preamble;
         dom_doc->js_mir_ctx = preamble->mir_ctx;
         dom_doc->js_runtime_heap = runtime.heap;
-        dom_doc->js_runtime_nursery = runtime.nursery;
         dom_doc->js_runtime_name_pool = runtime.name_pool;
         dom_doc->js_runtime_type_list = runtime.type_list;
         dom_doc->js_runtime_pool = runtime.reuse_pool;
         if (s_retain_js_state) {
             log_info("execute_document_scripts: retained MIR context for event handlers");
-            // Do NOT destroy heap/nursery/pool — they're retained on the document
+            // Do NOT destroy heap/pool — they're retained on the document
         } else {
             log_info("execute_document_scripts: releasing transient JS context");
             // transient scripts can leave timers rooted in this heap, sometimes
@@ -2389,9 +2387,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             }
         } else if (runtime.heap) {
             mem_free(runtime.heap);
-        }
-        if (runtime.nursery) {
-            gc_nursery_destroy(runtime.nursery);
         }
         if (runtime.type_list) {
             arraylist_free(runtime.type_list);
@@ -2625,7 +2620,6 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     Runtime runtime = {};
     runtime.dom_doc = dom_doc;
     runtime.heap = (Heap*)dom_doc->js_runtime_heap;
-    runtime.nursery = (gc_nursery_t*)dom_doc->js_runtime_nursery;
     runtime.name_pool = (NamePool*)dom_doc->js_runtime_name_pool;
     runtime.type_list = (ArrayList*)dom_doc->js_runtime_type_list;
     runtime.reuse_pool = (Pool*)dom_doc->js_runtime_pool;
@@ -2634,7 +2628,6 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     // This prevents the new MIR context from being destroyed — it gets deferred instead.
     EvalContext handler_compile_ctx = {};
     handler_compile_ctx.heap = runtime.heap;
-    handler_compile_ctx.nursery = runtime.nursery;
     handler_compile_ctx.name_pool = runtime.name_pool;
     handler_compile_ctx.type_list = runtime.type_list;
     handler_compile_ctx.pool = runtime.reuse_pool ? runtime.reuse_pool :
@@ -2701,9 +2694,8 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     log_info("collect_and_compile_event_handlers: installed %d/%d handlers into EventTarget path",
              installed, handlers->count);
 
-    // Update retained state (heap/nursery may have grown during compilation)
+    // Update retained state after compilation.
     dom_doc->js_runtime_heap = runtime.heap;
-    dom_doc->js_runtime_nursery = runtime.nursery;
     dom_doc->js_runtime_name_pool = runtime.name_pool;
     dom_doc->js_runtime_type_list = runtime.type_list;
 
@@ -2726,7 +2718,7 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         dom_doc->js_preamble_state = nullptr;
         dom_doc->js_mir_ctx = nullptr;
     }
-    // Destroy retained heap (GC metadata + nursery)
+    // Destroy retained heap and GC metadata.
     if (dom_doc->js_runtime_heap) {
         Heap* heap = (Heap*)dom_doc->js_runtime_heap;
         if (heap->gc) {
@@ -2737,11 +2729,6 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
         }
         mem_free(heap);
         dom_doc->js_runtime_heap = nullptr;
-    }
-
-    if (dom_doc->js_runtime_nursery) {
-        gc_nursery_destroy((gc_nursery_t*)dom_doc->js_runtime_nursery);
-        dom_doc->js_runtime_nursery = nullptr;
     }
 
     if (dom_doc->js_runtime_type_list) {

@@ -1987,7 +1987,10 @@ namespace FormDefaults {
     // Chrome default: height=19 border-box, width depends on content
     constexpr float SELECT_WIDTH = 57.0f;  // typical default for short options
     constexpr float SELECT_HEIGHT = 19.0f; // border-box height
-    constexpr float SELECT_ARROW_WIDTH = 16.0f;
+    constexpr float SELECT_ARROW_WIDTH = 16.0f; // painted arrow glyph area
+    constexpr float SELECT_NATIVE_ARROW_AREA = 20.0f; // themed arrow button and text gap
+    constexpr float SELECT_BORDER = 1.0f;
+    constexpr float OPTION_PADDING_H = 2.0f;
     // Options inside an <optgroup> are indented in the dropdown popup on macOS Chrome.
     // The indent contributes to the intrinsic select width for each optgroup option.
     constexpr float OPTGROUP_OPTION_INDENT = 17.0f;

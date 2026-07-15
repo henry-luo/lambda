@@ -20,6 +20,11 @@ using namespace std::chrono;
 extern double g_text_layout_time;
 extern int64_t g_text_layout_count;
 
+static float line_terminal_letter_spacing_trim(float letter_spacing) {
+    // CSS Text 3 leaves line-end spacing undefined; Chromium trims only positive tracking.
+    return max(letter_spacing, 0.0f);
+}
+
 // ============================================================================
 // CSS text-transform Helpers
 // ============================================================================
@@ -1447,6 +1452,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.last_non_shy_space_hanging_width = 0;
     lycon->line.last_non_shy_space_hanging_text_trim = 0;
     lycon->line.start_view = NULL;
+    lycon->line.has_phantom_inline_fragment = false;
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
     lycon->line.prev_codepoint = 0;   // reset codepoint kerning state
@@ -1791,20 +1797,6 @@ static void contribute_block_root_strut(LayoutContext* lycon) {
     }
 }
 
-static bool block_root_strut_extends_line_height(LayoutContext* lycon) {
-    if (!lycon || lycon->block.line_height_is_normal ||
-        lycon->line.has_expanded_inline_lh) return false;
-
-    float content_height = lycon->block.init_ascender + lycon->block.init_descender;
-    if (content_height <= 0.0f || lycon->block.line_height <= 0.0f) return false;
-
-    float half_leading = (lycon->block.line_height - content_height) / 2.0f;
-    float ascender = lycon->block.init_ascender + half_leading;
-    float descender = lycon->block.init_descender + half_leading;
-    return ascender > lycon->block.line_height + 0.5f ||
-        descender > lycon->block.line_height + 0.5f;
-}
-
 void line_break(LayoutContext* lycon) {
     // CSS 2.1 §16.6.1: For normal/nowrap/pre-line white-space, trailing spaces
     // at the end of a line are removed. Trim the last text rect's width.
@@ -1878,12 +1870,10 @@ void line_break(LayoutContext* lycon) {
         lycon->line.hanging_space_text_trim = 0;
     }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
-    // CSS Text 3 §8: Letter-spacing must not be applied at the end of a line.
-    // Subtract the trailing letter-spacing from advance_x (line width) for
-    // alignment purposes (center, right, justify). Do NOT subtract before
-    // max_width, as browsers include trailing letter-spacing in intrinsic sizing.
     if (lycon->line.trailing_letter_spacing != 0) {
-        lycon->line.advance_x -= lycon->line.trailing_letter_spacing;
+        float terminal_trim = line_terminal_letter_spacing_trim(
+            lycon->line.trailing_letter_spacing);
+        lycon->line.advance_x -= terminal_trim;
         lycon->line.trailing_letter_spacing = 0;
     }
 
@@ -2036,7 +2026,9 @@ void line_break(LayoutContext* lycon) {
             used_line_height = explicit_inline_height;
         } else if (lycon->line.has_replaced_content || lycon->block.line_height_is_normal ||
             lycon->line.has_expanded_inline_lh ||
-            (lycon->line.has_different_inline_font && block_root_strut_extends_line_height(lycon))) {
+            lycon->line.has_different_inline_font) {
+            // Baseline-aligned fonts with a shared explicit line-height can still
+            // have different half-leading splits; their ascent/descent union sizes the line box.
             used_line_height = max(css_line_height, font_line_height);
             // CSS 2.1 §10.8.1: For normal line-height with mixed fonts, each inline box
             // contributes its own font's normal line-height (including lineGap).
@@ -2319,7 +2311,9 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
 
                 float line_right = lycon->line.has_float_intrusion ?
                                    lycon->line.effective_right : lycon->line.right;
-                if (lycon->line.advance_x + text_width - lycon->font.style->letter_spacing > line_right + 0.001f) {
+                float terminal_trim = line_terminal_letter_spacing_trim(
+                    lycon->font.style->letter_spacing);
+                if (lycon->line.advance_x + text_width - terminal_trim > line_right + 0.001f) {
                     return has_break_opportunity ? RDT_LINE_NOT_FILLED : RDT_LINE_FILLED;
                 }
                 continue;
@@ -2387,9 +2381,9 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
-        // CSS Text 3 §8: letter-spacing is not applied at end of a line.
-        // Subtract the trailing letter-spacing in the overflow check.
-        if (lycon->line.advance_x + text_width - lycon->font.style->letter_spacing > line_right + 0.001f) { // line filled up
+        float terminal_trim = line_terminal_letter_spacing_trim(
+            lycon->font.style->letter_spacing);
+        if (lycon->line.advance_x + text_width - terminal_trim > line_right + 0.001f) { // line filled up
             // CSS Text 3 §5.2: If a break opportunity (hyphen, soft hyphen, ZWSP,
             // CJK) existed before the overflow, the text can be split during actual
             // layout at that break point.  Don't signal LINE_FILLED — let the text
@@ -3444,12 +3438,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
-        // CSS Text 3 §8: letter-spacing is not applied at end of a line.
-        // Subtract the trailing letter-spacing when checking overflow, since the
-        // last character's letter-spacing would be trimmed at line break time.
+        // Keep negative tracking in the fit width, matching intrinsic sizing.
+        float terminal_trim = line_terminal_letter_spacing_trim(
+            lycon->line.trailing_letter_spacing);
         // Use a small epsilon to tolerate accumulated floating-point rounding
         // errors from summing individual character widths (e.g., 0.000004px).
-        if (wrap_lines && rect->x + rect->width - lycon->line.trailing_letter_spacing > line_right + 0.001f) { // line filled up and wrapping enabled
+        if (wrap_lines && rect->x + rect->width - terminal_trim > line_right + 0.001f) { // line filled up and wrapping enabled
             log_debug("line filled up");
             if (codepoint == 0x3000 && white_space != CSS_VALUE_BREAK_SPACES) {
                 // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE hangs at end of line.

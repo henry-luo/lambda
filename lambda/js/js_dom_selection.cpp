@@ -94,9 +94,8 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* 
         js_dom_set_document(doc);
         return true;
     }
-    if (!doc->js_runtime_heap || !doc->js_runtime_nursery || !doc->js_runtime_name_pool) return false;
+    if (!doc->js_runtime_heap || !doc->js_runtime_name_pool) return false;
     scope->runtime_ctx.heap = (Heap*)doc->js_runtime_heap;
-    scope->runtime_ctx.nursery = (gc_nursery_t*)doc->js_runtime_nursery;
     scope->runtime_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
     scope->runtime_ctx.pool = doc->js_runtime_pool ?
         (Pool*)doc->js_runtime_pool : scope->runtime_ctx.heap->pool;

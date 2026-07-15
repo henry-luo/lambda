@@ -237,6 +237,21 @@ static bool jm_capture_is_transitive_through_parent(JsFuncCollected* parent,
     return false;
 }
 
+static int jm_parent_link_slot_after_captures(JsFuncCollected* child,
+        int shared_slot_count) {
+    if (!child) return shared_slot_count;
+    int link_slot = shared_slot_count;
+    // A copied env uses dense capture indices for unremapped captures, so the
+    // parent link must live after both dense and remapped slots. Reusing a dense
+    // slot turns that captured Item into a pointer during transitive readback.
+    if (child->capture_count > link_slot) link_slot = child->capture_count;
+    for (int k = 0; k < child->capture_count; k++) {
+        int capture_slot = child->captures[k].scope_env_slot;
+        if (capture_slot >= link_slot) link_slot = capture_slot + 1;
+    }
+    return link_slot;
+}
+
 static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollected* parent) {
     if (!child || !parent || parent->scope_env_count <= 0) return;
     struct hashmap* parent_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -268,7 +283,8 @@ static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollect
         return;
     }
     child->closure_env_has_parent_link = true;
-    child->closure_env_parent_link_slot = parent->scope_env_count;
+    child->closure_env_parent_link_slot =
+        jm_parent_link_slot_after_captures(child, parent->scope_env_count);
     for (int k = 0; k < child->capture_count; k++) {
         if (!child->captures[k].force_env_capture &&
             child->captures[k].scope_env_slot >= 0 &&
@@ -5196,7 +5212,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 if (closure_has_mixed_loop_captures(child)) {
                     child->closure_env_has_parent_link = true;
-                    child->closure_env_parent_link_slot = total;
+                    child->closure_env_parent_link_slot =
+                        jm_parent_link_slot_after_captures(child, total);
+                    if (child->closure_env_parent_link_slot >= mt->module_fc.scope_env_count) {
+                        // Immediate mixed-loop callbacks may reuse the module env.
+                        // Their generated transitive loads still require the
+                        // parent-link tail, so reserve it in the shared env too.
+                        mt->module_fc.has_parent_env_link = true;
+                        mt->module_fc.scope_env_count =
+                            child->closure_env_parent_link_slot + 1;
+                        snprintf(mt->module_fc.scope_env_names[
+                            child->closure_env_parent_link_slot], 64,
+                            "__parent_env__");
+                    }
                     for (int k = 0; k < child->capture_count; k++) {
                         FnCapture* cap = &child->captures[k];
                         if (capture_is_shared_module_binding(child, cap) && cap->scope_env_slot >= 0) {
@@ -5800,6 +5828,17 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 MIR_new_mem_op(mt->ctx, MIR_T_I64,
                     s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
                 MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ)));
+        }
+        if (mt->module_fc.has_parent_env_link) {
+            for (int s = mt->module_fc.scope_env_normal_count;
+                    s < mt->module_fc.scope_env_count; s++) {
+                // The module env is its own live parent binding store. The tail
+                // makes the shared layout match copied mixed-loop environments.
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, mt->scope_env_reg)));
+            }
         }
         log_debug("js-mir: js_main allocated module scope env (%d slots)",
             mt->module_fc.scope_env_count);

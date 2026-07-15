@@ -47,6 +47,17 @@ static void zero_form_child_box(DomElement* elem) {
     elem->content_height = 0.0f;
 }
 
+static bool form_control_has_specified_font(const ViewBlock* block) {
+    StyleTree* style = block ? block->specified_style : nullptr;
+    return style && (
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT) ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT_FAMILY) ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT_SIZE) ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT_WEIGHT) ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT_STYLE) ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT_VARIANT));
+}
+
 static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
 
@@ -177,7 +188,9 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
     if (font && font->font_size > 0) {
         // Determine if CSS overrides the UA default font-size.
         // font_size_from_medium is true when font-size is the initial value (CSS 'medium').
-        bool has_css_font = !font->font_size_from_medium;
+        // font-size ancestry does not reveal when author shorthand replaced UA control metrics.
+        bool has_css_font = form_control_has_specified_font(block) ||
+            !font->font_size_from_medium;
         float font_size = font->font_size;
 
         // Width: cols × char_width + scrollbar_reserve
@@ -288,6 +301,18 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
     }
 }
 
+float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow) {
+    float calculated = max_text_width;
+    if (has_ua_arrow) {
+        // Native combo boxes pixel-snap option text, then reserve the themed
+        // arrow region and the two UA borders as part of the border box.
+        calculated = ceilf(max_text_width) + FormDefaults::SELECT_NATIVE_ARROW_AREA +
+            2.0f * FormDefaults::SELECT_BORDER;
+    }
+    float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f;
+    return calculated > min_select_width ? calculated : min_select_width;
+}
+
 /**
  * Calculate intrinsic size for a select element based on option text.
  * Measures the longest option text using font metrics to determine width.
@@ -347,9 +372,9 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     // Listbox: no arrow, width = text content; height = visible_rows * row_height + 2px border
     bool is_listbox = form->multiple || form->select_size > 1;
     if (is_listbox) {
-        // Listbox mode: width = max option text + small padding; no dropdown arrow
-        // Chrome listbox select content-box width = max_text_width with some internal padding
-        float content_width = max_text_width;
+        // Native listboxes include each option's inline padding and the select border.
+        float content_width = max_text_width + 2.0f * FormDefaults::OPTION_PADDING_H +
+            2.0f * FormDefaults::SELECT_BORDER;
         float min_listbox_width = FormDefaults::SELECT_HEIGHT; // at least square
         form->intrinsic_width = content_width > min_listbox_width ? content_width : min_listbox_width;
 
@@ -374,10 +399,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         // In that case we must NOT add UA arrow overhead, otherwise the
         // border-box ends up wider than what the author intended.
         bool has_ua_arrow = !form->appearance_none;
-        float overhead = has_ua_arrow ? (FormDefaults::SELECT_ARROW_WIDTH + 1.0f) : 0.0f;
-        float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f; // ~22px minimum (matches Chrome empty)
-        float calculated = max_text_width + overhead;
-        form->intrinsic_width = calculated > min_select_width ? calculated : min_select_width;
+        form->intrinsic_width = layout_select_combo_intrinsic_width(max_text_width, has_ua_arrow);
         // Add author-CSS horizontal padding + border so border-box width includes
         // text + arrow without the renderer overrunning the arrow area. (UA defaults
         // for padding=0 and border=1px are already accounted for in the overhead.)
