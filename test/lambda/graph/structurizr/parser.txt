@@ -1,0 +1,10 @@
+{
+  workspace: ["workspace", ["Online shop", "C4 workspace"], "structurizr", "source"],
+  order: ["argument", "argument", "statement", "model", "views"],
+  model_order: ["declaration", "declaration", "relationship", "relationship", "relationship", "declaration"],
+  shop: ["shop", "softwareSystem", ["Online shop", "Sells books"], [["web", "container", ["Web application", "Serves the storefront", "Lambda"]], ["db", "container", ["Database", "Stores orders", "SQLite"]]]],
+  relationships: [["user", "shop", ["Uses"]], ["user", "shop.web", ["Uses", "HTTPS"]], ["shop.web", "shop.db", ["Reads from and writes to", "SQL"]]],
+  view: ["systemContext", ["shop", "Context"], ["*"], ["lr", "120", "80"]],
+  colors: [["background", ["#1168bd"]], ["color", ["#ffffff"]], ["routing", ["Orthogonal"]]],
+  spans_valid: [true, true, true, true, true]
+}

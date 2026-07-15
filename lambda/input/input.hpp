@@ -168,6 +168,7 @@ bool is_sys_url(const char* url);
 void parse_graph(Input* input, const char* graph_string, const char* flavor);
 void parse_graph_dot(Input* input, const char* dot_string);
 void parse_graph_mermaid(Input* input, const char* mermaid_string);
+void parse_graph_structurizr(Input* input, const char* structurizr_string);
 
 // HTML element extraction functions (from input.cpp)
 // Get the <html> element from #document tree built by HTML5 parser

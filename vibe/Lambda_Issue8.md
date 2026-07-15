@@ -382,3 +382,27 @@ observable messages were downstream `unknown range type: int, error` and
 fixed-shape ratios in its already-established port record instead. The retained
 JIT should either support compatible map-shape extension or reject the call at
 the actual field boundary.
+
+## Structurizr package syntax errors are reported at the next declaration or file root
+
+Several malformed but plausible constructs in the Structurizr Lambda modules
+produced diagnostics far from the cause:
+
+```lambda
+[for (block in blocks, child in children(block)) child]
+<c4-workspace; ...>
+for (view in views) ...
+```
+
+Lambda requires nested generators as repeated `for` expressions, quoted Mark
+names for hyphenated tags, and non-keyword local names (for example `diagram`
+instead of `view`). These errors were variously reported at the next `fn`, at
+the closing element `>`, or as an unexpected comment at line 1. A complex
+element constructor also masked the useful reserved-name diagnostic for a
+local named `element` until the constructor was simplified.
+
+The parser should retain the earliest failing node and report the specific
+rule: use `for (...) for (...)`, quote `<'hyphenated-tag'>`, or rename the
+reserved binder. In a multi-statement `fn` block, nested `if` branches also
+require braces; the diagnostic for that case is clear once earlier recovery
+has not consumed the surrounding function.

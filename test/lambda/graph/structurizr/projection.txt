@@ -1,0 +1,6 @@
+{
+  keys: ["Context", "Containers"],
+  context: ["systemContext", "LR", [["user", "c4-person", "Customer"], ["shop", "c4-software-system", "Online shop"]], [["user", "shop", "Uses"]]],
+  containers: ["shop", "Online shop", [["shop.web", "container"], ["shop.db", "container"]], [], [["shop.web", "shop.db"]]],
+  html: ["graph", "lambda-graph lambda-graph-theme-light", "lambda-graph", 4]
+}
