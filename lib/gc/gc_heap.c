@@ -991,17 +991,21 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         uint8_t* p = (uint8_t*)obj;
         void* items_ptr = *(void**)(p + 8);     // Item* items
         int64_t length = *(int64_t*)(p + 16);   // logical length
-        int64_t extra = *(int64_t*)(p + 24);    // js arrays may store a companion Map* here
+        uint8_t flags = *(uint8_t*)(p + 1);
+        int64_t extra = *(int64_t*)(p + 24);    // reserved tail item count
         int64_t capacity = *(int64_t*)(p + 32); // allocated dense capacity
-        int64_t dense_count = length < capacity ? length : capacity;
+        int64_t dense_limit = capacity >= extra ? capacity - extra : 0;
+        int64_t dense_count = length < dense_limit ? length : dense_limit;
         if (items_ptr && dense_count > 0) {
             uint64_t* items = (uint64_t*)items_ptr;
             for (int64_t i = 0; i < dense_count; i++) {
                 gc_mark_item(gc, items[i]);
             }
         }
-        if (extra != 0) {
-            gc_mark_possible_item(gc, (uint64_t)extra);
+        if (items_ptr && capacity > 0 && (flags & CONTAINER_FLAG_JS_PROPS)) {
+            // Flag-gated interpretation keeps the props edge precise; `extra`
+            // is only a count and scalar payload words are never traced as Items.
+            gc_mark_item(gc, ((uint64_t*)items_ptr)[capacity - 1]);
         }
         break;
     }
@@ -1301,7 +1305,8 @@ static void gc_compact_data(gc_heap_t* gc) {
                     // Fix embedded float/int64/datetime pointers that reference
                     // the old buffer's extra area (set by array_set)
                     if (extra > 0) {
-                        int64_t dense_count = length < capacity ? length : capacity;
+                        int64_t dense_limit = capacity >= extra ? capacity - extra : 0;
+                        int64_t dense_count = length < dense_limit ? length : dense_limit;
                         gc_fixup_embedded_pointers(old_items, (uint64_t*)new_items,
                                                    dense_count, capacity);
                     }

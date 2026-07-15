@@ -49,7 +49,7 @@ extern "C" JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter) {
 }
 
 // Locate the underlying TypeMap holding shape entries for a JS object.
-// Arrays use a companion Map stored in arr->extra (NULL if not yet allocated).
+// Arrays use a companion Map stored in their reserved props tail slot.
 static TypeMap* js_obj_typemap(Item obj) {
     TypeId t = get_type_id(obj);
     if (t == LMD_TYPE_MAP) {
@@ -60,8 +60,8 @@ static TypeMap* js_obj_typemap(Item obj) {
     }
     if (t == LMD_TYPE_ARRAY) {
         Array* arr = obj.array;
-        if (!arr || arr->extra == 0) return nullptr;
-        Map* m = (Map*)(uintptr_t)arr->extra;
+        if (!js_array_has_props(arr)) return nullptr;
+        Map* m = js_array_props(arr);
         if (!m) return nullptr;
         TypeMap* tm = (TypeMap*)m->type;
         return typemap_ptr_is_plausible(tm) ? tm : nullptr;
@@ -277,12 +277,12 @@ static int64_t js_attrs_parse_index_name(const char* name, int name_len) {
 
 static Map* js_attr_ensure_array_props_map(Array* arr) {
     if (!arr) return nullptr;
-    if (arr->extra == 0) {
+    if (!js_array_has_props(arr)) {
         Item obj = js_new_object();
         obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-        arr->extra = (int64_t)(uintptr_t)obj.map;
+        js_array_set_props(arr, obj.map);
     }
-    return (Map*)(uintptr_t)arr->extra;
+    return js_array_props(arr);
 }
 
 static void js_attr_mark_array_index_shape(Item target, const char* name, int name_len) {
@@ -290,8 +290,8 @@ static void js_attr_mark_array_index_shape(Item target, const char* name, int na
     Map* props = NULL;
     if (get_type_id(target) == LMD_TYPE_ARRAY) {
         Array* arr = target.array;
-        if (!arr || arr->extra == 0) return;
-        props = (Map*)(uintptr_t)arr->extra;
+        if (!js_array_has_props(arr)) return;
+        props = js_array_props(arr);
     } else if (get_type_id(target) == LMD_TYPE_MAP) {
         props = target.map;
     }
@@ -336,7 +336,7 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
     }
     if (!slot_found && arr && js_attrs_name_is_digits(name, name_len)) {
         int64_t idx = js_attrs_parse_index_name(name, name_len);
-        if (idx >= 0 && idx < arr->length && idx < arr->capacity &&
+        if (idx >= 0 && idx < arr->length && idx < container_dense_capacity(arr) &&
             arr->items[idx].item != JS_DELETED_SENTINEL_VAL) {
             slot_value = arr->items[idx];
             slot_found = true;
@@ -355,7 +355,7 @@ static bool js_attr_ensure_array_shape_entry(Item obj, const char* name, int nam
     js_attr_mark_array_index_shape(target, name, name_len);
     if (arr && js_attrs_name_is_digits(name, name_len)) {
         int64_t idx = js_attrs_parse_index_name(name, name_len);
-        if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
+        if (idx >= 0 && idx < arr->length && idx < container_dense_capacity(arr)) {
             arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
         }
     }
@@ -385,7 +385,7 @@ extern "C" bool js_props_query_configurable(Map* m, ShapeEntry* se,
 
 // Resolve the underlying Map* for an object: MAP → obj.map; FUNC →
 // fn->properties_map.map (when initialized); ARRAY → companion map (in
-// arr->extra). Returns nullptr if the object has no map storage.
+// the reserved array props slot). Returns nullptr if the object has no map storage.
 static Map* js_obj_resolve_map(Item obj) {
     TypeId t = get_type_id(obj);
     if (t == LMD_TYPE_MAP) return obj.map;
@@ -397,8 +397,8 @@ static Map* js_obj_resolve_map(Item obj) {
     }
     if (t == LMD_TYPE_ARRAY) {
         Array* arr = obj.array;
-        if (!arr || arr->extra == 0) return nullptr;
-        return (Map*)(uintptr_t)arr->extra;
+        if (!js_array_has_props(arr)) return nullptr;
+        return js_array_props(arr);
     }
     return nullptr;
 }
@@ -542,7 +542,7 @@ static Map* js_obj_underlying_map(Item obj) {
     if (t == LMD_TYPE_MAP) return obj.map;
     if (t == LMD_TYPE_ARRAY) {
         Array* arr = obj.array;
-        return (arr && arr->extra != 0) ? (Map*)(uintptr_t)arr->extra : nullptr;
+        return js_array_props(arr);
     }
     if (t == LMD_TYPE_FUNC) {
         JsFuncPropsView* fn = (JsFuncPropsView*)obj.function;

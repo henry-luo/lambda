@@ -1198,10 +1198,10 @@ static bool js_assert_is_arguments_value(Item value) {
         return js_assert_string_equals(tag, "Arguments");
     }
     if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
-            value.array->is_content != 1 || value.array->extra == 0) {
+            value.array->is_content != 1 || !js_array_has_props(value.array)) {
         return false;
     }
-    Map* props = (Map*)(uintptr_t)value.array->extra;
+    Map* props = js_array_props(value.array);
     bool found = false;
     Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
     if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;

@@ -2524,7 +2524,7 @@ extern "C" Item js_buffer_iterator_next(void) {
         if (elem.item == ITEM_NULL) elem = make_js_undefined();
         Item pair = js_array_new(2);
         pair.array->items[0] = (Item){.item = i2it(idx)};
-        pair.array->items[1] = elem;
+        js_array_set_int(pair, 1, elem);
         value = pair;
     } else {
         value = js_typed_array_get(target, (Item){.item = i2it(idx)});

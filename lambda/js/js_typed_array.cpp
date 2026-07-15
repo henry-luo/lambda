@@ -604,7 +604,7 @@ static void js_typed_array_raw_store_number(JsTypedArray* ta, char* data, int in
 }
 
 static bool js_typed_array_try_raw_from_dense_number_array(Item result, Array* arr, int len) {
-    if (!arr || arr->is_content == 1 || arr->extra != 0) return false;
+    if (!arr || arr->is_content == 1 || js_array_has_props(arr)) return false;
     if (len < 0 || (int64_t)len > arr->capacity) return false;
 
     JsTypedArray* dst = js_get_typed_array_ptr(result.map);

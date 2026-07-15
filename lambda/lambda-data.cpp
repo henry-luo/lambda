@@ -553,29 +553,121 @@ void expand_list(List *list, Arena* arena = nullptr) {
         heap_unregister_gc_root(&list_root);
     }
 
-    // copy extra items to the end of the list
-    if (list->extra) {
-        memcpy(list->items + (list->capacity - list->extra),
-            list->items + (list->capacity/2 - list->extra), list->extra * sizeof(Item));
-        // scan the list, if the item is long/double,
-        // and is stored in the list extra slots, need to update the pointer
-        for (int i = 0; i < list->length; i++) {
-            Item itm = list->items[i];
-            if (((itm._type_id == LMD_TYPE_FLOAT && itm.double_ptr > 1) || itm._type_id == LMD_TYPE_FLOAT64) ||
-                    (itm._type_id == LMD_TYPE_INT64 && !itm.is_inline_int64()) ||
-                    itm._type_id == LMD_TYPE_DTIME) {
-                Item* old_pointer = (Item*)itm.double_ptr;
-                // Only update pointers that are in the old list buffer's extra space
-                if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
-                    int offset = old_items + list->capacity/2 - old_pointer;
-                    void* new_pointer = list->items + list->capacity - offset;
-                    list->items[i] = {.item = is_float_type_id(itm._type_id) ? d2it(new_pointer) :
-                        itm._type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : k2it(new_pointer)};
-                }
-                // if the pointer is not in the old buffer, it should not be updated
-            }
+    list_relocate_owned_tail(list, old_items, prev_capacity,
+        list->items, list->capacity);
+}
+
+void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
+                              Item* new_items, int64_t new_capacity) {
+    if (!list || !old_items || !new_items || list->extra <= 0 ||
+            old_capacity < list->extra || new_capacity < list->extra) return;
+
+    memmove(new_items + (new_capacity - list->extra),
+        old_items + (old_capacity - list->extra),
+        (size_t)list->extra * sizeof(Item));
+
+    int64_t dense_capacity = new_capacity - list->extra;
+    int64_t dense_count = list->length < dense_capacity ? list->length : dense_capacity;
+    for (int64_t i = 0; i < dense_count; i++) {
+        Item item = new_items[i];
+        if (!(((item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1) ||
+                    item._type_id == LMD_TYPE_FLOAT64) ||
+                (item._type_id == LMD_TYPE_INT64 && !item.is_inline_int64()) ||
+                item._type_id == LMD_TYPE_DTIME)) continue;
+        Item* old_pointer = (Item*)item.double_ptr;
+        if (old_pointer < old_items || old_pointer >= old_items + old_capacity) continue;
+        int64_t end_offset = old_items + old_capacity - old_pointer;
+        void* new_pointer = new_items + new_capacity - end_offset;
+        new_items[i] = {.item = is_float_type_id(item._type_id) ? d2it(new_pointer) :
+            item._type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : k2it(new_pointer)};
+    }
+
+    // Growth copies the old buffer before moving its owned tail. Clear its
+    // vacated source; for JS arrays, also stamp every newly exposed dense slot
+    // so a sparse spec length cannot observe stale payloads or zeroed nulls.
+    int64_t new_tail_start = new_capacity - list->extra;
+    int64_t old_tail_start = old_capacity - list->extra;
+    Item vacant = (list->flags & CONTAINER_FLAG_JS_PROPS) != 0 ?
+        Item{.item = ITEM_JS_DELETED_SENTINEL} : ItemNull;
+    int64_t vacant_end = (list->flags & CONTAINER_FLAG_JS_PROPS) != 0 ?
+        new_tail_start : old_capacity;
+    if (vacant_end > new_tail_start) vacant_end = new_tail_start;
+    for (int64_t i = old_tail_start; i < vacant_end; i++) {
+        new_items[i] = vacant;
+    }
+}
+
+bool js_array_has_props(const Array* arr) {
+    return arr && (arr->flags & CONTAINER_FLAG_JS_PROPS) != 0;
+}
+
+Map* js_array_props(const Array* arr) {
+    if (!js_array_has_props(arr) || !arr->items || arr->capacity <= 0) return NULL;
+    Item props_item = arr->items[arr->capacity - 1];
+    return get_type_id(props_item) == LMD_TYPE_MAP ? props_item.map : NULL;
+}
+
+int64_t container_tail_reserved(const Array* arr) {
+    return js_array_has_props(arr) ? 1 : 0;
+}
+
+int64_t container_dense_capacity(const Array* arr) {
+    return arr && arr->capacity > arr->extra ? arr->capacity - arr->extra : 0;
+}
+
+void js_array_set_props(Array* arr, Map* props) {
+    if (!arr || !props) return;
+    if (js_array_has_props(arr)) {
+        arr->items[arr->capacity - 1] = {.map = props};
+        return;
+    }
+
+    uint64_t props_root = (uint64_t)(uintptr_t)props;
+    heap_register_gc_root(&props_root);
+    int64_t dense_capacity = arr->capacity >= arr->extra ? arr->capacity - arr->extra : 0;
+    int64_t dense_required = arr->length < dense_capacity ? arr->length : dense_capacity;
+    while (!arr->items || dense_required + arr->extra + 2 > arr->capacity) {
+        int64_t old_capacity = arr->capacity;
+        expand_list((List*)arr);
+        if (arr->capacity <= old_capacity) {
+            heap_unregister_gc_root(&props_root);
+            return;
         }
     }
+    props = (Map*)(uintptr_t)props_root;
+
+    // The props reservation is the high tail slot. Shift any existing scalar
+    // payloads down one slot and rebase only logical Items that point into them.
+    int64_t old_tail_start = arr->capacity - arr->extra;
+    if (arr->extra > 0) {
+        memmove(arr->items + old_tail_start - 1, arr->items + old_tail_start,
+            (size_t)arr->extra * sizeof(Item));
+        int64_t dense_count = arr->length < old_tail_start ? arr->length : old_tail_start;
+        for (int64_t i = 0; i < dense_count; i++) {
+            Item item = arr->items[i];
+            if (!(((item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1) ||
+                        item._type_id == LMD_TYPE_FLOAT64) ||
+                    (item._type_id == LMD_TYPE_INT64 && !item.is_inline_int64()) ||
+                    item._type_id == LMD_TYPE_DTIME)) continue;
+            Item* pointer = (Item*)item.double_ptr;
+            if (pointer < arr->items + old_tail_start ||
+                    pointer >= arr->items + arr->capacity) continue;
+            void* shifted = pointer - 1;
+            arr->items[i] = {.item = is_float_type_id(item._type_id) ? d2it(shifted) :
+                item._type_id == LMD_TYPE_INT64 ? l2it(shifted) : k2it(shifted)};
+        }
+    }
+    arr->items[arr->capacity - 1] = {.map = props};
+    arr->extra++;
+    arr->flags |= CONTAINER_FLAG_JS_PROPS;
+    // Sparse arrays can have a spec length beyond their physical dense prefix.
+    // Promotion may allocate fresh slots after the last sparse-hole stamp;
+    // mark those slots as holes so iteration never exposes zeroed words as null.
+    int64_t promoted_dense_capacity = arr->capacity - arr->extra;
+    for (int64_t i = dense_required; i < promoted_dense_capacity; i++) {
+        arr->items[i] = {.item = ITEM_JS_DELETED_SENTINEL};
+    }
+    heap_unregister_gc_root(&props_root);
 }
 
 Array* array_pooled(Pool *pool) {

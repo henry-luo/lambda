@@ -734,10 +734,10 @@ static bool js_util_inspect_constructor_name(Item value, char* out, int out_size
 
 static bool js_util_is_arguments_exotic(Item value) {
     if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
-            value.array->is_content != 1 || value.array->extra == 0) {
+            value.array->is_content != 1 || !js_array_has_props(value.array)) {
         return false;
     }
-    Map* props = (Map*)(uintptr_t)value.array->extra;
+    Map* props = js_array_props(value.array);
     bool found = false;
     Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
     if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
