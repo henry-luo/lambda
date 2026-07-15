@@ -27,6 +27,7 @@ void lambda_uv_abandon(void);    // free an unsafe loop without walking handles
 
 // JS task integration — called at event-loop phase checkpoints
 void lambda_uv_set_microtask_drain(void (*drain_fn)(void));
+void lambda_uv_set_task_drain(void (*drain_fn)(void));
 
 #ifdef __cplusplus
 }

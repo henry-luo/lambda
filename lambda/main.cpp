@@ -1678,6 +1678,24 @@ static int node_runner_main(int argc, char** argv) {
     return lambda_main_finish(final_status);
 }
 
+static bool apply_common_mir_option(const char* arg, Runtime* runtime, bool* use_mir) {
+    if (!arg || !runtime || !use_mir) return false;
+    // Direct and `run` entry paths must share MIR and task-drain policy parsing.
+    if (strcmp(arg, "--mir") == 0) {
+        *use_mir = true;
+        return true;
+    }
+    if (strcmp(arg, "--mir-interp") == 0) {
+        g_mir_interp_mode = 1;
+        return true;
+    }
+    if (strcmp(arg, "--no-drain") == 0) {
+        runtime->no_task_drain = true;
+        return true;
+    }
+    return false;
+}
+
 int main(int argc, char *argv[]) {
 #ifdef _WIN32
     // Set console to UTF-8 for proper Unicode display on Windows
@@ -4466,6 +4484,7 @@ int main(int argc, char *argv[]) {
             printf("Usage: %s run <script>\n", argv[0]);
             printf("\nOptions:\n");
 #endif
+            printf("  --no-drain      Return without draining spawned tasks\n");
             printf("  -h, --help     Show this help message\n");
             printf("\nDescription:\n");
             printf("  The 'run' command executes a Lambda script with run_main context enabled.\n");
@@ -4497,10 +4516,7 @@ int main(int argc, char *argv[]) {
                 }
             } else
 #endif
-            if (strcmp(argv[i], "--mir") == 0) {
-                use_mir = true;  // backward compat (already default)
-            } else if (strcmp(argv[i], "--mir-interp") == 0) {
-                g_mir_interp_mode = 1;
+            if (apply_common_mir_option(argv[i], &runtime, &use_mir)) {
             } else if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
             } else if (argv[i][0] != '-') {
@@ -4570,11 +4586,7 @@ int main(int argc, char *argv[]) {
         }
         else
 #endif
-        if (strcmp(argv[i], "--mir") == 0) {
-            use_mir = true;  // backward compat (already default)
-        }
-        else if (strcmp(argv[i], "--mir-interp") == 0) {
-            g_mir_interp_mode = 1;
+        if (apply_common_mir_option(argv[i], &runtime, &use_mir)) {
         }
         else if (strcmp(argv[i], "--help") == 0) {
             help_only = true;

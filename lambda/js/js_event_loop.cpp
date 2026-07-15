@@ -14,6 +14,8 @@
 #include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
+#include "../concurrency.h"
+#include "../concurrency_js.h"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/arraylist.h"
@@ -47,6 +49,7 @@ extern "C" Item js_domain_capture_async_stack(void);
 extern "C" Item js_domain_set_stack(Item stack);
 extern "C" void js_domain_restore_stack(Item previous);
 extern "C" Context* _lambda_rt;
+extern Runtime* js_source_runtime;
 
 // =============================================================================
 // Task Queues
@@ -1434,6 +1437,19 @@ extern "C" void js_event_loop_abandon_all_timers(void) {
 // =============================================================================
 
 extern "C" void js_event_loop_init(void) {
+    lambda_concurrency_js_init();
+    if (context && !context->scheduler && js_source_runtime &&
+            js_source_runtime->js_runtime_used) {
+        // Pure-JS contexts must retain their existing loop footprint. Attach a
+        // Lambda scheduler only after a cross-language module activates the
+        // membrane, so exported procedures can progress on this libuv loop.
+        context->scheduler = js_source_runtime && js_source_runtime->scheduler
+            ? js_source_runtime->scheduler
+            : lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
+        if (!js_source_runtime->scheduler) {
+            js_source_runtime->scheduler = context->scheduler;
+        }
+    }
     if (timer_handle_count > 0) {
         // Host-driven sessions (Radiant `view`) share ONE event loop across all
         // of a page's script executions, matching the browser. A later page
@@ -1479,8 +1495,11 @@ extern "C" void js_event_loop_init(void) {
     timer_negative_warning_emitted = false;
 
     // register task ring buffers as GC roots (static memory invisible to stack scanning)
-    static bool statics_rooted = false;
-    if (!statics_rooted) {
+    static struct gc_heap* statics_rooted_gc = NULL;
+    struct gc_heap* active_gc = context && context->heap ? context->heap->gc : NULL;
+    if (active_gc && statics_rooted_gc != active_gc) {
+        // Batch heap replacement creates a new root registry; static JS queues
+        // must be registered with that heap even though their addresses persist.
         heap_register_gc_root_range((uint64_t*)next_tick_ring, MICROTASK_CAPACITY);
         heap_register_gc_root_range((uint64_t*)next_tick_resource_ring, MICROTASK_CAPACITY);
         heap_register_gc_root_range((uint64_t*)next_tick_als_ring, MICROTASK_CAPACITY);
@@ -1493,7 +1512,7 @@ extern "C" void js_event_loop_init(void) {
         // Mock scheduler waits are static, so queued promise resolvers must be
         // rooted individually rather than via the whole struct with non-Item fields.
         mock_scheduler_register_gc_roots();
-        statics_rooted = true;
+        statics_rooted_gc = active_gc;
     }
 
     // initialize libuv loop

@@ -11,8 +11,9 @@ This document provides comprehensive documentation for all built-in system funct
 5. [Date/Time Functions](#datetime-functions)
 6. [Variadic Argument Functions](#variadic-argument-functions)
 7. [Input/Output Functions](#inputoutput-functions)
-8. [Error Handling](#error-handling)
-9. [Quick Reference Table](#quick-reference-table)
+8. [Concurrency Functions](#concurrency-functions)
+9. [Error Handling](#error-handling)
+10. [Quick Reference Table](#quick-reference-table)
 
 ---
 
@@ -1069,6 +1070,67 @@ pn benchmark() {
 
 ---
 
+## Concurrency Functions
+
+Concurrency is available only inside `pn`. A procedure becomes resumable when
+it calls a suspending operation; callers do not need an `async` or `await`
+annotation. Use `^` or `let value^err = ...` with operations that return
+`T^E`.
+
+| Function | Result | Behavior |
+|----------|--------|----------|
+| `start worker(args...)` | task handle | Enqueue a child procedure without blocking the parent. `start` is a contextual keyword, not a function. |
+| `send(handle, value)` | `ok^E` | Append to the target's bounded FIFO mailbox. The default capacity is 1024; a full mailbox returns an error. |
+| `receive()` | `item^E` | Remove the current task's oldest mailbox item, parking while empty. |
+| `wait(handle)` | `T^E` | Park until the task finishes and return its value or error. |
+| `wait(handle, timeout: ms)` | `T^E` | As above, but return a timeout error without cancelling the target. |
+| `select(h1, h2, ..., timeout: ms)` | `handle^E` | Return the first completed handle, with readiness ties resolved FIFO. |
+| `sleep(ms)` | `null^E` | Park on the shared libuv timer queue. |
+| `self()` | task handle | Return the current task's handle. |
+| `cancel(handle)` | `null` | Request cancellation. It is idempotent; cancellation is observed at park points. |
+| `toPromise(handle)` | JS Promise | Adapt a handle when a JavaScript runtime is active. Lambda normally consumes the Promise with `wait`. |
+
+```lambda
+pn worker() {
+    let message = receive()^
+    sleep(1)^
+    return upper(message)
+}
+
+pn main() {
+    let handle = start worker()
+    send(handle, "ready")^
+    print(wait(handle)^)       // READY
+}
+```
+
+Every non-escaped child belongs to the lexical block where it was started.
+Normal block exit joins it; error exit cancels and then joins it. Returning the
+handle transfers it to the caller. Sending a handle as a message does not
+transfer scope ownership.
+
+`wait` also accepts a JavaScript Promise imported from a `.js` module. Promise
+fulfillment resumes the Lambda task at macrotask position; rejection becomes a
+Lambda error value. Conversely, every exported Lambda `pn` is a Promise-returning
+function when called from JavaScript.
+
+### io.read(target)
+
+`io.read` is the asynchronous file-reading operation. It opens, stats, reads,
+and closes a local file through libuv, parking the current task without blocking
+the shared event loop. It returns the file contents as a string or a `T^E` file
+error.
+
+```lambda
+pn main() {
+    let text^err = io.read("data.txt")
+    if (^err) { print(err.message); return }
+    print(text)
+}
+```
+
+---
+
 ## Error Handling
 
 Functions for creating and handling errors.
@@ -1243,9 +1305,23 @@ if (result is error) {
 | `io.symlink` | 2 | Create symbolic link |
 | `io.chmod` | 2 | Change permissions |
 | `io.rename` | 2 | Rename file/directory |
+| `io.read` | 1 | Asynchronously read a local file (proc) |
 | `io.fetch` | 2 | HTTP request |
 | `cmd` | 1+ | Shell command |
 | `clock` | 0 | Monotonic clock (seconds) |
+
+### Concurrency Functions
+| Function | Args | Description |
+|----------|------|-------------|
+| `start` | pn call | Start a scoped child task |
+| `send` | 2 | Send to a bounded FIFO mailbox |
+| `receive` | 0 | Receive the oldest mailbox item |
+| `wait` | 1-2 | Wait for a task or JS Promise |
+| `select` | 1+ | Wait for the first completed handle |
+| `sleep` | 1 | Park for milliseconds |
+| `self` | 0 | Current task handle |
+| `cancel` | 1 | Request task cancellation |
+| `toPromise` | 1 | Convert a handle to a JS Promise |
 
 ### Other Functions
 | Function | Args | Description |

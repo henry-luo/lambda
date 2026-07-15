@@ -12,6 +12,7 @@ static uv_loop_t *g_loop = NULL;
 static uv_prepare_t g_prepare;
 static uv_check_t g_check;
 static void (*g_microtask_drain)(void) = NULL;
+static void (*g_task_drain)(void) = NULL;
 static int g_prepare_active = 0;
 static int g_check_active = 0;
 
@@ -31,6 +32,8 @@ static void check_cb(uv_check_t *handle) {
     (void)handle;
     // drain tasks after poll callbacks complete
     drain_task_checkpoint();
+    // Lambda resumes are macrotasks: they run only after the JS microtask checkpoint.
+    if (g_task_drain) g_task_drain();
 }
 
 uv_loop_t* lambda_uv_loop(void) {
@@ -107,6 +110,7 @@ void lambda_uv_cleanup(void) {
     mem_free(g_loop);
     g_loop = NULL;
     g_microtask_drain = NULL;
+    g_task_drain = NULL;
 
     log_debug("uv_loop: cleaned up");
 }
@@ -121,9 +125,14 @@ void lambda_uv_abandon(void) {
     g_prepare_active = 0;
     g_check_active = 0;
     g_microtask_drain = NULL;
+    g_task_drain = NULL;
     log_error("uv_loop: abandoned unsafe loop without closing handles");
 }
 
 void lambda_uv_set_microtask_drain(void (*drain_fn)(void)) {
     g_microtask_drain = drain_fn;
+}
+
+void lambda_uv_set_task_drain(void (*drain_fn)(void)) {
+    g_task_drain = drain_fn;
 }

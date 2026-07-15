@@ -230,6 +230,35 @@ pn main() {
 }
 ```
 
+#### Concurrency
+
+`pn` concurrency is colorless: suspending callees do not add syntax to their
+callers. `start` launches a scoped child and returns a task handle; the remaining
+operations are builtins.
+
+```lambda
+pn worker() {
+    let message = receive()^
+    return "done: " ++ message
+}
+
+pn main() {
+    let handle = start worker()
+    send(handle, "job")^
+    print(wait(handle)^)
+}
+```
+
+The task operations are `send`, `receive`, `wait`, `select`, `sleep`, `self`,
+and `cancel`. Mailboxes are bounded FIFO queues. A normal lexical-block exit
+joins non-escaped children; an error exit cancels and joins them. A started
+procedure cannot capture an outer mutable `var`; use an immutable `let`
+snapshot or messages. `wait(handle, timeout: ms)` does not cancel the target.
+
+JavaScript Promises and Lambda task handles share the same libuv loop. Lambda
+can `wait` on an imported Promise; JavaScript sees every exported Lambda `pn` as
+a Promise-returning function. `toPromise(handle)` is the explicit handle adapter.
+
 ---
 
 ## Modules and Imports

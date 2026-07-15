@@ -503,6 +503,7 @@ typedef enum SysFunc {
     SYSFUNC_BNOT,
     SYSFUNC_SHL,
     SYSFUNC_SHR,
+    SYSFUNC_TO_PROMISE,       // toPromise(handle) - JS Promise adapter
     // procedural functions
     SYSPROC_NOW,
     SYSPROC_TODAY,
@@ -514,6 +515,7 @@ typedef enum SysFunc {
     SYSPROC_CMD1,            // cmd(command) - no args version
     // io module functions (unified I/O - supports local and remote targets)
     SYSPROC_IO_COPY,
+    SYSPROC_IO_READ,          // io.read(target) - async text read
     SYSPROC_IO_MOVE,
     SYSPROC_IO_DELETE,
     SYSPROC_IO_MKDIR,
@@ -552,6 +554,13 @@ typedef enum SysFunc {
     SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER,  // pdf_register_svg_image_resolver(svg, pdf) - bind PDF image handles to SVG root
     SYSPROC_PUSH,            // push(arr, val) - append val to a growable array in place (procedural)
     SYSPROC_SPLICE,          // splice(arr, start, count) - remove count elements at start, in place (procedural)
+    SYSPROC_SEND,
+    SYSPROC_RECEIVE,
+    SYSPROC_WAIT,
+    SYSPROC_SELECT,
+    SYSPROC_SLEEP,
+    SYSPROC_SELF,
+    SYSPROC_CANCEL,
 } SysFunc;
 
 typedef struct Type {
@@ -947,6 +956,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_NULL_SPREADABLE ((uint64_t)LMD_TYPE_NULL << 56 | 1)  // spreadable null (skip when spreading)
 #define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
 #define ITEM_JS_TDZ         ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 1)  // TDZ sentinel for let/const
+#define ITEM_TASK_SUSPENDED ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 2)  // internal resumable-call sentinel
 #define ITEM_JS_DELETED_SENTINEL UINT64_C(0x9E00DEAD00DEAD00)
 #define ITEM_JS_ITER_DONE_SENTINEL UINT64_C(0x9F00DEAD00000000)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
@@ -1929,6 +1939,7 @@ extern "C" {
 
     // io module functions (procedural)
     RetItem pn_io_copy(Item src, Item dst);
+    RetItem pn_io_read(Item target);
     RetItem pn_io_move(Item src, Item dst);
     RetItem pn_io_delete(Item path);
     RetItem pn_io_mkdir(Item path);

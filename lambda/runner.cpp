@@ -14,6 +14,7 @@
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "lambda-stack.h"
+#include "concurrency.h"
 #include "module_registry.h"
 #include "jube/jube_registry.h"
 #include "js/js_runtime.h"
@@ -1375,6 +1376,18 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     return new_script;
 }
 
+Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
+                               const char* source, bool is_import) {
+    if (!runtime) return NULL;
+    // Cross-language loaders do not enter run_script_mir(), so select MIR Direct
+    // here or imported Lambda modules incorrectly fall through to the absent C2MIR path.
+    bool was_mir_direct = runtime->use_mir_direct;
+    runtime->use_mir_direct = true;
+    Script* script = load_script(runtime, script_path, source, is_import);
+    runtime->use_mir_direct = was_mir_direct;
+    return script;
+}
+
 void runner_init(Runtime *runtime, Runner* runner) {
     memset(runner, 0, sizeof(Runner));
     runner->runtime = runtime;
@@ -1446,6 +1459,19 @@ void runner_setup_context(Runner* runner) {
             rt->nursery = context->nursery;
             rt->name_pool = context->name_pool;
         }
+    }
+
+    if (rt && rt->scheduler) {
+        context->scheduler = rt->scheduler;
+    } else {
+        context->scheduler = lambda_scheduler_create(LAMBDA_MAILBOX_DEFAULT_CAPACITY);
+        if (rt) rt->scheduler = context->scheduler;
+    }
+    if (rt && rt->js_bootstrap_context) {
+        // The Lambda runner now owns every heap resource created while its JS
+        // imports were compiled; only the standalone bootstrap shell remains.
+        mem_free(rt->js_bootstrap_context);
+        rt->js_bootstrap_context = NULL;
     }
 
     // Initialize template registry for view/edit template dispatch
@@ -1533,6 +1559,9 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         result = context->result = runner->script->main_func(context);
         _lambda_recovery_armed = 0;
         log_debug("after main func, result type_id=%d", get_type_id(result));
+    }
+    if ((!runner->runtime || !runner->runtime->no_task_drain) && context->scheduler) {
+        lambda_scheduler_drain(context->scheduler);
     }
     if (context->heap) {
         context->heap->result_root = context->result.item;
@@ -1711,7 +1740,25 @@ void runtime_reset_heap(Runtime* runtime) {
         tmp_ctx.heap = runtime->heap;
         tmp_ctx.nursery = runtime->nursery;
         tmp_ctx.result = ItemNull;
+        tmp_ctx.scheduler = runtime->scheduler;
         context = &tmp_ctx;
+
+        if (runtime->js_runtime_used) {
+            // Cross-language JS caches retain Items from the current heap.
+            // Reset them before heap destruction so a later batch script cannot
+            // dereference stale Promise/module state from the preceding script.
+            js_batch_reset();
+        }
+
+        if (runtime->scheduler) {
+            lambda_scheduler_destroy(runtime->scheduler);
+            runtime->scheduler = NULL;
+        }
+        if (runtime->js_runtime_used) {
+            js_event_loop_shutdown();
+            lambda_uv_cleanup();
+            runtime->js_runtime_used = false;
+        }
 
         // Batch heap replacement invalidates module-owned callback Items just
         // as final runtime teardown does; release those roots before the GC.
@@ -1734,6 +1781,10 @@ void runtime_reset_heap(Runtime* runtime) {
         runtime->heap = NULL;
         runtime->nursery = NULL;
         context = NULL;
+    }
+    if (runtime->js_bootstrap_context) {
+        mem_free(runtime->js_bootstrap_context);
+        runtime->js_bootstrap_context = NULL;
     }
 }
 
@@ -1759,6 +1810,12 @@ void runtime_cleanup(Runtime* runtime) {
         tmp_ctx.nursery = runtime->nursery;
         tmp_ctx.result = ItemNull;
         context = &tmp_ctx;
+
+        if (runtime->scheduler) {
+            tmp_ctx.scheduler = runtime->scheduler;
+            lambda_scheduler_destroy(runtime->scheduler);
+            runtime->scheduler = NULL;
+        }
 
         js_event_loop_shutdown();
         lambda_uv_cleanup();
@@ -1804,6 +1861,10 @@ void runtime_cleanup(Runtime* runtime) {
     if (!event_loop_cleaned) {
         js_event_loop_shutdown();
         lambda_uv_cleanup();
+    }
+    if (runtime->js_bootstrap_context) {
+        mem_free(runtime->js_bootstrap_context);
+        runtime->js_bootstrap_context = NULL;
     }
     lambda_stack_cleanup();
     if (runtime->scripts) {

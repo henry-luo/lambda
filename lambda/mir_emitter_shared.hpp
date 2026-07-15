@@ -26,6 +26,7 @@ struct MirImportCacheEntry {
 struct VarEntry {
     MIR_reg_t reg;
     int root_slot;
+    int async_slot;
     MIR_type_t mir_type;
     TypeId type_id;
     TypeId elem_type;

@@ -63,6 +63,7 @@ typedef struct SysFuncInfo {
     fn_ptr native_func_ptr;     // actual C function pointer for native math optimization
     bool native_returns_float;  // True if native function returns double
     int native_arg_count;       // Number of args for native function (1 or 2), 0 if not applicable
+    bool is_async;              // call is a suspension seed for Lambda pn analysis
 } SysFuncInfo;
 
 // JIT import entry: maps name to function pointer for MIR import resolution

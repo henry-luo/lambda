@@ -123,8 +123,9 @@ static int item_to_int(Item v) {
     TypeId t = get_type_id(v);
     if (t == LMD_TYPE_INT) return (int)it2i(v);
     if (t == LMD_TYPE_FLOAT) {
-        double* d = (double*)(v.item & 0x00FFFFFFFFFFFFFF);
-        return d ? (int)*d : 0;
+        // JavaScript MIR can pass an inline IEEE-754 Item here; treating every
+        // float payload as a tagged pointer crashes on ordinary offsets like 4.
+        return (int)v.get_double();
     }
     return 0;
 }

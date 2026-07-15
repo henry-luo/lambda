@@ -128,6 +128,7 @@ typedef enum AstNodeType : uint16_t {
     AST_NODE_PATTERN_SEQ = 538,
     AST_NODE_VIEW = 539,
     AST_NODE_STATE_ENTRY = 540,
+    AST_NODE_START = 541,
     AST_NODE_EVENT_HANDLER = 541,
 } AstNodeType;
 
@@ -296,6 +297,12 @@ typedef struct AstCallNode : AstNode {
     bool can_raise;
     bool optional;
 } AstCallNode;
+
+typedef struct AstStartNode : AstNode {
+    AstCallNode* call;
+    NameScope* owner_scope;
+    bool escapes;
+} AstStartNode;
 
 typedef struct AstPrimaryNode : AstNode {
     AstNode *expr;
@@ -679,6 +686,11 @@ typedef struct FnAnalysis {
     FnParamEvidence* evidence;
     int capture_count;
     int evidence_count;
+    bool may_await;
+    bool needs_task_context;
+    bool has_indirect_pn_call;
+    int await_point_count;
+    const char* may_await_cause;
 } FnAnalysis;
 
 typedef union FnExt {

@@ -700,6 +700,21 @@ TEST_F(NegativeScriptTest, SemanticError_CaptureMutation) {
         "cannot mutate captured binding");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_StartOutsideProcedure) {
+    ExpectErrorMessage("test/lambda/negative/semantic/start_outside_pn.ls",
+        "`start` is only allowed inside a procedure (pn)");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_StartRequiresProcedureCall) {
+    ExpectErrorMessage("test/lambda/negative/semantic/start_non_pn.ls",
+        "`start` operand must resolve to a procedure (pn) call");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_StartRejectsMutableCapture) {
+    ExpectErrorMessage("test/lambda/negative/semantic/start_mutable_capture.ls",
+        "`start` cannot capture mutable var 'value'");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_VarTypeMismatch) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/var_type_mismatch.ls");
 }
