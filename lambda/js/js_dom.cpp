@@ -2051,10 +2051,10 @@ static void _decorate_options_collection(Item collection) {
 static bool _array_companion_set_int_slot(Item collection, const char* name,
                                           int name_len, int64_t value) {
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array ||
-        collection.array->extra == 0 || !name || name_len <= 0) {
+        !js_array_has_props(collection.array) || !name || name_len <= 0) {
         return false;
     }
-    Map* props = (Map*)(uintptr_t)collection.array->extra;
+    Map* props = js_array_props(collection.array);
     if (!props || !map_kind_is_array_props(props->map_kind) || !props->data) return false;
     Item props_item = (Item){.map = props};
     ShapeEntry* entry = nullptr;
@@ -2083,11 +2083,11 @@ static void _refresh_live_child_collection(Item collection, DomElement* owner, i
         }
         child = js_dom_next_script_visible_sibling(child);
     }
-    if (collection.array->extra != 0) {
+    if (js_array_has_props(collection.array)) {
         // decorated collections have a companion map; keep its length in sync
         // because array property reads consult it before the dense length, and
         // normal JS writes can be rejected once the slot is descriptor-backed.
-        Map* props = (Map*)(uintptr_t)collection.array->extra;
+        Map* props = js_array_props(collection.array);
         Item props_item = (Item){.map = props};
         fn_map_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
                    (Item){.item = i2it(collection.array->length)});
@@ -2110,8 +2110,8 @@ static void _refresh_live_form_collection(Item collection, LiveFormCollectionEnt
             _collect_form_controls_rec(form->first_child, collection);
         }
     }
-    if (collection.array->extra != 0) {
-        Map* props = (Map*)(uintptr_t)collection.array->extra;
+    if (js_array_has_props(collection.array)) {
+        Map* props = js_array_props(collection.array);
         Item props_item = (Item){.map = props};
         fn_map_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
                    (Item){.item = i2it(collection.array->length)});
@@ -2150,8 +2150,8 @@ static void _refresh_live_lookup_collection(Item collection, LiveLookupCollectio
             child = child->next_sibling;
         }
     }
-    if (collection.array->extra != 0) {
-        Map* props = (Map*)(uintptr_t)collection.array->extra;
+    if (js_array_has_props(collection.array)) {
+        Map* props = js_array_props(collection.array);
         Item props_item = (Item){.map = props};
         fn_map_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
                    (Item){.item = i2it(collection.array->length)});
@@ -7786,8 +7786,8 @@ static void _select_refresh_options_collection(Item collection, DomElement* sel)
     int sel_idx = _select_effective_selected_index(sel, collection);
     js_property_set(collection, (Item){.item = s2it(heap_create_name("selectedIndex"))},
                     (Item){.item = i2it(sel_idx)});
-    if (collection.array->extra != 0) {
-        Map* props = (Map*)(uintptr_t)collection.array->extra;
+    if (js_array_has_props(collection.array)) {
+        Map* props = js_array_props(collection.array);
         Item props_item = (Item){.map = props};
         js_property_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
                         (Item){.item = i2it(n)});
@@ -7871,8 +7871,8 @@ extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
         Item prop_key = (Item){.item = s2it(heap_strcpy(sk->chars, sk->len))};
         if (matched.item != ItemNull.item) {
             js_property_set(object, prop_key, matched);
-        } else if (object.array->extra != 0) {
-            Map* props = (Map*)(uintptr_t)object.array->extra;
+        } else if (js_array_has_props(object.array)) {
+            Map* props = js_array_props(object.array);
             bool found = false;
             Item existing = js_map_get_fast_ext(props, sk->chars, (int)sk->len, &found);
             if (found && js_dom_unwrap_element(existing)) {

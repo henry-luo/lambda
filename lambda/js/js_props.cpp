@@ -97,7 +97,7 @@ static Map* js_props_storage_map(Item object) {
     if (t == LMD_TYPE_MAP) return object.map;
     if (t == LMD_TYPE_ARRAY) {
         Array* arr = object.array;
-        return (arr && arr->extra != 0) ? (Map*)(uintptr_t)arr->extra : NULL;
+        return js_array_props(arr);
     }
     if (t == LMD_TYPE_FUNC) {
         JsFuncPropsView_props* fn = (JsFuncPropsView_props*)object.function;
@@ -454,8 +454,8 @@ extern "C" bool js_get_own_property_descriptor(Item object,
         // in the companion map. The bare-data slot at arr->items[idx] is
         // synthesized as a data descriptor when no accessor is present.
         Array* arr = object.array;
-        if (arr->extra != 0) {
-            Map* pm = (Map*)(uintptr_t)arr->extra;
+        if (js_array_has_props(arr)) {
+            Map* pm = js_array_props(arr);
             Item pm_item = (Item){.map = pm};
             if (js_props_desc_from_storage(pm_item, pm, name, name_len, out)) {
                 return true;
@@ -532,8 +532,8 @@ static Item js_props_array_numeric_storage_target(Item object,
 
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
         Array* arr = object.array;
-        if (!arr || arr->extra == 0) return ItemNull;
-        return (Item){.map = (Map*)(uintptr_t)arr->extra};
+        if (!js_array_has_props(arr)) return ItemNull;
+        return (Item){.map = js_array_props(arr)};
     }
     if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
             map_kind_is_array_props(object.map->map_kind)) {
@@ -545,8 +545,8 @@ static Item js_props_array_numeric_storage_target(Item object,
 static Item js_props_array_companion_storage_target(Item object) {
     if (get_type_id(object) == LMD_TYPE_ARRAY) {
         Array* arr = object.array;
-        if (!arr || arr->extra == 0) return ItemNull;
-        return (Item){.map = (Map*)(uintptr_t)arr->extra};
+        if (!js_array_has_props(arr)) return ItemNull;
+        return (Item){.map = js_array_props(arr)};
     }
     if (get_type_id(object) == LMD_TYPE_MAP && object.map &&
             map_kind_is_array_props(object.map->map_kind)) {
@@ -769,7 +769,7 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
             // Non-numeric (named) array properties: route through the IS_ACCESSOR
             // chokepoint just like regular objects. The companion map carries
             // the bare-name shape entry, and js_obj_typemap() returns it for
-            // arrays via arr->extra, so JSPD_IS_ACCESSOR works end-to-end.
+            // arrays via the reserved props slot, so JSPD_IS_ACCESSOR works end-to-end.
             bool is_numeric_index = false;
             if (name_len > 0) {
                 is_numeric_index = true;
@@ -798,12 +798,12 @@ extern "C" void js_define_own_property_from_descriptor(Item object,
                 Item target;
                 if (get_type_id(object) == LMD_TYPE_ARRAY) {
                     Array* arr = object.array;
-                    if (arr->extra == 0) {
+                    if (!js_array_has_props(arr)) {
                         Item nm = js_new_object();
                         nm.map->map_kind = MAP_KIND_ARRAY_PROPS;
-                        arr->extra = (int64_t)(uintptr_t)nm.map;
+                        js_array_set_props(arr, nm.map);
                     }
-                    target = (Item){.map = (Map*)(uintptr_t)arr->extra};
+                    target = (Item){.map = js_array_props(arr)};
                 } else {
                     // object IS the companion map (MAP_KIND_ARRAY_PROPS); use it.
                     target = object;

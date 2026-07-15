@@ -37,7 +37,8 @@ default-on; there is no legacy JS root-frame mode to preserve behind
   TLS-slot churn. JS envs allocate one raw scalar-tail slot per Item and re-home
   captured/write-back/suspended wide values before epilogue restore. Thrown wide
   scalars move to traced heap storage because `js_exception_value` has global
-  lifetime. Shared container copy-in/copy-out remains unchanged.
+  lifetime. Shared container copy-in/copy-out now includes JS arrays: SF15-J is
+  complete and props-bearing arrays use the same counted scalar tail.
 - **J4 closure:** JS uses the shared OS5 reservations (16 MiB roots, 64 MiB
   numbers). They are per-context virtual-address budgets, not per-language
   committed allocations; splitting a smaller JS reservation would add no RSS
@@ -49,6 +50,14 @@ precisely rooted object local plus out-of-band double return, closure capture an
 write-back, generator suspension, async suspension, forced GC, and exception
 escape. The debug executable is ASan-instrumented; a 2,000-closure forced-GC
 stress run completed without an ASan error.
+
+Final closure gates (2026-07-16): `make test-lambda-baseline` passed
+**3419/3419** and `make test262-baseline` fully passed **40261/40261**, with 0
+failed, 0 non-fully-passing, and 0 regressions. The complete ASan JS gtest run
+passed **332/332**, and `make editor-4c-js` passed **1931/1931**. The full Node
+and editor-view UI suites were stopped and excluded from closure at the user's
+direction because of their runtime; their partial results and the two observed
+editor-view failures are recorded in `vibe/Lambda_Impl_Stack_Frame_JS2.md`.
 
 ---
 
@@ -67,7 +76,7 @@ After phase 1, JS code runs **correctly but on legacy footing**: its numbers hom
 3. **Frame-scoped numbers** — long-running JS (servers, the event loop) stops accumulating boxed numerics per run; each callback invocation reclaims at return.
 4. Retirement of the now-unused heap `JitGcRootFrame` machinery and completion of the two-transpiler symmetry the unified-AST effort assumes.
 
-**Scope note (small by design):** JS's wide-scalar traffic is only out-of-band doubles plus polyglot int64/DateTime — JS numbers are inline doubles (SF18) and BigInt is `integer`/decimal (OS1). JS containers are Lambda containers, so SF15/SF16 re-homing reaches JS through the shared `fn_*`/container helpers — **except JS arrays**, whose props map still lives as a raw `Map*` in `extra` and collides with the tail-count meaning (SF15-J). That migration is its own prerequisite plan: `vibe/Lambda_Impl_Stack_Frame_JS2.md` — **J3d must not ship before its JP3 lands**. Phase 2's own re-homing surface is: returns, env tails, and the exception slot.
+**Scope note (small by design):** JS's wide-scalar traffic is only out-of-band doubles plus polyglot int64/DateTime — JS numbers are inline doubles (SF18) and BigInt is `integer`/decimal (OS1). JS containers are Lambda containers, so SF15/SF16 re-homing reaches JS through the shared `fn_*`/container helpers. The former JS-array exception is closed by `vibe/Lambda_Impl_Stack_Frame_JS2.md`: companion props now occupy a flag-gated counted tail slot and coexist with owned wide scalars. Phase 2's own re-homing surface remains returns, env tails, and the exception slot.
 
 **Out of scope (phase 3+):** broad C-helper migration to the RAII guard; conservative-scan retirement (needs that migration); js_args_stack unification into the side-stack family (works fine as-is; revisit only if profiling says so).
 
@@ -104,7 +113,7 @@ After phase 1, JS code runs **correctly but on legacy footing**: its numbers hom
 - **J3b. Env tails** (SF18): capture and write-back of wide scalars target the env's own tail. Per J0b, this also covers generator/async suspended state if it is env-resident.
 - **J3c. Exception slot**: a thrown wide scalar (rare — out-of-band double) re-homes into the base-frame extent when written to `js_exception_value` (globals-row treatment); alternatively wrap per the error=map rule. Pick during implementation; either is a one-liner at the throw helper.
 - **J3d. Frame number watermarks on** for JS frames; JS event-loop callbacks now reclaim numbers at every return.
-- Container copy-in/copy-out: shared helpers, live since phase 1 stage 3 — **but J3d requires the JS-array `extra` migration (SF15-J) complete through JP3** (`vibe/Lambda_Impl_Stack_Frame_JS2.md`): until then a props-bearing JS array receiving a wide scalar corrupts/misreads its companion `Map*`.
+- Container copy-in/copy-out: shared helpers, live since phase 1 stage 3. The JS-array `extra` migration (SF15-J) is complete through JP4 (`vibe/Lambda_Impl_Stack_Frame_JS2.md`), including both props-first and wide-scalar-first polyglot regressions; J3d's prerequisite is satisfied.
 - Gate additions: **long-running event-loop soak** (server workload — steady-state RSS, numbers reclaimed per tick); node/js baselines; polyglot int64 round-trip tests through the J0c bridges.
 
 ### Stage J4 — Cleanups and closure

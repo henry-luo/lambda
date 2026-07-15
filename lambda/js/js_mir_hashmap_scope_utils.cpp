@@ -323,7 +323,11 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
 static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
     if (!mt) return;
     MIR_reg_t new_top = jm_new_reg(mt, "js_root_top", MIR_T_I64);
-    MIR_reg_t ready = jm_new_reg(mt, "js_root_ready", MIR_T_I64);
+    MIR_reg_t limit = jm_new_reg(mt, "js_root_limit", MIR_T_I64);
+    MIR_reg_t overflow = jm_new_reg(mt, "js_root_overflow", MIR_T_I64);
+    MIR_reg_t bound = jm_new_reg(mt, "js_root_bound", MIR_T_I64);
+    MIR_reg_t ensured = jm_new_reg(mt, "js_root_ensured", MIR_T_I64);
+    MIR_label_t bound_label = jm_new_label(mt);
     MIR_label_t overflow_label = jm_new_label(mt);
     MIR_var_t ensure_args[3] = {
         {MIR_T_P, "context", 0}, {MIR_T_I64, "root_slots", 0},
@@ -331,16 +335,26 @@ static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
     };
     JsMirImportEntry* ensure = jm_ensure_import(mt, "lambda_side_stack_ensure",
         MIR_T_I64, 3, ensure_args, 1);
+    MIR_insn_t load_base = MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, mt->side_root_frame_base),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_top),
+            mt->side_frame_runtime, 0, 1));
+    MIR_insn_t check_bound = MIR_new_insn(mt->ctx, MIR_NE,
+        MIR_new_reg_op(mt->ctx, bound),
+        MIR_new_reg_op(mt->ctx, mt->side_root_frame_base),
+        MIR_new_int_op(mt->ctx, 0));
+    MIR_insn_t skip_bind = MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, bound_label), MIR_new_reg_op(mt->ctx, bound));
     MIR_insn_t ensure_call = MIR_new_call_insn(mt->ctx, 6,
         MIR_new_ref_op(mt->ctx, ensure->proto),
         MIR_new_ref_op(mt->ctx, ensure->import),
-        MIR_new_reg_op(mt->ctx, ready),
+        MIR_new_reg_op(mt->ctx, ensured),
         MIR_new_reg_op(mt->ctx, mt->side_frame_runtime),
         MIR_new_int_op(mt->ctx, mt->side_root_next),
         MIR_new_int_op(mt->ctx, 0));
     MIR_insn_t ensure_failed = MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, overflow_label), MIR_new_reg_op(mt->ctx, ready));
-    MIR_insn_t load_base = MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_label_op(mt->ctx, overflow_label), MIR_new_reg_op(mt->ctx, ensured));
+    MIR_insn_t reload_base = MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, mt->side_root_frame_base),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_top),
             mt->side_frame_runtime, 0, 1));
@@ -353,21 +367,81 @@ static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
         MIR_new_reg_op(mt->ctx, mt->side_root_frame_base),
         MIR_new_int_op(mt->ctx,
             (int64_t)mt->side_root_next * (int64_t)sizeof(uint64_t)));
+    MIR_insn_t load_limit = MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, limit),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_limit),
+            mt->side_frame_runtime, 0, 1));
+    MIR_insn_t compare = MIR_new_insn(mt->ctx, MIR_UGT,
+        MIR_new_reg_op(mt->ctx, overflow), MIR_new_reg_op(mt->ctx, new_top),
+        MIR_new_reg_op(mt->ctx, limit));
+    MIR_insn_t branch = MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, overflow_label),
+        MIR_new_reg_op(mt->ctx, overflow));
     MIR_insn_t store_top = MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_top),
             mt->side_frame_runtime, 0, 1), MIR_new_reg_op(mt->ctx, new_top));
 
-    // The slot count is a lowering-time fact. Inserting the checked reservation
-    // at the anchor keeps every later rooted assignment to one inline store.
+    // The old unconditional ensure call dominated hot JS functions. Bind only
+    // on the first call, then keep capacity checks inline; Windows page
+    // commitment remains an out-of-line slow path.
+    MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, load_base);
+    MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, check_bound);
+    MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, skip_bind);
     MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, ensure_call);
     MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, ensure_failed);
-    MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, load_base);
+    MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, reload_base);
+    MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, bound_label);
     MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, load_number_base);
     if (mt->side_root_next > 0) {
         MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, add_top);
+        MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, load_limit);
+        MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, compare);
+        MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, branch);
+#if defined(_WIN32)
+        MIR_reg_t commit_limit = jm_new_reg(mt, "js_root_commit_limit", MIR_T_I64);
+        MIR_reg_t needs_commit = jm_new_reg(mt, "js_root_needs_commit", MIR_T_I64);
+        MIR_reg_t committed = jm_new_reg(mt, "js_root_committed", MIR_T_I64);
+        MIR_label_t commit_ready = jm_new_label(mt);
+        MIR_insn_t load_commit_limit = MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, commit_limit),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                offsetof(Context, side_root_commit_limit),
+                mt->side_frame_runtime, 0, 1));
+        MIR_insn_t compare_commit = MIR_new_insn(mt->ctx, MIR_UGT,
+            MIR_new_reg_op(mt->ctx, needs_commit), MIR_new_reg_op(mt->ctx, new_top),
+            MIR_new_reg_op(mt->ctx, commit_limit));
+        MIR_insn_t skip_commit = MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, commit_ready),
+            MIR_new_reg_op(mt->ctx, needs_commit));
+        MIR_insn_t commit_call = MIR_new_call_insn(mt->ctx, 6,
+            MIR_new_ref_op(mt->ctx, ensure->proto),
+            MIR_new_ref_op(mt->ctx, ensure->import),
+            MIR_new_reg_op(mt->ctx, committed),
+            MIR_new_reg_op(mt->ctx, mt->side_frame_runtime),
+            MIR_new_int_op(mt->ctx, mt->side_root_next),
+            MIR_new_int_op(mt->ctx, 0));
+        MIR_insn_t commit_failed = MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, overflow_label),
+            MIR_new_reg_op(mt->ctx, committed));
+        MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor,
+            load_commit_limit);
+        MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor,
+            compare_commit);
+        MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor,
+            skip_commit);
+        MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor,
+            commit_call);
+        MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor,
+            commit_failed);
+        MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor,
+            commit_ready);
+#endif
         MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, store_top);
     } else {
         _MIR_free_insn(mt->ctx, add_top);
+        _MIR_free_insn(mt->ctx, load_limit);
+        _MIR_free_insn(mt->ctx, compare);
+        _MIR_free_insn(mt->ctx, branch);
         _MIR_free_insn(mt->ctx, store_top);
     }
 

@@ -316,15 +316,16 @@ static bool js_array_item_to_index(Item key, int64_t* out_index) {
 static bool js_array_has_nonconfigurable_index_from(Item obj, int64_t new_len) {
     if (get_type_id(obj) != LMD_TYPE_ARRAY || !obj.array) return false;
     Array* arr = obj.array;
-    int64_t dense_limit = arr->length < arr->capacity ? arr->length : arr->capacity;
+    int64_t dense_capacity = container_dense_capacity(arr);
+    int64_t dense_limit = arr->length < dense_capacity ? arr->length : dense_capacity;
     for (int64_t i = new_len; i < dense_limit; i++) {
         if (arr->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)i);
         if (!js_props_obj_query_configurable(obj, idx_buf, idx_len)) return true;
     }
-    if (arr->extra == 0) return false;
-    Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (!js_array_has_props(arr)) return false;
+    Map* pm = js_array_props(arr);
     if (!pm || !pm->type) return false;
     TypeMap* tm = (TypeMap*)pm->type;
     Item pm_item = (Item){.map = pm};
@@ -348,7 +349,8 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
     Array* arr = obj.array;
     int64_t highest_nonconfig = -1;
     int64_t old_len = arr->length;
-    int64_t dense_limit = old_len < arr->capacity ? old_len : arr->capacity;
+    int64_t dense_capacity = container_dense_capacity(arr);
+    int64_t dense_limit = old_len < dense_capacity ? old_len : dense_capacity;
     for (int64_t i = new_len; i < dense_limit; i++) {
         if (arr->items[i].item == JS_DELETED_SENTINEL_VAL) continue;
         char idx_buf[32];
@@ -359,8 +361,8 @@ static bool js_array_apply_failed_length_shrink(Item obj, int64_t new_len, bool 
             arr->items[i] = (Item){.item = JS_DELETED_SENTINEL_VAL};
         }
     }
-    if (arr->extra != 0) {
-        Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (js_array_has_props(arr)) {
+        Map* pm = js_array_props(arr);
         if (pm && pm->type) {
             TypeMap* tm = (TypeMap*)pm->type;
             Item pm_item = (Item){.map = pm};
@@ -616,7 +618,7 @@ static bool js_define_property_collect_existing_state(Item obj, Item name,
             if (ns && ns->len > 0 && ns->len < 200) {
                 // AT-3: accessors on arrays are stored on the companion map under
                 // the digit-string name with the IS_ACCESSOR shape flag (post-AT-1).
-                Map* pm = obj.array && obj.array->extra ? (Map*)(uintptr_t)obj.array->extra : nullptr;
+                Map* pm = js_array_props(obj.array);
                 if (pm) {
                     Item pm_item = (Item){.map = pm};
                     ShapeEntry* _se = js_find_shape_entry(pm_item, ns->chars, (int)ns->len);
@@ -630,7 +632,7 @@ static bool js_define_property_collect_existing_state(Item obj, Item name,
 
 static bool js_define_property_validate_array_companion_index(Item obj, Item name,
                                                               Item descriptor) {
-    if (get_type_id(obj) != LMD_TYPE_ARRAY || !obj.array || obj.array->extra == 0) {
+    if (get_type_id(obj) != LMD_TYPE_ARRAY || !js_array_has_props(obj.array)) {
         return true;
     }
     Item nsc = js_to_string(name);
@@ -641,7 +643,7 @@ static bool js_define_property_validate_array_companion_index(Item obj, Item nam
         return true;
     }
 
-    Map* pm = (Map*)(uintptr_t)obj.array->extra;
+    Map* pm = js_array_props(obj.array);
     Item pm_item = (Item){.map = pm};
     ShapeEntry* se = js_find_shape_entry(pm_item, ns->chars, (int)ns->len);
     bool companion_non_config = !js_props_query_configurable(pm, se, ns->chars, (int)ns->len);
@@ -714,9 +716,9 @@ static bool js_define_property_validate_nonconfigurable_update(
     // AT-3: accessors are stored as JsAccessorPair with IS_ACCESSOR
     // shape flag (post-AT-1). Probe shape entry only.
     ShapeEntry* _se_acc_chk = js_find_shape_entry(obj, ns_check->chars, (int)ns_check->len);
-    if (!_se_acc_chk && get_type_id(obj) == LMD_TYPE_ARRAY && obj.array && obj.array->extra != 0 &&
+    if (!_se_acc_chk && get_type_id(obj) == LMD_TYPE_ARRAY && js_array_has_props(obj.array) &&
         js_parse_array_index(ns_check->chars, (int)ns_check->len) >= 0) {
-        Item companion = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
+        Item companion = (Item){.map = js_array_props(obj.array)};
         _se_acc_chk = js_find_shape_entry(companion, ns_check->chars, (int)ns_check->len);
     }
     bool cur_is_accessor = state->has_existing_desc
@@ -775,8 +777,8 @@ static bool js_define_property_validate_nonconfigurable_update(
         bool have_pair = false;
         if (_se_acc_chk && jspd_is_accessor(_se_acc_chk)) {
             Map* _m = (get_type_id(obj) == LMD_TYPE_MAP) ? obj.map :
-                      (get_type_id(obj) == LMD_TYPE_ARRAY && obj.array && obj.array->extra)
-                          ? (Map*)(uintptr_t)obj.array->extra : nullptr;
+                      (get_type_id(obj) == LMD_TYPE_ARRAY)
+                          ? js_array_props(obj.array) : nullptr;
             if (_m) {
                 bool sf = false;
                 Item sv = js_map_get_fast_ext(_m, ns_check->chars, (int)ns_check->len, &sf);
@@ -854,7 +856,7 @@ static void js_define_property_apply_validated_descriptor(Item obj, Item name,
 
     Item define_target = obj;
     if (is_arguments_exotic && nm_len == 6 && strncmp(nm_chars, "length", 6) == 0) {
-        define_target = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
+        define_target = (Item){.map = js_array_props(obj.array)};
     }
     js_define_own_property_from_descriptor(define_target, nm_chars, nm_len, &pd,
         is_new_property, existing_accessor);
@@ -6727,11 +6729,8 @@ extern "C" Item js_in(Item key, Item object) {
             }
         }
         Array* arr = object.array;
-        // Js58 P0: bound-check `idx < arr->capacity` too — for sparse arrays
-        // `arr->length` is the spec length (e.g. 20001) but `arr->capacity` is
-        // the dense-buffer size (e.g. 3). Reading `arr->items[idx]` with
-        // `idx >= capacity` is an out-of-bounds heap read.
-        if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
+        // The owned tail is not part of the JS indexed-element range.
+        if (idx >= 0 && idx < arr->length && idx < container_dense_capacity(arr)) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype
             if (arr->items[idx].item != JS_DELETED_SENTINEL_VAL) {
                 return (Item){.item = b2it(true)};
@@ -6739,10 +6738,10 @@ extern "C" Item js_in(Item key, Item object) {
             // hole — fall through to prototype chain check
         }
         // Check companion map for own properties (e.g. arguments overflow)
-        if (idx >= 0 && arr->extra != 0) {
+        if (idx >= 0 && js_array_has_props(arr)) {
             char idx_buf[32];
             snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
-            Map* pm = (Map*)(uintptr_t)arr->extra;
+            Map* pm = js_array_props(arr);
             Item pm_item = (Item){.map = pm};
             JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, (int)strlen(idx_buf), NULL, NULL);
             if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return (Item){.item = b2it(true)};
@@ -6767,8 +6766,8 @@ extern "C" Item js_in(Item key, Item object) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* sk = it2s(key);
             if (sk && sk->len > 0) {
-                if (arr->extra != 0) {
-                    Map* pm = (Map*)(uintptr_t)arr->extra;
+                if (js_array_has_props(arr)) {
+                    Map* pm = js_array_props(arr);
                     Item pm_item = (Item){.map = pm};
                     JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, sk->chars, (int)sk->len, NULL, NULL);
                     if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return (Item){.item = b2it(true)};
@@ -6872,10 +6871,10 @@ extern "C" bool js_is_typed_array_ctor_name(const char* name, int len) {
 
 static bool js_is_arguments_exotic_array_for_proto(Item value) {
     if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->is_content != 1 ||
-        value.array->extra == 0) {
+        !js_array_has_props(value.array)) {
         return false;
     }
-    Map* props = (Map*)(uintptr_t)value.array->extra;
+    Map* props = js_array_props(value.array);
     bool found = false;
     Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
     if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
@@ -8527,7 +8526,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     if (type == LMD_TYPE_ARRAY) {
         if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
             if (js_is_arguments_exotic_array_for_proto(obj)) {
-                Item companion = (Item){.map = (Map*)(uintptr_t)obj.array->extra};
+                Item companion = (Item){.map = js_array_props(obj.array)};
                 JsPropertyDescriptor pd = {};
                 if (js_get_own_property_descriptor(companion, name_str->chars,
                                                     (int)name_str->len, &pd)) {
@@ -8559,8 +8558,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 idx = idx * 10 + (int64_t)(name_str->chars[i] - '0');
             }
             // check for accessor properties in companion map (even when idx >= length)
-            if (idx >= 0 && obj.array->extra != 0) {
-                Map* props = (Map*)(uintptr_t)obj.array->extra;
+            if (idx >= 0 && js_array_has_props(obj.array)) {
+                Map* props = js_array_props(obj.array);
                 // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
                 Item pm_item = (Item){.map = props};
                 ShapeEntry* _se_idx = js_find_shape_entry(pm_item, name_str->chars, (int)name_str->len);
@@ -8585,11 +8584,12 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 // AT-3: legacy __get_<idx>/__set_<idx> marker fallback retired
                 // (post-AT-1 IS_ACCESSOR shape probe above always succeeds).
             }
-            if (idx >= 0 && idx < obj.array->length && idx < obj.array->capacity) {
+            if (idx >= 0 && idx < obj.array->length &&
+                    idx < container_dense_capacity(obj.array)) {
                 // v25: deleted elements (holes) have no descriptor
                 if (obj.array->items[idx].item == JS_DELETED_SENTINEL_VAL) {
-                    if (obj.array->extra != 0) {
-                        Map* pm = (Map*)(uintptr_t)obj.array->extra;
+                    if (js_array_has_props(obj.array)) {
+                        Map* pm = js_array_props(obj.array);
                         Item pm_item = (Item){.map = pm};
                         JsPropertyDescriptor pd = {};
                         if (js_get_own_property_descriptor(pm_item, name_str->chars,
@@ -8619,7 +8619,7 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
                 js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, obj.array->items[idx]);
                 // Stage A3.2: shape-flag-first attribute query.
                 ShapeEntry* _se = js_find_shape_entry(obj, name_str->chars, (int)name_str->len);
-                Map* arr_props = obj.array->extra ? (Map*)(uintptr_t)obj.array->extra : NULL;
+                Map* arr_props = js_array_props(obj.array);
                 bool is_writable = js_props_query_writable(arr_props, _se, name_str->chars, (int)name_str->len);
                 bool is_configurable = js_props_query_configurable(arr_props, _se, name_str->chars, (int)name_str->len);
                 bool is_enumerable = js_props_query_enumerable(arr_props, _se, name_str->chars, (int)name_str->len);
@@ -8630,8 +8630,8 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             }
         }
         // Named properties on companion map (e.g., arguments.callee, Symbol.toStringTag)
-        if (obj.array->extra) {
-            Map* companion = (Map*)(uintptr_t)obj.array->extra;
+        if (js_array_has_props(obj.array)) {
+            Map* companion = js_array_props(obj.array);
             Item comp_item = (Item){.map = companion};
             Item name_key = (Item){.item = s2it(heap_create_name(name_str->chars, name_str->len))};
             {
@@ -8924,26 +8924,25 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
 }
 
 // =============================================================================
-// Array companion property map (stored in arr->extra)
+// Array companion property map (stored in the reserved props tail slot)
 // Arrays don't have inline Map storage for arbitrary string keys. Descriptor-
 // special indices, `length` flags, accessors, and custom properties live in a
 // lazily-created companion Map with normal ShapeEntry metadata.
 // =============================================================================
 
 static Map* js_array_props_map(Array* arr) {
-    if (arr->extra == 0) return NULL;
-    return (Map*)(uintptr_t)arr->extra;
+    return js_array_props(arr);
 }
 
 static Map* js_array_ensure_props_map(Array* arr) {
-    if (arr->extra == 0) {
+    if (!js_array_has_props(arr)) {
         Item obj = js_new_object();
         // Tag as companion storage so array helpers can distinguish descriptor
         // entries from ordinary objects.
         obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-        arr->extra = (int64_t)(uintptr_t)obj.map;
+        js_array_set_props(arr, obj.map);
     }
-    return (Map*)(uintptr_t)arr->extra;
+    return js_array_props(arr);
 }
 
 // Internal object-state helper. Js59 no longer uses this for accessor,
@@ -9082,7 +9081,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
     Item argument_unmap_value = ItemNull;
     bool have_argument_unmap_value = false;
     if (get_type_id(obj) == LMD_TYPE_ARRAY && obj.array->is_content == 1 &&
-        obj.array->extra != 0 && get_type_id(name) == LMD_TYPE_STRING &&
+        js_array_has_props(obj.array) && get_type_id(name) == LMD_TYPE_STRING &&
         get_type_id(descriptor) == LMD_TYPE_MAP) {
         String* str_name = it2s(name);
         int64_t arg_index = str_name ? js_parse_array_index(str_name->chars, (int)str_name->len) : -1;
@@ -9095,7 +9094,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
 
     Item result = ValidateAndApplyPropertyDescriptor(obj, name, descriptor);
     if (!js_check_exception() && get_type_id(obj) == LMD_TYPE_ARRAY && obj.array->is_content == 1 &&
-        obj.array->extra != 0 && get_type_id(name) == LMD_TYPE_STRING && get_type_id(descriptor) == LMD_TYPE_MAP) {
+        js_array_has_props(obj.array) && get_type_id(name) == LMD_TYPE_STRING && get_type_id(descriptor) == LMD_TYPE_MAP) {
         String* str_name = it2s(name);
         int64_t arg_index = str_name ? js_parse_array_index(str_name->chars, (int)str_name->len) : -1;
         if (arg_index >= 0 && arg_index < obj.array->length) {
@@ -9105,7 +9104,7 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
             js_map_get_fast_ext(descriptor.map, "get", 3, &getter_found);
             js_map_get_fast_ext(descriptor.map, "set", 3, &setter_found);
             if ((writable_found && !js_is_truthy(writable)) || getter_found || setter_found) {
-                Item companion = {.map = (Map*)(uintptr_t)obj.array->extra};
+                Item companion = {.map = js_array_props(obj.array)};
                 char marker_key[64];
                 snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)arg_index);
                 bool already_unmapped = false;
@@ -9240,10 +9239,10 @@ extern "C" Item js_object_create_define_properties(Item obj, Item props) {
 
 static bool js_array_is_arguments_exotic(Item value) {
     if (get_type_id(value) != LMD_TYPE_ARRAY || value.array->is_content != 1 ||
-        value.array->extra == 0) {
+        !js_array_has_props(value.array)) {
         return false;
     }
-    Map* props = (Map*)(uintptr_t)value.array->extra;
+    Map* props = js_array_props(value.array);
     bool found = false;
     Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
     if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
@@ -9317,7 +9316,8 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         Item result = js_array_new(0);
         Map* pm = js_array_props_map(object.array);
         int dense_lim = len;
-        if ((int)object.array->capacity < dense_lim) dense_lim = (int)object.array->capacity;
+        int64_t dense_capacity = container_dense_capacity(object.array);
+        if (dense_capacity < dense_lim) dense_lim = (int)dense_capacity;
         for (int i = 0; i < dense_lim; i++) {
             bool present = object.array->items[i].item != JS_DELETED_SENTINEL_VAL;
             char buf[16];
@@ -9860,12 +9860,11 @@ extern "C" Item js_object_keys(Item object) {
         int len = object.array->length;
         Item result = js_array_new(0);
         Map* pm = js_array_props_map(object.array);
-        // Js58 P0: dense iteration bound — for sparse arrays `len` is the
-        // spec length but `arr->capacity` is the dense buffer size. Limit
-        // to capacity to avoid OOB; sparse entries get picked up by the
-        // companion-Map walk below.
+        // Limit iteration to logical dense storage; sparse entries are picked
+        // up by the companion-map walk below and the owned tail is excluded.
         int dense_lim = len;
-        if ((int)object.array->capacity < dense_lim) dense_lim = (int)object.array->capacity;
+        int64_t dense_capacity = container_dense_capacity(object.array);
+        if (dense_capacity < dense_lim) dense_lim = (int)dense_capacity;
         for (int i = 0; i < dense_lim; i++) {
             // v25: skip deleted elements (holes)... unless an accessor descriptor
             // is registered for this index in the companion map (Object.defineProperty
@@ -11995,12 +11994,12 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         }
         if (is_numeric) {
             Array* arr = obj.array;
-            if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
+            if (idx >= 0 && idx < arr->length && idx < container_dense_capacity(arr)) {
                 // v25: check for deleted sentinel (array hole)
                 if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL) {
                     // still check for accessor marker
-                    if (arr->extra != 0) {
-                        Map* pm = (Map*)(uintptr_t)arr->extra;
+                    if (js_array_has_props(arr)) {
+                        Map* pm = js_array_props(arr);
                         // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
                         Item pm_item = (Item){.map = pm};
                         JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, ks->chars, (int)ks->len, NULL, NULL);
@@ -12018,8 +12017,8 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
                 return (Item){.item = b2it(true)};
             }
             // index out of bounds or sparse logical slot — check companion map
-            if (arr->extra != 0) {
-                Map* pm = (Map*)(uintptr_t)arr->extra;
+            if (js_array_has_props(arr)) {
+                Map* pm = js_array_props(arr);
                 // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
                 Item pm_item = (Item){.map = pm};
                 JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, ks->chars, (int)ks->len, NULL, NULL);
@@ -12035,8 +12034,8 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         // check companion map for named (non-index) properties
         {
             Array* arr = obj.array;
-            if (arr->extra != 0) {
-                Map* pm = (Map*)(uintptr_t)arr->extra;
+            if (js_array_has_props(arr)) {
+                Map* pm = js_array_props(arr);
                 Item pm_item = (Item){.map = pm};
                 JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, ks->chars, (int)ks->len, NULL, NULL);
                 if (status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR) return (Item){.item = b2it(true)};
@@ -12497,8 +12496,8 @@ extern "C" Item js_object_is_extensible(Item obj) {
     if (ot == LMD_TYPE_ARRAY) {
         // Arrays: check companion map for __non_extensible__ marker
         Array* arr = obj.array;
-        if (arr->extra != 0) {
-            Map* props = (Map*)(uintptr_t)arr->extra;
+        if (js_array_has_props(arr)) {
+            Map* props = js_array_props(arr);
             bool found = false;
             Item ne_v = js_map_get_fast_ext(props, "__non_extensible__", 17, &found);
             if (found && js_is_truthy(ne_v)) return (Item){.item = b2it(false)};
@@ -12771,12 +12770,15 @@ extern "C" Item js_array_from(Item iterable) {
         return js_array_new(0);
     }
     if (tid == LMD_TYPE_ARRAY) {
-        // shallow copy
+        // Array.from crosses an ownership boundary: reading and pushing each
+        // value both preserves sparse/prototype semantics and re-homes wide
+        // scalar payloads instead of retaining the source array's tail.
         Array* src = iterable.array;
-        Item result = js_array_new(src->length);
-        Array* dst = result.array;
-        memcpy(dst->items, src->items, src->length * sizeof(Item));
-        dst->length = src->length;
+        Item result = js_array_new(0);
+        for (int64_t i = 0; i < src->length; i++) {
+            js_array_push(result, js_array_get_int(iterable, i));
+            if (js_check_exception()) return ItemNull;
+        }
         return result;
     }
     // TypedArray: convert each element to a JS number in a regular array
@@ -12844,12 +12846,14 @@ extern "C" Item js_array_from(Item iterable) {
     // Use js_iterable_to_array for Map, Set, generators, and other iterables
     Item converted = js_iterable_to_array(iterable);
     if (get_type_id(converted) == LMD_TYPE_ARRAY) {
-        // shallow copy to return a new array
+        // The iterable fallback returns an independent array too; push through
+        // the same owned-store path so temporary scalar tails cannot escape.
         Array* src = converted.array;
-        Item result = js_array_new(src->length);
-        Array* dst = result.array;
-        memcpy(dst->items, src->items, src->length * sizeof(Item));
-        dst->length = src->length;
+        Item result = js_array_new(0);
+        for (int64_t i = 0; i < src->length; i++) {
+            js_array_push(result, js_array_get_int(converted, i));
+            if (js_check_exception()) return ItemNull;
+        }
         return result;
     }
     return js_array_new(0);
@@ -14013,8 +14017,8 @@ static Item js_delete_array_property(Item obj, Item key) {
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* sk = it2s(key);
         if (sk && sk->len == 6 && strncmp(sk->chars, "length", 6) == 0) {
-            if (arr->is_content == 1 && arr->extra != 0) {
-                Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
+            if (arr->is_content == 1 && js_array_has_props(arr)) {
+                Item pm_item = (Item){.map = js_array_props(arr)};
                 js_shape_mark_deleted_own(pm_item, "length", 6, /*create_if_missing=*/true);
                 return (Item){.item = b2it(true)};
             }
@@ -14029,13 +14033,13 @@ static Item js_delete_array_property(Item obj, Item key) {
     js_array_item_to_index(key, &idx);
     if (idx >= 0 && idx < arr->length) {
         // Check companion-map ShapeEntry flags before deleting.
-        if (arr->extra != 0) {
+        if (js_array_has_props(arr)) {
             // Stage A1: ToPropertyKey — uniform stringification.
             Item k_str = js_to_property_key(key);
             if (get_type_id(k_str) == LMD_TYPE_STRING) {
                 String* ks = it2s(k_str);
                 if (ks) {
-                    Map* pm = (Map*)(uintptr_t)arr->extra;
+                    Map* pm = js_array_props(arr);
                     // Stage A3.2: shape-flag-first non-configurable check.
                     Item pm_item = (Item){.map = pm};
                     ShapeEntry* _se = js_find_shape_entry(pm_item, ks->chars, (int)ks->len);
@@ -14048,15 +14052,15 @@ static Item js_delete_array_property(Item obj, Item key) {
                 }
             }
         }
-        if (idx < arr->capacity) {
+        if (idx < container_dense_capacity(arr)) {
             arr->items[idx] = (Item){.item = JS_DELETED_SENTINEL_VAL};
         }
         js_array_sparse_delete_index(obj, idx);
         // Arguments exotic objects: deleting a mapped index breaks the
         // ParameterMap link, so later re-defining the index must not
         // update the formal parameter binding.
-        if (arr->is_content == 1 && arr->extra != 0) {
-            Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
+        if (arr->is_content == 1 && js_array_has_props(arr)) {
+            Item pm_item = (Item){.map = js_array_props(arr)};
             char marker_key[64];
             snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)idx);
             js_property_set(pm_item,
@@ -14065,13 +14069,13 @@ static Item js_delete_array_property(Item obj, Item key) {
         }
         // Clear descriptor state in the companion map so the index is no
         // longer treated as an own property after delete.
-        if (arr->extra != 0) {
+        if (js_array_has_props(arr)) {
             // Stage A1: ToPropertyKey — uniform stringification.
             Item k_str = js_to_property_key(key);
             if (get_type_id(k_str) == LMD_TYPE_STRING) {
                 String* ks = it2s(k_str);
                 if (ks && ks->len > 0 && ks->len < 200) {
-                    Item pm_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
+                    Item pm_item = (Item){.map = js_array_props(arr)};
                     // Phase 5 / A2-T3: clear IS_ACCESSOR shape flag on the
                     // bare-key slot (which holds JsAccessorPair*) before
                     // tombstoning, so reads no longer dispatch to the
@@ -14098,8 +14102,8 @@ static Item js_delete_array_property(Item obj, Item key) {
     // check (via js_props_query_configurable), tombstones the 5 marker
     // prefixes, clears IS_ACCESSOR shape-flag, and writes the bare-key
     // sentinel — superset of what the legacy code did inline.
-    if (arr->extra != 0) {
-        Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (js_array_has_props(arr)) {
+        Map* pm = js_array_props(arr);
         Item pm_item = (Item){.map = pm};
         // Stage A1: ToPropertyKey so Symbol keys (__sym_N) and FLOAT keys
         // are canonicalized identically to define-property time.
