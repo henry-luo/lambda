@@ -458,14 +458,18 @@ after inclusion in source order according to Structurizr semantics.
 
 ### 8.2 Restricted expression evaluator
 
-View expressions are parsed into a small Mark expression AST. They are not
-evaluated as Lambda source. The initial allowlist covers the official element
-and relationship predicates needed by the corpus, including type, tag, parent,
-scope, source, destination, and relationship properties. Boolean composition
-is added only with explicit grammar and tests.
+View expressions are evaluated by the small pure
+`structurizr/expressions.ls` module; they are never evaluated as Lambda source.
+To keep the package and parser small, the current implementation recognizes the
+restricted grammar directly instead of building a second general-purpose AST.
+It supports identifiers, `*`, afferent/efferent coupling, element type, parent,
+tag, and technology predicates, relationship tag/source/destination and
+endpoint predicates, plus `&&` and `||`. Results retain model source order.
 
-Unknown predicates produce `structurizr.unsupported-expression`; malformed
-expressions produce `structurizr.invalid-expression`. Neither falls back to
+Unknown element predicates currently select nothing and unknown relationship
+predicates do not match. Structured `structurizr.unsupported-expression` and
+`structurizr.invalid-expression` diagnostics, property/group predicates, and
+parenthesized expressions remain follow-up work; none may fall back to
 including everything.
 
 ### 8.3 Dynamic views
@@ -557,10 +561,14 @@ Default roles include:
 - `c4-software-system-boundary`;
 - `c4-container-boundary`.
 
-Structurizr element and relationship styles lower through the existing safe
-style layer. Unsupported shapes, icons, fonts, or paint values preserve their
-source property and produce deterministic warnings. External icons are not
-fetched during transform or render.
+Structurizr element and relationship styles lower to canonical Graph IR style
+assignments and then pass through the existing safe style parser. The current
+allowlist includes background, text/line color, stroke, stroke width or
+thickness, node font size, node width/height, opacity, and dashed relationships.
+Unsupported shapes, icons, routing, fonts, or paint values remain canonical
+workspace properties but do not become executable CSS. Deterministic warnings
+for skipped values remain outstanding. External icons are not fetched during
+transform or render.
 
 ## 10. Layout Mapping
 
@@ -685,7 +693,7 @@ and one headless `.dsl` CLI test.
 
 ### 13.1 Current checkpoint
 
-The first two executable slices are implemented and covered by
+The first three executable slices are implemented and covered by
 `make test-graph-structurizr`:
 
 - explicit `structurizr` and `c4` flavor dispatch to a 370-line manual parser;
@@ -694,9 +702,13 @@ The first two executable slices are implemented and covered by
   order prefixes, and anonymous parallel blocks;
 - pure normalization of hierarchical IDs, core C4 elements, relationships,
   deployment declarations/instances, tags, static view metadata, and styles;
-- system-context and container projection, with shared landscape/component
-  selection paths, C4 rich node content, software-system boundaries, and
-  canonical graph edges;
+- landscape, system-context, container, component, filtered, and custom
+  projection through one static-view path, including ordinary/reluctant
+  wildcard behavior, include/exclude expressions, C4 rich node content,
+  boundaries, and canonical graph edges;
+- canonical default and authored element/relationship tags, custom-element
+  metadata, tag-filtered base views, and safe node/relationship style
+  assignments that survive `to_html()`;
 - dynamic interaction normalization with resolved endpoints, static
   relationship references, stable sequence labels, and parallel-group IDs;
 - deployment projection with nested deployment-node boundaries, distinct
@@ -704,13 +716,14 @@ The first two executable slices are implemented and covered by
   deployment-group-aware logical relationship lifting, and rich instance
   content inherited from the logical model;
 - selected-view `to_html()` through the existing graph transform;
-- native parser/LOC tests and Lambda source, canonical, static projection,
-  dynamic, deployment, and HTML fixtures.
+- native parser/LOC tests and Lambda source, canonical, static expression,
+  filtered/custom/style, dynamic, deployment, and HTML fixtures.
 
 This checkpoint is partial Stage 4A through Stage 4D, not full Structurizr
 support. Conservative `.dsl` auto-detection, canonical schemas and diagnostics,
-archetypes/implied relationships, complete expression and style semantics,
-filtered/custom fixtures, relationship-identifier dynamic statements, complete
+archetypes/implied relationships, expression diagnostics and property/group
+predicates, advanced shape/routing style semantics, terminology,
+relationship-identifier dynamic statements, complete
 deployment-group inheritance, includes, CLI view selection, reference
 adaptation, scene coverage, and release size measurement remain outstanding.
 
@@ -746,10 +759,11 @@ remain outstanding.
 
 ### Stage 4C - Static views and C4 HTML
 
-Status: **partially implemented**. Context/container projection and HTML output
-are covered. Landscape/component share the projection implementation but need
-dedicated fixtures; filtered/custom views, full expression semantics, style
-cascade, terminology, and retained scene/render coverage remain outstanding.
+Status: **substantially implemented**. All six static view kinds, selected-view
+HTML, filtered/custom semantics, reluctant wildcard, the initial pure expression
+allowlist, and safe basic style cascade have dedicated fixtures. Expression
+diagnostics and property/group predicates, terminology, shape/routing styles,
+and retained scene/render coverage remain outstanding.
 
 - implement landscape, context, container, component, filtered, and custom
   projection;

@@ -1,6 +1,8 @@
 // C4 workspace view projection to canonical Graph IR.
 
 import graph_model: lambda.package.graph.model
+import graph_style: lambda.package.graph.style
+import expression: lambda.package.graph.structurizr.expressions
 
 fn children(value, wanted = null) => [
   for (child in graph_model.element_children(value)
@@ -11,6 +13,7 @@ fn first(values) => if (len(values) > 0) values[0] else null
 
 fn workspace_model(workspace) => first(children(workspace, "c4-model"))
 fn workspace_views(workspace) => first(children(workspace, "c4-views"))
+fn workspace_styles(workspace) => first(children(workspace, "c4-styles"))
 
 fn elements(workspace) => children(workspace_model(workspace), "c4-element")
 fn relationships(workspace) => children(workspace_model(workspace), "c4-relationship")
@@ -64,6 +67,9 @@ fn base_ids(workspace, diagram) {
     [for (entry in all where contains([*inside, *connected_ids(workspace, inside)],
       string(entry.id))) string(entry.id)]
   }
+  else if (diagram_kind == "custom") { [
+    for (entry in all where string(entry.kind) == "custom") string(entry.id)
+  ] }
   else { [for (entry in all) string(entry.id)] }
 }
 
@@ -71,32 +77,42 @@ fn include_expressions(diagram) => [
   for (include_rule in children(diagram, "include")) string(include_rule.expression)
 ]
 
-fn explicit_ids(workspace, expressions) {
+fn exclude_expressions(diagram) => [
+  for (exclude_rule in children(diagram, "exclude")) string(exclude_rule.expression)
+]
+
+fn expression_ids(workspace, expressions) {
   let all = elements(workspace);
-  [for (entry in all where contains(expressions, string(entry.identifier))) string(entry.id)]
+  [for (entry in all where contains([
+    for (rule in expressions where not expression.relationship_expression(rule))
+      for (id in expression.element_ids(all, relationships(workspace), rule)) id
+  ], string(entry.id))) string(entry.id)]
 }
 
 fn selected_ids(workspace, diagram) {
-  let expressions = include_expressions(diagram);
+  let includes = include_expressions(diagram);
+  let excludes = exclude_expressions(diagram);
   let defaults = base_ids(workspace, diagram);
-  if (len(expressions) == 0 or contains(expressions, "*") or
-      contains(expressions, "*?")) defaults
-  else if (contains(expressions, "element.type==container")) [
-    for (entry in elements(workspace) where string(entry.kind) == "container") string(entry.id)
-  ]
-  else explicit_ids(workspace, expressions)
+  let included = if (len(includes) == 0 or contains(includes, "*") or
+      contains(includes, "*?")) defaults else expression_ids(workspace, includes);
+  let excluded = expression_ids(workspace, excludes);
+  [for (id in included where not contains(excluded, id)) id]
 }
 
 fn node_role(kind) => "c4-" ++ string(kind)
 
 fn node_shape(kind) => if (kind == "person") "person" else "box"
 
+fn node_meta(entry) => if (entry.kind == "custom" and entry.metadata != null)
+  string(entry.metadata)
+else string(entry.kind) ++
+  (if (entry.technology != null) ": " ++ string(entry.technology) else "")
+
 fn node_content(entry) =>
   <content;
     <div class: "c4-node-content";
       <strong; entry.name>
-      <small class: "c4-node-kind"; "[" ++ string(entry.kind) ++
-        (if (entry.technology != null) ": " ++ string(entry.technology) else "") ++ "]">
+      <small class: "c4-node-kind"; "[" ++ node_meta(entry) ++ "]">
       if (entry.description != null and entry.description != "") {
         <p; entry.description>
       }
@@ -105,10 +121,12 @@ fn node_content(entry) =>
 
 fn graph_node(entry) =>
   <node id: entry.id, role: node_role(entry.kind), 'c4-kind': entry.kind,
-    label: entry.name, shape: node_shape(entry.kind),
+    label: entry.name, metadata: graph_model.optional(entry, "metadata"),
+    shape: node_shape(entry.kind),
     'source-start': entry["source-start"], 'source-end': entry["source-end"];
     <label; entry.name>
     node_content(entry)
+    for (tag in children(entry, "tag")) <tag name: tag.name>
   >
 
 fn graph_edge(relation, ordered = false) {
@@ -127,6 +145,7 @@ fn graph_edge(relation, ordered = false) {
     'relationship-ref': graph_model.optional(relation, "relationship-ref"),
     'source-start': relation["source-start"], 'source-end': relation["source-end"];
     if (display_label != null) { <label; display_label> }
+    for (tag in children(relation, "tag")) <tag name: tag.name>
   >
 }
 
@@ -153,6 +172,133 @@ fn boundary(workspace, diagram, entries) {
   }
 }
 
+fn scope_seed_ids(workspace, diagram) {
+  let all = elements(workspace);
+  let kind = string(diagram.kind);
+  let scope = string(diagram.scope);
+  if (kind == "systemContext") { [scope] }
+  else if (kind == "container") { [for (entry in all
+    where string(entry.parent) == scope and string(entry.kind) == "container") string(entry.id)] }
+  else if (kind == "component") { [for (entry in all
+    where string(entry.parent) == scope and string(entry.kind) == "component") string(entry.id)] }
+  else { base_ids(workspace, diagram) }
+}
+
+fn relationship_excluded(workspace, diagram, relation) => len([
+  for (rule in exclude_expressions(diagram)
+    where expression.relationship_expression(rule) and
+      expression.relationship_matches(elements(workspace), relation, rule)) rule
+]) > 0
+
+fn selected_relationships(workspace, diagram, ids) {
+  let reluctant = contains(include_expressions(diagram), "*?");
+  let seeds = scope_seed_ids(workspace, diagram);
+  [for (relation in relationships(workspace)
+    where contains(ids, string(relation.source)) and
+      contains(ids, string(relation.destination)) and
+      (not reluctant or contains(seeds, string(relation.source)) or
+        contains(seeds, string(relation.destination))) and
+      not relationship_excluded(workspace, diagram, relation)) relation]
+}
+
+fn has_filter_tag(value, wanted) => len([
+  for (tag in children(value, "tag") where contains(wanted, string(tag.name))) tag
+]) > 0
+
+fn filter_tags(diagram) => [
+  for (tag in children(diagram, "filter-tag")) string(tag.name)
+]
+
+fn filter_values(values, diagram) {
+  let wanted = filter_tags(diagram);
+  let include = string(diagram["filter-mode"]) == "include";
+  [for (value in values where has_filter_tag(value, wanted) == include) value]
+}
+
+fn style_declaration(target, property) {
+  let name = lower(string(property.name));
+  let value = string(property.value);
+  let color = graph_style.safe_color(value);
+  let numeric = graph_style.unsigned_number_text(value, true);
+  let opacity = graph_style.parse("opacity:" ++ value).opacity;
+  if (name == "background" and target == "node" and color != null) "fill:" ++ color
+  else if (name == "color" and color != null)
+    (if (target == "node") "color:" else "stroke:") ++ color
+  else if (name == "stroke" and target == "node" and color != null) "stroke:" ++ color
+  else if ((name == "strokewidth" or name == "thickness") and numeric != null)
+    "stroke-width:" ++ numeric
+  else if (name == "fontsize" and target == "node" and numeric != null)
+    "font-size:" ++ numeric
+  else if ((name == "width" or name == "height") and target == "node" and numeric != null)
+    name ++ ":" ++ numeric
+  else if (name == "opacity" and opacity != null) "opacity:" ++ string(opacity)
+  else if (name == "dashed" and target == "edge" and lower(value) == "true")
+    "stroke-dasharray:6 4"
+  else ""
+}
+
+fn style_declarations(style, target) => join([
+  for (property in children(style, "property"),
+    let declaration = style_declaration(target, property)
+    where declaration != "") declaration
+], ";")
+
+fn style_matches(value, style, target) =>
+  (target == "node" and string(style.tag) == "Element") or
+  (target == "edge" and string(style.tag) == "Relationship") or
+  has_filter_tag(value, [string(style.tag)])
+
+fn style_assignments(workspace, entries, relations) => [
+  for (style in children(workspace_styles(workspace), "c4-style"),
+    let target = if (string(style["target-kind"]) == "element") "node" else "edge",
+    let values = if (target == "node") entries else relations,
+    let targets = [for (value in values where style_matches(value, style, target)) string(value.id)],
+    let declarations = style_declarations(style, target)
+    where len(targets) > 0 and declarations != "")
+    <'style-assignment' 'target-kind': target, targets: join(targets, ","),
+      declarations: declarations,
+      'source-start': style["source-start"], 'source-end': style["source-end"]>
+]
+
+fn static_graph(workspace, diagram, structure, entries, relations) {
+  let cluster = boundary(workspace, structure, entries);
+  // root-level views have no boundary, so null parents must remain graph nodes.
+  let grouped = if (cluster == null) [] else [for (entry in entries
+    where string(entry.parent) == string(structure.scope)) entry.id];
+  <graph id: diagram.key, flavor: "structurizr-c4", version: "1",
+    layout: "dot", directed: true, 'ir-stage': "canonical",
+    'diagram-type': diagram.kind, 'source-view-key': diagram.key,
+    'base-view-key': graph_model.optional(diagram, "base-key"),
+    direction: structure.direction, 'rank-sep': structure["rank-sep"],
+    'node-sep': structure["node-sep"];
+    if (cluster != null) { cluster }
+    for (entry in entries where not contains(grouped, entry.id)) graph_node(entry)
+    for (relation in relations) graph_edge(relation)
+    for (assignment in style_assignments(workspace, entries, relations)) assignment
+  >
+}
+
+fn static_project(workspace, diagram) {
+  let ids = selected_ids(workspace, diagram);
+  static_graph(workspace, diagram, diagram, selected_entries(workspace, ids),
+    selected_relationships(workspace, diagram, ids))
+}
+
+fn filtered_project(workspace, diagram) {
+  let base = selected_view(workspace, diagram["base-key"]);
+  if (base == null or string(base.kind) == "filtered" or
+      string(base.kind) == "dynamic" or string(base.kind) == "deployment") null
+  else {
+    let base_ids = selected_ids(workspace, base);
+    let entries = filter_values(selected_entries(workspace, base_ids), diagram);
+    let ids = [for (entry in entries) string(entry.id)];
+    let relations = filter_values(selected_relationships(workspace, base, base_ids), diagram);
+    static_graph(workspace, diagram, base, entries, [for (relation in relations
+      where contains(ids, string(relation.source)) and
+        contains(ids, string(relation.destination))) relation])
+  }
+}
+
 fn interaction_entries(workspace, diagram) {
   let interactions = children(diagram, "c4-interaction");
   [for (entry in elements(workspace) where len([
@@ -171,6 +317,7 @@ fn dynamic_project(workspace, diagram) {
     'node-sep': diagram["node-sep"];
     for (entry in entries) graph_node(entry)
     for (item in interactions) graph_edge(item, true)
+    for (assignment in style_assignments(workspace, entries, interactions)) assignment
   >
 }
 
@@ -283,6 +430,7 @@ fn deployment_project(workspace, diagram) {
       deployment_leaf(entry)) graph_node(entry)
     for (relation in direct) graph_edge(relation)
     for (relation in lifted) graph_edge(relation)
+    for (assignment in style_assignments(workspace, entries, [*direct, *lifted])) assignment
   >
 }
 
@@ -291,24 +439,8 @@ pub fn project(workspace, key) {
   if (diagram == null) { null }
   else if (string(diagram.kind) == "dynamic") dynamic_project(workspace, diagram)
   else if (string(diagram.kind) == "deployment") deployment_project(workspace, diagram)
-  else {
-    let ids = selected_ids(workspace, diagram);
-    let entries = selected_entries(workspace, ids);
-    let grouped = [for (entry in entries
-      where string(entry.parent) == string(diagram.scope)) entry.id];
-    let cluster = boundary(workspace, diagram, entries);
-    <graph id: diagram.key, flavor: "structurizr-c4", version: "1",
-      layout: "dot", directed: true, 'ir-stage': "canonical",
-      'diagram-type': diagram.kind, 'source-view-key': diagram.key,
-      direction: diagram.direction, 'rank-sep': diagram["rank-sep"],
-      'node-sep': diagram["node-sep"];
-      if (cluster != null) { cluster }
-      for (entry in entries where not contains(grouped, entry.id)) graph_node(entry)
-      for (relation in relationships(workspace)
-        where contains(ids, string(relation.source)) and contains(ids, string(relation.destination)))
-        graph_edge(relation)
-    >
-  }
+  else if (string(diagram.kind) == "filtered") filtered_project(workspace, diagram)
+  else static_project(workspace, diagram)
 }
 
 pub fn project_all(workspace) => [

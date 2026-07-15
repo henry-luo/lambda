@@ -25,6 +25,7 @@ fn statement_children(value, keyword) => [
 
 fn c4_kind(keyword) {
   if (keyword == "softwareSystem") "software-system"
+  else if (keyword == "element") "custom"
   else if (keyword == "deploymentEnvironment") "deployment-environment"
   else if (keyword == "deploymentGroup") "deployment-group"
   else if (keyword == "deploymentNode") "deployment-node"
@@ -32,6 +33,19 @@ fn c4_kind(keyword) {
   else if (keyword == "softwareSystemInstance") "software-system-instance"
   else if (keyword == "containerInstance") "container-instance"
   else keyword
+}
+
+fn default_tag(kind) {
+  if (kind == "person") "Person"
+  else if (kind == "software-system") "Software System"
+  else if (kind == "container") "Container"
+  else if (kind == "component") "Component"
+  else if (kind == "deployment-environment") "Deployment Environment"
+  else if (kind == "deployment-node") "Deployment Node"
+  else if (kind == "infrastructure-node") "Infrastructure Node"
+  else if (kind == "software-system-instance") "Software System Instance"
+  else if (kind == "container-instance") "Container Instance"
+  else null
 }
 
 fn is_c4_declaration(value) => graph_model.tag(value) == "declaration" and contains([
@@ -55,7 +69,8 @@ fn declaration_tags(value, kind) {
       for (tag in split(arg(statement, 0, ""), ",")
       where trim(tag) != "") trim(tag)
   ];
-  ["Element", kind, *authored]
+  let structural = default_tag(kind);
+  ["Element", for (tag in [structural] where tag != null) tag, *authored]
 }
 
 fn element_value(value, parent, parent_identifier, hierarchical) {
@@ -67,16 +82,25 @@ fn element_value(value, parent, parent_identifier, hierarchical) {
     for (group_name in split(arg(value, 1), ",") where trim(group_name) != "")
       trim(group_name)
   ] else [];
+  let custom = kind == "custom";
   {
     id: id, identifier: id,
     local_identifier: graph_model.optional(value, "identifier"),
     kind: kind, parent: parent, name: if (model_ref != null) null else arg(value, 0, id),
-    description: if (model_ref != null) null else arg(value, 1),
-    technology: if (model_ref != null) null else arg(value, 2),
+    metadata: if (custom) arg(value, 1) else null,
+    description: if (model_ref != null) null else arg(value, if (custom) 2 else 1),
+    technology: if (model_ref != null or custom) null else arg(value, 2),
     model_ref: model_ref, deployment_groups: deployment_groups,
     tags: declaration_tags(value, kind), source: value
   }
 }
+
+fn relationship_tags(value) => [
+  "Relationship",
+  for (tag in split(arg(value, 2, ""), ",") where trim(tag) != "") trim(tag),
+  for (statement in statement_children(value, "tags"))
+    for (tag in split(arg(statement, 0, ""), ",") where trim(tag) != "") trim(tag)
+]
 
 fn append_relation(state, value, parent_identifier) {
   let from = if (string(value.from) == "this") parent_identifier else string(value.from);
@@ -85,7 +109,7 @@ fn append_relation(state, value, parent_identifier) {
     else "relationship@" ++ string(value["source-start"]);
   let relation = {
     id: id, from: from, to: string(value.to), description: arg(value, 0),
-    technology: arg(value, 1), tags: ["Relationship"], source: value
+    technology: arg(value, 1), tags: relationship_tags(value), source: value
   };
   {*:state, relationships: [*state.relationships, relation]}
 }
@@ -196,13 +220,20 @@ fn dynamic_interactions(value, elements, relationships, key) =>
 
 fn view_value(value, elements, relationships) {
   let view_key = if (value.kind == "systemLandscape" or value.kind == "custom")
-    arg(value, 0, string(value.kind)) else if (value.kind == "deployment")
+    arg(value, 0, string(value.kind)) else if (value.kind == "filtered")
+    arg(value, 3, "filtered@" ++ string(value["source-start"]))
+    else if (value.kind == "deployment")
     arg(value, 2, string(value.kind)) else arg(value, 1, string(value.kind));
   {
     kind: string(value.kind),
     scope: if (value.kind == "systemLandscape" or value.kind == "custom")
       null else arg(value, 0),
     environment: if (value.kind == "deployment") arg(value, 1) else null,
+    base_key: if (value.kind == "filtered") arg(value, 0) else null,
+    filter_mode: if (value.kind == "filtered") lower(arg(value, 1, "include")) else null,
+    filter_tags: if (value.kind == "filtered") [
+      for (tag in split(arg(value, 2, ""), ",") where trim(tag) != "") trim(tag)
+    ] else [],
     key: view_key,
     includes: [for (include_rule in children(value, "include"))
       for (item in arguments(include_rule)) item],
@@ -240,7 +271,8 @@ fn style_values(source) => [
 fn c4_element(value) =>
   <'c4-element' id: value.id, identifier: value.identifier,
     'local-identifier': value.local_identifier, kind: value.kind, parent: value.parent,
-    name: value.name, description: value.description, technology: value.technology,
+    name: value.name, metadata: value.metadata,
+    description: value.description, technology: value.technology,
     'model-ref': value.model_ref,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
     for (tag in value.tags) <tag name: tag>
@@ -259,10 +291,12 @@ fn c4_view(value, elements) =>
   <'c4-view' key: value.key, kind: value.kind,
     scope: resolve_ref(elements, value.scope),
     environment: resolve_ref(elements, value.environment),
+    'base-key': value.base_key, 'filter-mode': value.filter_mode,
     direction: value.direction, 'rank-sep': value.rank_sep, 'node-sep': value.node_sep,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
     for (include_rule in value.includes) <include expression: include_rule>
     for (exclude_rule in value.excludes) <exclude expression: exclude_rule>
+    for (tag in value.filter_tags) <'filter-tag' name: tag>
     for (item in value.interactions)
       <'c4-interaction' id: item.id, source: item.source,
         destination: item.destination, 'relationship-ref': item.relationship_ref,
