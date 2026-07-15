@@ -43,6 +43,11 @@ typedef struct {
     ClipboardBackend* backend;
     ClipboardPermission perm_read;
     ClipboardPermission perm_write;
+
+    bool init();
+    void shutdown();
+    void set_backend(ClipboardBackend* next_backend);
+    void clear();
 } ClipboardStoreState;
 
 static ClipboardStoreState g_store = { NULL, NULL, NULL,
@@ -168,7 +173,7 @@ static ClipboardBackend* g_inmem_backend = NULL;
 
 ClipboardBackend* clipboard_backend_inmemory(void) {
     if (g_inmem_backend) return g_inmem_backend;
-    g_inmem_backend = (ClipboardBackend*)mem_calloc(1, sizeof(ClipboardBackend), MEM_CAT_SYSTEM);
+    g_inmem_backend = (ClipboardBackend*)mem_calloc(1, sizeof(ClipboardBackend), MEM_CAT_SYSTEM); // OBJ_HEAP_OK: process-lifetime clipboard backend singleton.
     g_inmem_backend->opaque = mem_calloc(1, sizeof(InMemoryBackendState), MEM_CAT_SYSTEM);
     g_inmem_backend->write_items = inmem_write_items;
     g_inmem_backend->read_items  = inmem_read_items;
@@ -237,32 +242,49 @@ ClipboardBackend* clipboard_backend_glfw(void) { return clipboard_backend_inmemo
 // ---------------------------------------------------------------------------
 
 void clipboard_store_init(void) {
-    if (g_store.items) return;     // idempotent
-    g_store.items   = arraylist_new(2);
-    g_store.backend = clipboard_backend_inmemory();
-    g_store.perm_read  = CLIPBOARD_PERMISSION_PROMPT;
-    g_store.perm_write = CLIPBOARD_PERMISSION_PROMPT;
+    g_store.init();
 }
 
 void clipboard_store_shutdown(void) {
-    if (g_store.items) { items_free(g_store.items); g_store.items = NULL; }
-    mem_free(g_store.cached_text);
-    g_store.cached_text = NULL;
-    g_store.backend = NULL;
+    g_store.shutdown();
     clipboard_backend_inmemory_shutdown();
 }
 
-void clipboard_store_set_backend(ClipboardBackend* backend) {
-    g_store.backend = backend ? backend : clipboard_backend_inmemory();
+void clipboard_store_clear(void) {
+    g_store.clear();
 }
 
-void clipboard_store_clear(void) {
-    if (!g_store.items) clipboard_store_init();
-    items_free(g_store.items);
-    g_store.items = arraylist_new(2);
-    mem_free(g_store.cached_text);
-    g_store.cached_text = NULL;
-    if (g_store.backend && g_store.backend->clear) g_store.backend->clear(g_store.backend);
+bool ClipboardStoreState::init() {
+    if (items) return true;     // idempotent
+    items = arraylist_new(2);
+    if (!items) return false;
+    backend = clipboard_backend_inmemory();
+    perm_read  = CLIPBOARD_PERMISSION_PROMPT;
+    perm_write = CLIPBOARD_PERMISSION_PROMPT;
+    return true;
+}
+
+void ClipboardStoreState::shutdown() {
+    if (items) {
+        items_free(items);
+        items = NULL;
+    }
+    mem_free(cached_text);
+    cached_text = NULL;
+    backend = NULL;
+}
+
+void ClipboardStoreState::set_backend(ClipboardBackend* next_backend) {
+    backend = next_backend ? next_backend : clipboard_backend_inmemory();
+}
+
+void ClipboardStoreState::clear() {
+    if (!items) init();
+    items_free(items);
+    items = arraylist_new(2);
+    mem_free(cached_text);
+    cached_text = NULL;
+    if (backend && backend->clear) backend->clear(backend);
 }
 
 void clipboard_store_write_mime(const char* mime, const char* text) {

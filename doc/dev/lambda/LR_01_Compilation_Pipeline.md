@@ -64,7 +64,7 @@ All dispatch happens inside `main()` (`main.cpp:1309`) as a sequence of `strcmp(
 - **Conversion.** `convert` → `exec_convert` (dispatcher at `:2339`, implementation at `:865`).
 - **Layout & render.** `layout` → `cmd_layout` (`:2383`); `math` (`:2443`); `render-batch` → `cmd_render_batch` (`:2450`); `render` → `render_html_to_output_target` (`:2457`).
 - **Viewer.** `replay` (`:2818`), `view` (`:2890`).
-- **Misc.** `serve` (`:3278`, a stub — see Known Issues), `webdriver` → `cmd_webdriver` (`:3359`), `fetch` (`:3370`), `test-batch` (`:3501`), `js-test-batch` (`:3614`), `--emit-sexpr` (`:4149`).
+- **Misc.** `serve` (`:3278`, a stub — see Known Issues), `fetch` (`:3370`), `test-batch` (`:3501`), `js-test-batch` (`:3614`), `--emit-sexpr` (`:4149`).
 - **Procedural run.** `run` (`:4158`, §4).
 - **Fallthrough.** Script-option parsing (`:4247`): `--mir`/`--mir-interp`, `--max-errors N`, `--optimize=N` and `-O0..-O3`, `--dry-run`; a bare file → `run_script_file` (`:4351`); otherwise → `run_repl` (`:4359`).
 

@@ -33,7 +33,7 @@ The atom is `struct DomBoundary { DomNode* node; uint32_t offset; }` (`event.hpp
 
 ### 2.4 `EditingSelection` — the façade over both worlds
 
-`struct EditingSelection` (`event.hpp`) is the union facade owned by the StateStore (`DocState`). Its `kind` is `EDIT_SEL_DOM_RANGE` (rich, carrying a `DomRange* range`) or `EDIT_SEL_TEXT_CONTROL` (form, carrying `DomElement* control` plus UTF-16 `start_u16`/`end_u16`). This is the single seam through which the two selection representations — DOM Range for rich, UTF-16 offsets for form controls — are unified, and `mutation_seq` lets projection consumers detect staleness.
+`struct EditingSelection` (`event.hpp`) is the union facade owned by the StateStore (`DocState`). Its `kind` is `EDIT_SEL_DOM_RANGE` (rich, carrying a `DomRange* range`) or `EDIT_SEL_TEXT_CONTROL` (form, carrying `DomElement* control` plus UTF-16 `start_u16`/`end_u16`). This is the single seam through which the two browser-required selection domains are unified, and `mutation_seq` orders selectionchange delivery and presentation refreshes.
 
 ---
 
@@ -89,7 +89,7 @@ The retired engine leaves only two **Layer-A helpers** in `editing.cpp:123`: `ed
 
 Because the DOM *is* the layout tree, every `DomText` carries a `TextRect` chain describing where its glyphs are drawn, and `event.hpp` / `dom_range_resolver.cpp` turns spec-level boundaries into pixels and back. `dom_range_resolve_layout` (`dom_range_resolver.cpp:593`) fills the `DomRange` layout cache from those `TextRect` chains (idempotent when `layout_valid`); `dom_hit_test_to_boundary` (`:1275`) maps a viewport `(vx, vy)` in CSS pixels to the closest `DomBoundary`. `dom_range_for_each_rect` (and the per-text / per-rect variants at `event.hpp`) emits selection rectangles; when given a `UiContext` it uses the registered **glyph-precise X resolvers** (`GlyphXResolverFn`/`ByteOffsetForXResolverFn`, `event.hpp`) so selection edges align pixel-exactly with the caret painter, and `ByteOffsetForXResolverFn` backs Up/Down arrow column preservation.
 
-`event.hpp` / `editing_geometry.cpp` wraps this for both surface kinds behind one `EditingBoundary` (`event.hpp`) and `EditingCaretRect` (`:38`). `editing_geometry_hit_test_boundary` (`editing_geometry.cpp:639`) is the unified pixel→boundary entry, honoring `EditingClampPolicy` and a Mac-specific `EDITING_POINT_BEHAVIOR_MAC` tweak (`:658`); `editing_geometry_caret_rect` and the text-control variants (`_text_control_caret_rect` at `:688`, `_for_each_selection_rect`) produce the rects the painters draw. The canonical selection→projection-cache refresh is `state_store_refresh_caret_projection` (`event.hpp`).
+`event.hpp` / `editing_geometry.cpp` wraps this for both surface kinds behind one `EditingBoundary` and `EditingCaretRect`. `editing_geometry_hit_test_boundary` is the unified pixel→boundary entry, honoring `EditingClampPolicy` and the Mac-specific `EDITING_POINT_BEHAVIOR_MAC` tweak; `editing_geometry_caret_rect` and the text-control variants produce the rects the painters draw. `selection_refresh_presentation` updates only the derived geometry/blink cache; logical boundaries remain canonical.
 
 ---
 
@@ -99,22 +99,21 @@ Because the DOM *is* the layout tree, every `DomText` carries a `TextRect` chain
 
 ---
 
-## 9. The projection-cache caveat
+## 9. Canonical boundaries and presentation geometry
 
-The canonical selection is `state->dom_selection` / `state->sel`; `CaretState` and `SelectionState` are projection caches for renderer/event paths that still need view + byte-offset snapshots. View/offset helper writes convert to `DomSelection` or `EditingSelection` first, then `state_store_refresh_caret_projection` rebuilds the projection caches. `dom_selection_sync_from_selection_projection`/`_caret` (`event.hpp`, implemented in `state_store.cpp`) remain only as compatibility bridges for projection-only paths. [RAD_17 — Interaction State](RAD_17_Interaction_State.md) owns the projection structs, and the DOM-boundary bridge to the Lambda editor's doc-tree value is the source-position bridge in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md).
+The canonical selection is `state->dom_selection` / `state->sel`. Snapshot/accessor functions derive anchor, focus, offsets, direction, and collapse state directly from `DomSelection`, `DomRange`, or the active text-control selection. `SelectionPresentation` contains only caret/range geometry, iframe offsets, blink state, and the previous dirty rectangle; it cannot become a second source of logical truth. Pointer-gesture lifetime lives in `EditingInteractionState`, not the presentation cache. The DOM-boundary bridge to the Lambda editor's doc-tree value remains the source-position bridge in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md).
 
 ---
 
 ## 10. Known Issues & Future Improvements
 
 1. **`dom_range.cpp` is a 4551-line monolith.** It mixes lifecycle, boundary comparison, mutation envelopes, extract/clone/surround, selectAll/triple-click, `Selection.modify`, and stringification. It is the single largest file in the area and the prime split candidate — a natural fission is (a) range/selection core + comparison, (b) mutation envelopes + §5.5 mutators, (c) modify/selectAll/word-breaking, (d) stringification.
-2. **Projection-cache consumers remain.** The canonical `DomSelection`/`EditingSelection` model still feeds `CaretState`/`SelectionState` projection caches for render/debug paths (`event.hpp`, `event.hpp`). *Improvement:* migrate renderers to the DomRange layout cache directly and delete the projection structs plus their invariants.
-3. **Text-control target range is a StaticRange hack.** `compute_text_control_target_ranges` (`editing_target_range.cpp:20`) synthesizes a boundary over the control *element* carrying UTF-16 `selectionStart`/`End`, "until E0 can promote form values to concrete DOM text nodes" (`event.hpp`). Two selection representations (DOM Range vs form UTF-16 offsets) remain unified only by the `EditingSelection` facade.
-4. **Incomplete OS clipboard backends.** Only in-memory and GLFW plain-text backends exist (`clipboard.cpp:169`, `194-232`); NSPasteboard/Win32/X11 rich-MIME backends are unimplemented, and `clipboard_store_sanitize` is a near-no-op (`event.hpp`). Rich copy/paste (`text/html`, images) round-trips only within the process.
-5. **Pattern-regex validation TODO (F5).** Form constraint validation `te_validate` cannot enforce `pattern="..."` — `TODO(F5): pattern="..." — needs lazy-compiled regex` (`text_edit.cpp:641`). (Detail belongs to [RAD_19](RAD_19_Form_Controls.md), noted here because it is a spec-coverage gap in the editing surface.)
-6. **LTR-only `Selection.modify`.** Direction mapping assumes LTR (left→backward, right→forward, `event.hpp`), and word granularity uses a simplistic alphanumeric-vs-other classifier (`event.hpp`) rather than a Unicode word-segmentation algorithm — RTL and complex-script editing will misbehave.
-7. **Single-range selection by design.** `DOM_SELECTION_MAX_RANGES == 1` (`event.hpp`); extra `addRange()` calls are silently ignored. This matches Chromium but is not the full spec, so multi-range selection WPTs cannot pass.
-8. **In-flux native-vs-JS mental model.** Two models coexist — rich is script-owned (Stage 4B), form is native — and the code carries many `retired`/`phased out`/`Stage 4B` markers (`editing_dispatch.cpp:832`, `902`; `editing.cpp:123`; `event.hpp,49`; `event.hpp`). The historical design docs remain on disk but are marked dead, which invites confusion.
+2. **Text-control target range is a StaticRange hack.** `compute_text_control_target_ranges` synthesizes a boundary over the control *element* carrying UTF-16 `selectionStart`/`End`, until form values can be promoted to concrete DOM text nodes. The document-vs-text-control distinction remains intentionally unified by the `EditingSelection` facade.
+3. **Incomplete OS clipboard backends.** Only in-memory and GLFW plain-text backends exist; NSPasteboard/Win32/X11 rich-MIME backends are unimplemented, and `clipboard_store_sanitize` is a near-no-op. Rich copy/paste (`text/html`, images) round-trips only within the process.
+4. **Pattern-regex validation TODO (F5).** Form constraint validation `te_validate` cannot enforce `pattern="..."` without a lazy-compiled regex. (Detail belongs to [RAD_19](RAD_19_Form_Controls.md), noted here because it is a spec-coverage gap in the editing surface.)
+5. **LTR-only `Selection.modify`.** Direction mapping assumes LTR and word granularity uses a simplistic alphanumeric-vs-other classifier rather than a Unicode word-segmentation algorithm — RTL and complex-script editing will misbehave.
+6. **Single-range selection by design.** `DOM_SELECTION_MAX_RANGES == 1`; extra `addRange()` calls are silently ignored. This matches Chromium but is not the full spec, so multi-range selection WPTs cannot pass.
+7. **In-flux native-vs-JS mental model.** Two models coexist — rich is script-owned (Stage 4B), form is native — and the code carries many `retired`/`phased out`/`Stage 4B` markers. The historical design docs remain on disk but are marked dead, which invites confusion.
 
 ---
 
@@ -123,7 +122,7 @@ The canonical selection is `state->dom_selection` / `state->sel`; `CaretState` a
 | File | Responsibility (this doc) |
 |---|---|
 | `radiant/event.hpp` / `dom_range.cpp` | `DomBoundary`/`DomRange`/`DomSelection`, UTF-16↔UTF-8 offsets, Range/Selection methods, live-range mutation envelopes, navigation, and stringification. |
-| `radiant/event.hpp` / `dom_range_resolver.cpp` | Layout-cache resolution, pixel↔boundary hit-testing, selection rectangles, glyph-precise X resolvers, and projection sync. |
+| `radiant/event.hpp` / `dom_range_resolver.cpp` | Layout-cache resolution, pixel↔boundary hit-testing, selection rectangles, and glyph-precise X resolvers. |
 | `radiant/event.hpp` / `editing.cpp` | `EditingSurface`/`EditingMode` resolution and the surviving Layer-A helpers. |
 | `radiant/event.hpp` / `editing_dispatch.cpp` | `editing_run_transaction`, the beforeinput/JS seam, dispatch hooks, and form dispatch variants. |
 | `radiant/event.hpp` / `editing_intent.cpp` | Input-intent taxonomy and key/text/composition mapping. |
@@ -138,6 +137,6 @@ The canonical selection is `state->dom_selection` / `state->sel`; `CaretState` a
 - [RAD_00 — Overview](RAD_00_Overview.md) — the set index and architecture.
 - [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) — the unified DOM/view tree these ranges point into, and the source-position bridge to the Lambda editor doc tree.
 - [RAD_15 — Events & Input](RAD_15_Events_Input.md) — the GLFW key/text/composition/paste pipeline that produces the intents fed to `editing_run_transaction`.
-- [RAD_17 — Interaction State](RAD_17_Interaction_State.md) — `DocState`/StateStore, the caret/selection projection structs refreshed from `DomSelection`.
+- [RAD_17 — Interaction State](RAD_17_Interaction_State.md) — `DocState`/StateStore, canonical selection accessors, and the presentation-only geometry cache.
 - [RAD_19 — Form Controls](RAD_19_Form_Controls.md) — the native (non-rich) text-control editing path: value/selection IDL, undo/redo, IME, constraint validation, caret/selection rendering.
 - [RAD_21 — JS Scripting Integration](RAD_21_JS_Scripting_Integration.md) — the JS/Lambda `beforeinput` handlers that own rich-host editing after the Stage 4B seam.

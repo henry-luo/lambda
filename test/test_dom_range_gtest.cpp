@@ -30,6 +30,7 @@ extern "C" {
 struct FakeState {
     Arena* arena;
     DomRange* live_ranges;
+    DomRange* range_freelist;
 };
 
 extern "C" Arena* dom_range_state_arena(DocState* s) {
@@ -37,6 +38,9 @@ extern "C" Arena* dom_range_state_arena(DocState* s) {
 }
 extern "C" DomRange** dom_range_state_live_ranges_slot(DocState* s) {
     return &reinterpret_cast<FakeState*>(s)->live_ranges;
+}
+extern "C" DomRange** dom_range_state_range_freelist_slot(DocState* s) {
+    return &reinterpret_cast<FakeState*>(s)->range_freelist;
 }
 extern "C" struct DomSelection* dom_range_state_selection(DocState*) {
     return nullptr;  // tests don't exercise selection-resync paths
@@ -65,6 +69,7 @@ protected:
         ASSERT_NE(arena, nullptr);
         fake_state.arena = arena;
         fake_state.live_ranges = nullptr;
+        fake_state.range_freelist = nullptr;
         state = reinterpret_cast<DocState*>(&fake_state);
         doc_storage.pool = pool;
         doc_storage.arena = arena;
@@ -199,6 +204,38 @@ TEST_F(DomRangeTest, RangeCreateIsCollapsedAtNullStart) {
     ASSERT_NE(r, nullptr);
     EXPECT_TRUE(dom_range_collapsed(r));
     dom_range_release(r);
+}
+
+TEST_F(DomRangeTest, RangeReleaseReusesFreelistSlot) {
+    DomRange* first = dom_range_create(state);
+    ASSERT_NE(first, nullptr);
+    const char* exc = nullptr;
+    ASSERT_TRUE(dom_range_set_start(first, hello, 1, &exc));
+    dom_range_release(first);
+    ASSERT_EQ(fake_state.range_freelist, first);
+
+    size_t used_after_release = arena_total_used(arena);
+    DomRange* second = dom_range_create(state);
+    EXPECT_EQ(second, first);
+    EXPECT_EQ(arena_total_used(arena), used_after_release);
+    EXPECT_EQ(second->start.node, nullptr);
+    EXPECT_EQ(second->end.node, nullptr);
+    EXPECT_EQ(second->ref_count, 1u);
+    dom_range_release(second);
+}
+
+TEST_F(DomRangeTest, RangeChurnPlateausArenaUse) {
+    DomRange* warmup = dom_range_create(state);
+    ASSERT_NE(warmup, nullptr);
+    dom_range_release(warmup);
+    size_t plateau_used = arena_total_used(arena);
+
+    for (uint32_t i = 0; i < 1000000u; i++) {
+        DomRange* r = dom_range_create(state);
+        ASSERT_NE(r, nullptr);
+        dom_range_release(r);
+    }
+    EXPECT_EQ(arena_total_used(arena), plateau_used);
 }
 
 TEST_F(DomRangeTest, RangeSetStartEndUpdatesBoundaries) {

@@ -468,6 +468,13 @@ static int buffer_number_to_int_or_default(Item item, int default_value) {
 extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
     TypeId tid = get_type_id(data);
 
+    if (tid == LMD_TYPE_BINARY) {
+        String* bin = data.get_safe_binary();
+        // Buffer receives an owned copy so mutation never changes Lambda's
+        // immutable binary value.
+        return js_buffer_from_bytes(bin ? bin->chars : NULL, bin ? (int)bin->len : 0);
+    }
+
     if (tid == LMD_TYPE_STRING) {
         // string → utf-8 bytes
         String* s = it2s(data);

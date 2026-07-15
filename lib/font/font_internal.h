@@ -252,6 +252,7 @@ struct FontContext {
     Arena*          glyph_arena;        // separate arena for glyph bitmap data
     bool            owns_pool;          // true if we created the pool
     bool            owns_arena;         // true if we created the arena
+    bool            owns_glyph_arena;   // true if we created the glyph arena
 
     // font database
     FontDatabase*   database;
@@ -375,6 +376,8 @@ typedef struct LoadedGlyphCacheEntry {
 // ============================================================================
 // Internal functions — called across font module source files
 // ============================================================================
+
+bool                font_context_enforce_glyph_arena_limit(FontContext* ctx);
 
 // font_database.c
 FontDatabase*       font_database_create_internal(Pool* pool, Arena* arena);

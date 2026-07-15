@@ -197,7 +197,7 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
         // set up navigation delegate
         LayerWebViewDelegate* delegate = [[LayerWebViewDelegate alloc] init];
 
-        WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT);
+        WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: platform webview handle is released by webview_layer_platform_destroy.
         handle->wk_view = wk_view;
         handle->mode = WEBVIEW_MODE_LAYER;
         handle->pixel_ratio = pixel_ratio;
@@ -260,21 +260,6 @@ void webview_layer_platform_set_html(WebViewHandle* handle, const char* html) {
         NSString* ns_html = [NSString stringWithUTF8String:html];
         [handle->wk_view loadHTMLString:ns_html baseURL:nil];
         log_debug("webview layer: loaded inline HTML (%zu bytes)", strlen(html));
-    }
-}
-
-void webview_layer_platform_eval_js(WebViewHandle* handle, const char* js) {
-    if (!handle || !handle->wk_view || !js) return;
-    @autoreleasepool {
-        NSString* ns_js = [NSString stringWithUTF8String:js];
-        [handle->wk_view evaluateJavaScript:ns_js completionHandler:^(id _result, NSError* error) {
-            (void)_result;
-            if (error) {
-                log_error("webview layer eval_js error: %s", error.localizedDescription.UTF8String);
-            }
-            // JS execution may have changed content
-            if (handle) handle->dirty = true;
-        }];
     }
 }
 

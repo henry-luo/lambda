@@ -14,16 +14,16 @@
 // Lottie Animation Tick
 // ============================================================================
 
-void lottie_animation_tick(AnimationInstance* anim, float t) {
-    LottiePlayer* lp = (LottiePlayer*)anim->state;
-    if (!lp || !lp->tvg_animation || !lp->tvg_canvas || !lp->playing) return;
+void LottiePlayer::tick(AnimationInstance* anim, float t) {
+    (void)anim;
+    if (!tvg_animation || !tvg_canvas || !playing) return;
 
-    Tvg_Animation tvg_anim = (Tvg_Animation)lp->tvg_animation;
-    Tvg_Canvas canvas = (Tvg_Canvas)lp->tvg_canvas;
+    Tvg_Animation tvg_anim = (Tvg_Animation)tvg_animation;
+    Tvg_Canvas canvas = (Tvg_Canvas)tvg_canvas;
 
     // Compute frame number from normalized progress
-    float frame_no = t * lp->total_frames;
-    if (frame_no >= lp->total_frames) frame_no = lp->total_frames - 0.001f;
+    float frame_no = t * total_frames;
+    if (frame_no >= total_frames) frame_no = total_frames - 0.001f;
     if (frame_no < 0) frame_no = 0;
 
     // Set the frame on the ThorVG animation
@@ -34,53 +34,57 @@ void lottie_animation_tick(AnimationInstance* anim, float t) {
     }
 
     // Clear and re-draw
-    memset(lp->pixels, 0, (size_t)lp->width * lp->height * sizeof(uint32_t));
-    tvg_swcanvas_set_target(canvas, lp->pixels, lp->width,
-                            lp->width, lp->height, TVG_COLORSPACE_ABGR8888);
+    memset(pixels, 0, (size_t)width * height * sizeof(uint32_t));
+    tvg_swcanvas_set_target(canvas, pixels, width,
+                            width, height, TVG_COLORSPACE_ABGR8888);
     tvg_canvas_draw(canvas, false);
     tvg_canvas_sync(canvas);
 
     // Point the surface pixels at our buffer
-    if (lp->surface) {
-        lp->surface->pixels = lp->pixels;
-        image_surface_bump_generation(lp->surface);
+    if (surface) {
+        surface->pixels = pixels;
+        image_surface_bump_generation(surface);
     }
 
-    log_debug("lottie tick: frame %.1f/%.0f (t=%.3f)", frame_no, lp->total_frames, t);
+    log_debug("lottie tick: frame %.1f/%.0f (t=%.3f)", frame_no, total_frames, t);
 }
 
-void lottie_animation_finish(AnimationInstance* anim) {
-    LottiePlayer* lp = (LottiePlayer*)anim->state;
-    if (!lp) return;
-
+void LottiePlayer::finish(AnimationInstance* anim) {
     log_info("lottie animation finished: %.0f frames, %.1fs duration",
-             lp->total_frames, lp->duration);
+             total_frames, duration);
 
-    lp->playing = false;
+    playing = false;
 
     // Clean up ThorVG resources
-    if (lp->tvg_canvas) {
-        tvg_canvas_destroy((Tvg_Canvas)lp->tvg_canvas);
-        lp->tvg_canvas = NULL;
+    if (tvg_canvas) {
+        tvg_canvas_destroy((Tvg_Canvas)tvg_canvas);
+        tvg_canvas = NULL;
     }
     // Note: tvg_animation_del also deletes the picture, so don't double-free
-    if (lp->tvg_animation) {
-        tvg_animation_del((Tvg_Animation)lp->tvg_animation);
-        lp->tvg_animation = NULL;
+    if (tvg_animation) {
+        tvg_animation_del((Tvg_Animation)tvg_animation);
+        tvg_animation = NULL;
     }
 
     // Free pixel buffer
-    if (lp->pixels) {
-        mem_free(lp->pixels);
-        lp->pixels = NULL;
+    if (pixels) {
+        mem_free(pixels);
+        pixels = NULL;
     }
-    if (lp->surface) {
-        lp->surface->pixels = NULL;
-        image_surface_bump_generation(lp->surface);
-    }
+    image_surface_detach_pixels(surface);
 
-    mem_free(lp);
+    mem_free(this);
     anim->state = NULL;
+}
+
+void lottie_animation_tick(AnimationInstance* anim, float t) {
+    LottiePlayer* lp = anim ? (LottiePlayer*)anim->state : nullptr;
+    if (lp) lp->tick(anim, t);
+}
+
+void lottie_animation_finish(AnimationInstance* anim) {
+    LottiePlayer* lp = anim ? (LottiePlayer*)anim->state : nullptr;
+    if (lp) lp->finish(anim);
 }
 
 // ============================================================================
@@ -152,7 +156,7 @@ static LottiePlayer* lottie_player_init(ImageSurface* surface,
     // Push the animation's picture to the canvas
     tvg_canvas_push(canvas, pic);
 
-    LottiePlayer* lp = (LottiePlayer*)mem_calloc(1, sizeof(LottiePlayer), MEM_CAT_RENDER);
+    LottiePlayer* lp = (LottiePlayer*)mem_calloc(1, sizeof(LottiePlayer), MEM_CAT_RENDER); // OBJ_HEAP_OK: media player handle outlives a single render pass and has explicit destroy.
     lp->tvg_animation = tvg_anim;
     lp->tvg_canvas = canvas;
     lp->total_frames = total_frames;

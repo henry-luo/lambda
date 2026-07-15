@@ -10,6 +10,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/log.h"
 #include "../lib/arena.h"
 #include "../lib/font/font.h"
@@ -444,19 +445,15 @@ static void svg_add_style_rule(SvgInlineRenderContext* ctx, const char* selector
                                const char* value_start, const char* value_end) {
     if (!ctx || !selector_start || !name_start || !value_start) return;
     if (ctx->style_rule_count >= 256) return;
-    if (!ctx->style_rules) {
-        ctx->style_rule_capacity = 64;
-        ctx->style_rules = mem_calloc(ctx->style_rule_capacity, sizeof(SvgStyleRule), MEM_CAT_RENDER);
-    } else if (ctx->style_rule_count >= ctx->style_rule_capacity) {
-        int new_cap = ctx->style_rule_capacity * 2;
-        SvgStyleRule* old_rules = (SvgStyleRule*)ctx->style_rules;
-        SvgStyleRule* new_rules = (SvgStyleRule*)mem_calloc(new_cap, sizeof(SvgStyleRule), MEM_CAT_RENDER);
-        if (!new_rules) return;
-        memcpy(new_rules, old_rules, sizeof(SvgStyleRule) * ctx->style_rule_count);
-        mem_free(old_rules);
-        ctx->style_rules = new_rules;
-        ctx->style_rule_capacity = new_cap;
+    SvgStyleRule* style_rules = (SvgStyleRule*)ctx->style_rules;
+    if (!lam::mem_grow_array(&style_rules, &ctx->style_rule_capacity,
+                             ctx->style_rule_count + 1, 64, MEM_CAT_RENDER)) {
+        // Style rules are appended immediately after growth; failing closed avoids writing past the old array.
+        log_error("[SVG] failed to grow inline style rule array to %d entries",
+                  ctx->style_rule_count + 1);
+        return;
     }
+    ctx->style_rules = style_rules;
     SvgStyleRule* rules = (SvgStyleRule*)ctx->style_rules;
     SvgStyleRule* rule = &rules[ctx->style_rule_count];
     svg_copy_trim(rule->selector, sizeof(rule->selector), selector_start, selector_end);
@@ -5202,7 +5199,7 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
                       &nested_paint);
 
     paint_list_destroy(&nested_paint);
-    arena_destroy(temp_arena);
+    mem_arena_destroy(temp_arena);
     mem_pool_destroy(temp_pool);
 }
 
@@ -5302,7 +5299,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
     scratch_release(&scratch);
     paint_list_destroy(&paint_list);
     dl_destroy(&dl);
-    arena_destroy(temp_arena);
+    mem_arena_destroy(temp_arena);
     mem_pool_destroy(temp_pool);
 }
 

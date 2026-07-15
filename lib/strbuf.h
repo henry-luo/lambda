@@ -16,7 +16,7 @@ extern "C" {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
-typedef struct {
+typedef struct StrBuf {
     // extends StrView
     char* str;        // pointer to string data (may or may-not be null-terminated)
     size_t length;    // length excluding null terminator    

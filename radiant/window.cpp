@@ -825,67 +825,6 @@ void log_cleanup() {
 }
 
 // Layout test function for headless testing
-int run_layout(const char* html_file) {
-    log_debug("Radiant Layout Test Mode");
-    log_debug("Testing file: %s", html_file);
-
-    // Initialize without GUI
-    log_init_wrapper();
-
-    // Initialize UI context properly in headless mode
-    if (ui_context_init(&ui_context, true) != 0) {
-        log_error("Error: Failed to initialize UI context");
-        return 1;
-    }
-
-    // Create surface for layout calculations (no actual rendering)
-    ui_context_create_surface(&ui_context, ui_context.window_width, ui_context.window_height);
-
-    // Get current directory for relative path resolution
-    Url* cwd = get_current_dir();
-    if (!cwd) {
-        log_error("Error: Could not get current directory");
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    // Create memory pool for document loading
-    Pool* pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "window");
-    if (!pool) {
-        log_error("Error: Failed to create memory pool");
-        url_destroy(cwd);
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    // Load document based on format
-    // CSS media queries should use CSS pixels (logical pixels), not physical pixels
-    int css_viewport_width = (int)(ui_context.window_width / ui_context.pixel_ratio);
-    int css_viewport_height = (int)(ui_context.window_height / ui_context.pixel_ratio);
-    log_debug("Loading document...");
-    DomDocument* doc = load_doc_by_format(html_file, cwd, css_viewport_width, css_viewport_height, pool);
-    if (!doc) {
-        log_error("Error: Could not load file: %s", html_file);
-        pool_destroy(pool);
-        url_destroy(cwd);
-        ui_context_cleanup(&ui_context);
-        return 1;
-    }
-
-    ui_context.document = doc;
-
-    // Layout the document
-    log_debug("Performing layout...");
-    layout_html_doc(&ui_context, doc, false);
-    log_debug("Layout completed successfully!");
-
-    // Cleanup
-    url_destroy(cwd);
-    ui_context_cleanup(&ui_context);
-    log_cleanup();
-    return 0;
-}
-
 static int window_finish_event_sim(EventSimContext* sim_ctx) {
     if (!sim_ctx) return 0;
     int fail_count = sim_ctx->fail_count;
@@ -1432,9 +1371,4 @@ int view_lambda_script_source_in_window_with_events(const char* script_name, con
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
     return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false);
-}
-
-int window_main(int argc, char* argv[]) {
-    // render the default index.html using unified viewer
-    return view_doc_in_window(NULL);
 }

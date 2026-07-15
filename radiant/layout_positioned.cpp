@@ -1986,17 +1986,6 @@ void layout_shift_static_positioned_abs_descendants(ViewElement* root, float del
 }
 
 /**
- * Check if an element has positioning properties that require special handling
- */
-bool element_has_positioning(ViewBlock* block) {
-    return block->position &&
-           (block->position->position == CSS_VALUE_RELATIVE ||
-            block->position->position == CSS_VALUE_STICKY ||
-            block->position->position == CSS_VALUE_ABSOLUTE ||
-            block->position->position == CSS_VALUE_FIXED);
-}
-
-/**
  * Check if an element has float properties
  * Per CSS 2.1 section 9.7: float is ignored for absolutely positioned elements
  * (position: absolute or position: fixed)

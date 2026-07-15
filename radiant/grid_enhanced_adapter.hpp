@@ -2,16 +2,14 @@
 // internal implementation header - only radiant/ and dedicated white-box tests may include it
 
 /**
- * Grid Enhanced Adapter
+ * Grid Enhanced Integration
  *
- * Bridges the existing Radiant grid types (GridTrack, GridTrackSize, etc.)
- * with the new enhanced grid infrastructure (EnhancedGridTrack, TrackSizingFunction,
- * CellOccupancyMatrix, etc.) adapted from Taffy.
+ * Connects parsed GridTrackSize syntax and the existing grid layout pipeline to
+ * the enhanced track, placement, occupancy, and sizing infrastructure.
  *
  * This adapter provides:
- * 1. Type conversion functions between old and new representations
- * 2. Integration helpers that use the new algorithms with existing data structures
- * 3. Migration path utilities for incremental adoption
+ * GridContainerLayout stores EnhancedGridTrack arrays directly. GridTrackSize is
+ * converted once at pass initialization and never retained as computed state.
  *
  * Uses fixed-capacity arrays and C+ helper functions for layout scratch work.
  */
@@ -40,7 +38,7 @@ namespace grid_adapter {
 using namespace grid;
 
 // ============================================================================
-// Type Conversion: Old → New
+// Parsed syntax → canonical track sizing functions
 // ============================================================================
 
 /**
@@ -146,83 +144,34 @@ inline TrackSizingFunction convert_to_track_sizing(GridTrackSize* old_size) {
 }
 
 /**
- * Convert old GridTrack (from grid.hpp) to new EnhancedGridTrack
- */
-inline EnhancedGridTrack convert_to_enhanced_track(::GridTrack* old_track) {
-    if (!old_track) {
-        return EnhancedGridTrack(TrackSizingFunction::Auto());
-    }
-
-    EnhancedGridTrack enhanced(convert_to_track_sizing(old_track->size));
-
-    // Transfer existing computed values if available
-    enhanced.base_size = static_cast<float>(old_track->base_size);
-    enhanced.growth_limit = old_track->growth_limit;
-
-    return enhanced;
-}
-
-/**
- * Convert old GridContainerLayout tracks to vector of EnhancedGridTrack
- */
-inline TrackArray convert_tracks_to_enhanced(
-    ::GridTrack* old_tracks, int count)
-{
-    TrackArray result;
-    result.reserve(count);
-
-    for (int i = 0; i < count; i++) {
-        result.push_back(convert_to_enhanced_track(&old_tracks[i]));
-    }
-
-    return result;
-}
-
-// ============================================================================
-// Type Conversion: New → Old
-// ============================================================================
-
-/**
- * Copy vector of EnhancedGridTrack back to old GridTrack array (from grid.hpp)
- * Uses the "largest remainder" method to distribute any fractional pixel loss:
+ * Finalize canonical used sizes with the largest-remainder method:
  * floor all track sizes first, then give +1px to the tracks with the largest
  * fractional parts until the integer total matches round(float total).
  * This prevents accumulated truncation errors (e.g. 4×17.5 → 158 instead of 160).
  */
-inline void copy_enhanced_tracks_to_old(
-    const TrackArray& enhanced_tracks,
-    ::GridTrack* old_tracks, int count)
-{
-    int copy_count = grid_min_value(static_cast<int>(enhanced_tracks.size()), count);
-
-    // Pass 1: floor each track and copy non-size fields
+inline void finalize_track_used_sizes(TrackArray& tracks) {
+    int track_count = static_cast<int>(tracks.size()); // INT_CAST_OK: bounded track count
     float float_total = 0.0f;
     int floor_total = 0;
-    for (int i = 0; i < copy_count; i++) {
-        float v = enhanced_tracks[i].base_size;
-        int fv = static_cast<int>(v);           // floor (truncate towards zero)
-        old_tracks[i].base_size     = fv;
-        old_tracks[i].computed_size = fv;
-        old_tracks[i].growth_limit  = enhanced_tracks[i].growth_limit;
-        old_tracks[i].is_flexible   = enhanced_tracks[i].max_track_sizing_function.is_fr();
+    struct FracEntry { float frac; int idx; };
+    FracEntry fracs[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 8 B = 512 B; layout-pass scratch.
+    size_t frac_count = 0;
+    fracs[0] = {};
+    for (int i = 0; i < track_count; i++) {
+        float v = tracks[i].base_size;
+        int fv = static_cast<int>(v); // INT_CAST_OK: largest-remainder floor
+        tracks[i].base_size = static_cast<float>(fv);
+        float frac = v - static_cast<float>(fv);
+        if (frac > 0.0f) fracs[frac_count++] = {frac, i};
         float_total += v;
         floor_total += fv;
     }
 
     // Pass 2: distribute the fractional remainder to tracks with highest frac parts
-    int remainder = static_cast<int>(roundf(float_total)) - floor_total;
-    if (remainder > 0 && copy_count > 0) {
+    int remainder = static_cast<int>(roundf(float_total)) - floor_total; // INT_CAST_OK: rounded pixel remainder
+    if (remainder > 0 && track_count > 0) {
         // Build (fractional_part, index) pairs and sort descending
         // Use a simple selection approach to keep code minimal
-        struct FracEntry { float frac; int idx; };
-        FracEntry fracs[MAX_GRID_TRACKS];  // LARGE_ARRAY_OK: bound = MAX_GRID_TRACKS (64) × 8 B = 512 B; layout-pass scratch.
-        size_t frac_count = 0;
-        fracs[0] = {};  // suppress potential uninitialized warning
-        for (int i = 0; i < copy_count; i++) {
-            float frac = enhanced_tracks[i].base_size
-                       - static_cast<float>(static_cast<int>(enhanced_tracks[i].base_size));
-            if (frac > 0.0f && frac_count < MAX_GRID_TRACKS) fracs[frac_count++] = {frac, i};
-        }
         for (size_t a = 0; a < frac_count; a++) {
             size_t best = a;
             for (size_t b = a + 1; b < frac_count; b++) {
@@ -236,11 +185,10 @@ inline void copy_enhanced_tracks_to_old(
                 fracs[best] = tmp;
             }
         }
-        int to_add = grid_min_value(remainder, static_cast<int>(frac_count));
+        int to_add = grid_min_value(remainder, static_cast<int>(frac_count)); // INT_CAST_OK: bounded remainder count
         for (int j = 0; j < to_add; j++) {
             int idx = fracs[j].idx;
-            old_tracks[idx].base_size++;
-            old_tracks[idx].computed_size++;
+            tracks[idx].base_size += 1.0f;
         }
     }
 }
@@ -850,13 +798,12 @@ inline void run_enhanced_track_sizing(
               container_width, container_height,
               grid_layout->computed_column_count, grid_layout->computed_row_count);
 
-    // Convert existing tracks to enhanced format
-    TrackArray col_tracks =
-        convert_tracks_to_enhanced(grid_layout->computed_columns,
-                                   grid_layout->computed_column_count);
-    TrackArray row_tracks =
-        convert_tracks_to_enhanced(grid_layout->computed_rows,
-                                   grid_layout->computed_row_count);
+    if (!grid_layout->computed_columns || !grid_layout->computed_rows) return;
+    TrackArray& col_tracks = *grid_layout->computed_columns;
+    TrackArray& row_tracks = *grid_layout->computed_rows;
+    // Percentage sizing temporarily rewrites functions; preserve only the pass input definitions.
+    TrackArray col_track_definitions = col_tracks;
+    TrackArray row_track_definitions = row_tracks;
 
     log_debug("  converted col_tracks.size=%zu, row_tracks.size=%zu",
               col_tracks.size(), row_tracks.size());
@@ -1035,14 +982,6 @@ inline void run_enhanced_track_sizing(
         for (size_t _di = 0; _di < col_tracks.size(); _di++)
             log_debug("  DBG post-stretch col[%zu]: base=%.2f gl=%.2f", _di, col_tracks[_di].base_size, col_tracks[_di].growth_limit);
 
-        // Compute track positions
-        compute_track_offsets(col_tracks, effective_col_gap);
-
-        // IMPORTANT: Copy column results back BEFORE sizing rows
-        // Row sizing needs to know the final column widths to calculate item heights
-        copy_enhanced_tracks_to_old(col_tracks, grid_layout->computed_columns,
-                                     grid_layout->computed_column_count);
-
         // === Second pass: re-resolve percentage tracks and/or percentage gaps ===
         // After the first pass (where pct were treated as auto, pct gaps as 0),
         // we know the container width. Re-resolve and re-run all phases.
@@ -1071,48 +1010,46 @@ inline void run_enhanced_track_sizing(
                 : 0.0f;
             float col_available2 = first_total - col_gap_total2;
 
-            // Re-create col_tracks from the original track definitions
-            TrackArray col_tracks2 =
-                convert_tracks_to_enhanced(grid_layout->computed_columns,
-                                           grid_layout->computed_column_count);
+            // Restore input sizing functions before resolving percentages definitively.
+            col_tracks = col_track_definitions;
             // Override pct tracks with their resolved values based on kind
             for (size_t _pi = 0; _pi < pct_col_count; _pi++) {
                 const auto& pti = pct_col_infos[_pi];
                 float resolved = first_total * (pti.pct / 100.0f);
                 switch (pti.kind) {
                     case PctKind::BarePercent:
-                        col_tracks2[pti.idx].min_track_sizing_function = MinTrackSizingFunction::Length(resolved);
-                        col_tracks2[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+                        col_tracks[pti.idx].min_track_sizing_function = MinTrackSizingFunction::Length(resolved);
+                        col_tracks[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
                         break;
                     case PctKind::FitContentPercent:
-                        col_tracks2[pti.idx].min_track_sizing_function = pti.orig_min;
-                        col_tracks2[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::FitContentPx(resolved);
+                        col_tracks[pti.idx].min_track_sizing_function = pti.orig_min;
+                        col_tracks[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::FitContentPx(resolved);
                         break;
                     case PctKind::MaxPercent:
-                        col_tracks2[pti.idx].min_track_sizing_function = pti.orig_min;
-                        col_tracks2[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+                        col_tracks[pti.idx].min_track_sizing_function = pti.orig_min;
+                        col_tracks[pti.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
                         break;
                 }
             }
 
             // Re-run all phases with pct tracks now definite and resolved gap
-            initialize_track_sizes(col_tracks2, col_available2);
+            initialize_track_sizes(col_tracks, col_available2);
             if (!col_contributions.empty()) {
-                resolve_intrinsic_track_sizes(col_tracks2, col_contributions, resolved_col_gap, col_available);
+                resolve_intrinsic_track_sizes(col_tracks, col_contributions, resolved_col_gap, col_available);
             }
             // For shrink-to-fit containers: use indefinite semantics for maximize
             // so that only finite-gl tracks grow to their gl (no free-space distribution).
             float max_avail = (container_width < 0) ? -1.0f : col_available2;
-            maximize_tracks(col_tracks2, max_avail, max_avail);
-            expand_flexible_tracks(col_tracks2, 0.0f, col_available2, col_available2,
+            maximize_tracks(col_tracks, max_avail, max_avail);
+            expand_flexible_tracks(col_tracks, 0.0f, col_available2, col_available2,
                                    col_contributions, resolved_col_gap);
             // For shrink-to-fit: no stretching (container size = content, no free space)
             if (container_width >= 0)
-                stretch_auto_tracks(col_tracks2, 0.0f, col_available2);
-            compute_track_offsets(col_tracks2, resolved_col_gap);
-            copy_enhanced_tracks_to_old(col_tracks2, grid_layout->computed_columns,
-                                         grid_layout->computed_column_count);
+                stretch_auto_tracks(col_tracks, 0.0f, col_available2);
         }
+        // Canonical consumers observe the same integer-pixel distribution as the legacy copy seam.
+        finalize_track_used_sizes(col_tracks);
+        compute_track_offsets(col_tracks, grid_layout->column_gap);
     }
 
     // === Run track sizing for rows ===
@@ -1179,46 +1116,38 @@ inline void run_enhanced_track_sizing(
             if (out_row_intrinsic_height) *out_row_intrinsic_height = first_row_total;
 
             // Re-resolve percentage row tracks against first-pass intrinsic height
-            TrackArray row_tracks2 = row_tracks;
+            row_tracks = row_track_definitions;
             for (size_t _pi = 0; _pi < pct_row_count; _pi++) {
                 const auto& pri = pct_row_infos[_pi];
                 float resolved = first_row_total * (pri.pct / 100.0f);
                 switch (pri.kind) {
                     case RowPctKind::BarePercent:
-                        row_tracks2[pri.idx].min_track_sizing_function = MinTrackSizingFunction::Length(resolved);
-                        row_tracks2[pri.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+                        row_tracks[pri.idx].min_track_sizing_function = MinTrackSizingFunction::Length(resolved);
+                        row_tracks[pri.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
                         break;
                     case RowPctKind::FitContentPercent:
-                        row_tracks2[pri.idx].min_track_sizing_function = pri.orig_min;
-                        row_tracks2[pri.idx].max_track_sizing_function = MaxTrackSizingFunction::FitContentPx(resolved);
+                        row_tracks[pri.idx].min_track_sizing_function = pri.orig_min;
+                        row_tracks[pri.idx].max_track_sizing_function = MaxTrackSizingFunction::FitContentPx(resolved);
                         break;
                     case RowPctKind::MaxPercent:
-                        row_tracks2[pri.idx].min_track_sizing_function = pri.orig_min;
-                        row_tracks2[pri.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
+                        row_tracks[pri.idx].min_track_sizing_function = pri.orig_min;
+                        row_tracks[pri.idx].max_track_sizing_function = MaxTrackSizingFunction::Length(resolved);
                         break;
                 }
             }
 
             float row_available2 = first_row_total;
-            initialize_track_sizes(row_tracks2, row_available2);
+            initialize_track_sizes(row_tracks, row_available2);
             if (!row_contributions.empty()) {
-                resolve_intrinsic_track_sizes(row_tracks2, row_contributions, grid_layout->row_gap, row_available);
+                resolve_intrinsic_track_sizes(row_tracks, row_contributions, grid_layout->row_gap, row_available);
             }
-            maximize_tracks(row_tracks2, row_available2, row_available2);
-            expand_flexible_tracks(row_tracks2, 0.0f, row_available2, row_available2,
+            maximize_tracks(row_tracks, row_available2, row_available2);
+            expand_flexible_tracks(row_tracks, 0.0f, row_available2, row_available2,
                                    row_contributions, grid_layout->row_gap);
-            stretch_auto_tracks(row_tracks2, 0.0f, row_available2);
-            compute_track_offsets(row_tracks2, grid_layout->row_gap);
-            copy_enhanced_tracks_to_old(row_tracks2, grid_layout->computed_rows,
-                                         grid_layout->computed_row_count);
-        } else {
-            // Compute track positions
-            compute_track_offsets(row_tracks, grid_layout->row_gap);
-
-            // Copy row results back
-            copy_enhanced_tracks_to_old(row_tracks, grid_layout->computed_rows,
-                                         grid_layout->computed_row_count);
+            stretch_auto_tracks(row_tracks, 0.0f, row_available2);
         }
+        finalize_track_used_sizes(row_tracks);
+        compute_track_offsets(row_tracks, grid_layout->row_gap);
     }
 }
 

@@ -35,6 +35,10 @@ extern "C" DomRange** dom_range_state_live_ranges_slot(DocState*) {
     static DomRange* slot = nullptr;
     return &slot;
 }
+extern "C" DomRange** dom_range_state_range_freelist_slot(DocState*) {
+    static DomRange* slot = nullptr;
+    return &slot;
+}
 extern "C" struct DomSelection* dom_range_state_selection(DocState*) {
     return nullptr;
 }

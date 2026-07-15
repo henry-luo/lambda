@@ -11,6 +11,7 @@
 // ============================================================================
 
 #include "view.hpp"
+#include "grid_track.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lib/arraylist.h"
@@ -224,14 +225,6 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
     AvailableSpace available_space
 );
 
-inline IntrinsicSizes intrinsic_sizes_width(IntrinsicSizesBidirectional sizes) {
-    return {sizes.min_content_width, sizes.max_content_width};
-}
-
-inline IntrinsicSizes intrinsic_sizes_height(IntrinsicSizesBidirectional sizes) {
-    return {sizes.min_content_height, sizes.max_content_height};
-}
-
 inline IntrinsicSizes intrinsic_sizes_for_axis(IntrinsicSizesBidirectional sizes, bool is_row_axis) {
     if (is_row_axis) {
         return {sizes.min_content_width, sizes.max_content_width};
@@ -244,11 +237,6 @@ struct CellIntrinsicWidths {
     float max_width;
 };
 
-CellIntrinsicWidths measure_table_cell_intrinsic_widths(
-    LayoutContext* lycon,
-    ViewBlock* cell
-);
-
 typedef struct IntrinsicSize {
     float min_width;
     float max_width;
@@ -259,8 +247,6 @@ typedef struct IntrinsicSize {
     float last_baseline;
 } IntrinsicSize;
 
-IntrinsicSize layout_measure_intrinsic(LayoutContext* lycon, DomNode* node,
-    AvailableSpace space);
 IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 
@@ -496,7 +482,6 @@ float layout_content_width_from_border_box(ViewBlock* block, float border_width)
 float layout_content_height_from_border_box(ViewBlock* block, float border_height);
 float layout_border_width_from_content_box(ViewBlock* block, float content_width);
 float layout_border_height_from_content_box(ViewBlock* block, float content_height);
-float layout_padding_border_axis(ViewBlock* block, bool horizontal);
 float layout_boundary_content_size_from_border_box(const BoundaryProp* bound, float border_size, bool horizontal);
 float layout_boundary_border_size_from_content_box(const BoundaryProp* bound, float content_size, bool horizontal);
 float layout_content_size_from_border_box(ViewBlock* block, float border_size, bool horizontal);
@@ -520,7 +505,6 @@ float layout_apply_min_max_height(ViewBlock* block, float height, bool height_is
 float layout_apply_min_max_axis(ViewBlock* block, float size, bool horizontal, bool size_is_border_box);
 float layout_clamp_min_max_width(ViewBlock* block, float width);
 float layout_clamp_min_max_height(ViewBlock* block, float height);
-float layout_clamp_min_max_axis(ViewBlock* block, float size, bool horizontal);
 
 static inline float layout_clamp_positive_min_max_width(ViewBlock* block, float width) {
     if (!block || !block->blk) return width;
@@ -532,24 +516,6 @@ static inline float layout_clamp_positive_min_max_width(ViewBlock* block, float 
         constrained_width = block->blk->given_min_width;
     }
     return constrained_width;
-}
-
-static inline float layout_clamp_positive_min_max_height(ViewBlock* block, float height) {
-    if (!block || !block->blk) return height;
-    float constrained_height = height;
-    if (block->blk->given_max_height > 0.0f && constrained_height > block->blk->given_max_height) {
-        constrained_height = block->blk->given_max_height;
-    }
-    if (block->blk->given_min_height > 0.0f && constrained_height < block->blk->given_min_height) {
-        constrained_height = block->blk->given_min_height;
-    }
-    return constrained_height;
-}
-
-static inline float layout_clamp_positive_min_max_axis(ViewBlock* block, float size, bool horizontal) {
-    return horizontal
-        ? layout_clamp_positive_min_max_width(block, size)
-        : layout_clamp_positive_min_max_height(block, size);
 }
 
 static inline float layout_explicit_min_width_or(ViewBlock* block, float fallback) {
@@ -580,12 +546,6 @@ static inline float layout_explicit_max_height_or(ViewBlock* block, float fallba
     return (block && block->blk && block->blk->given_max_height >= 0.0f)
         ? block->blk->given_max_height
         : fallback;
-}
-
-static inline float layout_explicit_max_axis_or(ViewBlock* block, bool horizontal, float fallback) {
-    return horizontal
-        ? layout_explicit_max_width_or(block, fallback)
-        : layout_explicit_max_height_or(block, fallback);
 }
 
 static inline bool layout_has_explicit_min_width(ViewBlock* block) {
@@ -636,10 +596,6 @@ static inline float layout_floor_min_width(ViewBlock* block, float width) {
 static inline float layout_floor_min_height(ViewBlock* block, float height) {
     if (!block || !block->blk || block->blk->given_min_height < 0.0f) return height;
     return height < block->blk->given_min_height ? block->blk->given_min_height : height;
-}
-
-static inline float layout_floor_min_axis(ViewBlock* block, float size, bool horizontal) {
-    return horizontal ? layout_floor_min_width(block, size) : layout_floor_min_height(block, size);
 }
 
 static inline void layout_apply_positive_min_max_contribution(ViewBlock* block, bool horizontal,
@@ -780,12 +736,17 @@ typedef struct CounterContext {
     Arena* arena;
     CounterScope* current_scope;
     lam::ArrayList<CounterScope*>* scope_stack;
+
+    bool init(Arena* backing_arena);
+    void destroy();
+    void push_scope();
+    void pop_scope();
+    void pop_scope_propagate(bool propagate_resets = false);
 } CounterContext;
 
 CounterContext* counter_context_create(Arena* arena);
 void counter_context_destroy(CounterContext* ctx);
 void counter_push_scope(CounterContext* ctx);
-void counter_pop_scope(CounterContext* ctx);
 void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets = false);
 void counter_reset(CounterContext* ctx, const char* counter_spec);
 void counter_increment(CounterContext* ctx, const char* counter_spec);
@@ -906,10 +867,6 @@ struct SpaceDistribution {
     float gap_after_last;
 };
 
-inline SpaceDistribution space_distribution_none() {
-    return {0.0f, 0.0f, 0.0f};
-}
-
 float compute_alignment_offset(
     int32_t alignment,
     float free_space,
@@ -955,21 +912,6 @@ float compute_view_first_text_baseline(
     bool use_normal_line_height,
     bool skip_block_children_of_table,
     FirstBaselineRowCallback row_baseline
-);
-
-float compute_element_last_baseline(
-    ::LayoutContext* lycon,
-    ViewBlock* element,
-    bool is_row_direction
-);
-
-float compute_stretched_cross_size(
-    float item_cross_size,
-    float line_cross_size,
-    float margin_cross,
-    float min_cross,
-    float max_cross,
-    bool has_definite_size
 );
 
 } // namespace radiant
@@ -1489,6 +1431,9 @@ typedef struct FlexContainerLayout : FlexProp {
 
     // Layout context for intrinsic sizing (set during init_flex_container)
     struct LayoutContext* lycon;
+
+    // pass-local flex state lives above this mark and is released together.
+    ScratchMark scratch_mark;
 } FlexContainerLayout;
 
 // ============================================================================
@@ -1566,10 +1511,6 @@ inline float layout_axis_border_start(const BorderProp* border, LayoutAxis axis)
     return border ? layout_axis_spacing_start(&border->width, axis) : 0.0f;
 }
 
-inline float layout_axis_border_end(const BorderProp* border, LayoutAxis axis) {
-    return border ? layout_axis_spacing_end(&border->width, axis) : 0.0f;
-}
-
 inline float layout_axis_padding_start(const BoundaryProp* bound, LayoutAxis axis) {
     return bound ? layout_axis_spacing_start(&bound->padding, axis) : 0.0f;
 }
@@ -1608,6 +1549,22 @@ inline float flex_gap_for_axis(FlexContainerLayout* flex, LayoutAxis axis) {
 
 void init_flex_container(LayoutContext* lycon, ViewBlock* container);
 void cleanup_flex_container(LayoutContext* lycon);
+
+// Mirrors BlockContextScope: pass-local flex scratch and parent context must
+// unwind together, even when nested layout exits early.
+struct FlexLayoutScope {
+    LayoutContext* lycon;
+    FlexContainerLayout* saved;
+    bool active;
+
+    FlexLayoutScope(LayoutContext* l, ViewBlock* container);
+    ~FlexLayoutScope();
+    void close();
+
+    FlexLayoutScope(const FlexLayoutScope&) = delete;
+    FlexLayoutScope& operator=(const FlexLayoutScope&) = delete;
+};
+
 int collect_and_prepare_flex_items(LayoutContext* lycon, FlexContainerLayout* flex_layout, ViewBlock* container);
 float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout);
 void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout);
@@ -1632,8 +1589,6 @@ void set_main_axis_size(ViewElement* item, float size, FlexContainerLayout* flex
 void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* flex_layout);
 float get_item_flex_grow(ViewElement* item);
 float get_item_flex_shrink(ViewElement* item);
-float get_item_flex_basis(ViewElement* item);
-bool get_item_flex_basis_is_percent(ViewElement* item);
 float find_max_baseline(FlexLineInfo* line, int container_align_items);
 float calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis);
 
@@ -1648,11 +1603,7 @@ typedef struct MeasurementCacheEntry {
 } MeasurementCacheEntry;
 
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child);
-void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_container);
-bool requires_content_measurement(ViewBlock* flex_container);
 void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height);
-int estimate_text_width(LayoutContext* lycon, const unsigned char* text, size_t length);
-void cleanup_temporary_view(ViewBlock* temp_view);
 void calculate_intrinsic_sizes(ViewBlock* view, LayoutContext* lycon);
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
 void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
@@ -1662,13 +1613,11 @@ void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
 void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
 void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
-void clear_measurement_cache();
+void clear_measurement_cache(ViewTree* tree);
+void destroy_measurement_cache(ViewTree* tree);
 void invalidate_measurement_cache_for_node(DomNode* node);
-void advance_measurement_cache_generation();
-uint32_t get_measurement_cache_generation();
-void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node);
+void advance_measurement_cache_generation(ViewTree* tree);
 void init_flex_item_view(LayoutContext* lycon, DomNode* node);
-void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node);
 void layout_block_with_measured_size(LayoutContext* lycon, DomNode* node,
     DisplayValue display, MeasurementCacheEntry* cached);
 
@@ -1745,7 +1694,6 @@ struct GridLine {
     constexpr GridLine() : value(0) {}
     constexpr explicit GridLine(int16_t v) : value(v) {}
 
-    constexpr int16_t as_i16() const { return value; }
     constexpr bool is_valid() const { return value != 0; }
 };
 
@@ -1856,16 +1804,6 @@ typedef struct GridTrackList {
     int repeat_count;
 } GridTrackList;
 
-typedef struct GridTrack {
-    GridTrackSize* size;
-    float computed_size;
-    float base_size;
-    float growth_limit;
-    bool is_flexible;
-    bool is_implicit;
-    bool owns_size;
-} GridTrack;
-
 typedef struct GridArea {
     char* name;
     int row_start;
@@ -1881,8 +1819,8 @@ typedef struct GridLineName {
 } GridLineName;
 
 typedef struct GridContainerLayout : GridProp {
-    GridTrack* computed_rows;
-    GridTrack* computed_columns;
+    radiant::grid::TrackArray* computed_rows;
+    radiant::grid::TrackArray* computed_columns;
     struct ViewBlock** grid_items;
     int item_count;
     int allocated_items;
@@ -1915,10 +1853,28 @@ typedef struct GridContainerLayout : GridProp {
     bool owns_auto_rows;
     bool owns_auto_columns;
     bool owns_grid_areas;
+    // pass-local grid state lives above this mark and is released together.
+    ScratchMark scratch_mark;
 } GridContainerLayout;
 
 void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
 void cleanup_grid_container(LayoutContext* lycon);
+
+// Mirrors BlockContextScope: pass-local grid scratch and parent context must
+// unwind together, even when no-item or absolute-only grid paths return early.
+struct GridLayoutScope {
+    LayoutContext* lycon;
+    GridContainerLayout* saved;
+    bool active;
+
+    GridLayoutScope(LayoutContext* l, ViewBlock* container);
+    ~GridLayoutScope();
+    void close();
+
+    GridLayoutScope(const GridLayoutScope&) = delete;
+    GridLayoutScope& operator=(const GridLayoutScope&) = delete;
+};
+
 GridTrackList* create_grid_track_list(int initial_capacity);
 void destroy_grid_track_list(GridTrackList* track_list);
 GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value);
@@ -1947,7 +1903,6 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
                                   float* min_width, float* max_width,
                                   float* min_height, float* max_height);
 void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_layout);
-bool grid_item_is_nested_container(ViewBlock* item);
 void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container);
 
 typedef struct LayoutContext {
@@ -2023,24 +1978,6 @@ inline bool layout_context_is_measuring(LayoutContext* lycon) {
 /**
  * Check if layout should perform full positioning
  */
-inline bool layout_context_should_position(LayoutContext* lycon) {
-    return lycon->run_mode == radiant::RunMode::PerformLayout;
-}
-
-/**
- * Check if layout is for a hidden element (display:none)
- */
-inline bool layout_context_is_hidden(LayoutContext* lycon) {
-    return lycon->run_mode == radiant::RunMode::PerformHiddenLayout;
-}
-
-/**
- * Check if layout should use content size (ignore CSS width/height)
- */
-inline bool layout_context_use_content_size(LayoutContext* lycon) {
-    return lycon->sizing_mode == radiant::SizingMode::ContentSize;
-}
-
 // ============================================================================
 // Percentage Resolution
 // ============================================================================
@@ -2203,8 +2140,6 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem);
  * Position and add a float at the current layout position
  * Implements CSS 2.2 Section 9.5.1 Rules
  */
-void block_context_position_float(BlockContext* ctx, ViewBlock* float_elem, float current_y);
-
 /**
  * Get available horizontal space at a given Y coordinate
  * @param ctx The block context
@@ -2295,7 +2230,6 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
 void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, bool is_before);
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
-void free_view(ViewTree* tree, View* view);
 
 // ============================================================================
 // Keyword Mapping: Lambda CSS strings → Lexbor enum values
@@ -2370,7 +2304,6 @@ static inline bool layout_element_is_display_none(const DomElement* element) {
 void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
-bool element_has_positioning(ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 ViewBlock* find_initial_containing_view_block(ViewBlock* element);
 ViewBlock* find_positioned_containing_block(ViewElement* view);
@@ -2563,6 +2496,20 @@ struct LayoutContextScope {
     LayoutContextScope& operator=(const LayoutContextScope&) = delete;
 };
 
+/**
+ * RAII guard for a top-level layout pass.
+ * Mirrors BlockContextScope: constructor initializes pass resources, destructor
+ * releases scratch/counters even when later layout code returns early.
+ */
+struct LayoutPassScope {
+    LayoutContext* lycon;
+    bool active;
+    LayoutPassScope(LayoutContext* l, DomDocument* doc, UiContext* uicon);
+    ~LayoutPassScope();
+    LayoutPassScope(const LayoutPassScope&) = delete;
+    LayoutPassScope& operator=(const LayoutPassScope&) = delete;
+};
+
 // Forward declaration
 struct DocState;
 
@@ -2582,7 +2529,6 @@ const char* form_button_label_text(ViewBlock* block, FormControlProp* form);
 // Text combination control for view tree output
 // When false, consecutive text nodes are output separately (useful for PDF testing)
 void set_combine_text_nodes(bool combine);
-bool get_combine_text_nodes();
 
 // HTML version detection functions
 int detect_html_version_lambda_css(DomDocument* doc);

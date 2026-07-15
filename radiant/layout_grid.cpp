@@ -2,7 +2,6 @@
 #include "view.hpp"
 #include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
 #include "../lib/tagged.hpp"
-#include "../lib/mem_grow.hpp"
 
 extern "C" {
 #include <stdlib.h>
@@ -14,19 +13,31 @@ extern "C" {
 
 // Forward declarations
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout);
-void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout);
 
-static ViewBlock** grid_item_array_alloc(int count) {
-    return reinterpret_cast<ViewBlock**>(mem_calloc(count, sizeof(ViewBlock*), MEM_CAT_LAYOUT));
+static int count_potential_grid_items(ViewBlock* container) {
+    int count = 0;
+    DomNode* child = container ? container->first_child : NULL;
+    while (child) {
+        if (child->is_element()) count++;
+        child = child->next_sibling;
+    }
+    return count;
 }
 
 // Initialize grid container layout state
 void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
-    if (!container) return;
+    if (!lycon || !container) return;
     log_debug("%s Initializing grid container for %p\n", container->source_loc(), container);
 
-    GridContainerLayout* grid = (GridContainerLayout*)mem_calloc(1, sizeof(GridContainerLayout), MEM_CAT_LAYOUT);
+    ScratchMark mark = scratch_mark(&lycon->scratch);
+    GridContainerLayout* grid = (GridContainerLayout*)scratch_calloc(&lycon->scratch, sizeof(GridContainerLayout));
+    if (!grid) {
+        log_error("layout_grid: unable to allocate grid container scratch state for %s",
+                  container->source_loc());
+        return;
+    }
     lycon->grid_container = grid;
+    grid->scratch_mark = mark;
     grid->lycon = lycon;  // Store layout context for intrinsic sizing
 
     // Initialize auto-placement cursors (grid lines are 1-indexed)
@@ -45,6 +56,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     if (container->embed && container->embed->grid) {
         memcpy(grid, container->embed->grid, sizeof(GridProp));
+        grid->scratch_mark = mark;
         grid->lycon = lycon;  // Restore after memcpy
         log_debug("%s Copied grid props: row_gap=%.1f, column_gap=%.1f", container->source_loc(),
                   grid->row_gap, grid->column_gap);
@@ -60,14 +72,11 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->column_gap = 0;
     }
 
-    // Initialize dynamic arrays
-    grid->allocated_items = 8;
-    grid->grid_items = grid_item_array_alloc(grid->allocated_items);
-
     // Only allocate new areas array if not already copied from embed->grid
     if (!grid->grid_areas || grid->area_count == 0) {
         grid->allocated_areas = 4;
-        grid->grid_areas = (GridArea*)mem_calloc(grid->allocated_areas, sizeof(GridArea), MEM_CAT_LAYOUT);
+        grid->grid_areas = (GridArea*)scratch_calloc(&lycon->scratch,
+            (size_t)grid->allocated_areas * sizeof(GridArea));
         grid->area_count = 0;  // Reset if we allocated new
         grid->owns_grid_areas = true;
     } else {
@@ -75,9 +84,6 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
     // If grid_areas was copied from embed->grid, keep it as-is
     log_debug("%s Grid areas after init: area_count=%d, grid_areas=%p", container->source_loc(), grid->area_count, (void*)grid->grid_areas);
-
-    grid->allocated_line_names = 8;
-    grid->line_names = (GridLineName*)mem_calloc(grid->allocated_line_names, sizeof(GridLineName), MEM_CAT_LAYOUT);
 
     // Initialize track lists - only create new ones if not already copied from embed->grid
     // Track ownership to avoid double-free
@@ -106,6 +112,34 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->owns_auto_columns = false;  // Shared with embed->grid
     }
 
+    // Immediate children bound the pass-local grid item array; scratch arrays are
+    // released by the container mark instead of individual heap frees.
+    int item_capacity = count_potential_grid_items(container);
+    grid->allocated_items = item_capacity;
+    if (item_capacity > 0) {
+        grid->grid_items = (ViewBlock**)scratch_calloc(&lycon->scratch,
+            (size_t)item_capacity * sizeof(ViewBlock*));
+        if (!grid->grid_items) {
+            log_error("layout_grid: unable to allocate %d grid item slots for %s",
+                      item_capacity, container->source_loc());
+            cleanup_grid_container(lycon);
+            return;
+        }
+    }
+
+    int line_capacity = 8 + grid->area_count * 4;
+    if (grid->grid_template_columns) line_capacity += grid->grid_template_columns->line_name_count;
+    if (grid->grid_template_rows) line_capacity += grid->grid_template_rows->line_name_count;
+    grid->allocated_line_names = line_capacity;
+    grid->line_names = (GridLineName*)scratch_calloc(&lycon->scratch,
+        (size_t)line_capacity * sizeof(GridLineName));
+    if (!grid->line_names) {
+        log_error("layout_grid: unable to allocate %d grid line-name slots for %s",
+                  line_capacity, container->source_loc());
+        cleanup_grid_container(lycon);
+        return;
+    }
+
     grid->needs_reflow = false;
 
     log_debug("%s Grid container initialized successfully\n", container->source_loc());
@@ -131,44 +165,41 @@ void cleanup_grid_container(LayoutContext* lycon) {
         destroy_grid_track_list(grid->grid_auto_columns);
     }
 
-    // Free computed tracks
-    if (grid->computed_rows) {
-        for (int i = 0; i < grid->computed_row_count; i++) {
-            // Only free size if we own it (created during init, not shared)
-            if (grid->computed_rows[i].size && grid->computed_rows[i].owns_size) {
-                destroy_grid_track_size(grid->computed_rows[i].size);
-            }
-        }
-        mem_free(grid->computed_rows);
-    }
-
-    if (grid->computed_columns) {
-        for (int i = 0; i < grid->computed_column_count; i++) {
-            // Only free size if we own it (created during init, not shared)
-            if (grid->computed_columns[i].size && grid->computed_columns[i].owns_size) {
-                destroy_grid_track_size(grid->computed_columns[i].size);
-            }
-        }
-        mem_free(grid->computed_columns);
-    }
-
     // Free grid areas only if this layout state allocated them locally.
     if (grid->owns_grid_areas) {
         for (int i = 0; i < grid->area_count; i++) {
             destroy_grid_area(&grid->grid_areas[i]);
         }
-        mem_free(grid->grid_areas);
     }
 
     // Free line names
     for (int i = 0; i < grid->line_name_count; i++) {
         mem_free(grid->line_names[i].name);
     }
-    mem_free(grid->line_names);
-
-    mem_free(grid->grid_items);
-    mem_free(grid);
+    ScratchMark mark = grid->scratch_mark;
+    lycon->grid_container = NULL;
+    scratch_restore(&lycon->scratch, mark);
     log_debug("Grid container cleanup complete\n");
+}
+
+GridLayoutScope::GridLayoutScope(LayoutContext* l, ViewBlock* container)
+    : lycon(l), saved(l ? l->grid_container : NULL), active(l != NULL) {
+    if (lycon && container) {
+        init_grid_container(lycon, container);
+    }
+}
+
+GridLayoutScope::~GridLayoutScope() {
+    close();
+}
+
+void GridLayoutScope::close() {
+    if (!active) return;
+    if (lycon->grid_container && lycon->grid_container != saved) {
+        cleanup_grid_container(lycon);
+    }
+    lycon->grid_container = saved;
+    active = false;
 }
 
 // Main grid layout algorithm entry point
@@ -282,7 +313,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
             float total_row_height = 0;
             for (int r = 0; r < grid_layout->computed_row_count; r++) {
-                total_row_height += grid_layout->computed_rows[r].base_size;
+                total_row_height += (*grid_layout->computed_rows)[r].base_size;
             }
             if (grid_layout->computed_row_count > 1) {
                 total_row_height += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
@@ -676,15 +707,10 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         return 0;
     }
 
-    // Ensure we have enough space in the grid items array
+    // Ensure the exact scratch-sized grid item array is not overrun.
     if (count > grid_layout->allocated_items) {
-        if (!lam::mem_grow_array(&grid_layout->grid_items, &grid_layout->allocated_items,
-                                 count, 8, MEM_CAT_LAYOUT)) {
-            // OOM/overflow: keep the old (still-valid) buffer and bail without collecting,
-            // so the fill loop below cannot write past the allocation.
-            *items = nullptr;
-            return 0;
-        }
+        *items = nullptr;
+        return 0;
     }
 
     // Collect items - ONLY collect element nodes, skip text nodes
@@ -858,69 +884,6 @@ static bool append_cloned_grid_track(GridTrackSize** tracks, int* dest, GridTrac
     tracks[*dest] = copy;
     (*dest)++;
     return true;
-}
-
-// CSS Grid §7.2.3.2: Collapse empty auto-fit tracks after item placement.
-// Empty auto-fit tracks are treated as having a fixed track sizing function of 0px,
-// and their gutters are also collapsed.
-void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout) {
-    if (!grid_layout) return;
-
-    // Process columns
-    if (grid_layout->auto_fit_col_count > 0 && grid_layout->grid_template_columns) {
-        GridTrackList* cols = grid_layout->grid_template_columns;
-        // Build occupancy bitmap: which column indices (0-based) have items
-        bool col_occupied[64] = {};
-        for (int idx = 0; idx < grid_layout->item_count; idx++) {
-            ViewBlock* item = grid_layout->grid_items[idx];
-            GridItemProp* gi = grid_item_prop(item);
-            if (!item || !gi) continue;
-            // computed positions are 1-based line numbers
-            int cs = gi->computed_grid_column_start - 1;
-            int ce = gi->computed_grid_column_end - 1;
-            for (int c = cs; c < ce && c < 64; c++) {
-                if (c >= 0) col_occupied[c] = true;
-            }
-        }
-        // Collapse unoccupied auto-fit tracks by setting their size to 0px
-        for (int c = 0; c < cols->track_count && c < 64; c++) {
-            if (c < grid_layout->auto_fit_col_count &&
-                grid_layout->auto_fit_columns[c] && !col_occupied[c]) {
-                // Replace with a 0px fixed track
-                GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
-                if (!zero_track) continue;
-                destroy_grid_track_size(cols->tracks[c]);
-                cols->tracks[c] = zero_track;
-                log_debug("GRID: auto-fit collapse column %d (empty)", c);
-            }
-        }
-    }
-
-    // Process rows
-    if (grid_layout->auto_fit_row_count > 0 && grid_layout->grid_template_rows) {
-        GridTrackList* rows = grid_layout->grid_template_rows;
-        bool row_occupied[64] = {};
-        for (int idx = 0; idx < grid_layout->item_count; idx++) {
-            ViewBlock* item = grid_layout->grid_items[idx];
-            GridItemProp* gi = grid_item_prop(item);
-            if (!item || !gi) continue;
-            int rs = gi->computed_grid_row_start - 1;
-            int re = gi->computed_grid_row_end - 1;
-            for (int r = rs; r < re && r < 64; r++) {
-                if (r >= 0) row_occupied[r] = true;
-            }
-        }
-        for (int r = 0; r < rows->track_count && r < 64; r++) {
-            if (r < grid_layout->auto_fit_row_count &&
-                grid_layout->auto_fit_rows[r] && !row_occupied[r]) {
-                GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
-                if (!zero_track) continue;
-                destroy_grid_track_size(rows->tracks[r]);
-                rows->tracks[r] = zero_track;
-                log_debug("GRID: auto-fit collapse row %d (empty)", r);
-            }
-        }
-    }
 }
 
 static GridTrackSize** expand_repeat_track_entries(GridTrackList* tracks, int repeat_index,

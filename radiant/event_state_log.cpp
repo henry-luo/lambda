@@ -220,6 +220,9 @@ struct EventStateLog {
     uint64_t mono_start_ns;  /* monotonic clock origin for this session */
     int      pid;
     bool     enabled;
+
+    bool init(const char* doc_name, const char* doc_url);
+    void destroy();
 };
 
 /* dropped-record diagnostic counter (per process). Surfaced via
@@ -316,76 +319,90 @@ static void write_envelope(EventStateLog* log, JsonWriter* w,
 
 /* ----------------------------- public ------------------------------ */
 
-EventStateLog* event_state_log_open(const char* doc_name, const char* doc_url) {
+bool EventStateLog::init(const char* doc_name, const char* doc_url) {
     make_temp_dir();
 
-    EventStateLog* log = (EventStateLog*)mem_calloc(1, sizeof(EventStateLog), MEM_CAT_SYSTEM);
-    if (!log) return NULL;
-
-    log->pid = (int)getpid();
-    log->mono_start_ns = now_mono_ns();
-    log->seq = 0;
-    log->cascade_seq = 0;
+    pid = (int)getpid();
+    mono_start_ns = now_mono_ns();
+    seq = 0;
+    cascade_seq = 0;
 
     char slug[96];
     sanitize_doc_name(doc_name, slug, sizeof(slug));
 
-    snprintf(log->path, sizeof(log->path),
-             "./temp/events_%d_%s.jsonl", log->pid, slug);
+    snprintf(path, sizeof(path),
+             "./temp/events_%d_%s.jsonl", pid, slug);
 
     /* truncate on open: each session/document starts fresh. */
-    log->out = fopen(log->path, "w");
-    if (!log->out) {
+    out = fopen(path, "w");
+    if (!out) {
         log_error("event_state_log: failed to open %s: %s",
-                   log->path, strerror(errno));
-        mem_free(log);
-        return NULL;
+                   path, strerror(errno));
+        return false;
     }
 
-    snprintf(log->doc_id, sizeof(log->doc_id), "%s", slug);
+    snprintf(doc_id, sizeof(doc_id), "%s", slug);
 
     char category_name[64];
     snprintf(category_name, sizeof(category_name), "event_state.%s", slug);
-    log->category = log_get_category(category_name);
-    if (!log->category || strcmp(log->category->name, category_name) != 0) {
+    category = log_get_category(category_name);
+    if (!category || strcmp(category->name, category_name) != 0) {
         log_error("event_state_log: failed to create log category %s", category_name);
-        fclose(log->out);
-        mem_free(log);
-        return NULL;
+        fclose(out);
+        out = NULL;
+        return false;
     }
-    log->category->enabled = 1;
-    log->category->level = LOG_LEVEL_DEBUG;
-    log->category->output = log->out;
-    strncpy(log->category->output_filename, log->path,
-            sizeof(log->category->output_filename) - 1);
-    log->category->output_filename[sizeof(log->category->output_filename) - 1] = '\0';
+    category->enabled = 1;
+    category->level = LOG_LEVEL_DEBUG;
+    category->output = out;
+    strncpy(category->output_filename, path,
+            sizeof(category->output_filename) - 1);
+    category->output_filename[sizeof(category->output_filename) - 1] = '\0';
 
     if (doc_url && *doc_url) {
         size_t n = strlen(doc_url);
-        log->doc_url = (char*)mem_alloc(n + 1, MEM_CAT_SYSTEM);
-        if (log->doc_url) memcpy(log->doc_url, doc_url, n + 1);
+        this->doc_url = (char*)mem_alloc(n + 1, MEM_CAT_SYSTEM);
+        if (this->doc_url) memcpy(this->doc_url, doc_url, n + 1);
     }
 
-    log->enabled = true;
+    enabled = true;
 
-    log_info("event_state_log: opened %s (doc_id=%s)", log->path, log->doc_id);
+    log_info("event_state_log: opened %s (doc_id=%s)", path, doc_id);
+    return true;
+}
+
+EventStateLog* event_state_log_open(const char* doc_name, const char* doc_url) {
+    EventStateLog* log = (EventStateLog*)mem_calloc(1, sizeof(EventStateLog), MEM_CAT_SYSTEM);
+    if (!log) return NULL;
+
+    if (!log->init(doc_name, doc_url)) {
+        mem_free(log);
+        return NULL;
+    }
     return log;
 }
 
 void event_state_log_close(EventStateLog* log) {
     if (!log) return;
-    if (log->enabled) event_state_log_session_end(log);
-    if (log->category) {
-        log->category->enabled = 0;
-        log->category->output = NULL;
-        log->category->output_filename[0] = '\0';
-    }
-    if (log->out) {
-        fflush(log->out);
-        fclose(log->out);
-    }
-    mem_free(log->doc_url);
+    log->destroy();
     mem_free(log);
+}
+
+void EventStateLog::destroy() {
+    if (enabled) event_state_log_session_end(this);
+    if (category) {
+        category->enabled = 0;
+        category->output = NULL;
+        category->output_filename[0] = '\0';
+    }
+    if (out) {
+        fflush(out);
+        fclose(out);
+        out = NULL;
+    }
+    mem_free(doc_url);
+    doc_url = NULL;
+    enabled = false;
 }
 
 bool event_state_log_enabled(EventStateLog* log) {
@@ -446,11 +463,6 @@ void event_state_log_finish_record(EventStateLog* log, JsonWriter* w) {
         g_event_log_dropped++;
         return;
     }
-}
-
-void event_state_log_emit_raw(EventStateLog* log, const char* json_line) {
-    if (!event_state_log_enabled(log) || !json_line) return;
-    if (clog_raw(log->category, json_line) != LOG_OK) g_event_log_dropped++;
 }
 
 static void build_node_path(const DomNode* node, char* buf, size_t buf_sz) {
@@ -620,21 +632,5 @@ void event_state_log_document(EventStateLog* log, const char* sub_type) {
     char buf[EVENT_LOG_RECORD_BUFSZ];
     JsonWriter w;
     event_state_log_begin_record(log, &w, buf, sizeof(buf), type, 0);
-    event_state_log_finish_record(log, &w);
-}
-
-void event_state_log_warning(EventStateLog* log, const char* code,
-                              const char* message) {
-    if (!event_state_log_enabled(log)) return;
-
-    char buf[EVENT_LOG_RECORD_BUFSZ];
-    JsonWriter w;
-    event_state_log_begin_record(log, &w, buf, sizeof(buf),
-                                  "logger.warning", 0);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
-        if (code)    jw_kv_str(&w, "code", code);
-        if (message) jw_kv_str(&w, "message", message);
-    jw_obj_end(&w);
     event_state_log_finish_record(log, &w);
 }

@@ -31,6 +31,11 @@ struct RetainedDisplayListCache {
     HashMap* map;
     uint32_t epoch;
     RetainedDisplayListStats stats;
+
+    bool init(Pool* owner_pool);
+    void destroy();
+    void begin_frame();
+    RetainedDisplayListStats snapshot_stats() const;
 };
 
 HASHMAP_DEFINE_INTKEY(retained_dl_entry, RetainedDisplayListEntry, view_id)
@@ -172,51 +177,70 @@ RetainedDisplayListCache* retained_dl_cache_create(Pool* pool) {
         (RetainedDisplayListCache*)mem_calloc(1, sizeof(RetainedDisplayListCache), MEM_CAT_RENDER);
     if (!cache) return nullptr;
 
-    cache->pool = pool;
-    cache->arena = mem_arena_create(NULL, pool, MEM_ROLE_RENDER, "retained_dl.arena");
-    cache->map = retained_dl_entry_new(128);
-    if (!cache->arena || !cache->map) {
-        retained_dl_cache_destroy(cache);
+    if (!cache->init(pool)) {
+        mem_free(cache);
         return nullptr;
     }
-    cache->epoch = 1;
     return cache;
 }
 
-void retained_dl_cache_destroy(RetainedDisplayListCache* cache) {
-    if (!cache) return;
+bool RetainedDisplayListCache::init(Pool* owner_pool) {
+    pool = owner_pool;
+    // Retained fragments intentionally share this cache arena so captures survive frame scratch resets.
+    arena = mem_arena_create(NULL, owner_pool, MEM_ROLE_RENDER, "retained_dl.arena");
+    map = retained_dl_entry_new(128);
+    if (!arena || !map) {
+        destroy();
+        return false;
+    }
+    epoch = 1;
+    return true;
+}
 
-    if (cache->map) {
+void RetainedDisplayListCache::destroy() {
+    if (map) {
         size_t iter = 0;
         void* item = nullptr;
-        while (hashmap_iter(cache->map, &iter, &item)) {
+        while (hashmap_iter(map, &iter, &item)) {
             RetainedDisplayListEntry* entry = (RetainedDisplayListEntry*)item;
             if (entry && entry->fragment) {
                 dl_destroy(&entry->fragment->list);
                 mem_free(entry->fragment);
             }
         }
-        hashmap_free(cache->map);
-        cache->map = nullptr;
+        hashmap_free(map);
+        map = nullptr;
     }
-    if (cache->arena) {
-        arena_destroy(cache->arena);
-        cache->arena = nullptr;
+    if (arena) {
+        // Factory-created retained arena must unregister before the borrowed parent pool is released.
+        mem_arena_destroy(arena);
+        arena = nullptr;
     }
+}
+
+void retained_dl_cache_destroy(RetainedDisplayListCache* cache) {
+    if (!cache) return;
+    cache->destroy();
     mem_free(cache);
 }
 
+void RetainedDisplayListCache::begin_frame() {
+    epoch++;
+    if (epoch == 0) epoch = 1;
+    memset(&stats, 0, sizeof(stats));
+}
+
 void retained_dl_cache_begin_frame(RetainedDisplayListCache* cache) {
-    if (!cache) return;
-    cache->epoch++;
-    if (cache->epoch == 0) cache->epoch = 1;
-    memset(&cache->stats, 0, sizeof(cache->stats));
+    if (cache) cache->begin_frame();
+}
+
+RetainedDisplayListStats RetainedDisplayListCache::snapshot_stats() const {
+    return stats;
 }
 
 RetainedDisplayListStats retained_dl_cache_stats(const RetainedDisplayListCache* cache) {
     RetainedDisplayListStats stats = {};
-    if (!cache) return stats;
-    return cache->stats;
+    return cache ? cache->snapshot_stats() : stats;
 }
 
 void retained_dl_cache_note_reuse_miss(RetainedDisplayListCache* cache) {
@@ -295,6 +319,7 @@ static void retained_dl_cache_store_marker(RetainedDisplayListCache* cache,
         retained_dl_fragment_get_or_create(cache, view_id);
     if (!fragment || !fragment->initialized) return;
 
+    // Fragment lists keep the same cache arena across captures; clear drops commands without releasing the arena.
     dl_clear(&fragment->list);
     if (!retained_dl_range_retainable(source, begin_index, end_index)) {
         cache->stats.skipped_non_retainable++;

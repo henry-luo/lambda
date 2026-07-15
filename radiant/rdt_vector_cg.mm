@@ -697,8 +697,15 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
 
 static CGGradientRef create_cg_gradient(CGColorSpaceRef colorspace,
                                          const RdtGradientStop* stops, int count) {
-    CGFloat* components = (CGFloat*)alloca(count * 4 * sizeof(CGFloat));
-    CGFloat* locations = (CGFloat*)alloca(count * sizeof(CGFloat));
+    // Gradient stop counts can come from parsed SVG/CSS, so do not size stack buffers from them.
+    CGFloat* components = (CGFloat*)mem_calloc((size_t)count * 4, sizeof(CGFloat), MEM_CAT_RENDER);
+    CGFloat* locations = (CGFloat*)mem_calloc((size_t)count, sizeof(CGFloat), MEM_CAT_RENDER);
+    if (!components || !locations) {
+        log_error("RDT_CG_GRADIENT_ALLOC failed for %d gradient stop(s)", count);
+        mem_free(locations);
+        mem_free(components);
+        return nullptr;
+    }
     for (int i = 0; i < count; i++) {
         components[i * 4 + 0] = stops[i].r / 255.0;
         components[i * 4 + 1] = stops[i].g / 255.0;
@@ -706,7 +713,10 @@ static CGGradientRef create_cg_gradient(CGColorSpaceRef colorspace,
         components[i * 4 + 3] = stops[i].a / 255.0;
         locations[i] = stops[i].offset;
     }
-    return CGGradientCreateWithColorComponents(colorspace, components, locations, count);
+    CGGradientRef gradient = CGGradientCreateWithColorComponents(colorspace, components, locations, count);
+    mem_free(locations);
+    mem_free(components);
+    return gradient;
 }
 
 static CGGradientRef cg_begin_gradient_fill(RdtVectorImpl* cg, RdtPath* path,
@@ -1268,12 +1278,6 @@ void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
     rdt_picture_draw(vec, pic, opacity, transform);
 }
 
-bool rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out) {
-    if (!pic || !out || !pic->has_transform) return false;
-    *out = pic->transform;
-    return true;
-}
-
 void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
     if (!pic || !m) return;
     pic->transform = *m;
@@ -1295,10 +1299,6 @@ void rdt_engine_init(int threads) {
 
 void rdt_engine_term(void) {
     tvg_engine_term();
-}
-
-void rdt_font_load(const char* font_path) {
-    (void)font_path;
 }
 
 void rdt_set_font_context(FontContext* ctx) {

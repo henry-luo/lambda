@@ -6,6 +6,7 @@
 
 #include "../lib/log.h"
 #include "../lib/mem.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/tagged.hpp"
 #include <float.h>
 #include <limits.h>
@@ -1215,94 +1216,109 @@ static void flex_measure_direct_child_heights(LayoutContext* lycon, DomElement* 
 // Content measurement for multi-pass flex layout
 // This file implements the first pass of the multi-pass flex layout algorithm
 
-// Global measurement cache
-static MeasurementCacheEntry* measurement_cache = nullptr;
-static int cache_count = 0;
-static int cache_capacity = 0;
-static uint32_t cache_generation = 0;  // incremented on each top-level layout
-
-static bool ensure_measurement_cache_capacity(int required) {
-    if (required <= cache_capacity) return true;
-
-    int new_capacity = cache_capacity > 0 ? cache_capacity : 1024;
-    while (new_capacity < required) {
-        new_capacity *= 2;
+// Content measurement cache is owned by ViewTree because entries point at that document's views.
+static ViewTree* measurement_cache_tree_for_node(DomNode* node) {
+    DomNode* current = node;
+    while (current) {
+        if (current->is_element()) {
+            DomElement* elem = current->as_element();
+            return elem && elem->doc ? elem->doc->view_tree : nullptr;
+        }
+        current = current->parent;
     }
-    MeasurementCacheEntry* grown = (MeasurementCacheEntry*)mem_realloc(
-        measurement_cache, (size_t)new_capacity * sizeof(MeasurementCacheEntry), MEM_CAT_CACHE_LAYOUT);
-    if (!grown) {
+    return nullptr;
+}
+
+static bool ensure_measurement_cache_capacity(ViewTree* tree, int required) {
+    if (!tree) return false;
+    if (required <= tree->measurement_cache_capacity) return true;
+
+    int old_capacity = tree->measurement_cache_capacity;
+    if (!lam::mem_grow_array(&tree->measurement_cache, &tree->measurement_cache_capacity, required, 1024,
+                             MEM_CAT_CACHE_LAYOUT)) {
         log_error("RAD_CAP_FLEX_MEASURE_CACHE: unable to grow measurement cache from %d to %d entries",
-                  cache_capacity, new_capacity);
+                  old_capacity, required);
         return false;
     }
     // New slots are zeroed so a failed/incomplete entry cannot look like a stale node hit.
-    if (new_capacity > cache_capacity) {
-        memset(grown + cache_capacity, 0,
-               (size_t)(new_capacity - cache_capacity) * sizeof(MeasurementCacheEntry));
+    if (tree->measurement_cache_capacity > old_capacity) {
+        memset(tree->measurement_cache + old_capacity, 0,
+               (size_t)(tree->measurement_cache_capacity - old_capacity) * sizeof(MeasurementCacheEntry));
     }
-    if (cache_capacity > 0) {
+    if (old_capacity > 0) {
         log_warn("[RAD_CAP_FLEX_MEASURE_CACHE] grew measurement cache from %d to %d entries",
-                 cache_capacity, new_capacity);
+                 old_capacity, tree->measurement_cache_capacity);
     }
-    measurement_cache = grown;
-    cache_capacity = new_capacity;
     return true;
 }
 
-void advance_measurement_cache_generation() {
-    cache_generation++;
-    log_debug("Measurement cache generation advanced to %u", cache_generation);
-}
-
-uint32_t get_measurement_cache_generation() {
-    return cache_generation;
+void advance_measurement_cache_generation(ViewTree* tree) {
+    if (!tree) return;
+    tree->measurement_cache_generation++;
+    log_debug("Measurement cache generation advanced to %u", tree->measurement_cache_generation);
 }
 
 void store_in_measurement_cache(DomNode* node, float width, float height,
                                float content_width, float content_height,
                                float context_width) {
-    if (!ensure_measurement_cache_capacity(cache_count + 1)) {
+    ViewTree* tree = measurement_cache_tree_for_node(node);
+    if (!ensure_measurement_cache_capacity(tree, tree ? tree->measurement_cache_count + 1 : 1)) {
         return;
     }
 
-    measurement_cache[cache_count].node = node;
-    measurement_cache[cache_count].measured_width = width;
-    measurement_cache[cache_count].measured_height = height;
-    measurement_cache[cache_count].content_width = content_width;
-    measurement_cache[cache_count].content_height = content_height;
-    measurement_cache[cache_count].context_width = context_width;
-    measurement_cache[cache_count].generation = cache_generation;
-    cache_count++;
+    int cache_count = tree->measurement_cache_count;
+    tree->measurement_cache[cache_count].node = node;
+    tree->measurement_cache[cache_count].measured_width = width;
+    tree->measurement_cache[cache_count].measured_height = height;
+    tree->measurement_cache[cache_count].content_width = content_width;
+    tree->measurement_cache[cache_count].content_height = content_height;
+    tree->measurement_cache[cache_count].context_width = context_width;
+    tree->measurement_cache[cache_count].generation = tree->measurement_cache_generation;
+    tree->measurement_cache_count++;
 
     log_debug("Cached measurement for node %p: %.1fx%.1f (content: %.1fx%.1f) gen=%u",
-              node, width, height, content_width, content_height, cache_generation);
+              node, width, height, content_width, content_height, tree->measurement_cache_generation);
 }
 
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node) {
-    for (int i = 0; i < cache_count; i++) {
-        if (measurement_cache[i].node == node) {
+    ViewTree* tree = measurement_cache_tree_for_node(node);
+    if (!tree) return nullptr;
+    for (int i = 0; i < tree->measurement_cache_count; i++) {
+        if (tree->measurement_cache[i].node == node) {
             // skip stale entries from a previous layout generation
-            if (measurement_cache[i].generation != cache_generation) {
+            if (tree->measurement_cache[i].generation != tree->measurement_cache_generation) {
                 log_debug("Skipping stale measurement cache entry for node %p (gen %u, current %u)",
-                          node, measurement_cache[i].generation, cache_generation);
+                          node, tree->measurement_cache[i].generation, tree->measurement_cache_generation);
                 return nullptr;
             }
-            return &measurement_cache[i];
+            return &tree->measurement_cache[i];
         }
     }
     return nullptr;
 }
 
-void clear_measurement_cache() {
-    cache_count = 0;
+void clear_measurement_cache(ViewTree* tree) {
+    if (!tree) return;
+    tree->measurement_cache_count = 0;
     log_debug("Cleared measurement cache");
 }
 
+void destroy_measurement_cache(ViewTree* tree) {
+    if (!tree) return;
+    mem_free(tree->measurement_cache);
+    tree->measurement_cache = nullptr;
+    tree->measurement_cache_count = 0;
+    tree->measurement_cache_capacity = 0;
+    tree->measurement_cache_generation = 0;
+}
+
 void invalidate_measurement_cache_for_node(DomNode* node) {
-    for (int i = 0; i < cache_count; i++) {
-        if (measurement_cache[i].node == node) {
+    ViewTree* tree = measurement_cache_tree_for_node(node);
+    if (!tree) return;
+    for (int i = 0; i < tree->measurement_cache_count; i++) {
+        if (tree->measurement_cache[i].node == node) {
             // Swap with last entry and decrement count to remove this entry
-            measurement_cache[i] = measurement_cache[--cache_count];
+            tree->measurement_cache[i] = tree->measurement_cache[--tree->measurement_cache_count];
             log_debug("Invalidated measurement cache for node %p (%s)", node, node ? node->node_name() : "null");
             return;
         }
@@ -1593,124 +1609,6 @@ void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
 
     log_debug("measure_text_run (unified): text_length=%zu, min=%d, max=%d, height=%d",
               length, *min_width, *max_width, *height);
-}
-
-int estimate_text_width(LayoutContext* lycon, const unsigned char* text, size_t length) {
-    // Use unified intrinsic sizing API for accurate text width
-    if (lycon && text && length > 0) {
-        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, (const char*)text, length);
-        return widths.max_content;
-    }
-    // Fallback: rough estimate when no context available
-    float avg_char_width = (lycon && lycon->font.style) ? lycon->font.style->font_size * 0.6f : 10.0f;
-    return (int)(length * avg_char_width); // INT_CAST_OK: estimated pixel width
-}
-
-void cleanup_temporary_view(ViewBlock* temp_view) {
-    // Cleanup temporary view and its resources
-    if (temp_view) {
-        // Free any allocated resources
-        // Note: In practice, this might be handled by the memory pool
-        log_debug("Cleaned up temporary measurement view");
-    }
-}
-
-bool requires_content_measurement(ViewBlock* flex_container) {
-    // Determine if content measurement is needed
-    // This could be based on flex properties, content types, etc.
-
-    if (!flex_container) return false;
-
-    // Check if any children have auto flex-basis or need intrinsic sizing
-    DomNode* child = nullptr;
-    if (flex_container->is_element()) {
-        child = lam::dom_require<DOM_NODE_ELEMENT>(flex_container)->first_child;
-    }
-    while (child) {
-        // If child has complex content or auto sizing, measurement is needed
-        DomNode* child_first = nullptr;
-        if (child->is_element()) {
-            child_first = lam::dom_require_element(child)->first_child;
-        }
-        if (child_first || child->is_text()) {
-            return true;
-        }
-        child = child->next_sibling;
-    }
-
-    return false;
-}
-
-void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_container) {
-    if (!flex_container) return;
-
-    log_debug("Measuring all flex children content");
-    DomNode* child = flex_container->first_child;
-    int child_count = 0;  const int MAX_CHILDREN = 100; // Safety limit
-    while (child && child_count < MAX_CHILDREN) {
-        measure_flex_child_content(lycon, child);
-        child = child->next_sibling;
-        child_count++;
-    }
-    log_debug("Content measurement complete for %d children", child_count);
-}
-
-// Lightweight View creation for flex items with measured sizes
-void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
-    if (!node) return;
-    // Skip text nodes - flex layout only processes element nodes
-    if (!node->is_element()) {
-        return;
-    }
-
-    // Create lightweight View for flex item element only (no child processing)
-    init_flex_item_view(lycon, node);
-
-    // Apply measured sizes if available
-    MeasurementCacheEntry* cached = get_from_measurement_cache(node);
-
-    if (cached && node->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* view = lam::view_require<RDT_VIEW_BLOCK>(node);
-        if (view == node) {
-            log_debug("Applying cached measurements to flex item: %.1fx%.1f",
-                cached->measured_width, cached->measured_height);
-
-            // For grid containers, skip the cached height — measure_flex_child_content
-            // stacks children as blocks (wrong for grid); grid height = max_row_height.
-            bool node_is_grid = (view->display.inner == CSS_VALUE_GRID) ||
-                flex_measurement_style_declares_display(
-                    view, CSS_VALUE_GRID, CSS_VALUE_INLINE_GRID);
-
-            // Use measured dimensions as hints (don't override explicit sizes)
-            if (view->width <= 0) {
-                view->width = cached->measured_width;
-            }
-            if (!node_is_grid && view->height <= 0) {
-                view->height = cached->measured_height;
-            }
-            log_debug("Applied measurements: view size now %.1fx%.1f (is_grid=%d)", view->width, view->height, node_is_grid);
-        } else {
-        }
-    } else {
-    }
-}
-
-// Set up basic flex item properties without content layout
-void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node) {
-    (void)lycon; // Suppress unused parameter warning
-    if (!view || !node) return;
-
-    // Get display properties
-    view->display = resolve_display_value(node);
-
-    // Initialize position and sizing
-    view->x = 0;
-    view->y = 0;
-
-    // Note: flex-specific properties (flex_grow, flex_shrink, flex_basis) and
-    // box model properties (margin, padding, border) will be resolved by the flex algorithm
-    // during CSS property resolution. We don't need to initialize them here.
-    log_debug("Set up basic properties for flex item: %s", node->node_name());
 }
 
 // Create lightweight View for flex item element only (no child processing)

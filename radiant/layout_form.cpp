@@ -688,27 +688,3 @@ bool is_form_control(DomElement* elem) {
         return false;
     }
 }
-
-/**
- * Get intrinsic min-content width for a form control.
- */
-float form_control_min_content_width(ViewBlock* block) {
-    if (!block || block->item_prop_type != DomElement::ITEM_PROP_FORM || !block->form) {
-        return 0;
-    }
-
-    // Form controls have fixed intrinsic size
-    return block->form->intrinsic_width;
-}
-
-/**
- * Get intrinsic max-content width for a form control.
- */
-float form_control_max_content_width(ViewBlock* block) {
-    if (!block || block->item_prop_type != DomElement::ITEM_PROP_FORM || !block->form) {
-        return 0;
-    }
-
-    // Form controls have fixed intrinsic size
-    return block->form->intrinsic_width;
-}

@@ -1,0 +1,16 @@
+id: radiant-alloc-allowlist
+language: cpp
+severity: warning
+message: >-
+  Allocation-ish call outside Radiant's sanctioned memory API allowlist. Use
+  mem_*/pool_*/arena_*/scratch_* or add the prefix to this rule after review.
+metadata:
+  suppress: ALLOC_API_OK
+rule:
+  all:
+    - kind: call_expression
+      regex: "\\b[A-Za-z_][A-Za-z0-9_]*(alloc|_free|dup|mmap|memalign|sbrk|valloc)[A-Za-z0-9_]*\\s*\\("
+    - not:
+        regex: "\\b(mem_|pool_|arena_|scratch_|strbuf_|arraylist_|hashmap_|lru_|mem_grow_array|pool_grow_array|tvg_|FT_|uv_|objc_|CF|CG|CFRetain|CFRelease|CGColorSpace|CGImage|CGContext|CGGradient|CGPath|NS|WK)[A-Za-z0-9_]*\\s*\\("
+files:
+  - "radiant/**/*.{c,cpp,h,hpp,mm}"

@@ -204,7 +204,6 @@ SOURCE_DIR_MODULES = [
     ("lambda/network",              "Network & resource loaders"),
     ("lambda",                      "Lambda core runtime"),
     ("radiant/pdf",                 "PDF engine"),
-    ("radiant/webdriver",           "WebDriver (testing)"),
     ("lib/font/woff2",              "Fonts & woff2"),
     ("lib/font",                    "Fonts & woff2"),
     ("lambda/serve",                "HTTP server"),

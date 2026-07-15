@@ -9,6 +9,7 @@
 #include "../lib/url.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/network/network_integration.h"
+#include <assert.h>
 #include <string.h>
 
 // Forward declarations (defined in window.cpp / cmd_layout.cpp)
@@ -72,39 +73,45 @@ BrowsingSession* session_create(struct NetworkThreadPool* pool, struct EnhancedF
     BrowsingSession* session = (BrowsingSession*)mem_calloc(1, sizeof(BrowsingSession), MEM_CAT_TEMP);
     if (!session) return nullptr;
 
-    session->history = nullptr;
-    session->history_count = 0;
-    session->history_index = -1;
-    session->history_capacity = 0;
-    session->thread_pool = pool;
-    session->file_cache = cache;
-
+    session->init(pool, cache);
     log_info("browse_session: created");
     return session;
 }
 
-void session_destroy(BrowsingSession* session) {
-    if (!session) return;
+void BrowsingSession::init(struct NetworkThreadPool* pool, struct EnhancedFileCache* cache) {
+    history = nullptr;
+    history_count = 0;
+    history_index = -1;
+    history_capacity = 0;
+    thread_pool = pool;
+    file_cache = cache;
+}
 
+void BrowsingSession::destroy() {
     // free all history entries
-    for (int i = 0; i < session->history_count; i++) {
-        history_entry_free(&session->history[i]);
+    for (int i = 0; i < history_count; i++) {
+        history_entry_free(&history[i]);
     }
-    mem_free(session->history);
+    mem_free(history);
 
     // note: thread_pool and file_cache are not owned by session — caller manages them
+}
+
+void session_destroy(BrowsingSession* session) {
+    if (!session) return;
+    session->destroy();
     mem_free(session);
     log_info("browse_session: destroyed");
 }
 
-DomDocument* session_navigate(BrowsingSession* session, struct UiContext* uicon,
-                              const char* url, int vw, int vh) {
-    if (!session || !uicon || !url) return nullptr;
+DomDocument* BrowsingSession::navigate(struct UiContext* uicon, const char* url,
+                                       int vw, int vh) {
+    if (!uicon || !url) return nullptr;
 
     // resolve URL against current page (if any)
     Url* resolved = nullptr;
-    if (session->history_index >= 0 && session->history[session->history_index].url) {
-        resolved = url_resolve_relative(url, session->history[session->history_index].url);
+    if (history_index >= 0 && history[history_index].url) {
+        resolved = url_resolve_relative(url, history[history_index].url);
     }
     if (!resolved) {
         resolved = url_parse(url);
@@ -119,39 +126,36 @@ DomDocument* session_navigate(BrowsingSession* session, struct UiContext* uicon,
     log_info("browse_session: navigating to %s", resolved_href);
 
     // truncate forward history (discard entries after current index)
-    for (int i = session->history_index + 1; i < session->history_count; i++) {
-        history_entry_free(&session->history[i]);
+    for (int i = history_index + 1; i < history_count; i++) {
+        history_entry_free(&history[i]);
     }
-    session->history_count = session->history_index + 1;
+    history_count = history_index + 1;
 
     // evict oldest entry if at max capacity
-    if (session->history_count >= BROWSE_HISTORY_MAX) {
-        history_entry_free(&session->history[0]);
-        memmove(&session->history[0], &session->history[1],
-                (size_t)(session->history_count - 1) * sizeof(HistoryEntry));
-        session->history_count--;
-        session->history_index--;
+    if (history_count >= BROWSE_HISTORY_MAX) {
+        history_entry_free(&history[0]);
+        memmove(&history[0], &history[1],
+                (size_t)(history_count - 1) * sizeof(HistoryEntry));
+        history_count--;
+        history_index--;
     }
 
     // add new history entry
-    history_ensure_capacity(session);
-    if (session->history_count >= session->history_capacity) {
+    history_ensure_capacity(this);
+    if (history_count >= history_capacity) {
         url_destroy(resolved);
         return nullptr;  // allocation failed
     }
 
-    HistoryEntry* entry = &session->history[session->history_count];
+    HistoryEntry* entry = &history[history_count];
     entry->url = resolved;
     entry->title = nullptr;
     entry->scroll_y = 0.0f;
-    session->history_count++;
-    session->history_index = session->history_count - 1;
+    history_count++;
+    history_index = history_count - 1;
 
-    // clean up old document's network resources
+    // session navigation owns replacing the presented document, so keep the old document alive until the new load succeeds.
     DomDocument* old_doc = uicon->document;
-    if (old_doc) {
-        radiant_cleanup_network_support(old_doc);
-    }
 
     // load the new page
     char* href_copy = mem_strdup(resolved_href, MEM_CAT_TEMP);
@@ -166,6 +170,12 @@ DomDocument* session_navigate(BrowsingSession* session, struct UiContext* uicon,
         return nullptr;
     }
 
+    if (old_doc) {
+        assert(old_doc != uicon->document);
+        radiant_cleanup_network_support(old_doc);
+        free_document(old_doc);
+    }
+
     // extract and store page title
     const char* title_text = session_extract_title(new_doc);
     if (title_text) {
@@ -175,16 +185,21 @@ DomDocument* session_navigate(BrowsingSession* session, struct UiContext* uicon,
     log_info("browse_session: loaded %s (title: %s, history: %d/%d)",
              resolved_href,
              entry->title ? entry->title : "(none)",
-             session->history_index + 1, session->history_count);
+             history_index + 1, history_count);
 
     mem_free(href_copy);
     return new_doc;
 }
 
+DomDocument* session_navigate(BrowsingSession* session, struct UiContext* uicon,
+                              const char* url, int vw, int vh) {
+    return session ? session->navigate(uicon, url, vw, vh) : nullptr;
+}
+
 static DomDocument* session_go_history(BrowsingSession* session, struct UiContext* uicon,
                                        int vw, int vh, int offset,
                                        const char* direction) {
-    bool can_go = offset < 0 ? session_can_go_back(session) : session_can_go_forward(session);
+    bool can_go = offset < 0 ? session->can_go_back() : session->can_go_forward();
     if (!can_go || !uicon) return nullptr;
 
     session->history_index += offset;
@@ -200,11 +215,8 @@ static DomDocument* session_go_history(BrowsingSession* session, struct UiContex
     log_info("browse_session: going %s to %s (%d/%d)", direction, href,
              session->history_index + 1, session->history_count);
 
-    // clean up old document's network resources
+    // history navigation owns replacing the presented document, so keep the old document alive until the reload succeeds.
     DomDocument* old_doc = uicon->document;
-    if (old_doc) {
-        radiant_cleanup_network_support(old_doc);
-    }
 
     // destroy all webviews from the old page before loading the new one
     if (uicon->webview_mgr) {
@@ -221,6 +233,12 @@ static DomDocument* session_go_history(BrowsingSession* session, struct UiContex
         return nullptr;
     }
 
+    if (old_doc) {
+        assert(old_doc != uicon->document);
+        radiant_cleanup_network_support(old_doc);
+        free_document(old_doc);
+    }
+
     // update title if it changed
     const char* title_text = session_extract_title(new_doc);
     if (title_text && (!entry->title || strcmp(entry->title, title_text) != 0)) {
@@ -233,42 +251,74 @@ static DomDocument* session_go_history(BrowsingSession* session, struct UiContex
 
 DomDocument* session_go_back(BrowsingSession* session, struct UiContext* uicon,
                              int vw, int vh) {
-    return session_go_history(session, uicon, vw, vh, -1, "back");
+    return session ? session->go_back(uicon, vw, vh) : nullptr;
 }
 
 DomDocument* session_go_forward(BrowsingSession* session, struct UiContext* uicon,
                                 int vw, int vh) {
-    return session_go_history(session, uicon, vw, vh, 1, "forward");
+    return session ? session->go_forward(uicon, vw, vh) : nullptr;
+}
+
+DomDocument* BrowsingSession::go_back(struct UiContext* uicon, int vw, int vh) {
+    return session_go_history(this, uicon, vw, vh, -1, "back");
+}
+
+DomDocument* BrowsingSession::go_forward(struct UiContext* uicon, int vw, int vh) {
+    return session_go_history(this, uicon, vw, vh, 1, "forward");
+}
+
+bool BrowsingSession::can_go_back() const {
+    return history_index > 0;
 }
 
 bool session_can_go_back(const BrowsingSession* session) {
-    return session && session->history_index > 0;
+    return session && session->can_go_back();
+}
+
+bool BrowsingSession::can_go_forward() const {
+    return history_index < history_count - 1;
 }
 
 bool session_can_go_forward(const BrowsingSession* session) {
-    return session && session->history_index < session->history_count - 1;
+    return session && session->can_go_forward();
 }
 
-const char* session_current_url(const BrowsingSession* session) {
-    if (!session || session->history_index < 0) return nullptr;
-    HistoryEntry* entry = &session->history[session->history_index];
+const char* BrowsingSession::current_url() const {
+    if (history_index < 0) return nullptr;
+    HistoryEntry* entry = &history[history_index];
     if (entry->url && entry->url->href) return entry->url->href->chars;
     return nullptr;
 }
 
+const char* session_current_url(const BrowsingSession* session) {
+    return session ? session->current_url() : nullptr;
+}
+
+const char* BrowsingSession::current_title() const {
+    if (history_index < 0) return nullptr;
+    return history[history_index].title;
+}
+
 const char* session_current_title(const BrowsingSession* session) {
-    if (!session || session->history_index < 0) return nullptr;
-    return session->history[session->history_index].title;
+    return session ? session->current_title() : nullptr;
+}
+
+void BrowsingSession::save_scroll_position(float scroll_y) {
+    if (history_index < 0) return;
+    history[history_index].scroll_y = scroll_y;
 }
 
 void session_save_scroll_position(BrowsingSession* session, float scroll_y) {
-    if (!session || session->history_index < 0) return;
-    session->history[session->history_index].scroll_y = scroll_y;
+    if (session) session->save_scroll_position(scroll_y);
+}
+
+float BrowsingSession::get_scroll_position() const {
+    if (history_index < 0) return 0.0f;
+    return history[history_index].scroll_y;
 }
 
 float session_get_scroll_position(const BrowsingSession* session) {
-    if (!session || session->history_index < 0) return 0.0f;
-    return session->history[session->history_index].scroll_y;
+    return session ? session->get_scroll_position() : 0.0f;
 }
 
 const char* session_extract_title(DomDocument* doc) {
@@ -276,9 +326,13 @@ const char* session_extract_title(DomDocument* doc) {
     return find_title_text(doc->root);
 }
 
-void session_set_current_title(BrowsingSession* session, const char* title) {
-    if (!session || session->history_index < 0) return;
-    HistoryEntry* entry = &session->history[session->history_index];
+void BrowsingSession::set_current_title(const char* title) {
+    if (history_index < 0) return;
+    HistoryEntry* entry = &history[history_index];
     if (entry->title) mem_free(entry->title);
     entry->title = title ? mem_strdup(title, MEM_CAT_TEMP) : nullptr;
+}
+
+void session_set_current_title(BrowsingSession* session, const char* title) {
+    if (session) session->set_current_title(title);
 }

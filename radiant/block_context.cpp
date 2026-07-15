@@ -14,6 +14,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
+#include <assert.h>
 #include <cmath>
 #include <cfloat>
 
@@ -263,10 +264,9 @@ void block_context_calc_bfc_offset(ViewElement* view, BlockContext* bfc, float* 
 // ============================================================================
 
 FloatBox* block_context_alloc_float_box(BlockContext* ctx) {
-    if (ctx->pool) {
-        return (FloatBox*)pool_calloc(ctx->pool, sizeof(FloatBox));
-    }
-    return (FloatBox*)mem_calloc(1, sizeof(FloatBox), MEM_CAT_LAYOUT);
+    // float boxes are tied to the view-tree pool; a heap fallback would escape all layout cleanup paths.
+    assert(ctx && ctx->pool);
+    return (FloatBox*)pool_calloc(ctx->pool, sizeof(FloatBox));
 }
 
 // ============================================================================
@@ -468,44 +468,4 @@ float block_context_clear_y(BlockContext* ctx, CssEnum clear_type) {
 
     log_debug("[BlockContext] clear_y(%d): %.1f", clear_type, clear_y);
     return clear_y;
-}
-
-// ============================================================================
-// Float Positioning
-// ============================================================================
-
-void block_context_position_float(BlockContext* ctx, ViewBlock* element, float current_y) {
-    if (!element || !element->position) return;
-
-    CssEnum side = element->position->float_prop;
-    if (side != CSS_VALUE_LEFT && side != CSS_VALUE_RIGHT) return;
-
-    // Get element dimensions including margins
-    float margin_l = element->bound ? element->bound->margin.left : 0;
-    float margin_r = element->bound ? element->bound->margin.right : 0;
-    float margin_t = element->bound ? element->bound->margin.top : 0;
-    float total_width = element->width + margin_l + margin_r;
-
-    // CSS 2.2 Rules 4, 5, 6: Float top >= max of various positions
-    float min_y = fmax(0, current_y);
-
-    // Find Y where float fits horizontally
-    float y = block_context_find_y_for_width(ctx, total_width, min_y);
-
-    // Get available space at that Y
-    FloatAvailableSpace space = block_context_space_at_y(ctx, y, element->height);
-
-    // Position the float
-    if (side == CSS_VALUE_LEFT) {
-        element->x = ctx->origin_x + space.left + margin_l;
-    } else {
-        element->x = ctx->origin_x + space.right - element->width - margin_r;
-    }
-    element->y = ctx->origin_y + y + margin_t;
-
-    log_debug("[BlockContext] Positioned float %s: side=%d, pos=(%.1f,%.1f), size=(%.1f,%.1f)",
-              element->node_name(), side, element->x, element->y, element->width, element->height);
-
-    // Add to float tracking
-    block_context_add_float(ctx, element);
 }

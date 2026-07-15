@@ -4,6 +4,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
+#include "js/js_typed_array.h"
 #include <stdarg.h>
 #include <time.h>
 #include <cstdlib>  // for abs function
@@ -2198,104 +2199,51 @@ Item fn_decimal(Item item) {
 
 Item fn_binary(Item item) {
     GUARD_ERROR1(item);
-    // Convert item to binary (string) type
-    if (get_type_id(item) == LMD_TYPE_STRING) {
-        return item;  // Already a string (binary is stored as string)
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_BINARY) {
+        return item;
     }
-    else if (get_type_id(item) == LMD_TYPE_SYMBOL) {
-        // Convert symbol to string
+    if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
         uint32_t len = item.get_len();
         if (!chars) {
-            log_debug("Cannot convert null symbol to binary");
+            log_debug("fn_binary: cannot convert null text to binary");
             return ItemError;
         }
-
-        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
-        if (!str) {
-            log_debug("Failed to allocate string for binary conversion");
-            return ItemError;
-        }
-
-        str->len = len;
-        str->is_ascii = str_is_ascii(chars, len) ? 1 : 0;
-        memcpy(str->chars, chars, len);
-        str->chars[len] = '\0';
-
-        return (Item) { .item = s2it(str) };
+        String* bin = heap_binary_from_bytes(chars, len);
+        return bin ? (Item){.item = x2it(bin)} : ItemError;
     }
-    else if (get_type_id(item) == LMD_TYPE_INT) {
-        // Convert int to binary string representation
+    if (type_id == LMD_TYPE_INT) {
         char buf[32];
         int len = snprintf(buf, sizeof(buf), "%lld", (long long)item.get_int56());
-        if (len < 0 || len >= (int)sizeof(buf)) {
-            log_debug("Failed to convert int to string");
-            return ItemError;
-        }
-
-        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
-        if (!str) {
-            log_debug("Failed to allocate string for binary conversion");
-            return ItemError;
-        }
-
-        str->len = len;
-        str->is_ascii = 1;  // numeric strings are always ASCII
-        memcpy(str->chars, buf, len);
-        str->chars[len] = '\0';
-
-        return (Item) { .item = s2it(str) };
+        if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
+        String* bin = heap_binary_from_bytes(buf, len);
+        return bin ? (Item){.item = x2it(bin)} : ItemError;
     }
-    else if (get_type_id(item) == LMD_TYPE_INT64) {
-        // Convert int64 to binary string representation
+    if (type_id == LMD_TYPE_INT64) {
         int64_t val = item.get_int64();
         char buf[32];
         int len = snprintf(buf, sizeof(buf), "%" PRId64, val);
-        if (len < 0 || len >= (int)sizeof(buf)) {
-            log_debug("Failed to convert int64 to string");
-            return ItemError;
-        }
-
-        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
-        if (!str) {
-            log_debug("Failed to allocate string for binary conversion");
-            return ItemError;
-        }
-
-        str->len = len;
-        str->is_ascii = 1;  // numeric strings are always ASCII
-        memcpy(str->chars, buf, len);
-        str->chars[len] = '\0';
-
-        return (Item) { .item = s2it(str) };
+        if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
+        String* bin = heap_binary_from_bytes(buf, len);
+        return bin ? (Item){.item = x2it(bin)} : ItemError;
     }
-    else if (get_type_id(item) == LMD_TYPE_FLOAT) {
-        // Convert float to binary string representation
+    if (type_id == LMD_TYPE_FLOAT) {
         double val = item.get_double();
         char buf[64];
         int len = snprintf(buf, sizeof(buf), "%.17g", val);
-        if (len < 0 || len >= (int)sizeof(buf)) {
-            log_debug("Failed to convert float to string");
-            return ItemError;
-        }
-
-        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
-        if (!str) {
-            log_debug("Failed to allocate string for binary conversion");
-            return ItemError;
-        }
-
-        str->len = len;
-        str->is_ascii = 1;  // numeric strings are always ASCII
-        memcpy(str->chars, buf, len);
-        str->chars[len] = '\0';
-
-        return (Item) { .item = s2it(str) };
+        if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
+        String* bin = heap_binary_from_bytes(buf, len);
+        return bin ? (Item){.item = x2it(bin)} : ItemError;
     }
-    else {
-        log_debug("Cannot convert type %d to binary", get_type_id(item));
-        return ItemError;
+    if (js_is_typed_array(item)) {
+        return binary_from_typed_array(js_get_typed_array_ptr(item.map));
     }
+    if (js_is_dataview(item)) {
+        return binary_from_dataview(js_get_dataview_ptr(item));
+    }
+    log_debug("fn_binary: cannot convert type %d", type_id);
+    return ItemError;
 }
 
 extern "C" Symbol* fn_symbol(Item item) {

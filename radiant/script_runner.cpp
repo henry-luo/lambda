@@ -28,6 +28,7 @@
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/log.h"
+#include "../lib/mem_factory.h"
 #include "layout.hpp"  // MAX_LAYOUT_DEPTH — shared DOM-recursion depth cap
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
@@ -166,7 +167,7 @@ static void script_runner_cleanup_source_cache() {
 extern "C" void script_runner_cleanup_heap() {
     jm_cleanup_deferred_mir();
     if (s_js_reuse_pool) {
-        pool_destroy(s_js_reuse_pool);
+        mem_pool_destroy(s_js_reuse_pool);
         s_js_reuse_pool = nullptr;
     }
     script_runner_cleanup_source_cache();
@@ -2181,8 +2182,10 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // set up Runtime for JS transpiler
     Runtime runtime = {};
     runtime.dom_doc = (void*)dom_doc;
-    // create fresh mmap pool for this JS execution
-    runtime.reuse_pool = pool_create_mmap();
+    // create fresh tracked mmap pool for this JS execution
+    runtime.reuse_pool = mem_pool_create_mmap((MemContext*)dom_doc->mem_ctx,
+                                              MEM_ROLE_RUNTIME_HEAP,
+                                              "script.js.reuse");
     EvalContext* saved_js_context = context;
     Context* saved_input_context = input_context;
     void* saved_js_document = js_dom_get_document();
@@ -2384,7 +2387,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             if (s_retain_js_state) {
                 s_js_reuse_pool = reuse_pool;
             } else if (reuse_pool) {
-                pool_destroy(reuse_pool);
+                mem_pool_destroy(reuse_pool);
             }
         } else if (runtime.heap) {
             mem_free(runtime.heap);
@@ -2590,7 +2593,9 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     }
 
     // Create a transient collection used only during compile/install.
-    Pool* handlers_pool = pool_create_mmap();
+    Pool* handlers_pool = mem_pool_create_mmap((MemContext*)dom_doc->mem_ctx,
+                                               MEM_ROLE_TEMP,
+                                               "script.inline_handlers");
     InlineHandlerInstallCollection* handlers =
         (InlineHandlerInstallCollection*)pool_calloc(handlers_pool, sizeof(InlineHandlerInstallCollection));
     handlers->pool = handlers_pool;
@@ -2606,7 +2611,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         log_debug("collect_and_compile_event_handlers: no event handlers found");
         strbuf_free(compile_buf);
         hashmap_free(handlers->element_map);
-        pool_destroy(handlers_pool);
+        mem_pool_destroy(handlers_pool);
         return;
     }
 
@@ -2648,7 +2653,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         log_error("collect_and_compile_event_handlers: compilation failed");
         context = saved_ctx;
         hashmap_free(handlers->element_map);
-        pool_destroy(handlers_pool);
+        mem_pool_destroy(handlers_pool);
         return;
     }
 
@@ -2660,7 +2665,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         log_error("collect_and_compile_event_handlers: no deferred MIR context found");
         context = saved_ctx;
         hashmap_free(handlers->element_map);
-        pool_destroy(handlers_pool);
+        mem_pool_destroy(handlers_pool);
         return;
     }
 
@@ -2705,7 +2710,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     dom_doc->js_runtime_type_list = runtime.type_list;
 
     hashmap_free(handlers->element_map);
-    pool_destroy(handlers_pool);
+    mem_pool_destroy(handlers_pool);
 }
 
 // ============================================================================

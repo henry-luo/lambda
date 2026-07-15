@@ -342,46 +342,4 @@ float compute_view_first_text_baseline(
     return -1.0f;
 }
 
-float compute_element_last_baseline(
-    ::LayoutContext* lycon,
-    ViewBlock* element,
-    bool is_row_direction
-) {
-    // TODO: Implement proper last baseline calculation
-    return -1.0f;  // No baseline
-}
-
-// ============================================================================
-// Cross-axis Size Resolution (Stretch)
-// ============================================================================
-
-float compute_stretched_cross_size(
-    float item_cross_size,
-    float line_cross_size,
-    float margin_cross,
-    float min_cross,
-    float max_cross,
-    bool has_definite_size
-) {
-    // If item has definite cross size, don't stretch
-    if (has_definite_size) {
-        return item_cross_size;
-    }
-
-    // Stretch to fill line (minus margins)
-    float available_cross = line_cross_size - margin_cross;
-    if (available_cross < 0) available_cross = 0;
-
-    // Apply min/max constraints
-    float stretched = available_cross;
-    if (min_cross > 0 && stretched < min_cross) {
-        stretched = min_cross;
-    }
-    if (max_cross > 0 && stretched > max_cross) {
-        stretched = max_cross;
-    }
-
-    return stretched;
-}
-
 } // namespace radiant

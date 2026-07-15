@@ -33,6 +33,7 @@
 
 extern "C" {
 #include "../../lib/str.h"
+#include "../../lib/strbuf.h"
 #include "../../lib/utf.h"
 }
 
@@ -1924,4 +1925,44 @@ TEST_F(StrFmtTest, HexNullSafety) {
     EXPECT_EQ(str_hex_encode(NULL, "a", 1), nullptr);
     char buf[4];
     EXPECT_EQ(str_hex_decode(buf, NULL, 0), 0u);
+}
+
+TEST_F(StrFmtTest, BinaryPayloadDecodeHexForms) {
+    StrBuf* out = strbuf_new();
+    int err_off = -1;
+    ASSERT_EQ(str_binary_payload_decode("A0 fe 00", 8, out, &err_off), 3);
+    const unsigned char expected[] = {0xA0, 0xFE, 0x00};
+    EXPECT_EQ(memcmp(out->str, expected, sizeof(expected)), 0);
+    ASSERT_EQ(str_binary_payload_decode("\\x DE ad", 8, out, &err_off), 2);
+    EXPECT_EQ((unsigned char)out->str[0], 0xDE);
+    EXPECT_EQ((unsigned char)out->str[1], 0xAD);
+    strbuf_free(out);
+}
+
+TEST_F(StrFmtTest, BinaryPayloadDecodeBase64Forms) {
+    StrBuf* out = strbuf_new();
+    int err_off = -1;
+    ASSERT_EQ(str_binary_payload_decode("\\64oP4=", 7, out, &err_off), 2);
+    EXPECT_EQ((unsigned char)out->str[0], 0xA0);
+    EXPECT_EQ((unsigned char)out->str[1], 0xFE);
+    ASSERT_EQ(str_binary_payload_decode("\\64oP4", 6, out, &err_off), 2);
+    EXPECT_EQ((unsigned char)out->str[0], 0xA0);
+    EXPECT_EQ((unsigned char)out->str[1], 0xFE);
+    ASSERT_EQ(str_binary_payload_decode("\\64 Zm 9v", 9, out, &err_off), 3);
+    EXPECT_EQ(memcmp(out->str, "foo", 3), 0);
+    strbuf_free(out);
+}
+
+TEST_F(StrFmtTest, BinaryPayloadDecodeErrors) {
+    StrBuf* out = strbuf_new();
+    int err_off = -1;
+    EXPECT_EQ(str_binary_payload_decode("\\xDEA", 5, out, &err_off), -1);
+    EXPECT_EQ(err_off, 4);
+    EXPECT_EQ(str_binary_payload_decode("\\xZZ", 4, out, &err_off), -1);
+    EXPECT_EQ(err_off, 2);
+    EXPECT_EQ(str_binary_payload_decode("\\64!!", 5, out, &err_off), -1);
+    EXPECT_EQ(err_off, 3);
+    EXPECT_EQ(str_binary_payload_decode("\\64Z=g", 6, out, &err_off), -1);
+    EXPECT_EQ(err_off, 5);
+    strbuf_free(out);
 }

@@ -28,10 +28,6 @@ void webview_layer_platform_set_html(WebViewHandle* handle, const char* html) {
     (void)handle; (void)html;
 }
 
-void webview_layer_platform_eval_js(WebViewHandle* handle, const char* js) {
-    (void)handle; (void)js;
-}
-
 void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float pixel_ratio) {
     (void)handle; (void)w; (void)h; (void)pixel_ratio;
 }

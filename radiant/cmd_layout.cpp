@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include "../lib/mem.h"
 #include "../lib/mem_factory.h"
+#include "../lib/mem_grow.hpp"
 #include "../lib/uv_loop.h"
 #include "../lib/escape.h"
 #include <chrono>       // timing - acceptable for profiling
@@ -113,9 +114,11 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
 static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                CssStylesheet*** stylesheets, int* count, int depth = 0, bool recurse = true);
+                                CssStylesheet*** stylesheets, int* count, int* capacity,
+                                int depth = 0, bool recurse = true);
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                   CssStylesheet*** stylesheets, int* count, int depth = 0, bool recurse = true);
+                                   CssStylesheet*** stylesheets, int* count, int* capacity,
+                                   int depth = 0, bool recurse = true);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 static EnhancedFileCache* layout_prepare_network_resources(UiContext* ui_context,
                                                            DomDocument* doc);
@@ -986,12 +989,13 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
 static CssStylesheet* parse_and_collect_stylesheet(
     CssEngine* engine, const char* css, const char* source_path,
     const char* import_base, Pool* pool, CssStylesheet*** stylesheets,
-    int* count, int import_depth);
+    int* count, int* capacity, int import_depth);
 
 static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* stylesheet_path,
                                         CssEngine* engine, Pool* pool,
-                                        CssStylesheet*** stylesheets, int* count, int depth) {
-    if (!stylesheet || !engine || !pool || !stylesheets || !count) return;
+                                        CssStylesheet*** stylesheets, int* count,
+                                        int* capacity, int depth) {
+    if (!stylesheet || !engine || !pool || !stylesheets || !count || !capacity) return;
     if (depth > 5) {
         log_warn("[CSS @import] Maximum @import nesting depth reached (5), skipping");
         return;
@@ -1107,7 +1111,7 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
 
         CssStylesheet* imported = parse_and_collect_stylesheet(
             engine, css_pool_copy, import_path, import_path, pool,
-            stylesheets, count, depth + 1);
+            stylesheets, count, capacity, depth + 1);
         if (imported && imported->rule_count > 0) {
             log_debug("[CSS @import] Parsed imported stylesheet '%s': %zu rules", import_path, imported->rule_count);
         } else {
@@ -1119,17 +1123,20 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
 static CssStylesheet* parse_and_collect_stylesheet(
     CssEngine* engine, const char* css, const char* source_path,
     const char* import_base, Pool* pool, CssStylesheet*** stylesheets,
-    int* count, int import_depth) {
+    int* count, int* capacity, int import_depth) {
     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, source_path);
     annotate_css_stylesheet_source_file(stylesheet, source_path);
     if (!stylesheet || stylesheet->rule_count == 0) return stylesheet;
 
-    *stylesheets = (CssStylesheet**)pool_realloc(
-        pool, *stylesheets, (*count + 1) * sizeof(CssStylesheet*));
+    if (!lam::pool_grow_array(pool, stylesheets, capacity, *count + 1, 4)) {
+        // stylesheet arrays are dereferenced immediately after append; skip this sheet if the pool cannot grow.
+        log_error("[CSS] Failed to grow stylesheet array to %d entries", *count + 1);
+        return stylesheet;
+    }
     (*stylesheets)[*count] = stylesheet;
     (*count)++;
     resolve_stylesheet_imports(stylesheet, import_base, engine, pool,
-                               stylesheets, count, import_depth);
+                               stylesheets, count, capacity, import_depth);
     return stylesheet;
 }
 
@@ -1383,10 +1390,13 @@ static void append_external_resource_url(char* url, char*** out_urls,
                                          int* out_count, int* out_capacity) {
     if (!url || !out_urls || !out_count || !out_capacity) return;
     if (*out_count >= *out_capacity) {
-        int new_capacity = *out_capacity > 0 ? *out_capacity * 2 : 16;
-        *out_urls = (char**)mem_realloc(
-            *out_urls, new_capacity * sizeof(char*), MEM_CAT_TEMP);
-        *out_capacity = new_capacity;
+        if (!lam::mem_grow_array(out_urls, out_capacity, *out_count + 1, 16,
+                                 MEM_CAT_TEMP)) {
+            // URL collection appends immediately after growth; skip this URL if the temp list cannot grow.
+            log_error("[CSS] Failed to grow external resource URL list to %d entries",
+                      *out_count + 1);
+            return;
+        }
     }
     (*out_urls)[(*out_count)++] = url;
 }
@@ -1459,8 +1469,9 @@ static void prefetch_document_subresources(Element* html_root, const char* base_
  * Loads and parses external CSS files
  */
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                CssStylesheet*** stylesheets, int* count, int depth, bool recurse) {
-    if (!elem || !engine || !pool || !stylesheets || !count) return;
+                                CssStylesheet*** stylesheets, int* count, int* capacity,
+                                int depth, bool recurse) {
+    if (!elem || !engine || !pool || !stylesheets || !count || !capacity) return;
     if (depth > MAX_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
@@ -1676,7 +1687,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 
                     CssStylesheet* stylesheet = parse_and_collect_stylesheet(
                         engine, css_pool_copy, css_path, css_path, pool,
-                        stylesheets, count, 0);
+                        stylesheets, count, capacity, 0);
                     if (stylesheet && stylesheet->rule_count > 0) {
                         log_debug("[CSS] Parsed linked stylesheet '%s': %zu rules", css_path, stylesheet->rule_count);
                     } else {
@@ -1698,7 +1709,8 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
         for (int64_t i = 0; i < elem->length; i++) {
             Item child_item = elem->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                collect_linked_stylesheets(child_item.element, engine, base_path, pool, stylesheets, count, depth + 1, true);
+                collect_linked_stylesheets(child_item.element, engine, base_path, pool,
+                                           stylesheets, count, capacity, depth + 1, true);
             }
         }
     }
@@ -1706,8 +1718,9 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 
 static void parse_inline_style_children(Element* elem, CssEngine* engine,
                                         const char* base_path, Pool* pool,
-                                        CssStylesheet*** stylesheets, int* count) {
-    bool collect_to_list = stylesheets && count;
+                                        CssStylesheet*** stylesheets, int* count,
+                                        int* capacity) {
+    bool collect_to_list = stylesheets && count && capacity;
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         int type_id = get_type_id(child_item);
@@ -1724,7 +1737,7 @@ static void parse_inline_style_children(Element* elem, CssEngine* engine,
                       (void*)css_text, css_text->len);
             stylesheet = parse_and_collect_stylesheet(
                 engine, css_text->chars, "<inline-style>", base_path,
-                pool, stylesheets, count, 0);
+                pool, stylesheets, count, capacity, 0);
         } else {
             log_debug("[CSS] Found <style> element with %d bytes of CSS", css_text->len);
             stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
@@ -1743,8 +1756,10 @@ static void parse_inline_style_children(Element* elem, CssEngine* engine,
 static void collect_inline_styles_impl(Element* elem, CssEngine* engine,
                                        const char* base_path, Pool* pool,
                                        CssStylesheet*** stylesheets, int* count,
-                                       int depth, bool recurse) {
-    if (!elem || !engine || !pool || (stylesheets && !count) || (!stylesheets && count)) return;
+                                       int* capacity, int depth, bool recurse) {
+    if (!elem || !engine || !pool ||
+        (stylesheets && (!count || !capacity)) ||
+        (!stylesheets && (count || capacity))) return;
     if (depth > MAX_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
@@ -1758,7 +1773,7 @@ static void collect_inline_styles_impl(Element* elem, CssEngine* engine,
             log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
         } else {
         parse_inline_style_children(
-            elem, engine, base_path, pool, stylesheets, count);
+            elem, engine, base_path, pool, stylesheets, count, capacity);
         } // end media check else
     }
 
@@ -1768,24 +1783,26 @@ static void collect_inline_styles_impl(Element* elem, CssEngine* engine,
             Item child_item = elem->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
                 collect_inline_styles_impl(child_item.element, engine, base_path, pool,
-                                           stylesheets, count, depth + 1, true);
+                                           stylesheets, count, capacity, depth + 1, true);
             }
         }
     }
 }
 
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                   CssStylesheet*** stylesheets, int* count, int depth, bool recurse) {
+                                   CssStylesheet*** stylesheets, int* count, int* capacity,
+                                   int depth, bool recurse) {
     collect_inline_styles_impl(elem, engine, base_path, pool,
-                               stylesheets, count, depth, recurse);
+                               stylesheets, count, capacity, depth, recurse);
 }
 
 static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engine,
                                                   const char* base_path, Pool* pool,
                                                   CssStylesheet*** stylesheets,
-                                                  int* count, int* linked_count,
+                                                  int* count, int* capacity,
+                                                  int* linked_count,
                                                   int depth = 0) {
-    if (!elem || !engine || !pool || !stylesheets || !count) return;
+    if (!elem || !engine || !pool || !stylesheets || !count || !capacity) return;
     if (depth > MAX_CSS_TREE_DEPTH) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
@@ -1793,13 +1810,13 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
         if (str_ieq_const(type->name.str, strlen(type->name.str), "link")) {
             int before = *count;
             collect_linked_stylesheets(elem, engine, base_path, pool,
-                                       stylesheets, count, depth, false);
+                                       stylesheets, count, capacity, depth, false);
             if (linked_count && *count > before) {
                 *linked_count += *count - before;
             }
         } else if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
             collect_inline_styles_to_list(elem, engine, base_path, pool,
-                                          stylesheets, count, depth, false);
+                                          stylesheets, count, capacity, depth, false);
         }
     }
 
@@ -1808,7 +1825,7 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
             collect_stylesheets_in_document_order(child_item.element, engine,
                                                   base_path, pool, stylesheets,
-                                                  count, linked_count, depth + 1);
+                                                  count, capacity, linked_count, depth + 1);
         }
     }
 }
@@ -1825,8 +1842,9 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
  * - Media query filtering
  */
 void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const char* base_path, Pool* pool,
-                                    CssStylesheet*** stylesheets, int* count, int depth = 0) {
-    if (!elem || !engine || !pool || !stylesheets || !count) return;
+                                    CssStylesheet*** stylesheets, int* count,
+                                    int* capacity, int depth = 0) {
+    if (!elem || !engine || !pool || !stylesheets || !count || !capacity) return;
     if (depth > MAX_CSS_TREE_DEPTH) return;
 
     // Check if this is a <style> element
@@ -1848,7 +1866,7 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
                         if (text_node->text && text_node->length > 0) {
                             CssStylesheet* stylesheet = parse_and_collect_stylesheet(
                                 engine, text_node->text, "<inline-style>", base_path,
-                                pool, stylesheets, count, 0);
+                                pool, stylesheets, count, capacity, 0);
                             if (stylesheet && stylesheet->rule_count > 0) {
                                 log_debug("[CSS] Re-scan: parsed <style> from DOM: %zu rules", stylesheet->rule_count);
                             }
@@ -1864,7 +1882,8 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
     DomNode* child = elem->first_child;
     while (child) {
         if (child->node_type == DOM_NODE_ELEMENT) {
-            collect_inline_styles_from_dom(lam::dom_require_element(child), engine, base_path, pool, stylesheets, count, depth + 1);
+            collect_inline_styles_from_dom(lam::dom_require_element(child), engine, base_path,
+                                           pool, stylesheets, count, capacity, depth + 1);
         }
         child = child->next_sibling;
     }
@@ -1916,15 +1935,6 @@ static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) 
 }
 
 /**
- * Recursively collect <style> inline CSS from HTML
- * Parses and adds to engine's stylesheet list
- */
-void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool, int depth = 0) {
-    collect_inline_styles_impl(elem, engine, nullptr, pool,
-                               nullptr, nullptr, depth, true);
-}
-
-/**
  * Master function to extract and apply all CSS from HTML document
  * Handles linked stylesheets, <style> elements, and inline style attributes
  * Returns array of collected stylesheets
@@ -1936,6 +1946,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
 
     *stylesheet_count = 0;
     CssStylesheet** stylesheets = nullptr;
+    int stylesheet_capacity = 0;
 
     // Step 0: Pre-fetch external HTTP sub-resources (CSS, scripts) in parallel
     // so subsequent serial loaders find them already cached on disk.
@@ -1948,7 +1959,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     int linked_count = 0;
     collect_stylesheets_in_document_order(html_root, engine, base_path, pool,
                                           &stylesheets, stylesheet_count,
-                                          &linked_count, 0);
+                                          &stylesheet_capacity, &linked_count, 0);
     if (linked_count_out) *linked_count_out = linked_count;
 
     int inline_count = *stylesheet_count - linked_count;
@@ -3395,9 +3406,11 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             if (dom_js_mutation_requires_inline_stylesheet_rescan(dom_doc)) {
                 // CSSOM edits mutate parsed CssStylesheet objects; only reparse when a <style> subtree changed.
                 int rescan_inline_count = 0;
+                int rescan_inline_capacity = 0;
                 CssStylesheet** rescan_inline_sheets = nullptr;
                 collect_inline_styles_from_dom(dom_root, css_engine, css_base_path, pool,
-                                               &rescan_inline_sheets, &rescan_inline_count);
+                                               &rescan_inline_sheets, &rescan_inline_count,
+                                               &rescan_inline_capacity);
 
                 int old_inline_only = inline_stylesheet_count - linked_stylesheet_count;
                 if (rescan_inline_count != old_inline_only) {

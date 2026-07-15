@@ -9,20 +9,19 @@
 // GIF Animation Tick
 // ============================================================================
 
-void gif_animation_tick(AnimationInstance* anim, float t) {
-    GifAnimation* ga = (GifAnimation*)anim->state;
-    if (!ga || !ga->frames || !ga->surface) return;
+void GifAnimation::tick(AnimationInstance* anim, float t) {
+    if (!frames || !surface) return;
 
     double now = anim->start_time + anim->duration * t;
-    int n = ga->frames->frame_count;
+    int n = frames->frame_count;
 
     // Check if it's time to advance the frame
-    if (now >= ga->frame_end_time) {
-        int next = ga->current_frame + 1;
+    if (now >= frame_end_time) {
+        int next = current_frame + 1;
         if (next >= n) {
             // End of sequence — check loop
-            ga->loops_completed++;
-            if (ga->loop_count != 0 && ga->loops_completed >= ga->loop_count) {
+            loops_completed++;
+            if (loop_count != 0 && loops_completed >= loop_count) {
                 // All loops done — stop
                 anim->play_state = ANIM_PLAY_FINISHED;
                 return;
@@ -30,41 +29,45 @@ void gif_animation_tick(AnimationInstance* anim, float t) {
             next = 0;  // restart from first frame
         }
 
-        ga->current_frame = next;
-        GifFrameData* frame = &ga->frames->frames[next];
+        current_frame = next;
+        GifFrameData* frame = &frames->frames[next];
 
         // Swap the surface pixel pointer to the new frame
-        ga->surface->pixels = frame->pixels;
-        image_surface_bump_generation(ga->surface);
+        surface->pixels = frame->pixels;
+        image_surface_bump_generation(surface);
 
         // Set next frame end time
-        ga->frame_end_time = now + frame->delay_ms / 1000.0;
+        frame_end_time = now + frame->delay_ms / 1000.0;
 
         log_debug("gif tick: frame %d/%d, delay %dms", next, n, frame->delay_ms);
     }
 }
 
-void gif_animation_finish(AnimationInstance* anim) {
-    GifAnimation* ga = (GifAnimation*)anim->state;
-    if (!ga) return;
-
+void GifAnimation::finish(AnimationInstance* anim) {
     log_debug("gif animation finished: %d frames, %d loops", 
-              ga->frames ? ga->frames->frame_count : 0, ga->loops_completed);
+              frames ? frames->frame_count : 0, loops_completed);
 
     // Free the GifFrames data
-    if (ga->frames) {
-        image_gif_free(ga->frames);
-        ga->frames = NULL;
+    if (frames) {
+        image_gif_free(frames);
+        frames = NULL;
     }
     // Note: surface->pixels now points to freed memory.
     // The surface itself is not freed here — the caller owns it.
     // We reset to NULL so the renderer shows nothing (or the caller can re-set).
-    if (ga->surface) {
-        ga->surface->pixels = NULL;
-        image_surface_bump_generation(ga->surface);
-    }
-    mem_free(ga);
+    image_surface_detach_pixels(surface);
+    mem_free(this);
     anim->state = NULL;
+}
+
+void gif_animation_tick(AnimationInstance* anim, float t) {
+    GifAnimation* ga = anim ? (GifAnimation*)anim->state : nullptr;
+    if (ga) ga->tick(anim, t);
+}
+
+void gif_animation_finish(AnimationInstance* anim) {
+    GifAnimation* ga = anim ? (GifAnimation*)anim->state : nullptr;
+    if (ga) ga->finish(anim);
 }
 
 // ============================================================================
@@ -86,7 +89,7 @@ AnimationInstance* gif_animation_create(AnimationScheduler* scheduler,
         total_ms += gif_frames->frames[i].delay_ms;
     }
 
-    GifAnimation* ga = (GifAnimation*)mem_calloc(1, sizeof(GifAnimation), MEM_CAT_RENDER);
+    GifAnimation* ga = (GifAnimation*)mem_calloc(1, sizeof(GifAnimation), MEM_CAT_RENDER); // OBJ_HEAP_OK: media player handle outlives a single render pass and has explicit destroy.
     ga->frames = gif_frames;
     ga->current_frame = 0;
     ga->surface = surface;

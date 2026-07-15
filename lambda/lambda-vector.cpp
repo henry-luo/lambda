@@ -2748,7 +2748,7 @@ Item fn_drop(Item vec, Item n_item) {
 }
 
 // slice(vec, start, end) - extract elements from start (inclusive) to end (exclusive)
-// Works for arrays, lists, and strings
+// Works for arrays, lists, strings, and binaries
 Item fn_slice(Item vec, Item start_item, Item end_item) {
     GUARD_ERROR3(vec, start_item, end_item);
     TypeId type = get_type_id(vec);
@@ -2761,7 +2761,7 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
         return fn_substring(vec, start_item, end_item);
     }
 
-    int64_t len = vector_length(vec);
+    int64_t len = type == LMD_TYPE_BINARY ? fn_len(vec) : vector_length(vec);
     if (len < 0) return ItemError;
 
     int64_t start = 0;
@@ -2783,6 +2783,14 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
 
     int64_t new_len = end - start;
 
+    if (type == LMD_TYPE_BINARY) {
+        String* bin = vec.get_safe_binary();
+        if (!bin) return ItemError;
+        // Tier-1 slices own their bytes; sharing storage is deferred until the
+        // PL5 refcounted binary representation can preserve lifetime safely.
+        String* result = heap_binary_from_bytes(bin->chars + start, new_len);
+        return result ? (Item){.item = x2it(result)} : ItemError;
+    }
     if (type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = vec.array_num;
         if (arr->get_elem_type() == ELEM_INT) {

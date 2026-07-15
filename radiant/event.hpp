@@ -261,7 +261,7 @@ const char* event_state_log_doc_id(EventStateLog* log);
 /* (input event, navigation, timer, etc.).                             */
 /* ------------------------------------------------------------------ */
 
-/* cause: "input", "webdriver", "event_sim", "navigation", "timer",
+/* cause: "input", "event_sim", "navigation", "timer",
  *        "script", "internal" */
 uint64_t event_state_log_begin_cascade(EventStateLog* log, const char* cause);
 
@@ -287,10 +287,6 @@ void event_state_log_begin_record(EventStateLog* log, JsonWriter* w,
 
 /* Closes the top-level object and writes the line to the file. */
 void event_state_log_finish_record(EventStateLog* log, JsonWriter* w);
-
-/* Emit an already-fully-formed JSON object string as one line.
- * Useful for tests and for code paths that want full control. */
-void event_state_log_emit_raw(EventStateLog* log, const char* json_line);
 
 /* Serialize a layered node reference:
  *   { "id": N, "stable_id": "...", "path": "...", "source": { ... }, ... }
@@ -320,9 +316,6 @@ void event_state_log_session_end(EventStateLog* log);
 
 /* document.* family */
 void event_state_log_document(EventStateLog* log, const char* sub_type /* e.g. "load_start" */);
-
-/* logger.warning record (e.g. dropped record, buffer overflow) */
-void event_state_log_warning(EventStateLog* log, const char* code, const char* message);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -395,6 +388,8 @@ typedef enum InputIntentType {
 } InputIntentType;
 
 typedef struct InputIntent {
+    InputIntent();
+    ~InputIntent();
     InputIntentType type;
     const char* data;
     const char* html_data;
@@ -497,8 +492,7 @@ struct DocState;
 struct Pool;
 // Projection structs are private to StateStore; public code should use
 // StateStore helper APIs rather than dereferencing them.
-struct CaretState;
-struct SelectionState;
+struct SelectionPresentation;
 
 #ifdef __cplusplus
 extern "C" {
@@ -721,13 +715,9 @@ DomRange* dom_selection_get_range_at  (DomSelection* s, uint32_t index, const ch
 void      dom_selection_add_range     (DomSelection* s, DomRange* range);
 void      dom_selection_remove_range  (DomSelection* s, DomRange* range);
 void      dom_selection_remove_all_ranges(DomSelection* s);
-void      dom_selection_empty         (DomSelection* s);  // alias
 
 // Boundary mutation (spec methods)
 bool dom_selection_collapse(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
-bool dom_selection_set_position(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
-void dom_selection_collapse_to_start(DomSelection* s, const char** out_exception);
-void dom_selection_collapse_to_end(DomSelection* s, const char** out_exception);
 bool dom_selection_extend(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
 bool dom_selection_set_base_and_extent(DomSelection* s,
                                        DomNode* anchor_node, uint32_t anchor_offset,
@@ -859,9 +849,6 @@ bool dom_range_insert_node(DomRange* r, struct DomNode* node,
 bool dom_range_surround_contents(DomRange* r, struct DomNode* node,
                                  const char** out_exception);
 
-// Selection.deleteFromDocument — delete the contents of every range.
-void dom_selection_delete_from_document(DomSelection* s);
-
 // ============================================================================
 // Phase 5 — Selection.modify & word breaking
 //
@@ -933,13 +920,7 @@ struct EditingHost {
 // `out` may be nullptr to query existence only.
 bool editing_host_lookup(const DomNode* node, EditingHost* out);
 
-// Convenience wrappers.
-inline bool node_is_editable(const DomNode* node) {
-    EditingHost h;
-    if (!editing_host_lookup(node, &h)) return false;
-    return !h.target_in_false_island;
-}
-
+// Convenience wrapper.
 inline DomElement* editing_host_of(const DomNode* node) {
     EditingHost h;
     return editing_host_lookup(node, &h) ? h.host : nullptr;
@@ -951,7 +932,6 @@ inline DomElement* editing_host_of(const DomNode* node) {
 const char* html_element_get_contentEditable(DomElement* element);
 
 // Computed: walks ancestors honouring inheritance and ="false" islands.
-bool html_element_get_isContentEditable(DomElement* element);
 
 // Setter: per HTML spec, "true" | "false" | "plaintext-only" | "inherit"
 // (case-insensitive). An empty string maps to "inherit". Any other value
@@ -1374,23 +1354,10 @@ void dom_range_for_each_rect_in_text_rect(struct DomRange* range,
     struct DomText* target_text, struct TextRect* target_rect,
     struct UiContext* uicon, DomRangeRectCb cb, void* userdata);
 
-// ---------------------------------------------------------------------------
-// Projection → DOM mirroring
-// ---------------------------------------------------------------------------
-
-// Compatibility direction for older projection entry points. Most callers now
-// update DomSelection first, but projection-only paths can still call into here
-// to keep `state->dom_selection` in sync.
-//
-// Both functions are no-ops when `state->dom_selection` is null. They
-// allocate it lazily on first call so JS reads match what the user sees.
-void dom_selection_sync_from_selection_projection(struct DocState* state);
-void dom_selection_sync_from_caret_projection    (struct DocState* state);
-
 // Canonical direction. Reads StateStore's EditingSelection/DomSelection facade
 // and refreshes the projection structs with anchor/focus/caret boundaries plus
 // resolved layout x/y/height when the selection mutation seq has advanced.
-void state_store_refresh_caret_projection(struct DocState* state);
+void selection_refresh_presentation(struct DocState* state);
 
 // Register a glyph-precise X resolver. When set, `dom_range_for_each_rect()`
 // uses it instead of linear interpolation so that the right edge of the
@@ -1542,31 +1509,9 @@ uint32_t te_word_end  (const char* buf, uint32_t buf_len, uint32_t byte_off);
 uint32_t te_line_start(const char* buf, uint32_t buf_len, uint32_t byte_off);
 uint32_t te_line_end  (const char* buf, uint32_t buf_len, uint32_t byte_off);
 
-// ---------- selection helpers (F2) -------------------------------------
-
-// Apply the (start, end) byte range as a selection in StateStore, anchored on
-// `target` view.
-// Caret moves to `end`. Returns true on success.
-//
-// `target` must be the view associated with the text control (typically
-// the ViewBlock for an <input>/<textarea>; or the ViewText that holds the
-// content for static text under a text node).
+// Apply a byte range through the canonical selection writer path.
 bool te_apply_byte_range(DocState* state, void* target,
                          uint32_t start, uint32_t end);
-
-// Select the word containing byte_off in the form's current_value (or
-// `value` fallback). Returns false when not a text control or no word at
-// position.
-bool te_select_word_at(DomElement* elem, DocState* state,
-                       void* target, uint32_t byte_off);
-
-// Select the logical line containing byte_off (textarea), or the entire
-// value (single-line <input>).
-bool te_select_line_at(DomElement* elem, DocState* state,
-                       void* target, uint32_t byte_off);
-
-// Select all text in the control.
-bool te_select_all(DomElement* elem, DocState* state, void* target);
 
 // ---------- F3: word-granularity navigation ----------------------------
 
@@ -1633,6 +1578,9 @@ struct EditHistory {
     uint16_t          count;  // valid entries
     uint16_t          cursor; // 0 = at newest; N = N undos back
     uint16_t          cap;    // ring capacity
+
+    bool init(uint16_t capacity);
+    void destroy();
 };
 
 EditHistory* te_history_new(uint16_t cap);
@@ -1781,10 +1729,6 @@ typedef struct ClipboardBackend {
 
 void  clipboard_store_init(void);
 void  clipboard_store_shutdown(void);
-
-// Switch backend (e.g. tests use the in-memory backend; an interactive
-// app installs the GLFW or NSPasteboard backend).
-void  clipboard_store_set_backend(ClipboardBackend* backend);
 
 // Built-in backends.
 ClipboardBackend* clipboard_backend_inmemory(void);   // headless / tests
@@ -2118,10 +2062,13 @@ typedef struct StateStore {
     Pool* pool;
     Arena* arena;
     struct DocState* doc_state;
+
+    bool init(DomDocument* document);
+    void destroy();
+    struct DocState* state() const;
 } StateStore;
 
-typedef struct CaretState CaretState;
-typedef struct SelectionState SelectionState;
+typedef struct SelectionPresentation SelectionPresentation;
 typedef struct FocusState FocusState;
 typedef struct RetainedDisplayListCache RetainedDisplayListCache;
 
@@ -2206,6 +2153,7 @@ typedef struct EditingInteractionState {
     EditingSurface active_surface;
     bool has_active_surface;
     bool pointer_selecting;
+    bool selection_extending;
     EditingDragMode drag_mode;
     View* drag_anchor_view;
     int drag_anchor_offset;
@@ -2282,8 +2230,7 @@ typedef struct DocState {
     SmTransitionScope* sm_active_transition; // debug schema action/effect recorder
     
     // Global interaction states
-    CaretState* caret;             // text cursor state (legacy; migrating to dom_selection)
-    SelectionState* selection;     // text selection state (legacy; migrating to dom_selection)
+    SelectionPresentation* selection_presentation; // geometry/animation only; boundaries live below
     bool text_selection_press_in_range;  // mouse-down began inside an existing text selection
     View* text_selection_press_view;     // fallback collapse target for press-in-selection mouse-up
     int text_selection_press_offset;
@@ -2309,9 +2256,9 @@ typedef struct DocState {
     // semantics). See state_store_set_text_control_selection.
     EditingSelection     sel;
     struct DomRange*     live_ranges;       // doubly-linked list head
+    struct DomRange*     range_freelist;    // released arena slots for churny Range users
     uint32_t             next_range_id;     // monotonic id (debug)
     bool                 selection_layout_dirty;
-    uint32_t             selection_projection_seq; // last selection seq reflected by projection caches
     // Phase 8D: selectionchange event coalescing. `selection_mutation_seq`
     // is bumped by the StateStore canonical selection writer/mutation hook;
     // `selection_event_seq` is the last seq we already enqueued a
@@ -2398,6 +2345,9 @@ typedef struct DocState {
         bool  is_seeking;          // true while seek bar is being dragged
         float seek_fraction;       // seek position during drag (0.0–1.0)
     } video_controls;
+
+    bool init(Pool* pool, StateUpdateMode mode);
+    void destroy();
 } DocState;
 
 typedef struct ScrollInteractionState {
@@ -2475,12 +2425,6 @@ const char* radiant_state_dump_path(StateDumpLog* dump);
 void radiant_state_set_dump_log(DocState* state, StateDumpLog* dump);
 StrBuf* radiant_state_dump_mark(DocState* state);
 void radiant_state_dump_emit_cascade(DocState* state, uint64_t cascade_id);
-bool radiant_state_dump_to_file(DocState* state, const char* path);
-
-/**
- * Reset state store, clearing all states but keeping allocation
- */
-void radiant_state_reset(DocState* state);
 
 /**
  * Get a state value
@@ -2527,11 +2471,6 @@ void view_state_set_active(DocState* state, View* view, bool active);
 void view_state_set_focused(DocState* state, View* view, bool focused);
 
 /**
- * Check if a state exists
- */
-bool state_has(DocState* state, void* node, const char* name);
-
-/**
  * Set a state value (in-place mode)
  */
 void state_set(DocState* state, void* node, const char* name, Item value);
@@ -2557,12 +2496,6 @@ DocState* state_set_immutable(DocState* state, void* node, const char* name, Ite
 DocState* state_remove_immutable(DocState* state, void* node, const char* name);
 
 /**
- * Register a callback for state changes
- */
-void state_on_change(DocState* state, void* node, const char* name,
-    StateChangeCallback callback, void* udata);
-
-/**
  * Begin a batch of state updates (defers callbacks and dirty flagging)
  */
 void state_begin_batch(DocState* state);
@@ -2579,7 +2512,7 @@ extern "C" {
 void state_store_refresh_editing_selection_shadow(DocState* state);
 bool state_store_editing_selection_shadow_matches(DocState* state);
 void state_store_note_selection_mutation(DocState* state);
-void state_store_refresh_caret_projection(DocState* state);
+void selection_refresh_presentation(DocState* state);
 bool state_store_set_selection(DocState* state,
                                const DomBoundary* anchor,
                                const DomBoundary* focus,
@@ -2614,8 +2547,8 @@ void state_store_set_text_control_selection(DocState* state,
 //
 // Compatibility surface for controller, state-machine, form, and event-sim
 // paths that still speak view + byte-offset selections. These functions convert
-// to DomSelection / EditingSelection first; CaretState and SelectionState are
-// refreshed projection caches for rendering and diagnostics.
+// to DomSelection / EditingSelection first; presentation geometry is cached
+// separately for rendering and diagnostics.
 
 /**
  * Set caret position in an editable element
@@ -2844,11 +2777,6 @@ View* focus_get(DocState* state);
 bool focus_has_current(DocState* state);
 View* focus_get_visible(DocState* state);
 
-/**
- * Check if element or ancestor has focus
- */
-bool focus_within(DocState* state, View* view);
-
 // ============================================================================
 // Doc-Level Interaction Target API
 // ============================================================================
@@ -2987,13 +2915,6 @@ bool scroll_state_is_dragging_for_view(DocState* state, View* view);
  * Returns the UTF-8 encoded string; may be nullptr if not yet set.
  */
 const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len);
-
-/**
- * Set the text value for a text control through the state store.
- * Resets selection to end of text (HTML default).
- * This is the only supported writer path for value mutations.
- */
-void form_control_set_value(DocState* state, View* view, const char* value, uint32_t len);
 
 /**
  * Restore a recreated text control's live value/selection from ViewState.
@@ -3276,11 +3197,6 @@ void visited_links_destroy(VisitedLinks* visited);
  */
 void visited_links_add(VisitedLinks* visited, const char* url);
 
-/**
- * Check if a URL has been visited
- */
-bool visited_links_check(VisitedLinks* visited, const char* url);
-
 // ============================================================================
 // Predefined State Names (interned strings)
 // ============================================================================
@@ -3348,7 +3264,7 @@ bool visited_links_check(VisitedLinks* visited, const char* url);
 /* Radiant interaction state-machine boundary — Phase 3.
  *
  * This module provides the event cascade boundary used by platform input,
- * event_sim, WebDriver, layout diagnostics, and future transition APIs.
+ * event_sim, layout diagnostics, and future transition APIs.
  * It deliberately starts as a small validation/snapshot shell; focus,
  * selection, caret, IME, and form transitions plug into this boundary in
  * later phases.
@@ -3470,7 +3386,7 @@ bool drag_transition(DocState* state,
                      DragTransitionArgs* args);
 
 /* Begin one event cascade. `cause` follows the design vocabulary:
- * input, webdriver, event_sim, navigation, timer, script, internal, layout.
+ * input, event_sim, navigation, timer, script, internal, layout.
  * Returns 0 when logging is disabled; callers may still call end safely.
  */
 uint64_t state_begin_event_cascade(DocState* state,

@@ -196,8 +196,6 @@ uint32_t te_line_end(const char* buf, uint32_t buf_len, uint32_t byte_off) {
     return i;
 }
 
-// ---------- selection helpers (F2) -------------------------------------
-
 bool te_apply_byte_range(DocState* state, void* target,
                          uint32_t start, uint32_t end) {
     if (!state || !target) return false;
@@ -210,44 +208,6 @@ bool te_apply_byte_range(DocState* state, void* target,
     log_debug("text_edit: applied selection bytes=[%u..%u] view=%p",
               start, end, view);
     return true;
-}
-
-typedef uint32_t (*TextBoundaryFn)(const char*, uint32_t, uint32_t);
-
-static bool te_select_boundaries_at(DomElement* elem, DocState* state, void* target,
-                                    uint32_t byte_off, TextBoundaryFn start_fn,
-                                    TextBoundaryFn end_fn, bool require_nonempty) {
-    if (!elem || !state || !target || !tc_is_text_control(elem)) return false;
-    FormControlProp* form = elem->form;
-    uint32_t length = 0;
-    const char* buffer = tc_buffer(form, &length);
-    if (!buffer || (require_nonempty && length == 0)) return false;
-
-    uint32_t start = start_fn(buffer, length, byte_off);
-    uint32_t end = end_fn(buffer, length, byte_off);
-    if (require_nonempty && start == end) return false;
-    return te_apply_byte_range(state, target, start, end);
-}
-
-bool te_select_word_at(DomElement* elem, DocState* state,
-                       void* target, uint32_t byte_off) {
-    return te_select_boundaries_at(
-        elem, state, target, byte_off, te_word_start, te_word_end, true);
-}
-
-bool te_select_line_at(DomElement* elem, DocState* state,
-                       void* target, uint32_t byte_off) {
-    return te_select_boundaries_at(
-        elem, state, target, byte_off, te_line_start, te_line_end, false);
-}
-
-bool te_select_all(DomElement* elem, DocState* state, void* target) {
-    if (!elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-    FormControlProp* f = elem->form;
-    uint32_t blen = 0;
-    (void)tc_buffer(f, &blen);
-    return te_apply_byte_range(state, target, 0, blen);
 }
 
 // ---------- F3: word-granularity navigation ----------------------------
@@ -399,24 +359,41 @@ bool te_blur_should_dispatch_change(DomElement* elem) {
 // ---------- undo/redo ring (skeleton) ----------------------------------
 
 EditHistory* te_history_new(uint16_t cap) {
-    if (cap == 0) cap = TE_HISTORY_DEFAULT_CAP;
     EditHistory* h = (EditHistory*)mem_calloc(1, sizeof(EditHistory), MEM_CAT_DOM);
     if (!h) return nullptr;
-    h->ring = (EditHistoryEntry*)mem_calloc(cap, sizeof(EditHistoryEntry), MEM_CAT_DOM);
-    if (!h->ring) { mem_free(h); return nullptr; }
-    h->cap = cap;
+    if (!h->init(cap)) {
+        mem_free(h);
+        return nullptr;
+    }
     return h;
 }
 
 void te_history_free(EditHistory* h) {
     if (!h) return;
-    if (h->ring) {
-        for (uint16_t i = 0; i < h->cap; i++) {
-            if (h->ring[i].snapshot) mem_free(h->ring[i].snapshot);
-        }
-        mem_free(h->ring);
-    }
+    h->destroy();
     mem_free(h);
+}
+
+bool EditHistory::init(uint16_t capacity) {
+    if (capacity == 0) capacity = TE_HISTORY_DEFAULT_CAP;
+    ring = (EditHistoryEntry*)mem_calloc(capacity, sizeof(EditHistoryEntry), MEM_CAT_DOM);
+    if (!ring) return false;
+    cap = capacity;
+    return true;
+}
+
+void EditHistory::destroy() {
+    if (ring) {
+        for (uint16_t i = 0; i < cap; i++) {
+            if (ring[i].snapshot) mem_free(ring[i].snapshot);
+        }
+        mem_free(ring);
+        ring = nullptr;
+    }
+    cap = 0;
+    head = 0;
+    count = 0;
+    cursor = 0;
 }
 
 static EditHistory* tc_get_or_create_history(FormControlProp* f) {

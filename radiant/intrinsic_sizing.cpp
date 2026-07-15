@@ -3305,12 +3305,18 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 if (n > num_columns) num_columns = n;
             });
 
-            // Allocate per-column min/max arrays on the stack
-            float* col_min = (float*)alloca(num_columns * sizeof(float));
-            float* col_max = (float*)alloca(num_columns * sizeof(float));
-            for (int i = 0; i < num_columns; i++) {
-                col_min[i] = 0;
-                col_max[i] = 0;
+            // Table column counts come from the DOM, so avoid input-sized stack frames.
+            float* col_min = num_columns > 0
+                ? (float*)scratch_calloc(&lycon->scratch, (size_t)num_columns * sizeof(float))
+                : nullptr;
+            float* col_max = num_columns > 0
+                ? (float*)scratch_calloc(&lycon->scratch, (size_t)num_columns * sizeof(float))
+                : nullptr;
+            if (num_columns > 0 && (!col_min || !col_max)) {
+                log_error("measure_element_intrinsic_widths: failed to allocate %d table column widths", num_columns);
+                scratch_free(&lycon->scratch, col_max);
+                scratch_free(&lycon->scratch, col_min);
+                return sizes;
             }
 
             // Pass 2: measure single-span cells, update per-column min/max
@@ -3417,6 +3423,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             sizes.max_content = max(sizes.max_content, table_max);
             log_debug("  table intrinsic: %d cols, min=%.1f, max=%.1f",
                       num_columns, table_min, table_max);
+            scratch_free(&lycon->scratch, col_max);
+            scratch_free(&lycon->scratch, col_min);
 
             // Handle captions
             for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -5359,8 +5367,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             // Calculate number of rows
             int row_count = (child_count + grid_column_count - 1) / grid_column_count;
 
-            // Collect heights and compute row-by-row max
-            float* child_heights = (float*)alloca(child_count * sizeof(float));
+            // Grid child counts come from the DOM, so avoid input-sized stack frames.
+            float* child_heights = (float*)scratch_calloc(&lycon->scratch, (size_t)child_count * sizeof(float));
+            if (!child_heights) {
+                log_error("calculate_max_content_height: failed to allocate %d grid child heights", child_count);
+                return height;
+            }
             float col_share = width / grid_column_count;
             int idx = 0;
             for (DomNode* c = element->first_child; c; c = c->next_sibling) {
@@ -5391,6 +5403,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
             log_debug("calculate_max_content_height: grid %s rows=%d, total_height=%.1f",
                       element->node_name(), row_count, height);
+            scratch_free(&lycon->scratch, child_heights);
         }
     } else if (is_flex_row && is_flex_wrap && width > 0) {
         // Special handling for wrapping flex row containers
@@ -5756,35 +5769,6 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
               result.min_content_width, result.max_content_width,
               result.min_content_height, result.max_content_height,
               width_for_height);
-
-    return result;
-}
-
-// ============================================================================
-// Table Cell Intrinsic Width Measurement
-// ============================================================================
-
-CellIntrinsicWidths measure_table_cell_intrinsic_widths(
-    LayoutContext* lycon,
-    ViewBlock* cell
-) {
-    CellIntrinsicWidths result = {0, 0};
-
-    if (!lycon || !cell) {
-        return result;
-    }
-
-    // Use unified API with max-content available space
-    AvailableSpace available = AvailableSpace::make_max_content();
-
-    IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, cell, available);
-
-    result.min_width = sizes.min_content_width;
-    result.max_width = sizes.max_content_width;
-
-    // Apply minimum usable width per CSS 2.1
-    if (result.min_width < 16.0f) result.min_width = 16.0f;
-    if (result.max_width < 16.0f) result.max_width = 16.0f;
 
     return result;
 }

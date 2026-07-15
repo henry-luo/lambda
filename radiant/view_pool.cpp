@@ -5,12 +5,15 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
+#include <stdlib.h>
 #include <time.h>
 #include <cmath>  // for INFINITY
 #include <string.h>
 #include <stdarg.h>
 
+#ifndef NDEBUG
 void print_view_group(ViewElement* view_group, StrBuf* buf, int indent);
+#endif
 
 // Flag to control whether consecutive text nodes are combined during JSON output
 // When true (default), consecutive ViewText nodes are merged for HTML output compatibility
@@ -19,10 +22,6 @@ static bool g_combine_text_nodes = true;
 
 void set_combine_text_nodes(bool combine) {
     g_combine_text_nodes = combine;
-}
-
-bool get_combine_text_nodes() {
-    return g_combine_text_nodes;
 }
 
 static const char* flex_enum_name(CssEnum value, const char* fallback) {
@@ -536,23 +535,20 @@ static void view_teardown_visit_node(ViewTree* tree,
     }
 }
 
-void free_view(ViewTree* tree, View* view) {
-    if (!tree || !view) return;
-    log_debug("free view %p, type %s", view, view->node_name());
-    view_teardown_visit_node(tree, static_cast<DomNode*>(view),
-        VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_FREE_POOL | VIEW_TEARDOWN_FREE_NODE,
-        false);
+void* alloc_prop(LayoutContext* lycon, size_t size) {
+    return lycon->doc->view_tree->alloc_prop(size);
 }
 
-void* alloc_prop(LayoutContext* lycon, size_t size) {
-    void* prop = pool_calloc(lycon->doc->view_tree->pool, size);
+void* ViewTree::alloc_prop(size_t size) {
+    void* prop = pool_calloc(pool, size);
     if (prop) {
         return prop;
     }
     else {
+        // layout properties have no recovery path; aborting here avoids unchecked callers dereferencing NULL later.
         log_error("alloc_prop: pool_calloc returned NULL (pool=%p, size=%zu) - pool may be corrupt",
-                  (void*)lycon->doc->view_tree->pool, size);
-        return NULL;
+                  (void*)pool, size);
+        abort();
     }
 }
 
@@ -749,54 +745,71 @@ void view_pool_release_detached_subtree(DomNode* root) {
         false);
 }
 
-void view_pool_init(ViewTree* tree) {
+void ViewTree::init() {
     log_debug("init view pool");
-    tree->pool = mem_pool_create(NULL, MEM_ROLE_VIEW, "view_tree.pool");
-    if (!tree->pool) {
+    pool = mem_pool_create(NULL, MEM_ROLE_VIEW, "view_tree.pool");
+    if (!pool) {
         log_error("Failed to initialize view pool");
     }
     else {
-        tree->arena = mem_arena_create(NULL, tree->pool, MEM_ROLE_VIEW, "view_tree.arena");
+        arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "view_tree.arena");
         log_debug("view pool initialized");
     }
 }
 
-void view_pool_reset_retained(ViewTree* tree) {
-    if (!tree) return;
+void view_pool_init(ViewTree* tree) {
+    if (tree) tree->init();
+}
 
-    if (tree->root) {
+void ViewTree::reset_retained() {
+    if (root) {
         // DOM mutation fallback keeps DOM/view nodes; only layout-pool-owned
         // props are replaced so StateStore anchors can keep binding by node id.
-        view_teardown_visit_node(tree, tree->root,
+        view_teardown_visit_node(this, root,
             VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_CLEAR_POINTERS,
             false);
-        tree->root = NULL;
+        root = NULL;
     }
+    // Measurement entries point at this tree's views; reset invalidates them with the layout epoch.
+    clear_measurement_cache(this);
 
-    Arena* arena = tree->arena;
-    Pool* pool = tree->pool;
-    tree->arena = NULL;
-    tree->pool = NULL;
-    if (arena) arena_destroy(arena);
-    if (pool) pool_destroy(pool);
-    view_pool_init(tree);
+    Arena* old_arena = arena;
+    Pool* old_pool = pool;
+    arena = NULL;
+    pool = NULL;
+    // Factory-created view roots must unregister their memory-context nodes on teardown.
+    if (old_arena) mem_arena_destroy(old_arena);
+    if (old_pool) mem_pool_destroy(old_pool);
+    init();
+}
+
+void view_pool_reset_retained(ViewTree* tree) {
+    if (tree) tree->reset_retained();
+}
+
+void ViewTree::destroy() {
+    destroy_measurement_cache(this);
+    if (root) {
+        view_teardown_visit_node(this, root,
+            VIEW_TEARDOWN_RELEASE_EXTERNAL,
+            false);
+        root = NULL;
+    }
+    Arena* old_arena = arena;
+    Pool* old_pool = pool;
+    arena = NULL;
+    pool = NULL;
+    // Factory-created view roots must unregister their memory-context nodes on teardown.
+    if (old_arena) mem_arena_destroy(old_arena);
+    if (old_pool) mem_pool_destroy(old_pool);
 }
 
 void view_pool_destroy(ViewTree* tree) {
-    if (tree->root) {
-        view_teardown_visit_node(tree, tree->root,
-            VIEW_TEARDOWN_RELEASE_EXTERNAL,
-            false);
-        tree->root = NULL;
-    }
-    Arena* arena = tree->arena;
-    Pool* pool = tree->pool;
-    tree->arena = NULL;
-    tree->pool = NULL;
-    if (arena) arena_destroy(arena);
-    if (pool) pool_destroy(pool);
+    if (tree) tree->destroy();
 }
 
+#ifndef NDEBUG
+// The human dump constructs its full buffer before log_debug, so release must omit the traversal itself.
 void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
     if (span->in_line) {
         strbuf_append_char_n(buf, ' ', indent);
@@ -1105,6 +1118,7 @@ void print_view_group(ViewElement* view_group, StrBuf* buf, int indent) {
     }
     // else no child view
 }
+#endif
 
 void write_string_to_file(const char *filename, const char *text) {
     FILE *file = fopen(filename, "w"); // Open file in write mode
@@ -1117,6 +1131,7 @@ void write_string_to_file(const char *filename, const char *text) {
 }
 
 void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) {
+#ifndef NDEBUG
     StrBuf* buf = strbuf_new_cap(1024);
     print_view_block(lam::view_require_block(view_root), buf, 0);
     log_debug("=================\nView tree:");
@@ -1135,6 +1150,7 @@ void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) 
 #endif
     }
     strbuf_free(buf);
+#endif
 
     // also generate JSON output
     print_view_tree_json(view_root, url, output_path);

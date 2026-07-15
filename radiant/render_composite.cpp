@@ -95,48 +95,11 @@ uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnu
     return ((uint32_t)new_a << 24) | ((uint32_t)rb << 16) | ((uint32_t)rg << 8) | rr;
 }
 
-bool render_composite_copy_backdrop(ImageSurface* surface, uint32_t* backdrop,
-                                    int x0, int y0, int width, int height,
-                                    bool clear_surface) {
-    if (!surface || !surface->pixels || !backdrop || width <= 0 || height <= 0) {
-        return false;
-    }
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int pitch = surface->pitch / 4;
-    for (int row = 0; row < height; row++) {
-        memcpy(backdrop + row * width,
-               pixels + (y0 + row) * pitch + x0,
-               (size_t)width * sizeof(uint32_t));
-    }
-    if (clear_surface) {
-        for (int row = 0; row < height; row++) {
-            memset(pixels + (y0 + row) * pitch + x0, 0, (size_t)width * sizeof(uint32_t));
-        }
-    }
-    return true;
-}
-
 static uint32_t* render_composite_target(ImageSurface* surface, const uint32_t* backdrop,
                                          int width, int height, int* pitch) {
     if (!surface || !surface->pixels || !backdrop || width <= 0 || height <= 0) return nullptr;
     *pitch = surface->pitch / 4;
     return (uint32_t*)surface->pixels;
-}
-
-void render_composite_apply_blend(ImageSurface* surface, const uint32_t* backdrop,
-                                  int x0, int y0, int width, int height,
-                                  CssEnum blend_mode) {
-    int pitch;
-    uint32_t* pixels = render_composite_target(surface, backdrop, width, height, &pitch);
-    if (!pixels) return;
-    for (int row = 0; row < height; row++) {
-        for (int col = 0; col < width; col++) {
-            uint32_t source = pixels[(y0 + row) * pitch + (x0 + col)];
-            uint32_t dst = backdrop[row * width + col];
-            pixels[(y0 + row) * pitch + (x0 + col)] =
-                render_composite_blend_pixel(dst, source, blend_mode);
-        }
-    }
 }
 
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,

@@ -1,0 +1,14 @@
+id: no-open-realloc
+language: cpp
+severity: error
+message: >-
+  Open-coded realloc in Radiant. Use mem_grow_array / pool_grow_array so
+  capacity growth is checked and conventionally registered. Mark an audited
+  exception with a trailing "// REALLOC_OK: <reason>".
+metadata:
+  suppress: REALLOC_OK
+rule:
+  kind: call_expression
+  regex: "\\b(mem_realloc|pool_realloc)\\s*\\("
+files:
+  - "radiant/**/*.{c,cpp,h,hpp,mm}"

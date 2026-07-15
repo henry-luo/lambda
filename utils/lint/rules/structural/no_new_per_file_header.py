@@ -11,7 +11,6 @@ ALLOW_LIST = {
     "render.hpp",
     "event.hpp",
     "radiant.hpp",
-    "webdriver/webdriver.hpp",
     "webview_handle_mac.h",
     "webview_handle_linux.h",
     "rdt_video.h",

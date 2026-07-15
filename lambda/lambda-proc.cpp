@@ -254,7 +254,9 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
 
     // binary source: output as raw binary data (ignore format)
     if (source_type == LMD_TYPE_BINARY) {
-        Binary* bin = (Binary*)it2s(source);
+        // it2s accepts only text-tagged values; using it here discarded valid
+        // binary pointers before the raw length-delimited write could occur.
+        Binary* bin = source.get_safe_binary();
         if (!bin) {
             log_error("pn_output_internal: source binary is null");
             strbuf_free(path_buf);

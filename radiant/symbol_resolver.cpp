@@ -464,10 +464,6 @@ static const char* find_emoji(const char* name, size_t len) {
     return nullptr;
 }
 
-bool is_emoji_shortcode(const char* name, size_t len) {
-    return find_emoji(name, len) != nullptr;
-}
-
 bool is_html_entity(const char* name, size_t len) {
     return html_entity_lookup(name, len) != nullptr;
 }

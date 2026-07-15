@@ -243,7 +243,7 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
     ensure_gtk_layer_initialized();
     if (!s_gtk_layer_initialized) return nullptr;
 
-    WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT);
+    WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: platform webview handle is released by webview_layer_platform_destroy.
     handle->mode        = WEBVIEW_MODE_LAYER;
     handle->width       = w;
     handle->height      = h;
@@ -336,12 +336,6 @@ void webview_layer_platform_set_html(WebViewHandle* handle, const char* html) {
     handle->dirty  = true;
     webkit_web_view_load_html(handle->wk_view, html, nullptr);
     log_debug("webview_layer_linux: loaded inline HTML (%zu bytes)", strlen(html));
-}
-
-void webview_layer_platform_eval_js(WebViewHandle* handle, const char* js) {
-    if (!handle || !handle->wk_view || !js) return;
-    webkit_web_view_run_javascript(handle->wk_view, js, nullptr, nullptr, nullptr);
-    handle->dirty = true;
 }
 
 void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float pixel_ratio) {

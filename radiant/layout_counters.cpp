@@ -28,90 +28,118 @@ CounterContext* counter_context_create(Arena* arena) {
     CounterContext* ctx = (CounterContext*)arena_alloc(arena, sizeof(CounterContext));
     if (!ctx) return nullptr;
 
-    ctx->arena = arena;
-    ctx->current_scope = nullptr;
-    void* stack_mem = mem_alloc(sizeof(lam::ArrayList<CounterScope*>), MEM_CAT_LAYOUT);
-    if (!stack_mem) return nullptr;
-    ctx->scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16); // NEW_DELETE_OK: single audited construction of scope_stack inside counter_context_create init.
-
-    // Create root scope
-    counter_push_scope(ctx);
+    if (!ctx->init(arena)) {
+        return nullptr;
+    }
 
     log_debug("[Counters] Created counter context");
     return ctx;
 }
 
+bool CounterContext::init(Arena* backing_arena) {
+    if (!backing_arena) return false;
+
+    arena = backing_arena;
+    current_scope = nullptr;
+    scope_stack = nullptr;
+    void* stack_mem = mem_alloc(sizeof(lam::ArrayList<CounterScope*>), MEM_CAT_LAYOUT);
+    if (!stack_mem) return false;
+    scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16); // NEW_DELETE_OK: single audited construction of scope_stack inside CounterContext::init.
+
+    // Create root scope
+    push_scope();
+
+    if (!current_scope) {
+        destroy();
+        return false;
+    }
+    return true;
+}
+
 void counter_context_destroy(CounterContext* ctx) {
     if (!ctx) return;
+    ctx->destroy();
+}
 
+void CounterContext::destroy() {
     // Free hash maps in each scope
-    if (ctx->scope_stack) {
-        for (size_t i = 0; i < ctx->scope_stack->size(); i++) {
-            CounterScope* scope = (*ctx->scope_stack)[i];
+    if (scope_stack) {
+        for (size_t i = 0; i < scope_stack->size(); i++) {
+            CounterScope* scope = (*scope_stack)[i];
             if (scope && scope->counters) {
                 hashmap_free(scope->counters);
             }
         }
-        ctx->scope_stack->~ArrayList<CounterScope*>();
-        mem_free(ctx->scope_stack);
+        scope_stack->~ArrayList<CounterScope*>();
+        mem_free(scope_stack);
+        scope_stack = nullptr;
     }
+    current_scope = nullptr;
 
     log_debug("[Counters] Destroyed counter context");
 }
 
 void counter_push_scope(CounterContext* ctx) {
     if (!ctx) return;
+    ctx->push_scope();
+}
 
+void CounterContext::push_scope() {
     // Allocate new scope
-    CounterScope* scope = (CounterScope*)arena_alloc(ctx->arena, sizeof(CounterScope));
+    CounterScope* scope = (CounterScope*)arena_alloc(arena, sizeof(CounterScope));
     if (!scope) return;
 
     // Create hash map for counters in this scope
     scope->counters = counter_new(16);
-    scope->parent = ctx->current_scope;
+    scope->parent = current_scope;
 
     // Push onto stack
-    if (ctx->scope_stack) {
-        ctx->scope_stack->append(scope);
+    if (scope_stack) {
+        scope_stack->append(scope);
     }
 
-    ctx->current_scope = scope;
+    current_scope = scope;
 }
 
-void counter_pop_scope(CounterContext* ctx) {
-    if (!ctx || !ctx->scope_stack) return;
+void CounterContext::pop_scope() {
+    if (!scope_stack) return;
 
-    size_t size = ctx->scope_stack->size();
+    size_t size = scope_stack->size();
     if (size <= 1) {
         // Don't pop root scope
         return;
     }
 
     // Free the hash map before removing
-    CounterScope* scope = (*ctx->scope_stack)[size - 1];
+    CounterScope* scope = (*scope_stack)[size - 1];
     if (scope && scope->counters) {
         hashmap_free(scope->counters);
     }
 
     // Pop from stack
-    ctx->scope_stack->remove(size - 1);
+    scope_stack->remove(size - 1);
 
     // Update current scope to parent
     if (size > 1) {
-        ctx->current_scope = (*ctx->scope_stack)[size - 2];
+        current_scope = (*scope_stack)[size - 2];
     } else {
-        ctx->current_scope = nullptr;
+        current_scope = nullptr;
     }
 }
 
 void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets) {
     if (!ctx || !ctx->scope_stack) return;
+    ctx->pop_scope_propagate(propagate_resets);
+}
 
-    size_t size = ctx->scope_stack->size();
+void CounterContext::pop_scope_propagate(bool propagate_resets) {
+    if (!scope_stack) return;
+
+    size_t size = scope_stack->size();
     if (size <= 1) return;
 
-    CounterScope* scope = (*ctx->scope_stack)[size - 1];
-    CounterScope* parent = (size > 1) ? (*ctx->scope_stack)[size - 2] : nullptr;
+    CounterScope* scope = (*scope_stack)[size - 1];
+    CounterScope* parent = (size > 1) ? (*scope_stack)[size - 2] : nullptr;
 
     // Propagate counters from popped scope to parent.
     // CSS 2.1 §12.4.1: "The scope of a counter starts at the first element in the
@@ -160,7 +188,7 @@ void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets) {
                 if (cv->created_by_reset) {
                     bool ancestor_has_counter = false;
                     for (size_t si = size - 2; si > 0; si--) {
-                        CounterScope* ancestor = (*ctx->scope_stack)[si - 1];
+                        CounterScope* ancestor = (*scope_stack)[si - 1];
                         if (ancestor && ancestor->counters) {
                             CounterValue* anc_cv = (CounterValue*)hashmap_get(ancestor->counters, &search_key);
                             if (anc_cv) {
@@ -192,13 +220,13 @@ void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets) {
     }
 
     // Pop from stack
-    ctx->scope_stack->remove(size - 1);
+    scope_stack->remove(size - 1);
 
     // Update current scope to parent
     if (size > 1) {
-        ctx->current_scope = (*ctx->scope_stack)[size - 2];
+        current_scope = (*scope_stack)[size - 2];
     } else {
-        ctx->current_scope = nullptr;
+        current_scope = nullptr;
     }
 }
 

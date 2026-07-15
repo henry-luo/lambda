@@ -29,6 +29,8 @@
 extern "C" {
 #endif
 
+typedef struct StrBuf StrBuf;
+
 /* sentinel for "not found" — same convention as C++ std::string::npos */
 #define STR_NPOS ((size_t)-1)
 
@@ -402,6 +404,12 @@ char* str_hex_encode(char* dst, const char* s, size_t len);
 
 /** hex decode [hex, hex+hex_len) into dst. returns bytes written. */
 size_t str_hex_decode(char* dst, const char* hex, size_t hex_len);
+
+/** Decode the payload between b' and ' into raw bytes.
+ *  Recognizes \\x hex, \\64 standard base64, and unmarked hex; ASCII
+ *  whitespace is ignored. Resets out before writing. Returns bytes written,
+ *  or -1 on malformed input and stores its source offset in err_off. */
+int str_binary_payload_decode(const char* content, int len, StrBuf* out, int* err_off);
 
 /* ──────────────────────────────────────────────────────────────────────
  *  17. Scanner tier (NUL-safe parser primitives)

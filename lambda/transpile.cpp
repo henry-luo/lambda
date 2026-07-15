@@ -2748,7 +2748,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             bool has_index = (loop_node->index_name != NULL);
             bool key_only = loop_node->key_only;
 
-            // Check if it's a known indexed type (array/range) at compile time
+            // Check if it's a known indexed type (array/range/binary) at compile time
             bool is_generic_array = (expr_type->type_id == LMD_TYPE_ARRAY);
             TypeId nested_type_id = LMD_TYPE_ANY;
             if (is_generic_array) {
@@ -2760,7 +2760,8 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             bool is_typed_array = (expr_type->type_id == LMD_TYPE_ARRAY_NUM);
             bool is_any_array = is_typed_array || is_generic_array;
             bool is_range = (expr_type->type_id == LMD_TYPE_RANGE);
-            bool is_known_indexed = is_range || is_any_array || expr_type->type_id == LMD_TYPE_ARRAY;
+            bool is_binary = (expr_type->type_id == LMD_TYPE_BINARY);
+            bool is_known_indexed = is_range || is_any_array || is_binary;
             bool is_known_keyed = c_transpile_keyed_loop_type(expr_type->type_id);
             bool uses_attr_keys = is_known_keyed && key_filter != LOOP_KEY_INT;
             bool uses_iter_keys = !is_known_indexed && !uses_attr_keys;
@@ -2819,6 +2820,8 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                     item_type = &TYPE_ANY; // elem_type determined at runtime
                 } else if (is_range) {
                     item_type = &TYPE_INT;
+                } else if (is_binary) {
+                    item_type = &TYPE_U8;
                 }
 
                 write_type(tp->code_buf, item_type);

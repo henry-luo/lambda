@@ -266,7 +266,6 @@ Pool*       rdt_picture_get_pool(RdtPicture* pic);
 const char* rdt_picture_get_source_path(RdtPicture* pic);
 void        rdt_picture_get_size(RdtPicture* pic, float* w, float* h);
 void        rdt_picture_set_size(RdtPicture* pic, float w, float h);
-bool        rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out);
 void        rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m);
 void        rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
                              uint8_t opacity, const RdtMatrix* transform);
@@ -280,7 +279,6 @@ void        rdt_picture_free(RdtPicture* pic);
 
 void rdt_engine_init(int threads);
 void rdt_engine_term(void);
-void rdt_font_load(const char* font_path);
 
 // Set the default FontContext used for SVG text rendering inside pictures
 // loaded from file/data via rdt_picture_load*.  Must be called once after
@@ -643,6 +641,13 @@ typedef struct DisplayList {
     int count;
     int capacity;
     ScratchArena arena;      // all variable-length data (paths, stops, dashes)
+#ifdef __cplusplus
+    void init(Arena* backing_arena);
+    void clear();
+    void destroy();
+    int item_count() const;
+    bool contains_glyphs() const;
+#endif
 } DisplayList;
 
 typedef struct DisplayListValidationResult {
@@ -1312,7 +1317,12 @@ typedef struct PaintList {
     PaintCmd* cmds;
     int count;
     int capacity;
-    Arena* arena;            // backing arena for the cmds array
+#ifdef __cplusplus
+    void init(Arena* backing_arena);
+    void clear();
+    void destroy();
+    int item_count() const;
+#endif
 } PaintList;
 
 typedef struct PaintIrValidationResult {
@@ -1330,7 +1340,7 @@ typedef struct PaintIrValidationResult {
 // ---------------------------------------------------------------------------
 
 void paint_list_init(PaintList* pl, Arena* backing_arena);
-void paint_list_clear(PaintList* pl);   // rewind count (arena owned by caller)
+void paint_list_clear(PaintList* pl);   // rewind count and release owned command payloads
 void paint_list_destroy(PaintList* pl);
 int  paint_list_count(const PaintList* pl);
 bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result);
@@ -1596,6 +1606,19 @@ typedef struct RenderContext {
     // a wider element subtree marker around replaced/layer content.
     int element_marker_suppression_depth;
 } RenderContext;
+
+struct RenderFrameScope {
+    RenderContext* rdcon;
+    DisplayList display_list;
+    bool context_active;
+    bool display_list_active;
+    RenderFrameScope(RenderContext* r, UiContext* uicon, ViewTree* view_tree,
+                     RenderProfiler* profiler);
+    ~RenderFrameScope();
+    DisplayList* list() { return display_list_active ? &display_list : nullptr; }
+    RenderFrameScope(const RenderFrameScope&) = delete;
+    RenderFrameScope& operator=(const RenderFrameScope&) = delete;
+};
 
 // Function declarations
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
@@ -2105,17 +2128,25 @@ typedef struct Tile {
 
 typedef struct TileGrid {
     Tile* tiles;
+    uint32_t* pixel_slab;
     int cols, rows;
     int total;
+    size_t pixel_slab_count;
     float scale;                // pixel_ratio (1.0, 2.0, etc.)
     int surface_w, surface_h;  // full surface dimensions in physical pixels
+#ifdef __cplusplus
+    void init(int surface_w, int surface_h, float scale);
+    void destroy();
+    void clear(uint32_t color);
+    void composite(ImageSurface* surface);
+#endif
 } TileGrid;
 
 // Create a tile grid covering the given surface dimensions.
 // scale = pixel_ratio (e.g. 2.0 for Retina).
 void tile_grid_init(TileGrid* grid, int surface_w, int surface_h, float scale);
 
-// Free all tile pixel buffers and the grid array.
+// Free tile pixel slab and the grid array.
 void tile_grid_destroy(TileGrid* grid);
 
 // Clear all tile pixels to a solid color (ABGR8888).
@@ -2142,6 +2173,9 @@ typedef struct WorkerState {
     Pool* pool;                 // thread-local memory pool (backing for arena)
     Arena* arena;               // thread-local arena (backing for scratch)
     bool initialized;
+
+    void init(Tile* tile);
+    void destroy();
 } WorkerState;
 
 typedef struct RenderPool {
@@ -2159,6 +2193,11 @@ typedef struct RenderPool {
     int next_job;               // index into jobs array (guarded by mutex)
     int completed_jobs;
     bool shutdown;
+#ifdef __cplusplus
+    void init(int threads);
+    void destroy();
+    void dispatch(TileJob* jobs, int count);
+#endif
 } RenderPool;
 
 // Create the pool with the given number of worker threads.
@@ -2219,23 +2258,8 @@ inline void radiant_retain_marker_text_content(MarkerProp* marker, lam::PoolPtr<
     field.set(text_content);
 }
 
-inline void radiant_retain_image_source_path(ImageSurface* surface, lam::PoolPtr<char> source_path) {
-    lam::PersistentFieldRef<char, lam::PoolDomain> field(surface->source_path);
-    field.set(source_path);
-}
-
 inline void radiant_take_image_source_path(ImageSurface* surface, lam::SessionPtr<char>& source_path) {
     surface->source_path = lam::detach_session_buffer(source_path);
-}
-
-inline void radiant_clear_image_source_path(ImageSurface* surface) {
-    surface->source_path = nullptr;
-}
-
-inline void radiant_retain_image_source_data(ImageSurface* surface, lam::PoolPtr<unsigned char> source_data, size_t len) {
-    lam::PersistentFieldRef<unsigned char, lam::PoolDomain> field(surface->source_data);
-    field.set(source_data);
-    surface->source_data_len = len;
 }
 
 inline void radiant_take_image_source_data(ImageSurface* surface, lam::SessionPtr<unsigned char>& source_data, size_t len) {
@@ -2378,6 +2402,10 @@ typedef struct GifAnimation {
 
     // Target surface — pixel pointer is swapped on frame change
     struct ImageSurface* surface;
+#ifdef __cplusplus
+    void tick(AnimationInstance* anim, float t);
+    void finish(AnimationInstance* anim);
+#endif
 } GifAnimation;
 
 // Create a GifAnimation from decoded frames and register with scheduler.
@@ -2437,6 +2465,10 @@ typedef struct LottiePlayer {
 
     bool loop;
     bool playing;
+#ifdef __cplusplus
+    void tick(AnimationInstance* anim, float t);
+    void finish(AnimationInstance* anim);
+#endif
 } LottiePlayer;
 
 // Create a LottiePlayer from a file path and register with scheduler.
@@ -3152,12 +3184,6 @@ void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope);
 // ===== render_composite.hpp =====
 uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode);
 
-bool render_composite_copy_backdrop(ImageSurface* surface, uint32_t* backdrop,
-                                    int x0, int y0, int width, int height,
-                                    bool clear_surface);
-void render_composite_apply_blend(ImageSurface* surface, const uint32_t* backdrop,
-                                  int x0, int y0, int width, int height,
-                                  CssEnum blend_mode);
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,
                                          int x0, int y0, int width, int height);
 void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,

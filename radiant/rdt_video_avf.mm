@@ -171,7 +171,7 @@ static RdtVideoObserver* get_or_create_observer(RdtVideo* v) {
 // ---------------------------------------------------------------------------
 
 RdtVideo* rdt_video_create(const RdtVideoCallbacks* cb, void* userdata) {
-    RdtVideo* v = (RdtVideo*)mem_calloc(1, sizeof(RdtVideo), MEM_CAT_RENDER);
+    RdtVideo* v = (RdtVideo*)mem_calloc(1, sizeof(RdtVideo), MEM_CAT_RENDER); // OBJ_HEAP_OK: video backend handle owns platform state until rdt_video_destroy.
     if (cb) v->callbacks = *cb;
     v->userdata = userdata;
     atomic_store(&v->state, (int)RDT_VIDEO_STATE_IDLE);
