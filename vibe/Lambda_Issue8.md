@@ -406,3 +406,18 @@ rule: use `for (...) for (...)`, quote `<'hyphenated-tag'>`, or rename the
 reserved binder. In a multi-statement `fn` block, nested `if` branches also
 require braces; the diagnostic for that case is clear once earlier recovery
 has not consumed the surrounding function.
+
+## Quoted strings are rejected as hyphenated map keys
+
+Structurizr deployment projection needed temporary edge maps carrying source
+spans. Bracket access and Mark attributes accept quoted hyphenated names, but
+the analogous map literal does not:
+
+```lambda
+{"source-start": relation["source-start"]}
+```
+
+This reports `Unexpected syntax near '"source-start":'`; changing the key to
+the quoted symbol `'source-start'` works. The diagnostic should say that map
+keys use names or symbols, or map literals should accept string keys
+consistently with bracket access.

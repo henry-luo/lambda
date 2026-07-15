@@ -111,12 +111,24 @@ fn graph_node(entry) =>
     node_content(entry)
   >
 
-fn graph_edge(relation) =>
+fn graph_edge(relation, ordered = false) {
+  let sequence_label = graph_model.optional(relation, "order");
+  let description = graph_model.optional(relation, "description");
+  let display_label = if (ordered and sequence_label != null)
+    string(sequence_label) ++ "." ++
+      (if (description != null and description != "") " " ++ string(description) else "")
+    else description;
   <edge id: relation.id, from: relation.source, to: relation.destination,
-    directed: true, label: relation.description, technology: relation.technology,
+    directed: true, label: display_label,
+    'interaction-label': if (ordered) description else null,
+    technology: graph_model.optional(relation, "technology"), order: sequence_label,
+    sequence: graph_model.optional(relation, "sequence"),
+    'parallel-group': graph_model.optional(relation, "parallel-group"),
+    'relationship-ref': graph_model.optional(relation, "relationship-ref"),
     'source-start': relation["source-start"], 'source-end': relation["source-end"];
-    if (relation.description != null) { <label; relation.description> }
+    if (display_label != null) { <label; display_label> }
   >
+}
 
 fn selected_entries(workspace, ids) => [
   for (entry in elements(workspace) where contains(ids, string(entry.id))) entry
@@ -141,9 +153,144 @@ fn boundary(workspace, diagram, entries) {
   }
 }
 
+fn interaction_entries(workspace, diagram) {
+  let interactions = children(diagram, "c4-interaction");
+  [for (entry in elements(workspace) where len([
+    for (item in interactions where string(item.source) == string(entry.id) or
+      string(item.destination) == string(entry.id)) item
+  ]) > 0) entry]
+}
+
+fn dynamic_project(workspace, diagram) {
+  let interactions = children(diagram, "c4-interaction");
+  let entries = interaction_entries(workspace, diagram);
+  <graph id: diagram.key, flavor: "structurizr-c4", version: "1",
+    layout: "dot", directed: true, 'ir-stage': "canonical",
+    'diagram-type': "dynamic", 'source-view-key': diagram.key,
+    direction: diagram.direction, 'rank-sep': diagram["rank-sep"],
+    'node-sep': diagram["node-sep"];
+    for (entry in entries) graph_node(entry)
+    for (item in interactions) graph_edge(item, true)
+  >
+}
+
+fn parent_entry(all, id) => first([
+  for (entry in all where string(entry.id) == string(id)) entry
+])
+
+fn below(all, entry, ancestor) {
+  let parent_id = graph_model.optional(entry, "parent");
+  if (parent_id == null) false
+  else if (string(parent_id) == string(ancestor)) true
+  else {
+    let parent = parent_entry(all, parent_id);
+    if (parent == null) false else below(all, parent, ancestor)
+  }
+}
+
+fn deployment_leaf(entry) => contains([
+  "infrastructure-node", "software-system-instance", "container-instance"
+], string(entry.kind))
+
+fn model_in_scope(all, entry, scope) {
+  let model_ref = graph_model.optional(entry, "model-ref");
+  if (scope == "*" or model_ref == null) true
+  else if (string(model_ref) == string(scope)) true
+  else {
+    let model = parent_entry(all, model_ref);
+    model != null and below(all, model, scope)
+  }
+}
+
+fn deployment_entries(workspace, diagram) {
+  let all = elements(workspace);
+  let environment = string(diagram.environment);
+  let scope = string(diagram.scope);
+  let candidates = [for (entry in all where below(all, entry, environment) and
+    (string(entry.kind) == "deployment-node" or deployment_leaf(entry))) entry];
+  if (scope == "*") candidates
+  else {
+    let leaves = [for (entry in candidates where deployment_leaf(entry) and
+      model_in_scope(all, entry, scope)) entry];
+    [for (entry in candidates where deployment_leaf(entry) and contains([
+        for (leaf in leaves) string(leaf.id)
+      ], string(entry.id)) or string(entry.kind) == "deployment-node" and len([
+        for (leaf in leaves where below(all, leaf, entry.id)) leaf
+      ]) > 0) entry]
+  }
+}
+
+fn deployment_boundary(entry, entries) =>
+  <subgraph id: entry.id, role: "cluster", 'c4-kind': "deployment-node",
+    label: entry.name;
+    <label; entry.name>
+    for (child in entries where string(child.parent) == string(entry.id) and
+      string(child.kind) == "deployment-node") deployment_boundary(child, entries)
+    for (child in entries where string(child.parent) == string(entry.id) and
+      deployment_leaf(child)) graph_node(child)
+  >
+
+fn group_refs(entry) => [
+  for (group_ref in children(entry, "deployment-group-ref"))
+    string(group_ref.identifier)
+]
+
+fn groups_compatible(source, destination) {
+  let source_groups = group_refs(source);
+  let destination_groups = group_refs(destination);
+  if (len(source_groups) == 0 and len(destination_groups) == 0) true
+  else len([for (group_name in source_groups
+    where contains(destination_groups, group_name)) group_name]) > 0
+}
+
+fn deployed_endpoints(entries, logical_id) => [
+  for (entry in entries where deployment_leaf(entry) and
+    string(graph_model.optional(entry, "model-ref")) == string(logical_id)) entry
+]
+
+fn lifted_relationships(workspace, entries) => [
+  for (relation in relationships(workspace))
+    for (source in deployed_endpoints(entries, relation.source))
+      for (destination in deployed_endpoints(entries, relation.destination)
+        where groups_compatible(source, destination))
+        {id: string(relation.id) ++ "@" ++ string(source.id) ++ "@" ++
+            string(destination.id), source: source.id, destination: destination.id,
+          description: relation.description, technology: relation.technology,
+          'source-start': relation["source-start"],
+          'source-end': relation["source-end"]}
+]
+
+fn direct_deployment_relationships(workspace, entries) {
+  let ids = [for (entry in entries where deployment_leaf(entry)) string(entry.id)];
+  [for (relation in relationships(workspace)
+    where contains(ids, string(relation.source)) and
+      contains(ids, string(relation.destination))) relation]
+}
+
+fn deployment_project(workspace, diagram) {
+  let entries = deployment_entries(workspace, diagram);
+  let environment = string(diagram.environment);
+  let direct = direct_deployment_relationships(workspace, entries);
+  let lifted = lifted_relationships(workspace, entries);
+  <graph id: diagram.key, flavor: "structurizr-c4", version: "1",
+    layout: "dot", directed: true, 'ir-stage': "canonical",
+    'diagram-type': "deployment", 'source-view-key': diagram.key,
+    environment: diagram.environment, direction: diagram.direction,
+    'rank-sep': diagram["rank-sep"], 'node-sep': diagram["node-sep"];
+    for (entry in entries where string(entry.parent) == environment and
+      string(entry.kind) == "deployment-node") deployment_boundary(entry, entries)
+    for (entry in entries where string(entry.parent) == environment and
+      deployment_leaf(entry)) graph_node(entry)
+    for (relation in direct) graph_edge(relation)
+    for (relation in lifted) graph_edge(relation)
+  >
+}
+
 pub fn project(workspace, key) {
   let diagram = selected_view(workspace, key);
   if (diagram == null) { null }
+  else if (string(diagram.kind) == "dynamic") dynamic_project(workspace, diagram)
+  else if (string(diagram.kind) == "deployment") deployment_project(workspace, diagram)
   else {
     let ids = selected_ids(workspace, diagram);
     let entries = selected_entries(workspace, ids);

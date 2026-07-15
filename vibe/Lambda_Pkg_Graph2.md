@@ -326,7 +326,7 @@ Current implementation measurement (2026-07-15):
 
 | Unit | Physical LOC | Budget result |
 |---|---:|---|
-| `input-graph-structurizr.cpp` | 341 | passes the 800-line target |
+| `input-graph-structurizr.cpp` | 370 | passes the 800-line target |
 | `input-graph.cpp` growth | 2 | dispatch only |
 | `input-graph.h` growth | 1 | parser declaration only |
 
@@ -685,26 +685,34 @@ and one headless `.dsl` CLI test.
 
 ### 13.1 Current checkpoint
 
-The first executable slice is implemented and covered by
+The first two executable slices are implemented and covered by
 `make test-graph-structurizr`:
 
-- explicit `structurizr` and `c4` flavor dispatch to a 341-line manual parser;
+- explicit `structurizr` and `c4` flavor dispatch to a 370-line manual parser;
 - source-ordered workspace/model/views Mark with spans, recovery, resource
-  limits, inert generic statements, and preserved style color tokens;
+  limits, inert generic statements, preserved style color tokens, dynamic
+  order prefixes, and anonymous parallel blocks;
 - pure normalization of hierarchical IDs, core C4 elements, relationships,
   deployment declarations/instances, tags, static view metadata, and styles;
 - system-context and container projection, with shared landscape/component
   selection paths, C4 rich node content, software-system boundaries, and
   canonical graph edges;
+- dynamic interaction normalization with resolved endpoints, static
+  relationship references, stable sequence labels, and parallel-group IDs;
+- deployment projection with nested deployment-node boundaries, distinct
+  infrastructure and model instances, direct deployment relationships,
+  deployment-group-aware logical relationship lifting, and rich instance
+  content inherited from the logical model;
 - selected-view `to_html()` through the existing graph transform;
-- native parser/LOC tests and Lambda source, canonical, and projection fixtures.
+- native parser/LOC tests and Lambda source, canonical, static projection,
+  dynamic, deployment, and HTML fixtures.
 
-This checkpoint is partial Stage 4A through Stage 4C, not full Structurizr
+This checkpoint is partial Stage 4A through Stage 4D, not full Structurizr
 support. Conservative `.dsl` auto-detection, canonical schemas and diagnostics,
 archetypes/implied relationships, complete expression and style semantics,
-filtered/custom fixtures, dynamic/deployment projection, includes, CLI view
-selection, reference adaptation, scene coverage, and release size measurement
-remain outstanding.
+filtered/custom fixtures, relationship-identifier dynamic statements, complete
+deployment-group inheritance, includes, CLI view selection, reference
+adaptation, scene coverage, and release size measurement remain outstanding.
 
 ### Stage 4A - Manual parser and source contract
 
@@ -752,7 +760,13 @@ cascade, terminology, and retained scene/render coverage remain outstanding.
 
 ### Stage 4D - Dynamic and deployment views
 
-Status: **not started beyond source/canonical declaration preservation**.
+Status: **substantially implemented**. Ordered endpoint interactions, explicit
+order prefixes, anonymous parallel blocks, nested deployment boundaries,
+distinct instances, infrastructure relationships, and group-aware logical
+relationship lifting are normalized and projected through HTML. Dynamic
+relationship-identifier shorthand, deployment-group inheritance from nodes,
+instance multiplicity, health checks, and fuller scope/include filtering remain
+outstanding.
 
 - preserve ordered and parallel dynamic relationship instances;
 - render dynamic collaboration diagrams with stable ordinals;

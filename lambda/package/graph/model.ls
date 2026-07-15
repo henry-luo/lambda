@@ -9,6 +9,12 @@ pub fn element_children(value) {
 
 pub fn tag(value) => if (value is element) string(name(value)) else ""
 
+pub fn optional(value, key) {
+  let found = value[key];
+  // dynamic attribute lookup reports missing shape fields as errors.
+  if (found is error) null else found
+}
+
 fn first_direct_child(value, wanted_tag) {
   let matches = [for (child in element_children(value) where tag(child) == wanted_tag) child];
   if (len(matches) > 0) matches[0] else null

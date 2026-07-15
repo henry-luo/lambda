@@ -9,11 +9,6 @@ fn children(value, wanted = null) => [
 
 fn first(values) => if (len(values) > 0) values[0] else null
 
-fn optional(value, key) {
-  let found = value[key];
-  if (found is error) null else found
-}
-
 fn arguments(value) => [
   for (child in children(value, "argument")) string(child.value)
 ]
@@ -24,7 +19,8 @@ fn arg(value, index, fallback = null) {
 }
 
 fn statement_children(value, keyword) => [
-  for (child in children(value) where optional(child, "keyword") == keyword) child
+  for (child in children(value)
+    where graph_model.optional(child, "keyword") == keyword) child
 ]
 
 fn c4_kind(keyword) {
@@ -45,7 +41,7 @@ fn is_c4_declaration(value) => graph_model.tag(value) == "declaration" and conta
 ], string(value.keyword))
 
 fn declared_identifier(value, parent_identifier, hierarchical) {
-  let local = optional(value, "identifier");
+  let local = graph_model.optional(value, "identifier");
   let stable = if (local != null) string(local)
     else string(value.keyword) ++ "@" ++ string(value["source-start"]);
   if (hierarchical and parent_identifier != null and local != null)
@@ -67,18 +63,25 @@ fn element_value(value, parent, parent_identifier, hierarchical) {
   let id = declared_identifier(value, parent_identifier, hierarchical);
   let model_ref = if (contains(["container-instance", "software-system-instance"], kind))
     arg(value, 0) else null;
+  let deployment_groups = if (model_ref != null and arg(value, 1) != null) [
+    for (group_name in split(arg(value, 1), ",") where trim(group_name) != "")
+      trim(group_name)
+  ] else [];
   {
-    id: id, identifier: id, local_identifier: optional(value, "identifier"),
+    id: id, identifier: id,
+    local_identifier: graph_model.optional(value, "identifier"),
     kind: kind, parent: parent, name: if (model_ref != null) null else arg(value, 0, id),
     description: if (model_ref != null) null else arg(value, 1),
     technology: if (model_ref != null) null else arg(value, 2),
-    model_ref: model_ref, tags: declaration_tags(value, kind), source: value
+    model_ref: model_ref, deployment_groups: deployment_groups,
+    tags: declaration_tags(value, kind), source: value
   }
 }
 
 fn append_relation(state, value, parent_identifier) {
   let from = if (string(value.from) == "this") parent_identifier else string(value.from);
-  let id = if (optional(value, "identifier") != null) string(value.identifier)
+  let id = if (graph_model.optional(value, "identifier") != null)
+    string(value.identifier)
     else "relationship@" ++ string(value["source-start"]);
   let relation = {
     id: id, from: from, to: string(value.to), description: arg(value, 0),
@@ -139,27 +142,84 @@ fn layout_arg(value, index, fallback) {
   if (len(layouts) > 0) arg(layouts[0], index, fallback) else fallback
 }
 
-fn view_value(value) => {
+fn relationship_ref(relations, source, destination) => first([
+  for (relation in relations
+    where relation.from == source and relation.to == destination) relation.id
+])
+
+fn interaction(value, elements, relationships, key, sequence, parallel_group) {
+  let source = resolve_ref(elements, string(value.from));
+  let destination = resolve_ref(elements, string(value.to));
+  let authored_order = graph_model.optional(value, "order");
+  let sequence_label = if (authored_order != null) string(authored_order)
+    else string(sequence);
+  {
+    id: key ++ "@" ++ string(value["source-start"]),
+    source: source, destination: destination,
+    relationship_ref: relationship_ref(relationships, source, destination),
+    description: arg(value, 0), technology: arg(value, 1),
+    order: sequence_label, sequence: sequence,
+    parallel_group: parallel_group, source_mark: value
+  }
+}
+
+fn interaction_values_at(values, index, elements, relationships, key, state,
+    forced_order = null, parallel_group = null) {
+  if (index >= len(values)) state
+  else {
+    let value = values[index];
+    let tag = graph_model.tag(value);
+    let next = if (tag == "relationship") {
+      let item = interaction(value, elements, relationships, key,
+        if (forced_order != null) forced_order else state.next_order, parallel_group);
+      {items: [*state.items, item], next_order:
+        if (forced_order != null) state.next_order else state.next_order + 1}
+    }
+    else if (tag == "parallel") {
+      let group_id = if (parallel_group != null) parallel_group
+        else key ++ ":parallel@" ++ string(value["source-start"]);
+      let block_order = if (forced_order != null) forced_order else state.next_order;
+      let nested = interaction_values_at(children(value), 0, elements, relationships,
+        key, state, block_order, group_id);
+      {items: nested.items, next_order:
+        if (forced_order != null) state.next_order else state.next_order + 1}
+    }
+    else state;
+    interaction_values_at(values, index + 1, elements, relationships, key,
+      next, forced_order, parallel_group)
+  }
+}
+
+fn dynamic_interactions(value, elements, relationships, key) =>
+  interaction_values_at(children(value), 0, elements, relationships, key,
+    {items: [], next_order: 1}).items
+
+fn view_value(value, elements, relationships) {
+  let view_key = if (value.kind == "systemLandscape" or value.kind == "custom")
+    arg(value, 0, string(value.kind)) else if (value.kind == "deployment")
+    arg(value, 2, string(value.kind)) else arg(value, 1, string(value.kind));
+  {
     kind: string(value.kind),
     scope: if (value.kind == "systemLandscape" or value.kind == "custom")
       null else arg(value, 0),
     environment: if (value.kind == "deployment") arg(value, 1) else null,
-    key: if (value.kind == "systemLandscape" or value.kind == "custom")
-      arg(value, 0, string(value.kind)) else if (value.kind == "deployment")
-      arg(value, 2, string(value.kind)) else arg(value, 1, string(value.kind)),
+    key: view_key,
     includes: [for (include_rule in children(value, "include"))
       for (item in arguments(include_rule)) item],
     excludes: [for (exclude_rule in children(value, "exclude"))
       for (item in arguments(exclude_rule)) item],
+    interactions: if (value.kind == "dynamic")
+      dynamic_interactions(value, elements, relationships, view_key) else [],
     direction: upper(layout_arg(value, 0, "tb")),
     rank_sep: int(layout_arg(value, 1, "300")),
     node_sep: int(layout_arg(value, 2, "300")),
     source: value
+  }
 }
 
-fn view_values(source) => [
+fn view_values(source, elements, relationships) => [
   for (block in children(source, "views"))
-    for (value in children(block, "view")) view_value(value)
+    for (value in children(block, "view")) view_value(value, elements, relationships)
 ]
 
 fn style_value(rule) => {
@@ -184,6 +244,8 @@ fn c4_element(value) =>
     'model-ref': value.model_ref,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
     for (tag in value.tags) <tag name: tag>
+    for (group_name in value.deployment_groups)
+      <'deployment-group-ref' identifier: group_name>
   >
 
 fn c4_relationship(value) =>
@@ -195,11 +257,20 @@ fn c4_relationship(value) =>
 
 fn c4_view(value, elements) =>
   <'c4-view' key: value.key, kind: value.kind,
-    scope: resolve_ref(elements, value.scope), environment: value.environment,
+    scope: resolve_ref(elements, value.scope),
+    environment: resolve_ref(elements, value.environment),
     direction: value.direction, 'rank-sep': value.rank_sep, 'node-sep': value.node_sep,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
     for (include_rule in value.includes) <include expression: include_rule>
     for (exclude_rule in value.excludes) <exclude expression: exclude_rule>
+    for (item in value.interactions)
+      <'c4-interaction' id: item.id, source: item.source,
+        destination: item.destination, 'relationship-ref': item.relationship_ref,
+        description: item.description, technology: item.technology,
+        order: item.order, sequence: item.sequence,
+        'parallel-group': item.parallel_group,
+        'source-start': item.source_mark["source-start"],
+        'source-end': item.source_mark["source-end"]>
   >
 
 fn c4_style(value) =>
@@ -236,7 +307,7 @@ pub fn normalize(source) {
   let relationships = [
     for (entry in walked.relationships) resolved_relationship(entry, elements)
   ];
-  let views = view_values(source);
+  let views = view_values(source, elements, relationships);
   let styles = style_values(source);
   let workspace_args = arguments(source);
   let workspace_name = if (len(workspace_args) > 0) workspace_args[0] else null;

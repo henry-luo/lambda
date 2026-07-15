@@ -210,13 +210,45 @@ struct StructurizrParser {
         }
     }
 
+    void parse_block(Element* owner, StructurizrContext context, size_t depth,
+                     SourceLocation start) {
+        if (depth >= STRUCTURIZR_MAX_DEPTH) {
+            ctx.addErrorCode(start, "structurizr.depth-limit",
+                "Structurizr block nesting limit exceeded");
+            recover_block();
+            return;
+        }
+        statements(owner, context, depth + 1);
+        skip();
+        if (src.current() == '}') src.advance();
+        else ctx.addErrorCode(src.location(), "structurizr.missing-close",
+            "Expected '}' to close Structurizr block");
+    }
+
     Element* statement(StructurizrContext parent, size_t depth) {
         SourceLocation start = src.location();
         bool has_block = false;
         ArrayList* tokens = line_tokens(&has_block);
         if (!tokens || tokens->length == 0) {
-            if (tokens) arraylist_free(tokens);
-            return nullptr;
+            if (!tokens || !has_block) {
+                if (tokens) arraylist_free(tokens);
+                return nullptr;
+            }
+            if (statement_index >= STRUCTURIZR_MAX_STATEMENTS) {
+                ctx.addErrorCode(start, "structurizr.statement-limit",
+                    "Structurizr statement limit exceeded");
+                arraylist_free(tokens);
+                return nullptr;
+            }
+            // anonymous view blocks carry dynamic parallel nesting in the source DSL.
+            const char* tag = parent == SZ_VIEW ? "parallel" : "block";
+            Element* result = ctx.builder.element(tag)
+                .attr("keyword", tag).attr("statement-index", (int64_t)statement_index++)
+                .final().element;
+            arraylist_free(tokens);
+            parse_block(result, parent, depth, start);
+            graph_set_source_span(ctx, result, start, src.location());
+            return result;
         }
         if (statement_index >= STRUCTURIZR_MAX_STATEMENTS) {
             ctx.addErrorCode(start, "structurizr.statement-limit",
@@ -246,6 +278,15 @@ struct StructurizrParser {
         if (strcmp(tag, "view") == 0) builder.attr("kind", keyword);
         if (strcmp(tag, "style-rule") == 0) builder.attr("target-kind", keyword);
         if (arrow >= 0) {
+            // an authored dynamic order precedes the source endpoint, not the label args.
+            StructurizrToken* explicit_order = arrow > first + 1
+                ? token_at(tokens, first) : nullptr;
+            size_t order_length = explicit_order ? explicit_order->value->len : 0;
+            if (order_length > 1 && explicit_order->value->chars[order_length - 1] == ':') {
+                String* order = ctx.builder.createString(
+                    explicit_order->value->chars, order_length - 1);
+                builder.attr("order", order->chars);
+            }
             const char* from = arrow > first ? token_at(tokens, arrow - 1)->value->chars : "this";
             const char* to = arrow + 1 < tokens->length
                 ? token_at(tokens, arrow + 1)->value->chars : "";
@@ -260,19 +301,7 @@ struct StructurizrParser {
             ctx.addErrorCode(start, "structurizr.missing-block",
                 "Structurizr '%s' statement requires a block", keyword);
         }
-        if (has_block) {
-            if (depth >= STRUCTURIZR_MAX_DEPTH) {
-                ctx.addErrorCode(start, "structurizr.depth-limit",
-                    "Structurizr block nesting limit exceeded");
-                recover_block();
-            } else {
-                statements(result, child_context(tag, keyword), depth + 1);
-                skip();
-                if (src.current() == '}') src.advance();
-                else ctx.addErrorCode(src.location(), "structurizr.missing-close",
-                    "Expected '}' to close Structurizr block");
-            }
-        }
+        if (has_block) parse_block(result, child_context(tag, keyword), depth, start);
         graph_set_source_span(ctx, result, start, src.location());
         return result;
     }
