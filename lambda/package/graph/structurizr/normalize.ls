@@ -23,6 +23,41 @@ fn statement_children(value, keyword) => [
     where graph_model.optional(child, "keyword") == keyword) child
 ]
 
+fn nested_arg(value, keyword, index = 0) {
+  let matches = statement_children(value, keyword);
+  if (len(matches) > 0) arg(matches[0], index) else null
+}
+
+fn property_values(value) => [
+  for (block in children(value, "properties"))
+    for (property in children(block)
+      where graph_model.tag(property) == "statement")
+      {name: string(property.keyword), value: arg(property, 0), source: property}
+]
+
+fn perspective_value(value) {
+  if (string(value.keyword) == "perspective") {
+    {name: arg(value, 0), description: nested_arg(value, "description"),
+      value: nested_arg(value, "value"), url: nested_arg(value, "url"), source: value}
+  } else {
+    {name: string(value.keyword), description: arg(value, 0), value: arg(value, 1),
+      url: null, source: value}
+  }
+}
+
+fn perspective_values(value) => [
+  for (block in children(value, "perspectives"))
+    for (perspective in children(block)
+      where graph_model.tag(perspective) == "statement") perspective_value(perspective)
+]
+
+fn health_check_values(value) => [
+  for (check in statement_children(value, "healthCheck"))
+    {name: arg(check, 0), url: arg(check, 1),
+      interval: int(arg(check, 2, "60")), timeout: int(arg(check, 3, "0")),
+      source: check}
+]
+
 fn c4_kind(keyword) {
   if (keyword == "softwareSystem") "software-system"
   else if (keyword == "element") "custom"
@@ -45,6 +80,7 @@ fn default_tag(kind) {
   else if (kind == "infrastructure-node") "Infrastructure Node"
   else if (kind == "software-system-instance") "Software System Instance"
   else if (kind == "container-instance") "Container Instance"
+  else if (kind == "group") "Group"
   else null
 }
 
@@ -73,25 +109,41 @@ fn declaration_tags(value, kind) {
   ["Element", for (tag in [structural] where tag != null) tag, *authored]
 }
 
-fn element_value(value, parent, parent_identifier, hierarchical) {
+fn node_deployment_groups(value) => [
+  for (child in children(value)
+    where graph_model.tag(child) == "declaration" and
+      string(child.keyword) == "deploymentGroup" and
+      graph_model.optional(child, "identifier") == null)
+    for (group_name in arguments(child)) group_name
+]
+
+fn element_value(value, parent, parent_identifier, group_name, inherited_groups,
+    hierarchical) {
   let kind = c4_kind(string(value.keyword));
   let id = declared_identifier(value, parent_identifier, hierarchical);
   let model_ref = if (contains(["container-instance", "software-system-instance"], kind))
     arg(value, 0) else null;
-  let deployment_groups = if (model_ref != null and arg(value, 1) != null) [
+  let explicit_groups = if (model_ref != null and arg(value, 1) != null) [
     for (group_name in split(arg(value, 1), ",") where trim(group_name) != "")
       trim(group_name)
   ] else [];
+  let deployment_groups = if (kind == "deployment-node")
+    unique([*inherited_groups, *node_deployment_groups(value)])
+    else if (model_ref != null) unique([*inherited_groups, *explicit_groups])
+    else [];
   let custom = kind == "custom";
   {
     id: id, identifier: id,
     local_identifier: graph_model.optional(value, "identifier"),
-    kind: kind, parent: parent, name: if (model_ref != null) null else arg(value, 0, id),
+    kind: kind, parent: parent, group: group_name,
+    name: if (model_ref != null) null else arg(value, 0, id),
     metadata: if (custom) arg(value, 1) else null,
     description: if (model_ref != null) null else arg(value, if (custom) 2 else 1),
     technology: if (model_ref != null or custom) null else arg(value, 2),
     model_ref: model_ref, deployment_groups: deployment_groups,
-    tags: declaration_tags(value, kind), source: value
+    tags: declaration_tags(value, kind), properties: property_values(value),
+    perspectives: perspective_values(value), health_checks: health_check_values(value),
+    source: value
   }
 }
 
@@ -103,30 +155,51 @@ fn relationship_tags(value) => [
 ]
 
 fn append_relation(state, value, parent_identifier) {
+  // both relationship endpoints may use the scoped `this` identifier.
   let from = if (string(value.from) == "this") parent_identifier else string(value.from);
+  let to = if (string(value.to) == "this") parent_identifier else string(value.to);
   let id = if (graph_model.optional(value, "identifier") != null)
     string(value.identifier)
     else "relationship@" ++ string(value["source-start"]);
   let relation = {
-    id: id, from: from, to: string(value.to), description: arg(value, 0),
-    technology: arg(value, 1), tags: relationship_tags(value), source: value
+    id: id, from: from, to: to, description: arg(value, 0),
+    technology: arg(value, 1), tags: relationship_tags(value),
+    properties: property_values(value), perspectives: perspective_values(value),
+    source: value
   };
   {*:state, relationships: [*state.relationships, relation]}
 }
 
-fn walk_values(values, index, parent, parent_identifier, hierarchical, state) {
+fn joined_group(parent_group, name, separator) =>
+  if (parent_group == null) name else parent_group ++ separator ++ name
+
+fn walk_values(values, index, parent, parent_identifier, parent_kind, group_name,
+    group_separator, inherited_groups, hierarchical, state) {
   if (index >= len(values)) state
   else {
     let value = values[index];
     let tag = graph_model.tag(value);
-    let next = if (is_c4_declaration(value)) {
-      let entry = element_value(value, parent, parent_identifier, hierarchical);
+    let group_assignment = tag == "declaration" and
+      string(value.keyword) == "deploymentGroup" and
+      graph_model.optional(value, "identifier") == null and
+      parent_kind == "deployment-node";
+    let next = if (group_assignment) state
+    else if (is_c4_declaration(value)) {
+      let entry = element_value(value, parent, parent_identifier, group_name,
+        inherited_groups, hierarchical);
       let added = {*:state, elements: [*state.elements, entry]};
-      walk_values(children(value), 0, entry.id, entry.identifier, hierarchical, added)
+      if (entry.kind == "group")
+        walk_values(children(value), 0, parent, parent_identifier, parent_kind,
+          joined_group(group_name, entry.name, group_separator), group_separator,
+          inherited_groups, hierarchical, added)
+      else walk_values(children(value), 0, entry.id, entry.identifier, entry.kind,
+        group_name, group_separator, entry.deployment_groups, hierarchical, added)
     }
     else if (tag == "relationship") append_relation(state, value, parent_identifier)
-    else walk_values(children(value), 0, parent, parent_identifier, hierarchical, state);
-    walk_values(values, index + 1, parent, parent_identifier, hierarchical, next)
+    else walk_values(children(value), 0, parent, parent_identifier, parent_kind,
+      group_name, group_separator, inherited_groups, hierarchical, state);
+    walk_values(values, index + 1, parent, parent_identifier, parent_kind, group_name,
+      group_separator, inherited_groups, hierarchical, next)
   }
 }
 
@@ -187,6 +260,30 @@ fn interaction(value, elements, relationships, key, sequence, parallel_group) {
   }
 }
 
+fn statement_order(value) {
+  let keyword = string(value.keyword);
+  if (ends_with(keyword, ":")) slice(keyword, 0, len(keyword) - 1) else null
+}
+
+fn interaction_by_ref(value, relationships, key, sequence, parallel_group) {
+  let authored_order = statement_order(value);
+  let relation_id = if (authored_order != null) arg(value, 0) else string(value.keyword);
+  let matches = [for (relation in relationships where relation.id == relation_id) relation];
+  if (len(matches) == 0) null
+  else {
+    let relation = matches[0];
+    let description_index = if (authored_order != null) 1 else 0;
+    {
+      id: key ++ "@" ++ string(value["source-start"]),
+      source: relation.from, destination: relation.to, relationship_ref: relation.id,
+      description: arg(value, description_index, relation.description),
+      technology: relation.technology,
+      order: if (authored_order != null) authored_order else string(sequence),
+      sequence: sequence, parallel_group: parallel_group, source_mark: value
+    }
+  }
+}
+
 fn interaction_values_at(values, index, elements, relationships, key, state,
     forced_order = null, parallel_group = null) {
   if (index >= len(values)) state
@@ -197,6 +294,13 @@ fn interaction_values_at(values, index, elements, relationships, key, state,
       let item = interaction(value, elements, relationships, key,
         if (forced_order != null) forced_order else state.next_order, parallel_group);
       {items: [*state.items, item], next_order:
+        if (forced_order != null) state.next_order else state.next_order + 1}
+    }
+    else if (tag == "statement") {
+      let item = interaction_by_ref(value, relationships, key,
+        if (forced_order != null) forced_order else state.next_order, parallel_group);
+      if (item == null) state
+      else {items: [*state.items, item], next_order:
         if (forced_order != null) state.next_order else state.next_order + 1}
     }
     else if (tag == "parallel") {
@@ -271,11 +375,26 @@ fn style_values(source) => [
 fn c4_element(value) =>
   <'c4-element' id: value.id, identifier: value.identifier,
     'local-identifier': value.local_identifier, kind: value.kind, parent: value.parent,
+    group: value.group,
     name: value.name, metadata: value.metadata,
     description: value.description, technology: value.technology,
     'model-ref': value.model_ref,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
     for (tag in value.tags) <tag name: tag>
+    for (property in value.properties)
+      <property name: property.name, value: property.value,
+        'source-start': property.source["source-start"],
+        'source-end': property.source["source-end"]>
+    for (perspective in value.perspectives)
+      <perspective name: perspective.name, description: perspective.description,
+        value: perspective.value, url: perspective.url,
+        'source-start': perspective.source["source-start"],
+        'source-end': perspective.source["source-end"]>
+    for (check in value.health_checks)
+      <'health-check' name: check.name, url: check.url,
+        interval: check.interval, timeout: check.timeout,
+        'source-start': check.source["source-start"],
+        'source-end': check.source["source-end"]>
     for (group_name in value.deployment_groups)
       <'deployment-group-ref' identifier: group_name>
   >
@@ -285,6 +404,15 @@ fn c4_relationship(value) =>
     description: value.description, technology: value.technology,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
     for (tag in value.tags) <tag name: tag>
+    for (property in value.properties)
+      <property name: property.name, value: property.value,
+        'source-start': property.source["source-start"],
+        'source-end': property.source["source-end"]>
+    for (perspective in value.perspectives)
+      <perspective name: perspective.name, description: perspective.description,
+        value: perspective.value, url: perspective.url,
+        'source-start': perspective.source["source-start"],
+        'source-end': perspective.source["source-end"]>
   >
 
 fn c4_view(value, elements) =>
@@ -314,10 +442,14 @@ fn c4_style(value) =>
   >
 
 fn c4_workspace(name, description, mode, elements, relationships, views, styles,
-    source) =>
+    model_properties, source) =>
   <'c4-workspace' name: name, description: description,
     flavor: "structurizr", 'ir-stage': "canonical", 'identifier-mode': mode;
     <'c4-model';
+      for (property in model_properties)
+        <property name: property.name, value: property.value,
+          'source-start': property.source["source-start"],
+          'source-end': property.source["source-end"]>
       for (entry in elements) c4_element(entry)
       for (entry in relationships) c4_relationship(entry)
     >
@@ -333,9 +465,13 @@ fn c4_workspace(name, description, mode, elements, relationships, views, styles,
 pub fn normalize(source) {
   let models = children(source, "model");
   let hierarchical = identifier_mode(source) == "hierarchical";
+  let model_properties = if (len(models) > 0) property_values(models[0]) else [];
+  let separators = [for (property in model_properties
+    where property.name == "structurizr.groupSeparator") property.value];
+  let group_separator = if (len(separators) > 0) separators[len(separators) - 1] else "/";
   let walked = if (len(models) > 0)
-    walk_values(children(models[0]), 0, null, null, hierarchical,
-      {elements: [], relationships: []})
+    walk_values(children(models[0]), 0, null, null, null, null, group_separator, [],
+      hierarchical, {elements: [], relationships: []})
     else {elements: [], relationships: []};
   let elements = [for (entry in walked.elements) resolved_element(entry, walked.elements)];
   let relationships = [
@@ -348,5 +484,5 @@ pub fn normalize(source) {
   let workspace_description = if (len(workspace_args) > 1) workspace_args[1] else null;
   let mode = if (hierarchical) "hierarchical" else "flat";
   c4_workspace(workspace_name, workspace_description, mode, elements, relationships,
-    views, styles, source)
+    views, styles, model_properties, source)
 }

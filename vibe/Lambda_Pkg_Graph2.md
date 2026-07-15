@@ -463,14 +463,14 @@ View expressions are evaluated by the small pure
 To keep the package and parser small, the current implementation recognizes the
 restricted grammar directly instead of building a second general-purpose AST.
 It supports identifiers, `*`, afferent/efferent coupling, element type, parent,
-tag, and technology predicates, relationship tag/source/destination and
-endpoint predicates, plus `&&` and `||`. Results retain model source order.
+group, tag, technology, and property predicates, relationship tag/property/
+source/destination and endpoint predicates, plus `&&` and `||`. Results retain
+model source order.
 
 Unknown element predicates currently select nothing and unknown relationship
 predicates do not match. Structured `structurizr.unsupported-expression` and
-`structurizr.invalid-expression` diagnostics, property/group predicates, and
-parenthesized expressions remain follow-up work; none may fall back to
-including everything.
+`structurizr.invalid-expression` diagnostics and parenthesized expressions
+remain follow-up work; none may fall back to including everything.
 
 ### 8.3 Dynamic views
 
@@ -701,7 +701,8 @@ The first three executable slices are implemented and covered by
   limits, inert generic statements, preserved style color tokens, dynamic
   order prefixes, and anonymous parallel blocks;
 - pure normalization of hierarchical IDs, core C4 elements, relationships,
-  deployment declarations/instances, tags, static view metadata, and styles;
+  deployment declarations/instances, tags, properties, perspectives, static
+  view metadata, and styles;
 - landscape, system-context, container, component, filtered, and custom
   projection through one static-view path, including ordinary/reluctant
   wildcard behavior, include/exclude expressions, C4 rich node content,
@@ -709,23 +710,30 @@ The first three executable slices are implemented and covered by
 - canonical default and authored element/relationship tags, custom-element
   metadata, tag-filtered base views, and safe node/relationship style
   assignments that survive `to_html()`;
+- canonical model, element, and relationship properties, compact and expanded
+  perspectives, property-based element/relationship expressions, and Graph IR
+  metadata propagation;
+- group declarations separated from C4 containment, canonical group membership,
+  `element.group` expressions, and visual group boundaries in static Graph IR;
+- scoped relationship normalization for both source and destination `this`
+  references, including hierarchical forward references;
 - dynamic interaction normalization with resolved endpoints, static
-  relationship references, stable sequence labels, and parallel-group IDs;
+  relationship references from endpoint or relationship-identifier syntax,
+  stable sequence labels, and parallel-group IDs;
 - deployment projection with nested deployment-node boundaries, distinct
   infrastructure and model instances, direct deployment relationships,
-  deployment-group-aware logical relationship lifting, and rich instance
-  content inherited from the logical model;
+  inherited deployment-group-aware logical relationship lifting, health checks,
+  and rich instance content inherited from the logical model;
 - selected-view `to_html()` through the existing graph transform;
 - native parser/LOC tests and Lambda source, canonical, static expression,
   filtered/custom/style, dynamic, deployment, and HTML fixtures.
 
 This checkpoint is partial Stage 4A through Stage 4D, not full Structurizr
 support. Conservative `.dsl` auto-detection, canonical schemas and diagnostics,
-archetypes/implied relationships, expression diagnostics and property/group
-predicates, advanced shape/routing style semantics, terminology,
-relationship-identifier dynamic statements, complete
-deployment-group inheritance, includes, CLI view selection, reference
-adaptation, scene coverage, and release size measurement remain outstanding.
+archetypes/implied relationships, expression diagnostics, advanced nested-group
+boundaries, shape/routing style semantics, terminology, fuller deployment view
+filtering, includes, CLI view selection, reference adaptation, scene coverage,
+and release size measurement remain outstanding.
 
 ### Stage 4A - Manual parser and source contract
 
@@ -744,10 +752,10 @@ remain outstanding.
 ### Stage 4B - Canonical C4 workspace
 
 Status: **partially implemented**. Core hierarchy, hierarchical identifiers,
-relationships, tags, deployment declarations, and logical instance references
-normalize deterministically. Schemas, full diagnostics, properties,
-perspectives, archetypes, implied relationships, and complete `this` resolution
-remain outstanding.
+relationships, tags, properties, both perspective forms, group membership,
+deployment declarations, and logical instance references normalize deterministically.
+Schemas, full diagnostics, archetypes, and implied relationships remain
+outstanding.
 
 - add source and canonical schemas;
 - resolve flat/hierarchical identifiers and `this`;
@@ -761,9 +769,10 @@ remain outstanding.
 
 Status: **substantially implemented**. All six static view kinds, selected-view
 HTML, filtered/custom semantics, reluctant wildcard, the initial pure expression
-allowlist, and safe basic style cascade have dedicated fixtures. Expression
-diagnostics and property/group predicates, terminology, shape/routing styles,
-and retained scene/render coverage remain outstanding.
+allowlist including property/group predicates, group boundaries, and safe basic
+style cascade have dedicated fixtures. Expression diagnostics, nested-group
+boundaries, terminology, shape/routing styles, and retained scene/render
+coverage remain outstanding.
 
 - implement landscape, context, container, component, filtered, and custom
   projection;
@@ -777,10 +786,10 @@ and retained scene/render coverage remain outstanding.
 Status: **substantially implemented**. Ordered endpoint interactions, explicit
 order prefixes, anonymous parallel blocks, nested deployment boundaries,
 distinct instances, infrastructure relationships, and group-aware logical
-relationship lifting are normalized and projected through HTML. Dynamic
-relationship-identifier shorthand, deployment-group inheritance from nodes,
-instance multiplicity, health checks, and fuller scope/include filtering remain
-outstanding.
+relationship lifting are normalized and projected through HTML. Relationship-
+identifier shorthand, deployment-group inheritance from nodes, instance
+multiplicity, and health checks have dedicated canonical and Graph IR coverage.
+Fuller deployment scope/include filtering remains outstanding.
 
 - preserve ordered and parallel dynamic relationship instances;
 - render dynamic collaboration diagrams with stable ordinals;

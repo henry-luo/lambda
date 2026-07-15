@@ -27,12 +27,15 @@ let deployment_html = structurizr.to_html(workspace, "Production")
 {
   source: [model.tag(source_parallel),
     [for (branch in children(source_parallel, "parallel"))
-      [for (relation in children(branch, "relationship"))
-        [relation.from, relation.to, relation.order]]],
-    [for (relation in children(source_dynamic, "relationship")) relation.order]],
+      [for (statement in children(branch, "statement"))
+        [statement.keyword, [for (argument in children(statement, "argument"))
+          argument.value]]]],
+    [for (statement in children(source_dynamic, "statement"))
+      [statement.keyword, [for (argument in children(statement, "argument"))
+        argument.value]]]],
   canonical: [for (item in interactions)
     [item.source, item.destination, item.order, item.sequence,
-      item["parallel-group"] != null, item["relationship-ref"] != null]],
+      item["parallel-group"] != null, item["relationship-ref"]]],
   instance: [api_instance.id, api_instance.parent, api_instance.name,
     [for (group_ref in children(api_instance, "deployment-group-ref"))
       group_ref.identifier]],

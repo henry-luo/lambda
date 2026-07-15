@@ -122,11 +122,20 @@ fn node_content(entry) =>
 fn graph_node(entry) =>
   <node id: entry.id, role: node_role(entry.kind), 'c4-kind': entry.kind,
     label: entry.name, metadata: graph_model.optional(entry, "metadata"),
+    group: graph_model.optional(entry, "group"),
     shape: node_shape(entry.kind),
     'source-start': entry["source-start"], 'source-end': entry["source-end"];
     <label; entry.name>
     node_content(entry)
     for (tag in children(entry, "tag")) <tag name: tag.name>
+    for (property in children(entry, "property"))
+      <property name: property.name, value: property.value>
+    for (perspective in children(entry, "perspective"))
+      <perspective name: perspective.name, description: perspective.description,
+        value: perspective.value, url: perspective.url>
+    for (check in children(entry, "health-check"))
+      <'health-check' name: check.name, url: check.url,
+        interval: check.interval, timeout: check.timeout>
   >
 
 fn graph_edge(relation, ordered = false) {
@@ -146,11 +155,33 @@ fn graph_edge(relation, ordered = false) {
     'source-start': relation["source-start"], 'source-end': relation["source-end"];
     if (display_label != null) { <label; display_label> }
     for (tag in children(relation, "tag")) <tag name: tag.name>
+    for (property in children(relation, "property"))
+      <property name: property.name, value: property.value>
+    for (perspective in children(relation, "perspective"))
+      <perspective name: perspective.name, description: perspective.description,
+        value: perspective.value, url: perspective.url>
   >
 }
 
 fn selected_entries(workspace, ids) => [
   for (entry in elements(workspace) where contains(ids, string(entry.id))) entry
+]
+
+fn group_names(entries) => unique([
+  for (entry in entries, let group_name = graph_model.optional(entry, "group")
+    where group_name != null and string(entry.kind) != "group") string(group_name)
+])
+
+fn group_boundary(group_name, entries) =>
+  <subgraph id: "group:" ++ group_name, role: "cluster", 'c4-kind': "group",
+    label: group_name;
+    <label; group_name>
+    for (entry in entries where string(graph_model.optional(entry, "group")) == group_name)
+      graph_node(entry)
+  >
+
+fn grouped(entries) => [
+  for (entry in entries where graph_model.optional(entry, "group") != null) entry.id
 ]
 
 fn boundary_kind(diagram) =>
@@ -164,10 +195,14 @@ fn boundary(workspace, diagram, entries) {
     where string(entry.id) == string(diagram.scope)) entry]);
   if (wanted == null or owner == null) { null }
   else {
+    let inside = [for (entry in entries
+      where string(entry.parent) == string(owner.id)) entry];
+    let grouped_ids = grouped(inside);
     <subgraph id: owner.id, role: "cluster", 'c4-kind': wanted,
       label: owner.name;
       <label; owner.name>
-      for (entry in entries where string(entry.parent) == string(owner.id)) graph_node(entry)
+      for (group_name in group_names(inside)) group_boundary(group_name, inside)
+      for (entry in inside where not contains(grouped_ids, entry.id)) graph_node(entry)
     >
   }
 }
@@ -262,9 +297,10 @@ fn style_assignments(workspace, entries, relations) => [
 
 fn static_graph(workspace, diagram, structure, entries, relations) {
   let cluster = boundary(workspace, structure, entries);
-  // root-level views have no boundary, so null parents must remain graph nodes.
-  let grouped = if (cluster == null) [] else [for (entry in entries
+  let contained = if (cluster == null) [] else [for (entry in entries
     where string(entry.parent) == string(structure.scope)) entry.id];
+  let root_entries = [for (entry in entries where not contains(contained, entry.id)) entry];
+  let grouped_ids = grouped(root_entries);
   <graph id: diagram.key, flavor: "structurizr-c4", version: "1",
     layout: "dot", directed: true, 'ir-stage': "canonical",
     'diagram-type': diagram.kind, 'source-view-key': diagram.key,
@@ -272,7 +308,8 @@ fn static_graph(workspace, diagram, structure, entries, relations) {
     direction: structure.direction, 'rank-sep': structure["rank-sep"],
     'node-sep': structure["node-sep"];
     if (cluster != null) { cluster }
-    for (entry in entries where not contains(grouped, entry.id)) graph_node(entry)
+    for (group_name in group_names(root_entries)) group_boundary(group_name, root_entries)
+    for (entry in root_entries where not contains(grouped_ids, entry.id)) graph_node(entry)
     for (relation in relations) graph_edge(relation)
     for (assignment in style_assignments(workspace, entries, relations)) assignment
   >

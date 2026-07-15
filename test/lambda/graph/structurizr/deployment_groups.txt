@@ -1,0 +1,8 @@
+{
+  groups: [["production.blue", "Blue"], ["production.green", "Green"]],
+  instances: [["production.blueServer.apiBlue", ["blue"]], ["production.blueServer.blueDatabase.databaseBlue", ["blue"]], ["production.greenServer.apiGreen", ["green"]], ["production.greenServer.greenDatabase.databaseGreen", ["green"]]],
+  health: [["production.blueServer.apiBlue", "API", "https://blue.example.test/health", 60, 0], ["production.greenServer.greenDatabase.databaseGreen", "Database", "https://green.example.test/health", 30, 500]],
+  graph_health: [["production.blueServer.apiBlue", "API", 60, 0], ["production.greenServer.greenDatabase.databaseGreen", "Database", 30, 500]],
+  boundaries: ["production.blueServer", "production.blueServer.blueDatabase", "production.greenServer", "production.greenServer.greenDatabase"],
+  edges: [["production.blueServer.apiBlue", "production.blueServer.blueDatabase.databaseBlue", "Reads and writes"], ["production.greenServer.apiGreen", "production.greenServer.greenDatabase.databaseGreen", "Reads and writes"]]
+}

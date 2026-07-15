@@ -23,6 +23,14 @@ fn has_all_tags(value, wanted) => len([
   for (tag in wanted where contains(tags(value), tag)) tag
 ]) == len(wanted)
 
+fn property_matches(value, expression, prefix) {
+  let parts = split(value_after(expression, prefix), "]==");
+  if (len(parts) != 2 or trim(parts[0]) == "") false
+  else len([for (property in children(value, "property")
+    where string(property.name) == trim(parts[0]) and
+      string(property.value) == trim(parts[1])) property]) > 0
+}
+
 fn canonical_kind(value) {
   let kind = lower(trim(value));
   if (kind == "softwaresystem" or kind == "software system") "software-system"
@@ -60,6 +68,10 @@ fn atomic_ids(elements, expression) {
     let parents = reference_ids(elements, value_after(value, "element.parent=="));
     [for (entry in elements where contains(parents, string(entry.parent))) string(entry.id)]
   }
+  else if (starts_with(value, "element.group==")) [
+    for (entry in elements where string(entry.group) == value_after(value, "element.group=="))
+      string(entry.id)
+  ]
   else if (starts_with(value, "element.tag==")) {
     let wanted = selected_tags(value, "element.tag==");
     [for (entry in elements where has_all_tags(entry, wanted)) string(entry.id)]
@@ -75,6 +87,10 @@ fn atomic_ids(elements, expression) {
   else if (starts_with(value, "element.technology!=")) [
     for (entry in elements where string(entry.technology) !=
       value_after(value, "element.technology!=")) string(entry.id)
+  ]
+  else if (starts_with(value, "element.properties[")) [
+    for (entry in elements
+      where property_matches(entry, value, "element.properties[")) string(entry.id)
   ]
   else if (starts_with(value, "element.")) []
   else reference_ids(elements, value)
@@ -134,6 +150,8 @@ fn relation_atomic_matches(elements, relation, expression) {
   else if (starts_with(value, "relationship.destination=="))
     endpoint_matches(elements, relation.destination,
       value_after(value, "relationship.destination=="))
+  else if (starts_with(value, "relationship.properties["))
+    property_matches(relation, value, "relationship.properties[")
   else {
     let endpoints = split(value, "->");
     len(endpoints) == 2 and endpoint_matches(elements, relation.source, trim(endpoints[0])) and
