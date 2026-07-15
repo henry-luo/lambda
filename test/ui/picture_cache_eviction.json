@@ -1,0 +1,10 @@
+{
+  "name": "RdtPicture cache eviction keeps recorded image handles alive",
+  "html": "test/ui/picture_cache_eviction.html",
+  "description": "Loads more than the 64-entry SVG data cache while earlier pictures remain recorded for replay.",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#cache img"}, "count": 70},
+    {"type": "assert_visible", "target": {"selector": "#cache img"}, "target_index": 0, "visible": true},
+    {"type": "assert_visible", "target": {"selector": "#cache img"}, "target_index": 69, "visible": true}
+  ]
+}

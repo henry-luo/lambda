@@ -332,6 +332,7 @@ extern "C" {
 
 static bool g_lambda_main_memtrack_shutdown_done = false;
 static bool g_lambda_main_mempool_cleanup_done = false;
+static const char* g_lambda_main_mem_dump_path = nullptr;
 static bool g_lambda_main_pre_memtrack_cleanup_done = false;
 
 extern "C" void log_mem_stage(const char* stage);
@@ -382,6 +383,13 @@ static int lambda_main_finish(int ret_code) {
     // and frees its global pool — otherwise those outlive the process and show
     // up as memtrack leaks at shutdown.
     InputManager::destroy_global();
+    // Subcommands return through this common finish path; dumping here ensures
+    // layout/render/view commands cannot bypass the requested exit snapshot.
+    if (g_lambda_main_mem_dump_path) {
+        mem_context_dump_json_file(NULL, g_lambda_main_mem_dump_path);
+        mem_context_report_leaks(NULL);
+        g_lambda_main_mem_dump_path = nullptr;
+    }
     lambda_main_pre_memtrack_cleanup_once();
     log_finish();
     MemtrackStats mem_stats = {};
@@ -1713,12 +1721,11 @@ int main(int argc, char *argv[]) {
 
     // Check for --mem-dump[=PATH] flag early; dump the memory context as JSON
     // at process exit and log a leak report. Strip it from argv.
-    const char* mem_dump_path = nullptr;  // non-null => enabled
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--mem-dump") == 0 ||
             strncmp(argv[i], "--mem-dump=", 11) == 0) {
             const char* eq = strchr(argv[i], '=');
-            mem_dump_path = (eq && eq[1]) ? eq + 1 : "./temp/mem_snapshot.json";
+            g_lambda_main_mem_dump_path = (eq && eq[1]) ? eq + 1 : "./temp/mem_snapshot.json";
             for (int j = i; j < argc - 1; j++) {
                 argv[j] = argv[j + 1];
             }
@@ -4647,13 +4654,6 @@ int main(int argc, char *argv[]) {
     lambda_stack_cleanup();
 
     // memtrack_shutdown runs in lambda_main_finish after normal cleanup.
-
-    // Memory-context dump / leak report (--mem-dump). After runtime teardown,
-    // before rpmalloc shutdown: any allocator still live here is a survivor.
-    if (mem_dump_path) {
-        mem_context_dump_json_file(NULL, mem_dump_path);
-        mem_context_report_leaks(NULL);
-    }
 
     return lambda_main_finish(ret_code);
 }
