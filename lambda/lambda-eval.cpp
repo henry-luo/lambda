@@ -290,6 +290,15 @@ Item fn_join(Item left, Item right) {
         }
     }
 
+    if (left_type == LMD_TYPE_BINARY && right_type == LMD_TYPE_BINARY) {
+        String* result = heap_binary_concat(left.get_safe_binary(), right.get_safe_binary());
+        if (!result) {
+            set_runtime_error(ERR_OUT_OF_MEMORY, "fn_join: failed to concatenate binary operands");
+            return ItemError;
+        }
+        return {.item = x2it(result)};
+    }
+
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
         // null ++ string → string, string ++ null → string
         if (left_type == LMD_TYPE_NULL) return right;
@@ -2184,6 +2193,17 @@ Bool fn_in(Item a_item, Item b_item) {
             String *str_a = a_item.get_safe_string();
             String *str_b = b_item.get_safe_string();
             return str_a->len <= str_b->len && strstr(str_b->chars, str_a->chars) != NULL;
+        }
+        if (b_item._type_id == LMD_TYPE_BINARY) {
+            String* bin = b_item.get_safe_binary();
+            if (!bin) return BOOL_FALSE;
+            // Membership follows Lambda numeric equality so 173, 173u8, and
+            // 173.0 all match the same byte without silently narrowing 256.
+            for (uint32_t i = 0; i < bin->len; i++) {
+                Item byte = {.item = u8_to_item((unsigned char)bin->chars[i])};
+                if (fn_eq(a_item, byte) == BOOL_TRUE) return BOOL_TRUE;
+            }
+            return BOOL_FALSE;
         }
     }
     else { // b is container

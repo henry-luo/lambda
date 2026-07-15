@@ -2046,6 +2046,11 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     else if (obj_tid == LMD_TYPE_ARRAY) {
         ast_node->type = &TYPE_ANY;
     }
+    else if (obj_tid == LMD_TYPE_BINARY) {
+        // Scalar binary indexes are u8 values; range indexes retain binary type.
+        ast_node->type = ast_node->field->type && ast_node->field->type->type_id == LMD_TYPE_RANGE
+            ? &TYPE_BINARY : &TYPE_U8;
+    }
     else if (ast_node->object->type->type_id == LMD_TYPE_MAP
           || ast_node->object->type->type_id == LMD_TYPE_OBJECT) {
         // resolve field type from map/object shape for unboxed access optimization
@@ -7098,6 +7103,10 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     }
     else if (expr_type->type_id == LMD_TYPE_RANGE) {
         ast_node->type = &TYPE_INT;
+    }
+    else if (expr_type->type_id == LMD_TYPE_BINARY) {
+        // Iteration exposes the same sized byte scalar as direct indexing.
+        ast_node->type = &TYPE_U8;
     }
     else {
         // for maps/elements/any: value type is any

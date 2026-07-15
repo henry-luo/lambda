@@ -912,6 +912,7 @@ String* heap_create_name(const char* name);
 // String creation for runtime strings
 String* heap_strcpy(const char* src, int64_t len);
 String* heap_binary_from_bytes(const char* src, int64_t len);
+String* heap_binary_concat(String* left, String* right);
 // Symbol creation for runtime symbols
 Symbol* heap_create_symbol(const char* symbol, size_t len);
 #ifdef __cplusplus

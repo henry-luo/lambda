@@ -1,6 +1,6 @@
 # Lambda Binary Type — Enhancement Proposal
 
-> **Status:** Proposal — **Tier 1 core (decoded representation) + JS/Node copy bridge IMPLEMENTED 2026-07-15** via [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) (decisions B1–B8). Indexing/slicing/iteration/concat and Tiers 2–4 remain proposal. Design decisions recorded 2026-07-15: **§9** streams alignment (WHATWG/Node), **§10** Uint8Array type-unification **rejected**, **§5.2** encode/decode selector API.
+> **Status:** Proposal — **Tier 1 core (decoded representation, element operations) + JS/Node copy bridge IMPLEMENTED 2026-07-15** via [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) (decisions B1–B8 and follow-up A1/A2). Tiers 2–4 remain proposal. Design decisions recorded 2026-07-15: **§9** streams alignment (WHATWG/Node), **§10** Uint8Array type-unification **rejected**, **§5.2** encode/decode selector API **settled** (namespaced `hex.encode` form rejected), **§4.2/§4.4** element-op semantics settled and implemented (`b[i]` → u8, out-of-bounds → `null`, `++` → byte concat).
 > **Scope:** Lambda Script `binary` primitive type — runtime representation, language surface, and stdlib roadmap.
 > **Related:**
 > - [Lambda_Data.md](../doc/Lambda_Data.md#binary-literals) — binary literal syntax
@@ -155,14 +155,16 @@ b[0 to len(b)-1]  // full copy
 // KIV: support of negative index from end, b[-1]
 ```
 
-Semantics:
+Semantics **(decided 2026-07-15, user-confirmed)**:
 
-- Element type at a single index is `u8`. *(Open detail: Lambda has no `u8` scalar type today — until the fixed-width numerics of §5.3 exist, `b[i]` should return `int` in 0–255; revisit when `uint8` lands.)*
+- `b[i]` returns the byte as **u8** — a real runtime value, not an aspiration: Lambda's sized numerics already exist as scalars (`200u8` literals, `NUM_SIZED_PACK` representation via `u8_to_item`, `lambda.h:283`), and indexing a `ELEM_UINT8` typed array already returns a u8-tagged item (`array_num_read_item`, `lambda-data-runtime.cpp:263`). Binary indexing must match. Verified semantics: `x is u8` → `true`, arithmetic promotes to plain integer (`200u8 + 100` → `300`, no wrap-around), prints as the bare number. Returning `int` instead would be *inconsistent*: `5 is u8` is `false` (no implicit narrowing), so an int-returning `b[i]` would make `b[i] is u8` false — wrong for a byte.
 - Range slices return `binary`.
-- Out‑of‑range indices raise `error` (consistent with array access).
+- ~~Out‑of‑range indices raise `error`~~ **Out‑of‑bounds indices return `null` — aligned with array semantics** (verified: `[1,2,3][5]` → `null`).
 - Tier 1 does an honest copy on slice; Tier 3 promotes slices to zero‑copy sub‑views.
 
-> **Status 2026-07-15:** not yet implemented — `b[i]` currently returns `null` (the `// todo - proper binary data access` at `lambda-data-runtime.cpp:2157`). This is the highest-value remaining Tier-1 item.
+> **Status 2026-07-15:** implemented. `item_at` returns a u8-tagged byte,
+> range indexing returns an owned binary slice, and OOB scalar indexes return
+> `null`. Covered by `test/lambda/binary_elements.ls`.
 
 ### 4.3 Iteration
 
@@ -177,6 +179,9 @@ let xor = reduce(b, (a, x) => a ^ x)
 - Comprehensions over `binary` build `u8[]` by default; an explicit `binary` cast collects back into a binary.
 - Implementation: extend the existing iterable dispatch table (same place strings register) with a `binary` case that walks `bytes[0 .. len)`.
 
+> **Status 2026-07-15:** implemented through the unified iterator; loop values
+> retain their u8 tags and indexed iteration exposes the normal integer key.
+
 ### 4.4 Concatenation operator `++`
 
 ```lambda
@@ -188,7 +193,9 @@ b1 ++ b2 ++ b3                    // associative
 - Type rule: `binary ++ binary → binary`. Mixed `binary ++ string` stays a *string* concat (the binary contributes its canonical `b'\x…'` text per B5) — explicit `encode(s, 'utf-8')` (§5.2) when byte concat with text content is meant.
 - Implementation: allocate destination `Binary` of summed length, two `memcpy`s. Tier 3 may replace this with an `iolist`‑style rope.
 
-> **Status 2026-07-15:** not yet implemented — `b1 ++ b2` currently routes both operands through string conversion (B5 canonical text), yielding `"b'\xDEAD'b'\xBEEF'"`. Changing `binary ++ binary` to byte concatenation is a **behavior change to landed semantics** and should ship together with indexing/slicing (§4.2–4.3) as the Tier-1 element-ops batch, with goldens updated in the same commit.
+> **Status 2026-07-15:** implemented with a checked, length-delimited allocation
+> and two byte copies. Embedded NULs are preserved; mixed binary/string joins
+> remain textual under B5.
 
 ### 4.5 Tier 1 deliverables checklist (status 2026-07-15)
 
@@ -196,12 +203,12 @@ b1 ++ b2 ++ b3                    // associative
 - [x] Parser decodes hex / base64 literals to raw bytes (`lib/str_binary.c`, both producers)
 - [x] Pretty‑print canonical `b'\x…'` form (uppercase, NUL-safe, shared helper)
 - [x] `len(b)` = byte count
-- [ ] `b[i]`, `b[a to b]`, `x in b` — **remaining**
-- [ ] `for byte in b { … }` and comprehension support — **remaining**
-- [ ] `b1 ++ b2` byte concat — **remaining** (currently stringifies; see §4.4 note)
+- [x] `b[i]`, `b[a to b]`, `x in b`
+- [x] `for byte in b { … }` and comprehension support
+- [x] `b1 ++ b2` byte concat
 - [x] Update transpile/MIR/emit/proc/editor switch tables (incl. `pn_output` binary-safe accessor fix)
 - [x] Test suite: literal round‑trip, decode errors, Mark/JSON egress, byte-exact output, fuzz fixture
-- [x] Doc updates for landed semantics; element-ops docs pending with their implementation
+- [x] Doc updates for landed semantics, including the element-ops batch
 
 ---
 
@@ -223,14 +230,24 @@ let out: binary = bld.freeze()        // immutable snapshot
 - `freeze()` transfers ownership into an immutable `binary` (zero‑copy when capacity ≈ length, otherwise truncating copy).
 - Internally implemented as a thin wrapper around the existing `StringBuf` machinery (see `strbuf_append_str_n` in [Lambda_Transpiler.md](../doc/dev/Lambda_Transpiler.md)).
 
-### 5.2 Encoding stdlib — `encode`/`decode` with a codec selector *(API decided 2026-07-15)*
+### 5.2 Encoding stdlib — `encode`/`decode` with a codec selector *(API SETTLED 2026-07-15, user-confirmed)*
 
-Keep encodings as **functions over `binary` and `string`**, not separate types — and expose them as **two functions with a codec-symbol selector**, not per-codec namespaces (`hex.encode(b)` style **rejected**):
+Keep encodings as **functions over `binary` and `string`**, not separate types — and expose them as **two functions with a codec-symbol selector**:
 
 ```lambda
 encode(x, 'hex')                 // codec as a symbol argument
 decode(x, 'base64')
 ```
+
+> **Rejected design (recorded):** the per-codec-namespace form this section originally proposed —
+>
+> ```lambda
+> hex.encode(b) / hex.decode(s)              // REJECTED
+> base64.encode(b) / base64.url_encode(b)    // REJECTED
+> utf8.encode(s) / utf8.decode(b)            // REJECTED
+> ```
+>
+> Rejected because the codec is code rather than data (not storable/computable/passable), each codec mints global names, N codecs × 2 directions = 2N functions to learn, and it diverges from the `input`/`format` selector family and Node's `Buffer` precedent. The rationale for the winner follows.
 
 **Why selector beats namespace** (decision rationale):
 
@@ -454,12 +471,12 @@ Lock down each codec with property tests:
 
 | Tier | Theme | Ship‑gating items | Status |
 |---|---|---|---|
-| **1** | Foundation | Decoded representation ✅; canonical print ✅; `len` ✅; `binary()` ✅; formatter/I-O egress ✅; JS copy bridge ✅ (impl plan Phases 1–5) — **remaining: indexing, slicing, iteration, `++` byte concat** | **core landed 2026-07-15** |
+| **1** | Foundation | Decoded representation ✅; canonical print ✅; `len` ✅; `binary()` ✅; formatter/I-O egress ✅; JS copy bridge ✅ (impl plan Phases 1–5); indexing ✅; slicing ✅; membership ✅; iteration ✅; `++` byte concat ✅ | **landed 2026-07-15** |
 | **2** | Structured access | Builder; encoding stdlib (`encode`/`decode` selector API, §5.2); endian accessors; `pack`/`unpack`; bit‑pattern `match` | proposal |
 | **3** | Performance & ecosystem | Sub‑binary zero‑copy slicing (**= PL5 flat buffer**, one work item); file I/O; `mmap`; crypto; compression (= PL6 transducers streaming); cross‑runtime zero-copy buffer; FFI | proposal; PL5/PL6 designs exist |
 | **4** | Polish | Hexdump; validators; constant‑time eq; round‑trip / fuzz tests; full docs | proposal |
 
-Tier 1's decode core was the unblocker: every later tier assumes binaries are real bytes, not source‑text shadows. The remaining Tier-1 element ops (indexing/slicing/iteration/concat) are the next batch; Tiers 2–4 can then land independently and incrementally.
+Tier 1's decode core was the unblocker: every later tier assumes binaries are real bytes, not source‑text shadows. With the Tier-1 element operations now landed, Tiers 2–4 can proceed independently and incrementally.
 
 ---
 

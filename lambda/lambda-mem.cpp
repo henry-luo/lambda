@@ -588,18 +588,37 @@ extern "C" String* heap_strcpy(const char* src, int64_t len) {
     return str;
 }
 
-extern "C" String* heap_binary_from_bytes(const char* src, int64_t len) {
-    if (!src || len < 0 || (uint64_t)len + 1 + sizeof(String) > (uint64_t)INT_MAX) {
-        return NULL;
-    }
+static String* heap_binary_alloc(int64_t len) {
+    if (len < 0 || (uint64_t)len + 1 + sizeof(String) > (uint64_t)INT_MAX) return NULL;
     // Binary owns immutable length-delimited bytes; using the binary allocation
     // tag prevents text conversions from silently erasing that distinction.
     String* bin = (String*)heap_alloc((int)(sizeof(String) + len + 1), LMD_TYPE_BINARY);
     if (!bin) return NULL;
-    memcpy(bin->chars, src, (size_t)len);
     bin->chars[len] = '\0';
     bin->len = (uint32_t)len;
+    return bin;
+}
+
+extern "C" String* heap_binary_from_bytes(const char* src, int64_t len) {
+    if (!src) return NULL;
+    String* bin = heap_binary_alloc(len);
+    if (!bin) return NULL;
+    memcpy(bin->chars, src, (size_t)len);
     bin->is_ascii = str_is_ascii(bin->chars, (size_t)len) ? 1 : 0;
+    return bin;
+}
+
+extern "C" String* heap_binary_concat(String* left, String* right) {
+    if (!left || !right) return NULL;
+    int64_t left_len = (int64_t)left->len;
+    int64_t right_len = (int64_t)right->len;
+    String* bin = heap_binary_alloc(left_len + right_len);
+    if (!bin) return NULL;
+    // Binary concatenation must remain length-based because either operand may
+    // contain embedded NUL bytes that terminate text-oriented copy helpers.
+    memcpy(bin->chars, left->chars, (size_t)left_len);
+    memcpy(bin->chars + left_len, right->chars, (size_t)right_len);
+    bin->is_ascii = left->is_ascii && right->is_ascii;
     return bin;
 }
 

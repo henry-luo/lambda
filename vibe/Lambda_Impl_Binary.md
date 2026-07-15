@@ -191,3 +191,25 @@ Order: **P1 → P2 → P3 → P4** as one PR (the semantics flip must land atomi
 | JS bridge detach/dangle | copies only (B8); zero-copy is PL5-gated |
 
 **Effort:** P1–P4 ≈ one focused session (decoder ~80 lines + ~10 touchpoints + goldens); P5 ≈ half a session (two helpers + two constructor hooks + tests).
+
+## 10. Follow-up action items (implemented 2026-07-15)
+
+The pre-batch behavior was verified before implementation: `b[0]` returned
+`null` unconditionally and `b1 ++ b2` returned the stringified literal texts.
+The user-decided semantics in `Lambda_Type_Binary.md` §4.2–§4.4 are now
+implemented through the shared runtime dispatch paths:
+
+- **A1 — complete:** `item_at` returns `u8_to_item` for an in-range binary
+  byte and `null` out of bounds. AST loop/index typing records `u8`, and all C
+  and MIR index paths continue to converge on the shared accessor.
+- **A2 — complete:** `binary ++ binary` calls the length-delimited
+  `heap_binary_concat` allocator and remains binary even with embedded NULs.
+  Mixed binary/string concatenation still follows B5 text conversion.
+- **Companions — complete:** range indexing uses `fn_slice` to make an owned
+  binary copy; `fn_in` compares each u8 byte with Lambda numeric equality; and
+  binary iteration uses the unified iterator while preserving u8 values.
+
+**Verification:** `test/lambda/binary_elements.ls` covers indexing, u8 identity,
+OOB nulls, slices, membership, iteration, binary/text concatenation,
+associativity, and embedded NULs. `make test-lambda-baseline` passes 3334/3334
+(2105 input + 1229 runtime, including 491/491 Lambda GTests).

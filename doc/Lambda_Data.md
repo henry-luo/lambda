@@ -263,6 +263,24 @@ form `b'\x<HEX>'`, independent of how it was authored. Mark formatting uses the
 same form and round-trips it; text formats without a native binary type, including
 JSON and YAML, emit the bytes as a standard base64 string.
 
+Binary element operations are byte-oriented:
+
+```lambda
+let bytes = b'\x00ADFF'
+bytes[1]                         // 173u8 (prints as 173)
+bytes[1] is u8                   // true
+bytes[1 to 2]                    // b'\xADFF'
+173 in bytes                     // true
+[for (byte in bytes) byte]       // [0, 173, 255], retaining u8 values
+b'\xDEAD' ++ b'\xBEEF'           // b'\xDEADBEEF'
+b'\xDEAD' ++ "tail"             // "b'\xDEAD'tail"
+```
+
+Scalar indexes outside the byte range return `null`, matching arrays. Binary
+slices are inclusive through range syntax and currently copy their bytes.
+Binary-to-binary `++` is length-delimited and preserves embedded NULs; a mixed
+binary/string join remains textual and uses the canonical binary literal form.
+
 ### DateTime Literals
 
 DateTime literals use the `t'...'` syntax:
@@ -999,6 +1017,9 @@ state updates.
 
 // String concatenation
 "hello" ++ " world"   // "hello world"
+
+// Binary concatenation
+b'\xDEAD' ++ b'\xBEEF'     // b'\xDEADBEEF'
 
 // Path concatenation
 /home.user ++ "config"      // /home.user.config
