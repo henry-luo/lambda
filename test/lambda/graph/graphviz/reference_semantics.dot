@@ -1,0 +1,12 @@
+strict digraph Reference {
+  graph [rankdir=LR]
+  node [shape=box color=gray]
+  edge [color=blue]
+  subgraph cluster_team {
+    label=Team
+    a [label=Start]
+    b
+  }
+  a -> b [label=go arrowhead=diamond]
+  a -> b [color=green]
+}

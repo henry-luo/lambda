@@ -1,0 +1,6 @@
+{"name":"Bootstrap toast autohides after its delay","html":"test/ui/dom/bootstrap_ui.html","events":[
+  {"type":"click","target":{"selector":"#toast-trigger"}},
+  {"type":"assert_class","target":{"selector":"#toast"},"class":"show"},
+  {"type":"wait","ms":5500},
+  {"type":"assert_visible","target":{"selector":"#toast"},"visible":false}
+]}

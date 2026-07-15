@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Window resize DOM event</title>
+  <style>
+    #marker { height: 24px; width: 40px; background: teal; }
+  </style>
+</head>
+<body>
+  <div id="marker">initial</div>
+  <script>
+    window.addEventListener('resize', function () {
+      var marker = document.getElementById('marker');
+      marker.style.width = window.innerWidth === 800 ? '400px' : '80px';
+      var rect = marker.getBoundingClientRect();
+      marker.textContent = window.innerWidth + 'x' + window.innerHeight + ':' + rect.width;
+    });
+  </script>
+</body>
+</html>

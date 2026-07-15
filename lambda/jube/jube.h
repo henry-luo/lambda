@@ -310,6 +310,8 @@ struct JubeHostDomAPI {
     Item (*append_variadic_bridge)(void* elem, Item* args, int argc);
     Item (*prepend_variadic_bridge)(void* elem, Item* args, int argc);
     void (*notify_mutation)(int kind, void* target, void* parent);
+    void (*notify_mutation_detail)(int kind, void* target, void* parent,
+                                   const char* attribute_name, const char* old_value);
 
     // -- DOM3 Phase 1 additive tail: receiver-explicit Range/Selection behavior.
     // These carry the behavior the deleted strcmp chains used to reach through
@@ -397,6 +399,11 @@ struct JubeHostDomAPI {
     Item (*rule_get_parent_rule)(Item rule);
     Item (*rule_decl_remove_property)(Item decl, Item prop);
     Item (*rule_decl_css_has)(Item decl, Item prop);
+
+    // -- Radiant browser-global state. Kept behind the host boundary so the
+    // module owns DOM-facing window semantics without reaching into js_dom.cpp.
+    void* (*get_ui_context)(void);
+    bool (*force_layout_for_geometry)(void* doc);
 };
 
 struct JubeHostAPI {

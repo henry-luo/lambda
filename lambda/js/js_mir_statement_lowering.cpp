@@ -3323,7 +3323,12 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             }
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             // Set pending new.target to the class (picked up by js_call_function)
-            jm_emit_set_function_home_class(mt, ctor_fn, cls_for_nt);
+            // An implicit derived constructor reuses its ancestor's function;
+            // retain that function's lexical home so its super() does not
+            // resolve relative to the deeper subclass and call itself.
+            if (active_ctor == ce->constructor) {
+                jm_emit_set_function_home_class(mt, ctor_fn, cls_for_nt);
+            }
             jm_call_void_1(mt, "js_set_new_target",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt));
             MIR_reg_t ctor_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
@@ -5010,7 +5015,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s", (int)cls_node->name->len, cls_node->name->chars);
                     JsMirVarEntry* local_class_binding = jm_find_var(mt, vname);
-                    bool stored_local_class_binding = false;
                     if (local_class_binding && local_class_binding->is_let_const) {
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, local_class_binding->reg),
@@ -5018,13 +5022,18 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         local_class_binding->tdz_active = false;
                         local_class_binding->type_id = LMD_TYPE_ANY;
                         local_class_binding->mir_type = MIR_T_I64;
-                        jm_scope_env_mark_and_writeback(mt, vname, local_class_binding->reg);
-                        stored_local_class_binding = true;
+                        // A nested lexical class can shadow a same-named promoted binding;
+                        // publish it through the class declaration's keyed env slot.
+                        jm_scope_env_mark_and_writeback_binding(mt, vname, stmt,
+                            local_class_binding->reg);
                     }
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", vname);
                     JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
-                    if (!stored_local_class_binding && mc && mc->const_type == MCONST_CLASS) {
+                    if (mc && (mc->const_type == MCONST_CLASS || mc->const_type == MCONST_MODVAR)) {
+                        // Static member lowering reads the class module slot.
+                        // Nested lexical classes still need that mirror even
+                        // when their authoritative binding is a local register.
                         jm_call_void_2(mt, "js_set_module_var",
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));

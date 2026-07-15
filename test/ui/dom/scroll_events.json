@@ -1,0 +1,10 @@
+{
+  "name": "Native viewport scrolling emits the window scroll event",
+  "html": "test/ui/dom/scroll_events.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "not-scrolled"},
+    {"type": "scroll", "x": 320, "y": 240, "dx": 0, "dy": -8},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "scrolled"}
+  ]
+}

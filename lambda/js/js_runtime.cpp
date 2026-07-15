@@ -35,6 +35,10 @@ extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_object_keys(Item object);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
+extern "C" void js_dom_event_handler_property_set(Item target,
+                                                    const char* property_name,
+                                                    int property_name_len,
+                                                    Item value);
 extern "C" Item js_symbol_well_known(Item name);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out);
@@ -105,6 +109,22 @@ static bool js_host_object_set_property(Item object, Item key, Item value, Item*
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->set_property &&
         type->host_ops->set_property(object, key, value, out);
+}
+
+static inline void js_note_event_handler_property_set(Item object,
+                                                       const char* name,
+                                                       int name_len,
+                                                       Item value) {
+    if (!name || name_len < 3 || name[0] != 'o' || name[1] != 'n') return;
+    js_dom_event_handler_property_set(object, name, name_len, value);
+}
+
+static inline void js_note_event_handler_property_set(Item object, Item key,
+                                                       Item value) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return;
+    String* name = it2s(key);
+    if (!name || name->len > 63) return;
+    js_note_event_handler_property_set(object, name->chars, (int)name->len, value);
 }
 
 static bool js_host_object_call_method(Item object,
@@ -3953,6 +3973,15 @@ extern "C" Item js_property_get(Item object, Item key) {
             return js_get_window_event_global_value();
         }
     }
+    {
+        extern int radiant_dom_window_get_property(Item object, Item key, Item* out);
+        Item window_value = ItemNull;
+        // Browser globals are live host state; stored preamble placeholders
+        // only make the names resolvable and must never shadow current metrics.
+        if (radiant_dom_window_get_property(object, key, &window_value)) {
+            return window_value;
+        }
+    }
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* private_key = it2s(key);
         if (private_key && private_key->len > 10 &&
@@ -6607,6 +6636,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         Item out = ItemNull;
         if (js_host_object_set_property(object, key, value, &out)) {
             JS_PROPERTY_SET_BRANCH("top_jube_host_vmap");
+            js_note_event_handler_property_set(object, key, value);
             return out;
         }
     }
@@ -6636,7 +6666,13 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     if (type == LMD_TYPE_MAP) {
         JS_PROPERTY_SET_BRANCH("top_map");
-        return js_property_set_map(object, key, value);
+        Item result = js_property_set_map(object, key, value);
+        if (!js_exception_pending) {
+            // Event-handler properties occupy the EventTarget listener list;
+            // recording successful writes here also covers global `window.on*`.
+            js_note_event_handler_property_set(object, key, value);
+        }
+        return result;
     }
 
     // Function: setting .prototype on a function (constructor pattern)
@@ -7564,6 +7600,7 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
                 }
                 js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_MONO);
                 js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_HIT_MONO);
+                js_note_event_handler_property_set(object, name, name_len, value);
                 return value;
             }
         } else if (ic->state == JS_STORE_IC_POLY) {
@@ -7577,6 +7614,7 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
                     }
                     js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_POLY);
                     js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_HIT_POLY);
+                    js_note_event_handler_property_set(object, name, name_len, value);
                     return value;
                 }
             }
@@ -12478,6 +12516,15 @@ extern "C" Item js_get_super_this_value(void) {
 static bool js_super_callee_is_constructor(Item callee);
 
 extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor) {
+    if (js_current_private_home_class.item != 0 &&
+        js_current_private_home_class.item != ItemNull.item &&
+        get_type_id(js_current_private_home_class) != LMD_TYPE_UNDEFINED) {
+        // super is lexical. An inherited constructor can run on a deeper
+        // subclass receiver, so deriving from receiver.constructor would call
+        // that inherited constructor again and recurse indefinitely.
+        Item lexical_super = js_get_prototype_of(js_current_private_home_class);
+        if (js_super_callee_is_constructor(lexical_super)) return lexical_super;
+    }
     TypeId receiver_type = get_type_id(receiver);
     if (receiver.item == 0 || receiver.item == ITEM_JS_UNDEFINED || receiver_type == LMD_TYPE_NULL ||
         receiver_type == LMD_TYPE_UNDEFINED) {
@@ -12614,6 +12661,15 @@ extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int 
         // Empty class with no constructor — no-op, this is already created
     }
     return this_val;
+}
+
+extern "C" Item js_super_apply_class(Item callee, Item this_val, Item args_array) {
+    int argc = js_array_length(args_array);
+    Item* args = argc > 0 ? LAMBDA_ALLOCA(argc, Item) : NULL;
+    for (int i = 0; i < argc; i++) {
+        args[i] = js_array_get(args_array, (Item){.item = i2it(i)});
+    }
+    return js_super_call_class(callee, this_val, args, argc);
 }
 
 // super() for native (built-in) parent constructors that ignore `this` and return a fresh

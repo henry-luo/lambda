@@ -503,7 +503,8 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run \
+	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
 
 # Help target - shows available commands
@@ -559,6 +560,8 @@ help:
 	@echo "  test-radiant-online - Run Radiant online URL smoke tests"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
+	@echo "  test-graph-mermaid   - Run Mermaid graph corpus and Lambda integration fixtures"
+	@echo "  test-graph-graphviz  - Run DOT parser and Graphviz package integration fixtures"
 	@echo "  test-pdf-render - Run PDF render visual gtest suite"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
@@ -1548,6 +1551,31 @@ editor-4c-view: build
 	echo "editor-4c-view: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
+# Browser-library DOM fixtures run through the real Radiant input/event/layout loop.
+dom-ui: build dom-ui-run
+
+dom-ui-run:
+	@echo "Running DOM UI integration suite..."
+	@echo "=============================================================="
+	@PASS=0; FAIL=0; TOTAL=0; \
+	for json in test/ui/dom/*.json; do \
+		[ -f "$$json" ] || continue; \
+		name=$$(basename "$$json" .json); \
+		TOTAL=$$((TOTAL + 1)); \
+		page=$$(sed -n 's/.*"html"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$$json" | head -1); \
+		[ -n "$$page" ] || page="test/ui/dom/$$name.html"; \
+		if ./lambda.exe view "$$page" --event-file "$$json" --headless >/dev/null 2>&1; then \
+			PASS=$$((PASS + 1)); \
+			printf "  \033[32m✓\033[0m %s\n" "$$name"; \
+		else \
+			FAIL=$$((FAIL + 1)); \
+			printf "  \033[31m✗\033[0m %s\n" "$$name"; \
+		fi; \
+	done; \
+	echo "=============================================================="; \
+	echo "dom-ui: $$PASS/$$TOTAL passed"; \
+	if [ $$FAIL -gt 0 ]; then exit 1; fi
+
 # Stage 4C Milestone 3 — parity report: cross-check the Radiant Phase-A pass-set
 # against the vitest/jsdom oracle (the editor's own suite under Node). Runs
 # Phase A (via run-phase-a.mjs) AND a fresh vitest oracle, reconciles per group,
@@ -1644,6 +1672,7 @@ test-extended: build-test
 	@rm -rf temp/cache
 	@echo "Running EXTENDED test suites only..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --category=extended --parallel
+	@$(MAKE) dom-ui-run
 
 test-library: build
 	@echo "Running library test suite..."
@@ -1665,6 +1694,19 @@ test-graph-mermaid: build-graph-mermaid-test
 	@./test/test_graph_mermaid_gtest.exe
 	@echo "Running Mermaid graph package integration fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*mermaid*'
+
+build-graph-graphviz-test:
+	@echo "Building Graphviz graph semantic runner..."
+	@mkdir -p build/premake
+	@$(MAKE) generate-premake
+	@PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	@PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native lambda test_graph_parser_gtest test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+
+test-graph-graphviz: build-graph-graphviz-test
+	@echo "Running native DOT parser coverage..."
+	@./test/test_graph_parser_gtest.exe --gtest_filter='GraphParserTest.ParserLocBudget:GraphParserTest.ParseDOTGraph:GraphParserTest.ParseComplexDOTGraph:GraphParserTest.ParseUndirectedGraph:GraphParserTest.ParseEmptyGraph'
+	@echo "Running manifest-driven Graphviz package fixtures..."
+	@./test/test_lambda_gtest.exe --gtest_filter='*graphviz*'
 
 test-validator: build
 	@echo "Running validator test suite..."

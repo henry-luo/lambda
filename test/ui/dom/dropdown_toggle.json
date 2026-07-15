@@ -1,0 +1,8 @@
+{"name":"Bootstrap dropdown toggle and outside dismissal","html":"test/ui/dom/bootstrap_ui.html","events":[
+  {"type":"click","target":{"selector":"#dropdown-toggle"}},
+  {"type":"assert_class","target":{"selector":".dropdown-menu"},"class":"show"},
+  {"type":"key_press","key":"ArrowDown"},
+  {"type":"assert_focus","target":{"selector":"#dropdown-item"}},
+  {"type":"click","target":{"selector":"#outside"}},
+  {"type":"assert_class","target":{"selector":".dropdown-menu"},"class":"show","present":false}
+]}

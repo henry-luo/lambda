@@ -1,0 +1,9 @@
+https:
+example.com:8443
+example.com
+/docs/page
+?q=one
+#part
+https://example.com:8443
+https://example.com:8443/docs/page?q=one#part
+ANCHOR_URL_DONE

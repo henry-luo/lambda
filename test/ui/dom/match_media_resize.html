@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+<body>
+  <div id="status">pending</div>
+  <script>
+    var query = matchMedia('(max-width: 500px)');
+    document.getElementById('status').textContent = String(query.matches);
+    query.addEventListener('change', function (event) {
+      document.getElementById('status').textContent =
+        String(event.matches) + ':' + event.media;
+    });
+  </script>
+</body>
+</html>

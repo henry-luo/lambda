@@ -3,8 +3,10 @@
 import model: .model
 import diagnostic: .diagnostics
 
-fn attr(name, kind, required = false, values = null, code = null, message = null) => {
-  name: name, kind: kind, required: required, values: values, code: code, message: message
+fn attr(name, kind, required = false, values = null, code = null, message = null,
+    allow_empty = false) => {
+  name: name, kind: kind, required: required, values: values, code: code,
+  message: message, allow_empty: allow_empty
 }
 
 fn common_attrs() => [
@@ -31,11 +33,14 @@ fn graph_spec() => {
     attr("direction", "text"), attr("rank-dir", "text"),
     attr("layout", "text"), attr("status", "text"),
     attr("rank-sep", "number"), attr("node-sep", "number"),
-    attr("edge-sep", "number"), attr("fill", "text"), attr("label", "text"),
+    attr("edge-sep", "number"),
+    attr("route-mode", "text", false,
+      ["none", "line", "polyline", "orthogonal", "curved"]),
+    attr("fill", "text"), attr("label", "text"),
     attr("label-format", "text", false, ["text", "markdown", "html"])
   ],
   children: ["meta", "styles", "defs", "constraints", "node", "edge", "subgraph",
-    "style-rule", "class-assignment", "style-assignment", "interaction",
+    "style-rule", "class-assignment", "style-assignment", "interaction", "annotation",
     "edge-property", "front-matter", "init", "properties", "dot-attr-statement",
     "dot-assignment", "dot-edge-statement", "diagnostics", "diagnostic"],
   open_children: false, scalar_children: false
@@ -49,6 +54,8 @@ fn node_spec() => {
     attr("label", "text"),
     attr("label-format", "text", false, ["text", "markdown", "html"]),
     attr("shape", "text"),
+    attr("shape-family", "text", false, ["box", "ellipse", "polygon", "text"]),
+    attr("graphviz-shape", "text"),
     attr("width", "number"), attr("height", "number"), attr("fill", "text"),
     attr("stroke", "text"), attr("stroke-width", "number"),
     attr("opacity", "number"), attr("class", "text"), attr("z", "integerish"),
@@ -72,7 +79,8 @@ fn edge_spec() => {
     attr("from-port", "text"), attr("to-port", "text"),
     attr("from-compass", "text"), attr("to-compass", "text"), attr("source-id", "text"),
     attr("directed", "boolish"), attr("arrow-head", "text"),
-    attr("arrow-tail", "text"), attr("min-length", "integerish"),
+    attr("arrow-tail", "text"), attr("arrow-direction", "text"),
+    attr("min-length", "integerish"),
     attr("weight", "number"), attr("constraint", "boolish"),
     attr("stroke", "text"), attr("stroke-width", "number"),
     attr("stroke-dasharray", "text"), attr("opacity", "number"),
@@ -155,6 +163,14 @@ fn metadata_spec(value_tag) {
       attr("callback", "text"), attr("tooltip", "text"), attr("target-window", "text")],
       children: [], open_children: false, scalar_children: false}
   }
+  else if (value_tag == "annotation") {
+    {attrs: [*common_attrs(), attr("owner-kind", "text", true,
+        ["graph", "subgraph", "node", "edge"]), attr("owner-id", "text", true),
+      attr("kind", "text", true), attr("label", "text", true),
+      attr("label-format", "text", false, ["text", "markdown", "html"]),
+      attr("z", "integerish")],
+      children: [], open_children: false, scalar_children: false}
+  }
   else if (value_tag == "edge-property") {
     {attrs: [*common_attrs(), attr("target", "text", true), attr("key", "text", true),
       attr("value", "text")], children: [], open_children: false, scalar_children: false}
@@ -183,7 +199,8 @@ fn dot_source_spec(value_tag) {
       open_children: false, scalar_children: false}
   }
   else if (value_tag == "dot-assignment") {
-    {attrs: [*common_attrs(), attr("name", "text", true), attr("value", "text", true),
+    {attrs: [*common_attrs(), attr("name", "text", true),
+      attr("value", "text", true, null, null, null, true),
       attr("name-source-kind", "text"), attr("value-source-kind", "text")], children: [],
       open_children: false, scalar_children: false}
   }
@@ -204,7 +221,8 @@ fn dot_source_spec(value_tag) {
       open_children: false, scalar_children: false}
   }
   else if (value_tag == "property") {
-    {attrs: [*common_attrs(), attr("name", "text", true), attr("value", "text", true),
+    {attrs: [*common_attrs(), attr("name", "text", true),
+      attr("value", "text", true, null, null, null, true),
       attr("name-source-kind", "text"), attr("value-source-kind", "text"),
       attr("origin", "text", false, ["direct", "default", "inherited"]),
       attr("defining-scope", "text"), attr("defining-statement", "text")], children: [],
@@ -263,7 +281,9 @@ fn spec_attr(spec, name) {
 fn attr_path(path, name) => path ++ "." ++ name
 
 fn required_attr_missing(value, entry) =>
-  value == null or (entry.kind == "text" and string(value) == "")
+  // DOT property and assignment values may be authored as an empty quoted ID.
+  value == null or (entry.kind == "text" and entry.allow_empty != true and
+    string(value) == "")
 
 fn required_attr_diagnostics(value, path, spec) => [
   for (entry in spec.attrs

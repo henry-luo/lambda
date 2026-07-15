@@ -92,3 +92,104 @@ before calling `map(...)` works in isolation, but the resulting dynamic map
 still cannot cross an element-spread boundary. Map spread should have the same
 flattening semantics for statically shaped and dynamically constructed maps, or
 report that the operand cannot be spread.
+
+## Resolved: retained Radiant layout crashes during document teardown
+
+While verifying Graphviz Stage 3, `make test-lambda-baseline` reproducibly
+segfaulted in `lambda.exe test-batch` when a sub-batch began with
+`test/lambda/radiant_custom_layout_bfc.ls`. Running the failed tranche alone
+reported the same process-level crash before the first script result:
+
+```text
+Segmentation fault: 11  ./lambda.exe test-batch --no-log --timeout=60
+Script not found in batch results: test/lambda/radiant_custom_layout_bfc.ls
+```
+
+The crash was not caused by the retained callback or runtime reset. The
+`radiant.layout()` module function created a stack-local `UiContext`, built a
+view tree whose font handles borrowed allocations from that context, then
+destroyed the context while retaining the document. `radiant.free()` later
+dereferenced those dangling font handles in `view_teardown_visit_node()`.
+Release optimization made the use-after-free deterministic.
+
+The module now attaches one reusable headless `UiContext` to the document's
+native resource list. The context remains alive through repeated reflow passes
+and is destroyed after the view tree during document teardown. Repeated
+`radiant.layout()` calls also use Radiant's reflow path instead of replacing and
+leaking the existing `ViewTree` shell. The release binary and retained
+`test-batch` both pass the BFC and flow custom-layout fixtures.
+
+The harness still reports every later script in a crashed sub-batch as a
+separate missing-result failure. It should preserve one process-crash diagnostic
+for the unexecuted entries instead of presenting them as unrelated missing
+scripts.
+
+## Recursive function parameters are overwritten after descent
+
+While sanitizing nested Graphviz HTML labels, a recursive function read element
+attributes after recursively processing its children. The attributes were
+present before recursion, but resolved as `null` afterward under MIR Direct:
+
+```lambda
+fn walk(value) {
+  let children = [for (child in value) walk(child)];
+  <td align: value.align; for (child in children) child>
+}
+```
+
+Capturing `value.align` in a local before the recursive calls did not help: the
+local was also overwritten, including when descent happened through a second
+helper and when the field was passed as another helper argument. This suggests
+recursive re-entry reuses or overwrites caller parameter and local slots instead
+of keeping each frame's bindings alive. The JIT should preserve function frames
+across recursion. Graph rich-label sanitization currently retains safe table
+structure but omits cell alignment and span attributes until this is fixed.
+
+## Resolved: retained custom layout did not switch the MIR runtime global
+
+The Graphviz render fixture initially produced an SVG while logging repeated
+`group_by_keys: invalid rows/keys/aliases/runtime` errors and missing node
+placements. The retained Radiant callback installed a temporary
+`EvalContext` in the thread-local `context`, but MIR-generated helpers obtain
+their pool through the separate `_lambda_rt` global. The callback therefore
+entered Lambda with two different runtime identities.
+
+The callback now saves, switches, and restores `_lambda_rt` together with
+`context` and `input_context`. `graphviz/render.ls` covers grouping inside the
+custom layout through final SVG and Graph Scene adaptation.
+
+## Incremental release rebuild can produce a runtime that returns null
+
+After `make test-lambda-baseline` rebuilt a marked release tree incrementally,
+the restored `lambda.exe` returned only `null` for ordinary scripts, including
+`test/lambda/expr.ls`, at MIR optimization levels 0, 1, and 2. The preserved
+debug executable and the previously packaged `release/lambda` both executed
+the same scripts correctly. Rebuilding through `make build` restored a working
+debug executable and allowed the baseline to proceed.
+
+This points to the incremental release/configuration path or a release-only
+runtime defect, not the graph package. The release gate should execute a small
+known script before backing up or restoring `lambda.exe`, and the optimized
+runtime still needs an isolated clean-build reproduction.
+
+## Multiline iterator calls can obscure comprehension parse errors
+
+While implementing Graphviz route intersection checks, a comprehension used a
+multiline function call directly as its iterator and added a `where` clause:
+
+```lambda
+[for (point in polygon_intersections(start.x, start.y,
+  finish.x, finish.y, vertices) where point.scale <= 1.0) point]
+```
+
+The parser reported an unclosed `{` at the enclosing function rather than
+identifying the ambiguous iterator boundary. Assigning the function result to a
+local moved the diagnostic but the filtered comprehension still failed. A
+boolean projection consumed by `any()` compiles:
+
+```lambda
+any([for (point in intersections) point.scale <= 1.0])
+```
+
+The grammar or error recovery should either accept the filtered form or report
+the `for` iterator as the failure location.

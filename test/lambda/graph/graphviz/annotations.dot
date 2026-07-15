@@ -1,0 +1,4 @@
+digraph Annotations {
+  a [xlabel="external"]
+  a -> b [label="center", xlabel=<<B>outside</B>>, headlabel="head", taillabel="tail"]
+}

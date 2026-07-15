@@ -1,65 +1,118 @@
-// Test Bootstrap DOM enhancements
-// Tests: Event/CustomEvent constructors, element.append(), getClientRects(),
-//        Node.ELEMENT_NODE, expando properties, focus()/blur(), window.innerWidth
+var fs = require('fs');
+(0, eval)(fs.readFileSync('test/js/popper_src_min.js', 'utf8'));
+(0, eval)(fs.readFileSync('test/js/bootstrap.min.js', 'utf8'));
 
-// === 1. Event constructor ===
-var e = new Event('click');
-console.log('Event type:', e.type);
-console.log('Event bubbles:', e.bubbles);
+function events(element, names) {
+  var seen = [];
+  names.forEach(function (name) {
+    element.addEventListener(name, function () { seen.push(name); });
+  });
+  return seen;
+}
 
-var e2 = new Event('submit', { bubbles: true, cancelable: true });
-console.log('Event2 bubbles:', e2.bubbles);
-console.log('Event2 cancelable:', e2.cancelable);
+function line(name, value) { console.log(name + ':' + value); }
 
-// === 2. CustomEvent constructor ===
-var ce = new CustomEvent('myevent', { detail: { foo: 42 }, bubbles: true });
-console.log('CustomEvent type:', ce.type);
-console.log('CustomEvent bubbles:', ce.bubbles);
-console.log('CustomEvent detail.foo:', ce.detail.foo);
+var alertElement = document.getElementById('alert');
+var alertEvents = events(alertElement, ['close.bs.alert', 'closed.bs.alert']);
+bootstrap.Alert.getOrCreateInstance(alertElement).close();
+line('alert', !document.getElementById('alert') + ':' + alertEvents.join(','));
 
-// === 3. Node constants ===
-console.log('Node.ELEMENT_NODE:', Node.ELEMENT_NODE);
-console.log('Node.TEXT_NODE:', Node.TEXT_NODE);
-console.log('Node.DOCUMENT_NODE:', Node.DOCUMENT_NODE);
-console.log('Node.DOCUMENT_FRAGMENT_NODE:', Node.DOCUMENT_FRAGMENT_NODE);
+var buttonElement = document.getElementById('button');
+bootstrap.Button.getOrCreateInstance(buttonElement).toggle();
+line('button', buttonElement.classList.contains('active') + ':' + buttonElement.getAttribute('aria-pressed'));
 
-// === 4. window.innerWidth / innerHeight ===
-console.log('innerWidth:', innerWidth);
-console.log('innerHeight:', innerHeight);
+var collapseElement = document.getElementById('collapse');
+var collapseEvents = events(collapseElement,
+  ['show.bs.collapse', 'shown.bs.collapse', 'hide.bs.collapse', 'hidden.bs.collapse']);
+var collapseWasShown = false;
+collapseElement.addEventListener('shown.bs.collapse', function () {
+  collapseWasShown = collapseElement.classList.contains('show');
+  bootstrap.Collapse.getInstance(collapseElement).hide();
+}, { once: true });
+collapseElement.addEventListener('hidden.bs.collapse', function () {
+  line('collapse', collapseWasShown + ':' + !collapseElement.classList.contains('show') + ':' + collapseEvents.join(','));
+  run_remaining_plugins();
+}, { once: true });
+bootstrap.Collapse.getOrCreateInstance(collapseElement, { toggle: false }).show();
 
-// === 5. DOM methods (require document) ===
-// These tests require a DOM document context, so we test feature detection
-var div = document.createElement('div');
-console.log('div created:', div.tagName);
+function run_remaining_plugins() {
+  var dropdownElement = document.getElementById('dropdown-toggle');
+  var dropdownEvents = events(dropdownElement,
+    ['show.bs.dropdown', 'shown.bs.dropdown', 'hide.bs.dropdown', 'hidden.bs.dropdown']);
+  var dropdown = bootstrap.Dropdown.getOrCreateInstance(dropdownElement, { display: 'static' });
+  dropdown.show();
+  var dropdownWasShown = document.querySelector('.dropdown-menu').classList.contains('show');
+  dropdown.hide();
+  line('dropdown', dropdownWasShown + ':' + dropdownElement.getAttribute('aria-expanded') + ':' + dropdownEvents.join(','));
 
-// 5a. append()
-var child1 = document.createElement('span');
-var child2 = document.createElement('em');
-div.append(child1, child2);
-console.log('children after append:', div.childNodes.length);
+  var modalElement = document.getElementById('modal');
+  var modalEvents = events(modalElement,
+    ['show.bs.modal', 'shown.bs.modal', 'hide.bs.modal', 'hidden.bs.modal']);
+  var modal = bootstrap.Modal.getOrCreateInstance(modalElement, { backdrop: false, focus: false });
+  modal.show();
+  var modalWasShown = modalElement.classList.contains('show');
+  modal.hide();
+  line('modal', modalWasShown + ':' + !modalElement.classList.contains('show') + ':' + modalEvents.join(','));
 
-// 5b. prepend()
-var first = document.createElement('b');
-div.prepend(first);
-console.log('first child after prepend:', div.firstChild.tagName);
+  var offcanvasElement = document.getElementById('offcanvas');
+  var offcanvasEvents = events(offcanvasElement,
+    ['show.bs.offcanvas', 'shown.bs.offcanvas', 'hide.bs.offcanvas', 'hidden.bs.offcanvas']);
+  var offcanvasWasShown = false;
+  offcanvasElement.addEventListener('shown.bs.offcanvas', function () {
+    offcanvasWasShown = offcanvasElement.classList.contains('show');
+    bootstrap.Offcanvas.getInstance(offcanvasElement).hide();
+  }, { once: true });
+  offcanvasElement.addEventListener('hidden.bs.offcanvas', function () {
+    line('offcanvas', offcanvasWasShown + ':' + !offcanvasElement.classList.contains('show') + ':' + offcanvasEvents.join(','));
+    run_synchronous_tail();
+  }, { once: true });
+  bootstrap.Offcanvas.getOrCreateInstance(offcanvasElement, { backdrop: false, scroll: true }).show();
+}
 
-// 5c. getClientRects()
-var rects = div.getClientRects();
-console.log('getClientRects length:', rects.length);
-console.log('getClientRects[0].width:', rects[0].width);
+function run_synchronous_tail() {
+  var tabElement = document.getElementById('tab2');
+  var tabEvents = events(tabElement, ['show.bs.tab', 'shown.bs.tab']);
+  bootstrap.Tab.getOrCreateInstance(tabElement).show();
+  line('tab', tabElement.classList.contains('active') + ':' +
+    document.getElementById('pane2').classList.contains('active') + ':' + tabEvents.join(','));
 
-// 5d. focus/blur (should not throw)
-div.focus();
-div.blur();
-console.log('focus/blur: ok');
+  var tooltipElement = document.getElementById('tooltip');
+  var tooltipEvents = events(tooltipElement,
+    ['show.bs.tooltip', 'shown.bs.tooltip', 'hide.bs.tooltip', 'hidden.bs.tooltip']);
+  var tooltip = bootstrap.Tooltip.getOrCreateInstance(tooltipElement,
+    { trigger: 'manual', animation: false });
+  tooltip.show();
+  var tooltipWasShown = !!document.querySelector('.tooltip.show');
+  tooltip.hide();
+  line('tooltip', tooltipWasShown + ':' + tooltipEvents.join(','));
 
-// 5e. expando properties
-div._bootstrapData = { tooltip: true, placement: 'top' };
-console.log('expando get:', div._bootstrapData.tooltip);
-console.log('expando placement:', div._bootstrapData.placement);
+  var popoverElement = document.getElementById('popover');
+  var popoverEvents = events(popoverElement,
+    ['show.bs.popover', 'shown.bs.popover', 'hide.bs.popover', 'hidden.bs.popover']);
+  var popover = bootstrap.Popover.getOrCreateInstance(popoverElement,
+    { trigger: 'manual', animation: false });
+  popover.show();
+  var popoverWasShown = !!document.querySelector('.popover.show');
+  popover.hide();
+  line('popover', popoverWasShown + ':' + popoverEvents.join(','));
 
-// store a number as expando
-div._counter = 99;
-console.log('expando counter:', div._counter);
+  var toastElement = document.getElementById('toast');
+  var toastEvents = events(toastElement,
+    ['show.bs.toast', 'shown.bs.toast', 'hide.bs.toast', 'hidden.bs.toast']);
+  var toast = bootstrap.Toast.getOrCreateInstance(toastElement,
+    { animation: false, autohide: false });
+  toast.show();
+  var toastWasShown = toastElement.classList.contains('show');
+  toast.hide();
+  line('toast', toastWasShown + ':' + !toastElement.classList.contains('show') + ':' + toastEvents.join(','));
 
-console.log('ALL TESTS PASSED');
+  var spy = bootstrap.ScrollSpy.getOrCreateInstance(document.getElementById('spy'),
+    { target: '#spy-nav', smoothScroll: false });
+  line('scrollspy', spy instanceof bootstrap.ScrollSpy);
+
+  var carouselElement = document.getElementById('carousel');
+  var carouselEvents = events(carouselElement, ['slide.bs.carousel', 'slid.bs.carousel']);
+  bootstrap.Carousel.getOrCreateInstance(carouselElement, { interval: false, touch: true }).next();
+  line('carousel', document.getElementById('slide2').classList.contains('active') + ':' + carouselEvents.join(','));
+  line('plugins', Object.keys(bootstrap).length);
+}

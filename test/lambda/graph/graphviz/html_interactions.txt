@@ -1,0 +1,17 @@
+{
+  valid: true,
+  label: ["<TABLE><TR><TD ALIGN="RIGHT"><B>Safe</B><SCRIPT>drop()</SCRIPT></TD><TD><I>Table</I></TD></TR></TABLE>", "html"],
+  content: <content
+    <table class: "graph-label-table"
+      <tbody
+        <tr
+          <td
+            <strong
+              "Safe">>
+          <td
+            <em
+              "Table">>>>>>,
+  interactions: [["a", "link", "https://example.com/a", "Open A", "_blank"], ["dot-stmt-0-s0-e0", "link", "https://example.com/edge", "Follow edge", "details"]],
+  html_node: ["link", "https://example.com/a", "Open A", "_blank"],
+  html_edge: ["link", "https://example.com/edge", "Follow edge", "details"]
+}

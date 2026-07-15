@@ -703,6 +703,18 @@ void css_animation_tick(AnimationInstance* anim, float t) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (!state || !state->keyframes || !state->element) return;
 
+    if (!state->event_started) {
+        state->event_started = true;
+        state->event_iteration = anim->current_iteration;
+        radiant_dispatch_css_event(state->ui_context, state->element,
+            "animationstart", "animationName", state->keyframes->name, 0.0);
+    } else if (anim->current_iteration > state->event_iteration) {
+        state->event_iteration = anim->current_iteration;
+        radiant_dispatch_css_event(state->ui_context, state->element,
+            "animationiteration", "animationName", state->keyframes->name,
+            anim->duration * (double)anim->current_iteration);
+    }
+
     CssKeyframes* kf = state->keyframes;
 
     int stop_a, stop_b;
@@ -814,6 +826,11 @@ void css_animation_tick(AnimationInstance* anim, float t) {
 void css_animation_finish(AnimationInstance* anim) {
     CssAnimState* state = (CssAnimState*)anim->state;
     if (state) {
+        double elapsed = anim->iteration_count > 0
+            ? anim->duration * (double)anim->iteration_count : anim->duration;
+        radiant_dispatch_css_event(state->ui_context, state->element,
+            "animationend", "animationName",
+            state->keyframes ? state->keyframes->name : "", elapsed);
         log_debug("css-anim: animation '%s' finished for element %p",
                   state->keyframes ? state->keyframes->name : "?", state->element);
     }
@@ -835,6 +852,7 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
     CssAnimState* state = (CssAnimState*)pool_calloc(pool, sizeof(CssAnimState));
     state->keyframes = keyframes;
     state->element = element;
+    state->event_iteration = -1;
 
     AnimationInstance* inst = animation_instance_create(scheduler);
     if (!inst) return NULL;
@@ -859,6 +877,7 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
     animation_update_layout_bounds(inst, span);
 
     animation_scheduler_add(scheduler, inst);
+
 
     log_debug("css-anim: created animation '%s' for <%s> (duration=%.3fs delay=%.3fs iterations=%d)",
               keyframes->name, element->tag_name ? element->tag_name : "?",
@@ -1095,7 +1114,11 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
 
     // create the animation
     double now = scheduler->current_time;
-    css_animation_create(scheduler, element, &anim_prop, keyframes, now, doc->pool);
+    AnimationInstance* instance = css_animation_create(
+        scheduler, element, &anim_prop, keyframes, now, doc->pool);
+    if (instance && instance->state) {
+        ((CssAnimState*)instance->state)->ui_context = lycon->ui_context;
+    }
 }
 
 // ============================================================================
@@ -1228,7 +1251,29 @@ void css_transition_finish(AnimationInstance* anim) {
             }
         }
     }
+    radiant_dispatch_css_event(st->ui_context, st->element,
+        "transitionend", "propertyName",
+        css_property_name_from_id(st->property_id), anim->duration);
     log_debug("css-transition: finished prop=%d for element %p", st->property_id, st->element);
+}
+
+static void css_transition_cancel(AnimationInstance* anim) {
+    CssTransitionState* st = (CssTransitionState*)anim->state;
+    if (!st || !st->element) return;
+    double now = anim->start_time;
+    if (st->ui_context && st->ui_context->document) {
+        DocState* doc_state = (DocState*)st->ui_context->document->state;
+        if (doc_state && doc_state->animation_scheduler) {
+            now = doc_state->animation_scheduler->current_time;
+        }
+    }
+    // elapsedTime excludes transition-delay and cannot exceed the active duration.
+    double elapsed = now - anim->start_time - anim->delay;
+    if (elapsed < 0.0) elapsed = 0.0;
+    if (elapsed > anim->duration) elapsed = anim->duration;
+    radiant_dispatch_css_event(st->ui_context, st->element,
+        "transitioncancel", "propertyName",
+        css_property_name_from_id(st->property_id), elapsed);
 }
 
 // Find a live transition instance for (element, property) in the scheduler, or NULL.
@@ -1303,21 +1348,29 @@ static bool css_transition_read_time(const CssValue* v, float* out_seconds) {
 // Resolve the element's transition-* declarations (longhands + `transition`
 // shorthand) into a CssTransitionProp. `prop_buf` backs the property list.
 // Returns true if a usable transition config with duration > 0 was found.
-static const CssValue* css_transition_longhand_value(StyleTree* style_tree,
-                                                     CssPropertyId property) {
-    AvlNode* node = avl_tree_search(style_tree->tree, property);
-    StyleNode* style = node ? (StyleNode*)node->declaration : NULL;
-    CssDeclaration* declaration = style ? style->winning_decl : NULL;
-    const CssValue* value = declaration ? declaration->value : NULL;
+static const CssValue* css_transition_first_value(const CssValue* value) {
     if (value && value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        value = value->data.list.values[0];
+        return value->data.list.values[0];
     }
     return value;
 }
 
-static bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
-                                          CssTransitionProp* tp,
-                                          CssPropertyId* prop_buf, int prop_cap) {
+static const CssValue* css_transition_tree_value(StyleTree* style_tree,
+                                                 CssPropertyId property) {
+    if (!style_tree || !style_tree->tree) return NULL;
+    AvlNode* node = avl_tree_search(style_tree->tree, property);
+    StyleNode* style = node ? (StyleNode*)node->declaration : NULL;
+    CssDeclaration* declaration = style ? style->winning_decl : NULL;
+    return declaration ? declaration->value : NULL;
+}
+
+bool css_transition_resolve_values(const CssValue* shorthand_value,
+                                   const CssValue* duration_value,
+                                   const CssValue* delay_value,
+                                   const CssValue* property_value,
+                                   const CssValue* timing_value,
+                                   CssTransitionProp* tp,
+                                   CssPropertyId* prop_buf, int prop_cap) {
     memset(tp, 0, sizeof(*tp));
     tp->properties = prop_buf;
     tp->property_count = 0;
@@ -1329,32 +1382,26 @@ static bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
     bool all_props = false;
 
     // --- longhands ---
-    const CssValue* duration_value = css_transition_longhand_value(
-        style_tree, CSS_PROPERTY_TRANSITION_DURATION);
+    duration_value = css_transition_first_value(duration_value);
     if (duration_value) {
         float secs;
         if (css_transition_read_time(duration_value, &secs)) { tp->duration = secs; saw_duration = true; }
     }
 
-    const CssValue* delay_value = css_transition_longhand_value(
-        style_tree, CSS_PROPERTY_TRANSITION_DELAY);
+    delay_value = css_transition_first_value(delay_value);
     if (delay_value) {
         float secs;
         if (css_transition_read_time(delay_value, &secs)) tp->delay = secs;
     }
 
-    const CssValue* timing_value = css_transition_longhand_value(
-        style_tree, CSS_PROPERTY_TRANSITION_TIMING_FUNCTION);
+    timing_value = css_transition_first_value(timing_value);
     if (timing_value) {
         parse_timing_function_value(timing_value, &tp->timing);
     }
 
     bool longhand_prop_present = false;
-    AvlNode* prop_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION_PROPERTY);
-    if (prop_node) {
-        StyleNode* sn = (StyleNode*)prop_node->declaration;
-        CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        const CssValue* v = d ? d->value : NULL;
+    if (property_value) {
+        const CssValue* v = property_value;
         longhand_prop_present = (v != NULL);
         if (v && v->type == CSS_VALUE_TYPE_LIST) {
             for (int i = 0; i < v->data.list.count; i++) {
@@ -1376,11 +1423,8 @@ static bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
     // decided after both longhand and shorthand are read (see below).
     // Parse each comma-separated group: [property] [duration] [timing] [delay].
     // Time dimensions: first is duration, second is delay.
-    AvlNode* sh_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_TRANSITION);
-    if (sh_node) {
-        StyleNode* sn = (StyleNode*)sh_node->declaration;
-        CssDeclaration* d = sn ? sn->winning_decl : NULL;
-        const CssValue* sv = d ? d->value : NULL;
+    if (shorthand_value) {
+        const CssValue* sv = shorthand_value;
         if (sv) {
             // Normalize into a flat item list. A single group is a LIST of items;
             // multiple comma groups are a LIST of LISTs. We take the first group's
@@ -1458,6 +1502,19 @@ static bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
     return saw_duration && tp->duration > 0.0f;
 }
 
+bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
+                                   CssTransitionProp* tp,
+                                   CssPropertyId* prop_buf, int prop_cap) {
+    (void)pool;
+    return css_transition_resolve_values(
+        css_transition_tree_value(style_tree, CSS_PROPERTY_TRANSITION),
+        css_transition_tree_value(style_tree, CSS_PROPERTY_TRANSITION_DURATION),
+        css_transition_tree_value(style_tree, CSS_PROPERTY_TRANSITION_DELAY),
+        css_transition_tree_value(style_tree, CSS_PROPERTY_TRANSITION_PROPERTY),
+        css_transition_tree_value(style_tree, CSS_PROPERTY_TRANSITION_TIMING_FUNCTION),
+        tp, prop_buf, prop_cap);
+}
+
 // Supported transitionable properties for the "all" keyword.
 static const CssPropertyId kTransitionSupported[] = {
     CSS_PROPERTY_OPACITY, CSS_PROPERTY_COLOR, CSS_PROPERTY_BACKGROUND_COLOR,
@@ -1469,7 +1526,8 @@ static const int kTransitionSupportedCount =
 static void css_transition_start(AnimationScheduler* scheduler, DomElement* element,
                                  CssTransitionTrack* track, const CssTransitionProp* tp,
                                  CssAnimValueType vt, float from_f, Color from_c,
-                                 float to_f, Color to_c, double now, Pool* pool) {
+                                 float to_f, Color to_c, double now, Pool* pool,
+                                 UiContext* ui_context) {
     // If a transition for this property is already running, reverse/interrupt from
     // its current interpolated value: cancel the old one and start fresh so we don't
     // stack instances. The current applied used value IS the interpolated value.
@@ -1480,11 +1538,12 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
             if (cvt == ANIM_VAL_FLOAT) from_f = cf;
             else if (cvt == ANIM_VAL_COLOR) from_c = cc;
         }
-        animation_scheduler_remove(scheduler, existing);
+        animation_scheduler_cancel(scheduler, existing);
     }
 
     CssTransitionState* st = (CssTransitionState*)pool_calloc(pool, sizeof(CssTransitionState));
     st->element = element;
+    st->ui_context = ui_context;
     st->property_id = track->property_id;
     st->value_type = vt;
     if (vt == ANIM_VAL_FLOAT) { st->from.f = from_f; st->to.f = to_f; }
@@ -1507,6 +1566,7 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
     inst->timing = tp->timing;
     inst->tick = css_transition_tick;
     inst->on_finish = css_transition_finish;
+    inst->on_cancel = css_transition_cancel;
 
     animation_update_layout_bounds(inst, static_cast<View*>(element));
 
@@ -1591,7 +1651,8 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
 
         if (changed && covered) {
             css_transition_start(scheduler, element, track, &tp, vt,
-                                 from_f, from_c, new_f, new_c, now, pool);
+                                 from_f, from_c, new_f, new_c, now, pool,
+                                 lycon->ui_context);
             // snapshot stays at the OLD value until the instance finishes (finish
             // snaps it to `to`); do not overwrite here.
         } else {

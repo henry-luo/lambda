@@ -86,6 +86,10 @@ pub fn visual_subgraph_entries(graph) => [
 
 pub fn ports(node) => [for (child in element_children(node) where tag(child) == "port") child]
 
+pub fn annotations(value) => [
+  for (child in element_children(value) where tag(child) == "annotation") child
+]
+
 pub fn port_entries(graph) => [
   for (entry in node_entries(graph), port in ports(entry.value)) {
     value: port,

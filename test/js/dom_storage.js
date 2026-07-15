@@ -1,0 +1,11 @@
+localStorage.clear();
+localStorage.setItem('mode', 'dark');
+localStorage.setItem(7, 9);
+console.log(localStorage.length);
+console.log(localStorage.getItem('mode'));
+console.log(localStorage.getItem('7'));
+console.log(localStorage.key(0));
+localStorage.removeItem('mode');
+console.log(localStorage.length);
+console.log(sessionStorage.getItem('mode') === null);
+console.log('STORAGE_DONE');

@@ -2063,7 +2063,7 @@ edge identity remains intentionally in Stage 3B normalization. Keeping those
 operations out of the parser preserves exact source declarations and avoids a
 second source AST.
 
-#### Stage 3B - DOT semantics and canonical IR (in progress, 2026-07-15)
+#### Stage 3B - DOT semantics and canonical IR (implemented 2026-07-15)
 
 The pure Lambda semantic implementation is complete:
 
@@ -2086,48 +2086,116 @@ The pure Lambda semantic implementation is complete:
 - canonical normalization is idempotent, and semantic-only scopes are excluded
   from visual cluster transformation.
 
-The implementation is covered by `canonical.ls` and `semantics.ls` under
-`test/lambda/graph/graphviz`. The remaining Stage 3B conformance item is the
-pinned `dot_json` adapter/reference comparison described in Section 19.12.
-Graphviz is not installed or invoked by ordinary tests.
+The implementation is covered by `canonical.ls`, `semantics.ls`, and
+`reference_semantics.ls` under `test/lambda/graph/graphviz`. The last fixture
+adapts checked-in Graphviz `dot_json` into Graph Scene Mark and compares it with
+the canonical Lambda graph. The generator version, command, and binary hashes
+are pinned beside the reference. Graphviz is not installed or invoked by
+ordinary tests.
 
 Lambda normalization size is tracked separately from native parser LOC:
 
 | Stage 3B module | Physical LOC |
 |---|---:|
-| `graphviz/attributes.ls` | 115 |
-| `graphviz/normalize.ls` | 479 |
-| total | 594 |
+| `graphviz/attributes.ls` | 166 |
+| `graphviz/normalize.ls` | 544 |
+| total | 710 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
 attribute families are added.
 
-#### Stage 3C - Content, shapes, markers, and HTML
+#### Stage 3C - Content, shapes, markers, and HTML (in progress, 2026-07-15)
 
-- implement plain-label substitutions, record labels, ports, and safe Graphviz
-  HTML-like labels;
-- add generic measured annotations;
-- implement Graphviz shape families, polygon parameters, peripheries, and arrow
-  composition;
-- lower safe styles, paint, links, and tooltips to semantic HTML;
-- add selected normalized HTML expectations.
+The first Stage 3C slice is implemented:
 
-#### Stage 3D - Layered layout parity
+- plain labels resolve `\\N`, `\\G`, `\\E`, `\\T`, `\\H`, and `\\L` only
+  after object identity is known; `\\n`, `\\l`, and `\\r` become measured line
+  breaks, and doubled backslashes remain literal;
+- nodes default to Graphviz's ellipse shape, common aliases lower to shared
+  renderer roles, and canonical IR preserves both `shape-family` and the raw
+  `graphviz-shape` name;
+- ellipse, triangle, parallelogram, trapezium, octagon, and house families use
+  matching HTML geometry and layout clipping;
+- `dir=forward|back|both|none` resolves endpoint marker presence, and baseline
+  single-component normal, inverted, open, circle, diamond, box, tee, vee,
+  crow, and empty markers reach generated SVG paint;
+- `content_shapes_markers.ls` checks canonical labels/shapes/markers, selected
+  semantic HTML attributes, pure layout propagation, and generated marker tags.
+- flat record fields lower to measured table content, named fields lower to
+  canonical ports with distinct attachment offsets, and record edges route
+  through the existing shared port implementation;
+- Graphviz HTML-label delimiters are removed before fragment parsing; safe
+  table/row/cell and inline emphasis structure survives while script, style,
+  template, authored link, and unknown wrapper markup is stripped;
+- node and edge `URL`/`href`, `tooltip`, and `target` attributes lower to inert
+  canonical interactions and semantic HTML metadata without navigation or
+  callback execution;
+- node and edge `xlabel`, plus edge `headlabel` and `taillabel`, lower to
+  graph-level canonical annotations with explicit owner identities. Radiant
+  measures their text or safe HTML content and the shared collision-aware
+  placement path positions them beside nodes or at route center/head/tail.
 
-- implement rank constraints, ordering/group hints, spacing, and edge weights;
+The new pure Stage 3C modules remain small:
+
+| Stage 3C module | Physical LOC |
+|---|---:|
+| `graphviz/labels.ls` | 35 |
+| `graphviz/shapes.ls` | 28 |
+| `graphviz/markers.ls` | 25 |
+| `graphviz/records.ls` | 55 |
+| total | 143 |
+
+Still outstanding in Stage 3C:
+
+- complete nested record groups, HTML table ports, and safe HTML cell
+  alignment/span attributes after the recursive-frame runtime issue recorded
+  in `vibe/Lambda_Issue8.md` is fixed;
+- complete specialized Graphviz shape families, polygon parameters,
+  peripheries, and multi-component arrow composition;
+- complete safe gradient/font/periphery paint lowering;
+- expand normalized HTML expectations to nested records, annotations, and
+  remaining styles.
+
+#### Stage 3D - Layered layout parity (in progress, 2026-07-15)
+
+Canonical rank constraints are exposed as zero-size semantic HTML/Velmt
+children. The layered ranker enforces `rank=same|min|max|source|sink`, excludes
+edges with `constraint=false`, propagates same-rank promotion through
+successors so `minlen` remains valid, ignores self-loops and cycle back-edges
+during promotion relaxation, and uses edge weights in crossing-order
+barycenters. `rank_layout.ls` covers both direct layout and transformed
+metadata contracts; the Mermaid routing fixture protects self-loop geometry.
+
+Graphviz `splines` now lowers into the canonical `route-mode` values `none`,
+`line`, `polyline`, `orthogonal`, and `curved`. The DOT aliases `false`,
+`ortho`, `spline`, and `true` are resolved during normalization, while an empty
+quoted value means `none`; unsupported values produce the stable
+`graph.graphviz.invalid-splines` diagnostic. The selected mode is carried
+through semantic HTML and Velmt layout. Paint omits `none` edges, preserves
+direct `line` segments, emits waypoint paths for `polyline` and `orthogonal`,
+and produces deterministic quadratic/cubic paths for `curved`. The retained
+`route_classes.ls` fixture covers aliases, diagnostics, routing, and SVG paint.
+
+- complete `ordering`, `newrank`, and stronger group ordering behavior;
 - complete compound cluster and port behavior;
-- implement declared line/polyline/orthogonal/curved route classes;
 - place all labels and annotations without incoherent overlap;
 - compare Graph Scene semantics and tolerant geometry against pinned Graphviz
   JSON references.
 
 #### Stage 3E - Formatter, runner, and integration
 
+- `manifest.mark` and `suite.ls` now run the positive DOT corpus through parse,
+  normalize, schema validation, and semantic HTML in one retained runtime;
+- `make test-graph-graphviz` reuses the native DOT parser runner and generic
+  retained Lambda runner instead of cloning the Mermaid C++ harness;
+- `render.ls` verifies the existing `.dot`/`.gv` CLI bridge pipeline through
+  Radiant SVG and Graph Scene. The retained callback now switches both
+  `::context` and MIR's `_lambda_rt`, which is required by grouping helpers;
 - rewrite canonical and source-semantic DOT formatting;
 - extract and reuse the graph conformance runner infrastructure;
-- add `make test-graph-graphviz` and baseline discovery;
-- verify `.dot` and `.gv` CLI render/view paths through the Lambda package;
+- add scene-reference policies to the Graphviz manifest runner;
+- add explicit headless `.gv` view-command coverage;
 - document the supported attribute/engine matrix and remaining diagnostics.
 
 ### 19.15 Acceptance criteria

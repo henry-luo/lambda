@@ -1,0 +1,10 @@
+{
+  "name": "matchMedia tracks live viewport changes",
+  "html": "test/ui/dom/match_media_resize.html",
+  "viewport": {"width": 800, "height": 400},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#status"}, "text": "false"},
+    {"type": "resize", "width": 400, "height": 400},
+    {"type": "assert_text", "target": {"selector": "#status"}, "text": "true:(max-width: 500px)"}
+  ]
+}

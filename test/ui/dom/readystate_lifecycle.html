@@ -1,0 +1,20 @@
+<!doctype html>
+<html><body>
+  <div id="status"></div>
+  <script>
+    function recordLifecycle(value) {
+      var status = document.getElementById('status');
+      status.textContent = status.textContent + value + '|';
+    }
+    recordLifecycle('initial:' + document.readyState);
+    document.addEventListener('readystatechange', function () {
+      recordLifecycle('state:' + document.readyState);
+    });
+    document.addEventListener('DOMContentLoaded', function () {
+      recordLifecycle('dom:' + document.readyState);
+    });
+    window.addEventListener('load', function () {
+      recordLifecycle('load:' + document.readyState);
+    });
+  </script>
+</body></html>

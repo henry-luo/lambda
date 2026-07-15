@@ -1,0 +1,11 @@
+{
+  valid: true,
+  graph_label: "Graph Escapes / L",
+  nodes: [["a", "Node a / \N / L", "ellipse", "ellipse", "oval"], ["b", "Second
+Line", "flip-tri", "polygon", "invtriangle"], ["c", "c", "lean-r", "polygon", "parallelogram"], ["d", "d", "octagon", "polygon", "octagon"], ["e", "e", "house", "polygon", "house"]],
+  edges: [["a", "b", "a to b (a->b) in Escapes / L", "odot", "diamond", "both"], ["b", "c", null, "none", "vee", null], ["c", "d", null, "obox", "none", "back"], ["d", "e", null, "none", "none", "none"]],
+  html_nodes: [["a", "Node a / \N / L", "ellipse", "ellipse", "oval"], ["b", "Second
+Line", "flip-tri", "polygon", "invtriangle"], ["c", "c", "lean-r", "polygon", "parallelogram"], ["d", "d", "octagon", "polygon", "octagon"], ["e", "e", "house", "polygon", "house"]],
+  html_edges: [["a", "b", "odot", "diamond"], ["b", "c", "none", "vee"], ["c", "d", "obox", "none"], ["d", "e", "none", "none"]],
+  paint: [["dot-stmt-0-s0-e0", "odot", "diamond", "circle", "path"], ["dot-stmt-1-s0-e0", "none", "vee", "path", "path"], ["dot-stmt-2-s0-e0", "obox", "none", "rect", "path"], ["dot-stmt-3-s0-e0", "none", "none", "path", "path"]]
+}

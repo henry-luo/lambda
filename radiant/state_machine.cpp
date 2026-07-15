@@ -15,6 +15,7 @@
 #include <string.h>
 
 extern bool is_view_focusable(View* view);
+extern bool is_view_programmatically_focusable(View* view);
 
 #define STATE_MACHINE_RECORD_BUFSZ 4096
 
@@ -102,8 +103,12 @@ bool focus_transition(DocState* state,
         TransitionDepthScope transition_scope(state);
         switch (kind) {
             case FOCUS_TRANSITION_FOCUS_ELEMENT:
-                focus_set(state, args ? args->target : NULL,
-                          args ? args->from_keyboard : false);
+                if (args && args->programmatic) {
+                    focus_set_programmatic(state, args->target);
+                } else {
+                    focus_set(state, args ? args->target : NULL,
+                              args ? args->from_keyboard : false);
+                }
                 break;
             case FOCUS_TRANSITION_BLUR_CURRENT:
                 focus_clear(state);
@@ -961,7 +966,7 @@ static void validate_view_state_registry(DocState* state,
 static void validate_focused_target_state(DocState* state,
                                           StateValidationReport* report) {
     if (!state || !state->focus || !state->focus->current) return;
-    if (!is_view_focusable(state->focus->current)) {
+    if (!is_view_programmatically_focusable(state->focus->current)) {
         report_fail(report, "focused target is not focusable");
     }
     if (state->focus->current->is_element()) {

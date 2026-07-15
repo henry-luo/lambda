@@ -1,0 +1,7 @@
+2
+dark
+9
+mode
+1
+true
+STORAGE_DONE

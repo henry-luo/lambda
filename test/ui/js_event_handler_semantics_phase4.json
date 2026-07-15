@@ -9,6 +9,6 @@
     {"type": "click", "target": {"selector": "#prop"}},
     {"type": "assert_text", "target": {"selector": "#log"}, "equals": "inline-this-inline|inline-event-click-inline|prop-this-prop|prop-event-prop", "assert_timeout": 1000},
     {"type": "click", "target": {"selector": "#cancel"}},
-    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "inline-this-inline|inline-event-click-inline|prop-this-prop|prop-event-prop|property-sees-prevented-false|listener-prevented-true", "assert_timeout": 1000}
+    {"type": "assert_text", "target": {"selector": "#log"}, "equals": "inline-this-inline|inline-event-click-inline|prop-this-prop|prop-event-prop|listener-prevented-true|property-sees-prevented-true", "assert_timeout": 1000}
   ]
 }

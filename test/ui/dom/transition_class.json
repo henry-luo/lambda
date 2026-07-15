@@ -1,0 +1,11 @@
+{
+  "name": "CSS transition completion dispatches transitionend",
+  "html": "test/ui/dom/transition_class.html",
+  "viewport": {"width": 240, "height": 180},
+  "events": [
+    {"type": "click", "target": {"selector": "#toggle"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "opacity", "value": "1"},
+    {"type": "assert_text", "target": {"selector": "#marker"}, "text": "opacity:true"}
+  ]
+}

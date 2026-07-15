@@ -334,6 +334,7 @@ typedef struct JsTimerHandle {
 static JsTimerHandle *timer_handles[MAX_TIMER_HANDLES];
 static int timer_handle_count = 0;
 static int64_t next_timer_id = 1;
+static uint64_t timer_progress_generation = 0;
 static bool timer_force_shutdown = false;
 static bool timer_nan_warning_emitted = false;
 static bool timer_negative_warning_emitted = false;
@@ -559,6 +560,7 @@ static void timer_abandon_all_without_uv(const char* reason_prefix) {
 
 static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
+    timer_progress_generation++;
     bool close_after_fire = th && !th->is_interval;
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
@@ -784,6 +786,15 @@ static JsTimerHandle* find_timer_handle(Item timer_id) {
     return NULL;
 }
 
+static void timer_start_from_wall_clock(uv_loop_t* loop, JsTimerHandle* timer,
+                                        uint64_t timeout_ms, uint64_t repeat_ms) {
+    if (!loop || !timer) return;
+    // JS can schedule timers after a long document compile before libuv's first
+    // turn; refresh its cached clock or the elapsed compile time makes them due.
+    uv_update_time(loop);
+    uv_timer_start(&timer->timer, timer_fire_cb, timeout_ms, repeat_ms);
+}
+
 extern "C" Item js_setTimeout(Item callback, Item delay) {
     if (get_type_id(callback) != LMD_TYPE_FUNC) {
         extern Item js_throw_type_error_code(const char*, const char*);
@@ -809,7 +820,7 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
+    timer_start_from_wall_clock(loop, th, ms, 0);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -858,7 +869,7 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
+    timer_start_from_wall_clock(loop, th, ms, 0);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -905,7 +916,7 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
 
     uv_timer_init(loop, &th->timer);
     // Immediates queued while draining the current check phase belong to the next turn.
-    uv_timer_start(&th->timer, timer_fire_cb, 1, 0);
+    timer_start_from_wall_clock(loop, th, 1, 0);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_IMMEDIATE);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -995,7 +1006,7 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, ms, ms);
+    timer_start_from_wall_clock(loop, th, ms, ms);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -1044,7 +1055,7 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, ms, ms);
+    timer_start_from_wall_clock(loop, th, ms, ms);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -1250,7 +1261,7 @@ extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    uv_timer_start(&th->timer, timer_fire_cb, ms, 0);
+    timer_start_from_wall_clock(loop, th, ms, 0);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -1330,7 +1341,7 @@ extern "C" Item js_setImmediate_promise(Item value, Item options) {
 
     uv_timer_init(loop, &th->timer);
     // Promise immediates share setImmediate's next-turn scheduling invariant.
-    uv_timer_start(&th->timer, timer_fire_cb, 1, 0);
+    timer_start_from_wall_clock(loop, th, 1, 0);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -1642,6 +1653,15 @@ typedef struct JsCloseRefedState {
 static void event_loop_close_refed_handle_cb(uv_handle_t* h, void* arg) {
     JsCloseRefedState* state = (JsCloseRefedState*)arg;
     if (!state || !h || h == state->skip || uv_is_closing(h) || !uv_has_ref(h)) return;
+    for (int i = 0; i < timer_handle_count; i++) {
+        JsTimerHandle* th = timer_handles[i];
+        if (!th || h != (uv_handle_t*)&th->timer) continue;
+        // Watchdog cleanup must update the JS timer owner before closing libuv;
+        // a raw close leaves the registry live and clearTimeout closes it twice.
+        timer_close_handle(th);
+        state->closed++;
+        return;
+    }
     // Watchdog exit leaves stale refed native handles behind; close them here
     // or global uv cleanup repeats the same wait during process teardown.
     uv_close(h, NULL);
@@ -1699,6 +1719,7 @@ static bool event_loop_has_refed_process_handles(uv_loop_t* loop) {
 typedef struct JsDrainWatchdogState {
     bool fired;
     uint64_t start_ns;
+    uint64_t progress_generation;
 } JsDrainWatchdogState;
 
 static void drain_watchdog_timer_cb(uv_timer_t* handle) {
@@ -1706,6 +1727,19 @@ static void drain_watchdog_timer_cb(uv_timer_t* handle) {
     uint64_t elapsed_ms = state
         ? (uv_hrtime() - state->start_ns) / 1000000ULL
         : (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS;
+    if (state && state->progress_generation != timer_progress_generation &&
+        elapsed_ms < (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS) {
+        // The short watchdog bounds an idle drain, not a productive timer chain;
+        // slow debug layouts can cross five seconds while still making progress.
+        state->progress_generation = timer_progress_generation;
+        uint64_t remaining = (uint64_t)EVENT_LOOP_PROCESS_DRAIN_TIMEOUT_MS - elapsed_ms;
+        uint64_t next_ms = remaining < (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS
+            ? remaining
+            : (uint64_t)EVENT_LOOP_DRAIN_TIMEOUT_MS;
+        if (next_ms == 0) next_ms = 1;
+        uv_timer_start(handle, drain_watchdog_timer_cb, next_ms, 0);
+        return;
+    }
     // Process handles get the longer startup grace only while they still exist;
     // once they close, remaining TCP/timer leaks should hit the normal watchdog.
     if (event_loop_has_refed_process_handles(lambda_uv_loop()) &&
@@ -1913,6 +1947,7 @@ extern "C" int js_event_loop_drain(void) {
         JsDrainWatchdogState watchdog_state;
         watchdog_state.fired = false;
         watchdog_state.start_ns = uv_hrtime();
+        watchdog_state.progress_generation = timer_progress_generation;
         uv_timer_init(loop, &watchdog);
         watchdog.data = &watchdog_state;
         uv_unref((uv_handle_t*)&watchdog); // don't let watchdog itself keep loop alive when alone
@@ -1926,6 +1961,17 @@ extern "C" int js_event_loop_drain(void) {
 
         // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
         result = lambda_uv_run();
+
+        int animation_frames = 0;
+        while (!watchdog_state.fired && js_dom_tick_headless_animation_frame() &&
+               animation_frames < 256) {
+            js_microtask_flush();
+            uv_run(loop, UV_RUN_NOWAIT);
+            animation_frames++;
+        }
+        if (animation_frames >= 256 && js_dom_tick_headless_animation_frame()) {
+            log_error("event_loop: headless CSS animation drain exceeded 256 frames");
+        }
 
         if (watchdog_state.fired) {
             event_loop_close_refed_handles_after_watchdog(loop, (uv_handle_t*)&watchdog);

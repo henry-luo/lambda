@@ -1,0 +1,10 @@
+{
+  "name": "DOM UI smoke - native click reaches inline JS and mutates the DOM",
+  "html": "test/ui/dom/smoke.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "inactive"},
+    {"type": "click", "target": {"selector": "#toggle"}},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "active"}
+  ]
+}

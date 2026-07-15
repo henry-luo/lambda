@@ -1,0 +1,4 @@
+initial: 40 25
+mutated: 135 55
+stable: 135 55
+GEOMETRY_FRESH_DONE

@@ -1,0 +1,6 @@
+{"name":"Bootstrap tooltip is Popper-positioned on hover","html":"test/ui/dom/bootstrap_ui.html","events":[
+  {"type":"mouse_move","target":{"selector":"#tooltip-trigger"}},
+  {"type":"wait","ms":40},
+  {"type":"assert_visible","target":{"selector":".tooltip"},"visible":true},
+  {"type":"assert_position","element_a":{"selector":"#tooltip-trigger"},"element_b":{"selector":".tooltip"},"relation":"above"}
+]}

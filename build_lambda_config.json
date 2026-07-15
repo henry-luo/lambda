@@ -2669,6 +2669,56 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "📝"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_cssom_view_gtest.cpp",
+                        "name": "WPT CSSOM View Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_cssom_view_gtest.exe",
+                        "libraries": ["gtest"],
+                        "requires_lambda_exe": true,
+                        "icon": "📐"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_dom_nodes_gtest.cpp",
+                        "name": "WPT DOM Nodes Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_dom_nodes_gtest.exe",
+                        "libraries": ["gtest"],
+                        "requires_lambda_exe": true,
+                        "icon": "🌳"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_resize_observer_gtest.cpp",
+                        "name": "WPT ResizeObserver Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_resize_observer_gtest.exe",
+                        "libraries": ["gtest"],
+                        "requires_lambda_exe": true,
+                        "icon": "📏"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_intersection_observer_gtest.cpp",
+                        "name": "WPT IntersectionObserver Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_intersection_observer_gtest.exe",
+                        "libraries": ["gtest"],
+                        "requires_lambda_exe": true,
+                        "icon": "👁️"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_css_transitions_gtest.cpp",
+                        "name": "WPT CSS Transitions Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_css_transitions_gtest.exe",
+                        "libraries": ["gtest"],
+                        "requires_lambda_exe": true,
+                        "icon": "🎞️"
                     }
                 ],
                 "type": "library"

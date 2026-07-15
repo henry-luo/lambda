@@ -1,0 +1,3 @@
+event:transitionend
+property:opacity
+elapsed:true

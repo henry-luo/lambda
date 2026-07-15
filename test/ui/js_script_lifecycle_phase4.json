@@ -7,7 +7,7 @@
     {
       "type": "assert_text",
       "target": {"selector": "#result"},
-      "equals": "second-script|throws-before|after-throw-second|defer-second|dom-second|rs-complete|body-onload|load-listener|onload-prop",
+      "equals": "second-script|throws-before|after-throw-second|defer-second|rs-interactive|dom-second|rs-complete|body-onload|load-listener|onload-prop",
       "assert_timeout": 1000
     }
   ]

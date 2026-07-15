@@ -1,14 +1,16 @@
 // Browser globals preamble for jQuery loading in --document mode
 globalThis.window = globalThis;
 globalThis.window.document = document;
-globalThis.navigator = { userAgent: "Lambda/1.0" };
-globalThis.location = { href: "", protocol: "file:", host: "" };
-globalThis.setTimeout = function(fn, ms) { if (typeof fn === "function") fn(); return 1; };
-globalThis.clearTimeout = function() {};
-globalThis.setInterval = function(fn, ms) { return 1; };
-globalThis.clearInterval = function() {};
-globalThis.getComputedStyle = function(el) { return { getPropertyValue: function() { return ""; } }; };
-document.defaultView = window;
+if (!globalThis.navigator) globalThis.navigator = { userAgent: "Lambda/1.0" };
+if (!globalThis.location) globalThis.location = { href: "", protocol: "file:", host: "" };
+if (!globalThis.__JQUERY_LIBRARY_ONLY__) {
+  globalThis.setTimeout = function(fn) { if (typeof fn === "function") fn(); return 1; };
+  globalThis.clearTimeout = function() {};
+  globalThis.setInterval = function() { return 1; };
+  globalThis.clearInterval = function() {};
+  globalThis.getComputedStyle = function() { return { getPropertyValue: function() { return ""; } }; };
+}
+if (!document.defaultView) document.defaultView = window;
 /*!
  * jQuery JavaScript Library v3.7.1
  * https://jquery.com/
@@ -10730,6 +10732,8 @@ return jQuery;
 // jQuery 3.7.1 Integration Tests
 // ============================================================================
 
+if (!globalThis.__JQUERY_LIBRARY_ONLY__) {
+
 // --- Core: $ function and jQuery object ---
 console.log(typeof jQuery);
 console.log(typeof $);
@@ -10920,3 +10924,4 @@ callbacks.fire("x");
 console.log(cbResult.join(","));
 
 console.log("JQUERY_TESTS_DONE");
+}

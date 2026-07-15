@@ -1,0 +1,60 @@
+{
+  cases: 8,
+  results: [{
+      id: "canonical",
+      valid: true,
+      nodes: 6,
+      edges: 6,
+      annotations: 0,
+      html: [6, 6, 0]
+    }, {
+      id: "reference-semantics",
+      valid: true,
+      nodes: 2,
+      edges: 1,
+      annotations: 0,
+      html: [2, 1, 0]
+    }, {
+      id: "content-shapes-markers",
+      valid: true,
+      nodes: 5,
+      edges: 4,
+      annotations: 0,
+      html: [5, 4, 0]
+    }, {
+      id: "html-interactions",
+      valid: true,
+      nodes: 2,
+      edges: 1,
+      annotations: 0,
+      html: [2, 1, 0]
+    }, {
+      id: "records-ports",
+      valid: true,
+      nodes: 3,
+      edges: 2,
+      annotations: 0,
+      html: [3, 2, 0]
+    }, {
+      id: "rank-layout",
+      valid: true,
+      nodes: 14,
+      edges: 8,
+      annotations: 0,
+      html: [14, 8, 0]
+    }, {
+      id: "annotations",
+      valid: true,
+      nodes: 2,
+      edges: 1,
+      annotations: 4,
+      html: [2, 1, 4]
+    }, {
+      id: "route-classes",
+      valid: true,
+      nodes: 2,
+      edges: 2,
+      annotations: 0,
+      html: [2, 2, 0]
+    }]
+}

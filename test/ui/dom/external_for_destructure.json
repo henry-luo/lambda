@@ -1,0 +1,6 @@
+{"name":"retained external handler preserves destructured for binding","html":"test/ui/dom/external_for_destructure.html","events":[
+  {"type":"click","target":{"selector":"#nested"}},
+  {"type":"assert_class","target":{"selector":"body"},"class":"dispatch-continued","present":true},
+  {"type":"assert_class","target":{"selector":"body"},"class":"outer-target-preserved","present":true},
+  {"type":"assert_class","target":{"selector":"body"},"class":"delegated-error","present":false}
+]}

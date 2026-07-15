@@ -52,9 +52,61 @@
     #include <sys/stat.h>
 #endif
 
-static const char* WPT_DIR = "ref/wpt/dom/events";
+#ifndef WPT_RUNNER_DIR
+#define WPT_RUNNER_DIR "ref/wpt/dom/events"
+#endif
+#ifndef WPT_RUNNER_TEMP_PREFIX
+#define WPT_RUNNER_TEMP_PREFIX "wpt_dom_events_"
+#endif
+#ifndef WPT_RUNNER_BASELINE_PATH
+#define WPT_RUNNER_BASELINE_PATH ""
+#endif
+#ifndef WPT_RUNNER_UPDATE_ENV
+#define WPT_RUNNER_UPDATE_ENV ""
+#endif
+#ifndef WPT_RUNNER_INCLUDE
+#define WPT_RUNNER_INCLUDE(name) true
+#endif
+
+static const char* WPT_DIR = WPT_RUNNER_DIR;
 static const char* SHIM_PATH = "test/wpt/wpt_testharness_shim.js";
 static const char* TEMP_DIR = "temp";
+static const char* BASELINE_PATH = WPT_RUNNER_BASELINE_PATH;
+static const char* UPDATE_BASELINE_ENV = WPT_RUNNER_UPDATE_ENV;
+
+static bool passing_baseline_contains(const char* test_name) {
+    if (!BASELINE_PATH[0] || !test_name) return false;
+    FILE* file = fopen(BASELINE_PATH, "r");
+    if (!file) return false;
+    char line[1024];
+    bool found = false;
+    while (fgets(line, sizeof(line), file)) {
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+            line[--len] = '\0';
+        }
+        if (strcmp(line, test_name) == 0) {
+            found = true;
+            break;
+        }
+    }
+    fclose(file);
+    return found;
+}
+
+static bool update_baseline_requested() {
+    if (!UPDATE_BASELINE_ENV[0]) return false;
+    const char* value = getenv(UPDATE_BASELINE_ENV);
+    return value && value[0] && strcmp(value, "0") != 0;
+}
+
+static void append_passing_baseline(const std::string& test_name) {
+    if (!update_baseline_requested() || !BASELINE_PATH[0]) return;
+    FILE* file = fopen(BASELINE_PATH, "a");
+    if (!file) return;
+    fprintf(file, "%s\n", test_name.c_str());
+    fclose(file);
+}
 
 // ---------------------------------------------------------------------------
 // Tests deliberately skipped -- they require subsystems Lambda's headless
@@ -338,25 +390,36 @@ struct WptDomEventsParam {
     bool        skip;
 };
 
-static std::vector<WptDomEventsParam> discover_wpt_dom_events_tests() {
-    std::vector<WptDomEventsParam> params;
-
+static void scan_wpt_dom_events_dir(const std::string& dir,
+                                    const std::string& rel_prefix,
+                                    std::vector<WptDomEventsParam>& params) {
 #ifdef _WIN32
-    char pattern[512];
-    snprintf(pattern, sizeof(pattern), "%s\\*.*", WPT_DIR);
+    std::string pattern = dir + "\\*.*";
     struct _finddata_t fd;
-    intptr_t handle = _findfirst(pattern, &fd);
-    if (handle == -1) return params;
+    intptr_t handle = _findfirst(pattern.c_str(), &fd);
+    if (handle == -1) return;
     do {
-        if (fd.attrib & _A_SUBDIR) continue;
         const char* name = fd.name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        std::string rel = rel_prefix.empty() ? std::string(name)
+                                             : rel_prefix + "/" + name;
+        if (fd.attrib & _A_SUBDIR) {
+            scan_wpt_dom_events_dir(dir + "/" + name, rel, params);
+            continue;
+        }
 #else
-    DIR* dir = opendir(WPT_DIR);
-    if (!dir) return params;
+    DIR* directory = opendir(dir.c_str());
+    if (!directory) return;
     struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_DIR) continue;
+    while ((entry = readdir(directory)) != NULL) {
         const char* name = entry->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        std::string rel = rel_prefix.empty() ? std::string(name)
+                                             : rel_prefix + "/" + name;
+        if (entry->d_type == DT_DIR) {
+            scan_wpt_dom_events_dir(dir + "/" + name, rel, params);
+            continue;
+        }
 #endif
 
         size_t len = strlen(name);
@@ -368,6 +431,10 @@ static std::vector<WptDomEventsParam> discover_wpt_dom_events_tests() {
                          (fname.find(".worker.js") != std::string::npos);
 
         if (!is_html && !is_any_js) continue;
+        // Large WPT directories mix unrelated capability families. Suite
+        // wrappers define a bounded acceptance corpus so aggregate CI does not
+        // spend minutes executing cases that are intentionally out of scope.
+        if (!WPT_RUNNER_INCLUDE(rel)) continue;
 
         // Skip reference files.
         if (is_html && len >= 9 && strcmp(name + len - 9, "-ref.html") == 0) {
@@ -375,11 +442,11 @@ static std::vector<WptDomEventsParam> discover_wpt_dom_events_tests() {
         }
 
         WptDomEventsParam p;
-        p.source_path = std::string(WPT_DIR) + "/" + name;
+        p.source_path = dir + "/" + name;
         p.is_any_js = is_any_js;
 
         // Strip extension(s) to form base name.
-        std::string base = fname;
+        std::string base = rel;
         if (is_html) {
             base = base.substr(0, base.size() - 5);
         } else {
@@ -415,7 +482,7 @@ static std::vector<WptDomEventsParam> discover_wpt_dom_events_tests() {
         if (fname.find(".worker.js") != std::string::npos) {
             p.skip = true;
         } else {
-            p.skip = should_skip(fname);
+            p.skip = should_skip(rel);
         }
 
         params.push_back(p);
@@ -425,8 +492,13 @@ static std::vector<WptDomEventsParam> discover_wpt_dom_events_tests() {
     _findclose(handle);
 #else
     }
-    closedir(dir);
+    closedir(directory);
 #endif
+}
+
+static std::vector<WptDomEventsParam> discover_wpt_dom_events_tests() {
+    std::vector<WptDomEventsParam> params;
+    scan_wpt_dom_events_dir(WPT_DIR, "", params);
 
     std::sort(params.begin(), params.end(),
               [](const WptDomEventsParam& a, const WptDomEventsParam& b) {
@@ -465,7 +537,10 @@ TEST_P(WptDomEventsTest, Run) {
     } else {
         std::string html = read_file_contents(p.source_path.c_str());
         ASSERT_FALSE(html.empty()) << "Could not read test file: " << p.source_path;
-        scripts = extract_inline_scripts(html, WPT_DIR);
+        size_t slash = p.source_path.rfind('/');
+        std::string source_dir = slash == std::string::npos
+            ? std::string(WPT_DIR) : p.source_path.substr(0, slash);
+        scripts = extract_inline_scripts(html, source_dir);
     }
 
     if (scripts.empty()) {
@@ -479,7 +554,7 @@ TEST_P(WptDomEventsTest, Run) {
     std::string combined = shim + "\n" + scripts +
                            "\n_wpt_fire_onload();\n_wpt_print_summary();\n";
 
-    std::string temp_js = std::string(TEMP_DIR) + "/wpt_dom_events_" + p.test_name + ".js";
+    std::string temp_js = std::string(TEMP_DIR) + "/" + WPT_RUNNER_TEMP_PREFIX + p.test_name + ".js";
     write_file_contents(temp_js.c_str(), combined);
 
     int exit_code = 0;
@@ -509,11 +584,16 @@ TEST_P(WptDomEventsTest, Run) {
     // Crash tests pass purely by completing.
     bool is_crash_test = (p.test_name.find("crash") != std::string::npos);
     if (is_crash_test && total_count == 0 && exit_code == 0) {
+        append_passing_baseline(p.test_name);
         printf("  %s: crash test -- completed without crash\n", p.test_name.c_str());
         return;
     }
 
     if (total_count == 0) {
+        if (BASELINE_PATH[0] && !passing_baseline_contains(p.test_name.c_str())) {
+            GTEST_SKIP() << "known failure (not in baseline): no test results from "
+                         << p.source_path;
+        }
         // No WPT_RESULT -- script likely failed to load/transpile (e.g.
         // missing constructor caused a top-level ReferenceError before any
         // test() call ran). Expected until the phases described in
@@ -528,6 +608,13 @@ TEST_P(WptDomEventsTest, Run) {
     printf("  %s: %d/%d passed", p.test_name.c_str(), pass_count, total_count);
     if (!failures.empty()) printf(" (%zu failures)", failures.size());
     printf("\n");
+
+    bool passing = failures.empty() && pass_count == total_count;
+    if (passing) append_passing_baseline(p.test_name);
+    if (!passing && BASELINE_PATH[0] && !passing_baseline_contains(p.test_name.c_str())) {
+        GTEST_SKIP() << "known failure (not in baseline): "
+                     << pass_count << "/" << total_count << " passed";
+    }
 
     for (const auto& f : failures) {
         ADD_FAILURE() << f;
@@ -548,6 +635,16 @@ INSTANTIATE_TEST_SUITE_P(
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(WptDomEventsTest);
 
 int main(int argc, char** argv) {
+    if (update_baseline_requested() && BASELINE_PATH[0]) {
+        FILE* file = fopen(BASELINE_PATH, "w");
+        if (file) {
+            fprintf(file,
+                "# Passing-file baseline; listed cases are regression-enforced.\n"
+                "# Generated by %s=1. New passes are allowed and should ratchet this file.\n\n",
+                UPDATE_BASELINE_ENV);
+            fclose(file);
+        }
+    }
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

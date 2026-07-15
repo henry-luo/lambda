@@ -19,6 +19,7 @@
 #include "../../../lib/url.h"
 #include <assert.h>
 #include <ctype.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -153,6 +154,9 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_append_variadic_bridge radiant_host_api->dom->append_variadic_bridge
 #define js_dom_prepend_variadic_bridge radiant_host_api->dom->prepend_variadic_bridge
 #define js_dom_notify_mutation radiant_host_api->dom->notify_mutation
+#define js_dom_notify_mutation_detail radiant_host_api->dom->notify_mutation_detail
+#define js_dom_get_ui_context radiant_host_api->dom->get_ui_context
+#define js_dom_force_layout_for_geometry radiant_host_api->dom->force_layout_for_geometry
 #define js_call_function radiant_host_api->script->call_function
 #define js_check_exception radiant_host_api->script->check_exception
 
@@ -603,12 +607,18 @@ static Item radiant_dom_attributes_item(DomElement* elem) {
         if (radiant_dom_is_internal_attr(name)) continue;
         const char* value = dom_element_get_attribute(elem, name);
         Item pair = radiant_host_api->value->new_object();
+        Item name_item = radiant_dom_string_item(name);
+        Item value_item = radiant_dom_string_item(value);
         radiant_host_api->value->property_set(pair,
-            (Item){.item = s2it(heap_create_name("name"))},
-            radiant_dom_string_item(name));
+            (Item){.item = s2it(heap_create_name("name"))}, name_item);
         radiant_host_api->value->property_set(pair,
-            (Item){.item = s2it(heap_create_name("value"))},
-            radiant_dom_string_item(value));
+            (Item){.item = s2it(heap_create_name("value"))}, value_item);
+        // Attr is a Node: sanitizers consume nodeName/nodeValue even when the
+        // bridge represents NamedNodeMap entries as lightweight objects.
+        radiant_host_api->value->property_set(pair,
+            (Item){.item = s2it(heap_create_name("nodeName"))}, name_item);
+        radiant_host_api->value->property_set(pair,
+            (Item){.item = s2it(heap_create_name("nodeValue"))}, value_item);
         array_push(arr, pair);
     }
     return arr_item;
@@ -795,14 +805,16 @@ static CssSelectorGroup* radiant_dom_parse_css_selector_group(const char* sel_te
 
 static DomElement* radiant_dom_selector_group_find_first(SelectorMatcher* matcher,
                                                          CssSelectorGroup* group,
-                                                         DomElement* elem) {
+                                                         DomElement* elem,
+                                                         bool include_elem) {
     if (!matcher || !group || !elem) return nullptr;
-    if (selector_matcher_matches_group(matcher, group, elem, nullptr)) return elem;
+    if (include_elem && selector_matcher_matches_group(matcher, group, elem, nullptr)) return elem;
 
     DomNode* child = elem->first_child;
     while (child) {
         if (child->is_element()) {
-            DomElement* found = radiant_dom_selector_group_find_first(matcher, group, child->as_element());
+            DomElement* found = radiant_dom_selector_group_find_first(
+                matcher, group, child->as_element(), true);
             if (found) return found;
         }
         child = child->next_sibling;
@@ -821,9 +833,10 @@ static bool radiant_dom_selector_group_result_contains(ArrayList* results, DomEl
 static void radiant_dom_selector_group_collect_all(SelectorMatcher* matcher,
                                                    CssSelectorGroup* group,
                                                    DomElement* elem,
-                                                   ArrayList* results) {
+                                                   ArrayList* results,
+                                                   bool include_elem) {
     if (!matcher || !group || !elem || !results) return;
-    if (selector_matcher_matches_group(matcher, group, elem, nullptr) &&
+    if (include_elem && selector_matcher_matches_group(matcher, group, elem, nullptr) &&
             !radiant_dom_selector_group_result_contains(results, elem)) {
         arraylist_append(results, elem);
     }
@@ -831,7 +844,8 @@ static void radiant_dom_selector_group_collect_all(SelectorMatcher* matcher,
     DomNode* child = elem->first_child;
     while (child) {
         if (child->is_element()) {
-            radiant_dom_selector_group_collect_all(matcher, group, child->as_element(), results);
+            radiant_dom_selector_group_collect_all(
+                matcher, group, child->as_element(), results, true);
         }
         child = child->next_sibling;
     }
@@ -1268,6 +1282,10 @@ RADIANT_C_API int radiant_dom_guard_hreft(Item receiver) {
         radiant_dom_is_tag(elem, "link") ||
         radiant_dom_is_tag(elem, "base"));
 }
+RADIANT_C_API int radiant_dom_guard_anchor(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    return elem && (radiant_dom_is_tag(elem, "a") || radiant_dom_is_tag(elem, "area"));
+}
 RADIANT_C_API int radiant_dom_guard_namet(Item receiver) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     return elem && (radiant_dom_is_tag(elem, "input") ||
@@ -1631,7 +1649,15 @@ RADIANT_C_API int radiant_dom_m4b_href_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* value = dom_element_get_attribute(elem, "href");
-    *out = radiant_dom_string_item(value ? value : "");
+    if (radiant_dom_is_tag(elem, "a") || radiant_dom_is_tag(elem, "area")) {
+        Url* resolved = elem->doc && elem->doc->url
+            ? url_parse_with_base(value ? value : "", elem->doc->url)
+            : url_parse(value ? value : "");
+        *out = radiant_dom_string_item(resolved ? url_get_href(resolved) : "");
+        if (resolved) url_destroy(resolved);
+    } else {
+        *out = radiant_dom_string_item(value ? value : "");
+    }
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_href_set(Item r, Item v, Item* out) {
@@ -1643,6 +1669,46 @@ RADIANT_C_API int radiant_dom_m4b_href_set(Item r, Item v, Item* out) {
     *out = v;
     return 1;
 }
+
+typedef const char* (*RadiantUrlGetter)(const Url* url);
+
+static int radiant_dom_anchor_component(Item receiver, Item* out,
+                                        RadiantUrlGetter getter) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out || !getter) return 0;
+    const char* href = dom_element_get_attribute(elem, "href");
+    Url* resolved = elem->doc && elem->doc->url
+        ? url_parse_with_base(href ? href : "", elem->doc->url)
+        : url_parse(href ? href : "");
+    *out = radiant_dom_string_item(resolved ? getter(resolved) : "");
+    if (resolved) url_destroy(resolved);
+    return 1;
+}
+
+#define RADIANT_ANCHOR_COMPONENT_GETTER(fn_name, url_getter) \
+    RADIANT_C_API int fn_name(Item receiver, Item* out) { \
+        return radiant_dom_anchor_component(receiver, out, url_getter); \
+    }
+
+RADIANT_ANCHOR_COMPONENT_GETTER(radiant_dom_anchor_protocol_get, url_get_protocol)
+RADIANT_ANCHOR_COMPONENT_GETTER(radiant_dom_anchor_host_get, url_get_host)
+RADIANT_ANCHOR_COMPONENT_GETTER(radiant_dom_anchor_hostname_get, url_get_hostname)
+RADIANT_ANCHOR_COMPONENT_GETTER(radiant_dom_anchor_pathname_get, url_get_pathname)
+RADIANT_ANCHOR_COMPONENT_GETTER(radiant_dom_anchor_search_get, url_get_search)
+RADIANT_ANCHOR_COMPONENT_GETTER(radiant_dom_anchor_origin_get, url_get_origin)
+
+RADIANT_C_API int radiant_dom_anchor_hash_get(Item receiver, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !out) return 0;
+    const char* href = dom_element_get_attribute(elem, "href");
+    // Fragment-only references are valid URL references even when the host
+    // parser has no base-path component; their hash is still the raw suffix.
+    const char* hash = href ? strchr(href, '#') : nullptr;
+    *out = radiant_dom_string_item(hash ? hash : "");
+    return 1;
+}
+
+#undef RADIANT_ANCHOR_COMPONENT_GETTER
 RADIANT_C_API int radiant_dom_m4b_alt_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
@@ -2182,7 +2248,12 @@ RADIANT_C_API int radiant_dom_member_node_type_any(Item receiver, Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     if (!node || !out) return 0;
     if (node->is_element()) {
-        *out = radiant_dom_int_item((int64_t)node->as_element()->node_type);
+        DomElement* elem = node->as_element();
+        // DocumentFragment uses the shared container storage internally, but
+        // its projected DOM discriminator must remain nodeType 11.
+        *out = radiant_dom_int_item(
+            radiant_dom_is_tag(elem, "#document-fragment") ? 11 :
+            (int64_t)elem->node_type);
         return 1;
     }
     return radiant_dom_member_character_data_property(receiver, "nodeType", out);
@@ -2877,7 +2948,10 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         // selector parsing and matching stay on the document pool so returned
         // wrappers are the only GC-managed values created by this read-only path.
         SelectorMatcher* matcher = selector_matcher_create(elem->doc->pool);
-        DomElement* found = radiant_dom_selector_group_find_first(matcher, selector_group, elem);
+        // Element selector queries walk descendants and must not match the
+        // context element itself (Document queries pass true below).
+        DomElement* found = radiant_dom_selector_group_find_first(
+            matcher, selector_group, elem, false);
         *out = radiant_dom_node_item((DomNode*)found);
         return true;
     }
@@ -2904,7 +2978,8 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = arr_item;
             return true;
         }
-        radiant_dom_selector_group_collect_all(matcher, selector_group, elem, results);
+        radiant_dom_selector_group_collect_all(
+            matcher, selector_group, elem, results, false);
         for (int i = 0; i < results->length; i++) {
             array_push(arr_item.array, radiant_dom_node_item((DomNode*)results->data[i]));
         }
@@ -3078,16 +3153,19 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
     }
 
     if (strcmp(method, "getBoundingClientRect") == 0) {
+        radiant_dom_ensure_layout(elem->doc);
         *out = js_dom_get_bounding_client_rect_bridge((void*)elem);
         return true;
     }
 
     if (strcmp(method, "getClientRects") == 0) {
+        radiant_dom_ensure_layout(elem->doc);
         *out = js_dom_get_client_rects_bridge((void*)elem);
         return true;
     }
 
     if (strcmp(method, "scrollIntoView") == 0) {
+        radiant_dom_ensure_layout(elem->doc);
         *out = js_dom_scroll_into_view_bridge((void*)elem);
         return true;
     }
@@ -3191,9 +3269,11 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
+        const char* old_value = dom_element_get_attribute(elem, attr_name);
         dom_element_set_attribute(elem, attr_name, attr_val);
         js_dom_after_set_attribute((void*)elem, attr_name, attr_val);
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
+            (void*)elem->parent, attr_name, old_value);
         *out = ItemNull;
         return true;
     }
@@ -3208,9 +3288,11 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
+        const char* old_value = dom_element_get_attribute(elem, attr_name);
         dom_element_remove_attribute(elem, attr_name);
         js_dom_after_remove_attribute((void*)elem, attr_name);
-        js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+        js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
+            (void*)elem->parent, attr_name, old_value);
         *out = ItemNull;
         return true;
     }
@@ -3226,6 +3308,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             return true;
         }
         bool has = dom_element_has_attribute(elem, attr_name);
+        const char* old_value = dom_element_get_attribute(elem, attr_name);
         bool should_have = (argc >= 2) ? js_is_truthy(args[1]) : !has;
         if (should_have && !has) {
             dom_element_set_attribute(elem, attr_name, "");
@@ -3234,7 +3317,8 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             js_dom_after_toggle_attribute_remove((void*)elem, attr_name);
         }
         if (should_have != has) {
-            js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
+            js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
+                (void*)elem->parent, attr_name, old_value);
         }
         *out = (Item){.item = b2it(should_have ? 1 : 0)};
         return true;
@@ -3252,6 +3336,15 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
     Item result = ItemNull;
     if (radiant_dom_get_basic_property(elem_item, prop_name, &result)) {
         return result;
+    }
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(elem_item);
+    const char* prop = fn_to_cstr(prop_name);
+    if (node && node->is_element() && prop &&
+        (strcmp(prop, "offsetWidth") == 0 || strcmp(prop, "offsetHeight") == 0 ||
+         strcmp(prop, "offsetTop") == 0 || strcmp(prop, "offsetLeft") == 0 ||
+         strcmp(prop, "offsetParent") == 0 || strncmp(prop, "client", 6) == 0 ||
+         strncmp(prop, "scroll", 6) == 0)) {
+        radiant_dom_ensure_layout(node->as_element()->doc);
     }
     return js_dom_get_property_impl(elem_item, prop_name);
 }
@@ -3973,6 +4066,21 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
+    if (strcmp(method, "contains") == 0) {
+        if (argc < 1 || !doc) {
+            *out = (Item){.item = b2it(0)};
+            return 1;
+        }
+        Item document_item = js_dom_document_proxy_for_doc_bridge((void*)doc);
+        DomNode* other = (DomNode*)js_dom_unwrap_element_impl(args[0]);
+        // Document inherits Node; attachment checks used by jQuery must include
+        // the documentElement itself and every descendant in the live tree.
+        bool contained = args[0].item == document_item.item ||
+            (root && other && radiant_dom_node_contains((DomNode*)root, other));
+        *out = (Item){.item = b2it(contained ? 1 : 0)};
+        return 1;
+    }
+
     if (strcmp(method, "getElementById") == 0) {
         if (argc < 1) {
             *out = ItemNull;
@@ -4035,7 +4143,8 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             return 1;
         }
         SelectorMatcher* matcher = selector_matcher_create(doc->pool);
-        DomElement* found = radiant_dom_selector_group_find_first(matcher, selector_group, root);
+        DomElement* found = radiant_dom_selector_group_find_first(
+            matcher, selector_group, root, true);
         *out = radiant_dom_node_item((DomNode*)found);
         return 1;
     }
@@ -4060,7 +4169,8 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         Item arr_item = radiant_dom_array_item();
         Array* arr = arr_item.array;
         if (results) {
-            radiant_dom_selector_group_collect_all(matcher, selector_group, root, results);
+            radiant_dom_selector_group_collect_all(
+                matcher, selector_group, root, results, true);
             for (int i = 0; i < results->length; i++) {
                 array_push(arr, radiant_dom_node_item((DomNode*)results->data[i]));
             }
@@ -4274,6 +4384,78 @@ RADIANT_C_API Item radiant_dom_window_remove_event_listener(Item type, Item call
 RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item) {
     // dispatch must use the same global-object key that listener registration uses.
     return js_dom_dispatch_event_bridge(radiant_host_api->script->global_this(), event_item);
+}
+
+RADIANT_C_API bool radiant_dom_ensure_layout(DomDocument* doc) {
+    return doc && js_dom_force_layout_for_geometry &&
+        js_dom_force_layout_for_geometry((void*)doc);
+}
+
+static Item radiant_dom_window_dimension(float value) {
+    return (Item){.item = i2it((int64_t)llroundf(value))};
+}
+
+RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* out) {
+    if (!out || object.item != radiant_host_api->script->global_this().item ||
+        !js_dom_get_ui_context) {
+        return 0;
+    }
+    UiContext* uicon = (UiContext*)js_dom_get_ui_context();
+    if (!uicon) return 0;
+
+    if (radiant_dom_key_equals(key, "innerWidth", 10)) {
+        *out = radiant_dom_window_dimension(uicon->viewport_width);
+        return 1;
+    }
+    if (radiant_dom_key_equals(key, "innerHeight", 11)) {
+        *out = radiant_dom_window_dimension(uicon->viewport_height);
+        return 1;
+    }
+    if (radiant_dom_key_equals(key, "outerWidth", 10)) {
+        *out = radiant_dom_window_dimension(uicon->window_width);
+        return 1;
+    }
+    if (radiant_dom_key_equals(key, "outerHeight", 11)) {
+        *out = radiant_dom_window_dimension(uicon->window_height);
+        return 1;
+    }
+    if (radiant_dom_key_equals(key, "devicePixelRatio", 16)) {
+        *out = radiant_dom_window_dimension(uicon->pixel_ratio > 0.0f ? uicon->pixel_ratio : 1.0f);
+        return 1;
+    }
+
+    DomDocument* doc = uicon->document;
+    float scroll_x = doc && doc->state ? doc->state->scroll_x
+        : (doc ? doc->pending_viewport_scroll_x : 0.0f);
+    float scroll_y = doc && doc->state ? doc->state->scroll_y
+        : (doc ? doc->pending_viewport_scroll_y : 0.0f);
+    if (radiant_dom_key_equals(key, "scrollX", 7) ||
+        radiant_dom_key_equals(key, "pageXOffset", 11)) {
+        *out = radiant_dom_window_dimension(scroll_x);
+        return 1;
+    }
+    if (radiant_dom_key_equals(key, "scrollY", 7) ||
+        radiant_dom_key_equals(key, "pageYOffset", 11)) {
+        *out = radiant_dom_window_dimension(scroll_y);
+        return 1;
+    }
+    if (radiant_dom_key_equals(key, "screen", 6)) {
+        // The active surface is the only screen available to embedded/headless
+        // Radiant; deriving this object here keeps it synchronized with resize.
+        Item screen = radiant_host_api->value->new_object();
+        Item width = radiant_dom_window_dimension(uicon->window_width);
+        Item height = radiant_dom_window_dimension(uicon->window_height);
+        Item depth = (Item){.item = i2it(24)};
+        radiant_host_api->value->property_set(screen, (Item){.item = s2it(heap_create_name("width"))}, width);
+        radiant_host_api->value->property_set(screen, (Item){.item = s2it(heap_create_name("height"))}, height);
+        radiant_host_api->value->property_set(screen, (Item){.item = s2it(heap_create_name("availWidth"))}, width);
+        radiant_host_api->value->property_set(screen, (Item){.item = s2it(heap_create_name("availHeight"))}, height);
+        radiant_host_api->value->property_set(screen, (Item){.item = s2it(heap_create_name("colorDepth"))}, depth);
+        radiant_host_api->value->property_set(screen, (Item){.item = s2it(heap_create_name("pixelDepth"))}, depth);
+        *out = screen;
+        return 1;
+    }
+    return 0;
 }
 
 

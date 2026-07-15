@@ -20,6 +20,8 @@
 #include "js_runtime_state.hpp"
 #include "js_builtin_catalog.hpp"
 #include "js_state_guards.h"
+#include "js_dom_platform.h"
+#include "js_dom_observers.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
@@ -39,6 +41,7 @@ extern "C" bool js_is_css_rule(Item item);
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
+extern "C" Item js_xhr_new(void);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
@@ -15880,6 +15883,31 @@ extern "C" Item js_get_global_this() {
                 js_new_function((void*)radiant_dom_window_dispatch_event, 1));
         }
 
+        // Browser documents need a real constructor value for feature
+        // detection; `new XMLHttpRequest` lowers to this same native factory.
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("XMLHttpRequest", 14))},
+            js_new_function((void*)js_xhr_new, 0));
+
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("localStorage", 12))},
+            js_storage_local_object());
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("sessionStorage", 14))},
+            js_storage_session_object());
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("matchMedia", 10))},
+            js_new_function((void*)js_match_media, 1));
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("MutationObserver", 16))},
+            js_new_function((void*)js_mutation_observer_new, 1));
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("ResizeObserver", 14))},
+            js_new_function((void*)js_resize_observer_new, 1));
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("IntersectionObserver", 20))},
+            js_new_function((void*)js_intersection_observer_new, 2));
+
         // Node.js: Buffer is a global
         extern Item js_get_buffer_namespace(void);
         js_property_set(js_global_this_obj,
@@ -17565,6 +17593,7 @@ static void js_proto_snapshot_bootstrap_constructors() {
         JS_CLASS_UI_EVENT, JS_CLASS_FOCUS_EVENT, JS_CLASS_MOUSE_EVENT,
         JS_CLASS_WHEEL_EVENT, JS_CLASS_KEYBOARD_EVENT, JS_CLASS_COMPOSITION_EVENT,
         JS_CLASS_INPUT_EVENT, JS_CLASS_POINTER_EVENT, JS_CLASS_STATIC_RANGE,
+        JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT,
         0
     };
     for (int i = 0; intrinsic_classes[i]; i++) {
@@ -17920,6 +17949,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_INPUT_EVENT) fn->func_ptr = (void*)js_ctor_input_event_fn;
     else if (ctor_id == JS_CTOR_POINTER_EVENT) fn->func_ptr = (void*)js_ctor_pointer_event_fn;
     else if (ctor_id == JS_CTOR_STATIC_RANGE) fn->func_ptr = (void*)js_ctor_static_range_fn;
+    else if (ctor_id == JS_CTOR_TRANSITION_EVENT) fn->func_ptr = (void*)js_ctor_transition_event_fn;
+    else if (ctor_id == JS_CTOR_ANIMATION_EVENT) fn->func_ptr = (void*)js_ctor_animation_event_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_WEAKREF || ctor_id == JS_CTOR_FINALIZATION_REGISTRY ||
@@ -18059,6 +18090,8 @@ static bool js_intrinsic_proto_ctor_name_for_class(JsClass cls, const char** out
         case JS_CLASS_INPUT_EVENT:           name = "InputEvent"; len = 10; break;
         case JS_CLASS_POINTER_EVENT:         name = "PointerEvent"; len = 12; break;
         case JS_CLASS_STATIC_RANGE:          name = "StaticRange"; len = 11; break;
+        case JS_CLASS_TRANSITION_EVENT:      name = "TransitionEvent"; len = 15; break;
+        case JS_CLASS_ANIMATION_EVENT:       name = "AnimationEvent"; len = 14; break;
         case JS_CLASS_TIMEOUT:               name = "Timeout"; len = 7; break;
         case JS_CLASS_IMMEDIATE:             name = "Immediate"; len = 9; break;
         default: break;

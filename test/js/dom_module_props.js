@@ -26,7 +26,7 @@ var mainKeys = Object.keys(main);
 console.log(mainKeys.indexOf("id") >= 0);
 console.log(mainKeys.indexOf("moduleExpando") > mainKeys.indexOf("id"));
 console.log(typeof Element);
-console.log(main.__proto__ === Element.prototype);
+console.log(main.__proto__ === HTMLElement.prototype);
 Element.prototype.moduleProto = 654;
 console.log(main.moduleProto);
 console.log(main instanceof Element);
