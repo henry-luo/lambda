@@ -120,6 +120,8 @@ typedef enum LambdaErrorCode {
     ERR_DECIMAL_PRECISION_LOSS = 316, // decimal precision loss
     ERR_DATETIME_INVALID = 317,       // invalid datetime operation
     ERR_USER_ERROR = 318,             // user-defined error via error()
+    ERR_CANCELLED = 319,              // cooperative task cancellation
+    ERR_MAILBOX_FULL = 320,           // bounded task mailbox has no capacity
     
     // -------------------------------------------------------------------------
     // 4xx - I/O Errors

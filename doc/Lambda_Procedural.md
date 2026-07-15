@@ -20,7 +20,8 @@ This document covers Lambda's procedural programming features — mutable state,
 7. [File Output Operators](#file-output-operators)
 8. [I/O Module](#io-module)
 9. [Procedural Functions (`pn`)](#procedural-functions-pn)
-10. [Procedural vs Functional](#procedural-vs-functional)
+10. [Concurrency](#concurrency)
+11. [Procedural vs Functional](#procedural-vs-functional)
 
 ---
 
@@ -499,6 +500,65 @@ For full object type documentation (inheritance, defaults, constraints, composit
 
 ---
 
+## Concurrency
+
+Lambda procedures use cooperative, colorless concurrency. There are no
+`async`/`await` keywords: the compiler finds procedures that can suspend and
+selectively lowers them to resumable state machines. A direct call through five
+ordinary `pn` frames can therefore suspend without changing any call-site
+syntax.
+
+```lambda
+pn child(value) {
+    sleep(1)^
+    return value + 1
+}
+
+pn main() {
+    let handle = start child(41)
+    print(wait(handle)^)  // 42
+}
+```
+
+`start` accepts a `pn` call and returns an opaque identity handle. The child is
+owned by the current lexical block. Normal exit joins non-escaped children;
+error exit requests cancellation and joins them with cancellation masked during
+cleanup. Returning a handle lets that task outlive its birth block. Copying or
+sending the handle grants another task a capability but does not transfer
+ownership.
+
+A started procedure may capture immutable values, but it may not capture an
+outer `var` by reference. Copy the value to `let` before `start`, or communicate
+through `send`/`receive`:
+
+```lambda
+pn worker() {
+    let value = receive()^
+    return value * 2
+}
+
+pn main() {
+    var mutable = 21
+    let snapshot = mutable
+    let handle = start worker()
+    send(handle, snapshot)^
+    print(wait(handle)^)
+}
+```
+
+Mailboxes are bounded FIFO queues with a default capacity of 1024. `select`
+returns the first completed handle. `wait(handle, timeout: ms)` times out only
+the waiter and never cancels the target; use `cancel(handle)` explicitly.
+Cancellation is cooperative and observed at suspension points such as `sleep`,
+`wait`, `receive`, `select`, and `io.read`.
+
+JavaScript interop uses one shared libuv loop. Imported Promises are directly
+`wait`-able, and an exported Lambda `pn` is uniformly exposed to JavaScript as a
+Promise-returning function. Promise reactions run as JS microtasks; Lambda task
+resumes run afterward at macrotask position.
+
+---
+
 ## Procedural vs Functional
 
 | Feature | `fn` (Functional) | `pn` (Procedural) |
@@ -513,6 +573,8 @@ For full object type documentation (inheritance, defaults, constraints, composit
 | Expression body | Yes | Yes |
 | Block body | Yes | Yes |
 | Closures | Yes | Yes |
+| Cooperative suspension | No | Yes |
+| `start` / task messaging | No | Yes |
 
 **When to use `pn`:**
 - Algorithms that need mutable state (counters, accumulators)

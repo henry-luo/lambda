@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include "sys_func_registry.h"  // includes lambda.h (brings in FPTR/NPTR macros)
 #include "lambda-error.h"
+#include "concurrency.h"
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT;
@@ -793,6 +794,9 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_VARG1, "varg", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_varg1", FPTR(fn_varg1), NULL, NULL, false, 0},
 
+    {SYSFUNC_TO_PROMISE, "toPromise", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_to_promise", FPTR(fn_to_promise), NULL, NULL, false, 0},
+
     // ========================================================================
     // Procedural functions — not method-eligible (side effects)
     // ========================================================================
@@ -807,6 +811,30 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSPROC_CLOCK, "clock", 0, &TYPE_FLOAT, true, false, false, LMD_TYPE_ANY, false,
      C_RET_DOUBLE, C_ARG_ITEM, "pn_clock", FPTR(pn_clock), NULL, NULL, false, 0},
+
+    {SYSPROC_SEND, "send", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_send", FPTR(pn_send), NULL, NULL, false, 0, false},
+
+    {SYSPROC_RECEIVE, "receive", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_receive", FPTR(pn_receive), NULL, NULL, false, 0, true},
+
+    {SYSPROC_WAIT, "wait", 1, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_wait1", FPTR(pn_wait1), NULL, NULL, false, 0, true},
+
+    {SYSPROC_WAIT, "wait", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_wait2", FPTR(pn_wait2), NULL, NULL, false, 0, true},
+
+    {SYSPROC_SELECT, "select", -1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_select", NULL, NULL, NULL, false, 0, true},
+
+    {SYSPROC_SLEEP, "sleep", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_sleep", FPTR(pn_sleep), NULL, NULL, false, 0, true},
+
+    {SYSPROC_SELF, "self", 0, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_self", FPTR(pn_self), NULL, NULL, false, 0, false},
+
+    {SYSPROC_CANCEL, "cancel", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_cancel", FPTR(pn_cancel), NULL, NULL, false, 0, false},
 
     {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_RETITEM, C_ARG_ITEM, "pn_fetch", FPTR(pn_fetch), NULL, NULL, false, 0},
@@ -828,6 +856,9 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     {SYSPROC_IO_COPY, "io_copy", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_RETITEM, C_ARG_ITEM, "pn_io_copy", FPTR(pn_io_copy), NULL, NULL, false, 0},
+
+    {SYSPROC_IO_READ, "io_read", 1, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_io_read", FPTR(pn_io_read), NULL, NULL, false, 0, true},
 
     {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_RETITEM, C_ARG_ITEM, "pn_io_move", FPTR(pn_io_move), NULL, NULL, false, 0},
@@ -982,12 +1013,19 @@ extern Item fn_parse1_mir(Item str_item);
 extern Item fn_parse2_mir(Item str_item, Item type);
 extern Item fn_input1_mir(Item url);
 extern Item fn_input2_mir(Item url, Item options);
+extern Item pn_send_mir(Item handle, Item message);
+extern Item pn_receive_mir(void);
+extern Item pn_wait1_mir(Item handle);
+extern Item pn_wait2_mir(Item handle, Item timeout_ms);
+extern Item pn_select_mir(Item handles, Item timeout_ms);
+extern Item pn_sleep_mir(Item duration_ms);
 extern Item pn_cmd1_mir(Item cmd);
 extern Item pn_cmd2_mir(Item cmd, Item args);
 extern Item pn_fetch_mir(Item url, Item options);
 extern Item pn_output2_mir(Item source, Item target);
 extern Item pn_output3_mir(Item source, Item target, Item options);
 extern Item pn_io_copy_mir(Item src, Item dst);
+extern Item pn_io_read_mir(Item target);
 extern Item pn_io_move_mir(Item src, Item dst);
 extern Item pn_io_delete_mir(Item path);
 extern Item pn_io_mkdir_mir(Item path);
@@ -2661,12 +2699,34 @@ JitImport jit_runtime_imports[] = {
     {"fn_parse2_mir", FPTR(fn_parse2_mir)},
     {"fn_input1_mir", FPTR(fn_input1_mir)},
     {"fn_input2_mir", FPTR(fn_input2_mir)},
+    {"pn_send_mir", FPTR(pn_send_mir)},
+    {"pn_receive_mir", FPTR(pn_receive_mir)},
+    {"pn_wait1_mir", FPTR(pn_wait1_mir)},
+    {"pn_wait2_mir", FPTR(pn_wait2_mir)},
+    {"pn_select_mir", FPTR(pn_select_mir)},
+    {"pn_sleep_mir", FPTR(pn_sleep_mir)},
+    {"lambda_async_frame_enter_current", FPTR(lambda_async_frame_enter_current)},
+    {"lambda_async_frame_scope_base", FPTR(lambda_async_frame_scope_base)},
+    {"lambda_task_scope_enter", FPTR(lambda_task_scope_enter)},
+    {"lambda_task_scope_current", FPTR(lambda_task_scope_current)},
+    {"lambda_task_scope_leave", FPTR(lambda_task_scope_leave)},
+    {"lambda_task_scope_unwind", FPTR(lambda_task_scope_unwind)},
+    {"lambda_async_frame_state", FPTR(lambda_async_frame_state)},
+    {"lambda_async_frame_set_state", FPTR(lambda_async_frame_set_state)},
+    {"lambda_async_frame_get", FPTR(lambda_async_frame_get)},
+    {"lambda_async_frame_set", FPTR(lambda_async_frame_set)},
+    {"lambda_async_frame_complete", FPTR(lambda_async_frame_complete)},
+    {"lambda_task_has_current", FPTR(lambda_task_has_current)},
+    {"lambda_task_start_function", FPTR(lambda_task_start_function)},
+    {"lambda_task_start_function_scoped", FPTR(lambda_task_start_function_scoped)},
+    {"lambda_task_run_root_raw", FPTR(lambda_task_run_root_raw)},
     {"pn_cmd1_mir", FPTR(pn_cmd1_mir)},
     {"pn_cmd2_mir", FPTR(pn_cmd2_mir)},
     {"pn_fetch_mir", FPTR(pn_fetch_mir)},
     {"pn_output2_mir", FPTR(pn_output2_mir)},
     {"pn_output3_mir", FPTR(pn_output3_mir)},
     {"pn_io_copy_mir", FPTR(pn_io_copy_mir)},
+    {"pn_io_read_mir", FPTR(pn_io_read_mir)},
     {"pn_io_move_mir", FPTR(pn_io_move_mir)},
     {"pn_io_delete_mir", FPTR(pn_io_delete_mir)},
     {"pn_io_mkdir_mir", FPTR(pn_io_mkdir_mir)},

@@ -1,6 +1,47 @@
 #include "input-graph.h"
+#include "../mark_reader.hpp"
 #include <string.h>
 #include "lib/log.h"
+
+using namespace lambda;
+
+void graph_set_source_span(InputContext& ctx, Element* element,
+                           const SourceLocation& start, const SourceLocation& end,
+                           bool preserve_existing) {
+    if (!element) return;
+    if (preserve_existing && !ElementReader(element).get_attr("source-start").isNull()) return;
+    add_graph_integer_attribute(ctx.input(), element, "source-start", (int64_t)start.offset);
+    add_graph_integer_attribute(ctx.input(), element, "source-end", (int64_t)end.offset);
+    add_graph_integer_attribute(ctx.input(), element, "source-line", (int64_t)start.line);
+    add_graph_integer_attribute(ctx.input(), element, "source-column", (int64_t)start.column);
+}
+
+static const char* graph_diagnostic_severity(ParseErrorSeverity severity) {
+    if (severity == ParseErrorSeverity::WARNING) return "warning";
+    if (severity == ParseErrorSeverity::NOTE) return "note";
+    return "error";
+}
+
+void graph_append_diagnostics(InputContext& ctx, Element* graph, const char* default_code) {
+    const ParseErrorList& errors = ctx.errors();
+    if (errors.size() == 0) return;
+    Element* diagnostics = ctx.builder.element("diagnostics").final().element;
+    for (size_t index = 0; index < errors.size(); index++) {
+        ParseError* error = errors.getError(index);
+        if (!error) continue;
+        ElementBuilder diagnostic = ctx.builder.element("diagnostic");
+        diagnostic.attr("code", error->code ? error->code : default_code)
+            .attr("severity", graph_diagnostic_severity(error->severity))
+            .attr("message", error->message ? error->message : "Graph parse error")
+            .attr("source-start", (int64_t)error->location.offset)
+            .attr("source-line", (int64_t)error->location.line)
+            .attr("source-column", (int64_t)error->location.column);
+        if (error->context_line) diagnostic.attr("context", error->context_line);
+        if (error->hint) diagnostic.attr("hint", error->hint);
+        add_node_to_graph(ctx.input(), diagnostics, diagnostic.final().element);
+    }
+    add_node_to_graph(ctx.input(), graph, diagnostics);
+}
 
 // Main graph parser function that dispatches to specific flavors
 void parse_graph(Input* input, const char* graph_string, const char* flavor) {

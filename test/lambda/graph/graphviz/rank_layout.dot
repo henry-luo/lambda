@@ -1,0 +1,15 @@
+digraph RankLayout {
+  a -> b
+  b -> c [weight=4]
+  c -> d
+  subgraph same_rank { rank=same; b; c }
+  x -> y [constraint=false]
+  p -> m
+  subgraph min_rank { rank=min; m }
+  q -> r
+  subgraph max_rank { rank=max; q }
+  u -> s
+  subgraph source_rank { rank=source; s }
+  v -> t
+  subgraph sink_rank { rank=sink; t }
+}

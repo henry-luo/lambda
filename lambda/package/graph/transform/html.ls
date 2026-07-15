@@ -69,6 +69,12 @@ fn shape_css(shape, palette) {
   else if (shape == "diamond") "clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);"
   else if (shape == "hexagon")
     "clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);"
+  else if (shape == "octagon")
+    "clip-path:polygon(25% 0,75% 0,100% 25%,100% 75%,75% 100%,25% 100%,0 75%,0 25%);"
+  else if (shape == "house")
+    "clip-path:polygon(50% 0,100% 50%,100% 100%,0 100%,0 50%);"
+  else if (shape == "invhouse")
+    "clip-path:polygon(0 0,100% 0,100% 50%,50% 100%,0 50%);"
   else if (shape == "trapezoid")
     "clip-path:polygon(20% 0,80% 0,100% 100%,0 100%);"
   else if (shape == "trapezoid-alt")
@@ -163,6 +169,8 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
       'data-graph-role': "node", 'data-node-id': id,
       'data-subgraph-id': group,
       'data-shape': source_attr(node, "shape", "box"),
+      'data-shape-family': source_attr(node, "shape-family", null),
+      'data-graphviz-shape': source_attr(node, "graphviz-shape", null),
       'data-label': label_source(node, id),
       'data-label-format': label_format(node),
       'data-style-declarations': style_declarations,
@@ -199,7 +207,7 @@ fn marker_text(value, enabled) {
 }
 
 fn html_edge(edge, index, group, graph_directed, assigned_classes,
-    style_declarations, graph) {
+    style_declarations, interaction, graph) {
   let id = string(source_attr(edge, "id", "e" ++ string(index)));
   let source_id = source_attr(edge, "source-id", null);
   let directed = bool_text(source_attr(edge, "directed", null), graph_directed);
@@ -222,10 +230,17 @@ fn html_edge(edge, index, group, graph_directed, assigned_classes,
       'data-marker-start': marker_start, 'data-marker-end': marker_end,
       'data-style': string(source_attr(edge, "style", "solid")),
       'data-style-declarations': style_declarations,
+      'data-interaction-action': source_attr(interaction, "action", null),
+      'data-href': source_attr(interaction, "href", null),
+      'data-callback': source_attr(interaction, "callback", null),
+      'data-tooltip': source_attr(interaction, "tooltip", null),
+      'data-link-target': source_attr(interaction, "target-window", null),
       'data-animate': string(model.edge_property(graph, id, source_id, "animate", "false")),
       'data-animation': model.edge_property(graph, id, source_id, "animation", null),
       'data-curve': model.edge_property(graph, id, source_id, "curve", null),
       'data-min-length': string(source_attr(edge, "min-length", source_attr(edge, "min_length", 1))),
+      'data-weight': string(source_attr(edge, "weight", 1)),
+      'data-constraint': bool_text(source_attr(edge, "constraint", true), true),
       'data-z': string(source_attr(edge, "z", -1)),
       style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
 }
@@ -285,6 +300,35 @@ fn html_edge_label(edge, index, group, palette) {
   }
 }
 
+fn html_annotation(annotation, owner_kind, owner_id, index, palette) {
+  let label = label_source(annotation);
+  let format = label_format(annotation);
+  if (label == null or label == "") null
+  else {
+    <annotation class: "graph-annotation", 'data-graph-role': "annotation",
+        'data-owner-kind': owner_kind, 'data-owner-id': owner_id,
+        'data-annotation-kind': string(source_attr(annotation, "kind", "external")),
+        'data-label': label, 'data-label-format': format,
+        'data-z': string(source_attr(annotation, "z", 0)),
+        style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
+          "background:" ++ palette.graph_background ++ ";color:" ++ palette.node_text ++
+          ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
+          ";pointer-events:none;";
+      for (child in graph_content.lower(label, format)) child
+    >
+  }
+}
+
+fn html_constraints(graph) => [
+  for (i, constraint in model.constraints(graph), member in model.element_children(constraint)
+    where model.tag(member) == "member")
+    <constraint 'data-constraint-kind': string(constraint.kind),
+      'data-constraint-value': string(constraint.value),
+      'data-constraint-scope': string(if (constraint.scope != null) constraint.scope else "c" ++ string(i)),
+      'data-constraint-member': string(member.node),
+      style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
+]
+
 fn graph_directed(graph) {
   if (source_attr(graph, "directed", null) != null) source_attr(graph, "directed", true)
   else source_attr(graph, "type", "directed") != "undirected"
@@ -295,13 +339,17 @@ pub fn to_html(graph, opts = null) {
     else [for (node in source_children(graph, "node")) {value: node, group: null}];
   let edge_entries = if (graph is element) model.edge_entries(graph)
     else [for (edge in source_children(graph, "edge")) {value: edge, group: null}];
-  let subgraph_entries = if (graph is element) model.subgraph_entries(graph) else [];
+  let subgraph_entries = if (graph is element) model.visual_subgraph_entries(graph) else [];
   let port_entries = if (graph is element) model.port_entries(graph) else [];
   let direction = string(opt(opts, "direction",
     if (graph is element) model.direction(graph)
     else source_attr(graph, "direction", source_attr(graph, "rank-dir", "TB"))));
   let config = if (graph is element and graph.flavor == "mermaid")
     mermaid_config.options(graph) else {};
+  let route_mode = string(opt(opts, "route_mode", source_attr(graph, "route-mode",
+    if (config.curve == "linear") "line"
+    else if (config.curve == "step") "orthogonal"
+    else if (config.use_splines == true) "curved" else "orthogonal")));
   let node_sep = string(opt(opts, "node_sep", source_attr(graph, "node-sep",
     if (config.node_sep != null) config.node_sep else 60)));
   let rank_sep = string(opt(opts, "rank_sep", source_attr(graph, "rank-sep",
@@ -315,6 +363,12 @@ pub fn to_html(graph, opts = null) {
   let description = if (graph is element) model.description(graph)
     else source_attr(graph, "description", null);
   let children = [
+    *(if (graph is element) html_constraints(graph) else []),
+    for (i, annotation in if (graph is element) model.annotations(graph) else [],
+      let value = html_annotation(annotation,
+        string(source_attr(annotation, "owner-kind", "edge")),
+        string(source_attr(annotation, "owner-id", "")), i, palette)
+      where value != null) value,
     for (i, entry in subgraph_entries) html_cluster(entry, i, palette),
     for (i, entry in subgraph_entries,
       let label = html_cluster_label(entry, i, palette)
@@ -336,6 +390,7 @@ pub fn to_html(graph, opts = null) {
         if (graph is element) model.edge_classes_for(graph, edge_id, source_id) else [],
         if (graph is element) model.edge_style_declarations_for(
           graph, edge_id, source_id, i) else "",
+        if (graph is element) model.interaction_for(graph, edge_id) else null,
         graph)
   ];
   <'graph' class: "lambda-graph lambda-graph-theme-" ++ theme,
@@ -346,7 +401,8 @@ pub fn to_html(graph, opts = null) {
       'data-direction': direction, 'data-node-sep': node_sep,
       'data-rank-sep': rank_sep, 'data-edge-sep': edge_sep,
       'data-curve': config.curve,
-      'data-use-splines': if (config.use_splines == true) "true" else "false",
+      'data-route-mode': route_mode,
+      'data-use-splines': if (route_mode == "curved") "true" else "false",
       style: "position:relative;background:" ++ palette.graph_background ++ ";";
     for child in children { child }>
 }

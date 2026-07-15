@@ -1,0 +1,17 @@
+{
+  valid: true,
+  equal: true,
+  diagnostics: [],
+  actual: {
+    direction: "LR",
+    clusters: [["cluster_team", null, "Team"]],
+    nodes: [["a", "box", "cluster_team", "gray", "Start"], ["b", "box", "cluster_team", "gray", "b"]],
+    edges: [["edge-0", "a", "b", "none", "diamond", "green", "go"]]
+  },
+  expected: {
+    direction: "LR",
+    clusters: [["cluster_team", null, "Team"]],
+    nodes: [["a", "box", "cluster_team", "gray", "Start"], ["b", "box", "cluster_team", "gray", "b"]],
+    edges: [["edge-0", "a", "b", "none", "diamond", "green", "go"]]
+  }
+}

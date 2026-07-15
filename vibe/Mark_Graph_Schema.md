@@ -72,6 +72,7 @@ Reference:
 | directed | bool | `true` for digraphs |
 | layout | string | Layout engine or algorithm |
 | rank-dir | string | Direction for hierarchical layouts |
+| route-mode | enum | `none`, `line`, `polyline`, `orthogonal`, or `curved` |
 | background | color | Background color |
 | font-family | string | Default font |
 | theme | string | "light" or "dark" |
@@ -83,6 +84,13 @@ Source-stage and canonical graph values share this Mark representation. A
 source-stage Mermaid graph may contain repeated node ids so each declaration
 retains its own values and source span. Normalization resolves those declarations
 before emitting a canonical graph, where node ids are unique.
+
+`route-mode` selects the graph-wide edge geometry contract. Graphviz `splines`
+aliases are normalized to this enum: `false` maps to `line`, `ortho` to
+`orthogonal`, `true` and `spline` to `curved`, and `none` or an empty quoted
+value to `none`. The canonical value is exposed on semantic HTML and retained
+as edge route metadata after layout; individual edge point lists remain the
+authority for final geometry.
 
 ### 2.2 `<node>`
 
@@ -253,6 +261,20 @@ Metadata for authorship, versioning, provenance, etc.
   <order>[A,B,C,D]</order>
 >
 ```
+
+Measured labels that are not primary node, edge, or cluster content are
+graph-level owner records. Keeping them beside interactions avoids embedding
+cross-object metadata inside measured node content:
+
+```mark
+<annotation owner-kind:"node" owner-id:"api" kind:"external"
+  label:"public endpoint" label-format:"text">
+<annotation owner-kind:"edge" owner-id:"calls" kind:"head"
+  label:"response" label-format:"text">
+```
+
+The initial layout contract recognizes `external`, `center`, `head`, and
+`tail`; adapters may preserve additional kinds for future placement policies.
 
 ---
 

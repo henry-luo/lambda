@@ -1,12 +1,61 @@
-# Lambda Concurrency — Implementation Plan (v3, Phase 1 Scope)
+# Lambda Concurrency — Implementation Record (v3)
 
-**Status:** implementation plan — derived from the confirmed design in `Lambda_Design_Concurrency.md` (v3, ledger K11–K29)
-**Date:** 2026-07-08
+**Status:** fully implemented — all in-scope phases and their concurrency gates completed
+**Plan date:** 2026-07-08
+**Completion date:** 2026-07-15
 **Scope (user-set):** (1) colorless concurrent `pn` under Lambda; (2) `start` + `send`/`wait`/`receive`/`select` messaging; (3) interop and unification with JS async.
 **Explicitly OUT of scope for this plan:** the process tier (`start process(...)`, K18/K29 wire), Stage A/B threading (K15), streams integration (K21–K28, P8), supervision, binary Mark. Each is a follow-on with its design already recorded.
 **Pulled INTO scope (2026-07-08): task scoping & cancellation (K30).** Block-exit join/cancel semantics are observable behavior of `start` — shipping `start` unscoped and adding K30 later would change program meaning. Like K13, it ships with `start` or the behavior breaks later: the unretrofittable set is now `start` + K13 capture rule + bounded delivery + **K30 scoping**.
 
 **Design anchors:** K1 (`fn` never suspends) · K2-R (may-await state machines, Phase-6 family) · K12 (`start` keyword + `wait`/`send`/`receive`/`select`/`self` builtins; no `async`/`await` keywords) · K13 (capture rule) · K14 (state machines because of thread-portability) · K16 (no `async` in grammar; uniform-Promise membrane) · K17 (build Lambda transform first; extract shared core after two clients) · K20a–e (mailbox semantics) · **K30a–f (scoped tasks, cancellation as `T^E` at park points, `cancel` as seventh builtin)** · K3/K10 (one libuv loop shared with JS) · O9/O10 (the two specs this plan must write before coding).
+
+## Implementation progress
+
+- [x] Phase 0 — O10/O9/O6/O7/constants/K30 specifications pinned in
+  `Lambda_Design_Concurrency.md` §12 (2026-07-15).
+- [x] Phase 1 — grammar, AST, may-await and handle-escape analyses.
+- [x] Phase 2 — task runtime, handles, mailboxes, scheduler, roots, builtins.
+- [x] Phase 3 — Lambda MIR resumable transform and scoped exit lowering.
+- [x] Phase 4 — JS Promise/task membrane and shared-loop ordering.
+- [x] Phase 5 — public docs, diagnostics, extraction decision, final gates.
+
+## Completion verification (2026-07-15)
+
+| Requirement | Verified result |
+|---|---|
+| Phase 0 specifications | `Lambda_Design_Concurrency.md` §12 records O9/O10, handle representation, constants, contextual grammar, structured scope/cancellation, and error policies. |
+| Grammar and analysis | Contextual `start` preserves ordinary identifiers; all 3 semantic negatives pass; may-await propagation covers direct, imported, and conservative indirect `pn` calls. |
+| Runtime substrate | 8/8 dedicated scheduler tests pass, covering FIFO/bounds, K20e ordering, cancellation/masking, timeout non-cancellation, GC roots, and parked-frame/mailbox collection. |
+| Lambda end to end | 22/22 `test/lambda/conc` scripts pass, including colorless chains, imports, indirect calls, scopes, cancellation, timeout/select, async file I/O, and both JS adapters. |
+| Load-bearing baseline | `make test-lambda-baseline`: **3368/3368** — input 2105/2105 and runtime 1263/1263 (including Lambda 513/513, JS 312/312, errors 75/75, Node prelim 110/110). |
+| Release smoke | Release build succeeded; 1,000 sequential spawn/send/wait round trips completed in **5.904 ms** on the verification host. This is indicative, not a performance threshold. |
+| JS/editor/UI gates | JS 312/312; editor JS 1931/1931; dedicated UI automation 233/233 runnable tests, with only the 2 native-GUI webview cases skipped in the headless run. |
+| Node official compatibility | No concurrency regression versus detached HEAD. The parallel run reported 3513 passes, 15 timeouts, 0 assertion failures, 0 crashes, and 22 configured skips. Ten timeouts passed serially; the remaining five reproduced identically on current and HEAD even at 120 seconds (listed below). |
+| Docs and release packaging | Public reference, procedural, system-function, cheatsheet, and LR runtime docs updated; the release build packaged the updated documentation successfully. |
+| Duplication hygiene | Concurrency sources add no Lizard clone family. The Lambda count is unchanged from detached HEAD at 1358; the checked-in ratchet is independently stale at 1357. |
+
+The five Node official cases that hang on both current and detached HEAD are
+`test-promises-unhandled-rejections.js`,
+`test-tls-client-allow-partial-trust-chain.js`,
+`test-tls-connect-abort-controller.js`, `test-tls-set-secure-context.js`, and
+`test-tls-streamwrap-buffersize.js`. Two additional cases exceed the stale
+60-second baseline threshold on both builds but pass with a 120-second budget:
+`test-runner-reporters.js` and `test-stringbytes-external.js`. Therefore the
+Phase 4 requirement is satisfied as **unchanged versus HEAD**, not represented
+as a false all-green Node-official result.
+
+An additional `make test` sweep reconfirmed the concurrency runtime (8/8), JS
+(312/312), and UI (235/235 as counted by the aggregate runner). That broader
+non-gating sweep also encountered existing unrelated input/WPT/validator
+failures and the runner did not reap `test_wpt_selection_gtest` after its
+360-second idle kill, so it was interrupted after the configured concurrency
+gates had completed. The authoritative Phase 3 regression gate is the fully
+green `make test-lambda-baseline` result above.
+
+The phase descriptions below are retained as the implemented scope and
+acceptance contract. Their imperative wording records what each completed phase
+was required to deliver; the checked progress list and verification table above
+are the current status.
 
 ---
 
@@ -77,9 +126,22 @@ Per K2-R/K14/K17, **following the Phase-6 pattern** (`js_mir_function_class_lowe
 
 ## Phase 5 — Hardening, docs, and the extraction decision
 
-- **5.1 Docs**: `doc/Lambda_Sys_Func.md` (six builtins), `doc/Lambda_Procedural.md` + `doc/Lambda_Reference.md` (`start`, colorless model, capture rule), cheatsheet entry; a short "concurrency" section in the LR-series runtime docs.
+- **5.1 Docs**: `doc/Lambda_Sys_Func.md` (seven task builtins plus the Promise adapter and async `io.read`), `doc/Lambda_Procedural.md` + `doc/Lambda_Reference.md` (`start`, colorless model, capture rule), cheatsheet entry; a short "concurrency" section in the LR-series runtime docs.
 - **5.2 Diagnostics polish**: the O9 "suspends because it calls …" explain; capture-rule error fix-its (suggest `let` snapshot or message passing).
 - **5.3 Shared-core extraction (K17 step 2) — decision point, not a commitment**: with two working state-machine clients (JS Phase 6 + Lambda Phase 3), assess extracting the neutral MIR "resumable function" utility. Proceed only if the shared shape is clean; gated on the full JS suites. If deferred, record why.
+
+  **Decision (2026-07-15): defer extraction.** Both clients now prove the broad
+  state-dispatch/live-slot pattern, but their ownership and completion contracts
+  are not yet a clean neutral API. Lambda frames belong to scheduler tasks, use
+  `T^E`, structured-scope unwind, and explicit park sentinels. JavaScript frames
+  belong to Promise/generator machinery and additionally carry completion
+  records, exception/finally regions, async-context state, and specification
+  microtask behavior. The reusable portion currently reduces to small state
+  switch and slot-access mechanics; extracting those now would add an abstraction
+  boundary without removing the semantic duplication. Reassess when a third
+  resumable client appears, or when both lowerings can consume a neutral API
+  containing only state allocation, dispatch, and live-slot persistence. The
+  full 312/312 JS gate confirms that deferral does not conceal a regression.
 - **5.4 Follow-on queue (design-first, in order):** the process tier (K18 + K29 text wire); streams executor (P8 + K21–K28, incl. the K27 chunk-queue core — **its K26 prerequisite is satisfied: K30 designed, and implemented by this plan**); **auto-close implementation** (R-ledger — reusing the 3.6 exit-edge machinery; no `defer` keyword initially per R5-R, introduced only on pressing need); Stage A parallel-`fn`.
 
 ## Cross-cutting risks
@@ -100,7 +162,7 @@ Per K2-R/K14/K17, **following the Phase-6 pattern** (`js_mir_function_class_lowe
 |---|---|---|
 | 0 | O10 + O9 specs, P0.3–P0.5 decisions | review |
 | 1 | `start` grammar/AST, capture rule, may-await analysis | baseline 100% + negatives |
-| 2 | tasks/handles/mailboxes/scheduler + 6 builtins | runtime gtests; baseline 100% |
+| 2 | tasks/handles/mailboxes/scheduler + 7 task builtins | runtime gtests; baseline 100% |
 | 3 | state-machine transform, colorless end-to-end | conc suite; **baseline 100%**; perf smoke |
 | 4 | JS membrane + shared-loop interop | node baseline · editor 1931 · UI-automation unchanged |
 | 5 | docs, diagnostics, extraction decision | doc build; K17 assessment recorded |

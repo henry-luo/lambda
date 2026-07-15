@@ -76,6 +76,8 @@ fn semantic_edges(children) {
     opacity: parsed_style.opacity,
     dash_array: parsed_style.dash_array,
     min_length: int(attr_or(child, "data-min-length", 1)),
+    weight: float(attr_or(child, "data-weight", 1.0)),
+    constraint: attr_or(child, "data-constraint", "true") != "false",
     z: child_z(child, -1),
     child_index: child_index(child, i)
   }]
@@ -88,6 +90,16 @@ fn semantic_ports(children) => [
     side: string(attr_or(child, "data-port-side", "auto")),
     offset: float(attr_or(child, "data-port-offset", 0.5)),
     z: child_z(child, 0),
+    child_index: child_index(child, i)
+  }
+]
+
+fn semantic_constraints(children) => [
+  for (i, child in children where child_tag(child) == "constraint") {
+    kind: string(attr_or(child, "data-constraint-kind", "rank")),
+    value: string(attr_or(child, "data-constraint-value", "same")),
+    scope: string(attr_or(child, "data-constraint-scope", "")),
+    member: string(attr_or(child, "data-constraint-member", "")),
     child_index: child_index(child, i)
   }
 ]
@@ -130,13 +142,27 @@ fn ports_for(ports, node_id) => [for (port in ports where port.node_id == node_i
 
 fn semantic_edge_labels(children) {
   [for (i, child in children where child_tag(child) == "edge-label") {
-    edge_id: string(attr_or(child, "data-edge-id", "")),
+    owner_kind: "edge",
+    owner_id: string(attr_or(child, "data-edge-id", "")),
+    kind: "center",
     width: child_width(child),
     height: child_height(child),
     z: child_z(child, 0),
     child_index: child_index(child, i)
   }]
 }
+
+fn semantic_annotations(children) => [
+  for (i, child in children where child_tag(child) == "annotation") {
+    owner_kind: string(attr_or(child, "data-owner-kind", "edge")),
+    owner_id: string(attr_or(child, "data-owner-id", "")),
+    kind: string(attr_or(child, "data-annotation-kind", "external")),
+    width: child_width(child),
+    height: child_height(child),
+    z: child_z(child, 0),
+    child_index: child_index(child, i)
+  }
+]
 
 fn routed_edge(edges, edge_id) {
   let matches = [for (edge in edges where edge.id == edge_id) edge];
@@ -177,8 +203,28 @@ fn route_anchor(edge) {
     route_length_at(edge.points, 1, 0.0) / 2.0)
 }
 
-fn label_placement(label, edges) {
-  let anchor = route_anchor(routed_edge(edges, label.edge_id));
+fn node_annotation_anchor(label, nodes) {
+  let matches = [for (node in nodes where node.id == label.owner_id) node];
+  if (len(matches) == 0) null
+  else {
+    let node = matches[0];
+    {x: node.x + node.width / 2.0 + 6.0 + label.width / 2.0, y: node.y}
+  }
+}
+
+fn label_anchor(label, edges, nodes) {
+  if (label.owner_kind == "node") node_annotation_anchor(label, nodes)
+  else {
+    let edge = routed_edge(edges, label.owner_id);
+    if (edge == null or len(edge.points) == 0) null
+    else if (label.kind == "head") edge.points[len(edge.points) - 1]
+    else if (label.kind == "tail") edge.points[0]
+    else route_anchor(edge)
+  }
+}
+
+fn label_placement(label, edges, nodes) {
+  let anchor = label_anchor(label, edges, nodes);
   if (anchor == null) {
     {index: label.child_index, x: 0.0, y: 0.0, z: label.z}
   } else {
@@ -217,12 +263,12 @@ fn first_clear_candidate(candidates, occupied, i) {
   else first_clear_candidate(candidates, occupied, i + 1)
 }
 
-fn place_edge_labels_at(labels, edges, occupied, i, result) {
+fn place_edge_labels_at(labels, edges, nodes, occupied, i, result) {
   if (i >= len(labels)) result
   else {
     let label = labels[i];
-    let anchor = route_anchor(routed_edge(edges, label.edge_id));
-    let fallback = label_placement(label, edges);
+    let anchor = label_anchor(label, edges, nodes);
+    let fallback = label_placement(label, edges, nodes);
     let gap = 6.0;
     let candidates = if (anchor == null) [{*:fallback,
       width: label.width, height: label.height}]
@@ -237,7 +283,7 @@ fn place_edge_labels_at(labels, edges, occupied, i, result) {
     ];
     let chosen = first_clear_candidate(candidates, occupied, 0);
     let box = placement_box(chosen.x, chosen.y, chosen.width, chosen.height);
-    place_edge_labels_at(labels, edges, [*occupied, box], i + 1,
+    place_edge_labels_at(labels, edges, nodes, [*occupied, box], i + 1,
       [*result, chosen])
   }
 }
@@ -250,7 +296,7 @@ fn edge_label_placements(labels, edges, nodes, cluster_labels, clusters) {
       let placement = cluster_label_placement(label, clusters))
       placement_box(placement.x, placement.y, label.width, label.height)
   ];
-  place_edge_labels_at(labels, edges, occupied, 0, [])
+  place_edge_labels_at(labels, edges, nodes, occupied, 0, [])
 }
 
 fn cluster_label_placement(label, clusters) {
@@ -283,8 +329,9 @@ fn placement_z(nodes, index) {
 pub fn from_velmts(parent, children, ctx, opts = null) {
   let nodes = semantic_nodes(children);
   let metadata_edges = semantic_edges(children);
-  let edge_labels = semantic_edge_labels(children);
+  let edge_labels = [*semantic_edge_labels(children), *semantic_annotations(children)];
   let ports = semantic_ports(children);
+  let constraints = semantic_constraints(children);
   let cluster_labels = semantic_cluster_labels(children);
   let clusters = semantic_clusters(children, cluster_labels);
   let edges = if (opts != null and opts.edges != null) opts.edges else metadata_edges;
@@ -292,6 +339,9 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
   let rank_sep = float(graph_option(parent, opts, "rank_sep", "data-rank-sep", 80.0));
   let edge_sep = float(graph_option(parent, opts, "edge_sep", "data-edge-sep", 10.0));
   let direction = string(graph_option(parent, opts, "direction", "data-direction", "TB"));
+  let route_mode = string(graph_option(parent, opts, "route_mode", "data-route-mode",
+    if (string(graph_option(parent, opts, "use_splines",
+        "data-use-splines", "false")) == "true") "curved" else "orthogonal"));
   let graph_input = {
     nodes: [for (entry in nodes) {
       id: child_id(entry.child, entry.order),
@@ -304,13 +354,14 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
       z: child_z(entry.child, 0)
     }],
     edges: edges,
+    constraints: constraints,
     clusters: clusters,
     direction: direction,
     node_sep: node_sep,
     rank_sep: rank_sep,
     edge_sep: edge_sep,
-    use_splines: string(graph_option(parent, opts, "use_splines",
-      "data-use-splines", "false")) == "true"
+    route_mode: route_mode,
+    use_splines: route_mode == "curved"
   };
   let result = compute(graph_input, opts);
   let placed_edge_labels = edge_label_placements(edge_labels, result.edges, result.nodes,
@@ -367,6 +418,12 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
         x: 0.0,
         y: 0.0,
         z: port.z
+      },
+      for (constraint in constraints) {
+        index: constraint.child_index,
+        x: 0.0,
+        y: 0.0,
+        z: 0
       },
       for (placement in placed_edge_labels) {
         index: placement.index, x: placement.x + shift_x,

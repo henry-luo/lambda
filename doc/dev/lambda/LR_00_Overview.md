@@ -82,7 +82,7 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 ### Part V — Data construction & procedural
 
 - **[LR_11 — Mark Data API](LR_11_Mark_Data_API.md)** — building, reading, and editing Lambda data structures, plus the canonical value printer.
-- **[LR_12 — Procedural Runtime](LR_12_Procedural_Runtime.md)** — `pn` procedures, `run`/`main()`, in-place mutation builtins, for-loops, and the safety analyzer.
+- **[LR_12 — Procedural Runtime](LR_12_Procedural_Runtime.md)** — `pn` procedures, `run`/`main()`, cooperative task concurrency and JS Promise interop, in-place mutation builtins, for-loops, and the safety analyzer.
 
 ### Part VI — Validation
 

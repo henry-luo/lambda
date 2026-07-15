@@ -148,6 +148,8 @@ static const ErrorCodeInfo error_code_table[] = {
     {ERR_DECIMAL_PRECISION_LOSS, "DECIMAL_PRECISION_LOSS", "Decimal precision loss"},
     {ERR_DATETIME_INVALID, "DATETIME_INVALID", "Invalid datetime operation"},
     {ERR_USER_ERROR, "USER_ERROR", "User error"},
+    {ERR_CANCELLED, "CANCELLED", "Task cancelled"},
+    {ERR_MAILBOX_FULL, "MAILBOX_FULL", "Task mailbox full"},
     
     // 4xx - I/O Errors
     {ERR_IO_ERROR, "IO_ERROR", "I/O error"},

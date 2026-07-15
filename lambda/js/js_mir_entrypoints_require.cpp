@@ -1458,6 +1458,7 @@ void preamble_state_destroy(JsPreambleState* state) {
 
 Item load_js_module(Runtime* runtime, const char* js_path) {
     log_info("js-mir: loading JS module '%s' for cross-language import", js_path);
+    if (runtime) runtime->js_runtime_used = true;
     char* source = read_text_file(js_path);
     if (!source) {
         log_error("js-mir: cannot read JS file '%s'", js_path);
@@ -1479,6 +1480,14 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
         _lambda_rt = (Context*)context;
+
+        // Transfer the bootstrap heap to Runtime; runner_setup_context will
+        // adopt its resources and release only this temporary context shell.
+        runtime->heap = context->heap;
+        runtime->nursery = context->nursery;
+        runtime->name_pool = context->name_pool;
+        runtime->type_list = (ArrayList*)context->type_list;
+        runtime->js_bootstrap_context = temp_ctx;
 
         // Create Input context for JS runtime
         Input* js_input = Input::create(context->pool);

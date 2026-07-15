@@ -639,3 +639,91 @@ Where a wire exists and what runs on it — decided 2026-07-08 *(user-confirmed)
 - **K29b — Flats across processes: serialized, not pointer-shared (v1).** Pointers never cross a process boundary — that is exactly why sharing was restricted to flat *pointer-free* values (K5): a shared buffer contains only raw element data; pointers exist only in each process's local header. **v1 ships the simple mechanism: a flat's raw buffer is serialized inline into the message** (in binary form: tag + length + `memcpy` — no text encoding of numbers). The zero-copy alternative — a small serialized *descriptor* (shm segment handle + offset + shape), each process mapping the segment locally — is a **deferred optimization** for very large buffers, with BEAM's inline-vs-refc binary threshold (64 bytes) as the precedent for a size-based split when the need arrives.
 - **K29c — Process ↔ process: two encodings of one model, text now, binary later.** Mark remains the single model. **Text Mark** is the working format today and remains first-class forever as the debug/log form (a pipe can run in text; any message is loggable via the existing formatter — you can `cat` the conversation). **Binary Mark** is the eventual production wire: self-describing, schemaless, covering every Item type by construction (elements, symbols, decimal128, datetime, N-D typed arrays as raw buffers), length-prefix framed so the same encoding carries K27 stream chunks. Its detailed encoding design is **explicitly deferred — no further work now**; when designed, it will likely borrow wire techniques from Protobuf and MessagePack (varints, tag-length-value, ext-type conventions) while rejecting what disqualified them as the wire itself: Protobuf's schema-first model and MessagePack's Item-model impedance. Both remain candidates as *conversion formats* (`format(x, 'msgpack')`) — never the IPC wire.
 - Non-goals restated: binary Mark is a streaming encode/decode, **not** the position-independent frozen-arena graph format (deferred indefinitely, K5), and it is value-shaped — columnar interchange stays Arrow's job in the deferred I/O proposal. Three formats, three jobs.
+
+---
+
+## 12. Phase-1 implementation specifications (pinned 2026-07-15)
+
+This section closes O6/O7/O9/O10 for the in-context task tier implemented by
+`Lambda_Impl_Concurrency.md`. It is normative for the Phase-1 implementation;
+the process, streams, and parallel-`fn` tiers remain outside that plan.
+
+### 12.1 O10 loop ordering
+
+There is one libuv loop per Lambda context. A loop turn observes this order:
+
+1. finish the currently executing Lambda task or host callback;
+2. drain JS `process.nextTick` and Promise microtasks to quiescence;
+3. append Lambda resumes made ready during that job to the Lambda FIFO run queue;
+4. run ready libuv callbacks for the turn;
+5. drain the JS microtasks created by those callbacks;
+6. run Lambda tasks from the ready queue in FIFO readiness order.
+
+A Lambda resume is therefore a macrotask: it never interrupts a JS job or its
+microtask checkpoint. A task's successful `send` operations enqueue into the
+receiver mailbox before the sender completion is published. Send completion is
+the return of that synchronous enqueue attempt; handle completion is queued only
+after all sends performed by that task have returned. Multiple task resumes made
+ready by one callback retain registration order.
+
+### 12.2 O9 may-await closure
+
+The seed set is every `pn` containing a call to a registry entry whose
+`is_async` flag is set (`wait`, `receive`, `select`, `sleep`, and the v1 async
+`io.read` operation), plus native-module procedures declared async. The compiler
+then computes a fixed point over static `pn` call edges. A `pn` that calls a seed
+or another may-await `pn` is may-await. A call through a `pn`-typed value,
+closure, higher-order parameter, or otherwise unresolved procedural callee is
+conservatively may-await. `fn` values never enter the closure.
+
+Each `AstFuncNode` records the bit and its first causal edge. Diagnostics use:
+`procedure '<name>' may suspend because it calls '<callee>'`, with `indirect pn
+call` as the callee for conservative edges. The MIR transform and JS export
+membrane consume the same bit; no second inference is permitted.
+
+### 12.3 O6 handle representation
+
+The v1 task handle is an opaque, immutable, branded VMap. The VMap's native
+payload points to the scheduler-owned task record; its brand distinguishes task
+handles from ordinary maps and other host objects. The scheduler, not the VMap
+finalizer, owns the task record because completion, waiters, and mailbox delivery
+may outlive any one handle reference. Scheduler teardown releases task records
+after unregistering their GC roots.
+
+Handles compare by VMap pointer identity. Their fields and backing store are not
+script-mutable; the only operations are the concurrency builtins. Handles may be
+sent in in-context messages. This representation deliberately avoids a new
+`TypeId`; a first-class static `handle` type remains a follow-on O6 typing task.
+
+### 12.4 Constants, delivery errors, and script exit
+
+- Default mailbox capacity: **1024 Items**.
+- A full mailbox makes `send` return an error value with code
+  **`'mailbox_full'`**; it never blocks and never drops silently.
+- Cancellation and timeout use **`'cancelled'`** and **`'timeout'`**.
+- Normal CLI execution drains the shared loop until no live Lambda task remains.
+  `--no-drain` disables that final drain for harnesses. The drain is bounded by
+  the existing event-loop watchdog policy; exhaustion is reported, never hidden.
+
+### 12.5 O7 contextual `start` grammar
+
+`start` is contextual only where an expression begins. The grammar node is
+`start_expr: 'start' call_expr`; its operand must resolve to a `pn` call. Existing
+bindings, parameters, fields, and map keys named `start` remain identifiers.
+`start` is legal only inside a `pn`; no `async` or `await` syntax is added.
+
+### 12.6 K30 scope, escape, and cancellation rules
+
+A started handle is owned by the nearest lexical block. Returning that handle
+transfers ownership to the caller. Storing or sending the handle exposes a
+capability but does **not** transfer scope ownership. Every non-escaped child is
+joined on normal block exit. Error exit, including `^` propagation and
+cancellation from above, cancels each non-escaped child and then joins it.
+
+Exit-edge lowering is a reusable compiler operation parameterized by normal or
+error exit; concurrency is its first client and auto-close may reuse it later.
+Cancellation sets an idempotent flag and unparks a parked task with
+`T^E 'cancelled'`. Park entry checks a pre-existing flag. Cleanup reached because
+of cancellation runs with further cancellation masked until the cleanup join
+finishes. `wait(h, timeout:)` returns `T^E 'timeout'` to the waiter only and does
+not cancel `h`.

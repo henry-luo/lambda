@@ -1,0 +1,8 @@
+{
+  valid: true,
+  diagnostics: [],
+  content_tag: "table",
+  ports: [["west", "auto", 0.25], ["east", "auto", 0.75]],
+  html_ports: [["a", "west", "auto", "0.25"], ["a", "east", "auto", "0.75"]],
+  starts: [["west", 30, 90], ["east", 90, 150]]
+}

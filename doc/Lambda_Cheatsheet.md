@@ -455,6 +455,30 @@ pn f(n) { var x=0; while(x<n) {x=x+1}; x }
 pn advance(pos: float[], vel: float[], n: int) { ... }
 ```
 
+## Concurrency (`pn` only)
+
+```lambda
+pn worker() { return receive()^ }
+
+pn main() {
+    let h = start worker()       // scoped child, opaque identity handle
+    send(h, "job")^             // bounded FIFO mailbox (default 1024)
+    print(wait(h)^)              // wait for T^E result
+}
+
+wait(h, timeout: 10)             // timeout does not cancel h
+select(h1, h2, timeout: 100)^    // first completed handle
+sleep(5)^                        // shared libuv timer
+self()                           // current handle
+cancel(h)                        // idempotent cancellation request
+io.read("file.txt")^             // async local file read
+```
+
+No `async`/`await` keywords are used. Normal block exit joins children; error
+exit cancels then joins. A `start` operand may not capture an outer `var` by
+reference—copy to `let` or use messages. Imported JS Promises are `wait`-able;
+exported Lambda `pn`s return Promises to JavaScript.
+
 **Advanced Features:**
 ```lambda
 fn f(x?:int)    // optional param

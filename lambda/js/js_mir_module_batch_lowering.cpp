@@ -8083,7 +8083,8 @@ void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
                 if (is_lambda_module) {
                     // Cross-language import: JS importing a Lambda module
                     log_info("js-mir: cross-language import of Lambda module '%s'", resolved);
-                    Script* lambda_script = load_script(runtime, resolved, NULL, true);
+                    runtime->js_runtime_used = true;
+                    Script* lambda_script = load_script_mir_direct(runtime, resolved, NULL, true);
                     if (lambda_script && lambda_script->jit_context) {
                         // Build namespace object from Lambda's pub declarations
                         Item ns = module_build_lambda_namespace(lambda_script);

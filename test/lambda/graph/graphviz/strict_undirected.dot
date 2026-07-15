@@ -1,0 +1,5 @@
+strict graph U {
+  node [shape=box]
+  a -- b [color=red]
+  b -- a [weight=4]
+}

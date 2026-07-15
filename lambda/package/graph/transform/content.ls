@@ -2,15 +2,12 @@
 
 import model: lambda.package.graph.model
 
-fn sanitize_value(value) {
-  if (value is string) { [value] }
-  else if (value is element) {
-    let value_tag = model.tag(value);
-    let children = if (len(value) > 0) [
-      for (i in 0 to (len(value) - 1), child in sanitize_value(value[i])) child
-    ] else [];
-    if (value_tag == "script" or value_tag == "style" or value_tag == "template") { [] }
-    else if (value_tag == "strong" or value_tag == "b") {
+fn sanitized_children(value) => if (len(value) > 0) [
+  for (i in 0 to (len(value) - 1), child in sanitize_value(value[i])) child
+] else []
+
+fn sanitized_element(children, value_tag) {
+  if (value_tag == "strong" or value_tag == "b") {
       [<strong; for child in children { child }>]
     }
     else if (value_tag == "em" or value_tag == "i") {
@@ -21,8 +18,34 @@ fn sanitize_value(value) {
     else if (value_tag == "sub") { [<sub; for child in children { child }>] }
     else if (value_tag == "sup") { [<sup; for child in children { child }>] }
     else if (value_tag == "br") { [<br>] }
+    else if (value_tag == "hr") { [<hr>] }
+    else if (value_tag == "table") {
+      [<table class: "graph-label-table";
+        for child in children { child }
+      >]
+    }
+    else if (value_tag == "tbody") {
+      [<tbody; for child in children { child }>]
+    }
+    else if (value_tag == "tr") {
+      [<tr; for child in children { child }>]
+    }
+    else if (value_tag == "td") {
+      [<td; for child in children { child }>]
+    }
+    else if (value_tag == "font") {
+      [<span; for child in children { child }>]
+    }
     // Unknown wrappers are removed while their sanitized text and inline children survive.
     else { children }
+}
+
+fn sanitize_value(value) {
+  if (value is string) { [value] }
+  else if (value is element) {
+    let value_tag = model.tag(value);
+    if (value_tag == "script" or value_tag == "style" or value_tag == "template") { [] }
+    else sanitized_element(sanitized_children(value), value_tag)
   }
   else { [] }
 }

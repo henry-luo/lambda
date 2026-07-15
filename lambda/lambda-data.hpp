@@ -74,6 +74,7 @@ typedef struct Pack Pack;
 typedef struct mpd_context_t mpd_context_t;
 typedef struct gc_nursery gc_nursery_t;
 struct LambdaError;  // forward declaration
+struct LambdaScheduler;
 
 typedef struct EvalContext : Context {
     Heap* heap;
@@ -89,6 +90,7 @@ typedef struct EvalContext : Context {
     ArrayList* debug_info;      // function address → source mapping for stack traces
     const char* current_file;   // current source file (for error reporting)
     LambdaError* last_error;    // most recent runtime error (owned)
+    LambdaScheduler* scheduler; // per-runtime cooperative task scheduler
 } EvalContext;
 
 // Unicode-enhanced comparison functions are declared in utf_string.h

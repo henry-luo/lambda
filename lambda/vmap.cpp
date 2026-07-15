@@ -12,6 +12,7 @@
 #include "../lib/log.h"
 #include "jube/jube_registry.h"
 #include "jube/jube_interface.h"
+#include "concurrency.h"
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -389,6 +390,12 @@ extern "C" void vmap_set(Item vmap_item, Item key, Item value) {
     VMap* vm = vmap_item.vmap;
     if (!vm || !vm->vtable) {
         log_error("vmap_set: null vmap or vtable");
+        return;
+    }
+    // Task handles are capability identities, not user-extensible maps; their
+    // VMap carrier is intentionally opaque and immutable.
+    if (lambda_task_handle_is(vmap_item)) {
+        log_error("vmap_set: task handles are immutable");
         return;
     }
     Item host_result = ItemNull;

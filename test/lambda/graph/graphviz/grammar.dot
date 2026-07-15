@@ -1,0 +1,15 @@
+StRiCt grAPH "G" + "raph" {
+  // Defaults retain list and property order.
+  gRaph [rankdir=LR][label=<<B>Dense</B>>]
+  noDE [shape=box color=blue;]
+  EDGE []
+
+  a:out:e -- { b; c } -- subgraph cluster_x { d; e } [label="go\l"][weight=2]
+  -1.5 [label="numeric"]
+  "quoted node" [label="continued \
+line\N"]
+  ported : "record field" : w
+  rank=same
+  /* Nested anonymous source scopes are not visual clusters. */
+  subgrAPH { { nested_a -- nested_b } }
+}

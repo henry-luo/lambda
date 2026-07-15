@@ -145,6 +145,7 @@ fn scene_edge(edge, labels, nodes) {
       'marker-start': string(attr(edge, "data-marker-start", "none")),
       'marker-end': string(attr(edge, "data-marker-end", "none")),
       'route-kind': string(attr(edge, "data-route-kind", "straight")),
+      'route-mode': attr(edge, "data-route-mode", null),
       stroke: attr(edge, "data-stroke", null),
       'stroke-width': nullable_number_attr(edge, "data-stroke-width"),
       opacity: nullable_number_attr(edge, "data-opacity"),

@@ -10,7 +10,8 @@ let ok = radiant.register_layout("bfc_smoke", (parent, children, ctx) => {
 
 let doc = radiant.load("test/lambda/radiant_custom_layout_bfc.html")
 let root = radiant.root(doc)
-let did_layout = radiant.layout(root)
+let first_layout = radiant.layout(root)
+let did_layout = first_layout and radiant.layout(root)
 let graph = root.owner_document.query_selector("#graph")
 let child = root.owner_document.query_selector("#child")
 let after = root.owner_document.query_selector("#after")

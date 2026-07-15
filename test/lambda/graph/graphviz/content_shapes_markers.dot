@@ -1,0 +1,12 @@
+digraph Escapes {
+  graph [label="Graph \G / \L"]
+  a [label="Node \N / \\N / \L" shape=oval]
+  b [label="Second\lLine" shape=invtriangle]
+  c [shape=parallelogram]
+  d [shape=octagon]
+  e [shape=house]
+  a -> b [label="\T to \H (\E) in \G / \L" arrowhead=diamond arrowtail=odot dir=both]
+  b -> c [arrowhead=vee]
+  c -> d [dir=back arrowtail=obox]
+  d -> e [dir=none]
+}
