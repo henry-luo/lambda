@@ -64,11 +64,10 @@ struct Runtime {
     bool use_mir_direct; // if true, all modules (main + imports) compiled via MIR Direct instead of C2MIR
 
     // Retained execution state (persistent across script evaluations).
-    // The GC heap, nursery, and name_pool are created on first evaluation
+    // The GC heap and name_pool are created on first evaluation
     // and reused for subsequent evaluations / event handler invocations.
     // Destroyed by runtime_cleanup().
     Heap* heap;
-    gc_nursery_t* nursery;
     NamePool* name_pool;
     ArrayList* type_list;
 

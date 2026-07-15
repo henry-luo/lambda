@@ -469,6 +469,8 @@ static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
 
     static __thread bool layout_flush_active = false;
 #ifndef NDEBUG
+    // Release builds erase log_debug arguments, so debug-only telemetry must
+    // not leave a write-only counter that fails the -Werror release build.
     static __thread uint64_t layout_flush_count = 0;
 #endif
     if (layout_flush_active) return doc->view_tree && doc->view_tree->root;
@@ -494,7 +496,6 @@ static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
     doc_state_clear_reflow(ds);
     reflow_clear(ds);
 #ifndef NDEBUG
-    // release builds strip log_debug arguments, so keep its counter debug-only.
     layout_flush_count++;
     log_debug("dom-flush: synchronous geometry layout count=%llu",
         (unsigned long long)layout_flush_count);

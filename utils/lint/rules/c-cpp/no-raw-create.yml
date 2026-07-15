@@ -9,6 +9,6 @@ metadata:
   suppress: RAWCREATE_OK
 rule:
   kind: call_expression
-  regex: "\\b(pool_create|pool_create_mmap|arena_create|arena_create_default|arena_create_sized|scratch_init|gc_nursery_create)\\s*\\("
+  regex: "\\b(pool_create|pool_create_mmap|arena_create|arena_create_default|arena_create_sized|scratch_init)\\s*\\("
 files:
   - "radiant/**/*.{c,cpp,h,hpp,mm}"

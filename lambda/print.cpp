@@ -402,7 +402,7 @@ struct PrintItemVisitor {
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_INT64> item) const {
-        int64_t long_val = *item.ptr();
+        int64_t long_val = item.value();
         log_debug("print int64: %" PRId64, long_val);
         strbuf_append_format(strbuf, "%" PRId64, long_val);
     }

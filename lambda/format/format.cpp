@@ -18,14 +18,9 @@ static void format_number_impl(StringBuf* sb, Item item, bool compact_float) {
         snprintf(num_buf, sizeof(num_buf), "%" PRId64, val);
         stringbuf_append_str(sb, num_buf);
     } else if (type == LMD_TYPE_INT64) {
-        int64_t* lptr = (int64_t*)item.int64_ptr;
-        if (lptr) {
-            char num_buf[32];
-            snprintf(num_buf, sizeof(num_buf), "%" PRId64, *lptr);
-            stringbuf_append_str(sb, num_buf);
-        } else {
-            stringbuf_append_str(sb, "0");
-        }
+        char num_buf[32];
+        snprintf(num_buf, sizeof(num_buf), "%" PRId64, item.get_int64());
+        stringbuf_append_str(sb, num_buf);
     } else if (is_float_type_id(type)) {
         double d = item.get_double();
         // ItemReader can pass inline floats; get_double() handles both inline and heap encodings.

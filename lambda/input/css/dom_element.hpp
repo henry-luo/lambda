@@ -190,7 +190,6 @@ struct DomDocument {
     void* js_mir_ctx;               // MIR_context_t — keeps compiled JS code pages alive
     void* js_preamble_state;        // JsPreambleState* — full state for cleanup
     void* js_runtime_heap;          // Heap* — retained GC heap for JS objects
-    void* js_runtime_nursery;       // gc_nursery_t* — retained nursery allocator
     void* js_runtime_name_pool;     // NamePool* — retained string interning pool
     void* js_runtime_type_list;     // ArrayList* — retained dynamic map type registry
     void* js_runtime_pool;          // Pool* — retained mmap pool for JS code
@@ -237,7 +236,7 @@ struct DomDocument {
                     pending_navigation_url(nullptr),
                     keyframe_registry(nullptr),
                     js_mir_ctx(nullptr), js_preamble_state(nullptr),
-                    js_runtime_heap(nullptr), js_runtime_nursery(nullptr),
+                    js_runtime_heap(nullptr),
                     js_runtime_name_pool(nullptr), js_runtime_type_list(nullptr),
                     js_runtime_pool(nullptr),
                     document_charset(nullptr),

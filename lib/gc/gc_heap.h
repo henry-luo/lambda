@@ -350,6 +350,9 @@ void gc_unregister_root_range(gc_heap_t* gc, uint64_t* base);
  */
 void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
                 uintptr_t stack_base, uintptr_t stack_current);
+void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
+                int extra_count, uintptr_t stack_base, uintptr_t stack_current,
+                uint64_t* root_base, int64_t root_count);
 
 /**
  * Mark a single Item as reachable (pushes to mark stack if GC-managed).

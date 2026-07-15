@@ -1,93 +1,174 @@
-# Lambda Stack Frame — Implementation Plan, Phase 1 (Lambda)
+# Lambda Stack Frames — Phase 1 Implementation Record
 
-**Status:** draft v1 — Lambda-first scope
-**Date:** 2026-07-15
-**Design:** `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20, all decided). This plan implements the design for the **Lambda MIR-Direct path + shared runtime**; the JS transpiler is phase 2 — `vibe/Lambda_Impl_Stack_Frame_JS.md`. C2MIR is untouched forever per OS6.
-
----
-
-## 1. Scope boundary — what makes "Lambda first" safe
-
-The load-bearing fact: **runtime boxing helpers are called by name** (`push_l`/`push_k`/`box_float_cold` and every `fn_*` that boxes). Their implementations flip runtime-wide, but frame *watermarks* only advance/pop where a transpiler emits them. Phase 1 emits frames **only in `transpile-mir.cpp`** (Lambda). Everything else — JS-generated code, C2MIR-generated code, host C helpers running under them — homes numbers into the **exec base frame** established by the runner, whose extent is the whole script run. That is exactly today's nursery lifetime, so non-Lambda code keeps status-quo semantics with zero code changes.
-
-**In scope (phase 1):**
-- Side-stack infrastructure in `lib/` (both regions, all three platforms — the Windows `VirtualAlloc` shim is ~30 lines, not worth deferring)
-- GC integration: precise root-region scan; conservative scan stays; old heap `JitGcRootFrame` machinery **stays compiled** (JS still uses it until phase 2)
-- Lambda MIR-Direct transpiler: watermark frames, inline root stores, single-epilogue restructure, SF14 two-lane returns for Lambda JIT→JIT calls
-- The full Lambda re-homing surface: SF15 container copy-in, SF16 copy-out + `is_immortal` flag, SF18 env tails, SF20 async-frame tails, REPL base frame
-- Nursery + `box_float_cold` retirement (runtime-wide, safe per the base-frame argument)
-- Recovery-site watermark snapshot/restore (SF17's three longjmp sites)
-
-**Out of scope (phase 2 = JS; explicitly deferred):**
-- JS transpiler frames, watermarks, two-lane returns, env tails (JS numbers ride the base frame; JS rooting stays on heap `JitGcRootFrame`s)
-- Conservative-scan retirement (needs helper migration + JS both complete)
-- Broad helper migration to the RAII root guard (only the guard class + a pilot module land in phase 1)
-- Per-task arenas, write-at-suspend liveness optimization, OS5 profile matrix beyond initial constants
-
-**Coordination with in-flight work:**
-- **Unified AST Phase 0 (MirEmitter)**: emit the new frame/watermark/root primitives as **`em_*` emitter functions in `mir_emitter_shared.hpp`**, not as `MirTranspiler`-local statics — phase 2 (JS) then inherits them through the shared emitter for free. This is the same interleave discipline as U21.
-- **Concurrency Stage A** (`concurrency.cpp` in flight): SF20's tail extension modifies `LambdaAsyncFrame` — land stage 3 of this plan after (or with) the concurrency code stabilizes; the struct change is additive (slots block grows a tail).
+**Status:** implemented and verified
+**Completed:** 2026-07-15
+**Design:** `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20)
+**Scope:** Lambda MIR-Direct plus the shared runtime. JS frame emission remains phase 2 in `vibe/Lambda_Impl_Stack_Frame_JS.md`; C2MIR frame emission is intentionally unchanged per OS6.
 
 ---
 
-## 2. Stages
+## 1. Delivered architecture
 
-Each stage lands alone and soaks on the full gates (§3) before the next begins — the P0.2 precedent.
+Lambda execution now uses two thread-local, virtually reserved side regions:
 
-### Stage 0 — Independent preludes (each its own PR, any order, can start now)
+| Region | Reserve | Contents | GC treatment |
+|---|---:|---|---|
+| root stack | 16 MiB | exact `Item`/GC-pointer roots | precisely scanned over `[side_root_base, side_root_top)` |
+| number stack | 64 MiB | wide `int64`, `DateTime`, and out-of-band `double` payloads | never scanned as GC roots |
 
-- **0a. SF10 small-int64 inlining.** int64 values fitting 56 bits pack inline in the Item (the `get_int56` mechanism with an int64-typed tag so `type()` fidelity is preserved); only genuinely wide values box. Shrinks number-stack traffic to a trickle before the architecture lands. Gate: lambda + JS baselines (JS BigInt egress paths touch int64 boxing).
-- **0b. Concat payload-rebase fix** (`lambda-eval.cpp:350`): copy tail payloads into the result's own tail and rebase the Item pointers. Fixes the latent dangle *today*, and the copy-and-rebase helper it introduces is exactly the SF15-invariant primitive stage 3 reuses at every container write site. Gate: lambda baseline + a new regression test (concat wide-scalar arrays, drop source, force GC, read result).
-- **0c. Slot-count instrumentation.** Transpiler logs per-function static root/number slot counts under a debug flag; run AWFY + baselines; the histogram sets OS5's initial constants. No behavior change.
+`lib/side_stack.c` owns reserve, watermark, snapshot/restore, allocation, and decommit behavior. POSIX uses a demand-paged `mmap`; Windows uses `MEM_RESERVE` followed by page-aligned `MEM_COMMIT` as a generated frame advances, and `MEM_DECOMMIT` after collection. `Context` carries the active bases, tops, commit limits, and hard limits so generated code can use direct loads/stores.
 
-### Stage 1 — Side-stack rooting for Lambda (flag-gated: `LAMBDA_SIDE_STACK_ROOTS`)
+The MIR-Direct function shape is now:
 
-- **1a. `lib/` region module**: reserve/commit per SF13 (plain `mmap` on macOS/Linux; `VirtualAlloc` reserve+commit shim on Windows), TLS tops, watermark save/restore API, exhaustion → catchable stack-overflow error, `madvise` hook for the GC driver. Root region only in this stage.
-- **1b. GC integration**: `heap_gc_collect` precisely scans `[root_base, root_top)` alongside the existing heap-frame walk and conservative scan. Both rooting mechanisms coexist (Lambda on side stack, JS on heap frames).
-- **1c. Transpiler — single-epilogue restructure first** (its own commit): all return paths in generated code funnel through one epilogue block per function, ordering = scope cleanup → (later: watermark restore) → return. This is pure control-flow restructuring with today's machinery, independently verifiable, and it is the SF17 invariant made structural.
-- **1d. Transpiler — frames**: prologue saves the root watermark + bumps by the static count (one overflow check per frame); rooted stores become inline register-relative stores at fixed offsets; epilogue restores. Emitted as `em_*` primitives. Functions with zero rooted slots emit nothing. Async-slotted vars keep their current double bookkeeping (cleanup is stage 3).
-- **1e. Recovery sites**: snapshot/restore the root watermark at the three SF17 boundaries (`runner.cpp` exec sigsetjmp; batch crash/timeout; batch MIR-error). Exec establishes the **base frame**.
-- Flag flips default-on after gates + soak. Old heap-frame emission path in `transpile-mir.cpp` is deleted at stage end — **and so is the runtime machinery** (`JitGcRootFrame` in `lambda-mem.cpp`): verified 2026-07-15 that the JS transpiler never emits `heap_jit_gc_root_frame_*` calls (JS locals rely on the conservative scan + permanent root ranges; see the phase-2 plan §1), so Lambda was its only user.
+1. load the current watermarks;
+2. reserve the function's exact root-slot count and, only for a widened return, one number scratch slot;
+3. execute with direct fixed-offset root stores;
+4. funnel every result through one epilogue;
+5. preserve the outgoing value, restore both watermarks, and return.
 
-### Stage 2 — Number stack infrastructure, nursery-equivalent mode
+Root-slot count is known after lowering, so the checked prologue is inserted at the function anchor once. A rooted assignment is one inline memory store and makes no C rooting call. Functions with zero root slots do not advance the root stack. Async-owned variables do not receive redundant side-root slots.
 
-- **2a. Number region** comes up in `lib/` (second mapping, SF12).
-- **2b. Flip the boxing helpers**: `push_l`/`push_k` bump the number-stack top; `box_float_cold` → number stack. **No Lambda frame advances or pops the number watermark yet** — everything homes into the base frame, so semantics are exactly nursery semantics (monotonic per run, freed at exec exit). `gc_nursery` is deleted in this stage; `INT64`/`DTIME` stay in the rootable set for now (their Items point into the number region, which isn't GC memory — verify the scan treats them benignly).
-- This stage is deliberately boring: it proves the region, the growth path, the recovery resets, and the REPL persistent base frame (which lands here), with zero lifetime risk. Long-run memory test: per-run ceiling replaces the old per-process leak — the N-I1 win is measurable already.
-
-### Stage 3 — Frame-scoped numbers + the full re-homing surface (the big one, atomic for Lambda)
-
-All of the following must land together, because the moment any Lambda frame pops the number watermark, every outliving store must already re-home:
-
-- **3a. SF14 two-lane returns** for Lambda JIT→JIT: `[item, scalar]` protos for ANY-returning functions, `[scalar, error]` for native `^E` (removes the `can_raise → ANY` deopt at `transpile-mir.cpp:11525`, retires `INT64_ERROR` sentinels). Callers re-home returned wide scalars only when they escape.
-- **3b. SF15 copy-in** at every Lambda container-write site (index-assign, push/splice, map/element construction, list building) using the 0b helper; container tail sizing on growth.
-- **3c. SF16 copy-out** at every boxed-scalar read site (`array_get`, `list_get`, `map_get`, `elmt_get`, iteration); `is_immortal` container flag set by input parsers and the const-pool builder; immortal path returns references.
-- **3d. SF18 env tails**: capture-time and write-back boxing target the env's own tail.
-- **3e. SF20 async-frame tails**: `LambdaAsyncFrame` allocation grows the static tail; only the Item region is root-ranged; suspension-barrier invariant holds by construction.
-- **3f. Frame-scoped watermarks on**: Lambda prologues/epilogues save/bump/restore the number watermark alongside the root watermark.
-- **3g. Cross-language shim**: Lambda functions callable from JS (Jube bridges) get a single-lane wrapper that re-homes the two-lane return into the caller's (base-frame) extent. Audit call-bridge sites first; if none exist yet, record the requirement and skip.
-- **3h. SF11 tightening**: `INT64`/`DTIME`/`FLOAT` leave `should_gc_root_var`; scalars are now fully out of GC on the Lambda path.
-- ⚠️ Verification item folded in: **temporaries across mid-expression `wait`** — confirm state-machine spilling covers them before 3e ships.
-
-### Stage 4 — Cleanups and pilot migration
-
-- **4a. RAII root guard** (C+ class per SF8) in the module header + **pilot migration of one helper module** (suggest `lambda-data-runtime.cpp` getters) to validate ergonomics; broad migration is phase 2+.
-- **4b. Async root-slot redundancy**: async-slotted vars skip side root slots (the GC-registered frame is their root).
-- **4c. Vocabulary**: rename/re-document `push_*` (OS10) — the third naming era, matching mechanics at last.
-- **4d. OS5 constants** finalized from stage-0c + soak telemetry; decommit cadence wired into the GC driver.
-- **4e. OS9 audit** (scalar pointer-identity assumptions) and **OS11** (MIR-interp frame parity) close out.
+The runner establishes the execution-base number extent. Shared boxing helpers used by JS, C2MIR, host helpers, and the MIR interpreter therefore retain script-lifetime behavior unless a Lambda MIR-Direct frame establishes a narrower extent.
 
 ---
 
-## 3. Gates (every stage)
+## 2. Implemented stages
 
-- `make test-lambda-baseline` 100%; full lambda gtest; JS + node baselines unchanged (JS must be *unaffected* — that is the phase-1 contract)
-- `RuntimeError_StackOverflow` fails fast (never hangs, never balloons)
-- deltablue green; havlak+push BUG-001 repro green (the historical GC-rooting tripwires)
-- AWFY within noise on **release** build (stages 1, 3 especially — rooted stores and boxing are on hot paths)
-- Stage 2+: per-run memory ceiling test (nursery leak must be gone and stay gone)
-- Stage 3: new regression tests — wide scalars through every table row (return/container/env/async/error/REPL), plus the 0b concat test
+| Stage | Result | Main implementation points |
+|---|---|---|
+| 0a — compact int64 | complete | Signed 56-bit `int64` values are encoded inline with `LMD_TYPE_INT64`; only the wide residue needs backing storage. Full-domain representation tests cover both boundaries. |
+| 0b — concat rebase | complete | Array/list copy and concat paths use owned-slot stores so scalar payload pointers are rebased into the destination rather than retaining a source/frame interior pointer. |
+| 0c — telemetry | complete | `LAMBDA_MIR_LOG_FRAME_SLOTS=1` reports final per-function root and number-scratch counts. |
+| 1 — precise roots | complete | Side-root region, precise GC scan, checked static frames, single epilogues, and recovery snapshots landed. The heap `JitGcRootFrame` implementation and all emitters were removed after confirming Lambda was its only user. |
+| 2 — number region | complete | `push_l`, `push_k`, and the out-of-band float path allocate from the number side stack. The numeric `gc_nursery` source, headers, factory state, and build entry were deleted. |
+| 3 — scoped numbers | complete | Lambda frames restore number watermarks; returns, container storage, environments, async frames, module/import bridges, and reads all obey re-homing rules. `INT64`/`DTIME`/`FLOAT` are no longer GC-root candidates. |
+| 4 — cleanup | complete | `LambdaRootGuard` landed with the typed-array view constructors as its pilot; async root duplication and obsolete inference/root machinery were removed; GC-driven side-stack decommit and the scalar identity audit landed. |
 
-## 4. Success criteria for phase 1
+No feature flag or legacy Lambda frame path remains.
 
-Lambda MIR-Direct code runs with: zero C calls for rooting (inline stores), zero rootless-frame overhead, scalars fully out of GC, nursery deleted, `^E` native returns un-deopted — with JS behavior and baselines byte-identical, riding the base frame until phase 2.
+---
+
+## 3. Wide-scalar lifetime rules
+
+### 3.1 Owned storage
+
+Runtime-owned `Array`, `List`, `Map`, `Element`, environment, and async storage never retains a pointer into a transient number frame. Each logical Item slot has an owned scalar payload slot used by `owned_item_slot_store`; wide values are copied into that payload and the stored Item is rebased to it.
+
+Reads from movable/owned storage call `scalar_storage_read`, which copies a wide scalar into the reader's current number extent before it can escape. Pool/arena/const containers carry `is_immortal`; their backing lifetime already exceeds execution, so reads may return the existing stable reference. The `LAMBDA_STATIC` input library similarly returns its pool-owned scalar references directly because that standalone build has no execution side stack.
+
+`VMap` was included in the pointer-identity audit. Wide integer and `DateTime` keys now hash and compare by value, keys/values are stabilized on insertion, updates preserve the stable stored key, and getters/key iteration copy wide scalars out. The permanent regression covers wide `int64` and `DateTime` keys.
+
+### 3.2 Captures and async suspension
+
+Captured scalar values are stored in environment-owned tails and copied out on reads. Async frames allocate two equal halves:
+
+- the Item half is registered as an exact GC root range and uses owned scalar payloads;
+- the raw half holds arbitrary MIR `I64` spill bits and is deliberately unscanned.
+
+Generated async functions reserve the compile-time slot count. Resizing preserves both halves independently. At `wait`, every live temporary needed by the resumed state is in the async frame; no suspended state points into a popped side-stack extent.
+
+### 3.3 Return ABI
+
+Lambda JIT-to-JIT calls have two logical lanes:
+
+- an Item-like result plus raw scalar bits for an escaping wide scalar; or
+- a native scalar plus an error Item for `T^E`.
+
+MIR's ARM64 multi-result lowering lost the primary lane when a nested call fed the return. The implemented portable ABI therefore returns the primary value through the normal machine return, stages it in the function's single reserved number scratch slot across cleanup, and publishes the secondary scalar/error lane through `Context::mir_return_lane`. The caller immediately consumes the handoff and re-homes the result when required. This preserves the logical two-lane contract without relying on the broken backend multi-result path.
+
+Generated boxed wrappers expose the existing single-Item ABI to host/JS callers and re-home their result into the caller/base extent. Imported cross-language functions bypass Lambda `_b` wrapper lookup because their module exports already use the direct boxed ABI.
+
+Language-level `i64^` success/error returns cover the full `int64` domain, including `INT64_MAX`; the old value-as-error sentinel is not used on this path. The legacy C system-function registry still uses its historical sentinel contract, so `transpile_box_item` retains `push_l_safe` only at that compatibility boundary.
+
+---
+
+## 4. GC, failure, and host-helper integration
+
+- `heap_gc_collect` passes the exact root side-region to the collector while retaining the conservative native-stack scan required by JS and unmigrated host code.
+- The number region is absent from all GC root scans. The unrelated data-zone nursery in `gc_data_zone` remains.
+- Runner stack-overflow recovery, test262 batch crash/timeout/MIR-error recovery, and cached-import execution snapshot both watermarks before entering generated code and restore them after `longjmp`/signal recovery.
+- Side-stack exhaustion reports the existing catchable stack-overflow error instead of accessing beyond the reservation.
+- Collection decommits unused pages above each live watermark, preventing transient deep execution from permanently setting the RSS floor.
+- `LambdaRootGuard` is a non-copyable C++ RAII helper that appends exact dynamic roots above the current watermark and restores it on destruction. The typed-array external/storage view constructors are the pilot migration.
+- Module globals, REPL values, and non-Lambda callers remain in the execution-base extent and therefore keep stable script-lifetime scalar backing.
+
+---
+
+## 5. Frame telemetry
+
+The permanent stack-frame regression produced these final slot counts:
+
+```text
+_wide_0             roots=0  numbers=1
+_read_69            roots=1  numbers=1
+_make_reader_41     roots=1  numbers=1
+_make_scalar_map_100 roots=0 numbers=1
+_maybe_wide_238     roots=1  numbers=1
+_delayed_wide_344   roots=1  numbers=1
+_main_415           roots=40 numbers=1
+main                roots=0  numbers=0
+```
+
+`numbers=1` is the reserved return scratch slot, not the number of dynamic boxes. Ordinary boxing advances within the current number extent through the shared helpers; the function epilogue restores the saved watermark. This is an implementation adjustment from the design's stronger static-number-slot ideal, while preserving its lifetime and GC invariants. Root slots remain exact, static, and inline.
+
+---
+
+## 6. Regression coverage
+
+`test/lambda/proc/proc_stack_frame.ls` exercises the complete Lambda phase-1 surface on both native MIR and the MIR interpreter:
+
+- `INT64_MAX` direct and nested returns;
+- closure capture and readback;
+- concat destination rebasing;
+- map field storage/readback;
+- successful and failing `i64^` returns, including `INT64_MAX` as success;
+- wide values before, inside, and after async suspension;
+- `VMap` wide-integer and `DateTime` keys plus wide values.
+
+Existing focused tripwires also pass:
+
+- `NegativeScriptTest.RuntimeError_StackOverflow` terminates and reports overflow;
+- DeltaBlue retains live pointer locals across allocation/GC;
+- Havlak exercises the historical `array_end` plus `push` BUG-001 path;
+- binary JS bridge/module imports verify that the cross-language boxed ABI was not redirected through Lambda-only wrappers.
+
+---
+
+## 7. Final verification — 2026-07-15
+
+| Gate | Result |
+|---|---|
+| `make test-lambda-baseline` | **3412 / 3412 passed**; Lambda scripts 530/530, JS gtests 330/330, Node preliminary 110/110 |
+| `make test262-baseline` | **40261 / 40261 fully passed**; 0 failed, 0 non-fully-passing, 0 regressions, retry 0.0 s |
+| stack-frame procedural regression | native MIR and `--mir-interp` output match the golden file |
+| stack-overflow focused gtest | **1 / 1 passed** |
+| release DeltaBlue | PASS; 92.9–97.6 ms across three current-tree runs |
+| release Havlak + push | PASS; 72.0–73.6 ms across three current-tree runs |
+
+The AWFY values are current release-build tripwires, not a controlled before/after A/B: the checked-in workloads changed after the older benchmark result snapshots. They establish correctness and a reproducible post-change timing range without making a false cross-version performance claim.
+
+The full test262 run also served as the long-process memory/recovery soak: all 40,261 selected tests reported memory data and completed without a retry or non-fully-passing batch.
+
+---
+
+## 8. Phase boundary and residual work
+
+Phase 1 is complete. The following are intentionally outside this document rather than incomplete Lambda work:
+
+- JS-generated static root/number frames and JS two-lane returns (`vibe/Lambda_Impl_Stack_Frame_JS.md`);
+- conservative native-stack scan retirement, which requires the JS and remaining host-helper migrations;
+- broad adoption of `LambdaRootGuard` beyond the completed pilot;
+- changes to C2MIR frame emission.
+
+The old `lib/num_stack` utility may still exist for its standalone library tests; it is not the Lambda runtime's scalar allocation path. The deleted component is the runtime numeric `gc_nursery`.
+
+## 9. Phase-1 success criteria
+
+- [x] zero C calls for generated rooting stores;
+- [x] zero root-frame overhead for functions with no root slots;
+- [x] wide scalars live outside GC and survive every escape surface;
+- [x] numeric nursery removed;
+- [x] native `^E` Lambda returns remain typed and preserve the full `int64` domain;
+- [x] stack-overflow and abnormal exits restore both watermarks;
+- [x] JS and cross-language behavior unchanged at the phase boundary;
+- [x] Lambda and test262 regression gates pass with no regressions.

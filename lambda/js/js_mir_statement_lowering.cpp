@@ -94,9 +94,7 @@ void jm_write_last_closure_capture_if_matching(JsMirTranspiler* mt,
         MIR_reg_t target_env = mt->last_closure_env_reg;
         if (mt->last_closure_capture_is_transitive[i]) {
             JsMirVarEntry* var = jm_find_var(mt, name);
-            if (!var || !var->from_env || var->env_reg == 0 || var->env_slot < 0) return;
-            target_env = var->env_reg;
-            slot = var->env_slot;
+            if (!jm_resolve_transitive_capture_env(var, &target_env, &slot)) return;
         }
         MIR_reg_t val = val_reg;
         if (jm_is_native_type(type_id)) {

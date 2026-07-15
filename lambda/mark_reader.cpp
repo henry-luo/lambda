@@ -164,7 +164,7 @@ int64_t ItemReader::asInt() const {
     if (auto val = asItem<LMD_TYPE_INT>()) {
         return val.value();
     } else if (auto long_val = asItem<LMD_TYPE_INT64>()) {
-        return *long_val.ptr();
+        return long_val.value();
     } else if (cached_type_ == LMD_TYPE_NUM_SIZED) {
         return item_.get_num_sized_as_int64();
     }
@@ -175,7 +175,7 @@ int32_t ItemReader::asInt32() const {
     if (auto val = asItem<LMD_TYPE_INT>()) {
         return (int32_t)val.value();  // INT_CAST_OK: API explicitly returns int32_t
     } else if (auto long_val = asItem<LMD_TYPE_INT64>()) {
-        int64_t val = *long_val.ptr();
+        int64_t val = long_val.value();
         return (int32_t)val;  // Truncate to 32-bit
     }
     return 0;

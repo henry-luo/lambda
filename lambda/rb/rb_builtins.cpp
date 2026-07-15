@@ -34,7 +34,7 @@ static inline void rb_arr_push(Array* arr, Item value) {
 
 // helper: make Item from inline int
 static inline Item rb_iitem(int64_t v) { return (Item){.item = i2it(v)}; }
-// helper: make Item from double (must use push_d which allocates in GC nursery)
+// helper: make Item from double (push_d homes cold payloads on the number stack)
 extern "C" Item push_d(double dval);
 static inline Item rb_ditem(double v) { return push_d(v); }
 // helper: make Item from C string

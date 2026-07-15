@@ -5113,7 +5113,6 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     memset(&retained_ctx, 0, sizeof(retained_ctx));
     if (runtime->heap) {
         retained_ctx.heap = runtime->heap;
-        retained_ctx.nursery = runtime->nursery;
         retained_ctx.name_pool = runtime->name_pool;
         retained_ctx.pool = runtime->heap->pool;
         if (runtime->ui_mode && runtime->result_arena) {

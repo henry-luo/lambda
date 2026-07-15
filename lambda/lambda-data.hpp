@@ -26,7 +26,6 @@ typedef struct mpd_t mpd_t;
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
 #include "../lib/hash.h"
-#include "../lib/gc/gc_nursery.h"
 #include "../lib/datetime.h"
 #include "../lib/url.h"
 
@@ -72,7 +71,6 @@ class SchemaValidator;
 typedef struct Heap Heap;
 typedef struct Pack Pack;
 typedef struct mpd_context_t mpd_context_t;
-typedef struct gc_nursery gc_nursery_t;
 struct LambdaError;  // forward declaration
 struct LambdaScheduler;
 
@@ -80,7 +78,6 @@ typedef struct EvalContext : Context {
     Heap* heap;
     Pool* ast_pool;
     NamePool* name_pool;        // name_pool for runtime-generated names
-    gc_nursery_t* nursery;  // bump-pointer allocator for numeric temporaries (int64, double, DateTime)
     void* type_info;  // meta info for the base types
     Item result; // final exec result
     mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
@@ -312,6 +309,7 @@ static inline void* map_field_ptr(void* map_data, const ShapeEntry* field) {
 }
 
 Item map_field_to_item(void* field_ptr, TypeId type_id);
+Item scalar_storage_read(Item item, bool immortal);
 
 static inline Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
     return map_field_to_item(map_field_ptr(map_data, field), field->type->type_id);

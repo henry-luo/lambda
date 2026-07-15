@@ -201,6 +201,19 @@ any([for (point in intersections) point.scale <= 1.0])
 The grammar or error recovery should either accept the filtered form or report
 the `for` iterator as the failure location.
 
+## Double-quoted map keys produce cascading syntax errors
+
+While building synthetic Velmt maps, JavaScript-style string keys such as
+`{"data-node-id": "a"}` produced a cascade of unrelated errors at following
+fields and closing braces. Lambda requires a quoted name for these fields:
+
+```lambda
+{attrs: {'data-node-id': "a", 'data-record-port': "west"}}
+```
+
+The first diagnostic should explain that double-quoted strings are values, not
+map field names, and suggest the single-quoted name syntax.
+
 ## Recursive accumulator return inference can change array construction
 
 A tail-recursive collector returned `reverse(result)` at its base case and

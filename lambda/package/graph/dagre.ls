@@ -111,6 +111,10 @@ fn normalize_edge(edge, nodes, index, directed) {
         else if (edge["from-port"] != null) string(edge["from-port"]) else null,
       to_port: if (edge.to_port != null) string(edge.to_port)
         else if (edge["to-port"] != null) string(edge["to-port"]) else null,
+      from_compass: if (edge.from_compass != null) lower(string(edge.from_compass))
+        else if (edge["from-compass"] != null) lower(string(edge["from-compass"])) else null,
+      to_compass: if (edge.to_compass != null) lower(string(edge.to_compass))
+        else if (edge["to-compass"] != null) lower(string(edge["to-compass"])) else null,
       tail_cluster: if (edge.tail_cluster != null) string(edge.tail_cluster)
         else if (edge["tail-cluster"] != null) string(edge["tail-cluster"]) else null,
       head_cluster: if (edge.head_cluster != null) string(edge.head_cluster)
@@ -279,33 +283,52 @@ fn boundary_ranks(nodes, constraints) {
       else node.rank}]
 }
 
-fn assign_ranks(nodes, edges, constraints) {
+fn node_cluster(nodes, id) =>
+  first_or([for (node in nodes where node.id == id)
+    if (node.group != null) string(node.group) else ""], "")
+
+fn constraint_crosses_clusters(value, constraints, nodes) => len(unique([
+  for (entry in constraints where entry.kind == "rank" and entry.scope == value.scope)
+    node_cluster(nodes, entry.member)
+])) > 1
+
+fn rank_constraints(constraints, nodes, new_rank) =>
+  if (new_rank) constraints
+  else [for (value in constraints
+    // Recursive DOT ranking cannot apply one rank set across structural clusters.
+    where not constraint_crosses_clusters(value, constraints, nodes)) value]
+
+fn assign_ranks(nodes, edges, constraints, new_rank) {
+  let scoped_constraints = rank_constraints(constraints, nodes, new_rank);
   let active = [for (edge in edges
-    where edge.constraint and not same_rank(edge.from, edge.to, constraints) and
-      not has_rank_value(edge.to, constraints, ["min", "source"]) and
-      not has_rank_value(edge.from, constraints, ["max", "sink"])) edge];
+    where edge.constraint and not same_rank(edge.from, edge.to, scoped_constraints) and
+      not has_rank_value(edge.to, scoped_constraints, ["min", "source"]) and
+      not has_rank_value(edge.from, scoped_constraints, ["max", "sink"])) edge];
   let ranked = [for (node in nodes) {*:node, rank: rank_of(node.id, active, [])}];
   // Cycle back-edges and self-loops cannot constrain rank during promotion relaxation.
   let forward = [for (edge in active
     where node_rank(ranked, edge.from) < node_rank(ranked, edge.to)) edge];
   // Same-rank promotion must be propagated to successors or minlen can collapse to zero.
-  boundary_ranks(relax_ranks(unify_same_ranks(ranked, constraints), forward,
-    constraints, len(nodes)), constraints)
+  boundary_ranks(relax_ranks(unify_same_ranks(ranked, scoped_constraints), forward,
+    scoped_constraints, len(nodes)), scoped_constraints)
 }
 
 fn max_rank(nodes) {
   if (len(nodes) == 0) 0 else max([for (node in nodes) node.rank])
 }
 
-fn node_group_key(node) =>
-  if (node.group != null) "cluster:" ++ string(node.group)
-  else if (node.order_group != null) "order:" ++ string(node.order_group)
-  else "node:" ++ node.id
+fn node_group_keys(node, clusters) {
+  let structural = [for (cluster in reverse_items(cluster_chain(node.group, clusters, [])))
+    "cluster:" ++ cluster.id];
+  let leaf = if (node.order_group != null) "order:" ++ string(node.order_group)
+    else "node:" ++ node.id;
+  [*structural, leaf]
+}
 
-fn layer_with_order(rank, nodes) {
+fn layer_with_order(rank, nodes, clusters) {
   let layer_nodes = [for (node in nodes where node.rank == rank) node];
   let scored = [for (i, node in layer_nodes)
-    {node: node, score: float(i), group_key: node_group_key(node)}];
+    {node: node, score: float(i), group_keys: node_group_keys(node, clusters)}];
   let ordered = grouped_nodes_by_score(scored);
   {
     rank: rank,
@@ -313,9 +336,9 @@ fn layer_with_order(rank, nodes) {
   }
 }
 
-fn create_layers(nodes) {
+fn create_layers(nodes, clusters) {
   let last_rank = max_rank(nodes);
-  let result = [for (rank in 0 to last_rank) layer_with_order(rank, nodes)];
+  let result = [for (rank in 0 to last_rank) layer_with_order(rank, nodes, clusters)];
   result
 }
 
@@ -339,30 +362,31 @@ fn barycenter(node, edges, ordered_nodes, use_predecessors) {
     total
 }
 
-fn scored_group(members) {
-  let values = [for (member in members where member.node != null) member];
-  {
-    score: min([for (member in values) member.score]),
-    members: sort(values, (member) => member.score)
-  }
+fn score_group_key(entry, depth) =>
+  if (depth < len(entry.group_keys)) entry.group_keys[depth]
+  else "node:" ++ entry.node.id
+
+fn grouped_entries_by_score(scored, depth) {
+  let grouped = [for (entry in scored group by score_group_key(entry, depth) into members) {
+    score: min([for (member in members) member.score]),
+    members: members
+  }];
+  [for (group in sort(grouped, (entry) => entry.score),
+    member in if (len(group.members) > 1)
+      grouped_entries_by_score(group.members, depth + 1)
+      else group.members) member]
 }
 
 fn grouped_nodes_by_score(scored) {
-  let grouped = [for (entry in scored group by entry.group_key into members) {
-    group_key: members.group_key,
-    *:scored_group(members)
-  }];
-  [for (group in sort(grouped, (entry) => entry.score),
-    member in group.members) member.node]
+  [for (entry in grouped_entries_by_score(scored, 0)) entry.node]
 }
 
-fn reorder_layer(layer, edges, ordered_nodes, use_predecessors) {
+fn reorder_layer(layer, edges, ordered_nodes, use_predecessors, clusters) {
   let scored = [for (node in layer.nodes) {
     node: node,
     score: barycenter(node, edges, ordered_nodes, use_predecessors),
-    // ungrouped nodes remain independent; a shared null key would incorrectly
-    // force every top-level node into one compound ordering block.
-    group_key: node_group_key(node)
+    // Cluster ancestry and authored groups are independent nesting levels.
+    group_keys: node_group_keys(node, clusters)
   }];
   let sorted_nodes = grouped_nodes_by_score(scored);
   {
@@ -371,19 +395,20 @@ fn reorder_layer(layer, edges, ordered_nodes, use_predecessors) {
   }
 }
 
-fn reduce_crossings_once(layers, edges) {
+fn reduce_crossings_once(layers, edges, clusters) {
   let ordered0 = all_layer_nodes(layers);
   let down = [for (layer in layers)
-    if (layer.rank == 0) layer else reorder_layer(layer, edges, ordered0, true)];
+    if (layer.rank == 0) layer else reorder_layer(layer, edges, ordered0, true, clusters)];
   let ordered1 = all_layer_nodes(down);
   let result = [for (layer in down)
-    if (layer.rank == 0) layer else reorder_layer(layer, edges, ordered1, false)];
+    if (layer.rank == 0) layer else reorder_layer(layer, edges, ordered1, false, clusters)];
   result
 }
 
-fn reduce_crossings(layers, edges, max_iterations) {
+fn reduce_crossings(layers, edges, max_iterations, clusters) {
   if (max_iterations <= 0 or len(layers) < 2) layers
-  else reduce_crossings(reduce_crossings_once(layers, edges), edges, max_iterations - 1)
+  else reduce_crossings(reduce_crossings_once(layers, edges, clusters), edges,
+    max_iterations - 1, clusters)
 }
 
 fn ordering_mode(node, fallback) =>
@@ -752,8 +777,10 @@ fn find_port(node, port_id) {
 fn port_point(node, port, target_x, target_y) {
   let side = normalized_port_side(port.side, node, target_x, target_y);
   // Direct layout callers omit metadata defaults that semantic HTML materializes.
-  let offset = min([1.0, max([0.0,
-    float(if (port.offset != null) port.offset else 0.5)])]);
+  let measured = if (contains(["north", "south"], side)) port.x_offset
+    else port.y_offset;
+  let offset = min([1.0, max([0.0, float(if (measured != null) measured
+    else if (port.offset != null) port.offset else 0.5)])]);
   let left = node.x - node.width / 2.0;
   let top = node.y - node.height / 2.0;
   let point = if (side == "north") {x: left + node.width * offset, y: top}
@@ -763,13 +790,11 @@ fn port_point(node, port, target_x, target_y) {
   point
 }
 
-fn clip_node(node, target_x, target_y, port_id = null) {
-  let port = find_port(node, port_id);
+fn clip_shape(node, target_x, target_y) {
   let half_w = node.width / 2.0;
   let half_h = node.height / 2.0;
   let vertices = shape_vertices(node);
-  if (port != null) port_point(node, port, target_x, target_y)
-  else if (contains(["circle", "doublecircle", "ellipse", "f-circ", "stadium",
+  if (contains(["circle", "doublecircle", "ellipse", "f-circ", "stadium",
       "cloud", "delay", "h-cyl", "curv-trap"], node.shape))
     clip_ellipse(node.x, node.y, target_x, target_y, half_w, half_h)
   else if (node.shape == "diamond")
@@ -777,6 +802,27 @@ fn clip_node(node, target_x, target_y, port_id = null) {
   else if (len(vertices) > 0)
     clip_polygon(node.x, node.y, target_x, target_y, vertices)
   else clip_rect(node.x, node.y, target_x, target_y, half_w, half_h)
+}
+
+fn compass_point(node, compass, target_x, target_y) {
+  let value = lower(string(compass));
+  if (value == "c") { {x: node.x, y: node.y} }
+  else if (value == "_") clip_shape(node, target_x, target_y)
+  else {
+    let dx = if (contains(["ne", "e", "se"], value)) 1.0
+      else if (contains(["nw", "w", "sw"], value)) -1.0 else 0.0;
+    let dy = if (contains(["sw", "s", "se"], value)) 1.0
+      else if (contains(["nw", "n", "ne"], value)) -1.0 else 0.0;
+    clip_shape(node, node.x + dx * node.width, node.y + dy * node.height)
+  }
+}
+
+fn clip_node(node, target_x, target_y, port_id = null, compass = null) {
+  let port = find_port(node, port_id);
+  if (port != null) port_point(node, port, target_x, target_y)
+  else if (compass != null and compass != "")
+    compass_point(node, compass, target_x, target_y)
+  else clip_shape(node, target_x, target_y)
 }
 
 fn points_close(a, b) => abs(a.x - b.x) < 0.001 and abs(a.y - b.y) < 0.001
@@ -950,19 +996,22 @@ fn lane_waypoint(start, finish, offset, vertical_first) {
   point
 }
 
-fn self_loop_points(node, edge_sep, sibling_index, from_port = null, to_port = null) {
+fn self_loop_points(node, edge_sep, sibling_index, from_port = null, to_port = null,
+    from_compass = null, to_compass = null) {
   let half_w = node.width / 2.0;
   let half_h = node.height / 2.0;
   let spread = max([10.0, half_h / 2.0]);
   // sibling rank keeps loop geometry independent of unrelated edge source order.
   let loop_gap = max([20.0, edge_sep * float(sibling_index + 2)]);
   // Named loop ports are authoritative; unported loops retain the historical anchors.
-  let start = if (from_port == null)
+  let start = if (from_port == null and from_compass == null)
     {x: node.x + half_w, y: node.y - spread}
-    else clip_node(node, node.x + half_w + loop_gap, node.y - spread, from_port);
-  let finish = if (to_port == null)
+    else clip_node(node, node.x + half_w + loop_gap, node.y - spread,
+      from_port, from_compass);
+  let finish = if (to_port == null and to_compass == null)
     {x: node.x + half_w, y: node.y + spread}
-    else clip_node(node, node.x + half_w + loop_gap, node.y + spread, to_port);
+    else clip_node(node, node.x + half_w + loop_gap, node.y + spread,
+      to_port, to_compass);
   simplify_route([
     start,
     {x: node.x + half_w + loop_gap, y: start.y},
@@ -986,12 +1035,12 @@ fn parallel_info(edge, edges) {
 }
 
 fn parallel_route_points(from_node, to_node, offset, vertical_first,
-    from_port = null, to_port = null) {
+    from_port = null, to_port = null, from_compass = null, to_compass = null) {
   // Lane reconstruction must retain authored ports instead of reverting to shape clipping.
   if (vertical_first) {
     let lane_x = (from_node.x + to_node.x) / 2.0 + offset;
-    let start = clip_node(from_node, lane_x, to_node.y, from_port);
-    let finish = clip_node(to_node, lane_x, from_node.y, to_port);
+    let start = clip_node(from_node, lane_x, to_node.y, from_port, from_compass);
+    let finish = clip_node(to_node, lane_x, from_node.y, to_port, to_compass);
     simplify_route([
       start,
       {x: lane_x, y: start.y},
@@ -1000,8 +1049,8 @@ fn parallel_route_points(from_node, to_node, offset, vertical_first,
     ])
   } else {
     let lane_y = (from_node.y + to_node.y) / 2.0 + offset;
-    let start = clip_node(from_node, to_node.x, lane_y, from_port);
-    let finish = clip_node(to_node, from_node.x, lane_y, to_port);
+    let start = clip_node(from_node, to_node.x, lane_y, from_port, from_compass);
+    let finish = clip_node(to_node, from_node.x, lane_y, to_port, to_compass);
     simplify_route([
       start,
       {x: start.x, y: lane_y},
@@ -1035,10 +1084,10 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
     // Explicit compound endpoints clip to cluster bounds, not the enclosed node bounds.
     let start = if (explicit_tail != null)
       cluster_boundary(explicit_tail, from_node.x, from_node.y, to_node.x, to_node.y)
-      else clip_node(from_node, to_node.x, to_node.y, edge.from_port);
+      else clip_node(from_node, to_node.x, to_node.y, edge.from_port, edge.from_compass);
     let finish = if (explicit_head != null)
       cluster_boundary(explicit_head, to_node.x, to_node.y, from_node.x, from_node.y)
-      else clip_node(to_node, from_node.x, from_node.y, edge.to_port);
+      else clip_node(to_node, from_node.x, from_node.y, edge.to_port, edge.to_compass);
     let vertical_first = not (opts.direction == "LR" or opts.direction == "RL");
     let parallel = parallel_info(edge, edges);
     let lane_offset = (float(parallel.index) - float(parallel.count - 1) / 2.0) * opts.edge_sep;
@@ -1060,7 +1109,7 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
     let base_points = if (opts.route_mode == "none") []
       else if (edge.from == edge.to)
       self_loop_points(from_node, opts.edge_sep, parallel.index,
-        edge.from_port, edge.to_port)
+        edge.from_port, edge.to_port, edge.from_compass, edge.to_compass)
       else if (opts.route_mode == "line") [start, finish]
       else if (has_compound)
         if (opts.route_mode == "orthogonal")
@@ -1068,7 +1117,7 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
         else simplify_route(compound_points)
       else if (parallel.count > 1)
         parallel_route_points(from_node, to_node, lane_offset, vertical_first,
-          edge.from_port, edge.to_port)
+          edge.from_port, edge.to_port, edge.from_compass, edge.to_compass)
       else if (opts.route_mode == "orthogonal")
         orthogonal_points([start, finish], vertical_first)
       else [start, finish];
@@ -1078,6 +1127,8 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       to: edge.to,
       from_port: edge.from_port,
       to_port: edge.to_port,
+      from_compass: edge.from_compass,
+      to_compass: edge.to_compass,
       tail_cluster: edge.tail_cluster,
       head_cluster: edge.head_cluster,
       points: if (edge.from == edge.to or opts.route_mode == "line" or
@@ -1144,9 +1195,11 @@ fn normalize_graph_geometry(nodes, edges, clusters) {
 
 pub fn layout(input, opts = null) {
   let graph = normalize_graph(input, opts);
-  let ranked = assign_ranks(graph.nodes, graph.edges, graph.constraints);
-  let layers0 = create_layers(ranked);
-  let crossed = reduce_crossings(layers0, graph.edges, graph.options.max_iterations);
+  let ranked = assign_ranks(graph.nodes, graph.edges, graph.constraints,
+    graph.options.new_rank);
+  let layers0 = create_layers(ranked, graph.clusters);
+  let crossed = reduce_crossings(layers0, graph.edges, graph.options.max_iterations,
+    graph.clusters);
   // Crossing reduction may reverse Graphviz's authored in/out edge sequence.
   let layers = enforce_ordering(crossed, ranked, graph.edges, graph.options.ordering);
   let canonical_nodes = position_nodes(layers, graph.options, graph.clusters);

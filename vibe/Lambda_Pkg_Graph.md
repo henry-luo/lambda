@@ -2099,8 +2099,8 @@ Lambda normalization size is tracked separately from native parser LOC:
 | Stage 3B module | Physical LOC |
 |---|---:|
 | `graphviz/attributes.ls` | 223 |
-| `graphviz/normalize.ls` | 622 |
-| total | 845 |
+| `graphviz/normalize.ls` | 647 |
+| total | 870 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
@@ -2228,10 +2228,35 @@ route endpoint and clips to that cluster's border; outer nested boundaries
 remain in the route. Unknown cluster references produce
 `graph.graphviz.unresolved-compound-cluster`.
 
-- implement the rank-policy difference for `newrank` and strengthen authored
-  group alignment inside nested structural clusters;
-- validate `lhead`/`ltail` endpoint membership and finish compass/table-port
-  attachment fidelity;
+Compound validation now follows nested cluster ownership and reports
+`graph.graphviz.compound-endpoint-outside-cluster` when an `lhead` target or
+`ltail` source is outside the named cluster. DOT's ambiguous one-token endpoint
+suffix is resolved only after record and HTML content have generated their
+actual ports: a matching name remains a port, otherwise
+`n|ne|e|se|s|sw|w|nw|c|_` becomes a compass point. Compass attachment is
+retained through canonical IR, semantic HTML, Velmt adaptation,
+parallel/self-loop routing, generated SVG, and Graph Scene Mark.
+`records_ports.ls` covers named-port precedence and north and diagonal compass
+geometry; `ordering_groups.ls` covers nested valid membership, unknown
+clusters, and outside-cluster diagnostics.
+
+The ranker now distinguishes Graphviz's recursive default from `newrank=true`.
+The default excludes rank sets whose members span structural clusters, while
+`newrank=true` applies those sets in the single global rank space. Crossing
+reduction groups nodes by their complete outer-to-inner cluster ancestry and
+then by authored DOT `group`, keeping nested clusters and inner alignment groups
+contiguous without conflating the two concepts. `ordering_groups.ls` covers the
+cross-cluster rank-policy difference and nested grouping order.
+
+Record and safe HTML-table ports now use measured Radiant cell geometry. The
+Velmt adapter walks the already-laid-out node subtree, accumulates each port
+cell's local border box, and retains normalized horizontal and vertical cell
+centers. Routing chooses the measured axis after resolving the endpoint side,
+while direct non-Radiant callers retain canonical source-order offsets as a
+fallback. Velmt descendant exposure remains lazy and bounded, with enough depth
+for nested table wrappers. `records_ports.ls` covers the pure adapter and
+`render.ls` verifies the retained Radiant render path.
+
 - place all labels and annotations without incoherent overlap;
 - compare Graph Scene semantics and tolerant geometry against pinned Graphviz
   JSON references.

@@ -159,6 +159,19 @@ struct MirTranspiler {
     // by the runtime as a thread-local stack so generated code never carries a
     // long-lived root-frame pointer register across calls.
     int jit_root_next;
+    MIR_reg_t side_root_frame_base;
+    MIR_reg_t side_root_runtime;
+    MIR_label_t side_root_anchor;
+    MIR_type_t side_root_return_type;
+    MIR_label_t function_return_label;
+    MIR_reg_t function_return_reg;
+    MIR_reg_t function_return_second_reg;
+    MIR_type_t function_return_mir_type;
+    int function_return_lane_kind;
+    bool function_return_active;
+    MIR_reg_t side_number_frame_base;
+    int side_number_frame_slots;
+    bool side_number_frame_active;
 
     // Consts pointer register
     MIR_reg_t consts_reg;
@@ -482,23 +495,46 @@ static MIR_reg_t emit_call_0(MirTranspiler* mt, const char* fn_name,
 static MIR_reg_t emit_call_2(MirTranspiler* mt, const char* fn_name,
     MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
     MIR_type_t a2t, MIR_op_t a2);
+static MIR_reg_t emit_call_3(MirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3);
 static void emit_call_void_1(MirTranspiler* mt, const char* fn_name,
     MIR_type_t arg1_type, MIR_op_t arg1);
-static void emit_call_void_0(MirTranspiler* mt, const char* fn_name);
 static void emit_call_void_2(MirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2);
 static void emit_call_void_3(MirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
     MIR_type_t a3t, MIR_op_t a3);
+static void emit_call_void_4(MirTranspiler* mt, const char* fn_name,
+    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
+    MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4);
 static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id);
 static void async_store_var(MirTranspiler* mt, MirVarEntry* var);
 static void transpile_task_scope_unwind(MirTranspiler* mt, bool error_exit);
 
 static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
     if (mir_type == MIR_T_P) return true;
-    // check is_gc_root_type
-    if (type_id >= LMD_TYPE_INT64 && type_id != LMD_TYPE_FLOAT) return true;
-    return false;
+    switch (type_id) {
+    case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_SYMBOL:
+    case LMD_TYPE_STRING:
+    case LMD_TYPE_BINARY:
+    case LMD_TYPE_PATH:
+    case LMD_TYPE_RANGE:
+    case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_VMAP:
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT:
+    case LMD_TYPE_TYPE:
+    case LMD_TYPE_FUNC:
+    case LMD_TYPE_ANY:
+    case LMD_TYPE_ERROR:
+        return true;
+    default:
+        return false;
+    }
 }
 
 static MIR_reg_t emit_root_value_bits(MirTranspiler* mt, MIR_reg_t value) {
@@ -509,20 +545,313 @@ static MIR_reg_t emit_root_value_bits(MirTranspiler* mt, MIR_reg_t value) {
 }
 
 static void emit_jit_root_frame_enter(MirTranspiler* mt) {
-    emit_call_void_0(mt, "heap_jit_gc_root_frame_enter");
     mt->jit_root_next = 0;
+    mt->side_root_frame_base = new_reg(mt, "root_frame", MIR_T_I64);
+    mt->side_root_anchor = new_label(mt);
+    emit_label(mt, mt->side_root_anchor);
 }
 
 static void emit_jit_root_frame_exit(MirTranspiler* mt) {
-    emit_call_void_0(mt, "heap_jit_gc_root_frame_exit");
+    em_store_frame_top(&mt->em, mt->side_root_runtime,
+        offsetof(Context, side_root_top), mt->side_root_frame_base);
+}
+
+enum FunctionReturnLaneKind {
+    RETURN_LANE_NONE = 0,
+    RETURN_LANE_SCALAR = 1,
+    RETURN_LANE_ERROR = 2,
+};
+
+static void begin_function_epilogue(MirTranspiler* mt, MIR_type_t return_type,
+                                    int lane_kind = RETURN_LANE_NONE) {
+    mt->function_return_label = new_label(mt);
+    mt->function_return_mir_type = return_type;
+    mt->function_return_reg = new_reg(mt, "return_value", return_type);
+    mt->function_return_lane_kind = lane_kind;
+    mt->function_return_second_reg = lane_kind != RETURN_LANE_NONE
+        ? new_reg(mt, lane_kind == RETURN_LANE_ERROR ? "return_error" : "return_scalar",
+                  MIR_T_I64)
+        : 0;
+    mt->function_return_active = true;
+}
+
+static void emit_function_return(MirTranspiler* mt, MIR_op_t value) {
+    MIR_insn_code_t move = mt->function_return_mir_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
+    emit_insn(mt, MIR_new_insn(mt->ctx, move,
+        MIR_new_reg_op(mt->ctx, mt->function_return_reg), value));
+    if (mt->function_return_lane_kind == RETURN_LANE_ERROR) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mt->function_return_second_reg),
+            MIR_new_int_op(mt->ctx, 0)));
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, mt->function_return_label)));
+}
+
+static void emit_function_error_return(MirTranspiler* mt, MIR_reg_t error_item) {
+    if (mt->function_return_lane_kind != RETURN_LANE_ERROR) {
+        emit_function_return(mt, MIR_new_reg_op(mt->ctx, error_item));
+        return;
+    }
+    MIR_insn_code_t move = mt->function_return_mir_type == MIR_T_D ? MIR_DMOV : MIR_MOV;
+    MIR_op_t zero = mt->function_return_mir_type == MIR_T_D
+        ? MIR_new_double_op(mt->ctx, 0.0) : MIR_new_int_op(mt->ctx, 0);
+    emit_insn(mt, MIR_new_insn(mt->ctx, move,
+        MIR_new_reg_op(mt->ctx, mt->function_return_reg), zero));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, mt->function_return_second_reg),
+        MIR_new_reg_op(mt->ctx, error_item)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+        MIR_new_label_op(mt->ctx, mt->function_return_label)));
+}
+
+static void emit_number_frame_enter(MirTranspiler* mt) {
+    mt->side_number_frame_base = em_load_frame_top(&mt->em,
+        mt->side_root_runtime, offsetof(Context, side_number_top),
+        "number_frame");
+    mt->side_number_frame_slots = mt->function_return_lane_kind == RETURN_LANE_NONE ? 0 : 1;
+    if (mt->side_number_frame_slots > 0) {
+        MIR_reg_t new_top = new_reg(mt, "number_top", MIR_T_I64);
+        MIR_reg_t limit = new_reg(mt, "number_limit", MIR_T_I64);
+        MIR_reg_t overflow = new_reg(mt, "number_overflow", MIR_T_I64);
+        MIR_label_t ready = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+            MIR_new_reg_op(mt->ctx, new_top),
+            MIR_new_reg_op(mt->ctx, mt->side_number_frame_base),
+            MIR_new_int_op(mt->ctx, (int64_t)mt->side_number_frame_slots *
+                (int64_t)sizeof(uint64_t))));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, limit),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_number_limit),
+                mt->side_root_runtime, 0, 1)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_UGT,
+            MIR_new_reg_op(mt->ctx, overflow), MIR_new_reg_op(mt->ctx, new_top),
+            MIR_new_reg_op(mt->ctx, limit)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, ready), MIR_new_reg_op(mt->ctx, overflow)));
+        emit_call_void_1(mt, "lambda_stack_overflow_error",
+            MIR_T_P, MIR_new_int_op(mt->ctx,
+                (int64_t)(uintptr_t)"number-side-stack"));
+        if (mt->function_return_lane_kind == RETURN_LANE_ERROR) {
+            MIR_reg_t error_item = new_reg(mt, "number_overflow_error", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, error_item),
+                MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
+            emit_function_error_return(mt, error_item);
+        } else {
+            emit_function_return(mt, MIR_new_uint_op(mt->ctx, ITEM_ERROR));
+        }
+        emit_label(mt, ready);
+#if defined(_WIN32)
+        MIR_reg_t committed = emit_call_3(mt, "lambda_side_stack_ensure",
+            MIR_T_I64,
+            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->side_root_runtime),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, mt->side_number_frame_slots));
+        MIR_label_t commit_ready = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, commit_ready),
+            MIR_new_reg_op(mt->ctx, committed)));
+        emit_call_void_1(mt, "lambda_stack_overflow_error",
+            MIR_T_P, MIR_new_int_op(mt->ctx,
+                (int64_t)(uintptr_t)"number-side-stack-commit"));
+        if (mt->function_return_lane_kind == RETURN_LANE_ERROR) {
+            MIR_reg_t error_item = new_reg(mt, "number_commit_error", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, error_item),
+                MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
+            emit_function_error_return(mt, error_item);
+        } else {
+            emit_function_return(mt, MIR_new_uint_op(mt->ctx, ITEM_ERROR));
+        }
+        emit_label(mt, commit_ready);
+#endif
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_number_top),
+                mt->side_root_runtime, 0, 1),
+            MIR_new_reg_op(mt->ctx, new_top)));
+    }
+    mt->side_number_frame_active = true;
+}
+
+static void emit_number_frame_exit(MirTranspiler* mt) {
+    if (!mt->side_number_frame_active) return;
+    em_store_frame_top(&mt->em, mt->side_root_runtime,
+        offsetof(Context, side_number_top), mt->side_number_frame_base);
+}
+
+static void finish_function_epilogue(MirTranspiler* mt) {
+    emit_label(mt, mt->function_return_label);
+    if (mt->function_return_lane_kind == RETURN_LANE_SCALAR) {
+        MIR_reg_t scalar = emit_call_1(mt, "lambda_item_scalar_lane", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->function_return_reg));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mt->function_return_second_reg),
+            MIR_new_reg_op(mt->ctx, scalar)));
+    }
+    if (mt->function_return_lane_kind != RETURN_LANE_NONE) {
+        MIR_insn_code_t first_store = mt->function_return_mir_type == MIR_T_D
+            ? MIR_DMOV : MIR_MOV;
+        MIR_type_t first_type = mt->function_return_mir_type == MIR_T_D
+            ? MIR_T_D : MIR_T_I64;
+        // MIR's multi-result ARM64 lowering loses the first lane when a nested
+        // call feeds it. Keep the primary result in the frame's reserved raw
+        // scratch slot until cleanup, and publish the secondary lane through
+        // the per-context handoff cell after cleanup.
+        emit_insn(mt, MIR_new_insn(mt->ctx, first_store,
+            MIR_new_mem_op(mt->ctx, first_type, 0,
+                mt->side_number_frame_base, 0, 1),
+            MIR_new_reg_op(mt->ctx, mt->function_return_reg)));
+    }
+    // Cleanup is emitted before each branch here; restoring the root watermark
+    // last keeps the in-flight return value live across cleanup calls that may collect.
+    if (mt->jit_root_next > 0) emit_jit_root_frame_exit(mt);
+    // The scalar/error lane is register-resident before the number watermark is
+    // restored, so no returned Item can point into the dead callee extent.
+    emit_number_frame_exit(mt);
+    if (mt->function_return_lane_kind != RETURN_LANE_NONE) {
+        MIR_reg_t first = new_reg(mt, "return_first_final", mt->function_return_mir_type);
+        MIR_insn_code_t first_load = mt->function_return_mir_type == MIR_T_D
+            ? MIR_DMOV : MIR_MOV;
+        MIR_type_t first_type = mt->function_return_mir_type == MIR_T_D
+            ? MIR_T_D : MIR_T_I64;
+        emit_insn(mt, MIR_new_insn(mt->ctx, first_load,
+            MIR_new_reg_op(mt->ctx, first),
+            MIR_new_mem_op(mt->ctx, first_type, 0,
+                mt->side_number_frame_base, 0, 1)));
+        em_store_frame_top(&mt->em, mt->side_root_runtime,
+            offsetof(Context, mir_return_lane),
+            mt->function_return_second_reg);
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
+            MIR_new_reg_op(mt->ctx, first)));
+    } else {
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
+            MIR_new_reg_op(mt->ctx, mt->function_return_reg)));
+    }
+    mt->function_return_active = false;
+    mt->side_number_frame_slots = 0;
+    mt->side_number_frame_active = false;
+}
+
+static void finalize_side_root_frame(MirTranspiler* mt) {
+    if (mt->jit_root_next == 0) return;
+    MIR_reg_t new_top = new_reg(mt, "root_top", MIR_T_I64);
+    MIR_reg_t limit = new_reg(mt, "root_limit", MIR_T_I64);
+    MIR_reg_t overflow = new_reg(mt, "root_overflow", MIR_T_I64);
+    MIR_label_t overflow_label = new_label(mt);
+
+    MIR_insn_t load_base = MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, mt->side_root_frame_base),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_top),
+            mt->side_root_runtime, 0, 1));
+    MIR_insn_t add_top = MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, new_top),
+        MIR_new_reg_op(mt->ctx, mt->side_root_frame_base),
+        MIR_new_int_op(mt->ctx, (int64_t)mt->jit_root_next * (int64_t)sizeof(uint64_t)));
+    MIR_insn_t load_limit = MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, limit),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_limit),
+            mt->side_root_runtime, 0, 1));
+    MIR_insn_t compare = MIR_new_insn(mt->ctx, MIR_UGT,
+        MIR_new_reg_op(mt->ctx, overflow), MIR_new_reg_op(mt->ctx, new_top),
+        MIR_new_reg_op(mt->ctx, limit));
+    MIR_insn_t branch = MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, overflow_label),
+        MIR_new_reg_op(mt->ctx, overflow));
+    MIR_insn_t store_top = MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_top),
+            mt->side_root_runtime, 0, 1), MIR_new_reg_op(mt->ctx, new_top));
+
+    // Slot count is known only after lowering. Insert the complete checked
+    // prologue at the anchor so every root store remains a single memory write.
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor, load_base);
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor, add_top);
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor, load_limit);
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor, compare);
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor, branch);
+#if defined(_WIN32)
+    MIR_reg_t commit_limit = em_new_reg(&mt->em, "root_commit_limit", MIR_T_I64);
+    MIR_reg_t needs_commit = em_new_reg(&mt->em, "root_needs_commit", MIR_T_I64);
+    MIR_reg_t committed = em_new_reg(&mt->em, "root_committed", MIR_T_I64);
+    MIR_label_t commit_ready = MIR_new_label(mt->ctx);
+    MIR_var_t ensure_args[3] = {
+        {MIR_T_P, "context", 0}, {MIR_T_I64, "root_slots", 0},
+        {MIR_T_I64, "number_slots", 0}
+    };
+    MirImportEntry* ensure_import = em_ensure_import(&mt->em,
+        "lambda_side_stack_ensure", MIR_T_I64, 3, ensure_args, 1, false);
+    MIR_insn_t load_commit_limit = MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, commit_limit),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            offsetof(Context, side_root_commit_limit),
+            mt->side_root_runtime, 0, 1));
+    MIR_insn_t compare_commit = MIR_new_insn(mt->ctx, MIR_UGT,
+        MIR_new_reg_op(mt->ctx, needs_commit), MIR_new_reg_op(mt->ctx, new_top),
+        MIR_new_reg_op(mt->ctx, commit_limit));
+    MIR_insn_t skip_commit = MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, commit_ready),
+        MIR_new_reg_op(mt->ctx, needs_commit));
+    MIR_insn_t ensure_call = MIR_new_call_insn(mt->ctx, 6,
+        MIR_new_ref_op(mt->ctx, ensure_import->proto),
+        MIR_new_ref_op(mt->ctx, ensure_import->import),
+        MIR_new_reg_op(mt->ctx, committed),
+        MIR_new_reg_op(mt->ctx, mt->side_root_runtime),
+        MIR_new_int_op(mt->ctx, mt->jit_root_next),
+        MIR_new_int_op(mt->ctx, 0));
+    MIR_insn_t commit_failed = MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, overflow_label),
+        MIR_new_reg_op(mt->ctx, committed));
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor,
+        load_commit_limit);
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor,
+        compare_commit);
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor,
+        skip_commit);
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor,
+        ensure_call);
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor,
+        commit_failed);
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor,
+        commit_ready);
+#endif
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor, store_top);
+
+    emit_label(mt, overflow_label);
+    emit_call_void_1(mt, "lambda_stack_overflow_error",
+        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)"side-stack"));
+    if (mt->function_return_lane_kind != RETURN_LANE_NONE) {
+        MIR_op_t first = mt->side_root_return_type == MIR_T_D
+            ? MIR_new_double_op(mt->ctx, 0.0)
+            : MIR_new_uint_op(mt->ctx, ITEM_ERROR);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, mir_return_lane),
+                mt->side_root_runtime, 0, 1),
+            mt->function_return_lane_kind == RETURN_LANE_ERROR
+                ? MIR_new_uint_op(mt->ctx, ITEM_ERROR)
+                : MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, first));
+    } else if (mt->side_root_return_type == MIR_T_D) {
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
+            MIR_new_double_op(mt->ctx, 0.0)));
+    } else {
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
+            MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
+    }
+}
+
+static void log_frame_slot_counts(const char* function_name, int root_slots,
+                                  int number_slots) {
+    const char* enabled = getenv("LAMBDA_MIR_LOG_FRAME_SLOTS");
+    if (!enabled || !enabled[0] || strcmp(enabled, "0") == 0) return;
+    log_info("mir-frame-slots: function=%s roots=%d numbers=%d",
+             function_name ? function_name : "<anonymous>", root_slots,
+             number_slots);
 }
 
 static void store_gc_root_slot(MirTranspiler* mt, int root_slot, MIR_reg_t value) {
     if (root_slot < 0) return;
     MIR_reg_t bits = emit_root_value_bits(mt, value);
-    emit_call_void_2(mt, "heap_jit_gc_root_frame_set",
-        MIR_T_I64, MIR_new_int_op(mt->ctx, root_slot),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, bits));
+    em_store_frame_slot(&mt->em, mt->side_root_frame_base, root_slot, bits);
 }
 
 static int create_gc_root_slot(MirTranspiler* mt, MIR_reg_t value) {
@@ -542,13 +871,21 @@ static MIR_reg_t load_gc_root_slot(MirTranspiler* mt, int root_slot, const char*
             MIR_new_int_op(mt->ctx, 0)));
         return zero;
     }
-    return emit_call_1(mt, "heap_jit_gc_root_frame_get", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, root_slot));
+    MIR_reg_t value = new_reg(mt, prefix, MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, value),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            (MIR_disp_t)root_slot * (MIR_disp_t)sizeof(uint64_t),
+            mt->side_root_frame_base, 0, 1)));
+    return value;
 }
 
 static void update_gc_root_slot(MirTranspiler* mt, MirVarEntry* var) {
     if (!var) return;
     async_store_var(mt, var);
+    // The async frame's registered Item range owns suspended locals; a second
+    // side-root slot would duplicate the same liveness edge on every write.
+    if (var->async_slot >= 0) return;
     if (var->root_slot < 0 && !should_gc_root_var(var->mir_type, var->type_id)) return;
     if (var->root_slot < 0) {
         var->root_slot = create_gc_root_slot(mt, var->reg);
@@ -588,9 +925,6 @@ static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type
     entry.var.reg = reg;
     entry.var.root_slot = -1;
     entry.var.async_slot = -1;
-    if (should_gc_root_var(mir_type, type_id)) {
-        entry.var.root_slot = create_gc_root_slot(mt, reg);
-    }
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
     entry.var.elem_type = LMD_TYPE_ANY;
@@ -598,6 +932,9 @@ static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type
     entry.var.env_offset = -1;  // not a captured variable by default
     entry.var.is_state_var = false;
     if (mt->in_async_proc) entry.var.async_slot = mt->async_next_slot++;
+    if (entry.var.async_slot < 0 && should_gc_root_var(mir_type, type_id)) {
+        entry.var.root_slot = create_gc_root_slot(mt, reg);
+    }
     async_store_var(mt, &entry.var);
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
@@ -612,9 +949,6 @@ static void set_state_var(MirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.reg = reg;
     entry.var.root_slot = -1;
     entry.var.async_slot = -1;
-    if (should_gc_root_var(mir_type, type_id)) {
-        entry.var.root_slot = create_gc_root_slot(mt, reg);
-    }
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
     entry.var.elem_type = LMD_TYPE_ANY;
@@ -623,6 +957,9 @@ static void set_state_var(MirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.is_state_var = true;
     entry.var.state_name_ptr = interned_name_ptr;
     if (mt->in_async_proc) entry.var.async_slot = mt->async_next_slot++;
+    if (entry.var.async_slot < 0 && should_gc_root_var(mir_type, type_id)) {
+        entry.var.root_slot = create_gc_root_slot(mt, reg);
+    }
     async_store_var(mt, &entry.var);
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
@@ -936,11 +1273,6 @@ static MIR_reg_t emit_call_8(MirTranspiler* mt, const char* fn_name,
     return emit_call_with_args(mt, fn_name, ret_type, 8, types, ops);
 }
 
-// Call with no return value
-static void emit_call_void_0(MirTranspiler* mt, const char* fn_name) {
-    emit_call_void_with_args(mt, fn_name, 0, NULL, NULL);
-}
-
 static void emit_call_void_1(MirTranspiler* mt, const char* fn_name,
     MIR_type_t arg1_type, MIR_op_t arg1) {
     MIR_type_t types[1] = {arg1_type};
@@ -961,6 +1293,14 @@ static void emit_call_void_3(MirTranspiler* mt, const char* fn_name,
     MIR_type_t types[3] = {a1t, a2t, a3t};
     MIR_op_t ops[3] = {a1, a2, a3};
     emit_call_void_with_args(mt, fn_name, 3, types, ops);
+}
+
+static void emit_call_void_4(MirTranspiler* mt, const char* fn_name,
+    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
+    MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4) {
+    MIR_type_t types[4] = {a1t, a2t, a3t, a4t};
+    MIR_op_t ops[4] = {a1, a2, a3, a4};
+    emit_call_void_with_args(mt, fn_name, 4, types, ops);
 }
 
 // ============================================================================
@@ -1066,8 +1406,7 @@ static void emit_return_item_error_if_zero(MirTranspiler* mt, MIR_reg_t ptr_reg)
     MIR_reg_t err = new_reg(mt, "coerce_err", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, err),
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
-    emit_jit_root_frame_exit(mt);
-    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, err)));
+    emit_function_error_return(mt, err);
     emit_label(mt, l_ok);
 }
 
@@ -1081,8 +1420,7 @@ static void emit_return_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_ok),
         MIR_new_reg_op(mt->ctx, is_error)));
     transpile_task_scope_unwind(mt, true);
-    emit_jit_root_frame_exit(mt);
-    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, item_reg)));
+    emit_function_error_return(mt, item_reg);
     emit_label(mt, l_ok);
 }
 
@@ -1159,26 +1497,25 @@ static MIR_reg_t emit_box_float(MirTranspiler* mt, MIR_reg_t val_reg) {
     return result;
 }
 
-// Load a C string literal pointer into a register
-// Uses the raw host pointer since name pool strings persist for program lifetime
+// Load a C string literal pointer into a register.
 static MIR_reg_t emit_load_string_literal(MirTranspiler* mt, const char* str) {
+    // Generated code outlives temporary StrBuf and stack storage used while lowering.
+    // Intern every literal so the embedded host pointer remains valid for the module lifetime.
+    const char* stable = name_pool_create_len(mt->name_pool, str, strlen(str))->chars;
     MIR_reg_t r = new_reg(mt, "strp", MIR_T_P);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)str)));
+        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)stable)));
     return r;
 }
 
-// Box int64 -> Item via push_l runtime call
-// Note: push_l takes int64_t by value, which maps correctly to MIR_T_I64
+// Box int64 -> Item through the full-domain number-stack API.
 static MIR_reg_t emit_box_int64(MirTranspiler* mt, MIR_reg_t val_reg) {
-    // Use push_l_safe to handle both raw int64 and already-boxed INT64 Items.
-    // This prevents double-boxing when the value comes from a runtime function
-    // return (boxed Item) vs a native computation (raw int64).
-    return emit_call_1(mt, "push_l_safe", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+    return emit_call_1(mt, "box_int64_value_safe", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
 }
 
 // Box DateTime* pointer -> Item (inline k2it)
-// val_reg is a POINTER to DateTime (on num_stack or consts), not the DateTime value itself.
+// val_reg is a POINTER to DateTime (on the number side stack or consts), not the value itself.
 // Use inline OR tagging: result = DTIME_TAG | ptr
 static MIR_reg_t emit_box_dtime(MirTranspiler* mt, MIR_reg_t val_reg) {
     MIR_reg_t result = new_reg(mt, "boxk", MIR_T_I64);
@@ -1200,7 +1537,7 @@ static MIR_reg_t emit_box_dtime(MirTranspiler* mt, MIR_reg_t val_reg) {
 
 // Box raw DateTime VALUE -> Item via push_k
 // val_reg is the raw DateTime uint64_t value (NOT a pointer).
-// push_k allocates on num_stack and returns a properly tagged Item.
+// push_k allocates on the number side stack and returns a properly tagged Item.
 static MIR_reg_t emit_box_dtime_value(MirTranspiler* mt, MIR_reg_t val_reg) {
     return emit_call_1(mt, "push_k", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
 }
@@ -1493,6 +1830,21 @@ static void async_complete_frame(MirTranspiler* mt) {
         MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
 }
 
+static void finalize_async_frame_enter(MirTranspiler* mt) {
+    if (!mt || !mt->in_async_proc || !mt->async_frame_reg) return;
+    MIR_var_t arg = {MIR_T_I64, "slots", 0};
+    MirImportEntry* imported = ensure_import(mt, "lambda_async_frame_enter_current",
+        MIR_T_P, 1, &arg, 1);
+    MIR_insn_t enter = MIR_new_call_insn(mt->ctx, 4,
+        MIR_new_ref_op(mt->ctx, imported->proto),
+        MIR_new_ref_op(mt->ctx, imported->import),
+        MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
+        MIR_new_int_op(mt->ctx, mt->async_next_slot));
+    // async_next_slot is final only after lowering. Insert the exact-size frame
+    // allocation into the prologue once every named local and temporary is known.
+    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor, enter);
+}
+
 static void async_save_spills(MirTranspiler* mt, int count) {
     if (!mt || !mt->in_async_proc || !mt->async_frame_reg) return;
     if (count > mt->async_spill_count) count = mt->async_spill_count;
@@ -1501,8 +1853,12 @@ static void async_save_spills(MirTranspiler* mt, int count) {
     for (int i = 0; i < count; i++) {
         AsyncRegSpill* spill = &mt->async_spills[i];
         MIR_reg_t bits = spill->reg;
-        if (spill->mir_type == MIR_T_D) bits = emit_box_float(mt, spill->reg);
-        emit_call_void_3(mt, "lambda_async_frame_set",
+        const char* setter = "lambda_async_frame_set_raw";
+        if (spill->mir_type == MIR_T_D) {
+            bits = emit_box_float(mt, spill->reg);
+            setter = "lambda_async_frame_set";
+        }
+        emit_call_void_3(mt, setter,
             MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
             MIR_T_I64, MIR_new_int_op(mt->ctx, spill->slot),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, bits));
@@ -1517,7 +1873,9 @@ static void async_restore_spills(MirTranspiler* mt, int count) {
     mt->async_tracking_suppressed = true;
     for (int i = 0; i < count; i++) {
         AsyncRegSpill* spill = &mt->async_spills[i];
-        MIR_reg_t saved = emit_call_2(mt, "lambda_async_frame_get", MIR_T_I64,
+        const char* getter = spill->mir_type == MIR_T_D
+            ? "lambda_async_frame_get" : "lambda_async_frame_get_raw";
+        MIR_reg_t saved = emit_call_2(mt, getter, MIR_T_I64,
             MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
             MIR_T_I64, MIR_new_int_op(mt->ctx, spill->slot));
         MIR_reg_t value = spill->mir_type == MIR_T_D
@@ -1545,9 +1903,7 @@ static void async_emit_suspended_return(
         MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
         MIR_T_I64, MIR_new_int_op(mt->ctx, state));
     log_debug("concurrency MIR: emitted park/resume state %d", state);
-    emit_jit_root_frame_exit(mt);
-    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
-        MIR_new_uint_op(mt->ctx, ITEM_TASK_SUSPENDED)));
+    emit_function_return(mt, MIR_new_uint_op(mt->ctx, ITEM_TASK_SUSPENDED));
     emit_label(mt, ready);
 }
 
@@ -1949,6 +2305,7 @@ static bool static_const_array_from_node(MirTranspiler* mt, AstArrayNode* arr_no
     if (!arr) return false;
     arr->type_id = LMD_TYPE_ARRAY;
     arr->is_static = 1;
+    arr->is_immortal = 1;
     arr->length = count;
     arr->capacity = count;
     if (count > 0) {
@@ -1972,6 +2329,7 @@ static bool static_const_map_from_node(MirTranspiler* mt, AstMapNode* map_node, 
     if (!map) return false;
     map->type_id = LMD_TYPE_MAP;
     map->is_static = 1;
+    map->is_immortal = 1;
     map->map_kind = MAP_KIND_PLAIN;
     map->type = map_type;
     map->data_cap = (int)map_type->byte_size;
@@ -2048,8 +2406,6 @@ static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index);
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node);
 static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node);
 static bool has_index_mutation(const char* var_name, AstNode* node);  // P4-3.2
-static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, bool is_proc);
-static bool has_inferred_native_params(AstFuncNode* fn_node);  // check for inferred-native params
 static bool has_generated_boxed_wrapper(AstFuncNode* fn_node);
 
 // ============================================================================
@@ -2286,7 +2642,10 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                 // Get the function name (use boxed wrapper for typed params or inferred native params)
                 // Include module index prefix to prevent name collisions across modules
                 StrBuf* fn_import_name = strbuf_new_cap(64);
-                bool use_wrapper = has_generated_boxed_wrapper(fn_node);
+                // Cross-language exports already expose the boxed host ABI;
+                // only Lambda-compiled dependencies publish generated _b symbols.
+                bool use_wrapper = !ident->entry->import->is_cross_lang &&
+                    has_generated_boxed_wrapper(fn_node);
                 if (use_wrapper) {
                     write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
                 } else {
@@ -2331,22 +2690,15 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             MIR_item_t func_item = find_local_func(mt, nm_buf->str);
             if (!func_item) func_item = find_local_func(mt, name_buf);
 
-            // Phase 4: For native functions used as first-class values, use the
-            // boxed wrapper (_b) since dynamic dispatch uses the Item ABI.
-            NativeFuncInfo* nfi_ref = find_native_func_info(mt, nm_buf->str);
-            log_debug("mir: LOCAL fn ref '%s' nfi_ref=%p has_native=%d func_item=%p",
-                nm_buf->str, (void*)nfi_ref, nfi_ref ? nfi_ref->has_native : -1, (void*)func_item);
-            if (nfi_ref && nfi_ref->has_native) {
-                StrBuf* wrapper_buf = strbuf_new_cap(64);
-                write_fn_name_ex(wrapper_buf, fn_node, ident->entry->import, "_b");
-                MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
-                if (wrapper_item) {
-                    log_debug("mir: fn ref '%s' → using boxed wrapper '%s'",
-                        nm_buf->str, wrapper_buf->str);
-                    func_item = wrapper_item;
-                }
-                strbuf_free(wrapper_buf);
+            StrBuf* wrapper_buf = strbuf_new_cap(64);
+            write_fn_name_ex(wrapper_buf, fn_node, ident->entry->import, "_b");
+            MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
+            if (wrapper_item) {
+                log_debug("mir: fn ref '%s' → using ABI wrapper '%s'",
+                    nm_buf->str, wrapper_buf->str);
+                func_item = wrapper_item;
             }
+            strbuf_free(wrapper_buf);
 
             if (func_item) {
                 // Get function address via MIR ref
@@ -2361,7 +2713,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     while (cap) { cap_count++; cap = cap->next; }
 
                     MIR_reg_t env_reg = emit_call_2(mt, "heap_calloc", MIR_T_P,
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(cap_count * 8)),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(cap_count * 16)),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
 
                     int cap_idx = 0;
@@ -2388,9 +2740,11 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                             }
                         }
 
-                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                            MIR_new_mem_op(mt->ctx, MIR_T_I64, cap_idx * 8, env_reg, 0, 1),
-                            MIR_new_reg_op(mt->ctx, cap_val)));
+                        emit_call_void_4(mt, "owned_item_slot_store",
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, env_reg),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, cap_idx),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cap_val));
 
                         cap_idx++;
                         cap = cap->next;
@@ -2545,6 +2899,29 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
     // raw native register — otherwise a match returning ints gets double-boxed.
     if (node->node_type == AST_NODE_MATCH_EXPR) return LMD_TYPE_ANY;
     TypeId tid = node->type ? node->type->type_id : LMD_TYPE_ANY;
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstCallNode* call = (AstCallNode*)node;
+        Type* target_type = call->function ? call->function->type : NULL;
+        bool can_raise = target_type && target_type->type_id == LMD_TYPE_FUNC &&
+            ((TypeFunc*)target_type)->can_raise;
+        if (!can_raise && call->function &&
+                call->function->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)call->function;
+            AstNode* target = ident->entry ? ident->entry->node : NULL;
+            if (target && (target->node_type == AST_NODE_FUNC ||
+                    target->node_type == AST_NODE_FUNC_EXPR ||
+                    target->node_type == AST_NODE_PROC) && target->type) {
+                can_raise = ((TypeFunc*)target->type)->can_raise;
+            }
+        }
+        if (can_raise) {
+            // A can-raise call must carry either its value or its error in one
+            // Item register at expression boundaries, even when its success
+            // lane is native. Reporting the declared scalar type here would
+            // make let/destructure code box the already-boxed merged result.
+            return LMD_TYPE_ANY;
+        }
+    }
     if (node->node_type == AST_NODE_ARRAY &&
         (tid == LMD_TYPE_NULL || tid == LMD_TYPE_RAW_POINTER || tid == LMD_TYPE_ANY)) {
         return LMD_TYPE_ARRAY;
@@ -7909,7 +8286,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             // Include module index prefix to disambiguate functions with same name+offset
             // across different modules (e.g. fraction.ls and style.ls both have _render_574).
             StrBuf* fn_import_name = strbuf_new_cap(64);
-            bool use_wrapper = has_generated_boxed_wrapper(fn_node);
+            // JS/Python module exports are registered under their direct boxed
+            // ABI name and never have a Lambda-generated _b companion.
+            bool use_wrapper = !ident->entry->import->is_cross_lang &&
+                has_generated_boxed_wrapper(fn_node);
             if (use_wrapper) {
                 write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
             } else {
@@ -8427,12 +8807,16 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             // P4-3.3: Return type — use native type when calling native version
             bool call_native_return = (native_call && call_nfi->return_type != LMD_TYPE_ANY);
             MIR_type_t ret_type = call_native_return ? call_nfi->return_mir : MIR_T_I64;
+            bool call_error_lane = call_native_return && call_fn_type && call_fn_type->can_raise;
+            bool call_scalar_lane = !call_native_return;
+            int call_result_count = 1;
 
             // Create proto for the call (unique name per call site)
             char proto_name[160];
             snprintf(proto_name, sizeof(proto_name), "%s_cp%d", fn_mangled, mt->em.label_counter++);
             MIR_type_t res_types[1] = { ret_type };
-            MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types, ai, arg_vars);
+            MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name,
+                call_result_count, res_types, ai, arg_vars);
 
             MIR_op_t func_op;
             if (local_func) {
@@ -8445,27 +8829,66 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             }
 
             // Build call instruction
-            int nops = 3 + ai;
-            MIR_op_t ops[19]; // 3 + max 16 args
+            int nops = 2 + call_result_count + ai;
+            MIR_op_t ops[20]; // proto + target + two results + max 16 args
             ops[0] = MIR_new_ref_op(mt->ctx, proto);
             ops[1] = func_op;
             MIR_reg_t result = new_reg(mt, "call", ret_type);
             ops[2] = MIR_new_reg_op(mt->ctx, result);
+            MIR_reg_t second_result = 0;
+            if (call_error_lane || call_scalar_lane) {
+                second_result = new_reg(mt,
+                    call_error_lane ? "call_error" : "call_scalar", MIR_T_I64);
+            }
             for (int i = 0; i < ai; i++) {
                 if (arg_root_slots[i] >= 0) {
                     MIR_reg_t live_arg = load_gc_root_slot(mt, arg_root_slots[i], "call_arg");
-                    ops[3 + i] = MIR_new_reg_op(mt->ctx, live_arg);
+                    ops[2 + call_result_count + i] = MIR_new_reg_op(mt->ctx, live_arg);
                 } else {
-                    ops[3 + i] = arg_ops[i];
+                    ops[2 + call_result_count + i] = arg_ops[i];
                 }
             }
 
             async_emit_invoke_resume_point(mt, call_node);
             emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+            if (second_result) {
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, second_result),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        offsetof(Context, mir_return_lane),
+                        mt->side_root_runtime, 0, 1)));
+            }
+
+            bool result_is_boxed = !call_native_return;
+            if (call_scalar_lane) {
+                result = emit_call_2(mt, "lambda_item_from_scalar_lane", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, second_result));
+            } else if (call_error_lane) {
+                MIR_reg_t boxed_native = emit_box(mt, result, call_nfi->return_type);
+                MIR_reg_t merged = new_reg(mt, "call_value_or_error", MIR_T_I64);
+                MIR_label_t use_error = new_label(mt);
+                MIR_label_t merged_done = new_label(mt);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, use_error),
+                    MIR_new_reg_op(mt->ctx, second_result)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, merged),
+                    MIR_new_reg_op(mt->ctx, boxed_native)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, merged_done)));
+                emit_label(mt, use_error);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, merged),
+                    MIR_new_reg_op(mt->ctx, second_result)));
+                emit_label(mt, merged_done);
+                result = merged;
+                result_is_boxed = true;
+            }
 
             // P4-3.3: Post-call type handling for return values
             TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
-            if (call_native_return) {
+            if (call_native_return && !result_is_boxed) {
                 // Native function returns native value directly
                 if (call_tid == call_nfi->return_type) {
                     // Perfect match — no conversion needed
@@ -8479,7 +8902,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 }
             } else {
                 // Standard boxed return — unbox if caller expects native type
-                if (!mt->emitting_async_call && mir_is_native_scalar_value_type(call_tid)) {
+                if (!call_error_lane && !mt->emitting_async_call &&
+                        mir_is_native_scalar_value_type(call_tid)) {
                     result = emit_unbox(mt, result, call_tid);
                 }
             }
@@ -8989,8 +9413,7 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
         // Return the error value from the function
         transpile_task_scope_unwind(mt, true);
         async_complete_frame(mt);
-        emit_jit_root_frame_exit(mt);
-        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
+        emit_function_error_return(mt, boxed);
         // Dummy register for unreachable code after return
         MIR_reg_t r = new_reg(mt, "raise_dummy", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
@@ -9003,8 +9426,7 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
     transpile_task_scope_unwind(mt, true);
     async_complete_frame(mt);
-    emit_jit_root_frame_exit(mt);
-    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, r)));
+    emit_function_error_return(mt, r);
     return r;
 }
 
@@ -9064,8 +9486,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             emit_vargs_restore();
             transpile_task_scope_unwind(mt, false);
             async_complete_frame(mt);
-            emit_jit_root_frame_exit(mt);
-            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, native_val)));
+            emit_function_return(mt, MIR_new_reg_op(mt->ctx, native_val));
         } else {
             // Standard: box and return
             MIR_reg_t boxed = emit_box(mt, val, val_tid);
@@ -9073,22 +9494,20 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             emit_vargs_restore();
             transpile_task_scope_unwind(mt, false);
             async_complete_frame(mt);
-            emit_jit_root_frame_exit(mt);
-            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
+            emit_function_return(mt, MIR_new_reg_op(mt->ctx, boxed));
         }
     } else {
         // Return with no value
         emit_vargs_restore();
         transpile_task_scope_unwind(mt, false);
         async_complete_frame(mt);
-        emit_jit_root_frame_exit(mt);
         if (native_ret == LMD_TYPE_FLOAT) {
-            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_double_op(mt->ctx, 0.0)));
+            emit_function_return(mt, MIR_new_double_op(mt->ctx, 0.0));
         } else if (native_ret != LMD_TYPE_ANY) {
-            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, 0)));
+            emit_function_return(mt, MIR_new_int_op(mt->ctx, 0));
         } else {
             uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            emit_function_return(mt, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL));
         }
     }
 
@@ -9247,10 +9666,14 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
         if (var->env_offset >= 0 && mt->env_reg) {
             // Box the current value to store back as Item
             MIR_reg_t boxed_wb = emit_box(mt, var->reg, var->type_id);
-            // Store: *(env_ptr + env_offset) = boxed_wb
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_offset, mt->env_reg, 0, 1),
-                MIR_new_reg_op(mt->ctx, boxed_wb)));
+            int env_count = 0;
+            for (FnCapture* cap = mt->current_closure ? mt->current_closure->captures : NULL;
+                    cap; cap = cap->next) env_count++;
+            emit_call_void_4(mt, "owned_item_slot_store",
+                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->env_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, env_count),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, var->env_offset / 8),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_wb));
         }
 
         update_gc_root_slot(mt, var);
@@ -9605,6 +10028,17 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         return boxed;
     }
 
+    if (node->node_type == AST_NODE_CALL_EXPR && tid == LMD_TYPE_INT64) {
+        AstCallNode* call = (AstCallNode*)node;
+        if (call->function && call->function->node_type == AST_NODE_SYS_FUNC) {
+            // Legacy INT64-valued runtime helpers still use INT64_ERROR as
+            // their error channel. Preserve that adapter at the helper ABI;
+            // language-level two-lane returns use the full-domain boxer.
+            return emit_call_1(mt, "push_l_safe", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        }
+    }
+
     return emit_box(mt, val, tid);
 }
 
@@ -9821,7 +10255,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             MIR_reg_t obj_item = transpile_expr(mt, ca->object);
             MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);
             MIR_reg_t boxed_val = transpile_box_item(mt, ca->value);
-            // use emit_call_4 (returns void treated as I64) since no emit_call_void_4 exists
+            // object_type_set_method returns an Item used by the surrounding expression.
             (void)emit_call_4(mt, "array_num_set_nd", MIR_T_I64,
                 MIR_T_P,   MIR_new_reg_op(mt->ctx, arr_ptr),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ndim),
@@ -10390,7 +10824,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         AstFuncNode* fn_method = (AstFuncNode*)method_node;
                         // Get the mangled function name
                         StrBuf* fn_name_buf = strbuf_new_cap(64);
-                        write_fn_name(fn_name_buf, fn_method, NULL);
+                        write_fn_name_ex(fn_name_buf, fn_method, NULL, "_b");
                         // Find the compiled MIR function
                         MIR_item_t method_func = find_local_func(mt, fn_name_buf->str);
                         log_debug("mir: AST_NODE_OBJECT_TYPE: looking for method '%s' → %s",
@@ -10424,7 +10858,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                                 MIR_new_reg_op(mt->ctx, fn_addr),
                                 MIR_new_int_op(mt->ctx, (int64_t)arity),
                                 MIR_new_int_op(mt->ctx, method_node->node_type == AST_NODE_PROC ? 1 : 0)));
-                            log_debug("mir: registered method '%s' on type '%.*s'",
+                            log_debug("mir: registered method ABI wrapper '%s' on type '%.*s'",
                                 fn_name_buf->str, (int)ot->type_name.length, ot->type_name.str);
                         }
                         strbuf_free(fn_name_buf);
@@ -10469,8 +10903,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             // error path: return error from enclosing function
             transpile_task_scope_unwind(mt, true);
             async_complete_frame(mt);
-            emit_jit_root_frame_exit(mt);
-            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, call_result)));
+            emit_function_error_return(mt, call_result);
             // non-error path: continue with result
             emit_label(mt, l_ok);
         }
@@ -10727,20 +11160,15 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
 
         MIR_item_t func_item = find_local_func(mt, name_buf->str);
 
-        // Phase 4: For native dual-version functions used as first-class values,
-        // use the boxed wrapper (_b) since dynamic dispatch uses the Item ABI.
-        NativeFuncInfo* nfi_expr = find_native_func_info(mt, name_buf->str);
-        if (nfi_expr && nfi_expr->has_native) {
-            StrBuf* wrapper_buf = strbuf_new_cap(64);
-            write_fn_name_ex(wrapper_buf, fn_node, NULL, "_b");
-            MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
-            if (wrapper_item) {
-                log_debug("mir: fn expr '%s' → using boxed wrapper '%s'",
-                    name_buf->str, wrapper_buf->str);
-                func_item = wrapper_item;
-            }
-            strbuf_free(wrapper_buf);
+        StrBuf* wrapper_buf = strbuf_new_cap(64);
+        write_fn_name_ex(wrapper_buf, fn_node, NULL, "_b");
+        MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
+        if (wrapper_item) {
+            log_debug("mir: fn expr '%s' → using ABI wrapper '%s'",
+                name_buf->str, wrapper_buf->str);
+            func_item = wrapper_item;
         }
+        strbuf_free(wrapper_buf);
 
         if (func_item) {
             // Count arity from AST param list
@@ -10759,9 +11187,9 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 FnCapture* cap = fn_node->captures;
                 while (cap) { cap_count++; cap = cap->next; }
 
-                // Allocate env: heap_calloc(cap_count * 8, 0)
+                // Each capture owns one Item slot and one raw scalar tail slot.
                 MIR_reg_t env_reg = emit_call_2(mt, "heap_calloc", MIR_T_P,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(cap_count * 8)),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(cap_count * 16)),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
 
                 // Populate env with captured variable values
@@ -10792,10 +11220,11 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         }
                     }
 
-                    // Store: *(env + cap_idx * 8) = cap_val
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, cap_idx * 8, env_reg, 0, 1),
-                        MIR_new_reg_op(mt->ctx, cap_val)));
+                    emit_call_void_4(mt, "owned_item_slot_store",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, env_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, cap_idx),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cap_val));
 
                     log_debug("mir: closure '%s' - captured '%s' at env offset %d",
                         name_buf->str, cap_name, cap_idx * 8);
@@ -10988,241 +11417,6 @@ static int classify_other_type(TypeId tid) {
     // strict equality comparisons later (INT 1 != BOOL true).
     if (tid == LMD_TYPE_BOOL) return 0;
     return INFER_STOP;  // string, map, list, etc.
-}
-
-// First pass: find aliases (var x = <tracked>) and register them
-static void find_aliases(AstNode* node, FnParamEvidence* ctx) {
-    while (node) {
-        switch (node->node_type) {
-        case AST_NODE_CONTENT: {
-            AstListNode* list = (AstListNode*)node;
-            find_aliases(list->declare, ctx);
-            find_aliases(list->item, ctx);
-            break;
-        }
-        case AST_NODE_VAR_STAM:
-        case AST_NODE_LET_STAM: {
-            AstLetNode* let_node = (AstLetNode*)node;
-            find_aliases(let_node->declare, ctx);
-            break;
-        }
-        case AST_NODE_ASSIGN: {
-            AstNamedNode* named = (AstNamedNode*)node;
-            if (named->as && is_tracked_ref(named->as, ctx) && named->name) {
-                add_alias(ctx, named->name->chars, (int)named->name->len);
-            }
-            break;
-        }
-        case AST_NODE_IF_EXPR: {
-            AstIfNode* ifn = (AstIfNode*)node;
-            find_aliases(ifn->then, ctx);
-            find_aliases(ifn->otherwise, ctx);
-            break;
-        }
-        case AST_NODE_WHILE_STAM: {
-            AstWhileNode* wh = (AstWhileNode*)node;
-            find_aliases(wh->body, ctx);
-            break;
-        }
-        default:
-            break;
-        }
-        node = node->next;
-    }
-}
-
-// Recursively walk AST to gather type evidence for tracked names
-static void gather_evidence(AstNode* node, FnParamEvidence* ctx) {
-    while (node) {
-        switch (node->node_type) {
-        case AST_NODE_BINARY: {
-            AstBinaryNode* bi = (AstBinaryNode*)node;
-            int op = bi->op;
-            bool is_arith = (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
-                             op == OPERATOR_DIV || op == OPERATOR_IDIV || op == OPERATOR_MOD ||
-                             op == OPERATOR_POW);
-            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE) || is_elementwise_comparison_op(op);
-
-            if (is_arith || is_cmp) {
-                bool left_is_tracked = is_tracked_ref(bi->left, ctx);
-                bool right_is_tracked = is_tracked_ref(bi->right, ctx);
-                // Only gather strong type evidence from LITERAL values (e.g. n+1, n%2).
-                // Typed variables (e.g. a:int in a+b) are NOT strong evidence — the
-                // untyped param may intentionally accept multiple types.
-                if (is_arith && left_is_tracked && bi->right && bi->right->type && bi->right->type->is_literal) {
-                    TypeId rtid = node_type_id(bi->right);
-                    ctx->evidence |= classify_other_type(rtid);
-                }
-                if (is_arith && right_is_tracked && bi->left && bi->left->type && bi->left->type->is_literal) {
-                    TypeId ltid = node_type_id(bi->left);
-                    ctx->evidence |= classify_other_type(ltid);
-                }
-                // Track that param is used in arithmetic/comparison context.
-                // Even without literal evidence, this means the param is numeric.
-                if (left_is_tracked || right_is_tracked) {
-                    ctx->evidence |= INFER_NUMERIC_USE;
-                    if (is_arith) ctx->evidence |= INFER_ARITH_USE;
-                    // true division (`/`) always yields float in Lambda (e.g. 4/2 → 2.0),
-                    // so a param used as a `/` operand is float-natured. Mark float context
-                    // to suppress the speculative pn INT inference, which would otherwise
-                    // truncate float args at the call site (e.g. a timestep dt = 0.01 → 0).
-                    if (op == OPERATOR_DIV) ctx->evidence |= INFER_FLOAT_CONTEXT;
-                }
-                // If both sides are untyped but param is involved, check binary node's type
-                if ((left_is_tracked || right_is_tracked) &&
-                    !(ctx->evidence & (INFER_INT | INFER_FLOAT))) {
-                    TypeId bi_tid = node_type_id((AstNode*)bi);
-                    if (bi_tid == LMD_TYPE_INT) ctx->evidence |= INFER_INT;
-                    else if (bi_tid == LMD_TYPE_FLOAT) ctx->evidence |= INFER_FLOAT;
-                }
-            }
-
-            gather_evidence(bi->left, ctx);
-            gather_evidence(bi->right, ctx);
-            break;
-        }
-        case AST_NODE_UNARY: {
-            AstUnaryNode* un = (AstUnaryNode*)node;
-            if (un->op == OPERATOR_NEG && is_tracked_ref(un->operand, ctx)) {
-                // negation applies to both int and float — weak evidence only
-                ctx->evidence |= INFER_NUMERIC_USE;
-            }
-            gather_evidence(un->operand, ctx);
-            break;
-        }
-        case AST_NODE_IF_EXPR: {
-            AstIfNode* ifn = (AstIfNode*)node;
-            gather_evidence(ifn->cond, ctx);
-            gather_evidence(ifn->then, ctx);
-            gather_evidence(ifn->otherwise, ctx);
-            break;
-        }
-        case AST_NODE_WHILE_STAM: {
-            AstWhileNode* wh = (AstWhileNode*)node;
-            gather_evidence(wh->cond, ctx);
-            gather_evidence(wh->body, ctx);
-            break;
-        }
-        case AST_NODE_RETURN_STAM: {
-            AstReturnNode* ret = (AstReturnNode*)node;
-            gather_evidence(ret->value, ctx);
-            break;
-        }
-        case AST_NODE_ASSIGN_STAM: {
-            AstAssignStamNode* asn = (AstAssignStamNode*)node;
-            gather_evidence(asn->value, ctx);
-            break;
-        }
-        case AST_NODE_CONTENT: {
-            AstListNode* list = (AstListNode*)node;
-            gather_evidence(list->declare, ctx);
-            gather_evidence(list->item, ctx);
-            break;
-        }
-        case AST_NODE_VAR_STAM:
-        case AST_NODE_LET_STAM: {
-            AstLetNode* let_node = (AstLetNode*)node;
-            gather_evidence(let_node->declare, ctx);
-            break;
-        }
-        case AST_NODE_ASSIGN: {
-            AstNamedNode* named = (AstNamedNode*)node;
-            gather_evidence(named->as, ctx);
-            break;
-        }
-        case AST_NODE_CALL_EXPR: {
-            AstCallNode* call = (AstCallNode*)node;
-            gather_evidence(call->function, ctx);
-            gather_evidence(call->argument, ctx);
-            break;
-        }
-        case AST_NODE_INDEX_EXPR: {
-            AstBinaryNode* idx = (AstBinaryNode*)node;
-            if (is_tracked_ref(idx->right, ctx)) {
-                // Only infer INT when the array operand has a confirmed array type.
-                // For maps, elements, objects and untyped (ANY) arrays the index
-                // key may be a string, so we must NOT assume the index is INT.
-                TypeId left_tid = (idx->left && idx->left->type)
-                    ? idx->left->type->type_id : LMD_TYPE_ANY;
-                bool is_typed_array = (left_tid == LMD_TYPE_ARRAY_NUM);
-                if (is_typed_array) ctx->evidence |= INFER_INT;
-            }
-            gather_evidence(idx->left, ctx);
-            gather_evidence(idx->right, ctx);
-            break;
-        }
-        case AST_NODE_PRIMARY: {
-            AstPrimaryNode* pri = (AstPrimaryNode*)node;
-            // Detect float literals anywhere in the function body.
-            // This sets INFER_FLOAT_CONTEXT which guards NUMERIC_USE→INT inference.
-            if (node->type && node->type->is_literal && node->type->type_id == LMD_TYPE_FLOAT) {
-                ctx->evidence |= INFER_FLOAT_CONTEXT;
-            }
-            gather_evidence(pri->expr, ctx);
-            break;
-        }
-        case AST_NODE_MATCH_EXPR: {
-            AstMatchNode* match = (AstMatchNode*)node;
-            gather_evidence(match->scrutinee, ctx);
-            AstMatchArm* arm = match->first_arm;
-            while (arm) {
-                gather_evidence(arm->body, ctx);
-                arm = (AstMatchArm*)arm->next;
-            }
-            break;
-        }
-        default:
-            break;
-        }
-
-        // Advance to next sibling in linked list (iterative, not recursive)
-        node = node->next;
-    }
-}
-
-// Infer a parameter's type from usage context in the function body.
-// First finds aliases (var x = param), then gathers evidence on param + aliases.
-// Returns LMD_TYPE_INT, LMD_TYPE_FLOAT, or LMD_TYPE_ANY if ambiguous.
-// is_proc: true for pn (procedural) functions — enables weaker numeric inference.
-static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, bool is_proc) {
-    FnParamEvidence ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    // Seed with the parameter name
-    memcpy(ctx.names[0], pname, pname_len);
-    ctx.names[0][pname_len] = '\0';
-    ctx.name_lens[0] = pname_len;
-    ctx.name_count = 1;
-
-    // Pass 1: find aliases (iterate to find transitive aliases)
-    int prev_count = 0;
-    while (prev_count != ctx.name_count) {
-        prev_count = ctx.name_count;
-        find_aliases(body, &ctx);
-    }
-
-    // Pass 2: gather evidence for all tracked names
-    gather_evidence(body, &ctx);
-
-    log_debug("mir: infer_param_type('%s') aliases=%d evidence=%d", pname, ctx.name_count - 1, ctx.evidence);
-    for (int i = 1; i < ctx.name_count; i++) {
-        log_debug("mir:   alias[%d]: '%s'", i, ctx.names[i]);
-    }
-
-    // If we have STOP evidence, the param may be non-numeric — keep ANY
-    if (ctx.evidence & INFER_STOP) return LMD_TYPE_ANY;
-    // Pure INT evidence (from literals)
-    if ((ctx.evidence & INFER_INT) && !(ctx.evidence & INFER_FLOAT)) return LMD_TYPE_INT;
-    // Any FLOAT evidence (even mixed with INT) → FLOAT (int promotes to float)
-    if (ctx.evidence & INFER_FLOAT) return LMD_TYPE_FLOAT;
-    // No POSITIVE type evidence (no int/float literal in arithmetic, no typed-array
-    // index, no float context). We previously SPECULATED INT here for pn params used
-    // in arithmetic ("compute-heavy loops are almost always int"). That guess is
-    // unsound: it unboxes float arguments to native int at the call boundary and
-    // TRUNCATES them. cd.ls's is_in_voxel positions (0.9 → 0) and safe_div denominators
-    // were silently truncated this way, corrupting the result. So we no longer guess —
-    // a param with only weak arithmetic evidence stays ANY (boxed, correct for both int
-    // and float; genuine int params still get native INT from positive evidence above).
-    return LMD_TYPE_ANY;
 }
 
 // ============================================================================
@@ -11520,9 +11714,6 @@ static TypeId infer_return_type(AstFuncNode* fn_node) {
     // 1. Check declared return type from TypeFunc::returned
     if (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC) {
         TypeFunc* ft = (TypeFunc*)fn_as_node->type;
-        // Skip functions that can raise errors (T^ or T^E) — error branch
-        // produces a non-native value, so we can't use native return.
-        if (ft->can_raise) return LMD_TYPE_ANY;
         if (ft->returned) {
             TypeId ret_tid = ft->returned->type_id;
             // Only accept simple native types for now
@@ -11549,54 +11740,8 @@ static TypeId infer_return_type(AstFuncNode* fn_node) {
     return LMD_TYPE_ANY;
 }
 
-// Returns true if the function has any parameter that would be inferred as a
-// native type by the MIR transpiler (causing a _b wrapper to be generated).
-// Cross-module callers must use the _b wrapper to correctly pass boxed Items
-// to functions with inferred native params (e.g. fn get_item(arr, i) => arr[i]).
-static bool has_inferred_native_params(AstFuncNode* fn_node) {
-    AstNode* fn_as = (AstNode*)fn_node;
-    if (fn_node->captures) return false;
-    TypeFunc* ft = (fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC)
-        ? (TypeFunc*)fn_as->type : NULL;
-    if (ft && ft->is_variadic) return false;
-    bool is_proc = (fn_as->node_type == AST_NODE_PROC);
-    TypeParam* tp = ft ? ft->param : NULL;
-    AstNamedNode* p = fn_node->param;
-    while (p) {
-        TypeId tid = p->type ? p->type->type_id : LMD_TYPE_ANY;
-        bool may_be_null = tp && tp->is_optional && !tp->default_value;
-        if (!may_be_null && tid == LMD_TYPE_ANY && fn_node->body) {
-            TypeId inferred = infer_param_type(fn_node->body,
-                p->name->chars, (int)p->name->len, is_proc);
-            if (mir_is_native_param_type(inferred)) return true;
-        }
-        tp = tp ? tp->next : NULL;
-        p = (AstNamedNode*)p->next;
-    }
-    // P4-3.4: Also check native return type. When a function has params (all untyped)
-    // but the body's return type is native (INT/FLOAT/BOOL), the MIR transpiler enables
-    // generate_native=true and generates a _b wrapper. needs_fn_call_wrapper() misses
-    // this case (it only checks no-param functions for native return).
-    // Examples: fn starts_with(s, prefix) returns bool from 'false'/'slice == prefix'.
-    if (fn_node->param) {
-        TypeId ret_tid = infer_return_type(fn_node);
-        if (mir_is_native_scalar_value_type(ret_tid)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static bool has_generated_boxed_wrapper(AstFuncNode* fn_node) {
-    AstNode* fn_as = (AstNode*)fn_node;
-    // A task-aware pn is deliberately kept on the boxed Item ABI. Treating its
-    // inferred scalar parameters as native would select a _b symbol that the
-    // state-machine compiler correctly never emits.
-    if (fn_as->node_type == AST_NODE_PROC && fn_node->analysis &&
-            fn_node->analysis->needs_task_context) {
-        return false;
-    }
-    return needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node);
+    return fn_node != NULL;
 }
 
 // ============================================================================
@@ -11605,26 +11750,46 @@ static bool has_generated_boxed_wrapper(AstFuncNode* fn_node) {
 // calls the native version, and returns the (already boxed) result.
 // Used for dynamic dispatch (Function*) and cross-module calls.
 // ============================================================================
-static void emit_native_boxed_wrapper(MirTranspiler* mt, const char* native_name,
-    AstFuncNode* fn_node, NativeFuncInfo* nfi)
+static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
+    AstFuncNode* fn_node, NativeFuncInfo* nfi, bool is_method)
 {
-    // Generate _b wrapper name
     StrBuf* wrapper_name = strbuf_new_cap(64);
     write_fn_name_ex(wrapper_name, fn_node, NULL, "_b");
-    log_debug("mir: generating boxed wrapper '%s' for native '%s'", wrapper_name->str, native_name);
+    log_debug("mir: generating ABI wrapper '%s' for '%s'", wrapper_name->str, raw_name);
 
-    // All wrapper params are MIR_T_I64 (boxed Item ABI)
-    MIR_var_t params[16];
+    AstNode* fn_as = (AstNode*)fn_node;
+    TypeFunc* fn_type = fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)fn_as->type : NULL;
+    bool is_closure = fn_node->captures && !is_method;
+    bool is_variadic = fn_type && fn_type->is_variadic;
+
+    // The wrapper preserves hidden env/self/vargs parameters but exposes boxed
+    // Items for every user parameter.
+    MIR_var_t params[32];
+    char* param_name_copies[32];
     int param_count = 0;
+    if (is_closure) {
+        params[param_count] = {MIR_T_P, raw_strdup("_env_ptr"), 0}; // RAWALLOC_OK: MIR owns a copy
+        param_name_copies[param_count] = (char*)params[param_count].name;
+        param_count++;
+    } else if (is_method) {
+        params[param_count] = {MIR_T_P, raw_strdup("_self"), 0}; // RAWALLOC_OK: MIR owns a copy
+        param_name_copies[param_count] = (char*)params[param_count].name;
+        param_count++;
+    }
     AstNamedNode* param = fn_node->param;
-    char* param_name_copies[16];
-    while (param && param_count < 16) {
+    while (param && param_count < 31) {
         char pname[64];
         snprintf(pname, sizeof(pname), "_%.*s", (int)param->name->len, param->name->chars);
         params[param_count] = {MIR_T_I64, raw_strdup(pname), 0}; // RAWALLOC_OK: MIR manages param name lifetime
         param_name_copies[param_count] = (char*)params[param_count].name;
         param_count++;
         param = (AstNamedNode*)param->next;
+    }
+    if (is_variadic && param_count < 32) {
+        params[param_count] = {MIR_T_P, raw_strdup("_vargs"), 0}; // RAWALLOC_OK: MIR owns a copy
+        param_name_copies[param_count] = (char*)params[param_count].name;
+        param_count++;
     }
 
     // Save outer function context
@@ -11642,66 +11807,120 @@ static void emit_native_boxed_wrapper(MirTranspiler* mt, const char* native_name
     // Free strdup copies
     for (int i = 0; i < param_count; i++) raw_free(param_name_copies[i]);
 
-    // Unbox each param to match native function's expected types
-    MIR_op_t call_args[16];
-    MIR_var_t call_vars[16];
+    MIR_op_t call_args[32];
+    MIR_var_t call_vars[32];
+    int call_arg_count = 0;
+    if (is_closure) {
+        MIR_reg_t env = MIR_reg(mt->ctx, "_env_ptr", wrapper_func);
+        call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, env);
+        call_vars[call_arg_count++] = {MIR_T_P, "env", 0};
+    } else if (is_method) {
+        MIR_reg_t self = MIR_reg(mt->ctx, "_self", wrapper_func);
+        call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, self);
+        call_vars[call_arg_count++] = {MIR_T_P, "self", 0};
+    }
     param = fn_node->param;
-    for (int i = 0; i < nfi->param_count && i < 16; i++) {
+    int user_index = 0;
+    while (param && call_arg_count < 31) {
         char prefixed[68];
         snprintf(prefixed, sizeof(prefixed), "_%.*s", (int)param->name->len, param->name->chars);
         MIR_reg_t preg = MIR_reg(mt->ctx, prefixed, wrapper_func);
 
-        if (mir_is_native_param_type(nfi->param_types[i])) {
-            // Unbox: Item → native type
-            MIR_reg_t unboxed = emit_unbox(mt, preg, nfi->param_types[i]);
-            call_args[i] = MIR_new_reg_op(mt->ctx, unboxed);
+        if (nfi && user_index < nfi->param_count &&
+                mir_is_native_param_type(nfi->param_types[user_index])) {
+            MIR_reg_t unboxed = emit_unbox(mt, preg, nfi->param_types[user_index]);
+            call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, unboxed);
+            call_vars[call_arg_count] = {nfi->param_mir[user_index], "p", 0};
         } else {
-            // Already boxed Item, pass through
-            call_args[i] = MIR_new_reg_op(mt->ctx, preg);
+            call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, preg);
+            call_vars[call_arg_count] = {MIR_T_I64, "p", 0};
         }
-        call_vars[i] = {nfi->param_mir[i], "p", 0};
+        call_arg_count++;
+        user_index++;
         param = (AstNamedNode*)param->next;
     }
-
-    // Call the native version
-    MIR_item_t native_func = find_local_func(mt, native_name);
-    if (!native_func) {
-        log_error("mir: boxed wrapper - native func '%s' not found", native_name);
+    if (is_variadic) {
+        MIR_reg_t vargs = MIR_reg(mt->ctx, "_vargs", wrapper_func);
+        call_args[call_arg_count] = MIR_new_reg_op(mt->ctx, vargs);
+        call_vars[call_arg_count++] = {MIR_T_P, "vargs", 0};
     }
 
-    // P4-3.3: Proto return type matches native function's return type
-    char proto_name[160];
-    snprintf(proto_name, sizeof(proto_name), "%s_wp%d", native_name, mt->em.label_counter++);
-    MIR_type_t native_ret = nfi->return_mir;
-    MIR_type_t res_types[1] = {native_ret};
-    MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types,
-        nfi->param_count, call_vars);
+    MIR_item_t raw_func = find_local_func(mt, raw_name);
+    if (!raw_func) {
+        log_error("mir: ABI wrapper - function '%s' not found", raw_name);
+    }
 
-    int nops = 3 + nfi->param_count;
-    MIR_op_t ops[19];
+    char proto_name[160];
+    snprintf(proto_name, sizeof(proto_name), "%s_wp%d", raw_name, mt->em.label_counter++);
+    bool native_return = nfi && nfi->return_type != LMD_TYPE_ANY;
+    MIR_type_t raw_ret = native_return ? nfi->return_mir : MIR_T_I64;
+    int raw_lane_kind = native_return
+        ? ((fn_type && fn_type->can_raise) ? RETURN_LANE_ERROR : RETURN_LANE_NONE)
+        : RETURN_LANE_SCALAR;
+    int raw_result_count = 1;
+    MIR_type_t res_types[1] = {raw_ret};
+    MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, raw_result_count,
+        res_types, call_arg_count, call_vars);
+
+    int nops = 2 + raw_result_count + call_arg_count;
+    MIR_op_t ops[36];
     ops[0] = MIR_new_ref_op(mt->ctx, proto);
-    ops[1] = MIR_new_ref_op(mt->ctx, native_func);
-    MIR_reg_t result = new_reg(mt, "wres", native_ret);
+    ops[1] = MIR_new_ref_op(mt->ctx, raw_func);
+    MIR_reg_t result = new_reg(mt, "wres", raw_ret);
     ops[2] = MIR_new_reg_op(mt->ctx, result);
-    for (int i = 0; i < nfi->param_count; i++) ops[3 + i] = call_args[i];
+    MIR_reg_t second_result = 0;
+    if (raw_lane_kind != RETURN_LANE_NONE) {
+        second_result = new_reg(mt,
+            raw_lane_kind == RETURN_LANE_ERROR ? "werr" : "wscalar", MIR_T_I64);
+    }
+    for (int i = 0; i < call_arg_count; i++) {
+        ops[2 + raw_result_count + i] = call_args[i];
+    }
 
     emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
-
-    // P4-3.3: Box native return to Item for the boxed wrapper ABI
-    if (nfi->return_type != LMD_TYPE_ANY) {
-        MIR_reg_t boxed = emit_box(mt, result, nfi->return_type);
-        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed)));
-    } else {
-        // Return is already boxed Item
-        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, result)));
+    if (second_result) {
+        MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
+        MIR_reg_t rt_addr = new_reg(mt, "wrapper_rt_addr", MIR_T_I64);
+        MIR_reg_t runtime = new_reg(mt, "wrapper_runtime", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, rt_addr), MIR_new_ref_op(mt->ctx, rt_import)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, runtime),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr, 0, 1)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, second_result),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                offsetof(Context, mir_return_lane), runtime, 0, 1)));
     }
+
+    MIR_reg_t boxed_result;
+    if (raw_lane_kind == RETURN_LANE_SCALAR) {
+        boxed_result = emit_call_2(mt, "lambda_item_from_scalar_lane", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, second_result));
+    } else if (native_return) {
+        boxed_result = emit_box(mt, result, nfi->return_type);
+        if (raw_lane_kind == RETURN_LANE_ERROR) {
+            MIR_label_t normal = new_label(mt);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                MIR_new_label_op(mt->ctx, normal),
+                MIR_new_reg_op(mt->ctx, second_result)));
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
+                MIR_new_reg_op(mt->ctx, second_result)));
+            emit_label(mt, normal);
+        }
+    } else {
+        boxed_result = result;
+    }
+    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
+        MIR_new_reg_op(mt->ctx, boxed_result)));
 
     MIR_finish_func(mt->ctx);
 
     // Register wrapper as local function with _b name
     register_local_func(mt, wrapper_name->str, wrapper_item);
 
-    log_debug("mir: boxed wrapper '%s' generated successfully", wrapper_name->str);
+    log_debug("mir: ABI wrapper '%s' generated successfully", wrapper_name->str);
 
     // Restore outer function context
     mt->em.func_item = saved_func_item;
@@ -11888,6 +12107,19 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_reg_t saved_consts_reg = mt->consts_reg;
     MIR_reg_t saved_gc_reg = mt->gc_reg;
     int saved_jit_root_next = mt->jit_root_next;
+    MIR_reg_t saved_side_root_frame_base = mt->side_root_frame_base;
+    MIR_reg_t saved_side_root_runtime = mt->side_root_runtime;
+    MIR_label_t saved_side_root_anchor = mt->side_root_anchor;
+    MIR_type_t saved_side_root_return_type = mt->side_root_return_type;
+    MIR_label_t saved_function_return_label = mt->function_return_label;
+    MIR_reg_t saved_function_return_reg = mt->function_return_reg;
+    MIR_reg_t saved_function_return_second_reg = mt->function_return_second_reg;
+    MIR_type_t saved_function_return_mir_type = mt->function_return_mir_type;
+    int saved_function_return_lane_kind = mt->function_return_lane_kind;
+    bool saved_function_return_active = mt->function_return_active;
+    MIR_reg_t saved_side_number_frame_base = mt->side_number_frame_base;
+    int saved_side_number_frame_slots = mt->side_number_frame_slots;
+    bool saved_side_number_frame_active = mt->side_number_frame_active;
     bool saved_in_user_func = mt->in_user_func;
     AstNode* saved_func_body = mt->func_body;
     bool saved_in_async_proc = mt->in_async_proc;
@@ -11937,7 +12169,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     for (int i = 0; i < param_count; i++) param_name_copies[i] = (char*)params[i].name;
 
     // Create function (MIR replaces params[i].name with internal copies)
-    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, name_buf->str, 1, &ret_type, param_count, params);
+    int return_lane_kind = native_return
+        ? ((fn_type && fn_type->can_raise) ? RETURN_LANE_ERROR : RETURN_LANE_NONE)
+        : RETURN_LANE_SCALAR;
+    MIR_type_t return_types[1] = {ret_type};
+    int return_count = 1;
+    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, name_buf->str,
+        return_count, return_types, param_count, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->em.func_item = func_item;
     mt->em.func = func;
@@ -11976,7 +12214,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg_fn, 0, 1)));  // heap->gc
 
+    mt->side_root_runtime = runtime_fn;
+    mt->side_root_return_type = ret_type;
     emit_jit_root_frame_enter(mt);
+    begin_function_epilogue(mt, ret_type, return_lane_kind);
+    emit_number_frame_enter(mt);
 
     // Register as local function early (before body transpilation for recursion)
     register_local_func(mt, name_buf->str, func_item);
@@ -12016,8 +12258,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         launch_args = load_gc_root_slot(mt, launch_args_root, "launch_args");
 
         MIR_reg_t function_ptr = new_reg(mt, "async_root_fn", MIR_T_P);
+        StrBuf* task_wrapper_name = strbuf_new_cap(64);
+        write_fn_name_ex(task_wrapper_name, fn_node, NULL, "_b");
+        MIR_item_t task_wrapper = find_local_func(mt, task_wrapper_name->str);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, function_ptr), MIR_new_ref_op(mt->ctx, func_item)));
+            MIR_new_reg_op(mt->ctx, function_ptr),
+            MIR_new_ref_op(mt->ctx, task_wrapper ? task_wrapper : func_item)));
+        strbuf_free(task_wrapper_name);
         MIR_reg_t launch_env = new_reg(mt, "async_root_env", MIR_T_P);
         if (is_closure) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -12046,14 +12293,12 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             MIR_new_reg_op(mt->ctx, launch_env),
             MIR_new_int_op(mt->ctx, fn_node->analysis ? fn_node->analysis->capture_count : 0),
             MIR_new_reg_op(mt->ctx, launch_args)));
-        emit_jit_root_frame_exit(mt);
-        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
-            MIR_new_reg_op(mt->ctx, launch_result)));
+        emit_function_return(mt, MIR_new_reg_op(mt->ctx, launch_result));
         emit_label(mt, in_task);
     }
 
     if (is_async_proc) {
-        mt->async_frame_reg = emit_call_0(mt, "lambda_async_frame_enter_current", MIR_T_P);
+        mt->async_frame_reg = new_reg(mt, "async_frame", MIR_T_P);
         mt->async_scope_base_reg = emit_call_1(mt, "lambda_async_frame_scope_base", MIR_T_P,
             MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
         MIR_reg_t frame_state = emit_call_1(mt, "lambda_async_frame_state", MIR_T_I64,
@@ -12079,17 +12324,21 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
         // Load captured variables from env into local scope
         // env is a flat array of Items (8 bytes each)
+        int cap_count = 0;
+        for (FnCapture* count_cap = fn_node->captures; count_cap; count_cap = count_cap->next) {
+            cap_count++;
+        }
         int cap_index = 0;
         FnCapture* cap = fn_node->captures;
         while (cap) {
             char cap_name[128];
             snprintf(cap_name, sizeof(cap_name), "%s", cap->name);
 
-            // Load: captured_val = *(env_ptr + cap_index * 8)
-            MIR_reg_t cap_val = new_reg(mt, "cap", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, cap_val),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, cap_index * 8, env_ptr_reg, 0, 1)));
+            MIR_reg_t cap_val = emit_call_4(mt, "owned_item_slot_read", MIR_T_I64,
+                MIR_T_P, MIR_new_reg_op(mt->ctx, env_ptr_reg),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, cap_count),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, cap_index),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
 
             // Store as local variable (already boxed as Item)
             set_var(mt, cap_name, cap_val, MIR_T_I64, LMD_TYPE_ANY);
@@ -12386,12 +12635,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
         // Emit a ret after overflow call (unreachable but needed for MIR validation)
         if (ret_type == MIR_T_D) {
-            emit_jit_root_frame_exit(mt);
-            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_double_op(mt->ctx, 0.0)));
+            emit_function_return(mt, MIR_new_double_op(mt->ctx, 0.0));
         } else {
             uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-            emit_jit_root_frame_exit(mt);
-            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            emit_function_return(mt, MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL));
         }
 
         // Continue label for normal execution
@@ -12487,23 +12734,24 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         emit_label(mt, mt->async_state_labels[state]);
     }
     async_complete_frame(mt);
-    emit_jit_root_frame_exit(mt);
-    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, body_result)));
+    emit_function_return(mt, MIR_new_reg_op(mt->ctx, body_result));
+    finish_function_epilogue(mt);
+    finalize_side_root_frame(mt);
+    finalize_async_frame_enter(mt);
+
+    log_frame_slot_counts(name_buf->str, mt->jit_root_next,
+        return_lane_kind == RETURN_LANE_NONE ? 0 : 1);
 
     pop_scope(mt);
 
     MIR_finish_func(mt->ctx);
     mt->current_return_type = saved_current_return_type;
 
-    // Phase 4: Generate boxed wrapper (_b) for native functions
-    // This must happen after MIR_finish_func but before restoring outer context,
-    // because emit_native_boxed_wrapper creates a new MIR function.
-    if (generate_native) {
-        NativeFuncInfo* nfi = find_native_func_info(mt, name_buf->str);
-        if (nfi) {
-            emit_native_boxed_wrapper(mt, name_buf->str, fn_node, nfi);
-        }
-    }
+    // Every raw Lambda function uses the widened JIT ABI. Publish one boxed,
+    // single-lane wrapper for dynamic calls, methods, imports, and host bridges.
+    NativeFuncInfo* wrapper_nfi = generate_native
+        ? find_native_func_info(mt, name_buf->str) : NULL;
+    emit_boxed_abi_wrapper(mt, name_buf->str, fn_node, wrapper_nfi, is_method);
 
     // Restore function context
     mt->em.func_item = saved_func_item;
@@ -12511,6 +12759,19 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->jit_root_next = saved_jit_root_next;
+    mt->side_root_frame_base = saved_side_root_frame_base;
+    mt->side_root_runtime = saved_side_root_runtime;
+    mt->side_root_anchor = saved_side_root_anchor;
+    mt->side_root_return_type = saved_side_root_return_type;
+    mt->function_return_label = saved_function_return_label;
+    mt->function_return_reg = saved_function_return_reg;
+    mt->function_return_second_reg = saved_function_return_second_reg;
+    mt->function_return_mir_type = saved_function_return_mir_type;
+    mt->function_return_lane_kind = saved_function_return_lane_kind;
+    mt->function_return_active = saved_function_return_active;
+    mt->side_number_frame_base = saved_side_number_frame_base;
+    mt->side_number_frame_slots = saved_side_number_frame_slots;
+    mt->side_number_frame_active = saved_side_number_frame_active;
     mt->in_user_func = saved_in_user_func;
     mt->func_body = saved_func_body;
     mem_free(mt->async_state_labels);
@@ -12653,6 +12914,13 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             MIR_item_t fwd = MIR_new_forward(mt->ctx, name_buf->str);
             register_local_func(mt, name_buf->str, fwd);
 
+            StrBuf* wrapper_fwd_name = strbuf_new_cap(64);
+            write_fn_name_ex(wrapper_fwd_name, fn_node, NULL, "_b");
+            MIR_item_t wrapper_fwd = MIR_new_forward(mt->ctx, wrapper_fwd_name->str);
+            register_local_func(mt, wrapper_fwd_name->str, wrapper_fwd);
+            log_debug("mir: forward-declared ABI wrapper '%s'", wrapper_fwd_name->str);
+            strbuf_free(wrapper_fwd_name);
+
             // Also register by raw name for fallback lookup
             if (fn_node->name) {
                 char raw_name[128];
@@ -12713,14 +12981,6 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                         hashmap_set(mt->infer_cache, &ice);
                     }
                     if (has_native) {
-                        // Forward-declare the _b wrapper
-                        StrBuf* wrapper_buf = strbuf_new_cap(64);
-                        write_fn_name_ex(wrapper_buf, fn_node, NULL, "_b");
-                        MIR_item_t fwd_b = MIR_new_forward(mt->ctx, wrapper_buf->str);
-                        register_local_func(mt, wrapper_buf->str, fwd_b);
-                        log_debug("mir: forward-declared boxed wrapper '%s'", wrapper_buf->str);
-                        strbuf_free(wrapper_buf);
-
                         // Pre-register NativeFuncInfo so call sites can use native ABI
                         NativeFuncInfo nfi;
                         memset(&nfi, 0, sizeof(nfi));
@@ -12742,14 +13002,6 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                     if (!has_native && !has_typed_array_param) {
                         TypeId fwd_ret_tid = infer_return_type(fn_node);
                         if (mir_is_native_scalar_value_type(fwd_ret_tid)) {
-                            // Forward-declare the _b wrapper
-                            StrBuf* wrapper_buf = strbuf_new_cap(64);
-                            write_fn_name_ex(wrapper_buf, fn_node, NULL, "_b");
-                            MIR_item_t fwd_b = MIR_new_forward(mt->ctx, wrapper_buf->str);
-                            register_local_func(mt, wrapper_buf->str, fwd_b);
-                            log_debug("mir: forward-declared boxed wrapper '%s' (return-type-only)", wrapper_buf->str);
-                            strbuf_free(wrapper_buf);
-
                             NativeFuncInfo nfi;
                             memset(&nfi, 0, sizeof(nfi));
                             nfi.param_count = fwd_param_count;
@@ -13113,6 +13365,14 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     MIR_reg_t saved_gc_reg = mt->gc_reg;
     MIR_reg_t saved_tl_reg = mt->type_list_reg;
     int saved_jit_root_next = mt->jit_root_next;
+    MIR_reg_t saved_side_root_frame_base = mt->side_root_frame_base;
+    MIR_reg_t saved_side_root_runtime = mt->side_root_runtime;
+    MIR_label_t saved_side_root_anchor = mt->side_root_anchor;
+    MIR_type_t saved_side_root_return_type = mt->side_root_return_type;
+    MIR_label_t saved_function_return_label = mt->function_return_label;
+    MIR_reg_t saved_function_return_reg = mt->function_return_reg;
+    MIR_type_t saved_function_return_mir_type = mt->function_return_mir_type;
+    bool saved_function_return_active = mt->function_return_active;
     bool saved_in_user_func = mt->in_user_func;
     AstNode* saved_func_body = mt->func_body;
     bool saved_block_returned = mt->block_returned;
@@ -13159,7 +13419,10 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg, 0, 1)));
 
+    mt->side_root_runtime = runtime_reg;
+    mt->side_root_return_type = ret_type;
     emit_jit_root_frame_enter(mt);
+    begin_function_epilogue(mt, ret_type);
 
     // register as local function
     register_local_func(mt, name_buf, func_item);
@@ -13225,8 +13488,9 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     MIR_reg_t body_result = transpile_box_item(mt, view->body);
 
     // emit return
-    emit_jit_root_frame_exit(mt);
-    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, body_result)));
+    emit_function_return(mt, MIR_new_reg_op(mt->ctx, body_result));
+    finish_function_epilogue(mt);
+    finalize_side_root_frame(mt);
 
     pop_scope(mt);
     MIR_finish_func(mt->ctx);
@@ -13245,6 +13509,14 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
     mt->jit_root_next = saved_jit_root_next;
+    mt->side_root_frame_base = saved_side_root_frame_base;
+    mt->side_root_runtime = saved_side_root_runtime;
+    mt->side_root_anchor = saved_side_root_anchor;
+    mt->side_root_return_type = saved_side_root_return_type;
+    mt->function_return_label = saved_function_return_label;
+    mt->function_return_reg = saved_function_return_reg;
+    mt->function_return_mir_type = saved_function_return_mir_type;
+    mt->function_return_active = saved_function_return_active;
     mt->in_user_func = saved_in_user_func;
     mt->func_body = saved_func_body;
     mt->block_returned = saved_block_returned;
@@ -13274,6 +13546,14 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     MIR_reg_t saved_gc_reg = mt->gc_reg;
     MIR_reg_t saved_tl_reg = mt->type_list_reg;
     int saved_jit_root_next = mt->jit_root_next;
+    MIR_reg_t saved_side_root_frame_base = mt->side_root_frame_base;
+    MIR_reg_t saved_side_root_runtime = mt->side_root_runtime;
+    MIR_label_t saved_side_root_anchor = mt->side_root_anchor;
+    MIR_type_t saved_side_root_return_type = mt->side_root_return_type;
+    MIR_label_t saved_function_return_label = mt->function_return_label;
+    MIR_reg_t saved_function_return_reg = mt->function_return_reg;
+    MIR_type_t saved_function_return_mir_type = mt->function_return_mir_type;
+    bool saved_function_return_active = mt->function_return_active;
     bool saved_in_user_func = mt->in_user_func;
     bool saved_in_proc = mt->in_proc;
     AstNode* saved_func_body = mt->func_body;
@@ -13329,7 +13609,10 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg, 0, 1)));
 
+    mt->side_root_runtime = runtime_reg;
+    mt->side_root_return_type = ret_type;
     emit_jit_root_frame_enter(mt);
+    begin_function_epilogue(mt, ret_type);
 
     // register as local function
     register_local_func(mt, handler_name, func_item);
@@ -13403,8 +13686,9 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, null_r),
         MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-    emit_jit_root_frame_exit(mt);
-    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, null_r)));
+    emit_function_return(mt, MIR_new_reg_op(mt->ctx, null_r));
+    finish_function_epilogue(mt);
+    finalize_side_root_frame(mt);
 
     pop_scope(mt);
     MIR_finish_func(mt->ctx);
@@ -13421,6 +13705,14 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
     mt->jit_root_next = saved_jit_root_next;
+    mt->side_root_frame_base = saved_side_root_frame_base;
+    mt->side_root_runtime = saved_side_root_runtime;
+    mt->side_root_anchor = saved_side_root_anchor;
+    mt->side_root_return_type = saved_side_root_return_type;
+    mt->function_return_label = saved_function_return_label;
+    mt->function_return_reg = saved_function_return_reg;
+    mt->function_return_mir_type = saved_function_return_mir_type;
+    mt->function_return_active = saved_function_return_active;
     mt->in_user_func = saved_in_user_func;
     mt->in_proc = saved_in_proc;
     mt->func_body = saved_func_body;
@@ -13739,7 +14031,10 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mt.gc_reg),
         MIR_new_mem_op(ctx, MIR_T_I64, 8, heap_reg, 0, 1)));  // heap->gc
 
+    mt.side_root_runtime = runtime_reg;
+    mt.side_root_return_type = main_ret;
     emit_jit_root_frame_enter(&mt);
+    begin_function_epilogue(&mt, main_ret);
 
     // Set up variable scope for main body
     push_scope(&mt);
@@ -13816,7 +14111,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
 
                 // Call the user-defined main procedure: _main0()
                 StrBuf* main_name = strbuf_new_cap(64);
-                write_fn_name(main_name, proc_node, NULL);
+                write_fn_name_ex(main_name, proc_node, NULL, "_b");
 
                 MIR_item_t main_func = find_local_func(&mt, main_name->str);
                 if (main_func) {
@@ -13847,8 +14142,10 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     pop_scope(&mt);
 
     // Return result
-    emit_jit_root_frame_exit(&mt);
-    emit_insn(&mt, MIR_new_ret_insn(ctx, 1, MIR_new_reg_op(ctx, result)));
+    emit_function_return(&mt, MIR_new_reg_op(ctx, result));
+    finish_function_epilogue(&mt);
+    finalize_side_root_frame(&mt);
+    log_frame_slot_counts("main", mt.jit_root_next, 0);
 
 #ifndef NDEBUG
     // Dump MIR text for debugging (before finish_func to capture state on error).
@@ -14431,6 +14728,8 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         log_notice("Executing JIT compiled code...");
         runner.context.run_main = run_main;
         Item result;
+        LambdaSideStackSnapshot side_stack_snapshot =
+            lambda_side_stack_snapshot(&runner.context);
         #if defined(__APPLE__) || defined(__linux__)
         if (sigsetjmp(_lambda_recovery_point, 1)) {
         #elif defined(_WIN32)
@@ -14441,6 +14740,8 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             _lambda_recovery_armed = 0;   // recovery consumed; disarm
             log_error("exec: recovered from stack overflow via signal handler");
             _lambda_stack_overflow_flag = false;
+            // the signal skips generated epilogues in this cached-import path.
+            lambda_side_stack_restore(&runner.context, side_stack_snapshot);
             lambda_stack_overflow_error("<signal>");
             result = runner.context.result = ItemError;
         } else {

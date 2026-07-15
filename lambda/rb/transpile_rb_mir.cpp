@@ -56,14 +56,12 @@ static void rb_mir_finish_context(Runtime* runtime, EvalContext* old_context, bo
             // Standalone Ruby execution owns this heap until runtime_cleanup(); returning it
             // through Runtime keeps any non-null script result valid for the caller to print.
             runtime->heap = context->heap;
-            runtime->nursery = context->nursery;
             runtime->name_pool = context->name_pool;
             runtime->type_list = (ArrayList*)context->type_list;
         } else {
             if (context->name_pool) name_pool_release(context->name_pool);
             if (context->type_list) arraylist_free((ArrayList*)context->type_list);
             if (context->heap) heap_destroy();
-            if (context->nursery) gc_nursery_destroy(context->nursery);
         }
     }
     context = old_context;
@@ -4639,11 +4637,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     if (old_context && old_context->heap) {
         context = old_context;
         reusing_context = true;
-        if (!context->nursery) {
-            context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "rb.nursery");
-        }
     } else {
-        rb_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "rb.nursery");
         context = &rb_context;
         heap_init();
         context->pool = context->heap->pool;

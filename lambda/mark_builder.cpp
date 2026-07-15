@@ -314,7 +314,7 @@ Item MarkBuilder::createRange(int64_t start, int64_t end) {
     if (!range) return createNull();
 
     range->type_id = LMD_TYPE_RANGE;
-    range->flags = 0;
+    range->flags = CONTAINER_FLAG_IMMORTAL;
     range->start = start;
     range->end = end;
     range->length = (end >= start) ? (end - start + 1) : 0;
@@ -531,6 +531,7 @@ MapBuilder::MapBuilder(MarkBuilder* builder)
     // Note: map_put() uses pool for internal data buffers (needs pool_free for resizing)
     map_ = (Map*)arena_calloc(builder_->arena(), sizeof(Map));
     map_->type_id = LMD_TYPE_MAP;
+    map_->is_immortal = 1;
     map_->type = &EmptyMap;  // Will be replaced by map_put on first insert
     map_->data = nullptr;
     map_->data_cap = 0;
@@ -833,7 +834,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
     if constexpr (Tag == LMD_TYPE_NULL || Tag == LMD_TYPE_BOOL || Tag == LMD_TYPE_INT) {
         return item;
     } else if constexpr (Tag == LMD_TYPE_INT64) {
-        return createLong(*typed.ptr());
+        return createLong(typed.value());
     } else if constexpr (Tag == LMD_TYPE_FLOAT) {
         // Float Items may be self-tagged inline values; never assume pointer storage.
         return createFloat(typed.value());
@@ -924,6 +925,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         int data_size = obj_type->byte_size > 0 ? obj_type->byte_size : (int)(obj_type->length * sizeof(Item));
         Object* new_obj = (Object*)arena_calloc(arena_, sizeof(Object) + data_size);
         new_obj->type_id = LMD_TYPE_OBJECT;
+        new_obj->is_immortal = 1;
         new_obj->type = (Type*)obj_type;
         new_obj->data = (char*)new_obj + sizeof(Object);
         new_obj->data_cap = data_size;

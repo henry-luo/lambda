@@ -169,6 +169,45 @@ static inline void em_emit_label(MirEmitter* em, MIR_label_t label) {
     mir_append_emit_label(em->ctx, em->func_item, label);
 }
 
+static inline MIR_reg_t em_load_frame_top(MirEmitter* em, MIR_reg_t runtime,
+                                          size_t context_offset,
+                                          const char* prefix) {
+    MIR_reg_t result = em_new_reg(em, prefix, MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result),
+        MIR_new_mem_op(em->ctx, MIR_T_I64, (MIR_disp_t)context_offset,
+            runtime, 0, 1)));
+    return result;
+}
+
+static inline void em_store_frame_top(MirEmitter* em, MIR_reg_t runtime,
+                                      size_t context_offset, MIR_reg_t value) {
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_mem_op(em->ctx, MIR_T_I64, (MIR_disp_t)context_offset,
+            runtime, 0, 1),
+        MIR_new_reg_op(em->ctx, value)));
+}
+
+static inline void em_store_frame_slot(MirEmitter* em, MIR_reg_t frame_base,
+                                       int slot, MIR_reg_t value) {
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_mem_op(em->ctx, MIR_T_I64,
+            (MIR_disp_t)slot * (MIR_disp_t)sizeof(uint64_t),
+            frame_base, 0, 1),
+        MIR_new_reg_op(em->ctx, value)));
+}
+
+static inline MIR_reg_t em_load_frame_slot(MirEmitter* em, MIR_reg_t frame_base,
+                                           int slot, const char* prefix) {
+    MIR_reg_t result = em_new_reg(em, prefix, MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result),
+        MIR_new_mem_op(em->ctx, MIR_T_I64,
+            (MIR_disp_t)slot * (MIR_disp_t)sizeof(uint64_t),
+            frame_base, 0, 1)));
+    return result;
+}
+
 static inline int em_add_const(MirEmitter* em, void* ptr) {
     if (!em || !em->const_list || !ptr) return -1;
     arraylist_append(em->const_list, ptr);

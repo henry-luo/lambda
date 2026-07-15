@@ -14,6 +14,7 @@
 #include "js/js_typed_array.h"
 #include "lambda-decimal.hpp"
 #include "lambda-stack.h"
+#include "../lib/side_stack.h"
 #include "binary.h"
 #include <mpdecimal.h>
 #include <math.h>
@@ -21,26 +22,6 @@
 #include <stdlib.h>
 
 extern __thread EvalContext* context;
-
-#define JIT_GC_ROOT_BLOCK_SLOTS 64
-#define JIT_GC_ROOT_FRAME_CACHE_MAX 256
-
-typedef struct JitGcRootBlock {
-    int64_t block_index;
-    uint64_t slots[JIT_GC_ROOT_BLOCK_SLOTS];
-    struct JitGcRootBlock* next;
-} JitGcRootBlock;
-
-typedef struct JitGcRootFrame {
-    struct JitGcRootFrame* prev;
-    JitGcRootBlock* blocks;
-    int64_t depth;
-} JitGcRootFrame;
-
-static __thread JitGcRootFrame* jit_gc_root_frame_top = NULL;
-static __thread JitGcRootFrame* jit_gc_root_frame_cache = NULL;
-static __thread int jit_gc_root_frame_cache_count = 0;
-static __thread int64_t jit_gc_root_frame_depth = 0;
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
 extern "C" void vmap_gc_destroy(void* obj, void* data);
@@ -192,51 +173,6 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
     js_regex_map_heap_destroy(map, seen_native);
 }
 
-static void jit_gc_root_register_active_ranges(gc_heap_t* gc) {
-    if (!gc) return;
-    JitGcRootFrame* frame = jit_gc_root_frame_top;
-    while (frame) {
-        JitGcRootBlock* block = frame->blocks;
-        while (block) {
-            gc_register_root_range(gc, block->slots, JIT_GC_ROOT_BLOCK_SLOTS);
-            block = block->next;
-        }
-        frame = frame->prev;
-    }
-}
-
-static uint64_t* jit_gc_root_snapshot_active(int* out_count) {
-    if (out_count) *out_count = 0;
-    int count = 0;
-    JitGcRootFrame* frame = jit_gc_root_frame_top;
-    while (frame) {
-        JitGcRootBlock* block = frame->blocks;
-        while (block) {
-            count += JIT_GC_ROOT_BLOCK_SLOTS;
-            block = block->next;
-        }
-        frame = frame->prev;
-    }
-    if (count <= 0) return NULL;
-
-    uint64_t* roots = (uint64_t*)mem_alloc((size_t)count * sizeof(uint64_t), MEM_CAT_EVAL);
-    if (!roots) return NULL;
-    int idx = 0;
-    frame = jit_gc_root_frame_top;
-    while (frame) {
-        JitGcRootBlock* block = frame->blocks;
-        while (block) {
-            for (int slot = 0; slot < JIT_GC_ROOT_BLOCK_SLOTS; slot++) {
-                roots[idx++] = block->slots[slot];
-            }
-            block = block->next;
-        }
-        frame = frame->prev;
-    }
-    if (out_count) *out_count = idx;
-    return roots;
-}
-
 // VMap GC bridge functions (defined in vmap.cpp)
 extern "C" void vmap_gc_trace(void* data, gc_heap_t* gc);
 extern "C" void err_gc_trace(void* data, gc_heap_t* gc);
@@ -352,11 +288,16 @@ extern "C" void heap_gc_collect(void) {
     log_debug("heap_gc_collect: stack_base=%p stack_current=%p",
               (void*)stack_base, (void*)stack_current);
 
-    jit_gc_root_register_active_ranges(gc);
-    int jit_root_count = 0;
-    uint64_t* jit_roots = jit_gc_root_snapshot_active(&jit_root_count);
-    gc_collect(gc, jit_roots, jit_root_count, stack_base, stack_current);
-    mem_free(jit_roots);
+    int64_t side_root_count = 0;
+    uint64_t* side_root_base = context->side_root_base;
+    if (side_root_base && context->side_root_top >= side_root_base) {
+        side_root_count = context->side_root_top - side_root_base;
+    }
+    gc_collect_with_root_region(gc, NULL, 0,
+        stack_base, stack_current, side_root_base, side_root_count);
+    // Side-stack virtual reservations are cheap; return untouched committed
+    // pages after a collection so transient recursion does not set the RSS floor.
+    lambda_side_stack_decommit_unused(context);
 }
 
 // register an external root slot (e.g., BSS global address)
@@ -383,135 +324,6 @@ extern "C" void heap_register_gc_root_range(uint64_t* base, int count) {
 extern "C" void heap_unregister_gc_root_range(uint64_t* base) {
     if (!context || !context->heap || !context->heap->gc || !base) return;
     gc_unregister_root_range(context->heap->gc, base);
-}
-
-static JitGcRootBlock* jit_gc_root_frame_get_block(JitGcRootFrame* frame, int64_t index, bool create) {
-    if (!frame || index < 0) return NULL;
-    int64_t block_index = index / JIT_GC_ROOT_BLOCK_SLOTS;
-    JitGcRootBlock* block = frame->blocks;
-    while (block) {
-        if (block->block_index == block_index) return block;
-        block = block->next;
-    }
-    if (!create) return NULL;
-
-    block = (JitGcRootBlock*)mem_calloc(1, sizeof(JitGcRootBlock), MEM_CAT_EVAL);
-    if (!block) {
-        log_error("jit_gc_root_frame: failed to allocate block for index %lld", (long long)index);
-        return NULL;
-    }
-    block->block_index = block_index;
-    block->next = frame->blocks;
-    frame->blocks = block;
-    if (context && context->heap && context->heap->gc) {
-        gc_register_root_range(context->heap->gc, block->slots, JIT_GC_ROOT_BLOCK_SLOTS);
-    }
-    return block;
-}
-
-static void jit_gc_root_frame_free_blocks(JitGcRootFrame* frame) {
-    if (!frame) return;
-    JitGcRootBlock* block = frame->blocks;
-    while (block) {
-        JitGcRootBlock* next = block->next;
-        if (context && context->heap && context->heap->gc) {
-            gc_unregister_root_range(context->heap->gc, block->slots);
-        }
-        mem_free(block);
-        block = next;
-    }
-    frame->blocks = NULL;
-}
-
-static JitGcRootFrame* jit_gc_root_frame_alloc() {
-    JitGcRootFrame* frame = jit_gc_root_frame_cache;
-    if (frame) {
-        jit_gc_root_frame_cache = frame->prev;
-        jit_gc_root_frame_cache_count--;
-        frame->prev = NULL;
-        frame->blocks = NULL;
-        frame->depth = 0;
-        return frame;
-    }
-    return (JitGcRootFrame*)mem_calloc(1, sizeof(JitGcRootFrame), MEM_CAT_EVAL);
-}
-
-static void jit_gc_root_frame_release(JitGcRootFrame* frame) {
-    if (!frame) return;
-    frame->blocks = NULL;
-    frame->depth = 0;
-    if (jit_gc_root_frame_cache_count >= JIT_GC_ROOT_FRAME_CACHE_MAX) {
-        mem_free(frame);
-        return;
-    }
-    frame->prev = jit_gc_root_frame_cache;
-    jit_gc_root_frame_cache = frame;
-    jit_gc_root_frame_cache_count++;
-}
-
-static void jit_gc_root_frame_cache_clear() {
-    while (jit_gc_root_frame_top) {
-        JitGcRootFrame* frame = jit_gc_root_frame_top;
-        jit_gc_root_frame_top = frame->prev;
-        jit_gc_root_frame_free_blocks(frame);
-        mem_free(frame);
-    }
-    while (jit_gc_root_frame_cache) {
-        JitGcRootFrame* frame = jit_gc_root_frame_cache;
-        jit_gc_root_frame_cache = frame->prev;
-        mem_free(frame);
-    }
-    jit_gc_root_frame_cache_count = 0;
-    jit_gc_root_frame_depth = 0;
-}
-
-static JitGcRootFrame* jit_gc_root_frame_current(bool create) {
-    if (jit_gc_root_frame_depth <= 0) return NULL;
-    if (jit_gc_root_frame_top && jit_gc_root_frame_top->depth == jit_gc_root_frame_depth) {
-        return jit_gc_root_frame_top;
-    }
-    if (!create) return NULL;
-    JitGcRootFrame* frame = jit_gc_root_frame_alloc();
-    if (!frame) return NULL;
-    frame->depth = jit_gc_root_frame_depth;
-    frame->prev = jit_gc_root_frame_top;
-    jit_gc_root_frame_top = frame;
-    return frame;
-}
-
-extern "C" void heap_jit_gc_root_frame_enter() {
-    jit_gc_root_frame_depth++;
-}
-
-extern "C" void heap_jit_gc_root_frame_set(int64_t index, uint64_t value) {
-    JitGcRootFrame* frame = jit_gc_root_frame_current(true);
-    if (!frame) {
-        log_error("jit_gc_root_frame_set: failed to allocate frame");
-        return;
-    }
-    JitGcRootBlock* block = jit_gc_root_frame_get_block(frame, index, true);
-    if (!block) return;
-    int64_t offset = index % JIT_GC_ROOT_BLOCK_SLOTS;
-    block->slots[offset] = value;
-}
-
-extern "C" uint64_t heap_jit_gc_root_frame_get(int64_t index) {
-    JitGcRootFrame* frame = jit_gc_root_frame_current(false);
-    JitGcRootBlock* block = jit_gc_root_frame_get_block(frame, index, false);
-    if (!block) return 0;
-    int64_t offset = index % JIT_GC_ROOT_BLOCK_SLOTS;
-    return block->slots[offset];
-}
-
-extern "C" void heap_jit_gc_root_frame_exit() {
-    if (jit_gc_root_frame_depth <= 0) return;
-    JitGcRootFrame* frame = jit_gc_root_frame_top;
-    if (frame && frame->depth == jit_gc_root_frame_depth) {
-        jit_gc_root_frame_top = frame->prev;
-        jit_gc_root_frame_free_blocks(frame);
-        jit_gc_root_frame_release(frame);
-    }
-    jit_gc_root_frame_depth--;
 }
 
 // unregister an external root slot
@@ -708,12 +520,17 @@ Symbol* heap_create_symbol(const char* symbol) {
     return heap_create_symbol(symbol, strlen(symbol));
 }
 
-static Item box_float_cold(double dval) {
-    if (!context || !context->nursery) {
-        log_error("box_float_cold called with invalid context");
+static Item box_float_number_stack(double dval) {
+    if (!context || (!context->side_number_top && !lambda_side_stack_bind(context))) {
+        log_error("number-stack float boxing called with invalid context");
         return ItemError;
     }
-    double *dptr = gc_nursery_alloc_double(context->nursery, dval);
+    double *dptr = (double*)lambda_side_number_alloc(context);
+    if (!dptr) {
+        lambda_stack_overflow_error("number-side-stack");
+        return ItemError;
+    }
+    *dptr = dval;
     return {.item = d2it(dptr)};
 }
 
@@ -727,7 +544,7 @@ Item flt2it(double dval) {
         return {.item = bits};
     }
     // S1 canonical encoding: tiny/subnormal out-of-band doubles stay boxed.
-    return box_float_cold(dval);
+    return box_float_number_stack(dval);
 }
 
 Item push_d(double dval) {
@@ -746,14 +563,85 @@ extern "C" double lambda_mir_bits_double(uint64_t bits) {
     return dval;
 }
 
-Item push_l(int64_t lval) {
-    if (!context->nursery) {
+extern "C" uint64_t lambda_item_scalar_lane(Item item) {
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64:
+        return (uint64_t)item.get_int64();
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
+        uint64_t bits;
+        double value = item.get_double();
+        memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    }
+    case LMD_TYPE_DTIME: {
+        uint64_t bits;
+        DateTime value = item.get_datetime();
+        memcpy(&bits, &value, sizeof(bits));
+        return bits;
+    }
+    default:
+        return 0;
+    }
+}
+
+extern "C" Item lambda_item_from_scalar_lane(Item item, uint64_t scalar_lane) {
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64:
+        return item.is_inline_int64() ? item : box_int64_value((int64_t)scalar_lane);
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
+        // Inline doubles are already self-contained; only the tagged-pointer
+        // residue needs a new home in the caller's number frame.
+        if ((item.item & ITEM_DBL_MASK) || item.item == ITEM_FLOAT_P0 ||
+                item.item == ITEM_FLOAT_N0) return item;
+        double value;
+        memcpy(&value, &scalar_lane, sizeof(value));
+        return push_d(value);
+    }
+    case LMD_TYPE_DTIME: {
+        DateTime value;
+        memcpy(&value, &scalar_lane, sizeof(value));
+        return push_k(value);
+    }
+    default:
+        return item;
+    }
+}
+
+Item box_int64_value(int64_t lval) {
+    if (lambda_int64_fits_inline(lval)) {
+        return {.item = lambda_inline_int64_to_item_bits(lval)};
+    }
+    if (!context || (!context->side_number_top && !lambda_side_stack_bind(context))) {
         log_error("push_l called with invalid context");
         return ItemError;
     }
-    if (lval == INT64_ERROR) return ItemError;
-    int64_t *lptr = gc_nursery_alloc_long(context->nursery, lval);
+    // Only genuinely wide INT64 values need stable backing storage.
+    int64_t *lptr = (int64_t*)lambda_side_number_alloc(context);
+    if (!lptr) {
+        lambda_stack_overflow_error("number-side-stack");
+        return ItemError;
+    }
+    *lptr = lval;
     return {.item = l2it(lptr)};
+}
+
+// Legacy result-channel adapter. New code should use box_int64_value so the
+// full int64 domain, including INT64_MAX, remains representable.
+Item push_l(int64_t lval) {
+    if (lval == INT64_ERROR) return ItemError;
+    return box_int64_value(lval);
+}
+
+Item box_int64_value_safe(int64_t val) {
+    uint8_t tag = (uint64_t)val >> 56;
+    if (tag == LMD_TYPE_INT64) return {.item = (uint64_t)val};
+    if (tag == LMD_TYPE_INT) {
+        Item item = {.item = (uint64_t)val};
+        return box_int64_value(item.get_int56());
+    }
+    return box_int64_value(val);
 }
 
 // Safe version of push_l that detects already-boxed INT64 Items.
@@ -807,11 +695,16 @@ Item push_k(DateTime val) {
         log_debug("push_k: received DateTime error sentinel");
         return ItemError;
     }
-    if (!context->nursery) {
+    if (!context || (!context->side_number_top && !lambda_side_stack_bind(context))) {
         log_error("push_k called with invalid context");
         return ItemError;
     }
-    DateTime *dtptr = gc_nursery_alloc_datetime(context->nursery, val);
+    DateTime *dtptr = (DateTime*)lambda_side_number_alloc(context);
+    if (!dtptr) {
+        lambda_stack_overflow_error("number-side-stack");
+        return ItemError;
+    }
+    *dtptr = val;
     return {.item = k2it(dtptr)};
 }
 
@@ -839,7 +732,6 @@ extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {
 
 void heap_destroy() {
     if (context->heap) {
-        jit_gc_root_frame_cache_clear();
         // Runtime item cleanup may neuter owning Array objects, so it must run
         // while the GC heap pool that contains those owners is still alive.
         js_array_runtime_items_cleanup_all();

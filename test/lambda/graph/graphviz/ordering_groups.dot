@@ -23,6 +23,6 @@ digraph OrderingGroups {
   right -> override
 
   subgraph cluster_source { source_node }
-  subgraph cluster_target { target_node }
+  subgraph cluster_target { subgraph cluster_inner { target_node } }
   source_node -> target_node [ltail=cluster_source, lhead=cluster_target]
 }

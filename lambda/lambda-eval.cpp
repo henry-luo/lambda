@@ -68,8 +68,6 @@ static bool item_to_integral_index(Item item, int64_t* out) {
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
 
-// forward declaration from lambda-data.cpp
-void array_set(Array* arr, int64_t index, Item itm);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 // External path functions for path ++ operation
@@ -350,21 +348,28 @@ Item fn_join(Item left, Item right) {
             int64_t total_extra = la->extra + ra->extra;
             Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len + total_extra), left_type);
             result->type_id = left_type;
-            result->length = total_len;  result->extra = total_extra;
+            result->length = total_len;
+            result->capacity = total_len + total_extra;
+            result->extra = 0;
             result->items = (Item*)(result + 1);
-            memcpy(result->items, la->items, sizeof(Item)*la->length);
-            memcpy(result->items + la->length, ra->items, sizeof(Item)*ra->length);
+            // Source tail pointers cannot survive after either operand dies.
+            array_copy_owned_items(result, 0, la->items, la->length);
+            array_copy_owned_items(result, la->length, ra->items, ra->length);
             return {.array = result};
         }
         // different types: produce generic Array, convert typed elements to Items
         int64_t left_len = fn_len(left), right_len = fn_len(right);
         int64_t total_len = left_len + right_len;
-        Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*total_len, LMD_TYPE_ARRAY);
+        // A typed source can expose one external scalar payload per element;
+        // reserve the exact worst-case tail before copy-in discovers the mix.
+        Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len * 2), LMD_TYPE_ARRAY);
         result->type_id = LMD_TYPE_ARRAY;
-        result->length = total_len;  result->extra = 0;
+        result->length = total_len;
+        result->capacity = total_len * 2;
+        result->extra = 0;
         result->items = (Item*)(result + 1);
-        for (int64_t i = 0; i < left_len; i++)  result->items[i] = item_at(left, i);
-        for (int64_t i = 0; i < right_len; i++) result->items[left_len + i] = item_at(right, i);
+        for (int64_t i = 0; i < left_len; i++) array_set(result, i, item_at(left, i));
+        for (int64_t i = 0; i < right_len; i++) array_set(result, left_len + i, item_at(right, i));
         return {.array = result};
     }
     else if (left_type <= LMD_TYPE_BINARY && right_type <= LMD_TYPE_BINARY) {

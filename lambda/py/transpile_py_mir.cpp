@@ -7321,11 +7321,7 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     if (old_context && old_context->heap) {
         context = old_context;
         reusing_context = true;
-        if (!context->nursery) {
-            context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "py.nursery");
-        }
     } else {
-        py_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "py.nursery");
         context = &py_context;
         heap_init();
         context->pool = context->heap->pool;
@@ -7495,7 +7491,6 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         EvalContext* temp_ctx = (EvalContext*)mem_calloc(1, sizeof(EvalContext), MEM_CAT_PY_RUNTIME);
         temp_ctx->pool = mem_pool_create(NULL, MEM_ROLE_RUNTIME_HEAP, "py.runtime");
         temp_ctx->result = ItemNull;
-        temp_ctx->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "py.nursery");
         context = temp_ctx;
         heap_init();
         context->pool = context->heap->pool;
