@@ -67,8 +67,8 @@ fn valid_unsigned_decimal_at(text, i, dots, digits) {
   }
 }
 
-fn unsigned_number_text(value, allow_px) {
-  let text = lower(trim(value));
+pub fn unsigned_number_text(value, allow_px) {
+  let text = lower(trim(string(if (value != null) value else "")));
   let numeric_text = if (allow_px and ends_with(text, "px")) trim(slice(text, 0, len(text) - 2))
     else text;
   if (valid_unsigned_decimal_at(numeric_text, 0, 0, 0)) numeric_text else null

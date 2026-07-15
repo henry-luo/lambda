@@ -351,7 +351,6 @@ fn node_element(entry, graph_id) {
     'source-start': entry.source["source-start"], 'source-end': entry.source["source-end"],
     'source-line': entry.source["source-line"], 'source-column': entry.source["source-column"];
     if (record != null) { <content; record.content> }
-    if (record != null) { for (port in record.ports) port }
     let properties = properties_element(entry.properties)
     if (properties != null) { properties }
   >

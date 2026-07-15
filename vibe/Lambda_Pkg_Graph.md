@@ -2098,8 +2098,8 @@ Lambda normalization size is tracked separately from native parser LOC:
 | Stage 3B module | Physical LOC |
 |---|---:|
 | `graphviz/attributes.ls` | 166 |
-| `graphviz/normalize.ls` | 544 |
-| total | 710 |
+| `graphviz/normalize.ls` | 543 |
+| total | 709 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
@@ -2122,12 +2122,18 @@ The first Stage 3C slice is implemented:
   crow, and empty markers reach generated SVG paint;
 - `content_shapes_markers.ls` checks canonical labels/shapes/markers, selected
   semantic HTML attributes, pure layout propagation, and generated marker tags.
-- flat record fields lower to measured table content, named fields lower to
-  canonical ports with distinct attachment offsets, and record edges route
-  through the existing shared port implementation;
+- flat and recursively nested record fields lower to measured table content;
+  each nested group alternates horizontal/vertical orientation, named fields
+  lower to canonical ports with distinct attachment offsets, and record edges
+  route through the existing shared port implementation;
 - Graphviz HTML-label delimiters are removed before fragment parsing; safe
   table/row/cell and inline emphasis structure survives while script, style,
   template, authored link, and unknown wrapper markup is stripped;
+- allowlisted table/row/cell alignment, cell vertical alignment, and bounded
+  positive row/column spans survive as semantic HTML; invalid enum and span
+  values are removed. `<TD PORT>` uses the same measured-content port walker as
+  record fields, so canonical ports, edge endpoint metadata, and zero-size HTML
+  port elements stay source ordered without a second Graphviz-only port model;
 - node and edge `URL`/`href`, `tooltip`, and `target` attributes lower to inert
   canonical interactions and semantic HTML metadata without navigation or
   callback execution;
@@ -2143,19 +2149,16 @@ The new pure Stage 3C modules remain small:
 | `graphviz/labels.ls` | 35 |
 | `graphviz/shapes.ls` | 28 |
 | `graphviz/markers.ls` | 25 |
-| `graphviz/records.ls` | 55 |
-| total | 143 |
+| `graphviz/records.ls` | 83 |
+| total | 171 |
 
 Still outstanding in Stage 3C:
 
-- complete nested record groups, HTML table ports, and safe HTML cell
-  alignment/span attributes after the recursive-frame runtime issue recorded
-  in `vibe/Lambda_Issue8.md` is fixed;
 - complete specialized Graphviz shape families, polygon parameters,
   peripheries, and multi-component arrow composition;
 - complete safe gradient/font/periphery paint lowering;
-- expand normalized HTML expectations to nested records, annotations, and
-  remaining styles.
+- expand normalized HTML expectations for remaining annotation and paint
+  styles.
 
 #### Stage 3D - Layered layout parity (in progress, 2026-07-15)
 

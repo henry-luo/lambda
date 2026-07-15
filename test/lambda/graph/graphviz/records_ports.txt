@@ -2,7 +2,9 @@
   valid: true,
   diagnostics: [],
   content_tag: "table",
+  nested_axes: ["horizontal", "vertical", "horizontal"],
   ports: [["west", "auto", 0.25], ["east", "auto", 0.75]],
-  html_ports: [["a", "west", "auto", "0.25"], ["a", "east", "auto", "0.75"]],
-  starts: [["west", 30, 90], ["east", 90, 150]]
+  nested_ports: [["north", "auto", 0.16666666666666666], ["south", "auto", 0.5], ["east", "auto", 0.8333333333333334]],
+  html_ports: [["a", "west", "auto", "0.25"], ["a", "east", "auto", "0.75"], ["nested", "north", "auto", "0.166667"], ["nested", "south", "auto", "0.5"], ["nested", "east", "auto", "0.833333"]],
+  starts: [["west", 120, 15], ["east", 90, 60]]
 }

@@ -31,10 +31,10 @@
     }, {
       id: "records-ports",
       valid: true,
-      nodes: 3,
+      nodes: 4,
       edges: 2,
       annotations: 0,
-      html: [3, 2, 0]
+      html: [4, 2, 0]
     }, {
       id: "rank-layout",
       valid: true,

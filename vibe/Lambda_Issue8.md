@@ -56,6 +56,13 @@ instead of at that function. Rewriting only the helper as an expression-bodied
 wrapper plus helper function compiled, confirming that neither its calls nor
 its types caused the rejection.
 
+The same recovery failure later recurred after a multiline expression-bodied
+helper returning an element comprehension. The helper compiled in isolation,
+but the following valid `node_element(...) { ... }` function was diagnosed as
+missing its body. Inlining the small comprehension removed the error. This
+further suggests the reported block function is only where stale expression
+parser state becomes visible.
+
 ## Comprehension binding named `list` resolves incorrectly
 
 While adding the Graphviz source-Mark parser fixture, a nested comprehension
@@ -193,3 +200,38 @@ any([for (point in intersections) point.scale <= 1.0])
 
 The grammar or error recovery should either accept the filtered form or report
 the `for` iterator as the failure location.
+
+## Recursive accumulator return inference can change array construction
+
+A tail-recursive collector returned `reverse(result)` at its base case and
+prepended strings during descent:
+
+```lambda
+fn collect(values, i, result: [string]) => if (i >= len(values)) reverse(result)
+  else collect(values, i + 1, [values[i], *result])
+```
+
+`collect(["west", "east"], 0, [])` returned `["westeast"]`; changing only the
+base case to `result` returned `["east", "west"]`. The `reverse(any) -> any`
+call appears to feed an incorrect string expectation back into recursive array
+construction. The explicit `[string]` parameter annotation does not prevent it.
+
+Attempting the documented `string[]` return annotation form made AST building
+dereference a null Tree-sitter node in `build_return_occurrence_type()` instead
+of reporting a diagnostic. Recursive return unification must preserve the
+accumulator container type, and malformed or unsupported return type syntax
+must never crash the compiler.
+
+## A local transformation named `lower` silently shadows string lowering
+
+`graph.transform.content` exports `lower(source, label_format)`. An earlier
+helper in that same module used `lower(string(value))`, intending the system
+string function. Name resolution instead bound the call to the later local
+transformation without any arity or useful type diagnostic. The returned array
+then made an enum membership test quietly return false, so valid Graphviz HTML
+alignment values disappeared.
+
+Receiver syntax, `string(value).lower()`, selects the intended string method and
+fixed the result. Either overload resolution should reject the incompatible
+local call, or diagnostics/tooling should make system-function shadowing clear;
+the previous behavior looked like a data or GC failure far downstream.
