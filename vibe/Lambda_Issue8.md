@@ -56,6 +56,13 @@ instead of at that function. Rewriting only the helper as an expression-bodied
 wrapper plus helper function compiled, confirming that neither its calls nor
 its types caused the rejection.
 
+The same recovery failure later recurred after a multiline expression-bodied
+helper returning an element comprehension. The helper compiled in isolation,
+but the following valid `node_element(...) { ... }` function was diagnosed as
+missing its body. Inlining the small comprehension removed the error. This
+further suggests the reported block function is only where stale expression
+parser state becomes visible.
+
 ## Comprehension binding named `list` resolves incorrectly
 
 While adding the Graphviz source-Mark parser fixture, a nested comprehension
@@ -193,3 +200,128 @@ any([for (point in intersections) point.scale <= 1.0])
 
 The grammar or error recovery should either accept the filtered form or report
 the `for` iterator as the failure location.
+
+## Recursive accumulator return inference can change array construction
+
+A tail-recursive collector returned `reverse(result)` at its base case and
+prepended strings during descent:
+
+```lambda
+fn collect(values, i, result: [string]) => if (i >= len(values)) reverse(result)
+  else collect(values, i + 1, [values[i], *result])
+```
+
+`collect(["west", "east"], 0, [])` returned `["westeast"]`; changing only the
+base case to `result` returned `["east", "west"]`. The `reverse(any) -> any`
+call appears to feed an incorrect string expectation back into recursive array
+construction. The explicit `[string]` parameter annotation does not prevent it.
+
+Attempting the documented `string[]` return annotation form made AST building
+dereference a null Tree-sitter node in `build_return_occurrence_type()` instead
+of reporting a diagnostic. Recursive return unification must preserve the
+accumulator container type, and malformed or unsupported return type syntax
+must never crash the compiler.
+
+## A local transformation named `lower` silently shadows string lowering
+
+`graph.transform.content` exports `lower(source, label_format)`. An earlier
+helper in that same module used `lower(string(value))`, intending the system
+string function. Name resolution instead bound the call to the later local
+transformation without any arity or useful type diagnostic. The returned array
+then made an enum membership test quietly return false, so valid Graphviz HTML
+alignment values disappeared.
+
+Receiver syntax, `string(value).lower()`, selects the intended string method and
+fixed the result. Either overload resolution should reject the incompatible
+local call, or diagnostics/tooling should make system-function shadowing clear;
+the previous behavior looked like a data or GC failure far downstream.
+
+## Conditional Mark attributes can collapse the parser diagnostic to line 1
+
+While composing Graphviz SVG markers, several adjacent Mark attributes used
+inline `if` expressions, including a quoted attribute name:
+
+```lambda
+<path fill: if (open) "none" else color,
+  stroke: if (open) color else null,
+  'stroke-width': if (open) 1.2 else null>
+```
+
+The compiler reported only `paint.ls:1:1` at the file comment and marked the
+whole module as erroneous. Tree-sitter's raw tree contained narrower recovery
+errors around the second and third conditional attributes, but those locations
+were lost by the normal diagnostic path. Computing the three values in locals
+before constructing the element compiled correctly.
+
+The grammar should either accept adjacent conditional attribute values
+consistently or reject the first ambiguous attribute at its own location. AST
+diagnostics should also prefer the smallest error node instead of the enclosing
+file-wide recovery node.
+
+## A map literal immediately after `if` is parsed as a statement block
+
+The compact parser-result form below is visually consistent with a map-valued
+conditional but is not accepted:
+
+```lambda
+if (valid) {valid: true, values: values}
+else {valid: false, values: values}
+```
+
+The diagnostic points at `valid:` but does not explain that braces after a
+condition select statement-block syntax. Calling a small map-constructor
+function avoids the ambiguity. Documentation or a targeted diagnostic should
+state how to return a map literal directly from an `if` expression.
+
+## Missing dynamic Velmt attributes can evaluate to errors instead of null
+
+The graph layout adapter used a generic optional-attribute helper that expected
+both map-backed and Velmt-backed missing fields to evaluate to `null`. During a
+retained Radiant render, newly queried `data-regular` and polygon fields instead
+returned error values. The error values passed `value != null`, became truthy or
+were sent through numeric conversion, and ordinary Mermaid nodes were routed as
+large regular polygons. The runtime also logged indirect `expected a map` and
+`unknown range type` messages rather than identifying the missing attribute.
+
+Both semantic HTML source lookup and the Velmt adapter now treat an error from
+dynamic indexing as absence and apply the declared fallback. Dynamic
+object/element/Velmt indexing should ideally use the same missing-member
+contract as maps, or expose a non-throwing attribute lookup primitive for
+optional metadata.
+
+## Explicit null Mark attributes fail optional schema type checks
+
+Graphviz annotations gained optional font attributes through a direct Mark
+constructor:
+
+```lambda
+<annotation 'font-name': optional(known, "font-name"),
+  'font-size': optional(known, "font-size")>
+```
+
+When the values were `null`, the attributes remained structurally present.
+Schema validation then reported that each optional attribute had the wrong
+type, even though dynamic reads returned `null`. Building a map containing only
+non-null fields and spreading it into the element avoided the errors.
+
+The distinction between an absent attribute and an explicitly null attribute
+is useful, but Mark formatting and ordinary dynamic reads make the two cases
+look identical. The element literal documentation and schema diagnostic should
+make this distinction clear, or the schema API should offer an explicit policy
+for treating null optional attributes as absent.
+
+## A comparison after a multiline comprehension is rejected
+
+This valid-looking final expression in a function block failed at `> 0`:
+
+```lambda
+len([for (item in styles where contains(allowed, item))
+  item]) > 0
+```
+
+Assigning the comprehension to `matched` was not sufficient; the final
+comparison also had to be parenthesized as `(len(matched) > 0)`. The diagnostic
+did identify the comparison, but did not explain why a comparison as a block's
+final expression required grouping here. The grammar should accept the
+expression consistently or suggest parentheses at the actual ambiguous
+boundary.

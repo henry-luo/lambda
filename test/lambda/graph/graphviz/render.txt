@@ -2,5 +2,6 @@
   installed: true,
   svg: true,
   nodes: [["a", true, true], ["b", true, true]],
-  edges: [["a", "b"]]
+  edges: [["a", "b"]],
+  styled: [96, 96, true]
 }

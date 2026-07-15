@@ -34,10 +34,14 @@ fn graph_spec() => {
     attr("layout", "text"), attr("status", "text"),
     attr("rank-sep", "number"), attr("node-sep", "number"),
     attr("edge-sep", "number"),
+    attr("ordering", "text", false, ["in", "out"]),
+    attr("new-rank", "boolish"), attr("compound", "boolish"),
     attr("route-mode", "text", false,
       ["none", "line", "polyline", "orthogonal", "curved"]),
     attr("fill", "text"), attr("label", "text"),
-    attr("label-format", "text", false, ["text", "markdown", "html"])
+    attr("label-format", "text", false, ["text", "markdown", "html"]),
+    attr("gradient-angle", "number"), attr("font-name", "text"),
+    attr("font-size", "number"), attr("font-color", "text"), attr("style", "text")
   ],
   children: ["meta", "styles", "defs", "constraints", "node", "edge", "subgraph",
     "style-rule", "class-assignment", "style-assignment", "interaction", "annotation",
@@ -56,10 +60,17 @@ fn node_spec() => {
     attr("shape", "text"),
     attr("shape-family", "text", false, ["box", "ellipse", "polygon", "text"]),
     attr("graphviz-shape", "text"),
+    attr("polygon-sides", "integerish"), attr("polygon-orientation", "number"),
+    attr("polygon-skew", "number"), attr("polygon-distortion", "number"),
+    attr("regular", "boolish"), attr("peripheries", "integerish"),
     attr("width", "number"), attr("height", "number"), attr("fill", "text"),
     attr("stroke", "text"), attr("stroke-width", "number"),
     attr("opacity", "number"), attr("class", "text"), attr("z", "integerish"),
-    attr("fixed-size", "boolish"), attr("group", "text"), attr("radius", "number"),
+    attr("fixed-size", "boolish"), attr("margin-x", "number"),
+    attr("margin-y", "number"), attr("gradient-angle", "number"),
+    attr("font-name", "text"), attr("font-size", "number"),
+    attr("font-color", "text"), attr("group", "text"), attr("radius", "number"),
+    attr("ordering", "text", false, ["in", "out"]),
     attr("style", "text"), attr("stroke-dasharray", "text")
   ],
   children: ["label", "content", "port", "properties"],
@@ -80,12 +91,15 @@ fn edge_spec() => {
     attr("from-compass", "text"), attr("to-compass", "text"), attr("source-id", "text"),
     attr("directed", "boolish"), attr("arrow-head", "text"),
     attr("arrow-tail", "text"), attr("arrow-direction", "text"),
+    attr("arrow-size", "number"),
     attr("min-length", "integerish"),
     attr("weight", "number"), attr("constraint", "boolish"),
     attr("stroke", "text"), attr("stroke-width", "number"),
     attr("stroke-dasharray", "text"), attr("opacity", "number"),
     attr("z", "integerish"), attr("label-z", "integerish"), attr("style", "text"),
-    attr("head-cluster", "text"), attr("tail-cluster", "text")
+    attr("head-cluster", "text"), attr("tail-cluster", "text"),
+    attr("font-name", "text"), attr("font-size", "number"),
+    attr("font-color", "text")
   ],
   children: ["label", "content", "properties"],
   open_children: true, scalar_children: false
@@ -103,7 +117,9 @@ fn subgraph_spec() => {
     attr("fill", "text"), attr("stroke", "text"), attr("stroke-width", "number"),
     attr("padding", "number"), attr("label-gap", "number"),
     attr("radius", "number"), attr("z", "integerish"),
-    attr("label-z", "integerish")
+    attr("label-z", "integerish"), attr("gradient-angle", "number"),
+    attr("font-name", "text"), attr("font-size", "number"),
+    attr("font-color", "text"), attr("style", "text")
   ],
   children: ["label", "content", "node", "edge", "subgraph", "style-rule",
     "class-assignment", "style-assignment", "interaction", "edge-property",
@@ -168,7 +184,8 @@ fn metadata_spec(value_tag) {
         ["graph", "subgraph", "node", "edge"]), attr("owner-id", "text", true),
       attr("kind", "text", true), attr("label", "text", true),
       attr("label-format", "text", false, ["text", "markdown", "html"]),
-      attr("z", "integerish")],
+      attr("font-name", "text"), attr("font-size", "number"),
+      attr("font-color", "text"), attr("z", "integerish")],
       children: [], open_children: false, scalar_children: false}
   }
   else if (value_tag == "edge-property") {

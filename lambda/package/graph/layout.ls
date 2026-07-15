@@ -11,8 +11,12 @@ pub fn compute(input, opts = null) => dagre.layout(input, opts)
 pub fn layout(input, opts = null) => compute(input, opts)
 
 fn attr_or(child, key, fallback) {
-  if (child.attrs != null and child.attrs[key] != null) child.attrs[key]
-  else if (child[key] != null) child[key]
+  let attrs = child.attrs;
+  let nested = if (attrs == null or attrs is error) null else attrs[key];
+  let direct = child[key];
+  // missing Velmt attributes may be errors; optional metadata must use its fallback.
+  if (nested != null and not (nested is error)) nested
+  else if (direct != null and not (direct is error)) direct
   else fallback
 }
 
@@ -47,6 +51,12 @@ fn child_z(child, fallback) {
   if (value != null) int(value) else fallback
 }
 
+fn bool_attr(child, key, fallback = false) {
+  let value = attr_or(child, key, fallback);
+  if (value == null or value is error) fallback
+  else value == true or lower(string(value)) == "true"
+}
+
 fn semantic_nodes(children) {
   let tagged = [for (i, child in children where child_tag(child) == "node") {child: child, order: i}];
   if (len(tagged) > 0) tagged
@@ -62,6 +72,8 @@ fn semantic_edges(children) {
     to: string(attr_or(child, "data-to", "")),
     from_port: attr_or(child, "data-from-port", null),
     to_port: attr_or(child, "data-to-port", null),
+    tail_cluster: attr_or(child, "data-tail-cluster", null),
+    head_cluster: attr_or(child, "data-head-cluster", null),
     directed: attr_or(child, "data-directed", "true") != "false",
     arrow_start: attr_or(child, "data-arrow-start", "false") == "true",
     arrow_end: attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true",
@@ -70,6 +82,7 @@ fn semantic_edges(children) {
     marker_end: string(attr_or(child, "data-marker-end",
       if (attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true")
         "normal" else "none")),
+    arrow_size: float(attr_or(child, "data-arrow-size", 1.0)),
     style: string(attr_or(child, "data-style", "solid")),
     stroke: parsed_style.stroke,
     stroke_width: parsed_style.stroke_width,
@@ -349,6 +362,15 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
       width: child_width(entry.child),
       height: child_height(entry.child),
       shape: string(attr_or(entry.child, "data-shape", "box")),
+      polygon_sides: attr_or(entry.child, "data-polygon-sides", null),
+      polygon_orientation: attr_or(entry.child, "data-polygon-orientation", null),
+      polygon_skew: attr_or(entry.child, "data-polygon-skew", null),
+      polygon_distortion: attr_or(entry.child, "data-polygon-distortion", null),
+      regular: bool_attr(entry.child, "data-regular"),
+      peripheries: attr_or(entry.child, "data-peripheries", null),
+      // DOT group is an ordering hint; structural subgraph membership still owns cluster geometry.
+      order_group: attr_or(entry.child, "data-order-group", null),
+      ordering: attr_or(entry.child, "data-ordering", null),
       group: attr_or(entry.child, "data-subgraph-id", null),
       ports: ports_for(ports, child_id(entry.child, entry.order)),
       z: child_z(entry.child, 0)
@@ -361,6 +383,9 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
     rank_sep: rank_sep,
     edge_sep: edge_sep,
     route_mode: route_mode,
+    ordering: graph_option(parent, opts, "ordering", "data-ordering", null),
+    new_rank: graph_option(parent, opts, "new_rank", "data-new-rank", false),
+    compound: graph_option(parent, opts, "compound", "data-compound", false),
     use_splines: route_mode == "curved"
   };
   let result = compute(graph_input, opts);

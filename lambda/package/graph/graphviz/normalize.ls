@@ -15,6 +15,20 @@ fn children(value, wanted) => [
 
 fn first(values) => if (len(values) > 0) values[0] else null
 
+fn optional(value, key) {
+  let found = value[key];
+  // typed attribute maps omit absent keys; dynamic lookup errors mean absence here.
+  if (found is error) null else found
+}
+
+fn optional_attr(name, value) => if (value == null) [] else [name, value]
+
+fn font_attr_map(known) => map([
+  *optional_attr("font-name", optional(known, "font-name")),
+  *optional_attr("font-size", optional(known, "font-size")),
+  *optional_attr("font-color", optional(known, "font-color"))
+])
+
 fn statement_id(value) {
   if (value.id != null) string(value.id)
   else "dot@" ++ string(if (value["source-start"] != null) value["source-start"] else 0)
@@ -330,10 +344,12 @@ fn interaction_element(target, known) {
     href: known.href, tooltip: known.tooltip, 'target-window': known["target-window"]>
 }
 
-fn annotation_element(kind, label, format, owner_kind, owner_id) =>
+fn annotation_element(kind, label, format, owner_kind, owner_id, known) {
+  let fonts = font_attr_map(known);
   if (label == null) null
   else <annotation kind: kind, label: label, 'label-format': format,
-    'owner-kind': owner_kind, 'owner-id': owner_id>
+    'owner-kind': owner_kind, 'owner-id': owner_id, *:fonts>
+}
 
 fn node_element(entry, graph_id) {
   let known = attributes.canonical("node", entry.properties);
@@ -344,14 +360,23 @@ fn node_element(entry, graph_id) {
     label: label,
     'label-format': known["label-format"], shape: known.shape,
     'shape-family': known["shape-family"], 'graphviz-shape': known["graphviz-shape"],
+    'polygon-sides': known["polygon-sides"],
+    'polygon-orientation': known["polygon-orientation"],
+    'polygon-skew': known["polygon-skew"],
+    'polygon-distortion': known["polygon-distortion"],
+    regular: known.regular, peripheries: known.peripheries,
     width: known.width, height: known.height, 'fixed-size': known["fixed-size"],
+    'margin-x': optional(known, "margin-x"), 'margin-y': optional(known, "margin-y"),
     fill: known.fill, stroke: known.stroke, 'stroke-width': known["stroke-width"],
-    group: known.group, style: known.style, 'stroke-dasharray': known["stroke-dasharray"],
+    'gradient-angle': optional(known, "gradient-angle"),
+    'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
+    'font-color': optional(known, "font-color"),
+    group: known.group, ordering: known.ordering,
+    style: known.style, 'stroke-dasharray': known["stroke-dasharray"],
     opacity: known.opacity, radius: known.radius,
     'source-start': entry.source["source-start"], 'source-end': entry.source["source-end"],
     'source-line': entry.source["source-line"], 'source-column': entry.source["source-column"];
     if (record != null) { <content; record.content> }
-    if (record != null) { for (port in record.ports) port }
     let properties = properties_element(entry.properties)
     if (properties != null) { properties }
   >
@@ -368,6 +393,9 @@ fn edge_element(entry, graph_id) {
     'arrow-head': markers.head(known["arrow-head"], known["arrow-direction"], entry.directed),
     'arrow-tail': markers.tail(known["arrow-tail"], known["arrow-direction"], entry.directed),
     'arrow-direction': known["arrow-direction"],
+    'arrow-size': known["arrow-size"],
+    'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
+    'font-color': optional(known, "font-color"),
     'min-length': known["min-length"], weight: known.weight,
     constraint: known.constraint, stroke: known.stroke,
     'stroke-width': known["stroke-width"], style: known.style,
@@ -436,11 +464,49 @@ fn engine_diagnostic(source, layout) =>
 fn engine_diagnostics(source, state) =>
   engine_diagnostic(source, attributes.value(state.graph_properties, "layout"))
 
+fn ordering_diagnostic(entry, context) =>
+  if (entry == null or attributes.ordering(entry.value) != null) []
+  else [diagnostic.for_value(
+    "graph.graphviz.invalid-ordering", "error",
+    "Unsupported DOT ordering mode '" ++ entry.value ++ "'",
+    context, entry.source)]
+
+fn ordering_diagnostics(state) => [
+  *ordering_diagnostic(attributes.last_entry(state.graph_properties, "ordering"),
+    "graph.ordering"),
+  for (node in state.nodes,
+    value in ordering_diagnostic(attributes.last_entry(node.properties, "ordering"),
+      "node:" ++ node.id ++ ".ordering")) value
+]
+
+fn cluster_exists(scopes, id) => len([
+  for (scope in scopes where scope.role == "cluster" and scope.id == id) scope
+]) > 0
+
+fn compound_reference_diagnostics(state) => [
+  for (edge in state.edges, name in ["lhead", "ltail"],
+    let entry = attributes.last_entry(edge.properties, name)
+    where entry != null and not cluster_exists(state.scopes, string(entry.value)))
+    diagnostic.for_value(
+      "graph.graphviz.unresolved-compound-cluster", "error",
+      "DOT " ++ name ++ " references unknown cluster '" ++ string(entry.value) ++ "'",
+      "edge:" ++ edge.id ++ "." ++ name, entry.source)
+]
+
 fn semantic_diagnostics(source, state) {
   let splines = attributes.value(state.graph_properties, "splines");
   let supported_route = splines == null or attributes.route_mode(splines) != null;
   [
     *rank_diagnostics(state), *engine_diagnostics(source, state),
+    *ordering_diagnostics(state),
+    *compound_reference_diagnostics(state),
+    for (edge in state.edges, name in ["arrowhead", "arrowtail"],
+      let entry = attributes.last_entry(edge.properties, name)
+      where entry != null and not markers.supported(entry.value))
+      diagnostic.for_value(
+        "graph.graphviz.unsupported-arrow", "warning",
+        "Unsupported DOT " ++ name ++ " specification '" ++ entry.value ++ "'",
+        "edge:" ++ edge.id ++ "." ++ name, entry.source),
     *(if (supported_route) [] else [diagnostic.for_value(
       "graph.graphviz.invalid-splines", "error",
       "Unsupported DOT splines mode '" ++ string(splines) ++ "'",
@@ -452,18 +518,22 @@ fn node_annotations(entry, graph_id) {
   let known = attributes.canonical("node", entry.properties);
   let label = if (known["external-label"] != null)
     labels.node(known["external-label"], entry.id, graph_id) else null;
-  [annotation_element("external", label, known["external-label-format"], "node", entry.id)]
+  [annotation_element("external", label, known["external-label-format"], "node", entry.id,
+    known)]
 }
 
 fn edge_annotations(entry, graph_id) {
   let known = attributes.canonical("edge", entry.properties);
   [
     annotation_element("external", labels.edge(known["external-label"], entry.from,
-      entry.to, entry.directed, graph_id), known["external-label-format"], "edge", entry.id),
+      entry.to, entry.directed, graph_id), known["external-label-format"], "edge", entry.id,
+      known),
     annotation_element("head", labels.edge(known["head-label"], entry.from,
-      entry.to, entry.directed, graph_id), known["head-label-format"], "edge", entry.id),
+      entry.to, entry.directed, graph_id), known["head-label-format"], "edge", entry.id,
+      known),
     annotation_element("tail", labels.edge(known["tail-label"], entry.from,
-      entry.to, entry.directed, graph_id), known["tail-label-format"], "edge", entry.id)
+      entry.to, entry.directed, graph_id), known["tail-label-format"], "edge", entry.id,
+      known)
   ]
 }
 
@@ -471,7 +541,10 @@ fn cluster_element(scope, state, graph_id) {
   let known = attributes.canonical("cluster", scope.properties);
   <subgraph id: scope.id, role: scope.role, 'parent-scope': scope.parent_scope,
     label: labels.graph(known.label, graph_id), 'label-format': known["label-format"],
-    direction: known.direction, fill: known.fill,
+    direction: known.direction, fill: known.fill, style: known.style,
+    'gradient-angle': optional(known, "gradient-angle"),
+    'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
+    'font-color': optional(known, "font-color"),
     'source-start': scope.source["source-start"], 'source-end': scope.source["source-end"],
     'source-line': scope.source["source-line"], 'source-column': scope.source["source-column"];
     let properties = properties_element(scope.properties)
@@ -500,7 +573,12 @@ fn canonical_graph(source, state) {
     layout: if (known.layout != null) known.layout else "dot",
     directed: source.directed, strict: source.strict, 'ir-stage': "canonical",
     direction: known.direction, 'node-sep': known["node-sep"],
-    'rank-sep': known["rank-sep"], 'route-mode': known["route-mode"], fill: known.fill,
+    'rank-sep': known["rank-sep"], 'route-mode': known["route-mode"],
+    ordering: known.ordering, 'new-rank': known["new-rank"], compound: known.compound,
+    fill: known.fill,
+    style: known.style, 'gradient-angle': optional(known, "gradient-angle"),
+    'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
+    'font-color': optional(known, "font-color"),
     label: labels.graph(known.label, string(source.id)),
     'label-format': known["label-format"],
     'source-start': source["source-start"], 'source-end': source["source-end"],
