@@ -305,6 +305,71 @@ fn has_port(entries, node_id, port_id) => len([
     where entry.node == node_id and item_id(entry.value) == port_id) entry
 ]) > 0
 
+fn resolve_dot_endpoint(edge, role, entries) {
+  let port_key = role ++ "-port";
+  let compass_key = role ++ "-compass";
+  let port = edge[port_key];
+  let compass = edge[compass_key];
+  let candidate = if (port != null) lower(string(port)) else null;
+  // DOT's one-token suffix is a compass only when no generated/authored port has that name.
+  let implicit_compass = compass == null and candidate != null and
+    graphviz_normalize.valid_compass(candidate) and
+    not has_port(entries, string(edge[if (role == "from") "from" else "to"]),
+      string(port));
+  {
+    port: if (implicit_compass) null else port,
+    compass: if (implicit_compass) candidate else compass,
+    changed: implicit_compass
+  }
+}
+
+fn resolve_dot_edge(edge, entries) {
+  let from = resolve_dot_endpoint(edge, "from", entries);
+  let to = resolve_dot_endpoint(edge, "to", entries);
+  let attrs = {*:map(edge), 'from-port': from.port, 'from-compass': from.compass,
+    'to-port': to.port, 'to-compass': to.compass};
+  <edge *:attrs;
+    for (child in model.child_items(edge)) child
+  >
+}
+
+fn resolve_dot_child(child, entries) {
+  if (not (child is element)) child
+  else if (model.tag(child) == "edge") resolve_dot_edge(child, entries)
+  else if (model.tag(child) == "subgraph") {
+    let attrs = map(child);
+    <subgraph *:attrs;
+      for (nested in model.child_items(child)) resolve_dot_child(nested, entries)
+    >
+  }
+  else child
+}
+
+fn dot_child_needs_compass_resolution(child, entries) {
+  if (not (child is element)) false
+  else if (model.tag(child) == "edge")
+    resolve_dot_endpoint(child, "from", entries).changed or
+      resolve_dot_endpoint(child, "to", entries).changed
+  else if (model.tag(child) == "subgraph") all([
+    for (nested in model.child_items(child))
+      not dot_child_needs_compass_resolution(nested, entries)
+  ]) == false
+  else false
+}
+
+fn resolve_dot_compass_ports(graph) {
+  let entries = model.port_entries(graph);
+  let needed = [for (child in model.child_items(graph)
+    where dot_child_needs_compass_resolution(child, entries)) child];
+  if (len(needed) == 0) graph
+  else {
+    let attrs = map(graph);
+    <graph *:attrs;
+      for (child in model.child_items(graph)) resolve_dot_child(child, entries)
+    >
+  }
+}
+
 fn edge_port_diagnostics(edges, entries) => [
   for (i, edge in edges, reference in [
       {role: "from-port", node: if (edge.from != null) string(edge.from) else "",
@@ -367,12 +432,14 @@ pub fn normalize(graph) {
     merge_mermaid_source_graph(dot_result.graph) else dot_result.graph;
   let canonical = if (resolved is element and string(name(resolved)) == "graph")
     (if (is_canonical_graph(resolved)) resolved else canonical_graph(resolved)) else resolved;
+  let final_graph = if (canonical is element and canonical.flavor == "dot")
+    resolve_dot_compass_ports(canonical) else canonical;
   // Validate authored structure before rebuilding so duplicate canonical children
   // cannot disappear without a diagnostic when the canonical pair is selected.
   let values = [*dot_result.diagnostics,
-    *validate(if (is_dot_source_graph(graph)) canonical else resolved)];
+    *validate(if (is_dot_source_graph(graph)) final_graph else resolved)];
   {
-    graph: canonical,
+    graph: final_graph,
     diagnostics: values,
     valid: not diagnostic.has_errors(values)
   }

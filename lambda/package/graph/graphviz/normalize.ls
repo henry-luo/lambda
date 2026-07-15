@@ -206,7 +206,7 @@ fn expand_segments(groups, i, state, statement, defaults, direct, directed, stri
   }
 }
 
-fn valid_compass(value) => value == null or
+pub fn valid_compass(value) => value == null or
   contains(["n", "ne", "e", "se", "s", "sw", "w", "nw", "c", "_"], lower(value))
 
 fn endpoint_compass_diagnostic(state, endpoint) {
@@ -493,6 +493,30 @@ fn compound_reference_diagnostics(state) => [
       "edge:" ++ edge.id ++ "." ++ name, entry.source)
 ]
 
+fn owner_in_cluster(scopes, owner, cluster_id, stack) {
+  if (owner == null or contains(stack, owner)) false
+  else if (owner == cluster_id) true
+  else {
+    let scope = scope_at(scopes, owner);
+    if (scope == null) false
+    else owner_in_cluster(scopes, scope.parent_owner, cluster_id, [*stack, owner])
+  }
+}
+
+fn compound_membership_diagnostics(state) => [
+  for (edge in state.edges,
+    endpoint in [{name: "lhead", node: edge.to}, {name: "ltail", node: edge.from}],
+    let entry = attributes.last_entry(edge.properties, endpoint.name),
+    let node = node_at(state.nodes, endpoint.node)
+    where entry != null and node != null and cluster_exists(state.scopes, string(entry.value)) and
+      not owner_in_cluster(state.scopes, node.owner, string(entry.value), []))
+    diagnostic.for_value(
+      "graph.graphviz.compound-endpoint-outside-cluster", "error",
+      "DOT " ++ endpoint.name ++ " cluster '" ++ string(entry.value) ++
+        "' does not contain endpoint node '" ++ endpoint.node ++ "'",
+      "edge:" ++ edge.id ++ "." ++ endpoint.name, entry.source)
+]
+
 fn semantic_diagnostics(source, state) {
   let splines = attributes.value(state.graph_properties, "splines");
   let supported_route = splines == null or attributes.route_mode(splines) != null;
@@ -500,6 +524,7 @@ fn semantic_diagnostics(source, state) {
     *rank_diagnostics(state), *engine_diagnostics(source, state),
     *ordering_diagnostics(state),
     *compound_reference_diagnostics(state),
+    *compound_membership_diagnostics(state),
     for (edge in state.edges, name in ["arrowhead", "arrowtail"],
       let entry = attributes.last_entry(edge.properties, name)
       where entry != null and not markers.supported(entry.value))

@@ -153,6 +153,12 @@ fn scene_edge(edge, labels, nodes) {
   let last_point = if (len(points) > 0) points[len(points) - 1] else null;
   <edge id: id, 'from': string(attr(edge, "data-from", "")),
       'to': string(attr(edge, "data-to", "")),
+      'from-port': attr(edge, "data-from-port", null),
+      'to-port': attr(edge, "data-to-port", null),
+      'from-compass': attr(edge, "data-from-compass", null),
+      'to-compass': attr(edge, "data-to-compass", null),
+      'tail-cluster': attr(edge, "data-tail-cluster", null),
+      'head-cluster': attr(edge, "data-head-cluster", null),
       'from-side': endpoint_side(first_point, scene_node_by_id(nodes, from_id)),
       'to-side': endpoint_side(last_point, scene_node_by_id(nodes, to_id)),
       'marker-start': string(attr(edge, "data-marker-start", "none")),
@@ -316,7 +322,9 @@ fn edge_mismatches(actual_scene, expected, geometry_tolerance, route_tolerance) 
   [
     *entity_mismatches(actual_scene, expected, "edge",
       ["id", "from", "to", "from-side", "to-side", "marker-start", "marker-end",
-        "route-kind", "stroke", "dash-array", "arrow-size"],
+        "from-port", "to-port", "from-compass", "to-compass",
+        "tail-cluster", "head-cluster", "route-kind", "stroke", "dash-array",
+        "arrow-size"],
       ["stroke-width", "opacity"], geometry_tolerance),
     *point_mismatches(actual, expected, attr(expected, "id", null), route_tolerance)
   ]

@@ -72,6 +72,8 @@ fn semantic_edges(children) {
     to: string(attr_or(child, "data-to", "")),
     from_port: attr_or(child, "data-from-port", null),
     to_port: attr_or(child, "data-to-port", null),
+    from_compass: attr_or(child, "data-from-compass", null),
+    to_compass: attr_or(child, "data-to-compass", null),
     tail_cluster: attr_or(child, "data-tail-cluster", null),
     head_cluster: attr_or(child, "data-head-cluster", null),
     directed: attr_or(child, "data-directed", "true") != "false",
@@ -96,12 +98,67 @@ fn semantic_edges(children) {
   }]
 }
 
-fn semantic_ports(children) => [
-  for (i, child in children where child_tag(child) == "port") {
-    node_id: string(attr_or(child, "data-node-id", "")),
-    id: string(attr_or(child, "data-port-id", "p" ++ string(i))),
+fn child_x(child) {
+  let box = child.box;
+  if (box != null and not (box is error) and box.x != null) float(box.x)
+  else if (child.x != null and not (child.x is error)) float(child.x) else 0.0
+}
+
+fn child_y(child) {
+  let box = child.box;
+  if (box != null and not (box is error) and box.y != null) float(box.y)
+  else if (child.y != null and not (child.y is error)) float(child.y) else 0.0
+}
+
+fn child_children(child) {
+  let values = child.children;
+  if (values is array or values is list) values else []
+}
+
+fn measured_ports_at(stack, node_width, node_height, result) {
+  if (len(stack) == 0) result
+  else {
+    let entry = stack[len(stack) - 1];
+    let remaining = slice(stack, 0, len(stack) - 1);
+    let child = entry.child;
+    let x = entry.x + child_x(child);
+    let y = entry.y + child_y(child);
+    let port_id = attr_or(child, "data-record-port", null);
+    let found = if (port_id != null and port_id != "") [{
+      id: string(port_id),
+      x_offset: (x + child_width(child) / 2.0) / max([1.0, node_width]),
+      y_offset: (y + child_height(child) / 2.0) / max([1.0, node_height])
+    }] else [];
+    let nested = [for (value in child_children(child)) {child: value, x: x, y: y}];
+    measured_ports_at([*remaining, *nested], node_width, node_height,
+      [*result, *found])
+  }
+}
+
+fn measured_ports(node) => measured_ports_at([
+  for (child in child_children(node)) {child: child, x: 0.0, y: 0.0}
+], child_width(node), child_height(node), [])
+
+fn measured_port(nodes, node_id, port_id) {
+  let matches = [for (entry in nodes,
+    port in measured_ports(entry.child)
+    where child_id(entry.child, entry.order) == node_id and port.id == port_id) port];
+  if (len(matches) > 0) matches[0] else null
+}
+
+fn semantic_ports(children, nodes) => [
+  for (i, child in children,
+    let node_id = string(attr_or(child, "data-node-id", "")),
+    let port_id = string(attr_or(child, "data-port-id", "p" ++ string(i))),
+    let measured = measured_port(nodes, node_id, port_id)
+    where child_tag(child) == "port") {
+    node_id: node_id,
+    id: port_id,
     side: string(attr_or(child, "data-port-side", "auto")),
     offset: float(attr_or(child, "data-port-offset", 0.5)),
+    // Measured cell centers supersede source-order estimates after Radiant prelayout.
+    x_offset: if (measured != null) measured.x_offset else null,
+    y_offset: if (measured != null) measured.y_offset else null,
     z: child_z(child, 0),
     child_index: child_index(child, i)
   }
@@ -343,7 +400,7 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
   let nodes = semantic_nodes(children);
   let metadata_edges = semantic_edges(children);
   let edge_labels = [*semantic_edge_labels(children), *semantic_annotations(children)];
-  let ports = semantic_ports(children);
+  let ports = semantic_ports(children, nodes);
   let constraints = semantic_constraints(children);
   let cluster_labels = semantic_cluster_labels(children);
   let clusters = semantic_clusters(children, cluster_labels);

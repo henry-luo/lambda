@@ -6,5 +6,17 @@
   ports: [["west", "auto", 0.25], ["east", "auto", 0.75]],
   nested_ports: [["north", "auto", 0.16666666666666666], ["south", "auto", 0.5], ["east", "auto", 0.8333333333333334]],
   html_ports: [["a", "west", "auto", "0.25"], ["a", "east", "auto", "0.75"], ["nested", "north", "auto", "0.166667"], ["nested", "south", "auto", "0.5"], ["nested", "east", "auto", "0.833333"]],
-  starts: [["west", 120, 15], ["east", 90, 60]]
+  starts: [["west", 120, 15], ["east", 90, 60]],
+  measured: {
+    offsets: [["top", 0.25, 0.25], ["bottom", 0.6666666666666666, 0.6666666666666666]],
+    starts: [["top", 120, 15], ["bottom", 120, 40]]
+  },
+  compass: {
+    valid: true,
+    canonical: [["p", "n", null], ["r", null, "n"], ["r", null, "se"]],
+    html: [["p", "n", null], ["r", null, "n"], ["r", null, "se"]],
+    named_port: true,
+    north: true,
+    southeast: true
+  }
 }
