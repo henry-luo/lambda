@@ -346,6 +346,10 @@ pub fn to_html(graph, opts = null) {
     else source_attr(graph, "direction", source_attr(graph, "rank-dir", "TB"))));
   let config = if (graph is element and graph.flavor == "mermaid")
     mermaid_config.options(graph) else {};
+  let route_mode = string(opt(opts, "route_mode", source_attr(graph, "route-mode",
+    if (config.curve == "linear") "line"
+    else if (config.curve == "step") "orthogonal"
+    else if (config.use_splines == true) "curved" else "orthogonal")));
   let node_sep = string(opt(opts, "node_sep", source_attr(graph, "node-sep",
     if (config.node_sep != null) config.node_sep else 60)));
   let rank_sep = string(opt(opts, "rank_sep", source_attr(graph, "rank-sep",
@@ -397,7 +401,8 @@ pub fn to_html(graph, opts = null) {
       'data-direction': direction, 'data-node-sep': node_sep,
       'data-rank-sep': rank_sep, 'data-edge-sep': edge_sep,
       'data-curve': config.curve,
-      'data-use-splines': if (config.use_splines == true) "true" else "false",
+      'data-route-mode': route_mode,
+      'data-use-splines': if (route_mode == "curved") "true" else "false",
       style: "position:relative;background:" ++ palette.graph_background ++ ";";
     for child in children { child }>
 }

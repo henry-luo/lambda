@@ -134,6 +134,14 @@ fn normalize_cluster(cluster, index) => {
   index: index
 }
 
+fn normalize_route_mode(raw, use_splines) {
+  let value = lower(string(if (raw == null) "" else raw));
+  if (contains(["none", "line", "polyline", "orthogonal", "curved"], value)) value
+  // Missing route_mode must preserve callers of the legacy use_splines option.
+  else if (use_splines == true) "curved"
+  else "orthogonal"
+}
+
 fn normalize_graph(input, opts) {
   let nodes0 = if (input.nodes != null) input.nodes else [];
   let nodes = [for (i, node in nodes0) normalize_node(node, i)];
@@ -154,6 +162,7 @@ fn normalize_graph(input, opts) {
       member: string(member)
     }
   ] else [];
+  let use_splines = opt(opts, "use_splines", opt(input, "use_splines", false));
   {
     nodes: nodes,
     edges: edges,
@@ -166,7 +175,9 @@ fn normalize_graph(input, opts) {
       node_sep: float(opt(opts, "node_sep", opt(input, "node_sep", 60.0))),
       rank_sep: float(opt(opts, "rank_sep", opt(input, "rank_sep", 80.0))),
       edge_sep: float(opt(opts, "edge_sep", opt(input, "edge_sep", 10.0))),
-      use_splines: opt(opts, "use_splines", opt(input, "use_splines", false)),
+      route_mode: normalize_route_mode(
+        opt(opts, "route_mode", opt(input, "route_mode", null)), use_splines),
+      use_splines: use_splines,
       max_iterations: int(opt(opts, "max_iterations", opt(input, "max_iterations", 8)))
     }
   }
@@ -750,14 +761,28 @@ fn routing_rect(x, y, width, height, margin) =>
   {left: x - margin, top: y - margin, right: x + width + margin,
     bottom: y + height + margin}
 
+fn point_inside_rect(point, rect) =>
+  point.x > rect.left and point.x < rect.right and
+  point.y > rect.top and point.y < rect.bottom
+
 fn segment_hits_rect(start, finish, rect) =>
-  if (abs(start.x - finish.x) < 0.001)
+  if (point_inside_rect(start, rect) or point_inside_rect(finish, rect)) true
+  else if (abs(start.x - finish.x) < 0.001)
     (start.x > rect.left and start.x < rect.right and
       max([start.y, finish.y]) > rect.top and min([start.y, finish.y]) < rect.bottom)
   else if (abs(start.y - finish.y) < 0.001)
     (start.y > rect.top and start.y < rect.bottom and
       max([start.x, finish.x]) > rect.left and min([start.x, finish.x]) < rect.right)
-  else false
+  else {
+    let vertices = [
+      {x: rect.left, y: rect.top}, {x: rect.right, y: rect.top},
+      {x: rect.right, y: rect.bottom}, {x: rect.left, y: rect.bottom}
+    ];
+    let intersections = polygon_intersections(start.x, start.y,
+      finish.x, finish.y, vertices);
+    // Ray intersections beyond the finish point do not belong to this segment.
+    any([for (point in intersections) point.scale <= 1.0])
+  }
 
 fn route_hits_obstacle_at(points, obstacles, i) {
   if (i >= len(points)) false
@@ -773,8 +798,9 @@ fn route_manhattan_length(points) =>
   if (len(points) < 2) 0.0 else sum([for (i in 1 to (len(points) - 1))
     abs(points[i].x - points[i - 1].x) + abs(points[i].y - points[i - 1].y)])
 
-fn obstacle_lane_routes(start, finish, obstacles, vertical_first, gap) {
-  let default_route = orthogonal_points([start, finish], vertical_first);
+fn obstacle_lane_routes(start, finish, obstacles, vertical_first, gap, orthogonal) {
+  let default_route = if (orthogonal) orthogonal_points([start, finish], vertical_first)
+    else [start, finish];
   let detours = if (vertical_first) [
     for (obstacle in obstacles, lane in [obstacle.left - gap, obstacle.right + gap])
       simplify_route([start, {x: lane, y: start.y}, {x: lane, y: finish.y}, finish])
@@ -785,27 +811,30 @@ fn obstacle_lane_routes(start, finish, obstacles, vertical_first, gap) {
   [default_route, *detours]
 }
 
-fn route_around_obstacles(start, finish, obstacles, vertical_first, gap) {
-  let candidates = obstacle_lane_routes(start, finish, obstacles, vertical_first, gap);
+fn route_around_obstacles(start, finish, obstacles, vertical_first, gap, orthogonal) {
+  let candidates = obstacle_lane_routes(start, finish, obstacles, vertical_first, gap,
+    orthogonal);
   let clear = [for (candidate in candidates
     where not route_hits_obstacle(candidate, obstacles)) candidate];
   if (len(clear) == 0) candidates[0]
   else sort(clear, (candidate) => route_manhattan_length(candidate))[0]
 }
 
-fn avoid_route_segments_at(points, obstacles, vertical_first, gap, i, result) {
+fn avoid_route_segments_at(points, obstacles, vertical_first, gap, orthogonal, i, result) {
   if (i >= len(points)) simplify_route(result)
   else {
     let segment = route_around_obstacles(points[i - 1], points[i], obstacles,
-      vertical_first, gap);
+      vertical_first, gap, orthogonal);
     let appended = [*result, for (j, point in segment where j > 0) point];
-    avoid_route_segments_at(points, obstacles, vertical_first, gap, i + 1, appended)
+    avoid_route_segments_at(points, obstacles, vertical_first, gap, orthogonal,
+      i + 1, appended)
   }
 }
 
-fn avoid_route_segments(points, obstacles, vertical_first, gap) =>
+fn avoid_route_segments(points, obstacles, vertical_first, gap, orthogonal) =>
   if (len(points) < 2) points
-  else avoid_route_segments_at(points, obstacles, vertical_first, gap, 1, [points[0]])
+  else avoid_route_segments_at(points, obstacles, vertical_first, gap, orthogonal,
+    1, [points[0]])
 
 fn cluster_boundary(cluster, source_x, source_y, target_x, target_y) {
   let vertices = [
@@ -938,24 +967,31 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       *crossings.target, finish];
     let obstacles = routing_obstacles(nodes, clusters, from_node, to_node,
       max([4.0, opts.edge_sep / 2.0]));
-    let base_points = if (edge.from == edge.to)
+    let base_points = if (opts.route_mode == "none") []
+      else if (edge.from == edge.to)
       self_loop_points(from_node, opts.edge_sep, parallel.index,
         edge.from_port, edge.to_port)
+      else if (opts.route_mode == "line") [start, finish]
       else if (len(crossings.source) > 0 or len(crossings.target) > 0)
-        orthogonal_waypoints(compound_points, vertical_first)
+        if (opts.route_mode == "orthogonal")
+          orthogonal_waypoints(compound_points, vertical_first)
+        else simplify_route(compound_points)
       else if (parallel.count > 1)
         parallel_route_points(from_node, to_node, lane_offset, vertical_first,
           edge.from_port, edge.to_port)
-      else orthogonal_points([start, finish], vertical_first);
+      else if (opts.route_mode == "orthogonal")
+        orthogonal_points([start, finish], vertical_first)
+      else [start, finish];
     {
       id: edge.id,
       from: edge.from,
       to: edge.to,
       from_port: edge.from_port,
       to_port: edge.to_port,
-      points: if (edge.from == edge.to) base_points
+      points: if (edge.from == edge.to or opts.route_mode == "line" or
+          opts.route_mode == "none") base_points
         else avoid_route_segments(base_points, obstacles, vertical_first,
-          max([4.0, opts.edge_sep / 2.0])),
+          max([4.0, opts.edge_sep / 2.0]), opts.route_mode == "orthogonal"),
       directed: edge.directed,
       arrow_start: edge.arrow_start,
       arrow_end: edge.arrow_end,
@@ -969,7 +1005,8 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       min_length: edge.min_length,
       z: edge.z,
       index: edge.index,
-      is_bezier: opts.use_splines
+      route_mode: opts.route_mode,
+      is_bezier: opts.route_mode == "curved"
     }
   }
 }

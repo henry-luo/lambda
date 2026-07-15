@@ -339,6 +339,9 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
   let rank_sep = float(graph_option(parent, opts, "rank_sep", "data-rank-sep", 80.0));
   let edge_sep = float(graph_option(parent, opts, "edge_sep", "data-edge-sep", 10.0));
   let direction = string(graph_option(parent, opts, "direction", "data-direction", "TB"));
+  let route_mode = string(graph_option(parent, opts, "route_mode", "data-route-mode",
+    if (string(graph_option(parent, opts, "use_splines",
+        "data-use-splines", "false")) == "true") "curved" else "orthogonal"));
   let graph_input = {
     nodes: [for (entry in nodes) {
       id: child_id(entry.child, entry.order),
@@ -357,8 +360,8 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
     node_sep: node_sep,
     rank_sep: rank_sep,
     edge_sep: edge_sep,
-    use_splines: string(graph_option(parent, opts, "use_splines",
-      "data-use-splines", "false")) == "true"
+    route_mode: route_mode,
+    use_splines: route_mode == "curved"
   };
   let result = compute(graph_input, opts);
   let placed_edge_labels = edge_label_placements(edge_labels, result.edges, result.nodes,

@@ -25,6 +25,9 @@ edge weight propagation, successor relaxation, and the four boundary rank
 classes. `annotations.ls` covers measured node/edge `xlabel`, `headlabel`, and
 `taillabel` metadata and placement. `render.ls` exercises the retained custom
 layout callback through final SVG and Graph Scene adaptation.
+`route_classes.ls` covers all supported Graphviz `splines` values and aliases,
+invalid-value diagnostics, semantic HTML propagation, route geometry, hidden
+edges, and deterministic curved SVG paths.
 
 `manifest.mark` and `suite.ls` provide one retained-runtime pass over the
 positive DOT corpus. Run the native parser checks and all package fixtures with

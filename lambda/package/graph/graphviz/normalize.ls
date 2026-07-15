@@ -436,9 +436,17 @@ fn engine_diagnostic(source, layout) =>
 fn engine_diagnostics(source, state) =>
   engine_diagnostic(source, attributes.value(state.graph_properties, "layout"))
 
-fn semantic_diagnostics(source, state) => [
-  *rank_diagnostics(state), *engine_diagnostics(source, state)
-]
+fn semantic_diagnostics(source, state) {
+  let splines = attributes.value(state.graph_properties, "splines");
+  let supported_route = splines == null or attributes.route_mode(splines) != null;
+  [
+    *rank_diagnostics(state), *engine_diagnostics(source, state),
+    *(if (supported_route) [] else [diagnostic.for_value(
+      "graph.graphviz.invalid-splines", "error",
+      "Unsupported DOT splines mode '" ++ string(splines) ++ "'",
+      "graph.splines", source)])
+  ]
+}
 
 fn node_annotations(entry, graph_id) {
   let known = attributes.canonical("node", entry.properties);
@@ -492,7 +500,7 @@ fn canonical_graph(source, state) {
     layout: if (known.layout != null) known.layout else "dot",
     directed: source.directed, strict: source.strict, 'ir-stage': "canonical",
     direction: known.direction, 'node-sep': known["node-sep"],
-    'rank-sep': known["rank-sep"], fill: known.fill,
+    'rank-sep': known["rank-sep"], 'route-mode': known["route-mode"], fill: known.fill,
     label: labels.graph(known.label, string(source.id)),
     'label-format': known["label-format"],
     'source-start': source["source-start"], 'source-end': source["source-end"],

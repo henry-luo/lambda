@@ -6,4 +6,5 @@
   <case id: 'records-ports', source: 'records_ports.dot'>
   <case id: 'rank-layout', source: 'rank_layout.dot'>
   <case id: 'annotations', source: 'annotations.dot'>
+  <case id: 'route-classes', source: 'route_classes.dot'>
 >

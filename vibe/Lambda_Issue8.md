@@ -171,3 +171,25 @@ This points to the incremental release/configuration path or a release-only
 runtime defect, not the graph package. The release gate should execute a small
 known script before backing up or restoring `lambda.exe`, and the optimized
 runtime still needs an isolated clean-build reproduction.
+
+## Multiline iterator calls can obscure comprehension parse errors
+
+While implementing Graphviz route intersection checks, a comprehension used a
+multiline function call directly as its iterator and added a `where` clause:
+
+```lambda
+[for (point in polygon_intersections(start.x, start.y,
+  finish.x, finish.y, vertices) where point.scale <= 1.0) point]
+```
+
+The parser reported an unclosed `{` at the enclosing function rather than
+identifying the ambiguous iterator boundary. Assigning the function result to a
+local moved the diagnostic but the filtered comprehension still failed. A
+boolean projection consumed by `any()` compiles:
+
+```lambda
+any([for (point in intersections) point.scale <= 1.0])
+```
+
+The grammar or error recovery should either accept the filtered form or report
+the `for` iterator as the failure location.

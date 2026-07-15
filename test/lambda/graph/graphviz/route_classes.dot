@@ -1,0 +1,5 @@
+digraph Routes {
+  graph [rankdir=LR splines=curved]
+  a -> b
+  a -> b
+}

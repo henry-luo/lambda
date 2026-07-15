@@ -6,11 +6,51 @@ fn path_tail(points, index, result) {
     result ++ " L " ++ string(points[index].x) ++ " " ++ string(points[index].y))
 }
 
-fn path_data(points) {
+fn line_path_data(points) {
   if (len(points) == 0) ""
   else path_tail(points, 1,
     "M " ++ string(points[0].x) ++ " " ++ string(points[0].y))
 }
+
+fn curve_tail(points, index, result) {
+  if (index >= len(points) - 1) {
+    let control = points[index];
+    let finish = points[len(points) - 1];
+    // The preceding waypoint remains the control for the terminal curve segment.
+    result ++ " Q " ++ string(control.x) ++ " " ++ string(control.y) ++
+      " " ++ string(finish.x) ++ " " ++ string(finish.y)
+  }
+  else {
+    let control = points[index];
+    let next = points[index + 1];
+    let mid_x = (control.x + next.x) / 2.0;
+    let mid_y = (control.y + next.y) / 2.0;
+    curve_tail(points, index + 1,
+      result ++ " Q " ++ string(control.x) ++ " " ++ string(control.y) ++
+        " " ++ string(mid_x) ++ " " ++ string(mid_y))
+  }
+}
+
+fn curve_path_data(points) {
+  if (len(points) < 2) line_path_data(points)
+  else if (len(points) == 2) {
+    let start = points[0];
+    let finish = points[1];
+    let dx = finish.x - start.x;
+    let dy = finish.y - start.y;
+    "M " ++ string(start.x) ++ " " ++ string(start.y) ++
+      " C " ++ string(start.x + dx / 3.0) ++ " " ++ string(start.y + dy / 3.0) ++
+      " " ++ string(start.x + dx * 2.0 / 3.0) ++ " " ++
+        string(start.y + dy * 2.0 / 3.0) ++
+      " " ++ string(finish.x) ++ " " ++ string(finish.y)
+  }
+  else curve_tail(points, 1,
+    "M " ++ string(points[0].x) ++ " " ++ string(points[0].y))
+}
+
+fn path_data(edge) =>
+  if (edge.route_mode == "curved") curve_path_data(edge.points)
+  else line_path_data(edge.points)
 
 fn route_tail(points, index, result) {
   if (index >= len(points)) result
@@ -24,8 +64,10 @@ fn route_data(points) {
 }
 
 fn route_kind(edge) {
-  if (edge.from == edge.to) "self-loop"
+  if (edge.route_mode == "none") "none"
+  else if (edge.from == edge.to) "self-loop"
   else if (edge.is_bezier == true) "curved"
+  else if (edge.route_mode == "polyline") "polyline"
   else if (len(edge.points) <= 2) "straight"
   else "orthogonal"
 }
@@ -107,7 +149,7 @@ fn edge_path(edge, color, stroke_width, opacity) {
     "url(#" ++ marker_id(edge, "start") ++ ")" else null;
   let marker_end = if (edge.marker_end != "none")
     "url(#" ++ marker_id(edge, "end") ++ ")" else null;
-  <path d: path_data(edge.points), fill: "none", stroke: color,
+  <path d: path_data(edge), fill: "none", stroke: color,
       'stroke-width': stroke_width,
       'stroke-dasharray': if (edge.dash_array != null) edge.dash_array else dash_array(edge.style),
       opacity: opacity,
@@ -115,6 +157,7 @@ fn edge_path(edge, color, stroke_width, opacity) {
       'data-graph-role': "edge", 'data-edge-id': edge.id,
       'data-from': edge.from, 'data-to': edge.to,
       'data-route': route_data(edge.points), 'data-route-kind': route_kind(edge),
+      'data-route-mode': edge.route_mode,
       'data-marker-start': edge.marker_start, 'data-marker-end': edge.marker_end,
       'data-stroke': color, 'data-stroke-width': stroke_width,
       'data-opacity': opacity,

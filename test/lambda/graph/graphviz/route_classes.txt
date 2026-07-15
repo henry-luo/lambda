@@ -1,0 +1,7 @@
+{
+  lowered: [["line", "line", true, []], ["false", "line", true, []], ["polyline", "polyline", true, []], ["ortho", "orthogonal", true, []], ["curved", "curved", true, []], ["spline", "curved", true, []], ["true", "curved", true, []], ["none", "none", true, []], ["", "none", true, []]],
+  invalid: [false, ["graph.graphviz.invalid-splines"]],
+  html: ["curved", "curved", "true", 2],
+  compatibility: ["curved", "line"],
+  routes: [["line", 2, 2, "straight", "line", false, false], ["polyline", 4, 2, "polyline", "polyline", false, false], ["orthogonal", 4, 2, "orthogonal", "orthogonal", false, false], ["curved", 4, 2, "curved", "curved", true, true], ["none", 0, 0, null, null, false, false]]
+}

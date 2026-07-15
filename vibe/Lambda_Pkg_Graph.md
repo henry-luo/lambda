@@ -2097,9 +2097,9 @@ Lambda normalization size is tracked separately from native parser LOC:
 
 | Stage 3B module | Physical LOC |
 |---|---:|
-| `graphviz/attributes.ls` | 152 |
-| `graphviz/normalize.ls` | 536 |
-| total | 688 |
+| `graphviz/attributes.ls` | 166 |
+| `graphviz/normalize.ls` | 544 |
+| total | 710 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
@@ -2167,9 +2167,18 @@ during promotion relaxation, and uses edge weights in crossing-order
 barycenters. `rank_layout.ls` covers both direct layout and transformed
 metadata contracts; the Mermaid routing fixture protects self-loop geometry.
 
+Graphviz `splines` now lowers into the canonical `route-mode` values `none`,
+`line`, `polyline`, `orthogonal`, and `curved`. The DOT aliases `false`,
+`ortho`, `spline`, and `true` are resolved during normalization, while an empty
+quoted value means `none`; unsupported values produce the stable
+`graph.graphviz.invalid-splines` diagnostic. The selected mode is carried
+through semantic HTML and Velmt layout. Paint omits `none` edges, preserves
+direct `line` segments, emits waypoint paths for `polyline` and `orthogonal`,
+and produces deterministic quadratic/cubic paths for `curved`. The retained
+`route_classes.ls` fixture covers aliases, diagnostics, routing, and SVG paint.
+
 - complete `ordering`, `newrank`, and stronger group ordering behavior;
 - complete compound cluster and port behavior;
-- implement declared line/polyline/orthogonal/curved route classes;
 - place all labels and annotations without incoherent overlap;
 - compare Graph Scene semantics and tolerant geometry against pinned Graphviz
   JSON references.

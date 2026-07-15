@@ -91,12 +91,26 @@ fn style_attrs(properties) {
   ]
 }
 
+pub fn route_mode(raw) {
+  if (raw == null) null
+  else {
+    let value = lower(trim(string(raw)));
+    if (value == "none" or value == "") "none"
+    else if (value == "line" or value == "false") "line"
+    else if (value == "polyline") "polyline"
+    else if (value == "ortho") "orthogonal"
+    else if (value == "curved" or value == "spline" or value == "true") "curved"
+    else null
+  }
+}
+
 fn graph_attrs(properties) {
   let rankdir = upper(string(value(properties, "rankdir", "")));
   map([
     *attr("direction", if (contains(["TB", "BT", "LR", "RL"], rankdir)) rankdir else null),
     *attr("node-sep", number_value(properties, "nodesep", 96.0)),
     *attr("rank-sep", number_value(properties, "ranksep", 96.0)),
+    *attr("route-mode", route_mode(value(properties, "splines"))),
     *attr("layout", value(properties, "layout")),
     *attr("fill", value(properties, "bgcolor")),
     *label_attrs(properties)
