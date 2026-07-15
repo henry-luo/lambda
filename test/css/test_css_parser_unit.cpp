@@ -562,6 +562,35 @@ TEST_F(CssParserUnitTest, Declaration_NoColon_Invalid) {
     EXPECT_EQ(decl, nullptr);
 }
 
+TEST_F(CssParserUnitTest, Declaration_FontFamilyQuotedNameRequiresComma) {
+    ASSERT_TRUE(css_property_system_init(pool.get()));
+    auto parser = CreateParser();
+    auto decl = parser.ParseDeclaration("font-family: \"Trebuchet MS\" Arial, Helvetica");
+
+    EXPECT_EQ(decl, nullptr);
+    css_property_system_cleanup();
+}
+
+TEST_F(CssParserUnitTest, Declaration_FontFamilyValidLists) {
+    ASSERT_TRUE(css_property_system_init(pool.get()));
+    auto parser = CreateParser();
+
+    EXPECT_NE(parser.ParseDeclaration("font-family: \"Trebuchet MS\", Arial, Helvetica"), nullptr);
+    EXPECT_NE(parser.ParseDeclaration("font-family: Times New Roman, serif"), nullptr);
+    css_property_system_cleanup();
+}
+
+TEST_F(CssParserUnitTest, ValueParser_FontFamilyQuotedNameRequiresComma) {
+    auto parser = CreateParser();
+    auto tokenizer = parser.Tokenize("\"Trebuchet MS\" Arial, Helvetica");
+    CssPropertyValueParser* value_parser = css_property_value_parser_create(pool.get());
+
+    CssValue* value = css_parse_property_value(
+        value_parser, tokenizer.tokens(), (int)tokenizer.count(), "font-family");
+
+    EXPECT_EQ(value, nullptr);
+}
+
 // =============================================================================
 // Category 11: Rule Parsing - Simple Rules
 // =============================================================================

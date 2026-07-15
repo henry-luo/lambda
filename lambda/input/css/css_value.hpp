@@ -553,6 +553,8 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_PAUSED,
     // Animation iteration-count keyword
     CSS_VALUE_INFINITE,
+    // CSS UI 4 form-control appearance
+    CSS_VALUE_BASE_SELECT,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY

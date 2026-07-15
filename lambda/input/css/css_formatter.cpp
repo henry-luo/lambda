@@ -673,6 +673,11 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                         if (simple->value) {
                             stringbuf_append_str(formatter->output, simple->value);
                         }
+                        if (simple->argument) {
+                            stringbuf_append_str(formatter->output, "(");
+                            stringbuf_append_str(formatter->output, simple->argument);
+                            stringbuf_append_str(formatter->output, ")");
+                        }
                         break;
                     case CSS_SELECTOR_PSEUDO_GENERIC:
                         // Generic pseudo-class - use stored name with :

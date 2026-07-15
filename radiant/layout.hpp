@@ -2363,6 +2363,8 @@ static inline bool layout_block_is_skipped_container_item(const ViewBlock* block
 
 void line_init(LayoutContext* lycon, float left, float right);
 void line_reset(LayoutContext* lycon);
+float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
+                                    float valign_offset = 0);
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset = 0);
 bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
@@ -2459,6 +2461,9 @@ bool has_id_line_break_class(uint32_t cp);
  * @return number of justification opportunities (spaces + CJK inter-char gaps)
  */
 int count_justify_opportunities(const char* str, int len);
+int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
+                                         bool trim_trailing_space,
+                                         bool* out_suppressed = nullptr);
 
 // ============================================================================
 // Context Scope Guards (§1.8: Prevent context leaks on early returns)

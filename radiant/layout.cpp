@@ -739,12 +739,24 @@ float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
     if (!handle) handle = style->font_handle;
     if (handle) {
         FontStyleDesc desc = font_style_desc_from_prop(style);
-        LoadedGlyph* glyph = font_load_glyph(handle, &desc, (uint32_t)' ', false);
+        FontHandle* resolved = handle;
+        bool release_resolved = false;
+        if (!font_has_codepoint(handle, (uint32_t)' ') && lycon &&
+            lycon->ui_context && lycon->ui_context->font_ctx) {
+            resolved = font_resolve_for_codepoint(
+                lycon->ui_context->font_ctx, &desc, (uint32_t)' ');
+            release_resolved = resolved != NULL;
+        }
+        LoadedGlyph* glyph = resolved
+            ? font_load_glyph(resolved, &desc, (uint32_t)' ', false) : NULL;
+        float advance = 0.0f;
         if (glyph && glyph->advance_x > 0.0f) {
             float pixel_ratio = lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f
                 ? lycon->ui_context->pixel_ratio : 1.0f;
-            return glyph->advance_x / pixel_ratio;
+            advance = glyph->advance_x / pixel_ratio;
         }
+        if (release_resolved) font_handle_release(resolved);
+        if (advance > 0.0f) return advance;
     }
     return style->space_width;
 }
@@ -1083,6 +1095,24 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         radiant::LAYOUT_PROFILE_STYLE, node, elapsed_ms);
 }
 
+float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
+                                    float valign_offset) {
+    switch (align) {
+    case CSS_VALUE_BASELINE:
+        return valign_offset;
+    case CSS_VALUE_SUB:
+        // CSS leaves the shift UA-defined; Chromium lowers by one fifth of the
+        // parent em plus one CSS pixel.
+        return -(lycon->line.parent_font_size / 5.0f + 1.0f);
+    case CSS_VALUE_SUPER:
+        // CSS leaves the shift UA-defined; Chromium raises by one third of the
+        // parent em plus one CSS pixel.
+        return lycon->line.parent_font_size / 3.0f + 1.0f;
+    default:
+        return 0.0f;
+    }
+}
+
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset) {
     // CSS 2.1 §10.8.1: text-top/text-bottom/middle/super/sub reference the PARENT element's
     // font metrics, not the block container's. parent_font_* is set by span_vertical_align
@@ -1093,7 +1123,8 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
     switch (align) {
     case CSS_VALUE_BASELINE:
         // For length/percentage vertical-align, offset shifts baseline (positive = raise = lower y)
-        return baseline_pos - item_baseline - valign_offset;
+        return baseline_pos - item_baseline -
+            vertical_align_baseline_shift(lycon, align, valign_offset);
     case CSS_VALUE_TOP:
         return 0;
     case CSS_VALUE_MIDDLE: {
@@ -1121,13 +1152,9 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
         // The parent's content bottom is at (baseline_pos + parent_descender).
         return baseline_pos + pa_desc - item_height;
     case CSS_VALUE_SUB:
-        // CSS 2.1 §10.8.1: "Lower the baseline of the box" by UA amount.
-        // Use ~0.3em of the parent's font size.
-        return baseline_pos - item_baseline + 0.3f * pa_fsize;
     case CSS_VALUE_SUPER:
-        // CSS 2.1 §10.8.1: "Raise the baseline of the box" by UA amount.
-        // Use ~0.3em of the parent's font size.
-        return baseline_pos - item_baseline - 0.3f * pa_fsize;
+        return baseline_pos - item_baseline -
+            vertical_align_baseline_shift(lycon, align, valign_offset);
     default:
         return baseline_pos - item_baseline; // Default to baseline
     }
@@ -1532,14 +1559,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 continue;
             }
             float item_height = rect->height;
-            // for text, baseline is at the font content-area ascender, not the
-            // normal line-height split stored on FontProp.
+            // Range rectangles use raster font extents, so their baseline uses
+            // the raster face ascender rather than the CSS inline-box metric split.
             float item_baseline = item_height;
             if (text_view->font && text_view->font->font_handle) {
-                float content_asc = 0.0f, content_desc = 0.0f;
-                font_get_content_area_split(text_view->font->font_handle,
-                                            &content_asc, &content_desc);
-                if (content_asc > 0.0f) item_baseline = content_asc;
+                float rendering_ascender = font_get_rendering_ascender(
+                    text_view->font->font_handle);
+                if (rendering_ascender > 0.0f) item_baseline = rendering_ascender;
             } else if (text_view->font && text_view->font->ascender > 0.0f) {
                 item_baseline = text_view->font->ascender;
             }
@@ -1591,12 +1617,12 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             bool is_replaced_elem = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
                 block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
                 (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
-                block->tag() == HTM_TAG_TEXTAREA ||
-                block->tag() == HTM_TAG_SELECT);
+                block->tag() == HTM_TAG_TEXTAREA);
             bool overflow_visible = !block->scroller ||
                 (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
                  block->scroller->overflow_y == CSS_VALUE_VISIBLE);
             if (!is_replaced_elem && overflow_visible) {
+                // Combo selects expose a synthesized internal text baseline from the first pass.
                 item_baseline = (block->bound ? block->bound->margin.top : 0) +
                     block->blk->last_line_max_ascender;
             }
@@ -1812,9 +1838,18 @@ static void shift_preceding_current_line_views(float offset, int line_number, Vi
 
 void view_line_align(LayoutContext* lycon, float offset, View* view);
 
-static void align_wrapped_continuation(LayoutContext* lycon, float offset, ViewText* text) {
-    View* cursor = static_cast<View*>(text);
-    shift_text_current_line_rects(offset, lycon->block.line_number, text);
+static void align_wrapped_continuation(LayoutContext* lycon, float offset, View* fragment) {
+    View* cursor = fragment;
+    if (fragment->view_type == RDT_VIEW_TEXT) {
+        shift_text_current_line_rects(
+            offset, lycon->block.line_number, lam::view_require_text(fragment));
+    } else if (fragment->view_type == RDT_VIEW_INLINE) {
+        // A nested inline can own fragments from both the justified line and its
+        // continuation; translate only descendants recorded on the current line.
+        shift_span_current_line_rects(
+            offset, lycon->block.line_number,
+            lam::view_require<RDT_VIEW_INLINE>(fragment));
+    }
 
     while (cursor) {
         // A line can continue after climbing out of a nested inline, such as
@@ -1834,6 +1869,31 @@ static void align_wrapped_continuation(LayoutContext* lycon, float offset, ViewT
             span, inline_span_has_multiple_line_fragments(span), fallback_fh);
         cursor = static_cast<View*>(span);
     }
+}
+
+static void find_text_line_membership(View* view, int line_number,
+                                      bool* has_prior, bool* has_current) {
+    if (!view || (*has_prior && *has_current)) return;
+    if (view->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = lam::view_require_text(view);
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->line_number < line_number) *has_prior = true;
+            else if (rect->line_number == line_number) *has_current = true;
+        }
+        return;
+    }
+    if (view->view_type != RDT_VIEW_INLINE) return;
+    ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+    for (View* child = span->first_child; child; child = child->next()) {
+        find_text_line_membership(child, line_number, has_prior, has_current);
+    }
+}
+
+static bool view_is_wrapped_continuation(View* view, int line_number) {
+    bool has_prior = false;
+    bool has_current = false;
+    find_text_line_membership(view, line_number, &has_prior, &has_current);
+    return has_prior && has_current;
 }
 
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
@@ -1862,7 +1922,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
 
 // Count justification opportunities in a text view for justify alignment.
 // CSS Text 3 §7.3: counts word spaces AND CJK inter-character gaps.
-static int count_spaces_in_view(View* view, int line_number) {
+static int count_spaces_in_view(LayoutContext* lycon, View* view, int line_number) {
     int count = 0;
     while (view) {
         if (line_align_view_is_out_of_flow(view)) {
@@ -1871,24 +1931,21 @@ static int count_spaces_in_view(View* view, int line_number) {
         }
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
-            const char* text_data = (const char*)text->text_data();
-            if (text_data) {
-                TextRect* rect = text->rect;
-                while (rect) {
-                    // A y lower-bound also admits future wrapped lines; the
-                    // recorded line index is the authoritative fragment identity.
-                    if (rect->line_number == line_number) {
-                        count += count_justify_opportunities(
-                            text_data + rect->start_index, rect->length);
-                    }
-                    rect = rect->next;
+            TextRect* rect = text->rect;
+            while (rect) {
+                // A y lower-bound also admits future wrapped lines; the
+                // recorded line index is the authoritative fragment identity.
+                if (rect->line_number == line_number) {
+                    count += count_rendered_justify_opportunities(
+                        text, rect, rect == lycon->line.last_text_rect);
                 }
+                rect = rect->next;
             }
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
             if (sp->first_child) {
-                count += count_spaces_in_view(sp->first_child, line_number);
+                count += count_spaces_in_view(lycon, sp->first_child, line_number);
             }
         }
         view = view->next();
@@ -1909,7 +1966,6 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
         }
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
-            const char* text_data = (const char*)text->text_data();
             TextRect* rect = text->rect;
             bool any_on_line = false;
             while (rect) {
@@ -1922,15 +1978,13 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                     any_on_line = true;
 
                     // count justification opportunities (spaces + CJK inter-char gaps)
-                    if (text_data) {
-                        int gap_count = count_justify_opportunities(
-                            text_data + rect->start_index, rect->length);
-                        // expand this rect's width by the space added within it
-                        if (gap_count > 0) {
-                            float added_space = gap_count * space_per_gap;
-                            rect->width += added_space;
-                            cumulative_offset += added_space;
-                        }
+                    int gap_count = count_rendered_justify_opportunities(
+                        text, rect, rect == lycon->line.last_text_rect);
+                    // expand this rect's width by the space added within it
+                    if (gap_count > 0) {
+                        float added_space = gap_count * space_per_gap;
+                        rect->width += added_space;
+                        cumulative_offset += added_space;
                     }
                 }
                 rect = rect->next;
@@ -2058,20 +2112,8 @@ void line_align(LayoutContext* lycon) {
 
         // Special handling for wrapped text continuation lines. TextRect line
         // numbers remain stable even when font ascent moves glyph boxes above line tops.
-        bool is_wrapped_continuation = false;
-        if (view && view->view_type == RDT_VIEW_TEXT) {
-            ViewText* text = lam::view_require_text(view);
-            bool has_prior_line = false;
-            bool has_current_line = false;
-            for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                if (rect->line_number < lycon->block.line_number) {
-                    has_prior_line = true;
-                } else if (rect->line_number == lycon->block.line_number) {
-                    has_current_line = true;
-                }
-            }
-            is_wrapped_continuation = has_prior_line && has_current_line;
-        }
+        bool is_wrapped_continuation = view_is_wrapped_continuation(
+            view, lycon->block.line_number);
         // Fallback: start_view is NULL but current view has wrapped text
         if (!is_wrapped_continuation && !view && lycon->view &&
             lycon->view->view_type == RDT_VIEW_TEXT) {
@@ -2083,17 +2125,8 @@ void line_align(LayoutContext* lycon) {
                 rect = rect->next;
             }
             if (rect_count > 1) {
-                ViewText* text = lam::view_require_text(lycon->view);
-                bool has_prior_line = false;
-                bool has_current_line = false;
-                for (TextRect* r = text->rect; r; r = r->next) {
-                    if (r->line_number < lycon->block.line_number) {
-                        has_prior_line = true;
-                    } else if (r->line_number == lycon->block.line_number) {
-                        has_current_line = true;
-                    }
-                }
-                is_wrapped_continuation = has_prior_line && has_current_line;
+                is_wrapped_continuation = view_is_wrapped_continuation(
+                    lycon->view, lycon->block.line_number);
                 if (is_wrapped_continuation) view = lycon->view;
             }
         }
@@ -2122,8 +2155,7 @@ void line_align(LayoutContext* lycon) {
             (offset > 0 || (is_rtl && offset < 0))) {
             // For wrapped text continuation lines, only align current-line rects
             if (is_wrapped_continuation) {
-                ViewText* text = lam::view_require_text(view);
-                align_wrapped_continuation(lycon, offset, text);
+                align_wrapped_continuation(lycon, offset, view);
             } else {
                 // CSS 2.1 §16.2: Before aligning from start_view, check preceding siblings
                 // for text continuation rects on the current line. This happens when a text
@@ -2154,10 +2186,7 @@ void line_align(LayoutContext* lycon) {
                             // on the current line to avoid corrupting previously justified
                             // lines' positions. Check if view is a wrapped text continuation.
                             if (is_wrapped_continuation) {
-                                if (view->view_type == RDT_VIEW_TEXT) {
-                                    ViewText* text = lam::view_require_text(view);
-                                    align_wrapped_continuation(lycon, offset, text);
-                                }
+                                align_wrapped_continuation(lycon, offset, view);
                             } else {
                                 // CSS 2.1 §16.2: Also check preceding siblings for
                                 // text continuation rects on the current line.
@@ -2185,15 +2214,22 @@ void line_align(LayoutContext* lycon) {
                     }
 
                     if (last_rect) {
-                        const char* text_data = (const char*)text->text_data();
-                        int num_gaps = 0;
-                        if (text_data) {
-                            num_gaps = count_justify_opportunities(
-                                text_data + last_rect->start_index,
-                                last_rect->length);
-                        }
+                        bool justification_suppressed = false;
+                        int num_gaps = count_rendered_justify_opportunities(
+                            text, last_rect,
+                            last_rect == lycon->line.last_text_rect,
+                            &justification_suppressed);
 
                         float extra_width = available_width - line_width;
+
+                        if (justification_suppressed && !view->next() &&
+                            extra_width > 0.0f) {
+                            // Chromium exposes the full justified line fragment in
+                            // Range geometry even when text-justify:none adds no spacing.
+                            last_rect->width += extra_width;
+                            adjust_text_bounds(text);
+                            return;
+                        }
 
                         if (num_gaps > 0 && extra_width > 0) {
                             // Fast path only when no sibling views need repositioning.
@@ -2218,7 +2254,7 @@ void line_align(LayoutContext* lycon) {
                 // distribute space across word gaps in sibling/nested views.
                 {
                     int num_spaces = count_spaces_in_view(
-                        view, lycon->block.line_number);
+                        lycon, view, lycon->block.line_number);
                     float extra_width = available_width - line_width;
                     if (num_spaces > 0 && extra_width > 0) {
                         float space_per_gap = extra_width / num_spaces;

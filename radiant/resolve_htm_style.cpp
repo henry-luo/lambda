@@ -1753,23 +1753,31 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             form_control_set_selected_index(state, (View*)block, init_index);
         }
         // Read CSS `appearance` property — affects intrinsic width and UA-rendered chrome.
-        // `appearance: none` removes the native dropdown arrow so author CSS can supply its own.
         {
             CssDeclaration* ap_decl = dom_element_get_specified_value(block, CSS_PROPERTY_APPEARANCE);
-            if (ap_decl && ap_decl->value && ap_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-                ap_decl->value->data.keyword == CSS_VALUE_NONE) {
-                block->form->appearance_none = 1;
-            } else {
-                block->form->appearance_none = 0;
-            }
+            CssEnum appearance = ap_decl && ap_decl->value &&
+                ap_decl->value->type == CSS_VALUE_TYPE_KEYWORD
+                ? ap_decl->value->data.keyword : CSS_VALUE_AUTO;
+            block->form->appearance_none = appearance == CSS_VALUE_NONE;
+            block->form->appearance_base_select = appearance == CSS_VALUE_BASE_SELECT;
         }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->display.inner = RDT_DISPLAY_REPLACED;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
-        // Chrome's select UA rule resets the font; inheriting the page font
-        // corrupts both the computed style and option-based intrinsic width.
-        apply_html_form_control_font(lycon, block);
+        if (block->form->appearance_base_select) {
+            // Base appearance is CSS-rendered and inherits author font metrics.
+            ensure_html_boundary_prop(lycon, block);
+            block->bound->padding.top = block->bound->padding.bottom =
+                FormDefaults::BASE_SELECT_PADDING_V;
+            block->bound->padding.left = block->bound->padding.right =
+                FormDefaults::BASE_SELECT_PADDING_H;
+            block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
+                block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
+        } else {
+            // Native select controls use the platform system font.
+            apply_html_form_control_font(lycon, block);
+        }
         // Set intrinsic_width to UA default only on first resolve. Later passes
         // (e.g. intrinsic sizing in flex/grid) measure option text and write a
         // larger value here; we must not clobber it.

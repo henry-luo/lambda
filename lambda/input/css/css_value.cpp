@@ -492,6 +492,7 @@ static const CssEnumInfo css_value_definitions[] = {
     {"paused", 6, CSS_VALUE_PAUSED, CSS_VALUE_GROUP_ANIMATION},
     // Animation iteration-count keyword
     {"infinite", 8, CSS_VALUE_INFINITE, CSS_VALUE_GROUP_ANIMATION},
+    {"base-select", 11, CSS_VALUE_BASE_SELECT, CSS_VALUE_GROUP_MISC},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 
