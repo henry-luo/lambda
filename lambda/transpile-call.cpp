@@ -222,16 +222,17 @@ void transpile_call_argument(Transpiler* tp, AstNode* arg, TypeParam* param_type
                 strbuf_append_str(tp->code_buf, "null");
             }
         }
-        // STRING/BINARY param: extract String* from Item, but skip roundtrip when
-        // value already emits native String* (e.g., typed local variable, string literal)
+        // STRING/BINARY param: extract the dedicated native pointer from Item, but skip
+        // the roundtrip when the value already emits that native pointer.
         // (Issue #16: `: string` annotation makes C param `String*`, but callers may pass `Item`,
         //  or the arg may be a sys func returning Item despite STRING semantic type)
         else if (param_type->type_id == LMD_TYPE_STRING || param_type->type_id == LMD_TYPE_BINARY) {
             if (value_emits_native_type(tp, value, param_type->type_id)) {
-                // value already produces String* — emit directly, no boxing roundtrip
+                // value already produces the declared native pointer
                 transpile_expr(tp, value);
             } else {
-                strbuf_append_str(tp->code_buf, "it2s(");
+                strbuf_append_str(tp->code_buf,
+                    param_type->type_id == LMD_TYPE_BINARY ? "it2x(" : "it2s(");
                 transpile_box_item(tp, value);
                 strbuf_append_char(tp->code_buf, ')');
             }

@@ -1561,9 +1561,9 @@ static bool spawn_write_stdin_chunk(JsSpawnProcess* sp, Item chunk, bool* out_sh
         len = byte_len > 0 ? (size_t)byte_len : 0;
     } else if (js_is_arraybuffer(chunk)) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(chunk);
-        if (!ab || ab->detached) return true;
-        data = (const char*)ab->data;
-        len = ab->byte_length > 0 ? (size_t)ab->byte_length : 0;
+        if (!ab || js_arraybuffer_detached(ab)) return true;
+        data = (const char*)js_arraybuffer_data_const(ab);
+        len = js_arraybuffer_length(ab) > 0 ? (size_t)js_arraybuffer_length(ab) : 0;
     } else {
         Item str = js_to_string(chunk);
         if (js_exception_pending || get_type_id(str) != LMD_TYPE_STRING) return false;
@@ -3326,21 +3326,22 @@ static bool cp_sync_input_bytes(Item input, const char** data, size_t* len) {
     }
     if (js_is_arraybuffer(input)) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(input);
-        if (!ab || ab->detached) return true;
-        *data = (const char*)ab->data;
-        *len = ab->byte_length > 0 ? (size_t)ab->byte_length : 0;
+        if (!ab || js_arraybuffer_detached(ab)) return true;
+        *data = (const char*)js_arraybuffer_data_const(ab);
+        *len = js_arraybuffer_length(ab) > 0 ? (size_t)js_arraybuffer_length(ab) : 0;
         return true;
     }
     if (js_is_dataview(input)) {
         JsDataView* dv = js_get_dataview_ptr(input);
-        if (!dv || !dv->buffer || dv->buffer->detached) return true;
-        int byte_len = dv->length_tracking ? dv->buffer->byte_length - dv->byte_offset : dv->byte_length;
+        if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return true;
+        int buffer_length = js_arraybuffer_length(dv->buffer);
+        int byte_len = dv->length_tracking ? buffer_length - dv->byte_offset : dv->byte_length;
         if (byte_len < 0 || dv->byte_offset < 0 ||
-                dv->byte_offset > dv->buffer->byte_length ||
-                dv->byte_offset + byte_len > dv->buffer->byte_length) {
+                dv->byte_offset > buffer_length ||
+                dv->byte_offset + byte_len > buffer_length) {
             return true;
         }
-        *data = (const char*)dv->buffer->data + dv->byte_offset;
+        *data = (const char*)js_arraybuffer_data_const(dv->buffer) + dv->byte_offset;
         *len = byte_len > 0 ? (size_t)byte_len : 0;
         return true;
     }

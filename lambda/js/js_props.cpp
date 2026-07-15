@@ -616,7 +616,7 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
         *(Symbol**)field_ptr = value.get_safe_symbol();
         break;
     case LMD_TYPE_BINARY:
-        *(String**)field_ptr = value.get_safe_binary();
+        *(Binary**)field_ptr = value.get_safe_binary();
         break;
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:

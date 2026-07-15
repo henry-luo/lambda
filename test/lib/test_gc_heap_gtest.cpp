@@ -100,6 +100,15 @@ protected:
     }
 };
 
+static int external_destroy_calls = 0;
+static uint16_t external_destroy_last_tag = 0;
+
+static void test_external_destroy(void* data, uint16_t type_tag) {
+    external_destroy_calls++;
+    external_destroy_last_tag = type_tag;
+    *(void**)data = NULL;
+}
+
 // ============================================================================
 // 1. Object Allocation and Tracking
 // ============================================================================
@@ -161,6 +170,35 @@ TEST_F(GCHeapTest, ObjectInteriorPointerNotManaged) {
 
     EXPECT_TRUE(gc_is_managed(gc, ptr));
     EXPECT_FALSE(gc_is_managed(gc, (uint8_t*)ptr + 8));
+}
+
+TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsDuringSweep) {
+    external_destroy_calls = 0;
+    external_destroy_last_tag = 0;
+    gc->external_destroy = test_external_destroy;
+    void* obj = gc_heap_calloc(gc, sizeof(void*), LMD_TYPE_BINARY);
+    ASSERT_NE(obj, nullptr);
+    *(void**)obj = obj;
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(external_destroy_calls, 1);
+    EXPECT_EQ(external_destroy_last_tag, LMD_TYPE_BINARY);
+}
+
+TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsAtHeapTeardown) {
+    external_destroy_calls = 0;
+    external_destroy_last_tag = 0;
+    gc->external_destroy = test_external_destroy;
+    void* obj = gc_heap_calloc(gc, sizeof(void*), LMD_TYPE_BINARY);
+    ASSERT_NE(obj, nullptr);
+    *(void**)obj = obj;
+
+    gc_heap_destroy(gc);
+    gc = nullptr;
+
+    EXPECT_EQ(external_destroy_calls, 1);
+    EXPECT_EQ(external_destroy_last_tag, LMD_TYPE_BINARY);
 }
 
 // ============================================================================

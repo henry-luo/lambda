@@ -83,6 +83,9 @@ typedef void (*gc_vmap_destroy_fn)(void* obj, void* data);
 typedef void (*gc_error_trace_fn)(void* data, gc_heap_t* gc);
 typedef void (*gc_error_destroy_fn)(void* data);
 typedef void (*gc_js_native_trace_fn)(void* data, gc_heap_t* gc);
+// Releases refcounted/native payloads embedded in otherwise zone-owned objects.
+// Implementations must clear the released field so repeated teardown is safe.
+typedef void (*gc_external_destroy_fn)(void* data, uint16_t type_tag);
 
 /**
  * Small per-cleanup native-pointer set used by runtime finalizers that own
@@ -183,6 +186,7 @@ typedef struct gc_heap {
     gc_error_trace_fn error_trace;   // traces heap-owned LambdaError cause chain
     gc_error_destroy_fn error_destroy; // frees LambdaError external payload fields
     gc_js_native_trace_fn js_native_trace; // traces native payload edges on JS Map wrappers
+    gc_external_destroy_fn external_destroy; // frees generic external payloads at sweep/teardown
 
     // Bump-pointer block chain (for cleanup and ownership registration)
     gc_bump_block_t* bump_blocks;   // linked list of allocated bump regions

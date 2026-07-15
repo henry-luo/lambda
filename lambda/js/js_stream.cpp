@@ -4453,8 +4453,9 @@ static Item js_stream_consumer_arrayBuffer_finish(Item chunks) {
     Item array_buffer = js_arraybuffer_new(byte_length);
     JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(array_buffer);
     void* src = js_typed_array_current_data_ptr(buf);
-    if (ab && ab->data && src && byte_length > 0) {
-        memcpy(ab->data, src, (size_t)byte_length);
+    uint8_t* destination = js_arraybuffer_prepare_write(ab);
+    if (destination && src && byte_length > 0) {
+        memcpy(destination, src, (size_t)byte_length);
     }
     return array_buffer;
 }
@@ -7415,7 +7416,8 @@ static Item js_duplex_from_blob(Item blob) {
     Item array_buffer = js_arraybuffer_new(len);
     if (len > 0 && get_type_id(array_buffer) == LMD_TYPE_MAP) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(array_buffer);
-        if (ab && ab->data) memcpy(ab->data, str->chars, (size_t)len);
+        uint8_t* destination = js_arraybuffer_prepare_write(ab);
+        if (destination) memcpy(destination, str->chars, (size_t)len);
     }
     return js_duplex_from_readable_value(array_buffer);
 }
@@ -9715,7 +9717,7 @@ static Item js_readable_to_web_copy_to_byob_view(Item chunk, Item view) {
 
     int copy_len = chunk_len < view_len ? chunk_len : view_len;
     void* src = js_typed_array_current_data_ptr(chunk);
-    void* dst = js_typed_array_current_data_ptr(view);
+    void* dst = js_typed_array_prepare_write_ptr(view);
     if (src && dst) {
         memcpy(dst, src, (size_t)copy_len);
     }

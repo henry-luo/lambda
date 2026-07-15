@@ -7,10 +7,12 @@
 #include "js_class.h"
 #include "js_coerce.h"
 #include "js_event_loop.h"
+#include "../binary.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../lambda-decimal.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -404,9 +406,9 @@ static int js_typed_array_stored_byte_length(JsTypedArray* ta) {
 static int js_typed_array_current_byte_length(JsTypedArray* ta) {
     if (!ta) return 0;
     if (!ta->buffer) return js_typed_array_stored_byte_length(ta);
-    if (ta->buffer->detached) return 0;
+    if (js_arraybuffer_detached(ta->buffer)) return 0;
     int byte_offset = js_typed_array_stored_byte_offset(ta);
-    int available = ta->buffer->byte_length - byte_offset;
+    int available = js_arraybuffer_length(ta->buffer) - byte_offset;
     if (available < 0) return 0;
     if (ta->length_tracking) {
         int elem_size = typed_array_element_size(ta->element_type);
@@ -426,17 +428,28 @@ static int js_typed_array_current_byte_offset(JsTypedArray* ta) {
     if (!ta) return 0;
     int byte_offset = js_typed_array_stored_byte_offset(ta);
     if (!ta->buffer) return byte_offset;
-    if (ta->buffer->detached) return 0;
-    if (ta->length_tracking) return ta->buffer->byte_length >= byte_offset ? byte_offset : 0;
+    if (js_arraybuffer_detached(ta->buffer)) return 0;
+    if (ta->length_tracking) return js_arraybuffer_length(ta->buffer) >= byte_offset ? byte_offset : 0;
     int byte_length = js_typed_array_stored_byte_length(ta);
-    return ta->buffer->byte_length >= byte_offset + byte_length ? byte_offset : 0;
+    return js_arraybuffer_length(ta->buffer) >= byte_offset + byte_length ? byte_offset : 0;
 }
 
 static void* js_typed_array_current_data(JsTypedArray* ta) {
     if (!ta) return NULL;
     if (!ta->buffer) return ta->view ? ta->view->data : NULL;
     if (js_typed_array_current_byte_length(ta) == 0) return NULL;
-    return (char*)ta->buffer->data + js_typed_array_current_byte_offset(ta);
+    return ta->view ? array_num_resolve_data(ta->view, false) : NULL;
+}
+
+static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta);
+
+static void* js_typed_array_prepare_write(JsTypedArray* ta) {
+    if (!ta || !ta->view) return NULL;
+    // Value coercion may resize the buffer after the initial witness record;
+    // refresh live ArrayNum bounds before the write resolver validates them.
+    js_typed_array_refresh_arraynum_view(ta);
+    if (js_typed_array_current_byte_length(ta) == 0) return NULL;
+    return array_num_resolve_data(ta->view, true);
 }
 
 static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
@@ -445,9 +458,6 @@ static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
     int byte_offset = js_typed_array_stored_byte_offset(ta);
     int length = ta->length_tracking ? js_typed_array_current_length(ta) :
         js_typed_array_stored_length(ta);
-    void* data = js_typed_array_current_data(ta);
-
-    ta->view->data = data;
     ta->view->length = length;
     ta->view->capacity = length;
 
@@ -464,14 +474,15 @@ static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta) {
     }
     array_num_shape_dims(shape)[0] = length;
     array_num_shape_strides(shape)[0] = 1;
+    array_num_resolve_data(ta->view, false);
 }
 
 static bool js_typed_array_is_out_of_bounds(JsTypedArray* ta) {
     if (!ta || !ta->buffer) return false;
-    if (ta->buffer->detached) return true;
+    if (js_arraybuffer_detached(ta->buffer)) return true;
     int byte_offset = js_typed_array_stored_byte_offset(ta);
-    if (ta->length_tracking) return ta->buffer->byte_length < byte_offset;
-    return ta->buffer->byte_length < byte_offset + js_typed_array_stored_byte_length(ta);
+    if (ta->length_tracking) return js_arraybuffer_length(ta->buffer) < byte_offset;
+    return js_arraybuffer_length(ta->buffer) < byte_offset + js_typed_array_stored_byte_length(ta);
 }
 
 static bool js_typed_array_arraynum_view_matches(JsTypedArray* ta, const char* data, int index) {
@@ -498,7 +509,7 @@ static bool js_typed_array_try_raw_set_same_type(JsTypedArray* dst, JsTypedArray
     js_typed_array_refresh_arraynum_view(src);
     js_typed_array_refresh_arraynum_view(dst);
     char* src_data = (char*)js_typed_array_current_data(src);
-    char* dst_data = (char*)js_typed_array_current_data(dst);
+    char* dst_data = (char*)js_typed_array_prepare_write(dst);
     if (!src_data || !dst_data) return false;
     if (js_typed_array_arraynum_range_matches(src, src_data, 0, src_len) &&
         js_typed_array_arraynum_range_matches(dst, dst_data, offset, src_len)) {
@@ -599,7 +610,7 @@ static bool js_typed_array_try_raw_from_dense_number_array(Item result, Array* a
     JsTypedArray* dst = js_get_typed_array_ptr(result.map);
     if (!dst || !js_typed_array_is_number_element(dst->element_type)) return false;
     js_typed_array_refresh_arraynum_view(dst);
-    char* data = (char*)js_typed_array_current_data(dst);
+    char* data = (char*)js_typed_array_prepare_write(dst);
     if (len > 0 && !data) return false;
     if (!js_typed_array_arraynum_range_matches(dst, data, 0, len)) return false;
 
@@ -642,7 +653,7 @@ static bool js_typed_array_try_arraynum_convert_number(JsTypedArray* dst, JsType
     js_typed_array_refresh_arraynum_view(src);
     js_typed_array_refresh_arraynum_view(dst);
     char* src_data = (char*)js_typed_array_current_data(src);
-    char* dst_data = (char*)js_typed_array_current_data(dst);
+    char* dst_data = (char*)js_typed_array_prepare_write(dst);
     if (!src_data || !dst_data) return false;
     if (!js_typed_array_arraynum_range_matches(src, src_data, 0, src_len) ||
         !js_typed_array_arraynum_range_matches(dst, dst_data, offset, src_len)) {
@@ -680,7 +691,7 @@ static bool js_typed_array_try_arraynum_convert_bigint(JsTypedArray* dst, JsType
     if (offset < 0 || (int64_t)offset + (int64_t)src_len > (int64_t)dst_len) return false;
 
     char* src_data = (char*)js_typed_array_current_data(src);
-    char* dst_data = (char*)js_typed_array_current_data(dst);
+    char* dst_data = (char*)js_typed_array_prepare_write(dst);
     if (!src_data || !dst_data) return false;
     if (!js_typed_array_arraynum_range_matches(src, src_data, 0, src_len) ||
         !js_typed_array_arraynum_range_matches(dst, dst_data, offset, src_len)) {
@@ -709,7 +720,7 @@ extern "C" bool js_typed_array_raw_copy_same_type(Item dst_item, Item src_item) 
     js_typed_array_refresh_arraynum_view(src);
     js_typed_array_refresh_arraynum_view(dst);
     char* src_data = (char*)js_typed_array_current_data(src);
-    char* dst_data = (char*)js_typed_array_current_data(dst);
+    char* dst_data = (char*)js_typed_array_prepare_write(dst);
     if (!src_data || !dst_data) return false;
     if (js_typed_array_arraynum_range_matches(src, src_data, 0, len) &&
         js_typed_array_arraynum_range_matches(dst, dst_data, 0, len)) {
@@ -725,7 +736,7 @@ extern "C" bool js_typed_array_raw_reverse(Item ta_item) {
     int len = js_typed_array_current_length(ta);
     if (len <= 1) return true;
     js_typed_array_refresh_arraynum_view(ta);
-    char* data = (char*)js_typed_array_current_data(ta);
+    char* data = (char*)js_typed_array_prepare_write(ta);
     if (!data) return false;
     if (js_typed_array_arraynum_range_matches(ta, data, 0, len)) {
         return array_num_reverse_bytes(ta->view);
@@ -745,7 +756,7 @@ extern "C" bool js_typed_array_raw_copy_reversed(Item dst_item, Item src_item) {
     js_typed_array_refresh_arraynum_view(src);
     js_typed_array_refresh_arraynum_view(dst);
     char* src_data = (char*)js_typed_array_current_data(src);
-    char* dst_data = (char*)js_typed_array_current_data(dst);
+    char* dst_data = (char*)js_typed_array_prepare_write(dst);
     if (!src_data || !dst_data) return false;
     if (js_typed_array_arraynum_range_matches(src, src_data, 0, len) &&
         js_typed_array_arraynum_range_matches(dst, dst_data, 0, len)) {
@@ -760,7 +771,7 @@ extern "C" bool js_typed_array_raw_copy_within(Item ta_item, int target, int sta
     if (!ta || js_typed_array_is_out_of_bounds(ta)) return false;
     if (count <= 0) return true;
     js_typed_array_refresh_arraynum_view(ta);
-    char* data = (char*)js_typed_array_current_data(ta);
+    char* data = (char*)js_typed_array_prepare_write(ta);
     if (!data) return false;
     if (js_typed_array_arraynum_range_matches(ta, data, start, count) &&
         js_typed_array_arraynum_range_matches(ta, data, target, count)) {
@@ -897,11 +908,11 @@ static JsTypedArray* js_validate_atomic_typed_array(Item typed_array, bool requi
         js_throw_type_error("Atomics operation requires a TypedArray");
         return NULL;
     }
-    if (require_shared && (!ta->buffer || !ta->buffer->is_shared)) {
+    if (require_shared && !js_arraybuffer_shared(ta->buffer)) {
         js_throw_type_error("Atomics operation requires a SharedArrayBuffer-backed TypedArray");
         return NULL;
     }
-    if (ta->buffer && ta->buffer->detached) {
+    if (ta->buffer && js_arraybuffer_detached(ta->buffer)) {
         js_throw_type_error(require_shared ? "Atomics operation requires a non-detached SharedArrayBuffer" :
                                            "Atomics operation requires a non-detached ArrayBuffer");
         return NULL;
@@ -1264,7 +1275,7 @@ extern "C" void js_atomics_agent_leaving(int agent_slot) {
         old_value = __atomic_fetch_or(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
         return js_atomics_item_from_bits(ta->element_type, (uint64_t)old_value); \
     case JS_ATOMICS_OP_STORE: \
-        if (!agent_spin_assist && ta->buffer && ta->buffer->is_shared && converted_value == (C_TYPE)0 && js_atomics_has_pending_waiter_for_buffer(ta->buffer)) { \
+        if (!agent_spin_assist && js_arraybuffer_shared(ta->buffer) && converted_value == (C_TYPE)0 && js_atomics_has_pending_waiter_for_buffer(ta->buffer)) { \
             __atomic_store_n(element_ptr, (C_TYPE)1, __ATOMIC_SEQ_CST); \
         } else { \
             __atomic_store_n(element_ptr, converted_value, __ATOMIC_SEQ_CST); \
@@ -1296,7 +1307,7 @@ extern "C" Item js_atomics_operation(int op, Item typed_array, Item index_item, 
     if (!js_atomics_validate_index(ta, index_item, &index)) return ItemNull;
     void* data = js_typed_array_current_data(ta);
     if (!data) return js_throw_range_error("Invalid atomic access index");
-    bool agent_spin_assist = ta->buffer && ta->buffer->is_shared && js_262_agent_current_slot_for_atomics() >= 0;
+    bool agent_spin_assist = js_arraybuffer_shared(ta->buffer) && js_262_agent_current_slot_for_atomics() >= 0;
 
     uint64_t value_bits = 0;
     uint64_t replacement_bits = 0;
@@ -1450,7 +1461,7 @@ extern "C" Item js_atomics_notify(Item typed_array, Item index_item, Item count)
         if (std::isnan(count_number) || count_number <= 0.0) notify_count = 0;
         else if (std::isfinite(count_number) && count_number < (double)INT_MAX) notify_count = (int)std::trunc(count_number);
     }
-    if (!ta->buffer || !ta->buffer->is_shared) {
+    if (!js_arraybuffer_shared(ta->buffer)) {
         return (Item){.item = i2it(0)};
     }
     js_atomics_resolve_due_waiters();
@@ -1505,12 +1516,25 @@ static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m);
 
 static JsArrayBuffer* js_arraybuffer_alloc(int byte_length) {
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
-    ab->byte_length = byte_length;
-    ab->max_byte_length = byte_length;
-    ab->data = mem_calloc(1, byte_length > 0 ? byte_length : 1, MEM_CAT_JS_RUNTIME);
-    ab->detached = false;
-    ab->is_shared = false;
-    ab->resizable = false;
+    if (!ab) return NULL;
+    if (!byte_buffer_init(&ab->handle, (size_t)byte_length, (size_t)byte_length,
+            BYTE_BUFFER_FLAG_NONE, MEM_CAT_JS_RUNTIME)) {
+        mem_free(ab);
+        return NULL;
+    }
+    return ab;
+}
+
+static JsArrayBuffer* js_arraybuffer_alloc_storage(ByteStorage* storage,
+        size_t storage_offset, size_t byte_length) {
+    if (!storage || byte_length > INT_MAX) return NULL;
+    JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
+    if (!ab) return NULL;
+    if (!byte_buffer_init_storage(&ab->handle, storage, storage_offset, byte_length,
+            byte_length, BYTE_BUFFER_FLAG_NONE, MEM_CAT_JS_RUNTIME)) {
+        mem_free(ab);
+        return NULL;
+    }
     return ab;
 }
 
@@ -1524,16 +1548,17 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
 extern "C" Item js_arraybuffer_new(int byte_length) {
     if (byte_length < 0) byte_length = 0;
     JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
+    if (!ab) return ItemError;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = ab->is_shared ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
+    m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
 
     Item result = (Item){.map = m};
-    js_arraybuffer_link_prototype(result, ab->is_shared);
+    js_arraybuffer_link_prototype(result, js_arraybuffer_shared(ab));
     return result;
 }
 
@@ -1565,8 +1590,8 @@ extern "C" Item js_arraybuffer_construct_resizable(Item length_arg, Item options
     if (js_is_arraybuffer(result)) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr(result.map);
         if (ab) {
-            ab->max_byte_length = max_byte_length;
-            ab->resizable = resizable;
+            ab->handle.max_byte_length = (size_t)max_byte_length;
+            if (resizable) ab->handle.flags |= BYTE_BUFFER_FLAG_RESIZABLE;
         }
     }
     return result;
@@ -1604,11 +1629,11 @@ extern "C" Item js_arraybuffer_wrap(JsArrayBuffer* ab) {
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = ab->is_shared ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
+    m->type = js_arraybuffer_shared(ab) ? (void*)&js_sharedarraybuffer_type_marker : (void*)&js_arraybuffer_type_marker;
     m->data = ab;
     m->data_cap = 0;
     Item result = (Item){.map = m};
-    js_arraybuffer_link_prototype(result, ab->is_shared);
+    js_arraybuffer_link_prototype(result, js_arraybuffer_shared(ab));
     return result;
 }
 
@@ -1616,7 +1641,7 @@ extern "C" int js_arraybuffer_byte_length(Item val) {
     if (!js_is_arraybuffer(val)) return 0;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return 0;
-    return ab->byte_length;
+    return js_arraybuffer_length(ab);
 }
 
 extern "C" int js_arraybuffer_max_byte_length(Item val) {
@@ -1626,14 +1651,14 @@ extern "C" int js_arraybuffer_max_byte_length(Item val) {
     // Js54 P1: spec §25.1.5.3 get ArrayBuffer.prototype.maxByteLength step 4:
     // "If IsDetachedBuffer(O) is true, return +0𝔽." The detach path zeros
     // byte_length but not max_byte_length, so the check is needed here.
-    if (ab->detached) return 0;
-    return ab->max_byte_length;
+    if (js_arraybuffer_detached(ab)) return 0;
+    return js_arraybuffer_max_length(ab);
 }
 
 extern "C" bool js_arraybuffer_is_resizable(Item val) {
     if (!js_is_arraybuffer(val)) return false;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
-    return ab && ab->resizable;
+    return js_arraybuffer_resizable(ab);
 }
 
 extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
@@ -1646,17 +1671,12 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
     // can have side effects); we throw afterwards. Test:
     // built-ins/ArrayBuffer/prototype/resize/coerced-new-length-detach.js.
     if (!ab) return js_throw_type_error("ArrayBuffer is detached");
-    if (!ab->resizable) return js_throw_type_error("ArrayBuffer is not resizable");
+    if (!js_arraybuffer_resizable(ab)) return js_throw_type_error("ArrayBuffer is not resizable");
     int new_length = 0;
     if (!js_to_index_int(new_length_item, &new_length, "Invalid array buffer length")) return ItemNull;
-    if (ab->detached) return js_throw_type_error("ArrayBuffer is detached");
-    if (new_length > ab->max_byte_length) return js_throw_range_error("Invalid array buffer length");
-
-    void* new_data = mem_calloc(1, new_length > 0 ? new_length : 1, MEM_CAT_JS_RUNTIME);
-    int copy_len = ab->byte_length < new_length ? ab->byte_length : new_length;
-    if (ab->data && copy_len > 0) memcpy(new_data, ab->data, copy_len);
-    ab->data = new_data;
-    ab->byte_length = new_length;
+    if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+    if (new_length > js_arraybuffer_max_length(ab)) return js_throw_range_error("Invalid array buffer length");
+    if (!byte_buffer_resize(&ab->handle, (size_t)new_length)) return ItemError;
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
@@ -1676,11 +1696,11 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
     // effect runs first when applicable.
     int new_length;
     if (argc == 0 || get_type_id(new_length_item) == LMD_TYPE_UNDEFINED) {
-        if (ab->detached) return js_throw_type_error("ArrayBuffer is detached");
-        new_length = ab->byte_length;
+        if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+        new_length = js_arraybuffer_length(ab);
     } else {
         if (!js_to_index_int(new_length_item, &new_length, "Invalid array buffer length")) return ItemNull;
-        if (ab->detached) return js_throw_type_error("ArrayBuffer is detached");
+        if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
     }
 
     // Determine resizable / maxByteLength for the new buffer.
@@ -1690,32 +1710,27 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
         new_resizable = false;
         new_max_byte_length = new_length;
     } else {
-        new_resizable = ab->resizable;
-        new_max_byte_length = new_resizable ? ab->max_byte_length : new_length;
+        new_resizable = js_arraybuffer_resizable(ab);
+        new_max_byte_length = new_resizable ? js_arraybuffer_max_length(ab) : new_length;
     }
     if (new_length > new_max_byte_length) {
         return js_throw_range_error("Invalid array buffer length");
     }
 
-    // Allocate the new buffer via js_arraybuffer_new, then adjust resizable
-    // metadata. Allocation uses the buffer's natural capacity; if resizable,
-    // ensure the data block can hold up to max_byte_length so subsequent
-    // resize() calls don't have to reallocate beyond their bound.
-    Item result = js_arraybuffer_new(new_length);
-    if (!js_is_arraybuffer(result)) return result;
-    JsArrayBuffer* nab = js_get_arraybuffer_ptr(result.map);
-    if (!nab) return result;
-
-    int copy_len = ab->byte_length < new_length ? ab->byte_length : new_length;
-    if (ab->data && copy_len > 0) memcpy(nab->data, ab->data, copy_len);
-    nab->resizable = new_resizable;
-    nab->max_byte_length = new_max_byte_length;
-
-    // Detach the source. This zeros source byte_length and frees the conceptual
-    // data slot (ab->data set to NULL); existing TypedArray views over it
-    // observe the detach through their stored ta->buffer pointer.
-    js_arraybuffer_detach(val);
-
+    JsArrayBuffer* nab = (JsArrayBuffer*)mem_calloc(1, sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
+    if (!nab) return ItemError;
+    if (!byte_buffer_transfer(&ab->handle, &nab->handle, (size_t)new_length,
+            to_fixed_length)) {
+        mem_free(nab);
+        return ItemError;
+    }
+    // The stable source handle is detached by transfer, so all extant views
+    // invalidate through its generation instead of retaining a freed pointer.
+    Item result = js_arraybuffer_wrap(nab);
+    if (!js_is_arraybuffer(result)) {
+        byte_buffer_destroy(&nab->handle);
+        mem_free(nab);
+    }
     return result;
 }
 
@@ -1736,21 +1751,23 @@ extern "C" Item js_arraybuffer_slice(Item val, int begin, int end) {
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return (Item){.item = ITEM_NULL};
-    if (ab->detached) {
+    if (js_arraybuffer_detached(ab)) {
         js_throw_type_error("ArrayBuffer.prototype.slice called on detached buffer");
         return ItemNull;
     }
 
-    if (begin < 0) begin = ab->byte_length + begin;
-    if (end < 0) end = ab->byte_length + end;
+    int source_length = js_arraybuffer_length(ab);
+    if (begin < 0) begin = source_length + begin;
+    if (end < 0) end = source_length + end;
     if (begin < 0) begin = 0;
-    if (end > ab->byte_length) end = ab->byte_length;
+    if (end > source_length) end = source_length;
     if (begin >= end) return js_arraybuffer_new(0);
 
     int new_len = end - begin;
     Item result = js_arraybuffer_new(new_len);
     JsArrayBuffer* rab = (JsArrayBuffer*)result.map->data;
-    memcpy(rab->data, (char*)ab->data + begin, new_len);
+    memcpy(js_arraybuffer_prepare_write(rab), js_arraybuffer_data_const(ab) + begin,
+        (size_t)new_len);
     return result;
 }
 
@@ -1778,17 +1795,18 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return (Item){.item = ITEM_NULL};
-    if (ab->detached) {
+    if (js_arraybuffer_detached(ab)) {
         return js_throw_type_error("ArrayBuffer.prototype.slice called on detached buffer");
     }
 
     int begin = 0;
-    int end = ab->byte_length;
+    int source_length = js_arraybuffer_length(ab);
+    int end = source_length;
     if (argc > 0) {
-        if (!js_arraybuffer_slice_index(begin_item, ab->byte_length, &begin)) return ItemNull;
+        if (!js_arraybuffer_slice_index(begin_item, source_length, &begin)) return ItemNull;
     }
     if (argc > 1 && get_type_id(end_item) != LMD_TYPE_UNDEFINED) {
-        if (!js_arraybuffer_slice_index(end_item, ab->byte_length, &end)) return ItemNull;
+        if (!js_arraybuffer_slice_index(end_item, source_length, &end)) return ItemNull;
     }
     if (end < begin) end = begin;
     int new_len = end - begin;
@@ -1836,11 +1854,12 @@ extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_i
         return js_throw_type_error("ArrayBuffer species constructor returned the same buffer");
     }
     JsArrayBuffer* rab = js_get_arraybuffer_ptr(result_item.map);
-    if (!rab || rab->byte_length < new_len) {
+    if (!rab || js_arraybuffer_length(rab) < new_len) {
         return js_throw_type_error("ArrayBuffer species constructor returned a buffer that is too small");
     }
     if (new_len > 0) {
-        memcpy(rab->data, (char*)ab->data + begin, new_len);
+        memcpy(js_arraybuffer_prepare_write(rab), js_arraybuffer_data_const(ab) + begin,
+            (size_t)new_len);
     }
     return result_item;
 }
@@ -1855,17 +1874,12 @@ extern "C" Item js_arraybuffer_is_view_item(Item val) {
     return (Item){.item = result ? (ITEM_TRUE) : (ITEM_FALSE)};
 }
 
-// Detach an ArrayBuffer: set byte_length to 0 and mark as detached
+// Detach an ArrayBuffer through the stable handle so storage is released once.
 extern "C" void js_arraybuffer_detach(Item val) {
     if (!js_is_arraybuffer(val)) return;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return;
-    if (ab->data) {
-        mem_free(ab->data);
-    }
-    ab->data = NULL;
-    ab->byte_length = 0;
-    ab->detached = true;
+    byte_buffer_detach(&ab->handle);
 }
 
 // Check if an ArrayBuffer is detached
@@ -1873,7 +1887,7 @@ extern "C" bool js_arraybuffer_is_detached(Item val) {
     if (!js_is_arraybuffer(val)) return false;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return false;
-    return ab->detached;
+    return js_arraybuffer_detached(ab);
 }
 
 // ============================================================================
@@ -1938,12 +1952,14 @@ extern "C" Item js_sharedarraybuffer_construct_with_options(Item length_arg, Ite
     }
 
     JsArrayBuffer* ab = (JsArrayBuffer*)mem_alloc(sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
-    ab->byte_length = byte_length;
-    ab->max_byte_length = max_byte_length;
-    ab->data = mem_calloc(1, byte_length > 0 ? byte_length : 1, MEM_CAT_JS_RUNTIME);
-    ab->detached = false;
-    ab->is_shared = true;
-    ab->resizable = growable;
+    if (!ab) return ItemError;
+    uint32_t handle_flags = BYTE_BUFFER_FLAG_SHARED;
+    if (growable) handle_flags |= BYTE_BUFFER_FLAG_RESIZABLE;
+    if (!byte_buffer_init(&ab->handle, (size_t)byte_length, (size_t)max_byte_length,
+            handle_flags, MEM_CAT_JS_RUNTIME)) {
+        mem_free(ab);
+        return ItemError;
+    }
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -1967,7 +1983,7 @@ extern "C" bool js_is_sharedarraybuffer(Item val) {
     Map* m = val.map;
     if (!m || m->map_kind != MAP_KIND_ARRAYBUFFER) return false;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(m);
-    return ab && ab->is_shared;
+    return js_arraybuffer_shared(ab);
 }
 
 extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* args, int argc) {
@@ -1980,22 +1996,23 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
 
     // slice(begin, end)
     if (mname->len == 5 && strncmp(mname->chars, "slice", 5) == 0) {
-        int begin = 0, end = ab->byte_length;
+        int source_length = js_arraybuffer_length(ab);
+        int begin = 0, end = source_length;
         if (argc > 0) {
             Item b = js_to_number(args[0]);
             if (js_check_exception()) return ItemNull;
             begin = (int)(get_type_id(b) == LMD_TYPE_FLOAT ? it2d(b) : (double)it2i(b));
-            if (begin < 0) begin = ab->byte_length + begin;
+            if (begin < 0) begin = source_length + begin;
             if (begin < 0) begin = 0;
-            if (begin > ab->byte_length) begin = ab->byte_length;
+            if (begin > source_length) begin = source_length;
         }
         if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
             Item e = js_to_number(args[1]);
             if (js_check_exception()) return ItemNull;
             end = (int)(get_type_id(e) == LMD_TYPE_FLOAT ? it2d(e) : (double)it2i(e));
-            if (end < 0) end = ab->byte_length + end;
+            if (end < 0) end = source_length + end;
             if (end < 0) end = 0;
-            if (end > ab->byte_length) end = ab->byte_length;
+            if (end > source_length) end = source_length;
         }
         if (end < begin) end = begin;
         int new_len = end - begin;
@@ -2035,29 +2052,28 @@ extern "C" Item js_sharedarraybuffer_method(Item sab, Item method_name, Item* ar
             return js_throw_type_error("SharedArrayBuffer species constructor returned the same buffer");
         }
         JsArrayBuffer* rab = js_get_arraybuffer_ptr(result_item.map);
-        if (!rab || rab->byte_length < new_len) {
+        if (!rab || js_arraybuffer_length(rab) < new_len) {
             return js_throw_type_error("SharedArrayBuffer species constructor returned a buffer that is too small");
         }
         if (rab && new_len > 0) {
-            memcpy(rab->data, (char*)ab->data + begin, new_len);
+            memcpy(js_arraybuffer_prepare_write(rab), js_arraybuffer_data_const(ab) + begin,
+                (size_t)new_len);
         }
         return result_item;
     }
 
     if (mname->len == 4 && strncmp(mname->chars, "grow", 4) == 0) {
-        if (!ab->resizable) return js_throw_type_error("SharedArrayBuffer is not growable");
+        if (!js_arraybuffer_resizable(ab)) return js_throw_type_error("SharedArrayBuffer is not growable");
         Item new_length_item = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
         int new_length = 0;
         if (!js_to_index_int(new_length_item, &new_length, "Invalid shared array buffer length")) return ItemNull;
-        if (new_length < ab->byte_length || new_length > ab->max_byte_length) {
+        int current_length = js_arraybuffer_length(ab);
+        if (new_length < current_length || new_length > js_arraybuffer_max_length(ab)) {
             return js_throw_range_error("Invalid shared array buffer length");
         }
-        if (new_length != ab->byte_length) {
-            void* new_data = mem_calloc(1, new_length > 0 ? new_length : 1, MEM_CAT_JS_RUNTIME);
-            int copy_len = ab->byte_length < new_length ? ab->byte_length : new_length;
-            if (ab->data && copy_len > 0) memcpy(new_data, ab->data, copy_len);
-            ab->data = new_data;
-            ab->byte_length = new_length;
+        if (new_length != current_length &&
+            !byte_buffer_resize(&ab->handle, (size_t)new_length)) {
+            return ItemError;
         }
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
@@ -2104,7 +2120,7 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     ta->buffer_item = buffer_item.item;
     ta->length_tracking = false;
     ta->is_buffer = false;
-    ta->view = array_num_new_external_view((Container*)buffer_item.map, ab->data,
+    ta->view = array_num_new_buffer_view((Container*)buffer_item.map, &ab->handle,
         js_typed_array_elem_type(arr_type), 0, length, true);
     js_typed_array_refresh_arraynum_view(ta);
 
@@ -2118,11 +2134,33 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     return (Item){.map = m};
 }
 
-extern "C" Item js_typed_array_from_binary(String* bin) {
+extern "C" Item js_typed_array_from_binary(Binary* bin) {
     if (!bin) return js_typed_array_new(JS_TYPED_UINT8, 0);
-    Item result = js_typed_array_new(JS_TYPED_UINT8, (int)bin->len);
-    void* data = js_typed_array_current_data_ptr(result);
-    if (data && bin->len > 0) memcpy(data, bin->chars, bin->len);
+    uint32_t length = binary_length(bin);
+    ByteSpan span = binary_span(bin);
+    if (length > 0 && span.storage &&
+            (span.storage->flags & BYTE_STORAGE_FLAG_SHARED_MUTABLE) == 0) {
+        JsArrayBuffer* ab = js_arraybuffer_alloc_storage(
+            span.storage, span.offset, span.length);
+        if (!ab) return ItemError;
+        Item buffer_item = js_arraybuffer_wrap(ab);
+        if (!js_is_arraybuffer(buffer_item)) {
+            byte_buffer_destroy(&ab->handle);
+            mem_free(ab);
+            return ItemError;
+        }
+        // Binary retains the allocation while the stable handle is the sole
+        // mutable coherence point for every JS view over this ArrayBuffer.
+        return js_typed_array_new_from_buffer(
+            JS_TYPED_UINT8, buffer_item, 0, (int)length);
+    }
+
+    Item result = js_typed_array_new(JS_TYPED_UINT8, (int)length);
+    void* data = js_typed_array_prepare_write_ptr(result);
+    if (data && length > 0) {
+        memcpy(data, binary_data(bin), length);
+        binary_record_payload_copy();
+    }
     return result;
 }
 
@@ -2133,24 +2171,45 @@ extern "C" Item binary_from_typed_array(JsTypedArray* ta) {
     }
     js_typed_array_refresh_arraynum_view(ta);
     int byte_length = js_typed_array_current_byte_length(ta);
-    void* data = js_typed_array_current_data(ta);
     if (byte_length == 0) return ItemNull;
+    void* data = js_typed_array_current_data(ta);
     if (!data) return ItemError;
-    // Crossing from mutable/detachable JS storage must copy so the immutable
-    // Lambda binary cannot be changed or dangled by later JS operations.
-    String* bin = heap_binary_from_bytes((const char*)data, byte_length);
+    ByteBufferHandle* handle = ta->buffer ? &ta->buffer->handle : NULL;
+    Binary* bin = NULL;
+    if (handle && handle->storage && !byte_buffer_is_shared(handle)) {
+        size_t view_offset = (size_t)js_typed_array_current_byte_offset(ta);
+        if (view_offset <= handle->byte_length &&
+                (size_t)byte_length <= handle->byte_length - view_offset) {
+            bin = heap_binary_from_storage(handle->storage,
+                handle->storage_offset + view_offset, (size_t)byte_length,
+                str_is_ascii((const char*)data, (size_t)byte_length));
+        }
+    } else {
+        // SharedArrayBuffer remains a snapshot copy because concurrent writes
+        // cannot satisfy Lambda Binary immutability.
+        bin = heap_binary_from_bytes((const char*)data, byte_length);
+    }
     return bin ? (Item){.item = x2it(bin)} : ItemError;
 }
 
 extern "C" Item binary_from_dataview(JsDataView* dv) {
-    if (!dv || !dv->buffer || dv->buffer->detached) return ItemError;
+    if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return ItemError;
     int byte_length = dv->length_tracking ?
-        dv->buffer->byte_length - dv->byte_offset : dv->byte_length;
+        js_arraybuffer_length(dv->buffer) - dv->byte_offset : dv->byte_length;
     if (byte_length < 0 || dv->byte_offset < 0 ||
-        dv->byte_offset + byte_length > dv->buffer->byte_length) return ItemError;
+        dv->byte_offset + byte_length > js_arraybuffer_length(dv->buffer)) return ItemError;
     if (byte_length == 0) return ItemNull;
-    const char* data = (const char*)dv->buffer->data + dv->byte_offset;
-    String* bin = heap_binary_from_bytes(data, byte_length);
+    const char* data = (const char*)js_arraybuffer_data_const(dv->buffer) + dv->byte_offset;
+    ByteBufferHandle* handle = &dv->buffer->handle;
+    Binary* bin = NULL;
+    if (!byte_buffer_is_shared(handle) && handle->storage) {
+        bin = heap_binary_from_storage(handle->storage,
+            handle->storage_offset + (size_t)dv->byte_offset,
+            (size_t)byte_length, str_is_ascii(data, (size_t)byte_length));
+    } else {
+        // DataView over SharedArrayBuffer must also snapshot mutable bytes.
+        bin = heap_binary_from_bytes(data, byte_length);
+    }
     return bin ? (Item){.item = x2it(bin)} : ItemError;
 }
 
@@ -2164,7 +2223,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     JsTypedArrayType arr_type = (JsTypedArrayType)type_id;
     int elem_size = typed_array_element_size(arr_type);
 
-    if (ab->detached) {
+    if (js_arraybuffer_detached(ab)) {
         return js_throw_type_error("Cannot construct TypedArray from detached ArrayBuffer");
     }
     if (byte_offset < 0) {
@@ -2174,11 +2233,12 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
         log_error("js_typed_array_new_from_buffer: byte_offset %d not aligned to element size %d", byte_offset, elem_size);
         return js_throw_range_error("Invalid typed array byteOffset");
     }
-    if (byte_offset > ab->byte_length) {
+    int buffer_length = js_arraybuffer_length(ab);
+    if (byte_offset > buffer_length) {
         return js_throw_range_error("Invalid typed array byteOffset");
     }
 
-    int available = ab->byte_length - byte_offset;
+    int available = buffer_length - byte_offset;
 
     bool length_tracking = length < 0;
     if (length_tracking) {
@@ -2188,13 +2248,13 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
         // trailing remainder. Without this fix `new Float64Array(rab)` over a
         // resizable buffer whose byteLength isn't a multiple of 8 throws
         // RangeError, blocking the species-ctor cluster.
-        if (!ab->resizable && (available % elem_size != 0)) {
+        if (!js_arraybuffer_resizable(ab) && (available % elem_size != 0)) {
             return js_throw_range_error("Invalid typed array byteLength");
         }
         length = available / elem_size;
     }
     int byte_length = length * elem_size;
-    if (length < 0 || byte_length < 0 || byte_offset + byte_length > ab->byte_length) {
+    if (length < 0 || byte_length < 0 || byte_offset + byte_length > buffer_length) {
         log_error("js_typed_array_new_from_buffer: view exceeds buffer bounds");
         return js_throw_range_error("Invalid typed array length");
     }
@@ -2205,7 +2265,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     ta->buffer_item = buffer_item.item;  // preserve original Item for identity-preserving .buffer
     ta->length_tracking = length_tracking;
     ta->is_buffer = false;
-    ta->view = array_num_new_external_view((Container*)buffer_item.map, ab->data,
+    ta->view = array_num_new_buffer_view((Container*)buffer_item.map, &ab->handle,
         js_typed_array_elem_type(arr_type), byte_offset, length, true);
     js_typed_array_refresh_arraynum_view(ta);
 
@@ -2292,11 +2352,13 @@ extern "C" Item js_typed_array_construct(int type_id, Item arg, Item byte_offset
 
     if (get_type_id(arg) == LMD_TYPE_BINARY &&
         (type_id == JS_TYPED_UINT8 || type_id == JS_TYPED_UINT8_CLAMPED)) {
-        String* bin = arg.get_safe_binary();
+        Binary* bin = arg.get_safe_binary();
         if (type_id == JS_TYPED_UINT8) return js_typed_array_from_binary(bin);
-        Item result = js_typed_array_new(type_id, bin ? (int)bin->len : 0);
+        Item result = js_typed_array_new(type_id, bin ? (int)binary_length(bin) : 0);
         void* data = js_typed_array_current_data_ptr(result);
-        if (data && bin && bin->len > 0) memcpy(data, bin->chars, bin->len);
+        if (data && bin && binary_length(bin) > 0) {
+            memcpy(data, binary_data(bin), binary_length(bin));
+        }
         return result;
     }
 
@@ -2512,7 +2574,7 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
             if (js_check_exception()) return (Item){.item = ITEM_NULL};
         }
         int current_length = js_typed_array_current_length(ta);
-        void* data = js_typed_array_current_data(ta);
+        void* data = js_typed_array_prepare_write(ta);
         if (idx < 0 || idx >= current_length || !data) return value;
         if (ta->element_type == JS_TYPED_BIGINT64) {
             Item wrapped = js_bigint_as_int_n((Item){.item = i2it(64)}, bi);
@@ -2554,7 +2616,7 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
 
     int current_length = js_typed_array_current_length(ta);
     if (idx < 0 || idx >= current_length) return value;
-    void* data = js_typed_array_current_data(ta);
+    void* data = js_typed_array_prepare_write(ta);
     if (!data) return value;
 
     switch (ta->element_type) {
@@ -2597,7 +2659,7 @@ extern "C" int js_typed_array_length(Item ta_item) {
 
 // Js54 P3: live data pointer for the typed array's element storage.
 // Used by the MIR JIT inline indexed get/set paths so resizable-buffer-backed
-// views see the current ab->data after a resize() reallocs the backing store
+// views resolve the current handle storage after resize changes its generation
 // (cached descriptor data would point at the freed/stale backing store otherwise).
 // Returns NULL for OOB or detached views — callers must treat NULL as a
 // short-circuit on the access path.
@@ -2607,6 +2669,13 @@ extern "C" void* js_typed_array_current_data_ptr(Item ta_item) {
     JsTypedArray* ta = js_get_typed_array_ptr(m);
     js_typed_array_refresh_arraynum_view(ta);
     return js_typed_array_current_data(ta);
+}
+
+extern "C" void* js_typed_array_prepare_write_ptr(Item ta_item) {
+    if (!js_is_typed_array(ta_item)) return NULL;
+    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
+    js_typed_array_refresh_arraynum_view(ta);
+    return js_typed_array_prepare_write(ta);
 }
 
 extern "C" int js_typed_array_byte_length(Item ta_item) {
@@ -2662,7 +2731,7 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
     }
 
     int len = js_typed_array_current_length(ta);
-    void* data = js_typed_array_current_data(ta);
+    void* data = js_typed_array_prepare_write(ta);
     if (!data || len <= 0) return ta_item;
 
     if (start < 0) start = len + start;
@@ -2907,7 +2976,7 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
     Item result = js_typed_array_species_create(ta_item, new_length);
     if (js_check_exception()) return (Item){.item = ITEM_NULL};
     if (new_length > 0 && !js_dispatch_as_array_method) {
-        if (ta->buffer && ta->buffer->detached) {
+        if (ta->buffer && js_arraybuffer_detached(ta->buffer)) {
             return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer");
         }
         if (js_typed_array_is_out_of_bounds(ta)) {
@@ -2924,7 +2993,7 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end) {
         js_typed_array_refresh_arraynum_view(ta);
         js_typed_array_refresh_arraynum_view(rta);
         char* src_data = (char*)js_typed_array_current_data(ta);
-        char* dst_data = (char*)js_typed_array_current_data(rta);
+        char* dst_data = (char*)js_typed_array_prepare_write(rta);
         int src_start = start * elem_size;
         if (src_data && dst_data && ta->buffer && rta->buffer && ta->buffer == rta->buffer) {
             // same-buffer species results must follow the spec's forward byte copy.
@@ -2974,11 +3043,12 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end, bool e
     int begin_byte_offset = byte_offset + start * elem_size;
     bool result_length_tracking = ta->buffer && ta->length_tracking && end_is_default;
 
-    if (ta->buffer && !ta->buffer->detached) {
-        int available_bytes = ta->buffer->byte_length - byte_offset;
+    if (ta->buffer && !js_arraybuffer_detached(ta->buffer)) {
+        int buffer_length = js_arraybuffer_length(ta->buffer);
+        int available_bytes = buffer_length - byte_offset;
         if (available_bytes < 0) available_bytes = 0;
         available_len = available_bytes / elem_size;
-        if (begin_byte_offset > ta->buffer->byte_length) {
+        if (begin_byte_offset > buffer_length) {
             return js_throw_range_error("offset is out of bounds");
         }
         if (!result_length_tracking && end > available_len) {
@@ -3033,12 +3103,13 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     int byte_offset = 0;
     if (!js_dataview_to_index(offset_item, &byte_offset)) return ItemNull;
 
-    if (ab->detached) {
+    if (js_arraybuffer_detached(ab)) {
         js_throw_type_error("DataView buffer is detached");
         return ItemNull;
     }
 
-    if (byte_offset < 0 || byte_offset > ab->byte_length) {
+    int buffer_length = js_arraybuffer_length(ab);
+    if (byte_offset < 0 || byte_offset > buffer_length) {
         js_throw_range_error("Start offset is outside the bounds of the buffer");
         return ItemNull;
     }
@@ -3048,14 +3119,14 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
     // Js54 P2: length_tracking when constructor called without explicit byteLength.
     // The recorded byte_length is the initial value; readers re-derive from the
     // buffer's current byte_length on every access for length-tracking views.
-    bool length_tracking = (lt == LMD_TYPE_UNDEFINED) && ab->resizable;
+    bool length_tracking = (lt == LMD_TYPE_UNDEFINED) && js_arraybuffer_resizable(ab);
     if (lt == LMD_TYPE_UNDEFINED) {
-        byte_length = ab->byte_length - byte_offset;
+        byte_length = buffer_length - byte_offset;
     } else {
         if (!js_dataview_to_index(length_item, &byte_length)) return ItemNull;
     }
 
-    if (byte_length < 0 || (int64_t)byte_offset + (int64_t)byte_length > ab->byte_length) {
+    if (byte_length < 0 || (int64_t)byte_offset + (int64_t)byte_length > buffer_length) {
         js_throw_range_error("Invalid DataView length");
         return ItemNull;
     }
@@ -3085,7 +3156,7 @@ extern "C" Item js_dataview_new(Item buffer, Item offset_item, Item length_item)
 static inline int dv_current_byte_length(JsDataView* dv) {
     if (!dv || !dv->buffer) return 0;
     if (dv->length_tracking) {
-        int avail = dv->buffer->byte_length - dv->byte_offset;
+        int avail = js_arraybuffer_length(dv->buffer) - dv->byte_offset;
         return avail > 0 ? avail : 0;
     }
     return dv->byte_length;
@@ -3096,11 +3167,11 @@ static inline int dv_current_byte_length(JsDataView* dv) {
 // byte_offset + byte_length, or below byte_offset for length-tracking views).
 static inline bool dv_is_out_of_bounds(JsDataView* dv) {
     if (!dv || !dv->buffer) return false;
-    if (dv->buffer->detached) return true;
+    if (js_arraybuffer_detached(dv->buffer)) return true;
     if (dv->length_tracking) {
-        return dv->buffer->byte_length < dv->byte_offset;
+        return js_arraybuffer_length(dv->buffer) < dv->byte_offset;
     }
-    return dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length;
+    return js_arraybuffer_length(dv->buffer) < (int64_t)dv->byte_offset + (int64_t)dv->byte_length;
 }
 
 // Js54 P2: throws TypeError if the DataView is detached or out-of-bounds.
@@ -3116,10 +3187,19 @@ static inline bool dv_validate_or_throw(JsDataView* dv) {
 // Helper: get raw pointer into DataView's buffer at given offset
 // Js54 P2: bounds-check against the CURRENT view length so length-tracking
 // views see live shrink/grow, not the cached construction-time byte_length.
-static inline uint8_t* dv_ptr(JsDataView* dv, int offset, int size) {
+static inline const uint8_t* dv_ptr(JsDataView* dv, int offset, int size) {
     int current_len = dv_current_byte_length(dv);
     if (offset < 0 || offset + size > current_len) return NULL;
-    return (uint8_t*)dv->buffer->data + dv->byte_offset + offset;
+    return js_arraybuffer_data_const(dv->buffer) + dv->byte_offset + offset;
+}
+
+static inline uint8_t* dv_write_ptr(JsDataView* dv, int offset, int size) {
+    int current_len = dv_current_byte_length(dv);
+    if (offset < 0 || offset + size > current_len) return NULL;
+    uint8_t* base = js_arraybuffer_prepare_write(dv->buffer);
+    // DataView setters share the ArrayBuffer handle with typed arrays, so COW
+    // must occur before deriving the view-relative mutable pointer.
+    return base ? base + dv->byte_offset + offset : NULL;
 }
 
 // Endianness helpers
@@ -3186,17 +3266,17 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
 
     // Getter methods
     if (ml == 7 && strncmp(mn, "getInt8", 7) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 1);
+        const uint8_t* p = dv_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         return (Item){.item = i2it((int64_t)(int8_t)*p)};
     }
     if (ml == 8 && strncmp(mn, "getUint8", 8) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 1);
+        const uint8_t* p = dv_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         return (Item){.item = i2it((int64_t)*p)};
     }
     if (ml == 8 && strncmp(mn, "getInt16", 8) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 2);
+        const uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint16_t raw;
@@ -3205,7 +3285,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         return (Item){.item = i2it((int64_t)(int16_t)raw)};
     }
     if (ml == 9 && strncmp(mn, "getUint16", 9) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 2);
+        const uint8_t* p = dv_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint16_t raw;
@@ -3214,7 +3294,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         return (Item){.item = i2it((int64_t)raw)};
     }
     if (ml == 8 && strncmp(mn, "getInt32", 8) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 4);
+        const uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint32_t raw;
@@ -3223,7 +3303,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         return (Item){.item = i2it((int64_t)(int32_t)raw)};
     }
     if (ml == 9 && strncmp(mn, "getUint32", 9) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 4);
+        const uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint32_t raw;
@@ -3232,7 +3312,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         return (Item){.item = i2it((int64_t)raw)};
     }
     if (ml == 10 && strncmp(mn, "getFloat32", 10) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 4);
+        const uint8_t* p = dv_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint32_t raw;
@@ -3243,7 +3323,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         return js_make_number((double)f);
     }
     if (ml == 10 && strncmp(mn, "getFloat64", 10) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 8);
+        const uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint64_t raw;
@@ -3254,7 +3334,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         return js_make_number(d);
     }
     if (ml == 11 && strncmp(mn, "getBigInt64", 11) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 8);
+        const uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint64_t raw;
@@ -3263,7 +3343,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         return bigint_from_int64((int64_t)raw);
     }
     if (ml == 12 && strncmp(mn, "getBigUint64", 12) == 0) {
-        uint8_t* p = dv_ptr(dv, offset, 8);
+        const uint8_t* p = dv_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 1) ? js_is_truthy(args[1]) : false;
         uint64_t raw;
@@ -3278,7 +3358,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 1);
+        uint8_t* p = dv_write_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         int64_t raw_val = js_dataview_to_integer_value(number_value);
         *p = (uint8_t)(int8_t)raw_val;
@@ -3289,7 +3369,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 1);
+        uint8_t* p = dv_write_ptr(dv, offset, 1);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         int64_t raw_val = js_dataview_to_integer_value(number_value);
         *p = (uint8_t)raw_val;
@@ -3300,7 +3380,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 2);
+        uint8_t* p = dv_write_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         uint16_t val = (uint16_t)(int16_t)js_dataview_to_integer_value(number_value);
@@ -3313,7 +3393,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 2);
+        uint8_t* p = dv_write_ptr(dv, offset, 2);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         uint16_t val = (uint16_t)js_dataview_to_integer_value(number_value);
@@ -3326,7 +3406,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 4);
+        uint8_t* p = dv_write_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         uint32_t val = (uint32_t)(int32_t)js_dataview_to_integer_value(number_value);
@@ -3339,7 +3419,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
         if (!js_dataview_to_number_value(value_item, &number_value)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 4);
+        uint8_t* p = dv_write_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         uint32_t val = (uint32_t)js_dataview_to_integer_value(number_value);
@@ -3352,7 +3432,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         double number_value = 0.0;
         if (!js_dataview_to_number_value(val_item, &number_value)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 4);
+        uint8_t* p = dv_write_ptr(dv, offset, 4);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         float f = (float)number_value;
@@ -3367,7 +3447,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         double d = 0.0;
         if (!js_dataview_to_number_value(val_item2, &d)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 8);
+        uint8_t* p = dv_write_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         uint64_t raw;
@@ -3381,7 +3461,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item bigint_value;
         if (!js_dataview_to_bigint_value(value_item, &bigint_value)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 8);
+        uint8_t* p = dv_write_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         Item wrapped = js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value);
@@ -3396,7 +3476,7 @@ extern "C" Item js_dataview_method(Item dv_item, Item method_name, Item* args, i
         Item bigint_value;
         if (!js_dataview_to_bigint_value(value_item, &bigint_value)) return ItemNull;
         if (!dv_validate_or_throw(dv)) return ItemNull;
-        uint8_t* p = dv_ptr(dv, offset, 8);
+        uint8_t* p = dv_write_ptr(dv, offset, 8);
         if (!p) return js_throw_range_error("Invalid DataView offset");
         bool little_endian = (argc > 2) ? js_is_truthy(args[2]) : false;
         Item wrapped = js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value);

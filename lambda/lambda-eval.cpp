@@ -292,7 +292,7 @@ Item fn_join(Item left, Item right) {
     }
 
     if (left_type == LMD_TYPE_BINARY && right_type == LMD_TYPE_BINARY) {
-        String* result = heap_binary_concat(left.get_safe_binary(), right.get_safe_binary());
+        Binary* result = heap_binary_concat(left.get_safe_binary(), right.get_safe_binary());
         if (!result) {
             set_runtime_error(ERR_OUT_OF_MEMORY, "fn_join: failed to concatenate binary operands");
             return ItemError;
@@ -2219,12 +2219,13 @@ Bool fn_in(Item a_item, Item b_item) {
             return str_a->len <= str_b->len && strstr(str_b->chars, str_a->chars) != NULL;
         }
         if (b_item._type_id == LMD_TYPE_BINARY) {
-            String* bin = b_item.get_safe_binary();
+            Binary* bin = b_item.get_safe_binary();
             if (!bin) return BOOL_FALSE;
+            const uint8_t* bytes = binary_data(bin);
             // Membership follows Lambda numeric equality so 173, 173u8, and
             // 173.0 all match the same byte without silently narrowing 256.
-            for (uint32_t i = 0; i < bin->len; i++) {
-                Item byte = {.item = u8_to_item((unsigned char)bin->chars[i])};
+            for (uint32_t i = 0; i < binary_length(bin); i++) {
+                Item byte = {.item = u8_to_item(bytes[i])};
                 if (fn_eq(a_item, byte) == BOOL_TRUE) return BOOL_TRUE;
             }
             return BOOL_FALSE;
@@ -2421,8 +2422,8 @@ String* fn_string(Item itm) {
     case LMD_TYPE_STRING:
         return itm.get_safe_string();
     case LMD_TYPE_BINARY: {
-        String* bin = itm.get_safe_binary();
-        StrBuf* sb = strbuf_new_cap(bin ? (size_t)bin->len * 2 + 6 : 6);
+        Binary* bin = itm.get_safe_binary();
+        StrBuf* sb = strbuf_new_cap(bin ? (size_t)binary_length(bin) * 2 + 6 : 6);
         if (!sb) return &STR_ERROR;
         // String conversion is deliberately lossless and readable; raw UTF-8
         // decoding requires an explicit codec rather than implicit text.
@@ -5802,7 +5803,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         break;
     }
     case LMD_TYPE_BINARY: {
-        *(String**)field_ptr = value.get_safe_binary();
+        *(Binary**)field_ptr = value.get_safe_binary();
         break;
     }
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
@@ -5839,7 +5840,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
             titem.string = value.get_safe_string();
             break;
         case LMD_TYPE_BINARY:
-            titem.string = value.get_safe_binary();
+            titem.binary = value.get_safe_binary();
             break;
         case LMD_TYPE_SYMBOL:
             titem.symbol = value.get_safe_symbol();

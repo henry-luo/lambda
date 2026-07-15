@@ -1610,20 +1610,10 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
             if (var->hoisted_data_reg) continue;
 
             if (var->typed_array_type >= 0) {
-                // Js54 P0/P3: route data + length loads through the runtime
-                // helpers so the hoist is correct for upgraded Map layouts and
-                // for length-tracking / resize-aware views. Note: this snapshots
-                // the data ptr + length once before the loop, so a resize that
-                // happens INSIDE the loop is not reflected here; a future phase
-                // can introduce per-iteration reload when needed.
-                MIR_reg_t h_len = jm_call_1(mt, "js_typed_array_length", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
-                MIR_reg_t h_data = jm_call_1(mt, "js_typed_array_current_data_ptr", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
-                var->hoisted_data_reg = h_data;
-                var->hoisted_len_reg = h_len;
-                p4h_hoisted_vars[p4h_hoisted_count++] = var;
-                log_debug("P4h: hoisted typed array data+len before while loop");
+                // A typed-array descriptor caches handle-derived geometry/data;
+                // resize, detach, transfer, or COW inside the loop changes its
+                // generation, so each access must resolve instead of hoisting.
+                continue;
             }
         }
     }
@@ -1884,17 +1874,9 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
             if (var->hoisted_data_reg) continue; // already hoisted by outer loop
 
             if (var->typed_array_type >= 0) {
-                // Js54 P0/P3: route through runtime helpers so the hoist is
-                // correct for upgraded Map layouts and for length-tracking /
-                // resize-aware views. Snapshots once before the loop.
-                MIR_reg_t h_len = jm_call_1(mt, "js_typed_array_length", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
-                MIR_reg_t h_data = jm_call_1(mt, "js_typed_array_current_data_ptr", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
-                var->hoisted_data_reg = h_data;
-                var->hoisted_len_reg = h_len;
-                p4h_hoisted_vars[p4h_hoisted_count++] = var;
-                log_debug("P4h: hoisted typed array '%s' data+len before for loop", arr_names[ai]);
+                // Handle-backed data may change generation during the loop;
+                // per-access resolution is the required invalidation guard.
+                continue;
             }
         }
     }

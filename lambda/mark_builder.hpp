@@ -115,6 +115,13 @@ public:
     String* createString(const char* str, size_t len);
 
     /**
+     * Create an arena-owned Binary descriptor with inline bytes.
+     * Arena values cannot retain external storage because arenas have no
+     * per-object finalization, so this is an explicit ownership-boundary form.
+     */
+    Binary* createBinary(const void* bytes, size_t len);
+
+    /**
      * Create String from StringBuf (takes ownership of content)
      */
     String* createStringFromBuf(StringBuf* sb);

@@ -120,7 +120,7 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
         *(Symbol**)field_ptr = value.get_safe_symbol();
         break;
     case LMD_TYPE_BINARY:
-        *(String**)field_ptr = value.get_safe_binary();
+        *(Binary**)field_ptr = value.get_safe_binary();
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
@@ -166,7 +166,7 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
             titem.symbol = item.get_safe_symbol();
             break;
         case LMD_TYPE_BINARY:
-            titem.string = item.get_safe_binary();
+            titem.binary = item.get_safe_binary();
             break;
         case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
         case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
@@ -658,7 +658,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         *(Symbol**)field_ptr = value.get_safe_symbol();
         break;
     case LMD_TYPE_BINARY:
-        *(String**)field_ptr = value.get_safe_binary();
+        *(Binary**)field_ptr = value.get_safe_binary();
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {

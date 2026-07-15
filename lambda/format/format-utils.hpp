@@ -17,7 +17,7 @@ public:
     virtual void bool_value(const ItemReader& item) { (void)item; }
     virtual void number_value(const ItemReader& item) { (void)item; }
     virtual void string_value(const ItemReader& item, String* str) { (void)item; (void)str; }
-    virtual void binary_value(const ItemReader& item, String* bin) { (void)bin; unknown_value(item); }
+    virtual void binary_value(const ItemReader& item, Binary* bin) { (void)bin; unknown_value(item); }
     virtual void symbol_value(const ItemReader& item, Symbol* sym) { (void)sym; unknown_value(item); }
     virtual void array_value(const ItemReader& item, ArrayReader arr) { (void)arr; unknown_value(item); }
     virtual void map_value(const ItemReader& item, MapReader map) { (void)map; unknown_value(item); }

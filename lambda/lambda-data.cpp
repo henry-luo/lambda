@@ -443,6 +443,10 @@ String* it2s(Item itm) {
     return nullptr;
 }
 
+Binary* it2x(Item itm) {
+    return itm.get_safe_binary();
+}
+
 // Convert item to C string (for use in path segment names)
 // Returns the chars pointer from a string/symbol
 // For other types, returns empty string (path segments must be strings)
@@ -1038,9 +1042,12 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(DateTime*)field_ptr = dtval;
                 break;
             }
-            case LMD_TYPE_STRING:  case LMD_TYPE_BINARY: {
-                String *str = item._type_id == LMD_TYPE_STRING ? item.get_safe_string() : item.get_safe_binary();
-                *(String**)field_ptr = str;
+            case LMD_TYPE_STRING: {
+                *(String**)field_ptr = item.get_safe_string();
+                break;
+            }
+            case LMD_TYPE_BINARY: {
+                *(Binary**)field_ptr = item.get_safe_binary();
                 break;
             }
             case LMD_TYPE_SYMBOL: {
@@ -1104,7 +1111,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.string = item.get_safe_string();
                     break;
                 case LMD_TYPE_BINARY:
-                    titem.string = item.get_safe_binary();
+                    titem.binary = item.get_safe_binary();
                     break;
                 case LMD_TYPE_SYMBOL:
                     titem.symbol = item.get_safe_symbol();

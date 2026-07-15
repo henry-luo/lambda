@@ -773,7 +773,7 @@ static bool socket_onread_buffer_data(Item buffer, char** out_data, size_t* out_
     if (js_typed_array_is_out_of_bounds_item(buffer)) return false;
     int byte_len = js_typed_array_byte_length(buffer);
     if (byte_len <= 0) return false;
-    void* data = js_typed_array_current_data_ptr(buffer);
+    void* data = js_typed_array_prepare_write_ptr(buffer);
     if (!data) return false;
     *out_data = (char*)data;
     *out_len = (size_t)byte_len;

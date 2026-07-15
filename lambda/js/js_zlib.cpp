@@ -91,16 +91,17 @@ static bool get_input_buffer(Item input, const uint8_t** out, int* out_len) {
     }
     if (js_is_dataview(input)) {
         JsDataView* dv = js_get_dataview_ptr(input);
-        if (!dv || !dv->buffer || dv->buffer->detached) return false;
+        if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return false;
         int byte_len = dv->length_tracking
-            ? dv->buffer->byte_length - dv->byte_offset
+            ? js_arraybuffer_length(dv->buffer) - dv->byte_offset
             : dv->byte_length;
         if (byte_len < 0 ||
             dv->byte_offset < 0 ||
-            dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)byte_len) {
+            js_arraybuffer_length(dv->buffer) < (int64_t)dv->byte_offset + (int64_t)byte_len) {
             return false;
         }
-        *out = byte_len > 0 ? (const uint8_t*)dv->buffer->data + dv->byte_offset : NULL;
+        const uint8_t* data = js_arraybuffer_data_const(dv->buffer);
+        *out = byte_len > 0 ? data + dv->byte_offset : NULL;
         *out_len = byte_len;
         return *out || *out_len == 0;
     }
@@ -119,7 +120,7 @@ static Item make_buffer_result(const uint8_t* data, int len) {
     JsTypedArray* ta = js_get_typed_array_ptr(result.map);
     if (ta) {
         ta->is_buffer = true;
-        uint8_t* dst = (uint8_t*)js_typed_array_current_data_ptr(result);
+        uint8_t* dst = (uint8_t*)js_typed_array_prepare_write_ptr(result);
         if (dst) memcpy(dst, data, (size_t)len);
     }
     return result;

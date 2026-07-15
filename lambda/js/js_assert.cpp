@@ -4193,11 +4193,11 @@ static bool js_assert_is_any_arraybuffer(Item value) {
 static int js_assert_dataview_current_length(JsDataView* dv) {
     if (!dv || !dv->buffer) return -1;
     if (dv->length_tracking) {
-        int length = dv->buffer->byte_length - dv->byte_offset;
+        int length = js_arraybuffer_length(dv->buffer) - dv->byte_offset;
         return length > 0 ? length : 0;
     }
     if (dv->byte_offset < 0 || dv->byte_length < 0 ||
-            dv->byte_offset + dv->byte_length > dv->buffer->byte_length) {
+            dv->byte_offset + dv->byte_length > js_arraybuffer_length(dv->buffer)) {
         return -1;
     }
     return dv->byte_length;
@@ -4208,15 +4208,19 @@ static bool js_assert_partial_dataview_match(Item actual, Item expected) {
     JsDataView* actual_dv = js_get_dataview_ptr(actual);
     JsDataView* expected_dv = js_get_dataview_ptr(expected);
     if (!actual_dv || !expected_dv || !actual_dv->buffer || !expected_dv->buffer) return false;
-    if (actual_dv->buffer->detached || expected_dv->buffer->detached) return false;
-    if (actual_dv->buffer->is_shared != expected_dv->buffer->is_shared) return false;
+    if (js_arraybuffer_detached(actual_dv->buffer) ||
+        js_arraybuffer_detached(expected_dv->buffer)) return false;
+    if (js_arraybuffer_shared(actual_dv->buffer) !=
+        js_arraybuffer_shared(expected_dv->buffer)) return false;
     int actual_len = js_assert_dataview_current_length(actual_dv);
     int expected_len = js_assert_dataview_current_length(expected_dv);
     if (actual_len < 0 || expected_len < 0 || actual_len < expected_len) return false;
     if (expected_len == 0) return true;
-    if (!actual_dv->buffer->data || !expected_dv->buffer->data) return false;
-    uint8_t* actual_bytes = (uint8_t*)actual_dv->buffer->data + actual_dv->byte_offset;
-    uint8_t* expected_bytes = (uint8_t*)expected_dv->buffer->data + expected_dv->byte_offset;
+    const uint8_t* actual_data = js_arraybuffer_data_const(actual_dv->buffer);
+    const uint8_t* expected_data = js_arraybuffer_data_const(expected_dv->buffer);
+    if (!actual_data || !expected_data) return false;
+    const uint8_t* actual_bytes = actual_data + actual_dv->byte_offset;
+    const uint8_t* expected_bytes = expected_data + expected_dv->byte_offset;
     return memcmp(actual_bytes, expected_bytes, (size_t)expected_len) == 0;
 }
 
@@ -4232,8 +4236,10 @@ static bool js_assert_partial_arraybuffer_match(Item actual, Item expected) {
     JsArrayBuffer* expected_ab = js_get_arraybuffer_ptr_item(expected);
     if (!actual_ab || !expected_ab) return false;
     if (expected_len <= 0) return true;
-    if (!actual_ab->data || !expected_ab->data) return false;
-    return memcmp(actual_ab->data, expected_ab->data, (size_t)expected_len) == 0;
+    const uint8_t* actual_data = js_arraybuffer_data_const(actual_ab);
+    const uint8_t* expected_data = js_arraybuffer_data_const(expected_ab);
+    if (!actual_data || !expected_data) return false;
+    return memcmp(actual_data, expected_data, (size_t)expected_len) == 0;
 }
 
 static bool js_assert_is_url_like(Item value) {

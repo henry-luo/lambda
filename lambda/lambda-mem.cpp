@@ -14,6 +14,7 @@
 #include "js/js_typed_array.h"
 #include "lambda-decimal.hpp"
 #include "lambda-stack.h"
+#include "binary.h"
 #include <mpdecimal.h>
 #include <math.h>
 #include <setjmp.h>
@@ -43,6 +44,26 @@ static __thread int64_t jit_gc_root_frame_depth = 0;
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
 extern "C" void vmap_gc_destroy(void* obj, void* data);
+
+static void gc_destroy_external_payload(void* obj, uint16_t type_tag) {
+    if (!obj) return;
+    if (type_tag == LMD_TYPE_BINARY) {
+        Binary* binary = (Binary*)obj;
+        if (binary->storage) binary_release_storage(binary);
+        return;
+    }
+    if (type_tag == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* array = (ArrayNum*)obj;
+        if (!(array->is_view && array->extra)) return;
+        ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)array->extra;
+        if (shape->backing_kind != ARRAY_NUM_BACKING_BYTE_STORAGE || !shape->backing) return;
+        // Each retained-storage view owns exactly one reference, including
+        // derived views, so sweep and teardown must consume it once.
+        ByteStorage* storage = (ByteStorage*)shape->backing;
+        shape->backing = NULL;
+        byte_storage_release(storage);
+    }
+}
 
 static void heap_assert_raw_item_allocation(void* ptr, TypeId type_id) {
     (void)type_id;
@@ -100,10 +121,7 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
 
 static void gc_finalize_arraybuffer(JsArrayBuffer* ab, gc_native_seen_t* seen_native) {
     if (!ab || gc_native_seen_seen_or_add(seen_native, ab)) return;
-    if (ab->data) {
-        mem_free(ab->data);
-        ab->data = NULL;
-    }
+    byte_buffer_destroy(&ab->handle);
     mem_free(ab);
 }
 
@@ -273,6 +291,7 @@ void heap_init() {
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
+    context->heap->gc->external_destroy = gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
 
     // initialize interned single-char ASCII table (one-time, idempotent)
@@ -295,6 +314,7 @@ void heap_init_with_pool(Pool* pool) {
     context->heap->gc->error_trace = err_gc_trace;
     context->heap->gc->error_destroy = err_gc_destroy;
     context->heap->gc->js_native_trace = js_native_map_gc_trace;
+    context->heap->gc->external_destroy = gc_destroy_external_payload;
     err_set_heap_allocator(heap_calloc);
 
     if (!ascii_char_table_initialized) {
@@ -588,38 +608,63 @@ extern "C" String* heap_strcpy(const char* src, int64_t len) {
     return str;
 }
 
-static String* heap_binary_alloc(int64_t len) {
-    if (len < 0 || (uint64_t)len + 1 + sizeof(String) > (uint64_t)INT_MAX) return NULL;
-    // Binary owns immutable length-delimited bytes; using the binary allocation
-    // tag prevents text conversions from silently erasing that distinction.
-    String* bin = (String*)heap_alloc((int)(sizeof(String) + len + 1), LMD_TYPE_BINARY);
-    if (!bin) return NULL;
-    bin->chars[len] = '\0';
-    bin->len = (uint32_t)len;
-    return bin;
+extern "C" Binary* heap_binary_from_storage(ByteStorage* storage, size_t offset,
+        size_t length, bool is_ascii) {
+    if (!storage || length > UINT32_MAX || offset > storage->capacity ||
+        length > storage->capacity - offset || (length > 0 && !storage->data)) return NULL;
+    Binary* binary = (Binary*)heap_alloc((int)sizeof(Binary), LMD_TYPE_BINARY);
+    if (!binary) return NULL;
+    // A failed retain must leave a finalizer-safe GC descriptor.
+    memset(binary, 0, sizeof(Binary));
+    if (!binary_init_storage(binary, storage, offset, length, is_ascii)) return NULL;
+    return binary;
 }
 
-extern "C" String* heap_binary_from_bytes(const char* src, int64_t len) {
-    if (!src) return NULL;
-    String* bin = heap_binary_alloc(len);
-    if (!bin) return NULL;
-    memcpy(bin->chars, src, (size_t)len);
-    bin->is_ascii = str_is_ascii(bin->chars, (size_t)len) ? 1 : 0;
-    return bin;
+extern "C" Binary* heap_binary_from_bytes(const char* src, int64_t len) {
+    if (len < 0 || (len > 0 && !src) || (uint64_t)len > UINT32_MAX) return NULL;
+    ByteStorage* storage = byte_storage_alloc((size_t)len, MEM_CAT_CONTAINER);
+    if (!storage) return NULL;
+    if (len > 0) {
+        memcpy(storage->data, src, (size_t)len);
+        binary_record_payload_copy();
+    }
+    bool is_ascii = len == 0 || str_is_ascii(src, (size_t)len);
+    Binary* binary = heap_binary_from_storage(storage, 0, (size_t)len, is_ascii);
+    byte_storage_release(storage);
+    return binary;
 }
 
-extern "C" String* heap_binary_concat(String* left, String* right) {
-    if (!left || !right) return NULL;
-    int64_t left_len = (int64_t)left->len;
-    int64_t right_len = (int64_t)right->len;
-    String* bin = heap_binary_alloc(left_len + right_len);
-    if (!bin) return NULL;
-    // Binary concatenation must remain length-based because either operand may
-    // contain embedded NUL bytes that terminate text-oriented copy helpers.
-    memcpy(bin->chars, left->chars, (size_t)left_len);
-    memcpy(bin->chars + left_len, right->chars, (size_t)right_len);
-    bin->is_ascii = left->is_ascii && right->is_ascii;
-    return bin;
+extern "C" Binary* heap_binary_slice(Binary* source, size_t offset, size_t length) {
+    if (!source || offset > source->len || length > source->len - offset) return NULL;
+    const uint8_t* data = binary_data(source);
+    if (length > 0 && !data) return NULL;
+    if (source->storage) {
+        Binary* binary = (Binary*)heap_alloc((int)sizeof(Binary), LMD_TYPE_BINARY);
+        if (!binary) return NULL;
+        memset(binary, 0, sizeof(Binary));
+        return binary_init_slice(binary, source, offset, length) ? binary : NULL;
+    }
+    return heap_binary_from_bytes((const char*)data + offset, (int64_t)length);
+}
+
+extern "C" Binary* heap_binary_copy(Binary* source) {
+    if (!source) return NULL;
+    return heap_binary_from_bytes((const char*)binary_data(source), source->len);
+}
+
+extern "C" Binary* heap_binary_concat(Binary* left, Binary* right) {
+    if (!left || !right || left->len > UINT32_MAX - right->len) return NULL;
+    size_t length = (size_t)left->len + right->len;
+    ByteStorage* storage = byte_storage_alloc(length, MEM_CAT_CONTAINER);
+    if (!storage) return NULL;
+    // Concatenation stays contiguous and length-based because bytes may contain NUL.
+    if (left->len > 0) memcpy(storage->data, binary_data(left), left->len);
+    if (right->len > 0) memcpy(storage->data + left->len, binary_data(right), right->len);
+    if (length > 0) binary_record_payload_copy();
+    Binary* binary = heap_binary_from_storage(storage, 0, length,
+        left->is_ascii && right->is_ascii);
+    byte_storage_release(storage);
+    return binary;
 }
 
 // create a name string using runtime name_pool (ALWAYS pooled via string interning)

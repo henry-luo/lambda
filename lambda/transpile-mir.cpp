@@ -1865,7 +1865,7 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
         *(Symbol**)field_ptr = value.get_safe_symbol(); return true;
     case LMD_TYPE_BINARY:
         if (value_type != LMD_TYPE_BINARY) return false;
-        *(String**)field_ptr = value.get_safe_binary(); return true;
+        *(Binary**)field_ptr = value.get_safe_binary(); return true;
     case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:
@@ -1911,7 +1911,7 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
         case LMD_TYPE_DTIME: titem.datetime_val = value.get_datetime(); break;
         case LMD_TYPE_STRING: titem.string = value.get_safe_string(); break;
         case LMD_TYPE_SYMBOL: titem.symbol = value.get_safe_symbol(); break;
-        case LMD_TYPE_BINARY: titem.string = value.get_safe_binary(); break;
+        case LMD_TYPE_BINARY: titem.binary = value.get_safe_binary(); break;
         case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
         case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
             titem.container = value.container; break;
@@ -2013,7 +2013,7 @@ static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* 
         case LMD_TYPE_DECIMAL: { TypeDecimal* t = (TypeDecimal*)node->type; out->item = c2it(t->decimal); return true; }
         case LMD_TYPE_STRING: { TypeString* t = (TypeString*)node->type; out->item = s2it(t->string); return true; }
         case LMD_TYPE_SYMBOL: { TypeString* t = (TypeString*)node->type; out->item = y2it((Symbol*)t->string); return true; }
-        case LMD_TYPE_BINARY: { TypeString* t = (TypeString*)node->type; out->item = x2it(t->string); return true; }
+        case LMD_TYPE_BINARY: { TypeBinaryConst* t = (TypeBinaryConst*)node->type; out->item = x2it(t->binary); return true; }
         case LMD_TYPE_NUM_SIZED: { TypeNumSized* t = (TypeNumSized*)node->type; out->item = NUM_SIZED_PACK(t->num_type, t->raw_bits); return true; }
         case LMD_TYPE_UINT64: { TypeUint64* t = (TypeUint64*)node->type; out->item = u2it(&t->uint64_val); return true; }
         default: return false;
@@ -6539,7 +6539,7 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
     // Scalar types: load 8 bytes as int64
     // INT/INT64: native int64 value
     // BOOL: bool (1 byte) in 8-byte zero-padded slot → safe to read 8 bytes
-    // STRING/SYMBOL/BINARY: raw pointer (String*/Symbol*)
+    // STRING/SYMBOL/BINARY: raw pointer (String*/Symbol*/Binary*)
     MIR_reg_t result = new_reg(mt, "mfld", MIR_T_I64);
     if (!skip_null_guard) {
         // null → 0 (default for scalars)

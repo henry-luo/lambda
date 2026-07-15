@@ -57,6 +57,14 @@ static uint8_t* buffer_data(Item buf, int* out_len) {
     return data;
 }
 
+static uint8_t* buffer_data_write(Item buf, int* out_len) {
+    if (!js_is_typed_array(buf)) { *out_len = 0; return NULL; }
+    uint8_t* data = (uint8_t*)js_typed_array_prepare_write_ptr(buf);
+    if (!data) { *out_len = 0; return NULL; }
+    *out_len = js_typed_array_byte_length(buf);
+    return data;
+}
+
 static int buffer_decode_base64_bytes(const char* str, int str_len, Base64Variant variant,
                                       uint8_t* out_buf, int max_out) {
     if (!str || str_len <= 0 || !out_buf || max_out <= 0) return 0;
@@ -157,7 +165,7 @@ extern "C" Item js_buffer_from_bytes(const char* data, int len) {
     if (len < 0) len = 0;
     Item buf = create_buffer(len);
     int buf_len = 0;
-    uint8_t* dst = buffer_data(buf, &buf_len);
+    uint8_t* dst = buffer_data_write(buf, &buf_len);
     if (dst && data && len > 0) {
         int copy_len = len < buf_len ? len : buf_len;
         memcpy(dst, data, (size_t)copy_len);
@@ -375,14 +383,14 @@ extern "C" Item js_buffer_alloc(Item size_item, Item fill_item) {
         int fill_val = (int)(it2i(fill_item) & 0xFF);
         if (fill_val != 0) {
             int blen = 0;
-            uint8_t* data = buffer_data(buf, &blen);
+            uint8_t* data = buffer_data_write(buf, &blen);
             if (data) memset(data, fill_val, blen);
         }
     } else if (fill_type == LMD_TYPE_STRING) {
         String* s = it2s(fill_item);
         if (s && s->len > 0) {
             int blen = 0;
-            uint8_t* data = buffer_data(buf, &blen);
+            uint8_t* data = buffer_data_write(buf, &blen);
             if (data) {
                 for (int i = 0; i < blen; i++)
                     data[i] = (uint8_t)s->chars[i % s->len];
@@ -469,10 +477,13 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
     TypeId tid = get_type_id(data);
 
     if (tid == LMD_TYPE_BINARY) {
-        String* bin = data.get_safe_binary();
-        // Buffer receives an owned copy so mutation never changes Lambda's
-        // immutable binary value.
-        return js_buffer_from_bytes(bin ? bin->chars : NULL, bin ? (int)bin->len : 0);
+        Binary* bin = data.get_safe_binary();
+        Item buf = js_typed_array_from_binary(bin);
+        if (js_is_typed_array(buf)) {
+            JsTypedArray* ta = js_get_typed_array_ptr(buf.map);
+            if (ta) ta->is_buffer = true;
+        }
+        return buf;
     }
 
     if (tid == LMD_TYPE_STRING) {
@@ -494,7 +505,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             int byte_len = buffer_valid_hex_byte_length(s->chars, (int)s->len, -1);
             Item buf = create_buffer(byte_len);
             int buf_len = 0;
-            uint8_t* bdata = buffer_data(buf, &buf_len);
+            uint8_t* bdata = buffer_data_write(buf, &buf_len);
             if (bdata) {
                 buffer_decode_hex_bytes(s->chars, (int)s->len, bdata, buf_len);
             }
@@ -506,7 +517,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             uint8_t* decoded = base64_decode_variant(s->chars, s->len, &decoded_len, BASE64_STD);
             Item buf = create_buffer(decoded ? (int)decoded_len : 0);
             int buf_byte_len = 0;
-            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
             if (decoded && bdata && buf_byte_len > 0) {
                 memcpy(bdata, decoded, (size_t)buf_byte_len);
             }
@@ -519,7 +530,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             int byte_len = buffer_utf8_codepoint_count(s->chars, (int)s->len);
             Item buf = create_buffer(byte_len);
             int buf_byte_len = 0;
-            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
             if (bdata) {
                 int index = 0;
                 for (int i = 0; i < byte_len; i++) {
@@ -534,14 +545,14 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             if (s->is_ascii) {
                 Item buf = create_buffer((int)s->len);
                 int buf_byte_len = 0;
-                uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+                uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
                 if (bdata && s->len > 0) memcpy(bdata, s->chars, (size_t)buf_byte_len);
                 return buf;
             }
             int byte_len = buffer_utf8_codepoint_count(s->chars, (int)s->len);
             Item buf = create_buffer(byte_len);
             int buf_byte_len = 0;
-            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
             if (bdata) {
                 int index = 0;
                 for (int i = 0; i < byte_len; i++) {
@@ -558,7 +569,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
                 int out_bytes = (int)s->len * 2;
                 Item buf = create_buffer(out_bytes);
                 int buf_byte_len = 0;
-                uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+                uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
                 if (bdata) {
                     int j = 0;
                     for (uint32_t i = 0; i < s->len && j + 1 < buf_byte_len; i++) {
@@ -584,7 +595,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             int out_bytes = cp_count * 2;
             Item buf = create_buffer(out_bytes);
             int buf_byte_len = 0;
-            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
             if (bdata) {
                 int j = 0;
                 q = p;
@@ -622,14 +633,14 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         if (s->is_ascii) {
             Item buf = create_buffer((int)s->len);
             int buf_byte_len = 0;
-            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
             if (bdata && s->len > 0) memcpy(bdata, s->chars, (size_t)buf_byte_len);
             return buf;
         }
         int byte_len = buffer_utf8_encoded_len(s->chars, (int)s->len);
         Item buf = create_buffer(byte_len);
         int buf_byte_len = 0;
-        uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+        uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
         if (bdata && byte_len > 0) {
             buffer_write_utf8_encoded(s->chars, (int)s->len, bdata);
         }
@@ -648,20 +659,21 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
     // ArrayBuffer / SharedArrayBuffer → Buffer view over the same backing store
     if (js_is_arraybuffer(data)) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(data);
-        if (!ab || ab->detached) {
+        if (!ab || js_arraybuffer_detached(ab)) {
             return js_throw_type_error("Cannot create Buffer from a detached ArrayBuffer");
         }
 
         int byte_offset = 0;
         if (!buffer_from_to_index(encoding, 0, 0, &byte_offset, "offset")) return ItemNull;
-        if (byte_offset > ab->byte_length) {
+        int buffer_length = js_arraybuffer_length(ab);
+        if (byte_offset > buffer_length) {
             return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS",
                 "\"offset\" is outside of buffer bounds");
         }
 
-        int byte_length = ab->byte_length - byte_offset;
+        int byte_length = buffer_length - byte_offset;
         if (!buffer_from_to_index(length_item, byte_length, 0, &byte_length, "length")) return ItemNull;
-        if (byte_length > ab->byte_length - byte_offset) {
+        if (byte_length > buffer_length - byte_offset) {
             return js_throw_range_error_code("ERR_BUFFER_OUT_OF_BOUNDS",
                 "\"length\" is outside of buffer bounds");
         }
@@ -683,7 +695,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         }
         Item buf = create_buffer((int)arr_len);
         int buf_byte_len = 0;
-        uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+        uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
         if (bdata) {
             for (int64_t i = 0; i < arr_len; i++) {
                 Item elem = js_array_get_int(data, i);
@@ -703,7 +715,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
         uint8_t* src_data = buffer_data(data, &src_len);
         Item buf = create_buffer(src_len);
         int dst_len = 0;
-        uint8_t* dst_data = buffer_data(buf, &dst_len);
+        uint8_t* dst_data = buffer_data_write(buf, &dst_len);
         if (src_data && dst_data && src_len > 0) {
             memcpy(dst_data, src_data, src_len);
         }
@@ -713,16 +725,16 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
     // DataView -> copy the viewed byte window.
     if (js_is_dataview(data)) {
         JsDataView* dv = js_get_dataview_ptr(data);
-        if (!dv || !dv->buffer || dv->buffer->detached) {
+        if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) {
             return js_throw_type_error("Cannot create Buffer from a detached DataView");
         }
         int byte_length = dv->length_tracking
-            ? dv->buffer->byte_length - dv->byte_offset
+            ? js_arraybuffer_length(dv->buffer) - dv->byte_offset
             : dv->byte_length;
         if (byte_length < 0 ||
-            dv->buffer->byte_length < dv->byte_offset ||
+            js_arraybuffer_length(dv->buffer) < dv->byte_offset ||
             (!dv->length_tracking &&
-             dv->buffer->byte_length < dv->byte_offset + dv->byte_length)) {
+             js_arraybuffer_length(dv->buffer) < dv->byte_offset + dv->byte_length)) {
             return js_throw_type_error("Cannot create Buffer from an out-of-bounds DataView");
         }
         Item buffer_item = dv->buffer_item
@@ -755,7 +767,7 @@ extern "C" Item js_buffer_from(Item data, Item encoding, Item length_item) {
             }
             Item buf = create_buffer((int)arr_len);
             int buf_byte_len = 0;
-            uint8_t* bdata = buffer_data(buf, &buf_byte_len);
+            uint8_t* bdata = buffer_data_write(buf, &buf_byte_len);
             if (bdata) {
                 for (int64_t i = 0; i < arr_len; i++) {
                     char idx[24];
@@ -877,7 +889,7 @@ extern "C" Item js_buffer_concat(Item list, Item total_length_item) {
 
     Item result = create_buffer((int)total);
     int dst_len = 0;
-    uint8_t* dst = buffer_data(result, &dst_len);
+    uint8_t* dst = buffer_data_write(result, &dst_len);
     int64_t offset = 0;
     for (int64_t i = 0; i < count && offset < total; i++) {
         Item buf = js_array_get_int(list, i);
@@ -991,7 +1003,7 @@ static Item js_buffer_copyBytesFrom(Item view, Item offset_item, Item length_ite
     extern Item js_buffer_alloc(Item size, Item fill);
     Item result = js_buffer_alloc((Item){.item = i2it(byte_len)}, ItemNull);
     if (js_is_typed_array(result) && byte_len > 0) {
-        uint8_t* dst_data = (uint8_t*)js_typed_array_current_data_ptr(result);
+        uint8_t* dst_data = (uint8_t*)js_typed_array_prepare_write_ptr(result);
         if (dst_data && src_offset + byte_len <= view_byte_length) {
             memcpy(dst_data, src_data + src_offset, byte_len);
         }
@@ -1414,7 +1426,7 @@ static int encode_string_bytes(const char* str, int str_len, const char* enc,
 
 extern "C" Item js_buffer_write(Item buf, Item str_item, Item offset_item, Item length_item, Item enc_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data || blen == 0) return (Item){.item = i2it(0)};
     if (get_type_id(str_item) != LMD_TYPE_STRING) return (Item){.item = i2it(0)};
 
@@ -1484,7 +1496,7 @@ static int coerce_copy_offset(Item item, int default_val) {
 extern "C" Item js_buffer_copy(Item src_buf, Item dst_buf, Item target_start_item, Item source_start_item, Item source_end_item) {
     int src_len = 0, dst_len = 0;
     uint8_t* src = buffer_data(src_buf, &src_len);
-    uint8_t* dst = buffer_data(dst_buf, &dst_len);
+    uint8_t* dst = buffer_data_write(dst_buf, &dst_len);
     if (!src || !dst) return (Item){.item = i2it(0)};
 
     int target_start = coerce_copy_offset(target_start_item, 0);
@@ -1763,7 +1775,7 @@ extern "C" Item js_buffer_slice(Item buf, Item start_item, Item end_item) {
     int slice_len = end - start;
     Item result = create_buffer(slice_len);
     int dst_len = 0;
-    uint8_t* dst = buffer_data(result, &dst_len);
+    uint8_t* dst = buffer_data_write(result, &dst_len);
     if (dst) memcpy(dst, data + start, slice_len);
     return result;
 }
@@ -1771,7 +1783,7 @@ extern "C" Item js_buffer_slice(Item buf, Item start_item, Item end_item) {
 // ─── buf.fill(value, offset?, end?) ─────────────────────────────────────────
 extern "C" Item js_buffer_fill(Item buf, Item value) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data || blen == 0) return buf;
 
     uint8_t fill_byte = 0;
@@ -2165,7 +2177,7 @@ extern "C" Item js_buffer_readDoubleLE(Item buf, Item offset_item) {
 // ─── Endian-aware write methods ──────────────────────────────────────────────
 extern "C" Item js_buffer_writeUInt8(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(1)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 1, "offset", &err);
@@ -2178,7 +2190,7 @@ extern "C" Item js_buffer_writeUInt8(Item buf, Item value_item, Item offset_item
 
 extern "C" Item js_buffer_writeUInt16BE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(2)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
@@ -2192,7 +2204,7 @@ extern "C" Item js_buffer_writeUInt16BE(Item buf, Item value_item, Item offset_i
 
 extern "C" Item js_buffer_writeUInt16LE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(2)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
@@ -2206,7 +2218,7 @@ extern "C" Item js_buffer_writeUInt16LE(Item buf, Item value_item, Item offset_i
 
 extern "C" Item js_buffer_writeUInt32BE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(4)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
@@ -2222,7 +2234,7 @@ extern "C" Item js_buffer_writeUInt32BE(Item buf, Item value_item, Item offset_i
 
 extern "C" Item js_buffer_writeUInt32LE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(4)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
@@ -2240,7 +2252,7 @@ extern "C" Item js_buffer_writeUInt32LE(Item buf, Item value_item, Item offset_i
 
 extern "C" Item js_buffer_writeInt8(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(1)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 1, "offset", &err);
@@ -2253,7 +2265,7 @@ extern "C" Item js_buffer_writeInt8(Item buf, Item value_item, Item offset_item)
 
 extern "C" Item js_buffer_writeInt16BE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(2)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
@@ -2267,7 +2279,7 @@ extern "C" Item js_buffer_writeInt16BE(Item buf, Item value_item, Item offset_it
 
 extern "C" Item js_buffer_writeInt16LE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(2)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 2, "offset", &err);
@@ -2281,7 +2293,7 @@ extern "C" Item js_buffer_writeInt16LE(Item buf, Item value_item, Item offset_it
 
 extern "C" Item js_buffer_writeInt32BE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(4)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
@@ -2297,7 +2309,7 @@ extern "C" Item js_buffer_writeInt32BE(Item buf, Item value_item, Item offset_it
 
 extern "C" Item js_buffer_writeInt32LE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(4)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
@@ -2315,7 +2327,7 @@ extern "C" Item js_buffer_writeInt32LE(Item buf, Item value_item, Item offset_it
 
 extern "C" Item js_buffer_writeFloatBE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(4)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
@@ -2334,7 +2346,7 @@ extern "C" Item js_buffer_writeFloatBE(Item buf, Item value_item, Item offset_it
 
 extern "C" Item js_buffer_writeFloatLE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(4)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 4, "offset", &err);
@@ -2353,7 +2365,7 @@ extern "C" Item js_buffer_writeFloatLE(Item buf, Item value_item, Item offset_it
 
 extern "C" Item js_buffer_writeDoubleBE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(8)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 8, "offset", &err);
@@ -2371,7 +2383,7 @@ extern "C" Item js_buffer_writeDoubleBE(Item buf, Item value_item, Item offset_i
 
 extern "C" Item js_buffer_writeDoubleLE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data) return (Item){.item = i2it(8)};
     Item err;
     int off = validate_rw_offset(offset_item, blen, 8, "offset", &err);
@@ -2408,7 +2420,7 @@ extern "C" Item js_buffer_toJSON(Item buf) {
 
 extern "C" Item js_buffer_swap16(Item buf) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data || blen % 2 != 0) return buf;
     for (int i = 0; i < blen; i += 2) {
         uint8_t tmp = data[i];
@@ -2420,7 +2432,7 @@ extern "C" Item js_buffer_swap16(Item buf) {
 
 extern "C" Item js_buffer_swap32(Item buf) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data || blen % 4 != 0) return buf;
     for (int i = 0; i < blen; i += 4) {
         uint8_t t0 = data[i], t1 = data[i + 1];
@@ -2434,7 +2446,7 @@ extern "C" Item js_buffer_swap32(Item buf) {
 
 extern "C" Item js_buffer_swap64(Item buf) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     if (!data || blen % 8 != 0) return buf;
     for (int i = 0; i < blen; i += 8) {
         for (int j = 0; j < 4; j++) {
@@ -2600,7 +2612,7 @@ extern "C" Item js_buffer_readIntLE(Item buf, Item offset_item, Item byte_len_it
 // buf.writeUIntBE(value, offset, byteLength)
 extern "C" Item js_buffer_writeUIntBE(Item buf, Item value_item, Item offset_item, Item byte_len_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     int nbytes = buffer_number_to_int_or_default(byte_len_item, 1);
     uint64_t val = 0;
@@ -2617,7 +2629,7 @@ extern "C" Item js_buffer_writeUIntBE(Item buf, Item value_item, Item offset_ite
 // buf.writeUIntLE(value, offset, byteLength)
 extern "C" Item js_buffer_writeUIntLE(Item buf, Item value_item, Item offset_item, Item byte_len_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     int nbytes = buffer_number_to_int_or_default(byte_len_item, 1);
     uint64_t val = 0;
@@ -2687,7 +2699,7 @@ extern "C" Item js_buffer_readBigUInt64LE(Item buf, Item offset_item) {
 
 extern "C" Item js_buffer_writeBigInt64BE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     Item bigint_value;
@@ -2704,7 +2716,7 @@ extern "C" Item js_buffer_writeBigInt64BE(Item buf, Item value_item, Item offset
 
 extern "C" Item js_buffer_writeBigInt64LE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     Item bigint_value;
@@ -2721,7 +2733,7 @@ extern "C" Item js_buffer_writeBigInt64LE(Item buf, Item value_item, Item offset
 
 extern "C" Item js_buffer_writeBigUInt64BE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     Item bigint_value;
@@ -2738,7 +2750,7 @@ extern "C" Item js_buffer_writeBigUInt64BE(Item buf, Item value_item, Item offse
 
 extern "C" Item js_buffer_writeBigUInt64LE(Item buf, Item value_item, Item offset_item) {
     int blen = 0;
-    uint8_t* data = buffer_data(buf, &blen);
+    uint8_t* data = buffer_data_write(buf, &blen);
     int offset = buffer_number_to_int_or_default(offset_item, 0);
     if (offset < 0 || offset + 8 > blen) return ItemNull;
     Item bigint_value;

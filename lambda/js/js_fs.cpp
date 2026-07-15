@@ -429,7 +429,7 @@ static Item fs_buffer_from_bytes(const char* data, int len) {
         JsTypedArray* ta = js_get_typed_array_ptr(chunk.map);
         if (ta) {
             ta->is_buffer = true;
-            uint8_t* dst = (uint8_t*)js_typed_array_current_data_ptr(chunk);
+            uint8_t* dst = (uint8_t*)js_typed_array_prepare_write_ptr(chunk);
             if (dst && data && len > 0) {
                 memcpy(dst, data, (size_t)len);
             }
@@ -2304,7 +2304,7 @@ extern "C" Item js_fs_readSync(Item fd_item, Item buffer_item, Item offset_item,
     JsTypedArray* ta = fs_get_typed_array(read_buffer);
     if (!ta) return js_throw_invalid_arg_type("buffer", "Buffer, TypedArray, or DataView", read_buffer);
     int blen = js_typed_array_byte_length(read_buffer);
-    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(read_buffer);
+    uint8_t* data = (uint8_t*)js_typed_array_prepare_write_ptr(read_buffer);
 
     int offset = 0, length = blen;
     if (!fs_validate_offset_length(read_offset, read_length, blen, &offset, &length)) return ItemNull;
@@ -2667,7 +2667,7 @@ extern "C" Item js_fs_readvSync(Item fd_item, Item buffers_item, Item position_i
         JsTypedArray* ta = fs_get_typed_array(buffer);
         if (!ta) return js_throw_invalid_arg_type("buffers", "ArrayBufferView[]", buffer);
         int blen = js_typed_array_byte_length(buffer);
-        uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(buffer);
+        uint8_t* data = (uint8_t*)js_typed_array_prepare_write_ptr(buffer);
         bufs[i] = uv_buf_init((char*)data, blen);
     }
 

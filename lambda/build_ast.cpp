@@ -789,8 +789,8 @@ static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
         return true;
     }
     case LMD_TYPE_BINARY: {
-        TypeString* t = (TypeString*)node->type;
-        out->item = x2it(t->string);
+        TypeBinaryConst* t = (TypeBinaryConst*)node->type;
+        out->item = x2it(t->binary);
         return true;
     }
     case LMD_TYPE_NUM_SIZED: {
@@ -2879,7 +2879,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
     // Handle binary separately — extract content between b' and '
     if (symbol == SYM_BINARY) {
-        TypeString* str_type = (TypeString*)alloc_type(tp->pool, LMD_TYPE_BINARY, sizeof(TypeString));
+        TypeBinaryConst* str_type = (TypeBinaryConst*)alloc_type(tp->pool, LMD_TYPE_BINARY, sizeof(TypeBinaryConst));
         str_type->is_const = 1;  str_type->is_literal = 1;
 
         int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
@@ -2908,15 +2908,11 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
             return &LIT_NULL;
         }
 
-        str = (String*)pool_alloc(tp->pool, sizeof(String) + (size_t)decoded_len + 1);
-        str_type->string = str;
-        memcpy(str->chars, decoded->str, (size_t)decoded_len);
-        str->chars[decoded_len] = '\0';
-        str->len = (uint32_t)decoded_len;
-        str->is_ascii = str_is_ascii(str->chars, (size_t)decoded_len) ? 1 : 0;
+        Binary* binary = pool_binary_from_bytes(tp->pool, decoded->str, (size_t)decoded_len);
+        str_type->binary = binary;
         strbuf_free(decoded);
 
-        arraylist_append(tp->const_list, str);
+        arraylist_append(tp->const_list, binary);
         str_type->const_index = tp->const_list->length - 1;
         return (Type*)str_type;
     }

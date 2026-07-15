@@ -324,6 +324,7 @@
             ],
             "source_files": [
                 "lambda/print.cpp",
+                "lambda/binary.cpp",
                 "lambda/emit_sexpr.cpp",
                 "lambda/utf_string.cpp",
                 "lambda/name_pool.cpp",
@@ -392,6 +393,7 @@
                 "lib/file_utils.c",
                 "lib/log.c",
                 "lib/memtrack.c",
+                "lib/byte_storage.c",
                 "lib/str.c",
                 "lib/str_binary.c",
                 "lib/utf.c",
@@ -1781,6 +1783,29 @@
                         ],
                         "binary": "test_atomic_gtest.exe",
                         "icon": "⚛️"
+                    },
+                    {
+                        "source": "lib/test_byte_storage_gtest.cpp",
+                        "name": "Shared Byte Storage Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "pthread"
+                        ],
+                        "additional_sources": [
+                            "lib/byte_storage.c",
+                            "lib/memtrack.c",
+                            "lib/hashmap.c",
+                            "lib/arena.c",
+                            "lib/mempool.c",
+                            "lib/str.c",
+                            "lib/utf.c",
+                            "lib/log.c"
+                        ],
+                        "binary": "test_byte_storage_gtest.exe",
+                        "icon": "🧱"
                     },
                     {
                         "source": "lib/test_hashmap_helpers_gtest.cpp",
@@ -3907,6 +3932,20 @@
                             "rpmalloc"
                         ],
                         "icon": "🐑"
+                    },
+                    {
+                        "source": "test/test_binary_storage_gtest.cpp",
+                        "name": "Lambda Binary Storage Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "binary": "test_binary_storage_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "icon": "🧱"
                     },
                     {
                         "source": "test/test_lambda_errors_gtest.cpp",

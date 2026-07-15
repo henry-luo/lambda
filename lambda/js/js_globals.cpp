@@ -4444,11 +4444,14 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
     // ArrayBuffer: clone bytes, or clone as the transferred backing store.
     if (js_is_arraybuffer(value) && !js_is_sharedarraybuffer(value)) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(value);
-        if (!ab || ab->detached) return value;
-        Item clone = js_arraybuffer_new(ab->byte_length);
+        if (!ab || js_arraybuffer_detached(ab)) return value;
+        int byte_length = js_arraybuffer_length(ab);
+        Item clone = js_arraybuffer_new(byte_length);
         JsArrayBuffer* cab = js_get_arraybuffer_ptr_item(clone);
-        if (cab && ab->data && cab->data && ab->byte_length > 0) {
-            memcpy(cab->data, ab->data, (size_t)ab->byte_length);
+        const uint8_t* source = js_arraybuffer_data_const(ab);
+        uint8_t* destination = js_arraybuffer_prepare_write(cab);
+        if (source && destination && byte_length > 0) {
+            memcpy(destination, source, (size_t)byte_length);
         }
         return clone;
     }
@@ -4474,7 +4477,7 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         if (ta && src_data && byte_length > 0) {
             extern Item js_typed_array_new(int element_type, int length);
             Item clone = js_typed_array_new(ta->element_type, len);
-            void* dst_data = js_typed_array_current_data_ptr(clone);
+            void* dst_data = js_typed_array_prepare_write_ptr(clone);
             if (dst_data) memcpy(dst_data, src_data, (size_t)byte_length);
             return clone;
         }
@@ -12189,12 +12192,12 @@ extern "C" Item js_object_freeze(Item obj) {
     // indexed properties can't be redefined as {writable: false, configurable:
     // false} because the buffer can resize behind them. Applies even for
     // currently-zero-length TAs (the buffer could grow). Tracking buffer-
-    // backed TA detection via js_is_typed_array + ta->buffer->resizable.
+    // backed TA detection via js_is_typed_array + the buffer handle flags.
     extern bool js_is_typed_array(Item val);
     if (js_is_typed_array(obj)) {
         extern JsTypedArray* js_get_typed_array_ptr(Map* m);
         JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-        if (ta && ta->buffer && ta->buffer->resizable) {
+        if (ta && js_arraybuffer_resizable(ta->buffer)) {
             js_throw_type_error("Cannot freeze a TypedArray backed by a resizable ArrayBuffer");
             return obj;
         }
@@ -18637,27 +18640,26 @@ static bool js_web_stream_item_is_true(Item item) {
 static bool js_readable_stream_view_is_detached(Item view) {
     if (!js_is_typed_array(view)) return true;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    return !ta || !ta->buffer || ta->buffer->detached ||
+    return !ta || !ta->buffer || js_arraybuffer_detached(ta->buffer) ||
            js_typed_array_is_out_of_bounds_item(view);
 }
 
 static void js_readable_stream_detach_byob_view(Item view) {
     if (!js_is_typed_array(view)) return;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    if (!ta || !ta->buffer || ta->buffer->detached) return;
+    if (!ta || !ta->buffer || js_arraybuffer_detached(ta->buffer)) return;
     if (ta->buffer_item) {
         js_arraybuffer_detach((Item){.item = ta->buffer_item});
     } else {
-        ta->buffer->detached = true;
-        ta->buffer->byte_length = 0;
+        byte_buffer_detach(&ta->buffer->handle);
     }
 }
 
 static int js_readable_stream_view_buffer_length(Item view) {
     if (!js_is_typed_array(view)) return -1;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    if (!ta || !ta->buffer || ta->buffer->detached) return -1;
-    return ta->buffer->byte_length;
+    if (!ta || !ta->buffer || js_arraybuffer_detached(ta->buffer)) return -1;
+    return js_arraybuffer_length(ta->buffer);
 }
 
 static Item js_readable_stream_byob_respond_with_new_view(Item env_item, Item view) {

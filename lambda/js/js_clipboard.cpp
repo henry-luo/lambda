@@ -129,11 +129,11 @@ static bool blob_part_has_shared_backing(Item part) {
     }
     if (js_is_typed_array(part)) {
         JsTypedArray* ta = js_get_typed_array_ptr(part.map);
-        if (ta && ta->buffer && ta->buffer->is_shared) return true;
+        if (ta && js_arraybuffer_shared(ta->buffer)) return true;
     }
     if (js_is_dataview(part)) {
         JsDataView* dv = js_get_dataview_ptr(part);
-        if (dv && dv->buffer && dv->buffer->is_shared) return true;
+        if (dv && js_arraybuffer_shared(dv->buffer)) return true;
     }
     return false;
 }
@@ -151,8 +151,9 @@ static bool blob_append_part(StrBuf* sb, Item part) {
         // otherwise WebIDL callers can observe shared memory or crash on view metadata.
         if (blob_part_has_shared_backing(part)) return blob_reject_shared_buffer_part(part);
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(part);
-        if (ab && ab->data && ab->byte_length > 0 && !ab->detached) {
-            strbuf_append_str_n(sb, (const char*)ab->data, (size_t)ab->byte_length);
+        const uint8_t* data = js_arraybuffer_data_const(ab);
+        if (ab && data && js_arraybuffer_length(ab) > 0 && !js_arraybuffer_detached(ab)) {
+            strbuf_append_str_n(sb, (const char*)data, (size_t)js_arraybuffer_length(ab));
         }
         return true;
     }
@@ -168,10 +169,11 @@ static bool blob_append_part(StrBuf* sb, Item part) {
     if (js_is_dataview(part)) {
         if (blob_part_has_shared_backing(part)) return blob_reject_shared_buffer_part(part);
         JsDataView* dv = js_get_dataview_ptr(part);
-        if (dv && dv->buffer && dv->buffer->data && dv->byte_length > 0 &&
-            !dv->buffer->detached) {
+        const uint8_t* data = dv ? js_arraybuffer_data_const(dv->buffer) : NULL;
+        if (dv && data && dv->byte_length > 0 &&
+            !js_arraybuffer_detached(dv->buffer)) {
             strbuf_append_str_n(sb,
-                (const char*)dv->buffer->data + dv->byte_offset,
+                (const char*)data + dv->byte_offset,
                 (size_t)dv->byte_length);
         }
         return true;
@@ -257,7 +259,8 @@ extern "C" Item js_blob_array_buffer(void) {
     Item buf = js_arraybuffer_new((int)n);
     if (t && n > 0 && get_type_id(buf) == LMD_TYPE_MAP) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(buf);
-        if (ab && ab->data) memcpy(ab->data, t, n);
+        uint8_t* data = js_arraybuffer_prepare_write(ab);
+        if (data) memcpy(data, t, n);
     }
     return js_promise_resolve(buf);
 }

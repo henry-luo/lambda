@@ -1319,6 +1319,8 @@ JitImport jit_runtime_imports[] = {
 #endif
     {"it2b", FPTR(it2b)},
     {"it2s", FPTR(it2s)},
+    // Binary owns a distinct descriptor, so generated code must not resolve its unbox through it2s.
+    {"it2x", FPTR(it2x)},
     {"fn_to_cstr", FPTR(fn_to_cstr)},
     {"coerce_num_sized", FPTR(coerce_num_sized)},
     {"coerce_uint64", FPTR(coerce_uint64)},
@@ -1922,6 +1924,7 @@ JitImport jit_runtime_imports[] = {
     {"js_is_typed_array", FPTR(js_is_typed_array)},
     {"js_get_typed_array_ptr", FPTR(js_get_typed_array_ptr)},
     {"js_typed_array_current_data_ptr", FPTR(js_typed_array_current_data_ptr)},
+    {"js_typed_array_prepare_write_ptr", FPTR(js_typed_array_prepare_write_ptr)},
     {"js_typed_array_construct", FPTR(js_typed_array_construct)},
     {"js_arraybuffer_construct_resizable", FPTR(js_arraybuffer_construct_resizable)},
     {"js_arraybuffer_is_view", FPTR(js_arraybuffer_is_view_item)},

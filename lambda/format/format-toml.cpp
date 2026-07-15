@@ -49,7 +49,7 @@ static void format_item_reader(TomlContext& ctx, ItemReader item, const char* pa
             (void)item;
             ctx_.emit("%Q", str);
         }
-        void binary_value(const ItemReader& item, String* bin) override {
+        void binary_value(const ItemReader& item, Binary* bin) override {
             (void)item;
             ctx_.write_char('"');
             format_binary_base64_string(ctx_.output(), bin);

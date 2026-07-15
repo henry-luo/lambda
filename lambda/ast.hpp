@@ -506,7 +506,7 @@ typedef struct Transpiler : Script {
 bool types_compatible(Type* arg_type, Type* param_type);
 
 void print_item(StrBuf *strbuf, Item item, int depth=0, const char* indent="  ");
-void format_binary_literal(StrBuf* strbuf, String* bin);
+void format_binary_literal(StrBuf* strbuf, Binary* bin);
 void print_root_item(StrBuf *strbuf, Item item, const char* indent="  ");
 // for C to access
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, const char* indent);

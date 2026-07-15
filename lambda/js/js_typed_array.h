@@ -15,6 +15,7 @@ extern "C" {
 #endif
 
 #include "../lambda.h"
+#include "../../lib/byte_storage.h"
 
 typedef enum JsTypedArrayType {
     JS_TYPED_INT8,
@@ -31,15 +32,36 @@ typedef enum JsTypedArrayType {
     JS_TYPED_FLOAT16,
 } JsTypedArrayType;
 
-// ArrayBuffer: raw byte storage
+// ArrayBuffer identity stays stable while its handle replaces storage on
+// resize, detach, transfer, and copy-on-write.
 typedef struct JsArrayBuffer {
-    void* data;         // heap-allocated byte buffer
-    int byte_length;    // total bytes
-    int max_byte_length; // max bytes for resizable buffers
-    bool detached;      // true after ArrayBuffer has been detached
-    bool is_shared;     // true for SharedArrayBuffer
-    bool resizable;     // true for ArrayBuffer(length, {maxByteLength})
+    ByteBufferHandle handle;
 } JsArrayBuffer;
+
+static inline const uint8_t* js_arraybuffer_data_const(const JsArrayBuffer* ab) {
+    return ab ? byte_buffer_data_const(&ab->handle) : NULL;
+}
+static inline uint8_t* js_arraybuffer_prepare_write(JsArrayBuffer* ab) {
+    return ab ? byte_buffer_prepare_write(&ab->handle) : NULL;
+}
+static inline int js_arraybuffer_length(const JsArrayBuffer* ab) {
+    return ab ? (int)ab->handle.byte_length : 0;
+}
+static inline int js_arraybuffer_max_length(const JsArrayBuffer* ab) {
+    return ab ? (int)ab->handle.max_byte_length : 0;
+}
+static inline uint64_t js_arraybuffer_generation(const JsArrayBuffer* ab) {
+    return ab ? ab->handle.generation : 0;
+}
+static inline bool js_arraybuffer_detached(const JsArrayBuffer* ab) {
+    return !ab || byte_buffer_is_detached(&ab->handle);
+}
+static inline bool js_arraybuffer_shared(const JsArrayBuffer* ab) {
+    return ab && byte_buffer_is_shared(&ab->handle);
+}
+static inline bool js_arraybuffer_resizable(const JsArrayBuffer* ab) {
+    return ab && byte_buffer_is_resizable(&ab->handle);
+}
 
 // DataView: structured access into an ArrayBuffer
 typedef struct JsDataView {
@@ -48,7 +70,7 @@ typedef struct JsDataView {
     int byte_length;         // view byte length (ignored when length_tracking)
     uint64_t buffer_item;    // original ArrayBuffer Item for identity-preserving .buffer access
     bool length_tracking;    // Js54 P2: true when constructed without explicit byteLength —
-                             // current byte_length re-derives from buffer->byte_length - byte_offset
+                             // current byte_length re-derives from the handle length - byte_offset
                              // on every access so resizable-buffer views see live length.
 } JsDataView;
 
@@ -80,7 +102,7 @@ extern char js_typed_array_marker;
 Item js_typed_array_new(int type_id, int length);
 Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length);
 Item js_typed_array_new_from_array(int type_id, Item source);
-Item js_typed_array_from_binary(String* bin);
+Item js_typed_array_from_binary(Binary* bin);
 Item binary_from_typed_array(JsTypedArray* ta);
 Item binary_from_dataview(JsDataView* dv);
 Item js_typed_array_get(Item ta, Item index);
@@ -94,6 +116,7 @@ Item js_typed_array_fill(Item ta, Item value, int start, int end);
 bool js_is_typed_array(Item val);
 JsTypedArray* js_get_typed_array_ptr(Map* m);
 void* js_typed_array_current_data_ptr(Item ta_item);
+void* js_typed_array_prepare_write_ptr(Item ta_item);
 Item js_typed_array_subarray(Item ta, int start, int end, bool end_is_default);
 Item js_typed_array_slice(Item ta, int start, int end);
 Item js_typed_array_set_from(Item ta, Item source, int offset);

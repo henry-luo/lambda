@@ -1,6 +1,6 @@
 # Lambda Binary Type — Enhancement Proposal
 
-> **Status:** Proposal — **Tier 1 core (decoded representation, element operations) + JS/Node copy bridge IMPLEMENTED 2026-07-15** via [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) (decisions B1–B8 and follow-up A1/A2). Tiers 2–4 remain proposal. Design decisions recorded 2026-07-15: **§9** streams alignment (WHATWG/Node), **§10** Uint8Array type-unification **rejected**, **§11** byte-storage substrate unification **accepted** (separate value types over shared storage), **§5.2** encode/decode selector API **settled** (namespaced `hex.encode` form rejected), **§4.2/§4.4** element-op semantics settled and implemented (`b[i]` → u8, out-of-bounds → `null`, `++` → byte concat).
+> **Status:** Proposal for Tiers 2–4; **Tier 1 core and §11 shared byte-storage substrate IMPLEMENTED 2026-07-15** via [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) and [Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md). Eligible Binary/Uint8Array/Uint8ClampedArray/Buffer/DataView conversions now retain shared storage with copy-on-write isolation; SharedArrayBuffer conversions remain explicit copies. Design decisions recorded 2026-07-15: **§9** streams alignment (WHATWG/Node), **§10** Uint8Array type-unification **rejected**, **§11** byte-storage substrate unification **implemented** (separate value types over shared storage), **§5.2** encode/decode selector API **settled** (namespaced `hex.encode` form rejected), **§4.2/§4.4** element-op semantics settled and implemented (`b[i]` → u8, out-of-bounds → `null`, `++` → byte concat).
 > **Scope:** Lambda Script `binary` primitive type — runtime representation, language surface, and stdlib roadmap.
 > **Related:**
 > - [Lambda_Data.md](../doc/Lambda_Data.md#binary-literals) — binary literal syntax
@@ -396,12 +396,12 @@ Each entry takes `binary → binary`; the streaming forms are exactly the PL6 tr
 
 ### 6.6 Cross‑runtime zero‑copy bridge
 
-> **Status 2026-07-15:** the **copy** bridge shipped ([Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) Phase 5, decision B8): `Buffer.from`/`Uint8Array`/`Uint8ClampedArray`/`DataView` interop with mutation isolation. Copying is *required* today, not provisional laziness — Lambda binary is immutable while `JsArrayBuffer.data` is mutable and manually freed on detach/transfer; aliasing would let JS mutate or dangle a Lambda value. The zero-copy end-state below is the PL5 flat-buffer work, where detach becomes drop-ref and sharing becomes sound. **Note the type stays distinct — see §10; only the buffer unifies.**
+> **Status 2026-07-15:** the original safe copy bridge shipped in [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md); [Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md) has now replaced eligible copies with retained `ByteStorage` spans. `Buffer.from(Binary)`, `Uint8Array` construction, and `binary(Uint8Array/Uint8ClampedArray/Buffer/DataView)` share non-shared storage until the first JS write, when the stable ArrayBuffer handle COWs. SharedArrayBuffer remains a mandatory snapshot copy. **The value types stay distinct — see §10; only storage ownership is shared.**
 
 Make Lambda `binary` share the **same physical buffer** as JS `Uint8Array` and (future) Python `bytes`/`bytearray`. Lambda's [Jube runtime](../doc/Lambda_Jube_Runtime.md) is the right place to define the contract:
 
 - A shared refcounted buffer ABI — this is exactly PL5's refcounted immutable flat buffer ([Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) §4); the `BufferDescriptor { ptr; len; owner; refcount; readonly }` sketched here and PL5 are one design, and the `ArrayNum` external-view machinery (`is_view`/`is_pinned`/`ArrayNumShape`, already GC-aware and already backing every JS typed array) is the implementation template.
-- `js.Uint8Array` constructed from a Lambda `binary` shares storage (read-only pages or COW).
+- `js.Uint8Array`/Node `Buffer` constructed from a storage-backed Lambda `binary` share storage with COW; inline constants perform one promotion copy.
 - Python `bytes` (when implemented) likewise.
 - Eliminates the marshal cost that currently makes binary‑heavy cross‑language workflows untenable.
 
@@ -515,7 +515,7 @@ The `binary` type is the **chunk currency** of Lambda's binary pipelines: a bina
 
 ## 11. Accepted design: shared byte-storage substrate, separate value types
 
-*(Accepted 2026-07-15. Detailed implementation plan:
+*(Accepted and implemented 2026-07-15. As-built implementation record:
 [Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md). This section supersedes the
 older parent-`Binary*` sub-view sketch in §6.1 and makes the PL5 convergence
 contract precise.)*
@@ -547,11 +547,11 @@ identity. Phase 6 extends that principle downward to storage ownership.
 
 | Value/view | Current byte ownership | Current view/lifetime rule | Target |
 |---|---|---|---|
-| Lambda `binary` | bytes inline in a String-shaped GC object | slices copy | immutable span over shared storage; small-inline optimization permitted |
-| Owned `ArrayNum` | separate GC data-zone allocation | movable unless pinned | retain current fast path initially; large/shareable storage may use the common substrate |
-| `ArrayNum` view | raw data pointer + `ArrayNumShape.base` | GC marks base; owner is permanently pinned once viewed | descriptor resolves through a stable storage owner/handle; no dangling raw alias |
-| `JsArrayBuffer` | mutable `mem_alloc` allocation | manually freed on detach/finalize; resize replaces allocation | mutable handle over refcounted storage |
-| JS typed array / Buffer | `ArrayNum` external view over ArrayBuffer bytes | wrapper refreshes raw pointer after detach/resize | same `ArrayNum` operation layer, backed by the stable handle/storage generation |
+| Lambda `binary` | dedicated `Binary` header; runtime values retain `ByteStorage`, compiler/pool constants stay inline | storage-backed slices flatten to `(storage, offset, length)` | implemented |
+| Owned `ArrayNum` | separate GC data-zone allocation | movable unless pinned | retained as the measured fast path; no speculative wholesale migration |
+| `ArrayNum` view | explicitly tagged `ArrayNumShape` backing descriptor | GC views pin; handle views refresh; storage views retain | implemented; no ownership inference from `base` |
+| `JsArrayBuffer` | embedded stable `ByteBufferHandle` over retained `ByteStorage` | resize/detach/transfer/COW advance generation and release exactly once | implemented |
+| JS typed array / Buffer | generation-aware ArrayNum view over the buffer handle | reads resolve current storage; every non-shared writer prepares COW | implemented |
 
 `ArrayNumShape` is the template for offsets, shapes, strides, base liveness, and
 mutable/read-only views. It is **not** itself the common storage object:
@@ -612,7 +612,7 @@ The separation is load-bearing:
 
 ### 11.4 Binary representation and slicing
 
-A binary becomes either a small inline value or a direct span over storage:
+A binary is either an owner-lifetime inline constant or a direct span over storage:
 
 ```c
 typedef struct Binary {
@@ -631,11 +631,13 @@ directly. A storage-backed slice retains the same `ByteStorage` and adjusts
 `offset`/`len`, so nested slices always point directly to root storage rather
 than forming parent chains.
 
-Small binaries may remain inline (the PL5/BEAM precedent suggests an initial
-64-byte threshold, to be confirmed by measurement). Crossing an inline value
-into a shareable runtime may perform one promotion copy; storage-backed values
-then remain zero-copy. The threshold is an allocation optimization, never a
-semantic distinction.
+Compiler/pool-owned constants remain inline because their owner has no
+per-object external-payload finalizer. Runtime-created non-empty binaries use
+storage uniformly; crossing an inline constant into a shareable runtime
+performs the one documented promotion copy. Release measurements did not show
+a binary-heavy bottleneck that justified growing every header or introducing a
+size threshold, so no additional small-inline policy is enabled. This remains
+an allocation-policy decision, never a semantic distinction.
 
 Retaining a tiny slice can retain a giant allocation. `binary.copy(value)` is
 the explicit detachment operation; a later heuristic may copy automatically
@@ -692,11 +694,13 @@ Convergence proceeds in two levels:
    and eliminating permanent pinning for those arrays. Small/local arrays may
    retain the current GC data-zone fast path.
 
-The second level is not required to ship binary zero-copy interop. Forcing
-every small numeric array through atomic refcounting would add header,
-allocation, and retain/release costs without evidence that it helps. The
-storage API must support ArrayNum, but allocation policy remains type- and
-size-aware.
+The second level is not required to ship binary zero-copy interop. The 2026-07-15
+release measurements covered the Binary/JS COW matrix and representative N-D
+image/linalg workloads; no GC/pinning or cross-runtime copy bottleneck was
+demonstrated. Therefore owned ArrayNums retain the GC data-zone fast path and
+no large-array threshold is introduced. FFI/mmap/cross-isolate users can use
+the explicit retained-storage view today without imposing atomic-refcount cost
+on every local numeric array.
 
 `ArrayNumShape` continues to own element-space geometry: element offset,
 dimensions, and strides. The common substrate uses byte offsets and byte

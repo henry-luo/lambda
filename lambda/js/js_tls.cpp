@@ -287,11 +287,12 @@ static bool tls_item_to_cert_string(Item value, Item* out) {
     }
     if (js_is_dataview(value)) {
         JsDataView* dv = js_get_dataview_ptr(value);
-        if (!dv || !dv->buffer || dv->buffer->detached) return false;
-        if (dv->buffer->byte_length < dv->byte_offset) return false;
-        int len = dv->length_tracking ? dv->buffer->byte_length - dv->byte_offset : dv->byte_length;
-        if (len < 0 || dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)len) return false;
-        const char* data = (const char*)dv->buffer->data + dv->byte_offset;
+        if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return false;
+        int buffer_length = js_arraybuffer_length(dv->buffer);
+        if (buffer_length < dv->byte_offset) return false;
+        int len = dv->length_tracking ? buffer_length - dv->byte_offset : dv->byte_length;
+        if (len < 0 || buffer_length < (int64_t)dv->byte_offset + (int64_t)len) return false;
+        const char* data = (const char*)js_arraybuffer_data_const(dv->buffer) + dv->byte_offset;
         *out = make_string_item(data, len);
         return true;
     }

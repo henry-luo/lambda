@@ -10625,8 +10625,8 @@ MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr_reg,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 
         // Js54 P3: ask the runtime for the live data pointer. For TAs over an
-        // ArrayBuffer the data lives at ab->data + byte_offset, and ab->data
-        // can be replaced by ArrayBuffer.prototype.resize() reallocating —
+        // ArrayBuffer data resolves from its stable handle plus byte_offset
+        // because ArrayBuffer.prototype.resize() can replace the storage —
         // cached descriptor data would point at the freed/stale backing store.
         // The helper returns NULL for OOB / detached, which the bounds check
         // below treats like idx-out-of-range.
@@ -10884,9 +10884,9 @@ MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr_reg,
         ta_len = jm_call_1(mt, "js_typed_array_length", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 
-        // Js54 P3: live data pointer (handles resize realloc + detached/OOB →
-        // NULL). Treating NULL as OOB short-circuits the write to a no-op.
-        data_ptr = jm_call_1(mt, "js_typed_array_current_data_ptr", MIR_T_I64,
+        // Mutable access must prepare the stable handle before exposing bytes;
+        // this refreshes generation state and performs COW when storage is shared.
+        data_ptr = jm_call_1(mt, "js_typed_array_prepare_write_ptr", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
     }
 
