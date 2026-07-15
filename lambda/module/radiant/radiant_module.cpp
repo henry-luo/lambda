@@ -814,7 +814,6 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         // Script-document layout runs after its stack-local Runner is gone;
         // every Velmt and callback allocation must use the retained runtime.
         callback_context.heap = runtime->heap;
-        callback_context.nursery = runtime->nursery;
         callback_context.name_pool = runtime->name_pool;
         callback_context.pool = runtime->reuse_pool
             ? runtime->reuse_pool : runtime->heap->pool;

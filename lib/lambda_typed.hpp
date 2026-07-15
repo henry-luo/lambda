@@ -15,7 +15,7 @@ template<> struct ItemTagToType<LMD_TYPE_NULL> { typedef void type; enum { is_po
 template<> struct ItemTagToType<LMD_TYPE_BOOL> { typedef bool type; enum { is_pointer = false, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_NUM_SIZED> { typedef Item type; enum { is_pointer = false, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_INT> { typedef int64_t type; enum { is_pointer = false, is_direct_pointer = false }; };
-template<> struct ItemTagToType<LMD_TYPE_INT64> { typedef int64_t type; enum { is_pointer = true, is_direct_pointer = false }; };
+template<> struct ItemTagToType<LMD_TYPE_INT64> { typedef int64_t type; enum { is_pointer = false, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_UINT64> { typedef uint64_t type; enum { is_pointer = true, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_FLOAT> { typedef double type; enum { is_pointer = true, is_direct_pointer = false }; };
 template<> struct ItemTagToType<LMD_TYPE_DECIMAL> { typedef Decimal type; enum { is_pointer = true, is_direct_pointer = false }; };
@@ -98,6 +98,8 @@ public:
             return raw_.bool_val != 0;
         } else if constexpr (Tag == LMD_TYPE_INT) {
             return raw_.get_int56();
+        } else if constexpr (Tag == LMD_TYPE_INT64) {
+            return raw_.get_int64();
         } else if constexpr (Tag == LMD_TYPE_FLOAT) {
             return raw_.get_double();
         } else if constexpr (Tag == LMD_TYPE_NUM_SIZED) {

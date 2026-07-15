@@ -208,7 +208,9 @@ static void task_handle_destroy(void* data) {
 static void async_frame_reset_from(LambdaAsyncFrame* frame) {
     while (frame) {
         frame->state = 0;
-        for (int i = 0; i < frame->slot_count; i++) frame->slots[i] = ItemNull;
+        for (int i = 0; i < frame->slot_count; i++) {
+            owned_item_slot_store(frame->slots, frame->slot_capacity, i, ItemNull);
+        }
         frame = frame->next;
     }
 }
@@ -971,7 +973,31 @@ extern "C" bool lambda_task_take_resume_value(LambdaTask* task, Item* out) {
     return true;
 }
 
-extern "C" LambdaAsyncFrame* lambda_async_frame_enter_current(void) {
+static bool async_frame_reserve(LambdaAsyncFrame* frame, int slot_capacity) {
+    if (!frame || slot_capacity <= frame->slot_capacity) return frame != NULL;
+    Item* resized = (Item*)mem_calloc((size_t)slot_capacity * 2,
+        sizeof(Item), MEM_CAT_EVAL);
+    if (!resized) return false;
+    for (int i = 0; i < frame->slot_count; i++) {
+        owned_item_slot_store(resized, slot_capacity, i, frame->slots[i]);
+        // Raw MIR spills occupy the unscanned tail. Preserve them separately;
+        // the Item half can be zero for a raw-only slot.
+        resized[slot_capacity + i].item =
+            frame->slots[frame->slot_capacity + i].item;
+    }
+    if (frame->slots && scheduler_has_heap()) {
+        heap_unregister_gc_root_range((uint64_t*)frame->slots);
+    }
+    mem_free(frame->slots);
+    frame->slots = resized;
+    frame->slot_capacity = slot_capacity;
+    if (scheduler_has_heap()) {
+        heap_register_gc_root_range((uint64_t*)frame->slots, frame->slot_capacity);
+    }
+    return true;
+}
+
+extern "C" LambdaAsyncFrame* lambda_async_frame_enter_current(int slot_capacity) {
     LambdaTask* task = context && context->scheduler
         ? lambda_scheduler_current(context->scheduler) : NULL;
     if (!task) return NULL;
@@ -989,6 +1015,7 @@ extern "C" LambdaAsyncFrame* lambda_async_frame_enter_current(void) {
             tail->next = frame;
         }
     }
+    if (slot_capacity > 0 && !async_frame_reserve(frame, slot_capacity)) return NULL;
     task->async_cursor = frame->next;
     return frame;
 }
@@ -1003,7 +1030,7 @@ extern "C" void lambda_async_frame_set_state(LambdaAsyncFrame* frame, int state)
 
 extern "C" Item lambda_async_frame_get(LambdaAsyncFrame* frame, int slot) {
     if (!frame || slot < 0 || slot >= frame->slot_count) return ItemNull;
-    return frame->slots[slot];
+    return owned_item_slot_read(frame->slots, frame->slot_capacity, slot, false);
 }
 
 extern "C" void lambda_async_frame_set(LambdaAsyncFrame* frame, int slot, Item value) {
@@ -1011,25 +1038,31 @@ extern "C" void lambda_async_frame_set(LambdaAsyncFrame* frame, int slot, Item v
     if (slot >= frame->slot_capacity) {
         int next_capacity = frame->slot_capacity > 0 ? frame->slot_capacity : 8;
         while (next_capacity <= slot) next_capacity *= 2;
-        if (frame->slots && scheduler_has_heap()) {
-            heap_unregister_gc_root_range((uint64_t*)frame->slots);
-        }
-        Item* resized = (Item*)mem_realloc(frame->slots,
-            sizeof(Item) * (size_t)next_capacity, MEM_CAT_EVAL);
-        if (!resized) {
-            if (frame->slots && scheduler_has_heap()) {
-                heap_register_gc_root_range((uint64_t*)frame->slots, frame->slot_capacity);
-            }
-            return;
-        }
-        for (int i = frame->slot_capacity; i < next_capacity; i++) resized[i] = ItemNull;
-        frame->slots = resized;
-        frame->slot_capacity = next_capacity;
-        if (scheduler_has_heap()) {
-            heap_register_gc_root_range((uint64_t*)frame->slots, frame->slot_capacity);
-        }
+        // This fallback covers hand-written host use; generated functions reserve
+        // their exact compile-time slot count in the prologue.
+        if (!async_frame_reserve(frame, next_capacity)) return;
     }
-    frame->slots[slot] = value;
+    owned_item_slot_store(frame->slots, frame->slot_capacity, slot, value);
+    if (slot >= frame->slot_count) frame->slot_count = slot + 1;
+}
+
+extern "C" uint64_t lambda_async_frame_get_raw(LambdaAsyncFrame* frame, int slot) {
+    if (!frame || slot < 0 || slot >= frame->slot_count) return 0;
+    return frame->slots[frame->slot_capacity + slot].item;
+}
+
+extern "C" void lambda_async_frame_set_raw(LambdaAsyncFrame* frame, int slot,
+                                             uint64_t value) {
+    if (!frame || slot < 0) return;
+    if (slot >= frame->slot_capacity) {
+        int next_capacity = frame->slot_capacity > 0 ? frame->slot_capacity : 8;
+        while (next_capacity <= slot) next_capacity *= 2;
+        if (!async_frame_reserve(frame, next_capacity)) return;
+    }
+    // MIR I64 temporaries are arbitrary bit patterns. Keep them in the raw
+    // tail so the precise root range never interprets payload bits as Items.
+    frame->slots[slot] = ItemNull;
+    frame->slots[frame->slot_capacity + slot].item = value;
     if (slot >= frame->slot_count) frame->slot_count = slot + 1;
 }
 

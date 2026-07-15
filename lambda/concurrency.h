@@ -79,11 +79,13 @@ bool lambda_task_on_complete(LambdaTask* task, LambdaTaskCompletionFn callback,
 void lambda_concurrency_set_promise_bridge(LambdaPromiseIsFn is_promise,
     LambdaPromiseWaitFn wait_promise, LambdaHandleToPromiseFn handle_to_promise);
 
-LambdaAsyncFrame* lambda_async_frame_enter_current(void);
+LambdaAsyncFrame* lambda_async_frame_enter_current(int slot_capacity);
 int lambda_async_frame_state(LambdaAsyncFrame* frame);
 void lambda_async_frame_set_state(LambdaAsyncFrame* frame, int state);
 Item lambda_async_frame_get(LambdaAsyncFrame* frame, int slot);
 void lambda_async_frame_set(LambdaAsyncFrame* frame, int slot, Item value);
+uint64_t lambda_async_frame_get_raw(LambdaAsyncFrame* frame, int slot);
+void lambda_async_frame_set_raw(LambdaAsyncFrame* frame, int slot, uint64_t value);
 void lambda_async_frame_complete(LambdaAsyncFrame* frame);
 LambdaTaskScope* lambda_async_frame_scope_base(LambdaAsyncFrame* frame);
 int lambda_task_has_current(void);

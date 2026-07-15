@@ -14,6 +14,7 @@
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "lambda-stack.h"
+#include "../lib/side_stack.h"
 #include "concurrency.h"
 #include "module_registry.h"
 #include "jube/jube_registry.h"
@@ -1405,6 +1406,9 @@ void runner_setup_context(Runner* runner) {
 
     // Store stack_limit in context for fast access from JIT-compiled code
     runner->context.stack_limit = _lambda_stack_limit;
+    if (!lambda_side_stack_bind(&runner->context)) {
+        log_error("runner side-stack: failed to initialize execution regions");
+    }
 
     runner->context.pool = runner->script->pool;
     runner->context.type_list = runner->script->type_list;
@@ -1434,19 +1438,17 @@ void runner_setup_context(Runner* runner) {
         context->arena = ui_rt->result_arena;
     }
 
-    // Reuse or create the GC heap, nursery, and name_pool from the Runtime.
+    // Reuse or create the GC heap and name_pool from the Runtime.
     // These persist across multiple evaluations on the same Runtime.
     Runtime* rt = runner->runtime;
     if (rt && rt->heap) {
-        // Reuse retained heap, nursery, name_pool from a previous evaluation
+        // Reuse retained heap and name_pool from a previous evaluation
         log_debug("runner_setup_context: reusing retained heap from Runtime");
         context->heap = rt->heap;
-        context->nursery = rt->nursery;
         context->name_pool = rt->name_pool;
         context->pool = context->heap->pool;
     } else {
         // First evaluation on this Runtime — create fresh resources
-        context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "eval.nursery");
         context->name_pool = name_pool_create(context->pool, nullptr);
         if (!context->name_pool) {
             log_error("Failed to create runtime name_pool");
@@ -1456,7 +1458,6 @@ void runner_setup_context(Runner* runner) {
         // Store on Runtime for reuse
         if (rt) {
             rt->heap = context->heap;
-            rt->nursery = context->nursery;
             rt->name_pool = context->name_pool;
         }
     }
@@ -1539,6 +1540,8 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     // If a stack overflow occurs during execution, the signal handler will
     // siglongjmp back here. No per-call overhead — detection is OS-level.
     Item result;
+    LambdaSideStackSnapshot side_stack_snapshot =
+        lambda_side_stack_snapshot(context);
 #if defined(__APPLE__) || defined(__linux__)
     if (sigsetjmp(_lambda_recovery_point, 1)) {
 #elif defined(_WIN32)
@@ -1550,6 +1553,8 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         _lambda_recovery_armed = 0;   // recovery consumed; disarm
         log_error("exec: recovered from stack overflow via signal handler");
         _lambda_stack_overflow_flag = false;
+        // longjmp bypasses generated epilogues, so recover both watermarks.
+        lambda_side_stack_restore(context, side_stack_snapshot);
         lambda_stack_overflow_error("<signal>");
         result = context->result = ItemError;
     } else {
@@ -1729,16 +1734,15 @@ void runtime_log_mir_cache_summary(Runtime* runtime) {
     (void)hit_rate;
 }
 
-// Reset the retained heap, nursery, and name_pool on a Runtime.
+// Reset the retained heap and name_pool on a Runtime.
 // Used between independent evaluations (e.g. test-batch) so that each
 // script starts with a clean GC heap.  The next runner_setup_context()
-// call will create fresh heap/nursery/name_pool and store them back.
+// call will create fresh heap/name_pool state and store it back.
 void runtime_reset_heap(Runtime* runtime) {
     if (runtime->heap) {
         EvalContext tmp_ctx;
         memset(&tmp_ctx, 0, sizeof(tmp_ctx));
         tmp_ctx.heap = runtime->heap;
-        tmp_ctx.nursery = runtime->nursery;
         tmp_ctx.result = ItemNull;
         tmp_ctx.scheduler = runtime->scheduler;
         context = &tmp_ctx;
@@ -1777,9 +1781,7 @@ void runtime_reset_heap(Runtime* runtime) {
         }
 
         heap_destroy();
-        if (runtime->nursery) gc_nursery_destroy(runtime->nursery);
         runtime->heap = NULL;
-        runtime->nursery = NULL;
         context = NULL;
     }
     if (runtime->js_bootstrap_context) {
@@ -1800,14 +1802,13 @@ void runtime_cleanup(Runtime* runtime) {
 
     bool event_loop_cleaned = false;
 
-    // Destroy retained execution state (heap, nursery, name_pool)
+    // Destroy retained execution state (heap and name_pool)
     if (runtime->heap) {
         // Set the thread-local context so heap_destroy can access context->heap
         // (heap_destroy uses the context global)
         EvalContext tmp_ctx;
         memset(&tmp_ctx, 0, sizeof(tmp_ctx));
         tmp_ctx.heap = runtime->heap;
-        tmp_ctx.nursery = runtime->nursery;
         tmp_ctx.result = ItemNull;
         context = &tmp_ctx;
 
@@ -1847,9 +1848,7 @@ void runtime_cleanup(Runtime* runtime) {
         }
 
         heap_destroy();
-        if (runtime->nursery) gc_nursery_destroy(runtime->nursery);
         runtime->heap = NULL;
-        runtime->nursery = NULL;
         context = NULL;
     } else {
         js_dom_shutdown();

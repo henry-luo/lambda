@@ -562,7 +562,8 @@ void expand_list(List *list, Arena* arena = nullptr) {
         for (int i = 0; i < list->length; i++) {
             Item itm = list->items[i];
             if (((itm._type_id == LMD_TYPE_FLOAT && itm.double_ptr > 1) || itm._type_id == LMD_TYPE_FLOAT64) ||
-                    itm._type_id == LMD_TYPE_INT64 || itm._type_id == LMD_TYPE_DTIME) {
+                    (itm._type_id == LMD_TYPE_INT64 && !itm.is_inline_int64()) ||
+                    itm._type_id == LMD_TYPE_DTIME) {
                 Item* old_pointer = (Item*)itm.double_ptr;
                 // Only update pointers that are in the old list buffer's extra space
                 if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
@@ -582,6 +583,7 @@ Array* array_pooled(Pool *pool) {
     if (arr == NULL) return NULL;
     memset(arr, 0, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
+    arr->is_immortal = 1;
     return arr;
 }
 
@@ -591,6 +593,7 @@ Array* array_arena(Arena* arena) {
     if (arr == NULL) return NULL;
     memset(arr, 0, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
+    arr->is_immortal = 1;
     return arr;
 }
 
@@ -599,6 +602,7 @@ List* list_arena(Arena* arena) {
     if (list == NULL) return NULL;
     memset(list, 0, sizeof(List));
     list->type_id = LMD_TYPE_ARRAY;
+    list->is_immortal = 1;
     return list;
 }
 
@@ -619,6 +623,7 @@ void array_set(Array* arr, int64_t index, Item itm) {
         break;
     }
     case LMD_TYPE_INT64: {
+        if (itm.is_inline_int64()) break;
         int64_t* ival = (int64_t*)(arr->items + (arr->capacity - arr->extra - 1));
         *ival = itm.get_int64();  arr->items[index] = {.item = l2it(ival)};
         arr->extra++;
@@ -642,11 +647,81 @@ void array_set(Array* arr, int64_t index, Item itm) {
     }
 }
 
+void array_copy_owned_items(Array* destination, int64_t destination_index,
+                            const Item* source, int64_t count) {
+    if (!destination || !source || count <= 0) return;
+    // Scalar tail pointers belong to their source container. Route every copy
+    // through array_set so the destination owns and rebases wide payloads.
+    for (int64_t i = 0; i < count; i++) {
+        array_set(destination, destination_index + i, source[i]);
+    }
+}
+
+void owned_item_slot_store(Item* storage, int64_t item_count,
+                           int64_t index, Item item) {
+    if (!storage || item_count <= 0 || index < 0 || index >= item_count) return;
+    storage[index] = item;
+    Item* payload = &storage[item_count + index];
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64:
+        if (!item.is_inline_int64()) {
+            *(int64_t*)payload = item.get_int64();
+            storage[index] = {.item = l2it(payload)};
+        }
+        break;
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
+        if (!(item.item & ITEM_DBL_MASK) && item.item != ITEM_FLOAT_P0 &&
+                item.item != ITEM_FLOAT_N0) {
+            *(double*)payload = item.get_double();
+            storage[index] = lambda_float_ptr_to_item((double*)payload);
+        }
+        break;
+    case LMD_TYPE_DTIME:
+        *(DateTime*)payload = item.get_datetime();
+        storage[index] = {.item = k2it(payload)};
+        break;
+    default:
+        break;
+    }
+}
+
+Item owned_item_slot_read(Item* storage, int64_t item_count,
+                          int64_t index, bool immortal) {
+    if (!storage || item_count <= 0 || index < 0 || index >= item_count) return ItemNull;
+    return scalar_storage_read(storage[index], immortal);
+}
+
+Item scalar_storage_read(Item item, bool immortal) {
+    if (immortal) return item;
+#ifdef LAMBDA_STATIC
+    // The standalone input library has no execution side stack; all of its
+    // container storage is owned by the live input pool, so the reference is
+    // already stable for the reader's lifetime.
+    return item;
+#else
+    // Owned storage may move or die independently of the reader. Re-home its
+    // interior scalar references in the current number frame before escape.
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64:
+        return item.is_inline_int64() ? item : box_int64_value(item.get_int64());
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
+        return push_d(item.get_double());
+    case LMD_TYPE_DTIME:
+        return push_k(item.get_datetime());
+    default:
+        return item;
+    }
+#endif
+}
+
 void array_append(Array* arr, Item itm, Pool *pool, Arena* arena) {
     if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr, arena); }
-    // no need to call array_set() as the item data is pooled
-    // array_set(arr, arr->length, itm, pool);
-    arr->items[arr->length] = itm;
+    (void)pool;
+    // Even arena-backed builders can receive a runtime-boxed scalar. Rebase it
+    // into this array so no container Item ever owns another frame's payload.
+    array_set(arr, arr->length, itm);
     arr->length++;
 }
 
@@ -866,6 +941,7 @@ void list_push(List *list, Item item) {
         break;
     }
     case LMD_TYPE_INT64: {
+        if (item.is_inline_int64()) break;
         int64_t* ival = (int64_t*)(list->items + (list->capacity - list->extra - 1));
         *ival = item.get_int64();  list->items[list->length-1] = {.item = l2it(ival)};
         list->extra++;
@@ -1161,6 +1237,7 @@ extern TypeMap EmptyMap;
 Map* map_pooled(Pool *pool) {
     Map *map = (Map *)pool_calloc(pool, sizeof(Map));
     map->type_id = LMD_TYPE_MAP;
+    map->is_immortal = 1;
     map->type = &EmptyMap;
     return map;
 }
@@ -1171,6 +1248,7 @@ Map* map_arena(Arena* arena) {
     if (map == NULL) return NULL;
     memset(map, 0, sizeof(Map));
     map->type_id = LMD_TYPE_MAP;
+    map->is_immortal = 1;
     map->type = &EmptyMap;
     return map;
 }
@@ -1389,6 +1467,7 @@ bool Map::has_field(const char* field_name) const {
 Element* elmt_pooled(Pool *pool) {
     Element *elmt = (Element *)pool_calloc(pool, sizeof(Element));
     elmt->type_id = LMD_TYPE_ELEMENT;
+    elmt->is_immortal = 1;
     elmt->type = &EmptyElmt;
     return elmt;
 }
@@ -1399,6 +1478,7 @@ Element* elmt_arena(Arena* arena) {
     if (elmt == NULL) return NULL;
     memset(elmt, 0, sizeof(Element));
     elmt->type_id = LMD_TYPE_ELEMENT;
+    elmt->is_immortal = 1;
     elmt->type = &EmptyElmt;
     return elmt;
 }

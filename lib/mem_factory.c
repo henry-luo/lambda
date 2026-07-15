@@ -15,7 +15,6 @@ static void ensure_release_hooks(void) {
         pool_set_node_release_hook(release_node);
         arena_set_node_release_hook(release_node);
         scratch_set_node_release_hook(release_node);
-        gc_nursery_set_node_release_hook(release_node);
         installed = true;
     }
 }
@@ -137,29 +136,4 @@ void mem_scratch_init(MemContext* ctx, ScratchArena* sa, Arena* backing,
                               MEM_KIND_SCRATCH, role, label, sa, parent,
                               scratch_stat_fn, NULL);
     sa->mem_node = n;
-}
-
-// ============================================================================
-// GC nursery factory
-// ============================================================================
-
-static bool nursery_stat_fn(void* a, MemStatSample* s) {
-    size_t elems = gc_nursery_total_allocated((gc_nursery_t*)a);
-    uint64_t bytes = (uint64_t)elems * sizeof(gc_num_value_t);
-    s->bytes_reserved = bytes;
-    s->bytes_in_use = bytes;
-    s->alloc_count = (uint64_t)elems;
-    return true;
-}
-
-gc_nursery_t* mem_nursery_create(MemContext* ctx, size_t block_size,
-                                 MemRole role, const char* label) {
-    ensure_release_hooks();
-    gc_nursery_t* n = gc_nursery_create(block_size);
-    if (!n) return NULL;
-    MemNode* node = mem_register(ctx ? ctx : mem_context_root(),
-                                 MEM_KIND_NURSERY, role, label, n, NULL,
-                                 nursery_stat_fn, NULL);
-    n->mem_node = node;
-    return n;
 }

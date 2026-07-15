@@ -699,7 +699,6 @@ const char* mem_kind_name(MemKind k) {
         case MEM_KIND_ARENA:     return "arena";
         case MEM_KIND_SCRATCH:   return "scratch";
         case MEM_KIND_HEAP:      return "heap";
-        case MEM_KIND_NURSERY:   return "nursery";
         case MEM_KIND_NAMEPOOL:  return "namepool";
         case MEM_KIND_SHAPEPOOL: return "shapepool";
         case MEM_KIND_JIT:       return "jit";

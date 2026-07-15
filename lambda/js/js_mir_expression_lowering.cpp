@@ -6442,6 +6442,25 @@ static void jm_clear_last_closure_tracking(JsMirTranspiler* mt) {
 // Read back captured variables from closure env after synchronous callback calls
 // (e.g., forEach, reduce, map). The callback may have modified captured variables
 // via env write-back, and we need to propagate those changes to the caller's registers.
+bool jm_resolve_transitive_capture_env(JsMirVarEntry* var,
+        MIR_reg_t* env_reg, int* env_slot) {
+    if (!var || !env_reg || !env_slot) return false;
+    if (var->from_env && var->env_reg != 0 && var->env_slot >= 0) {
+        *env_reg = var->env_reg;
+        *env_slot = var->env_slot;
+        return true;
+    }
+    // Top-level block lexicals are backed by the module scope env, not a
+    // from_env cell. Transitive callback mutations must read and write that
+    // live cell instead of the copied closure's stale snapshot.
+    if (var->in_scope_env && var->scope_env_reg != 0 && var->scope_env_slot >= 0) {
+        *env_reg = var->scope_env_reg;
+        *env_slot = var->scope_env_slot;
+        return true;
+    }
+    return false;
+}
+
 void jm_readback_closure_env(JsMirTranspiler* mt) {
     if (!mt->last_closure_has_env) return;
     if (mt->last_closure_env_reg == 0) return;
@@ -6466,10 +6485,8 @@ void jm_readback_closure_env(JsMirTranspiler* mt) {
         if (var->from_block_func_decl) continue;
         int slot = mt->last_closure_capture_slots[i] >= 0 ? mt->last_closure_capture_slots[i] : i;
         MIR_reg_t read_env = mt->last_closure_env_reg;
-        if (mt->last_closure_capture_is_transitive[i] &&
-                var->from_env && var->env_reg != 0 && var->env_slot >= 0) {
-            read_env = var->env_reg;
-            slot = var->env_slot;
+        if (mt->last_closure_capture_is_transitive[i]) {
+            jm_resolve_transitive_capture_env(var, &read_env, &slot);
         }
         // Js56 P2: BOOL vars are stored BOXED (var-decl falls into the
         // generic boxed branch — there is no native-bool fast path), so they
@@ -12456,6 +12473,15 @@ int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has
         fc->closure_env_parent_link_slot + 1 > env_size) {
         env_size = fc->closure_env_parent_link_slot + 1;
     }
+    if (mt && fc->parent_index >= 0 && fc->parent_index < mt->func_count) {
+        JsFuncCollected* parent_fc = &mt->func_entries[fc->parent_index];
+        // A remapped copied env is consumed with the parent's scope-env layout.
+        // Reserve its trailing link slot too; otherwise generated transitive
+        // loads read one Item past the copied env and treat adjacent pool data as a pointer.
+        if (parent_fc->has_parent_env_link && parent_fc->scope_env_count > env_size) {
+            env_size = parent_fc->scope_env_count;
+        }
+    }
     return env_size;
 }
 
@@ -12518,6 +12544,36 @@ static int jm_last_closure_track_count(JsFuncCollected* fc) {
     return fc->capture_count;
 }
 
+static void jm_collect_descendant_func_assignments(JsMirTranspiler* mt,
+        JsFuncCollected* ancestor, struct hashmap* assigned) {
+    if (!mt || !ancestor || !assigned) return;
+    int ancestor_index = -1;
+    for (int fi = 0; fi < mt->func_count; fi++) {
+        if (&mt->func_entries[fi] == ancestor) {
+            ancestor_index = fi;
+            break;
+        }
+    }
+    if (ancestor_index < 0) return;
+
+    for (int fi = 0; fi < mt->func_count; fi++) {
+        int parent_index = mt->func_entries[fi].parent_index;
+        while (parent_index >= 0 && parent_index < mt->func_count) {
+            if (parent_index == ancestor_index) {
+                JsFunctionNode* descendant = mt->func_entries[fi].node;
+                if (descendant && descendant->body) {
+                    // A synchronously invoked outer closure can run nested
+                    // callbacks that mutate its captures. Include descendant
+                    // writes so post-call readback observes those live cells.
+                    jm_collect_func_assignments(descendant->body, assigned);
+                }
+                break;
+            }
+            parent_index = mt->func_entries[parent_index].parent_index;
+        }
+    }
+}
+
 static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         JsFuncCollected* fc, bool use_capture_slots) {
     if (!mt || !fc || env == 0) return;
@@ -12526,6 +12582,7 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     if (assigned && fc->node && fc->node->body) {
         jm_collect_func_assignments(fc->node->body, assigned);
+        jm_collect_descendant_func_assignments(mt, fc, assigned);
     }
     mt->last_closure_env_reg = env;
     mt->last_closure_capture_count = count;
@@ -12673,10 +12730,15 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
             }
         }
-        if (use_scope_env && !mt->allow_loop_let_scope_env_for_immediate_call) {
+        if (use_scope_env &&
+                (!mt->allow_loop_let_scope_env_for_immediate_call ||
+                 fc->closure_env_has_parent_link)) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
+                    // A mixed loop closure needs a private env even when invoked
+                    // immediately: its parent-link tail is absent from the shared
+                    // scope env, so sharing makes transitive loads read past it.
                     use_scope_env = false;
                     break;
                 }
@@ -12896,10 +12958,14 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
                 }
             }
         }
-        if (use_scope_env && !mt->allow_loop_let_scope_env_for_immediate_call) {
+        if (use_scope_env &&
+                (!mt->allow_loop_let_scope_env_for_immediate_call ||
+                 fc->closure_env_has_parent_link)) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (jm_capture_is_current_loop_lexical(mt, fc->captures[ci].name, cv)) {
+                    // Immediate invocation does not make a mixed parent-link
+                    // layout compatible with the smaller shared scope env.
                     use_scope_env = false;
                     break;
                 }

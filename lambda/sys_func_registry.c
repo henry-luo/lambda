@@ -19,6 +19,7 @@
 #include "sys_func_registry.h"  // includes lambda.h (brings in FPTR/NPTR macros)
 #include "lambda-error.h"
 #include "concurrency.h"
+#include "../lib/side_stack.h"
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT;
@@ -1206,6 +1207,7 @@ JitImport jit_runtime_imports[] = {
     {"bits_to_f32", FPTR(bits_to_f32)},
     // stack overflow protection
     {"lambda_stack_overflow_error", FPTR(lambda_stack_overflow_error)},
+    {"lambda_side_stack_ensure", FPTR(lambda_side_stack_ensure)},
 
     // ========================================================================
     // Array constructors and operations
@@ -1298,6 +1300,12 @@ JitImport jit_runtime_imports[] = {
     {"js_profile_property_set_site", FPTR(js_profile_property_set_site)},
 #endif
     {"push_l", FPTR(push_l)},
+    {"box_int64_value", FPTR(box_int64_value)},
+    {"box_int64_value_safe", FPTR(box_int64_value_safe)},
+    {"owned_item_slot_read", FPTR(owned_item_slot_read)},
+    {"owned_item_slot_store", FPTR(owned_item_slot_store)},
+    {"lambda_item_scalar_lane", FPTR(lambda_item_scalar_lane)},
+    {"lambda_item_from_scalar_lane", FPTR(lambda_item_from_scalar_lane)},
     {"push_l_safe", FPTR(push_l_safe)},
     {"push_d_safe", FPTR(push_d_safe)},
     {"push_k", FPTR(push_k)},
@@ -1450,10 +1458,6 @@ JitImport jit_runtime_imports[] = {
     {"heap_calloc", FPTR(heap_calloc)},
     {"heap_calloc_class", FPTR(heap_calloc_class)},
     {"heap_gc_root_slot_new", FPTR(heap_gc_root_slot_new)},
-    {"heap_jit_gc_root_frame_enter", FPTR(heap_jit_gc_root_frame_enter)},
-    {"heap_jit_gc_root_frame_set", FPTR(heap_jit_gc_root_frame_set)},
-    {"heap_jit_gc_root_frame_get", FPTR(heap_jit_gc_root_frame_get)},
-    {"heap_jit_gc_root_frame_exit", FPTR(heap_jit_gc_root_frame_exit)},
     {"heap_data_calloc", FPTR(heap_data_calloc)},
     {"heap_create_name", FPTR(heap_create_name)},
     {"heap_create_symbol", FPTR(heap_create_symbol)},
@@ -2709,6 +2713,8 @@ JitImport jit_runtime_imports[] = {
     {"pn_select_mir", FPTR(pn_select_mir)},
     {"pn_sleep_mir", FPTR(pn_sleep_mir)},
     {"lambda_async_frame_enter_current", FPTR(lambda_async_frame_enter_current)},
+    {"lambda_async_frame_get_raw", FPTR(lambda_async_frame_get_raw)},
+    {"lambda_async_frame_set_raw", FPTR(lambda_async_frame_set_raw)},
     {"lambda_async_frame_scope_base", FPTR(lambda_async_frame_scope_base)},
     {"lambda_task_scope_enter", FPTR(lambda_task_scope_enter)},
     {"lambda_task_scope_current", FPTR(lambda_task_scope_current)},

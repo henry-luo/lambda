@@ -1098,7 +1098,7 @@ extern "C" void js_drag_session_end(void) {
 extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
         const char* type, int client_x, int client_y) {
     // The session DataTransfer must be allocated inside the JS runtime context
-    // (js_new_object needs the active heap/nursery), so open it here — the
+    // (js_new_object needs the active runtime heap), so open it here — the
     // caller enters the ctx scope before dispatching. dragstart always starts a
     // fresh session; later points reuse it (or begin lazily if one was missed).
     if (type && strcmp(type, "dragstart") == 0) {

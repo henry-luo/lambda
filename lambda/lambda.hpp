@@ -3,6 +3,7 @@
 #include "lambda.h"
 #include "lambda-path.h"
 #include "../lib/byte_storage.h"
+#include "../lib/side_stack.h"
 
 // ============================================================================
 // Definitions moved from lambda.h to keep the JIT-embedded header slim.
@@ -187,7 +188,14 @@ typedef struct Item {
         }
         return *(double*)this->double_ptr;
     }
-    inline int64_t get_int64() const { return *(int64_t*)this->int64_ptr; }
+    inline bool is_inline_int64() const {
+        return lambda_item_is_inline_int64_bits(this->item);
+    }
+    inline int64_t get_int64() const {
+        return is_inline_int64()
+            ? lambda_inline_int64_value(this->item)
+            : *(int64_t*)this->int64_ptr;
+    }
     inline uint64_t get_uint64() const { return *(uint64_t*)this->uint64_ptr; }
     inline DateTime get_datetime() const { return *(DateTime*)this->datetime_ptr; }
     inline Decimal* get_decimal() const { return (Decimal*)this->decimal_ptr; }
@@ -314,6 +322,38 @@ inline ConstItem Item::to_const() const {
 
 // get type_id from an Item
 static inline TypeId get_type_id(Item value) { return value.type_id(); }
+
+// Precise host-helper root. Its dynamic slots compose with JIT static frames:
+// nested generated calls start above the guard and destruction restores the
+// exact incoming watermark.
+class LambdaRootGuard {
+    Context* runtime_;
+    uint64_t* watermark_;
+
+public:
+    explicit LambdaRootGuard(Context* runtime)
+        : runtime_(runtime), watermark_(runtime ? runtime->side_root_top : nullptr) {
+        if (runtime_ && !watermark_ && lambda_side_stack_bind(runtime_)) {
+            watermark_ = runtime_->side_root_top;
+        }
+    }
+
+    ~LambdaRootGuard() {
+        if (runtime_ && watermark_) runtime_->side_root_top = watermark_;
+    }
+
+    bool root(Item item) {
+        if (!runtime_ || !lambda_side_stack_ensure(runtime_, 1, 0)) {
+            lambda_stack_overflow_error("host-root-side-stack");
+            return false;
+        }
+        *runtime_->side_root_top++ = item.item;
+        return true;
+    }
+
+    LambdaRootGuard(const LambdaRootGuard&) = delete;
+    LambdaRootGuard& operator=(const LambdaRootGuard&) = delete;
+};
 
 static inline Item lambda_float_ptr_to_item(const double* double_ptr) {
     if (!double_ptr) return {.item = ITEM_NULL};

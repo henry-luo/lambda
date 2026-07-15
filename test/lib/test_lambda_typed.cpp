@@ -118,7 +118,7 @@ TEST(LambdaTypedItem, ReadsInlineAndTaggedScalars) {
     int64_item.item = l2it(&boxed);
     auto int64_match = lam::as<LMD_TYPE_INT64>(int64_item);
     ASSERT_TRUE((bool)int64_match);
-    EXPECT_EQ(*int64_match.ptr(), 42);
+    EXPECT_EQ(int64_match.value(), 42);
 }
 
 TEST(LambdaTypedItem, GroupAccessorsRejectWrongStorageAtCompileTime) {

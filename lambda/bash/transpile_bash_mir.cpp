@@ -6190,11 +6190,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     if (old_context && old_context->heap) {
         context = old_context;
         reusing_context = true;
-        if (!context->nursery) {
-            context->nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "bash.nursery");
-        }
     } else {
-        bash_context.nursery = mem_nursery_create(NULL, 0, MEM_ROLE_RUNTIME_HEAP, "bash.nursery");
         context = &bash_context;
         heap_init();
         context->pool = context->heap->pool;

@@ -4,7 +4,6 @@
 #include "../../lib/mempool.h"
 #include "../../lib/arena.h"
 #include "../../lib/scratch_arena.h"
-#include "../../lib/gc/gc_nursery.h"
 #include <string.h>
 
 // Exercises the allocator factory with REAL Pool/Arena allocators: snapshot
@@ -153,35 +152,4 @@ TEST_F(MemFactoryTest, ScratchInitRegistersAndReleaseUnregisters) {
 
     mem_arena_destroy(a);
     mem_pool_destroy(p);
-}
-
-// ---- GC nursery factory ----
-
-TEST_F(MemFactoryTest, NurseryCreateRegistersAndDestroyUnregisters) {
-    MemContext* root = mem_context_root();
-    gc_nursery_t* n = mem_nursery_create(root, 0, MEM_ROLE_RUNTIME_HEAP, "eval.nursery");
-    ASSERT_NE(n, nullptr);
-    EXPECT_NE(n->mem_node, nullptr);
-    EXPECT_EQ(mem_context_live_count(root), 1u);
-
-    gc_nursery_alloc_long(n, 42);
-    gc_nursery_alloc_double(n, 3.14);
-
-    MemSnapshot* snap = mem_snapshot_capture(root);
-    ASSERT_NE(snap, nullptr);
-    ASSERT_EQ(snap->count, 1u);
-    EXPECT_EQ(snap->samples[0].kind, MEM_KIND_NURSERY);
-    EXPECT_GE(snap->samples[0].bytes_in_use, 2u * sizeof(gc_num_value_t));
-    mem_snapshot_free(snap);
-
-    gc_nursery_destroy(n);                // auto-unregisters
-    EXPECT_EQ(mem_context_live_count(root), 0u);
-}
-
-TEST_F(MemFactoryTest, UntrackedNurseryDestroyIsSafe) {
-    // raw nursery (not via factory) has NULL mem_node; destroy must be safe
-    gc_nursery_t* n = gc_nursery_create(0);
-    ASSERT_NE(n, nullptr);
-    EXPECT_EQ(n->mem_node, nullptr);
-    gc_nursery_destroy(n);
 }

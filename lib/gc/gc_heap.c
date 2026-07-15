@@ -805,6 +805,10 @@ static void* item_to_ptr(uint64_t item) {
         return (void*)(uintptr_t)item;
     }
 
+    // Compact INT64 values share the tag with boxed INT64 pointers; the
+    // payload discriminator keeps scalar bits out of the conservative roots.
+    if (tag == LMD_TYPE_INT64_ && (item & ITEM_INT64_INLINE_MARK)) return NULL;
+
     // tags 4-11: tagged pointer types (Int64, Float, Decimal, DateTime, String, etc.)
     // mask off the tag byte in the upper 8 bits to get the actual pointer
     if (tag >= LMD_TYPE_INT64_ && tag <= LMD_TYPE_BINARY_) {
@@ -1234,7 +1238,8 @@ static void gc_fixup_embedded_pointers(uint64_t* old_items, uint64_t* new_items,
 
         // Only fix tagged pointer types that array_set stores inline:
         // Float (5), Int64 (4), DateTime (8)
-        if (item_tag == LMD_TYPE_FLOAT_ || item_tag == LMD_TYPE_INT64_ ||
+        if (item_tag == LMD_TYPE_FLOAT_ ||
+            (item_tag == LMD_TYPE_INT64_ && !(item & ITEM_INT64_INLINE_MARK)) ||
             item_tag == LMD_TYPE_DTIME_) {
             // Extract the raw pointer (lower 56 bits)
             uint8_t* ptr = (uint8_t*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFFULL);
@@ -1634,8 +1639,9 @@ static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_
     (void)scanned; (void)marked; (void)skipped_poisoned;  // silence release-build unused warning
 }
 
-void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
-                uintptr_t stack_base, uintptr_t stack_current) {
+void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
+                int extra_count, uintptr_t stack_base, uintptr_t stack_current,
+                uint64_t* root_base, int64_t root_count) {
     if (!gc) return;
     if (gc->collecting) {
         log_debug("gc_collect: skipping re-entrant collection");
@@ -1681,6 +1687,14 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
         }
     }
     GC_PROFILE_LEAVE("gc_mark_roots", gc_roots_token);
+
+    // The side root stack is already a dense Item region. Its live watermark
+    // makes this scan precise without registering or walking unused capacity.
+    if (root_base && root_count > 0) {
+        for (int64_t i = 0; i < root_count; i++) {
+            gc_mark_item(gc, root_base[i]);
+        }
+    }
 
     // Phase 1b: Mark explicit extra roots (caller-provided Items)
     uint64_t gc_extra_roots_token = GC_PROFILE_ENTER("gc_mark_extra_roots");
@@ -1764,4 +1778,10 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
     log_debug("gc_collect: collection #%zu complete, %zu objects remain, %zu bytes collected total",
               gc->collections, gc->object_count, gc->bytes_collected);
     GC_PROFILE_LEAVE("gc_collect_total", gc_total_token);
+}
+
+void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
+                uintptr_t stack_base, uintptr_t stack_current) {
+    gc_collect_with_root_region(gc, extra_roots, extra_count,
+                                stack_base, stack_current, NULL, 0);
 }

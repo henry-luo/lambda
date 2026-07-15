@@ -660,6 +660,8 @@ enum MapKind {
     MAP_KIND_ARRAY_SPARSE = 14, // array companion map plus numeric sparse hash table
 };
 
+#define CONTAINER_FLAG_IMMORTAL (1u << 5)
+
 static inline bool map_kind_is_array_props(uint8_t map_kind) {
     return map_kind == MAP_KIND_ARRAY_PROPS || map_kind == MAP_KIND_ARRAY_SPARSE;
 }
@@ -676,6 +678,7 @@ struct Container {
             uint8_t is_heap:1;           // whether allocated from runtime heap (vs arena for input docs)
             uint8_t is_data_migrated:1;  // data buffer migrated from input pool to runtime pool (for mutated markup containers)
             uint8_t is_static:1;         // read-only const-pool/static data container
+            uint8_t is_immortal:1;       // storage outlives every execution frame (input arena/const pool)
         };
     };
     union {
@@ -840,6 +843,21 @@ Item list_end(List *list);
 
 // Spreadable array functions for for-expression results
 Array* array_plain();  // constructs a plain empty array (no frame management)
+#ifdef __cplusplus
+extern "C" {
+#endif
+void array_set(Array* arr, int64_t index, Item item);
+void array_copy_owned_items(Array* destination, int64_t destination_index,
+                            const Item* source, int64_t count);
+void owned_item_slot_store(Item* storage, int64_t item_count,
+                           int64_t index, Item item);
+Item owned_item_slot_read(Item* storage, int64_t item_count,
+                          int64_t index, bool immortal);
+uint64_t lambda_item_scalar_lane(Item item);
+Item lambda_item_from_scalar_lane(Item item, uint64_t scalar_lane);
+#ifdef __cplusplus
+}
+#endif
 void array_drop_inplace(Array* arr, int64_t n);  // drop first n items in-place
 void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-place
 void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items in-place
@@ -941,10 +959,6 @@ void* heap_calloc(size_t size, TypeId type_id);
 void* heap_calloc_class(size_t size, TypeId type_id, int cls);  // allocate with pre-computed size class
 void* heap_data_calloc(size_t size);  // allocate GC-managed data buffer (for map/object data)
 uint64_t* heap_gc_root_slot_new(uint64_t value);
-void heap_jit_gc_root_frame_enter();
-void heap_jit_gc_root_frame_set(int64_t index, uint64_t value);
-uint64_t heap_jit_gc_root_frame_get(int64_t index);
-void heap_jit_gc_root_frame_exit();
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings
@@ -997,6 +1011,12 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_JS_DELETED_SENTINEL UINT64_C(0x9E00DEAD00DEAD00)
 #define ITEM_JS_ITER_DONE_SENTINEL UINT64_C(0x9F00DEAD00000000)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
+#define ITEM_INT64          ((uint64_t)LMD_TYPE_INT64 << 56)
+// Compact INT64 values use bit 55 as an immediate discriminator. Lambda's
+// integer value band ends at bit 52, while ordinary user pointers must keep
+// this payload bit clear under the tagged-pointer ABI.
+#define ITEM_INT64_INLINE_MARK UINT64_C(0x0080000000000000)
+#define ITEM_INT64_INLINE_MASK UINT64_C(0x007FFFFFFFFFFFFF)
 // BigInt reuses LMD_TYPE_DECIMAL; distinguished by Decimal.unlimited == DECIMAL_BIGINT
 #define DECIMAL_BIGINT      2
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
@@ -1121,6 +1141,35 @@ static inline void assert_raw_item_pointer(const void* ptr) {
 #define INT56_MAX  ((int64_t)9007199254740991LL)   // +(2^53 - 1)
 #define INT56_MIN  ((int64_t)-9007199254740991LL)  // -(2^53 - 1)
 
+static inline bool lambda_int64_fits_inline(int64_t value) {
+    return value >= INT56_MIN && value <= INT56_MAX;
+}
+
+static inline bool lambda_item_is_inline_int64_bits(uint64_t item) {
+    return (uint8_t)(item >> 56) == LMD_TYPE_INT64 &&
+           (item & ITEM_INT64_INLINE_MARK) != 0;
+}
+
+static inline uint64_t lambda_inline_int64_to_item_bits(int64_t value) {
+    if (!lambda_int64_fits_inline(value)) return ITEM_ERROR;
+    return ITEM_INT64 | ITEM_INT64_INLINE_MARK |
+           ((uint64_t)value & ITEM_INT64_INLINE_MASK);
+}
+
+static inline int64_t lambda_inline_int64_value(uint64_t item) {
+    // Discard the tag and discriminator, then sign-extend payload bit 54.
+    return (int64_t)(item << 9) >> 9;
+}
+
+static inline uint64_t lambda_int64_ptr_to_item_bits(const int64_t* ptr) {
+    if (!ptr) return ITEM_NULL;
+    uint64_t payload = (uint64_t)(uintptr_t)ptr;
+    // The discriminator must never alias a tagged pointer. Fail closed if a
+    // future address-space ABI exceeds the payload contract.
+    if (payload & (ITEM_HIGH_BYTE_MASK | ITEM_INT64_INLINE_MARK)) return ITEM_ERROR;
+    return ITEM_INT64 | payload;
+}
+
 inline uint64_t b2it(uint8_t bool_val) {
     return bool_val >= BOOL_ERROR ? ITEM_ERROR : ((((uint64_t)LMD_TYPE_BOOL)<<56) | bool_val);
 }
@@ -1132,7 +1181,7 @@ inline uint64_t b2it(uint8_t bool_val) {
 #endif
 // BigInt: same as decimal tagged pointer (Decimal.unlimited == DECIMAL_BIGINT)
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)
-#define l2it(long_ptr)       ((long_ptr)? ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr)): ITEM_NULL)
+#define l2it(long_ptr)       lambda_int64_ptr_to_item_bits((const int64_t*)(long_ptr))
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
 // f64 is a type-language alias for binary64; runtime Items use canonical float encoding.
 #define f642it(double_ptr)   lambda_float_ptr_to_item(double_ptr)
@@ -1452,6 +1501,15 @@ typedef struct Context {
     bool disable_string_merging; // disable automatic string merging in list_push
     uintptr_t stack_limit; // stack overflow check limit (from lambda_stack_init)
     bool ui_mode; // allocate fat DomElement/DomText on arena for unified DOM tree
+    uint64_t* side_root_base;
+    uint64_t* side_root_top;
+    uint64_t* side_root_commit_limit;
+    uint64_t* side_root_limit;
+    uint64_t* side_number_base;
+    uint64_t* side_number_top;
+    uint64_t* side_number_commit_limit;
+    uint64_t* side_number_limit;
+    uint64_t mir_return_lane;
 } Context;
 
 #ifndef LAMBDA_STATIC
@@ -1502,7 +1560,7 @@ extern "C" {
     Object* object_with_tl(int64_t type_index, void* type_list_ptr);
     Object* object_fill(Object* obj, ...);
 
-    // these getters use runtime num_stack
+    // these getters use the runtime number side stack
     Item array_get(Array *array, int64_t index);
     Item array_num_get(ArrayNum *array, int64_t index);
     Item array_int_get(ArrayNum *array, int64_t index);
@@ -1539,6 +1597,8 @@ extern "C" {
     Item flt2it(double dval);  // canonical double -> Item encoder
     Item push_d(double dval);
     Item push_l(int64_t lval);
+    Item box_int64_value(int64_t lval);
+    Item box_int64_value_safe(int64_t val);
     Item push_l_safe(int64_t val);  // safe boxing: detects already-boxed INT64 Items
     Item push_d_safe(double val);   // safe boxing: detects already-boxed FLOAT Items
     Item push_k(DateTime dtval);

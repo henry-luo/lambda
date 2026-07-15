@@ -37,7 +37,6 @@ typedef enum MemKind {
     MEM_KIND_ARENA,        // lib/arena.c
     MEM_KIND_SCRATCH,      // lib/scratch_arena.c
     MEM_KIND_HEAP,         // gc_heap (Lambda runtime objects)
-    MEM_KIND_NURSERY,      // gc_nursery (numeric temporaries)
     MEM_KIND_NAMEPOOL,     // interned names
     MEM_KIND_SHAPEPOOL,    // cached shapes
     MEM_KIND_JIT,          // MIR-generated executable code (mmap'd code pages)

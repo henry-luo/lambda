@@ -21,7 +21,6 @@
 #include "mempool.h"
 #include "arena.h"
 #include "scratch_arena.h"
-#include "gc/gc_nursery.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,12 +45,6 @@ void   mem_arena_destroy(Arena* arena);
 // after a release re-registers.
 void mem_scratch_init(MemContext* ctx, ScratchArena* sa, Arena* backing,
                       MemRole role, const char* label);
-
-// ---- GC nursery (numeric temporaries) ----
-// Creates a nursery (via gc_nursery_create) and registers a MEM_KIND_NURSERY
-// node. Auto-unregistered by gc_nursery_destroy().
-gc_nursery_t* mem_nursery_create(MemContext* ctx, size_t block_size,
-                                 MemRole role, const char* label);
 
 #ifdef __cplusplus
 }
