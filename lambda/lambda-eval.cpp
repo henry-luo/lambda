@@ -290,6 +290,15 @@ Item fn_join(Item left, Item right) {
         }
     }
 
+    if (left_type == LMD_TYPE_BINARY && right_type == LMD_TYPE_BINARY) {
+        String* result = heap_binary_concat(left.get_safe_binary(), right.get_safe_binary());
+        if (!result) {
+            set_runtime_error(ERR_OUT_OF_MEMORY, "fn_join: failed to concatenate binary operands");
+            return ItemError;
+        }
+        return {.item = x2it(result)};
+    }
+
     if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
         // null ++ string → string, string ++ null → string
         if (left_type == LMD_TYPE_NULL) return right;
@@ -2185,6 +2194,17 @@ Bool fn_in(Item a_item, Item b_item) {
             String *str_b = b_item.get_safe_string();
             return str_a->len <= str_b->len && strstr(str_b->chars, str_a->chars) != NULL;
         }
+        if (b_item._type_id == LMD_TYPE_BINARY) {
+            String* bin = b_item.get_safe_binary();
+            if (!bin) return BOOL_FALSE;
+            // Membership follows Lambda numeric equality so 173, 173u8, and
+            // 173.0 all match the same byte without silently narrowing 256.
+            for (uint32_t i = 0; i < bin->len; i++) {
+                Item byte = {.item = u8_to_item((unsigned char)bin->chars[i])};
+                if (fn_eq(a_item, byte) == BOOL_TRUE) return BOOL_TRUE;
+            }
+            return BOOL_FALSE;
+        }
     }
     else { // b is container
         TypeId b_type = b_item.container->type_id;
@@ -2376,8 +2396,17 @@ String* fn_string(Item itm) {
         return itm.bool_val ? &STR_TRUE : &STR_FALSE;
     case LMD_TYPE_STRING:
         return itm.get_safe_string();
-    case LMD_TYPE_BINARY:
-        return itm.get_safe_binary();
+    case LMD_TYPE_BINARY: {
+        String* bin = itm.get_safe_binary();
+        StrBuf* sb = strbuf_new_cap(bin ? (size_t)bin->len * 2 + 6 : 6);
+        if (!sb) return &STR_ERROR;
+        // String conversion is deliberately lossless and readable; raw UTF-8
+        // decoding requires an explicit codec rather than implicit text.
+        format_binary_literal(sb, bin);
+        String* result = heap_strcpy(sb->str, (int64_t)sb->length);
+        strbuf_free(sb);
+        return result ? result : &STR_ERROR;
+    }
     case LMD_TYPE_SYMBOL: {
         // Symbol has different layout than String; create a String from symbol chars
         Symbol* sym = itm.get_safe_symbol();
@@ -3551,17 +3580,18 @@ int64_t fn_len(Item item) {
         size = elmt->length;
         break;
     }
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-        // returns the length of the string
-        // todo: binary length
+    case LMD_TYPE_BINARY:
+        // Binary length is a byte count, including embedded NUL bytes.
+        size = item.get_len();
+        break;
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
+        // returns the character length of text values
         const char* chars = item.get_chars();
         if (!chars) { size = 0; break; }
         bool is_ascii = false;
         uint32_t len = item.get_len();
-        if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_BINARY) {
-            String* str = type_id == LMD_TYPE_STRING
-                ? item.get_safe_string()
-                : item.get_safe_binary();
+        if (type_id == LMD_TYPE_STRING) {
+            String* str = item.get_safe_string();
             is_ascii = str->is_ascii != 0;
         }
         size = is_ascii ? (int64_t)len : (int64_t)str_utf8_count(chars, len);

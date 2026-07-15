@@ -1,4 +1,9 @@
 #include "format.h"
+#include "../ast.hpp"
+#include "../../lib/base64.h"
+#include "../../lib/mem.h"
+#include "../../lib/strbuf.h"
+#include "../../lib/str.h"
 #include "format-markup.h"
 #include "../lambda-decimal.hpp"
 #include "../../lib/stringbuf.h"
@@ -75,6 +80,31 @@ void format_number_compact(StringBuf* sb, Item item) {
     format_number_impl(sb, item, true);
 }
 
+void format_binary_base64_string(StringBuf* sb, String* bin) {
+    if (!sb || !bin) return;
+    size_t encoded_len = base64_encoded_len(bin->len, BASE64_STD);
+    char* encoded = (char*)mem_alloc(encoded_len + 1, MEM_CAT_TEMP);
+    if (!encoded) return;
+    base64_encode(bin->chars, bin->len, encoded, BASE64_STD);
+    stringbuf_append_str_n(sb, encoded, encoded_len);
+    mem_free(encoded);
+}
+
+String* format_mark(Pool* pool, Item root_item) {
+    if (!pool) return NULL;
+    StrBuf* sb = strbuf_new();
+    if (!sb) return NULL;
+    print_item(sb, root_item, 0, NULL);
+    String* result = (String*)pool_alloc(pool, sizeof(String) + sb->length + 1);
+    if (result) {
+        result->len = (uint32_t)sb->length;
+        result->is_ascii = str_is_ascii(sb->str, sb->length) ? 1 : 0;
+        memcpy(result->chars, sb->str, sb->length + 1);
+    }
+    strbuf_free(sb);
+    return result;
+}
+
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
     // format(x) documents a default serializer; null type must not drop scalars.
     const char* t = type ? type->chars : "text";
@@ -88,6 +118,7 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         String* (*format_fn)(Pool*, Item);
     };
     static const FormatEntry SIMPLE_FORMATS[] = {
+        { "mark",       format_mark },
         { "json",       format_json },
         { "xml",        format_xml },
         { "html",       format_html },

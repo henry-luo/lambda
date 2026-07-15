@@ -10854,6 +10854,23 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             js_throw_type_error("%TypedArray%.from: mapfn is not a function");
             return ItemNull;
         }
+        if (get_type_id(source) == LMD_TYPE_BINARY) {
+            String* bin = source.get_safe_binary();
+            int len = bin ? (int)bin->len : 0;
+            Item result = js_typed_array_create_with_constructor(this_val, len);
+            if (js_exception_pending) return ItemNull;
+            for (int i = 0; i < len; i++) {
+                Item val = (Item){.item = i2it((unsigned char)bin->chars[i])};
+                if (has_mapfn) {
+                    Item map_args[2] = {val, (Item){.item = i2it(i)}};
+                    val = js_call_function(mapfn, map_this, map_args, 2);
+                    if (js_exception_pending) return ItemNull;
+                }
+                js_typed_array_set(result, (Item){.item = i2it(i)}, val);
+                if (js_exception_pending) return ItemNull;
+            }
+            return result;
+        }
         // Check for iterable protocol: [Symbol.iterator]
         bool is_iterable = false;
         TypeId src_type = get_type_id(source);

@@ -353,6 +353,10 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
                 format_html_string_safe(ctx_.output(), str, false);
             }
         }
+        void binary_value(const ItemReader& item, String* bin) override {
+            (void)item;
+            format_binary_base64_string(ctx_.output(), bin);
+        }
         void symbol_value(const ItemReader& item, Symbol* sym) override {
             (void)item;
             if (!sym) return;

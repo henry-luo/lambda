@@ -2046,6 +2046,11 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     else if (obj_tid == LMD_TYPE_ARRAY) {
         ast_node->type = &TYPE_ANY;
     }
+    else if (obj_tid == LMD_TYPE_BINARY) {
+        // Scalar binary indexes are u8 values; range indexes retain binary type.
+        ast_node->type = ast_node->field->type && ast_node->field->type->type_id == LMD_TYPE_RANGE
+            ? &TYPE_BINARY : &TYPE_U8;
+    }
     else if (ast_node->object->type->type_id == LMD_TYPE_MAP
           || ast_node->object->type->type_id == LMD_TYPE_OBJECT) {
         // resolve field type from map/object shape for unboxed access optimization
@@ -2880,21 +2885,31 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         const char* content_start = raw + 2;
         int content_len = raw_len - 3;
 
-        // Skip leading/trailing whitespace inside the quotes
-        while (content_len > 0 && (*content_start == ' ' || *content_start == '\n' || *content_start == '\r' || *content_start == '\t')) { content_start++; content_len--; }
-        while (content_len > 0 && (content_start[content_len - 1] == ' ' || content_start[content_len - 1] == '\n' || content_start[content_len - 1] == '\r' || content_start[content_len - 1] == '\t')) { content_len--; }
-
-        if (content_len <= 0) {
+        StrBuf* decoded = strbuf_new_cap((size_t)content_len + 1);
+        int err_off = 0;
+        int decoded_len = decoded ?
+            str_binary_payload_decode(content_start, content_len, decoded, &err_off) : -1;
+        if (decoded_len < 0) {
+            // Binary constants must enter the runtime as bytes; retaining malformed
+            // source text here makes every later length/print operation ambiguous.
+            record_semantic_error(tp, node, ERR_SYNTAX_ERROR,
+                "invalid binary literal payload at byte %d", err_off);
+            if (decoded) strbuf_free(decoded);
+            return &TYPE_ERROR;
+        }
+        if (decoded_len == 0) {
             log_debug("build_lit_string: empty binary literal, returning null type");
+            strbuf_free(decoded);
             return &LIT_NULL;
         }
 
-        str = (String*)pool_alloc(tp->pool, sizeof(String) + content_len + 1);
+        str = (String*)pool_alloc(tp->pool, sizeof(String) + (size_t)decoded_len + 1);
         str_type->string = str;
-        memcpy(str->chars, content_start, content_len);
-        str->chars[content_len] = '\0';
-        str->len = content_len;
-        str->is_ascii = str_is_ascii(str->chars, content_len) ? 1 : 0;
+        memcpy(str->chars, decoded->str, (size_t)decoded_len);
+        str->chars[decoded_len] = '\0';
+        str->len = (uint32_t)decoded_len;
+        str->is_ascii = str_is_ascii(str->chars, (size_t)decoded_len) ? 1 : 0;
+        strbuf_free(decoded);
 
         arraylist_append(tp->const_list, str);
         str_type->const_index = tp->const_list->length - 1;
@@ -7088,6 +7103,10 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     }
     else if (expr_type->type_id == LMD_TYPE_RANGE) {
         ast_node->type = &TYPE_INT;
+    }
+    else if (expr_type->type_id == LMD_TYPE_BINARY) {
+        // Iteration exposes the same sized byte scalar as direct indexing.
+        ast_node->type = &TYPE_U8;
     }
     else {
         // for maps/elements/any: value type is any

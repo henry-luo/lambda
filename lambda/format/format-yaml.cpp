@@ -203,6 +203,14 @@ static void format_item_reader(YamlContext& ctx, const ItemReader& item, int ind
                 ctx_.write_text("null");
             }
         }
+        void binary_value(const ItemReader& item, String* bin) override {
+            (void)item;
+            // YAML egress matches other text formats with a base64 string;
+            // ingress remains explicit and never guesses that strings are bytes.
+            ctx_.write_char('"');
+            format_binary_base64_string(ctx_.output(), bin);
+            ctx_.write_char('"');
+        }
         void array_value(const ItemReader& item, ArrayReader arr) override {
             (void)item;
             format_array_reader(ctx_, arr, indent_level_);

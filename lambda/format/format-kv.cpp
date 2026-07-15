@@ -106,6 +106,10 @@ static void format_kv_item(KeyValueContext& ctx, const ItemReader& item,
             (void)item;
             if (str) format_kv_string(ctx_.output(), str, cfg_);
         }
+        void binary_value(const ItemReader& item, String* bin) override {
+            (void)item;
+            format_binary_base64_string(ctx_.output(), bin);
+        }
         void array_value(const ItemReader& item, ArrayReader arr) override {
             if (!item.isArray()) {
                 unknown_value(item);

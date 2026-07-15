@@ -1,0 +1,1 @@
+[b'\xA0FE', binary, 2, "b'\xA0FE'"]

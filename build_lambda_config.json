@@ -393,6 +393,7 @@
                 "lib/log.c",
                 "lib/memtrack.c",
                 "lib/str.c",
+                "lib/str_binary.c",
                 "lib/utf.c",
                 "lib/stringbuf.c",
                 "lib/strview.c",

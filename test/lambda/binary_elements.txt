@@ -1,0 +1,1 @@
+[0, true, 173, true, 255, true, null, null, b'\x00', b'\xADFF', true, b'\x00ADFF', true, true, true, true, false, false, b'\xDEADBEEF', true, true, 4, b'\x00FF00AD', 4, "b'\xDEAD'tail", "headb'\xBEEF'", [0, 173, 255], [true, true, true], [[0, 0], [1, 173], [2, 255]]]
