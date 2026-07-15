@@ -1643,11 +1643,23 @@ inline bool is_quirks_mode(HtmlVersion v) {
            v == HTML_QUIRKS || v == HTML1_0;
 }
 
+struct MeasurementCacheEntry;
+
 struct ViewTree {
     Pool *pool;
     Arena *arena;  // bump allocator for view allocations (O(1) alloc, bulk free)
     View* root;
     HtmlVersion html_version;
+    MeasurementCacheEntry* measurement_cache;
+    int measurement_cache_count;
+    int measurement_cache_capacity;
+    uint32_t measurement_cache_generation;
+#ifdef __cplusplus
+    void init();
+    void reset_retained();
+    void destroy();
+    void* alloc_prop(size_t size);
+#endif
 };
 
 void release_dom_owned_embed_images(DomElement* elem);
@@ -2624,6 +2636,9 @@ typedef struct UiContext {
 
     // font handling
     struct FontContext* font_ctx; // unified font context
+    Pool* font_pool;       // factory-registered root for font context allocations
+    Arena* font_arena;     // factory-registered arena for font strings/database
+    Arena* font_glyph_arena; // factory-registered arena for glyph bitmap caches
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
     char** fallback_fonts;  // fallback fonts
@@ -2648,6 +2663,11 @@ typedef struct UiContext {
     bool headless;          // true if running headless (no visible window). When true, clipboard
                             // operations use the in-process ClipboardStore only and do NOT touch
                             // the OS pasteboard via GLFW (avoids cross-process races in tests).
+
+    int init(bool headless);
+    void create_surface(int pixel_width, int pixel_height);
+    void destroy_document();
+    void destroy();
 } UiContext;
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);

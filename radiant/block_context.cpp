@@ -14,6 +14,7 @@
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
+#include <assert.h>
 #include <cmath>
 #include <cfloat>
 
@@ -263,10 +264,9 @@ void block_context_calc_bfc_offset(ViewElement* view, BlockContext* bfc, float* 
 // ============================================================================
 
 FloatBox* block_context_alloc_float_box(BlockContext* ctx) {
-    if (ctx->pool) {
-        return (FloatBox*)pool_calloc(ctx->pool, sizeof(FloatBox));
-    }
-    return (FloatBox*)mem_calloc(1, sizeof(FloatBox), MEM_CAT_LAYOUT);
+    // float boxes are tied to the view-tree pool; a heap fallback would escape all layout cleanup paths.
+    assert(ctx && ctx->pool);
+    return (FloatBox*)pool_calloc(ctx->pool, sizeof(FloatBox));
 }
 
 // ============================================================================

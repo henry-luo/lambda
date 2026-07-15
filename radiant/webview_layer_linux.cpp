@@ -243,7 +243,7 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
     ensure_gtk_layer_initialized();
     if (!s_gtk_layer_initialized) return nullptr;
 
-    WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT);
+    WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: platform webview handle is released by webview_layer_platform_destroy.
     handle->mode        = WEBVIEW_MODE_LAYER;
     handle->width       = w;
     handle->height      = h;

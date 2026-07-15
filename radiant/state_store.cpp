@@ -70,6 +70,9 @@ typedef struct StateDumpLog {
     int pid;
     uint64_t seq;
     bool enabled;
+
+    bool init(const char* doc_name);
+    void destroy();
 } StateDumpLog;
 
 enum {
@@ -241,38 +244,49 @@ static void state_dump_sanitize_doc_name(const char* in, char* out, size_t out_s
     }
 }
 
-StateDumpLog* radiant_state_dump_open(const char* doc_name) {
+bool StateDumpLog::init(const char* doc_name) {
     state_dump_make_temp_dir();
 
+    pid = (int)getpid();
+    state_dump_sanitize_doc_name(doc_name, doc_id, sizeof(doc_id));
+    snprintf(path, sizeof(path), "./temp/state/state_%d_%s.mark",
+             pid, doc_id);
+
+    out = fopen(path, "w");
+    if (!out) {
+        log_error("state_dump: failed to open %s: %s", path, strerror(errno));
+        return false;
+    }
+
+    enabled = true;
+    log_info("state_dump: opened %s (doc_id=%s)", path, doc_id);
+    return true;
+}
+
+StateDumpLog* radiant_state_dump_open(const char* doc_name) {
     StateDumpLog* dump = (StateDumpLog*)mem_calloc(1, sizeof(StateDumpLog), MEM_CAT_SYSTEM);
     if (!dump) return NULL;
 
-    dump->pid = (int)getpid();
-    state_dump_sanitize_doc_name(doc_name, dump->doc_id, sizeof(dump->doc_id));
-    snprintf(dump->path, sizeof(dump->path), "./temp/state/state_%d_%s.mark",
-             dump->pid, dump->doc_id);
-
-    dump->out = fopen(dump->path, "w");
-    if (!dump->out) {
-        log_error("state_dump: failed to open %s: %s", dump->path, strerror(errno));
+    if (!dump->init(doc_name)) {
         mem_free(dump);
         return NULL;
     }
-
-    dump->enabled = true;
-    log_info("state_dump: opened %s (doc_id=%s)", dump->path, dump->doc_id);
     return dump;
 }
 
 void radiant_state_dump_close(StateDumpLog* dump) {
     if (!dump) return;
-    if (dump->out) {
-        fflush(dump->out);
-        fclose(dump->out);
-    }
-    dump->out = NULL;
-    dump->enabled = false;
+    dump->destroy();
     mem_free(dump);
+}
+
+void StateDumpLog::destroy() {
+    if (out) {
+        fflush(out);
+        fclose(out);
+        out = NULL;
+    }
+    enabled = false;
 }
 
 bool radiant_state_dump_enabled(StateDumpLog* dump) {
@@ -875,9 +889,90 @@ void radiant_state_dump_emit_cascade(DocState* state, uint64_t cascade_id) {
 // State Store Creation/Destruction
 // ============================================================================
 
-DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
+bool DocState::init(Pool* backing_pool, StateUpdateMode update_mode) {
     init_interned_names();
 
+    if (!backing_pool) {
+        log_error("radiant_state_create: pool is NULL");
+        return false;
+    }
+
+    pool = backing_pool;
+    mode = update_mode;
+    lifecycle = DOC_LIFECYCLE_UNINITIALIZED;
+    version = 1;
+    zoom_level = 1.0f;
+    editing_behavior = EDITING_BEHAVIOR_MAC;
+
+    // Create dedicated arena for state allocations
+    arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.arena");
+    if (!arena) {
+        log_error("radiant_state_create: failed to create arena");
+        destroy();
+        return false;
+    }
+
+    // Create state hashmap
+    state_map = hashmap_new(
+        sizeof(StateEntry),
+        64,  // initial capacity
+        0x12345678, 0x87654321,  // hash seeds
+        state_key_hash,
+        state_key_cmp,
+        NULL,  // no element free function
+        NULL   // no user data
+    );
+    if (!state_map) {
+        log_error("radiant_state_create: failed to create state_map");
+        destroy();
+        return false;
+    }
+
+    view_state_map = view_state_entry_new(64);
+    if (!view_state_map) {
+        log_error("radiant_state_create: failed to create view_state_map");
+        destroy();
+        return false;
+    }
+
+    retained_dl_cache = retained_dl_cache_create(pool);
+    if (!retained_dl_cache) {
+        log_error("radiant_state_create: failed to create retained display-list cache");
+        destroy();
+        return false;
+    }
+
+    // Initialize dirty tracker arena
+    dirty_tracker.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.dirty");
+
+    // Initialize reflow scheduler arena
+    reflow_scheduler.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.reflow");
+
+    // Initialize template reactive state: create the map and inject it into
+    // the global template state store so Lambda views use the same map.
+    tmpl_state_init();
+    template_state_map = tmpl_state_get_map();
+
+    // Initialize render map for observer-based reconciliation (Phase 3)
+    render_map_init();
+    render_map = render_map_get_map();
+
+    // R7 step 3c — register the source-path recorder so apply() persists
+    // child-index paths into the editor bridge's path side-table.
+    render_map_set_path_recorder(&render_map_record_path);
+
+    // Initialize animation scheduler
+    animation_scheduler = animation_scheduler_create(pool);
+
+    // F8: context-menu starts hidden; -1 indicates "no item highlighted".
+    context_menu_target = nullptr;
+    context_menu_hover = -1;
+
+    log_debug("radiant_state_create: created state store with mode %d", update_mode);
+    return true;
+}
+
+DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     if (!pool) {
         log_error("radiant_state_create: pool is NULL");
         return NULL;
@@ -889,85 +984,9 @@ DocState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
         return NULL;
     }
 
-    state->pool = pool;
-    state->mode = mode;
-    state->lifecycle = DOC_LIFECYCLE_UNINITIALIZED;
-    state->version = 1;
-    state->zoom_level = 1.0f;
-    state->editing_behavior = EDITING_BEHAVIOR_MAC;
-
-    // Create dedicated arena for state allocations
-    state->arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.arena");
-    if (!state->arena) {
-        log_error("radiant_state_create: failed to create arena");
+    if (!state->init(pool, mode)) {
         return NULL;
     }
-
-    // Create state hashmap
-    state->state_map = hashmap_new(
-        sizeof(StateEntry),
-        64,  // initial capacity
-        0x12345678, 0x87654321,  // hash seeds
-        state_key_hash,
-        state_key_cmp,
-        NULL,  // no element free function
-        NULL   // no user data
-    );
-    if (!state->state_map) {
-        log_error("radiant_state_create: failed to create state_map");
-        arena_destroy(state->arena);
-        return NULL;
-    }
-
-    state->view_state_map = view_state_entry_new(64);
-    if (!state->view_state_map) {
-        log_error("radiant_state_create: failed to create view_state_map");
-        hashmap_free(state->state_map);
-        state->state_map = NULL;
-        arena_destroy(state->arena);
-        state->arena = NULL;
-        return NULL;
-    }
-
-    state->retained_dl_cache = retained_dl_cache_create(pool);
-    if (!state->retained_dl_cache) {
-        log_error("radiant_state_create: failed to create retained display-list cache");
-        hashmap_free(state->view_state_map);
-        state->view_state_map = NULL;
-        hashmap_free(state->state_map);
-        state->state_map = NULL;
-        arena_destroy(state->arena);
-        state->arena = NULL;
-        return NULL;
-    }
-
-    // Initialize dirty tracker arena
-    state->dirty_tracker.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.dirty");
-
-    // Initialize reflow scheduler arena
-    state->reflow_scheduler.arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "state.reflow");
-
-    // Initialize template reactive state: create the map and inject it into
-    // the global template state store so Lambda views use the same map.
-    tmpl_state_init();
-    state->template_state_map = tmpl_state_get_map();
-
-    // Initialize render map for observer-based reconciliation (Phase 3)
-    render_map_init();
-    state->render_map = render_map_get_map();
-
-    // R7 step 3c — register the source-path recorder so apply() persists
-    // child-index paths into the editor bridge's path side-table.
-    render_map_set_path_recorder(&render_map_record_path);
-
-    // Initialize animation scheduler
-    state->animation_scheduler = animation_scheduler_create(pool);
-
-    // F8: context-menu starts hidden; -1 indicates "no item highlighted".
-    state->context_menu_target = nullptr;
-    state->context_menu_hover = -1;
-
-    log_debug("radiant_state_create: created state store with mode %d", mode);
     return state;
 }
 
@@ -989,34 +1008,50 @@ StateStore* state_store_create(DomDocument* document) {
         return NULL;
     }
 
-    store->document = document;
-    store->pool = document->pool;
-    store->arena = mem_arena_create(NULL, document->pool, MEM_ROLE_VIEW, "state.store");
-    if (!store->arena) {
-        log_error("state_store_create: failed to create StateStore arena");
+    if (!store->init(document)) {
         return NULL;
-    }
-
-    store->doc_state = document->state ? document->state : radiant_state_create(document->pool, STATE_MODE_IN_PLACE);
-    if (!store->doc_state) {
-        log_error("state_store_create: failed to create DocState");
-        arena_destroy(store->arena);
-        store->arena = NULL;
-        return NULL;
-    }
-
-    document->state_store = store;
-    document->state = store->doc_state;
-    store->doc_state->owner_store = store;
-    if (store->doc_state->lifecycle == DOC_LIFECYCLE_UNINITIALIZED) {
-        doc_state_set_lifecycle(store->doc_state, DOC_LIFECYCLE_LOADING);
     }
     log_debug("state_store_create: created StateStore for document");
     return store;
 }
 
+bool StateStore::init(DomDocument* owner_document) {
+    if (!owner_document) {
+        log_error("state_store_create: document is NULL");
+        return false;
+    }
+
+    document = owner_document;
+    pool = owner_document->pool;
+    arena = mem_arena_create(NULL, owner_document->pool, MEM_ROLE_VIEW, "state.store");
+    if (!arena) {
+        log_error("state_store_create: failed to create StateStore arena");
+        destroy();
+        return false;
+    }
+
+    doc_state = owner_document->state ? owner_document->state : radiant_state_create(owner_document->pool, STATE_MODE_IN_PLACE);
+    if (!doc_state) {
+        log_error("state_store_create: failed to create DocState");
+        destroy();
+        return false;
+    }
+
+    owner_document->state_store = this;
+    owner_document->state = doc_state;
+    doc_state->owner_store = this;
+    if (doc_state->lifecycle == DOC_LIFECYCLE_UNINITIALIZED) {
+        doc_state_set_lifecycle(doc_state, DOC_LIFECYCLE_LOADING);
+    }
+    return true;
+}
+
 DocState* state_store_doc_state(StateStore* store) {
-    return store ? store->doc_state : NULL;
+    return store ? store->state() : NULL;
+}
+
+DocState* StateStore::state() const {
+    return doc_state;
 }
 
 static uint32_t view_state_detach_node(DocState* state, DomNode* node);
@@ -1057,18 +1092,20 @@ static void state_store_detach_selection_for_unload(DocState* state) {
     selection_finish_active_gesture(state);
 }
 
-void state_store_destroy(DomDocument* document) {
-    if (!document) return;
-    StateStore* store = document->state_store;
-    DocState* state = store ? store->doc_state : document->state;
+void StateStore::destroy() {
+    DomDocument* owner_document = document;
+    DocState* state = doc_state;
+    if (!state && owner_document && owner_document->state_store == this) {
+        state = owner_document->state;
+    }
     if (state) {
         state_begin_batch(state);
         state_store_detach_selection_for_unload(state);
         doc_state_set_hover_target(state, NULL);
         doc_state_set_active_target(state, NULL);
         focus_clear(state);
-        if (document->root) {
-            uint32_t removed = view_state_detach_node(state, static_cast<DomNode*>(document->root));
+        if (owner_document && owner_document->root) {
+            uint32_t removed = view_state_detach_node(state, static_cast<DomNode*>(owner_document->root));
             if (removed > 0) {
                 state->version++;
                 log_debug("state_store_destroy: detached %u ViewState entries before unload", removed);
@@ -1077,17 +1114,37 @@ void state_store_destroy(DomDocument* document) {
         doc_state_set_lifecycle(state, DOC_LIFECYCLE_UNLOADED);
         state_end_batch(state);
         state->owner_store = NULL;
-        radiant_state_destroy(state);
+        state->destroy();
     }
-    if (store && store->arena) {
-        arena_destroy(store->arena);
-        store->arena = NULL;
+    if (arena) {
+        mem_arena_destroy(arena);
+        arena = NULL;
     }
+    if (owner_document) {
+        if (owner_document->state_store == this) {
+            owner_document->state_store = NULL;
+        }
+        if (owner_document->state == state) {
+            owner_document->state = NULL;
+        }
+    }
+    doc_state = NULL;
+    document = NULL;
+    pool = NULL;
+}
+
+void state_store_destroy(DomDocument* document) {
+    if (!document) return;
+    StateStore* store = document->state_store;
     if (store) {
-        store->doc_state = NULL;
+        store->destroy();
+        return;
     }
-    document->state_store = NULL;
-    document->state = NULL;
+
+    StateStore transient = {};
+    transient.document = document;
+    transient.doc_state = document->state;
+    transient.destroy();
 }
 
 DocState* radiant_document_ensure_state(DomDocument* document, const char* owner) {
@@ -1123,6 +1180,9 @@ extern "C" Arena* dom_range_state_arena(DocState* state) {
 }
 extern "C" DomRange** dom_range_state_live_ranges_slot(DocState* state) {
     return state ? (DomRange**)&state->live_ranges : NULL;
+}
+extern "C" DomRange** dom_range_state_range_freelist_slot(DocState* state) {
+    return state ? (DomRange**)&state->range_freelist : NULL;
 }
 extern "C" struct DomSelection* dom_range_state_selection(DocState* state) {
     return state ? state->dom_selection : NULL;
@@ -2050,64 +2110,67 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
               (void*)anc_view, anc_off, (void*)foc_view, foc_off, dom_collapsed);
 }
 
-void radiant_state_destroy(DocState* state) {
-    if (!state) return;
-
+void DocState::destroy() {
     // Detach template state map from global store before destroying
-    if (state->template_state_map) {
+    if (template_state_map) {
         tmpl_state_set_map(NULL);
-        state->template_state_map = NULL;
+        template_state_map = NULL;
     }
 
     // Detach render map from global store before destroying
-    if (state->render_map) {
+    if (render_map) {
         render_map_set_map(NULL);
-        state->render_map = NULL;
+        render_map = NULL;
     }
 
-    if (state->state_map) {
-        hashmap_free(state->state_map);
-        state->state_map = NULL;
+    if (state_map) {
+        hashmap_free(state_map);
+        state_map = NULL;
     }
 
-    if (state->view_state_map) {
-        view_state_release_all_payloads(state->view_state_map);
-        hashmap_free(state->view_state_map);
-        state->view_state_map = NULL;
+    if (view_state_map) {
+        view_state_release_all_payloads(view_state_map);
+        hashmap_free(view_state_map);
+        view_state_map = NULL;
     }
 
-    if (state->retained_dl_cache) {
-        retained_dl_cache_destroy(state->retained_dl_cache);
-        state->retained_dl_cache = NULL;
+    if (retained_dl_cache) {
+        retained_dl_cache_destroy(retained_dl_cache);
+        retained_dl_cache = NULL;
     }
 
-    if (state->arena) {
-        arena_destroy(state->arena);
-        state->arena = NULL;
+    if (arena) {
+        mem_arena_destroy(arena);
+        arena = NULL;
     }
 
-    if (state->dirty_tracker.arena) {
-        arena_destroy(state->dirty_tracker.arena);
-        state->dirty_tracker.arena = NULL;
+    if (dirty_tracker.arena) {
+        mem_arena_destroy(dirty_tracker.arena);
+        dirty_tracker.arena = NULL;
     }
 
-    if (state->reflow_scheduler.arena) {
-        arena_destroy(state->reflow_scheduler.arena);
-        state->reflow_scheduler.arena = NULL;
+    if (reflow_scheduler.arena) {
+        mem_arena_destroy(reflow_scheduler.arena);
+        reflow_scheduler.arena = NULL;
     }
 
-    if (state->visited_links) {
-        visited_links_destroy(state->visited_links);
-        state->visited_links = NULL;
+    if (visited_links) {
+        visited_links_destroy(visited_links);
+        visited_links = NULL;
     }
 
     // Destroy animation scheduler
-    if (state->animation_scheduler) {
-        animation_scheduler_destroy(state->animation_scheduler);
-        state->animation_scheduler = NULL;
+    if (animation_scheduler) {
+        animation_scheduler_destroy(animation_scheduler);
+        animation_scheduler = NULL;
     }
 
     log_debug("radiant_state_destroy: destroyed state store");
+}
+
+void radiant_state_destroy(DocState* state) {
+    if (!state) return;
+    state->destroy();
 }
 
 static void editing_composition_reset(EditingCompositionState* composition) {
@@ -2123,80 +2186,6 @@ static void editing_composition_reset(EditingCompositionState* composition) {
     composition->update_count = 0;
     composition->committed = false;
     composition->canceled = false;
-}
-
-void radiant_state_reset(DocState* state) {
-    if (!state) return;
-
-    // Clear the state map
-    hashmap_clear(state->state_map, false);
-    view_state_release_all_payloads(state->view_state_map);
-    hashmap_clear(state->view_state_map, false);
-
-    // Reset arenas
-    if (state->arena) {
-        arena_reset(state->arena);
-    }
-
-    // Reset global state
-    state->focus = NULL;
-    state->hover_target = NULL;
-    state->active_target = NULL;
-    state->drag_target = NULL;
-    state->caret = NULL;
-    state->selection = NULL;
-    state->cursor = NULL;
-    state->scroll_x = 0;
-    state->scroll_y = 0;
-    state->editing_autoscroll_active = false;
-    state->editing_autoscroll_surface = NULL;
-    state->editing_autoscroll_pointer_x = 0.0f;
-    state->editing_autoscroll_pointer_y = 0.0f;
-    state->editing_tick_last_time = 0.0;
-    state->editing_caret_blink_elapsed = 0.0;
-    editing_surface_clear(&state->editing.active_surface);
-    state->editing.has_active_surface = false;
-    state->editing.pointer_selecting = false;
-    state->editing.drag_mode = EDITING_DRAG_CHAR;
-    state->editing.drag_anchor_view = NULL;
-    state->editing.drag_anchor_offset = 0;
-    state->editing.composing = false;
-    editing_composition_reset(&state->editing.composition);
-    state->editing.autoscroll.active = false;
-    state->editing.autoscroll.surface = NULL;
-    state->editing.autoscroll.pointer_x = 0.0f;
-    state->editing.autoscroll.pointer_y = 0.0f;
-    state->editing.autoscroll.tick_last_time = 0.0;
-    state->editing.autoscroll.caret_blink_elapsed = 0.0;
-    state->editing.rich_transaction_phase = EDITING_RICH_TX_IDLE;
-    state->editing.rich_transaction_target = NULL;
-    state->editing.rich_transaction_target_ranges_active = false;
-    state->editing.rich_transaction_target_ranges_required = false;
-    state->editing.rich_transaction_target_ranges_valid = true;
-    state->editing.rich_transaction_input_type = 0;
-    state->editing.rich_transaction_selection_seq = 0;
-    state->editing.rich_transaction_target_range_count = 0;
-    state->editing.inline_format_state = 0;
-    state->editing.inline_format_state_mask = 0;
-    memset(state->editing.rich_transaction_target_ranges, 0,
-           sizeof(state->editing.rich_transaction_target_ranges));
-
-    // Reset dirty state
-    state->is_dirty = false;
-    state->needs_reflow = false;
-    state->needs_repaint = false;
-    dirty_clear(&state->dirty_tracker);
-    reflow_clear(state);
-
-    // Clear template reactive state
-    tmpl_state_reset();
-
-    // Clear render map
-    render_map_reset();
-
-    state->version++;
-
-    log_debug("radiant_state_reset: reset state store to version %llu", state->version);
 }
 
 void editing_interaction_set_active_surface(DocState* state,

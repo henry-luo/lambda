@@ -14,7 +14,7 @@ extern "C" {
 
 RdtVideo* rdt_video_create(const RdtVideoCallbacks* cb, void* userdata) {
     (void)cb; (void)userdata;
-    RdtVideo* v = (RdtVideo*)mem_calloc(1, sizeof(RdtVideo), MEM_CAT_RENDER);
+    RdtVideo* v = (RdtVideo*)mem_calloc(1, sizeof(RdtVideo), MEM_CAT_RENDER); // OBJ_HEAP_OK: video backend handle owns platform state until rdt_video_destroy.
     if (v) v->state = RDT_VIDEO_STATE_IDLE;
     return v;
 }

@@ -399,24 +399,41 @@ bool te_blur_should_dispatch_change(DomElement* elem) {
 // ---------- undo/redo ring (skeleton) ----------------------------------
 
 EditHistory* te_history_new(uint16_t cap) {
-    if (cap == 0) cap = TE_HISTORY_DEFAULT_CAP;
     EditHistory* h = (EditHistory*)mem_calloc(1, sizeof(EditHistory), MEM_CAT_DOM);
     if (!h) return nullptr;
-    h->ring = (EditHistoryEntry*)mem_calloc(cap, sizeof(EditHistoryEntry), MEM_CAT_DOM);
-    if (!h->ring) { mem_free(h); return nullptr; }
-    h->cap = cap;
+    if (!h->init(cap)) {
+        mem_free(h);
+        return nullptr;
+    }
     return h;
 }
 
 void te_history_free(EditHistory* h) {
     if (!h) return;
-    if (h->ring) {
-        for (uint16_t i = 0; i < h->cap; i++) {
-            if (h->ring[i].snapshot) mem_free(h->ring[i].snapshot);
-        }
-        mem_free(h->ring);
-    }
+    h->destroy();
     mem_free(h);
+}
+
+bool EditHistory::init(uint16_t capacity) {
+    if (capacity == 0) capacity = TE_HISTORY_DEFAULT_CAP;
+    ring = (EditHistoryEntry*)mem_calloc(capacity, sizeof(EditHistoryEntry), MEM_CAT_DOM);
+    if (!ring) return false;
+    cap = capacity;
+    return true;
+}
+
+void EditHistory::destroy() {
+    if (ring) {
+        for (uint16_t i = 0; i < cap; i++) {
+            if (ring[i].snapshot) mem_free(ring[i].snapshot);
+        }
+        mem_free(ring);
+        ring = nullptr;
+    }
+    cap = 0;
+    head = 0;
+    count = 0;
+    cursor = 0;
 }
 
 static EditHistory* tc_get_or_create_history(FormControlProp* f) {

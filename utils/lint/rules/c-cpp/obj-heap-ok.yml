@@ -1,0 +1,15 @@
+id: obj-heap-ok
+language: cpp
+severity: warning
+message: >-
+  Typed struct heap allocation in Radiant should be reviewed as a long-lived
+  heap root. Add "// OBJ_HEAP_OK: <reason>" when it has no natural pool/scratch
+  owner; otherwise move it to the correct lifetime owner.
+metadata:
+  suppress: OBJ_HEAP_OK
+rule:
+  pattern:
+    context: "void f() { $T* $V = ($T*)mem_calloc($$$A); }"
+    selector: declaration
+files:
+  - "radiant/**/*.{c,cpp,h,hpp,mm}"

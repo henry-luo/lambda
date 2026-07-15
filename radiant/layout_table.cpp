@@ -5,6 +5,7 @@
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
 #include "../lib/arraylist.hpp"
+#include "../lib/utf.h"
 // str.h included via view.hpp
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
@@ -753,6 +754,187 @@ static bool table_view_has_cell_line_content(View* view) {
     return true;
 }
 
+struct TableCellContentExtent {
+    bool has_content;
+    float min_y;
+    float max_y;
+    bool has_line_y;
+    float line_min_y;
+    float line_max_y;
+    float last_line_y;
+    float max_line_height;
+    float max_line_gap;
+};
+
+static void table_note_cell_content_extent(TableCellContentExtent* extent,
+                                           float top, float bottom) {
+    if (!extent) return;
+    if (!extent->has_content || top < extent->min_y) {
+        extent->min_y = top;
+    }
+    if (!extent->has_content || bottom > extent->max_y) {
+        extent->max_y = bottom;
+    }
+    extent->has_content = true;
+}
+
+static void table_note_cell_line_position(TableCellContentExtent* extent,
+                                          float top, float line_height) {
+    if (!extent) return;
+    if (!extent->has_line_y) {
+        extent->line_min_y = top;
+        extent->line_max_y = top;
+        extent->last_line_y = top;
+        extent->has_line_y = true;
+    } else {
+        if (top < extent->line_min_y) extent->line_min_y = top;
+        if (top > extent->line_max_y) extent->line_max_y = top;
+        float gap = top - extent->last_line_y;
+        if (gap < 0.0f) gap = -gap;
+        if (gap > 0.5f && gap > extent->max_line_gap) {
+            extent->max_line_gap = gap;
+        }
+        if (gap > 0.5f) extent->last_line_y = top;
+    }
+    if (line_height > extent->max_line_height) {
+        extent->max_line_height = line_height;
+    }
+}
+
+static float table_inline_line_stack_height(const TableCellContentExtent* extent) {
+    if (!extent || !extent->has_content) return 0.0f;
+    float line_stack_height = extent->max_y - extent->min_y;
+    if (extent->has_line_y) {
+        float line_unit = extent->max_line_height;
+        if (extent->max_line_gap > line_unit) {
+            // wrapped text rects expose the actual line pitch even when the
+            // style lookup has fallen back to the shorter glyph box height.
+            line_unit = extent->max_line_gap;
+        }
+        float positioned_height = extent->line_max_y - extent->line_min_y + line_unit;
+        if (positioned_height > line_stack_height) line_stack_height = positioned_height;
+    }
+    return line_stack_height;
+}
+
+static float table_text_font_normal_line_height(ViewText* text, FontProp* font,
+                                                bool* has_cjk_text) {
+    if (has_cjk_text) *has_cjk_text = false;
+    if (!text || !font) return 0.0f;
+    const char* data = reinterpret_cast<const char*>(text->text_data());
+    size_t len = text->length;
+    if (!data || len == 0) return 0.0f;
+
+    FontHandle* handle = font->font_handle;
+    if (!handle) return 0.0f;
+
+    FontStyleDesc style = font_style_desc_from_prop(font);
+    float max_normal_line_height = 0.0f;
+    size_t pos = 0;
+    while (pos < len) {
+        uint32_t cp = 0;
+        int consumed = utf8_decode(data + pos, len - pos, &cp);
+        if (consumed <= 0) break;
+        if (has_cjk_text && utf_is_cjk(cp)) *has_cjk_text = true;
+        LoadedGlyph* glyph = font_load_glyph(handle, &style, cp, false);
+        if (glyph && glyph->font_normal_line_height > max_normal_line_height) {
+            max_normal_line_height = glyph->font_normal_line_height;
+        }
+        pos += (size_t)consumed;
+    }
+    return max_normal_line_height;
+}
+
+static float table_cell_line_box_height_for_view(View* view, float cell_line_height,
+                                                 bool line_height_is_normal,
+                                                 float parent_font_size,
+                                                 FontProp* cell_font) {
+    if (!view) return cell_line_height;
+    float view_height = view->height;
+    if (line_height_is_normal && view->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
+        FontProp* text_font = text->font ? text->font : cell_font;
+        bool has_cjk_text = false;
+        float fallback_line_height = table_text_font_normal_line_height(
+            text, text_font, &has_cjk_text);
+        if (fallback_line_height > cell_line_height) {
+            // normal line-height uses the actual fallback glyph font; otherwise
+            // table rows with kana measure only the primary font's shorter strut.
+            cell_line_height = fallback_line_height;
+        } else if (has_cjk_text) {
+            float cjk_line_height = get_cjk_system_line_height(parent_font_size);
+            if (cjk_line_height > cell_line_height) {
+                // match line layout: only actual CJK text gets the browser's
+                // cjk strut; applying it to ASCII inflates compact table rows.
+                cell_line_height = cjk_line_height;
+            }
+        }
+    }
+    return max(cell_line_height > 0.0f ? cell_line_height : 0.0f, view_height);
+}
+
+static void table_collect_inline_line_box_extent(View* view, float cell_line_height,
+                                                 bool line_height_is_normal,
+                                                 float parent_font_size,
+                                                 FontProp* cell_font,
+                                                 TableCellContentExtent* extent) {
+    if (!view || !view->view_type || table_cell_vertical_align_skips_child(view)) return;
+
+    if (view->view_type == RDT_VIEW_TEXT || view->view_type == RDT_VIEW_BR) {
+        float line_height = cell_line_height;
+        if (line_height_is_normal && view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
+            FontProp* text_font = text->font ? text->font : cell_font;
+            bool has_cjk_text = false;
+            float fallback_line_height = table_text_font_normal_line_height(
+                text, text_font, &has_cjk_text);
+            if (fallback_line_height > line_height) {
+                line_height = fallback_line_height;
+            } else if (has_cjk_text) {
+                float cjk_line_height = get_cjk_system_line_height(parent_font_size);
+                if (cjk_line_height > line_height) line_height = cjk_line_height;
+            }
+        }
+        if (line_height <= 0.0f) line_height = view->height;
+
+        if (view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
+            bool noted_rect = false;
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                float rect_line_height = max(line_height, rect->height);
+                table_note_cell_content_extent(extent, rect->y, rect->y + rect_line_height);
+                table_note_cell_line_position(extent, rect->y, rect_line_height);
+                noted_rect = true;
+            }
+            if (noted_rect) return;
+        }
+
+        float child_top = view->y;
+        table_note_cell_content_extent(extent, child_top, child_top + line_height);
+        table_note_cell_line_position(extent, child_top, line_height);
+        return;
+    }
+
+    if (view->view_type == RDT_VIEW_INLINE) {
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        if (table_inline_span_is_phantom_for_cell_height(span)) return;
+        for (View* child = span->first_child; child; child = child->next_sibling) {
+            table_collect_inline_line_box_extent(child, cell_line_height,
+                                                 line_height_is_normal,
+                                                 parent_font_size, cell_font, extent);
+        }
+        return;
+    }
+
+    if (view->view_type == RDT_VIEW_INLINE_BLOCK ||
+        view->view_type == RDT_VIEW_BLOCK ||
+        view->view_type == RDT_VIEW_LIST_ITEM ||
+        view->view_type == RDT_VIEW_TABLE) {
+        float child_top = view->y;
+        table_note_cell_content_extent(extent, child_top, child_top + view->height);
+    }
+}
+
 // Measure content height from cell's children
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
     bool has_block_content = false;
@@ -772,6 +954,19 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     }
     setup_line_height(lycon, tcell);
     float cell_line_height = lycon->block.line_height;
+    bool cell_line_height_is_normal = lycon->block.line_height_is_normal;
+    float cell_font_size = tcell->font && tcell->font->font_size > 0.0f
+        ? tcell->font->font_size
+        : lycon->font.current_font_size;
+    if (tcell->blk && tcell->blk->line_height && tcell->font) {
+        float specified_line_height = layout_resolve_line_height_value(
+            lycon, tcell->blk->line_height, tcell, tcell->font->font_size);
+        if (specified_line_height > cell_line_height) {
+            // unitless inherited line-height must resolve against the cell font;
+            // a stale layout font strut makes table rows shorter than their lines.
+            cell_line_height = specified_line_height;
+        }
+    }
 
     // Restore context
     lycon->font = saved_font;
@@ -785,7 +980,9 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // CSS 2.1 §17.5.3: "The height of a cell box is the minimum height required by the content"
             float text_top = text->y;
             // Use the maximum of CSS line-height and actual text bounding box height for each line
-            float text_height = max(cell_line_height > 0 ? cell_line_height : 0.0f, text->height);
+            float text_height = table_cell_line_box_height_for_view(
+                child, cell_line_height, cell_line_height_is_normal, cell_font_size,
+                tcell->font);
             float text_bottom = text_top + text_height;
 
             if (!has_inline_content || text_top < inline_content_min_y) {
@@ -828,23 +1025,38 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // calculation. The view height includes border+padding for visual rendering,
             // but for line box purposes we use the element's resolved line-height
             // (stored in content_height during layout_inline).
+            float child_top = child->y;
+            float child_bottom = child->y + child_height;
             if (child->view_type == RDT_VIEW_INLINE) {
+                TableCellContentExtent inline_extent = {};
+                // inline child coordinates are already relative to the table cell;
+                // adding ancestor span offsets here double-counts line placement.
+                table_collect_inline_line_box_extent(child, cell_line_height,
+                                                     cell_line_height_is_normal,
+                                                     cell_font_size, tcell->font,
+                                                     &inline_extent);
                 if (block->content_height > 0) {
-                    // Inline descendants can resolve normal line-height against
-                    // their own font; the cell strut is only a fallback when the
-                    // span made no line-height contribution of its own.
-                    child_height = block->content_height;
+                    // inline descendants can wrap without expanding the span's visual
+                    // border box; table rows must honor the descendant line-box extent.
+                    child_height = max(child_height, block->content_height);
                 } else if (cell_line_height > child_height) {
                     child_height = cell_line_height;
                 }
+                if (inline_extent.has_content) {
+                    float inline_line_box_height = table_inline_line_stack_height(&inline_extent);
+                    if (inline_line_box_height > child_height) {
+                        // descendant line positions reveal wrapped line-box
+                        // height, but their coordinate origin may be the span.
+                        child_height = inline_line_box_height;
+                    }
+                }
+                child_bottom = child->y + child_height;
             }
 
             // Track the min y and max bottom of block content for stacked blocks
             // CSS 2.1 §9.4.1: Table cells establish a BFC. Child margins don't collapse
             // through the cell boundary, so they must be included in the content extent.
             // Include margin_top of first child and margin_bottom of last child.
-            float child_top = child->y;
-            float child_bottom = child->y + child_height;
             if (block->bound) {
                 // CSS 2.1 §8.3.1: Self-collapsing blocks (height=0, no border/padding)
                 // have their margin.bottom set to a "pending chain" value from the margin
@@ -915,6 +1127,11 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
         has_any = true;
     }
     float content_height = has_any ? (overall_max_y - overall_min_y) : 0.0f;
+    if (has_inline_content && tcell->content_height > content_height) {
+        // table cell row sizing is based on line boxes; inline DOMRects only
+        // cover glyph ink and can drop explicit line-height leading.
+        content_height = tcell->content_height;
+    }
     if (!has_any && tcell->content_height > content_height) {
         // Replaced-only spacer cells measure from their child boxes; the line
         // advance fallback would incorrectly add the table cell's font strut.
@@ -3781,10 +3998,13 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     cell->td->col_index = -1;
     cell->td->row_index = -1;
     cell->td->is_empty = is_cell_empty(cell) ? 1 : 0;  // Check if cell has no content
-    // CSS 2.1: Default vertical-align is 'baseline' (initial value)
-    // HTML TD/TH elements get 'middle' via UA stylesheet (set in resolve_htm_style.cpp)
-    // For CSS display:table-cell, baseline alignment positions single-line text at top
-    cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
+    // css table cells default to baseline, but real HTML td/th elements have
+    // ua middle alignment; table structure can be parsed before the UA inline
+    // property is attached, so keep that HTML fallback here too.
+    uintptr_t tag = cellNode->tag();
+    cell->td->vertical_align = (tag == HTM_TAG_TD || tag == HTM_TAG_TH)
+        ? TableCellProp::CELL_VALIGN_MIDDLE
+        : TableCellProp::CELL_VALIGN_BASELINE;
     if (!cellNode->is_element()) return;
 
     if (cellNode->node_type == DOM_NODE_ELEMENT) {

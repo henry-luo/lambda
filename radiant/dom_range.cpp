@@ -72,6 +72,7 @@ __attribute__((weak)) void tc_ensure_init(DomElement* /*elem*/) {
 struct Arena;
 extern "C" Arena*    dom_range_state_arena(DocState* state);
 extern "C" DomRange** dom_range_state_live_ranges_slot(DocState* state);
+extern "C" DomRange** dom_range_state_range_freelist_slot(DocState* state);
 extern "C" struct DomSelection* dom_range_state_selection(DocState* state);
 
 // ============================================================================
@@ -244,15 +245,24 @@ DomRange* dom_range_create(DocState* state) {
         log_error("dom_range_create: NULL state");
         return NULL;
     }
-    Arena* arena = dom_range_state_arena(state);
-    if (!arena) {
-        log_error("dom_range_create: state has no arena");
-        return NULL;
-    }
-    DomRange* r = (DomRange*)arena_alloc(arena, sizeof(DomRange));
-    if (!r) {
-        log_error("dom_range_create: arena_alloc failed");
-        return NULL;
+    DomRange* r = NULL;
+    DomRange** freelist = dom_range_state_range_freelist_slot(state);
+    if (freelist && *freelist) {
+        // released ranges stay in the document arena; reusing slots keeps
+        // create/release churn from growing that arena for the document lifetime.
+        r = *freelist;
+        *freelist = r->next;
+    } else {
+        Arena* arena = dom_range_state_arena(state);
+        if (!arena) {
+            log_error("dom_range_create: state has no arena");
+            return NULL;
+        }
+        r = (DomRange*)arena_alloc(arena, sizeof(DomRange));
+        if (!r) {
+            log_error("dom_range_create: arena_alloc failed");
+            return NULL;
+        }
     }
     memset(r, 0, sizeof(*r));
     r->state = state;
@@ -278,7 +288,15 @@ void dom_range_release(DomRange* range) {
     }
     range->ref_count--;
     if (range->ref_count == 0) {
-        dom_range_unlink_from_state(range->state, range);
+        DocState* state = range->state;
+        dom_range_unlink_from_state(state, range);
+        DomRange** freelist = dom_range_state_range_freelist_slot(state);
+        if (freelist) {
+            range->is_live = false;
+            range->prev = NULL;
+            range->next = *freelist;
+            *freelist = range;
+        }
         // Memory itself is arena-owned; freed at state teardown.
     }
 }

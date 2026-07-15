@@ -1891,6 +1891,26 @@
                         "icon": "🔤"
                     },
                     {
+                        "source": "lib/test_font_context_gtest.cpp",
+                        "name": "Font Context Tests",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/font/font_context_glyph_cache.c",
+                            "lib/arena.c",
+                            "lib/hashmap.c",
+                            "lib/log.c",
+                            "lib/mempool.c",
+                            "lib/str.c",
+                            "lib/utf.c"
+                        ],
+                        "binary": "test_font_context_gtest.exe",
+                        "icon": "🔤"
+                    },
+                    {
                         "source": "lib/test_woff2_gtest.cpp",
                         "name": "WOFF2 Font Decompression Tests",
                         "dependencies": [

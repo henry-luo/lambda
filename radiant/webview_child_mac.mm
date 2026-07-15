@@ -229,7 +229,7 @@ WebViewHandle* webview_platform_create(GLFWwindow* window,
         [content_view addSubview:wk_view];
 
         // allocate handle
-        WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT);
+        WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: platform webview handle is released by webview_platform_destroy.
         handle->wk_view = wk_view;
         handle->parent_view = content_view;
         handle->pixel_ratio = pixel_ratio;

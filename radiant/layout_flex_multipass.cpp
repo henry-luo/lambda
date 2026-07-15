@@ -545,7 +545,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     // CRITICAL: Initialize flex container properties for this container
     // This must be done BEFORE running the flex algorithm so it uses
     // the correct direction, wrap, justify, etc. from CSS
-    init_flex_container(lycon, flex_container);
+    FlexLayoutScope flex_scope(lycon, flex_container);
 
     log_debug("Starting enhanced flex layout for container %p", flex_container);
 
@@ -868,8 +868,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     reposition_baseline_items(lycon, flex_container);
 
     // Restore parent flex context
-    cleanup_flex_container(lycon);
-    lycon->flex_container = pa_flex;
+    flex_scope.close();
 
     log_info("ENHANCED FLEX ALGORITHM END: container=%p", flex_container);
     log_leave();
@@ -2024,7 +2023,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // Height restoration is keyed by flex-item order; allocate to the actual item count
     // so documents with more than 256 items do not silently lose aspect/realign state.
     float* original_heights = original_height_count > 0
-        ? (float*)mem_calloc((size_t)original_height_count, sizeof(float), MEM_CAT_LAYOUT)
+        ? (float*)scratch_calloc(&lycon->scratch, (size_t)original_height_count * sizeof(float))
         : nullptr;
     if (original_height_count > 256) {
         log_warn("[RAD_CAP_FLEX_ORIGINAL_HEIGHTS] tracking %d flex item heights beyond legacy cap 256 for %s",
@@ -2637,7 +2636,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
 
     log_info("FINAL FLEX CONTENT LAYOUT END: container=%p", flex_container);
     if (original_heights) {
-        mem_free(original_heights);
+        scratch_free(&lycon->scratch, original_heights);
     }
     log_leave();
 }

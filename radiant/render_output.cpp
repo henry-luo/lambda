@@ -40,7 +40,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
                                            int total_width, int total_height);
 
 static void init_render_pool_once() {
-    g_render_pool = (RenderPool*)mem_calloc(1, sizeof(RenderPool), MEM_CAT_RENDER);
+    g_render_pool = (RenderPool*)mem_calloc(1, sizeof(RenderPool), MEM_CAT_RENDER); // OBJ_HEAP_OK: process render worker pool singleton.
     render_pool_init(g_render_pool, g_render_pool_threads);
 }
 
@@ -111,7 +111,7 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
     int layout_height = viewport_height > 0 ? viewport_height : fallback_height;
     session->scale = scale > 0.0f ? scale : 1.0f;
 
-    session->ui_context = (UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER);
+    session->ui_context = (UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER); // OBJ_HEAP_OK: export session owns the headless UI context shell.
     if (!session->ui_context) {
         log_error("[EXPORT_SESSION] Failed to allocate headless UI context");
         return false;
@@ -279,6 +279,22 @@ static void render_output_cleanup_context(RenderContext* rdcon) {
     rdt_vector_destroy(&rdcon->vec);
 }
 
+RenderFrameScope::RenderFrameScope(RenderContext* r, UiContext* uicon, ViewTree* view_tree,
+                                   RenderProfiler* profiler)
+    : rdcon(r), display_list{}, context_active(false), display_list_active(false) {
+    if (!rdcon || !view_tree) return;
+    render_output_init_context(rdcon, uicon, view_tree, profiler);
+    context_active = true;
+    dl_init(&display_list, view_tree->arena);
+    display_list_active = true;
+    rdcon->dl = &display_list;
+}
+
+RenderFrameScope::~RenderFrameScope() {
+    if (display_list_active) dl_destroy(&display_list);
+    if (context_active) render_output_cleanup_context(rdcon);
+}
+
 static uint32_t render_output_canvas_background(View* root_view) {
     if (!root_view || root_view->view_type != RDT_VIEW_BLOCK) {
         return 0xFFFFFFFF;
@@ -378,12 +394,23 @@ static RenderOutputReplayResult render_output_replay_display_list(RenderContext*
         ImageSurface* surface = rdcon->ui_context->surface;
         TileGrid grid;
         tile_grid_init(&grid, surface->width, surface->height, rdcon->scale);
+        if (grid.total <= 0) {
+            log_error("[RENDER] tile grid initialization failed for %dx%d surface",
+                      surface->width, surface->height);
+            return result;
+        }
         tile_grid_clear(&grid, canvas_bg);
 
         g_render_pool_threads = render_threads;
         pthread_once(&g_render_pool_once, init_render_pool_once);
 
-        TileJob* jobs = (TileJob*)mem_alloc(grid.total * sizeof(TileJob), MEM_CAT_RENDER);
+        // Render jobs are frame-scoped; scratch allocation prevents queue storage from outliving dispatch.
+        TileJob* jobs = (TileJob*)scratch_calloc(&rdcon->scratch, (size_t)grid.total * sizeof(TileJob));
+        if (!jobs) {
+            log_error("[RENDER] failed to allocate %d tile jobs", grid.total);
+            tile_grid_destroy(&grid);
+            return result;
+        }
         for (int i = 0; i < grid.total; i++) {
             jobs[i].tile = &grid.tiles[i];
             jobs[i].display_list = display_list;
@@ -398,7 +425,7 @@ static RenderOutputReplayResult render_output_replay_display_list(RenderContext*
         result.tile_count = grid.total;
         result.thread_count = g_render_pool ? g_render_pool->thread_count : 1;
 
-        mem_free(jobs);
+        scratch_free(&rdcon->scratch, jobs);
         tile_grid_destroy(&grid);
         return result;
     }
@@ -435,7 +462,8 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     render_profiler_reset(&profiler);
     RenderContext rdcon;
     log_debug("Render HTML doc");
-    render_output_init_context(&rdcon, uicon, view_tree, &profiler);
+    RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler);
+    DisplayList& display_list = *frame.list();
 
     uint32_t canvas_bg = render_output_canvas_background(view_tree->root);
     DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
@@ -443,9 +471,6 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         render_output_clear_surface(&rdcon, view_tree, state, canvas_bg);
     bool selective = clear_result.selective;
 
-    DisplayList display_list = {};
-    dl_init(&display_list, view_tree->arena);
-    rdcon.dl = &display_list;
     retained_dl_cache_begin_frame(rdcon.retained_dl_cache);
 
     auto t_init = high_resolution_clock::now();
@@ -470,8 +495,6 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
             (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
     }
     if (!dl_validate_or_log(&display_list, "render_output_raster")) {
-        dl_destroy(&display_list);
-        render_output_cleanup_context(&rdcon);
         return 1;
     }
     retained_dl_cache_capture(rdcon.retained_dl_cache, &display_list);
@@ -534,8 +557,6 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         log_info("[TIMING] save_to_file: %.1fms", duration<double, std::milli>(t_save - t_sync).count());
     }
 
-    dl_destroy(&display_list);
-    render_output_cleanup_context(&rdcon);
     if (uicon->document && uicon->document->state) {
         doc_state_clear_render_flags(uicon->document->state);
     }
@@ -720,15 +741,12 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
     RenderProfiler profiler;
     render_profiler_reset(&profiler);
     RenderContext rdcon;
-    render_output_init_context(&rdcon, uicon, view_tree, &profiler);
+    RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler);
+    DisplayList& display_list = *frame.list();
 
     // Record the full page once. Use the whole page as the root clip so nothing
     // is culled at record time; per-strip culling happens during replay.
     rdcon.block.clip = {0, 0, (float)total_width, (float)total_height};
-
-    DisplayList display_list = {};
-    dl_init(&display_list, view_tree->arena);
-    rdcon.dl = &display_list;
 
     auto t_record_start = high_resolution_clock::now();
     render_output_render_view_tree(&rdcon, view_tree);
@@ -738,8 +756,6 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         duration<double, std::milli>(t_record_end - t_record_start).count(),
         dl_item_count(&display_list));
     if (!dl_validate_or_log(&display_list, "render_output_tiled_png")) {
-        dl_destroy(&display_list);
-        render_output_cleanup_context(&rdcon);
         image_surface_destroy(rec_surf);
         uicon->surface = saved_surface;
         uicon->window_height = saved_window_height;
@@ -805,8 +821,6 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
     render_output_trace_retained_stats(&trace, rdcon.retained_dl_cache);
     render_profiler_emit_path_trace(rdcon.profiler, uicon, rstate, &trace);
 
-    dl_destroy(&display_list);
-    render_output_cleanup_context(&rdcon);
     image_surface_destroy(rec_surf);
 
     uicon->surface = saved_surface;

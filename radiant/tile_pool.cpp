@@ -9,6 +9,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/mem.h"
 #include "../lib/memtrack.h"
+#include "../lib/checked_math.hpp"
 #include <string.h>
 #include <math.h>
 #include <chrono>
@@ -31,25 +32,41 @@ static inline int get_cpu_count() { return (int)sysconf(_SC_NPROCESSORS_ONLN); }
 // TileGrid
 // ============================================================================
 
-void tile_grid_init(TileGrid* grid, int surface_w, int surface_h, float scale) {
-    memset(grid, 0, sizeof(TileGrid));
-    grid->scale = scale;
-    grid->surface_w = surface_w;
-    grid->surface_h = surface_h;
+void TileGrid::init(int surface_w, int surface_h, float scale) {
+    memset(this, 0, sizeof(TileGrid));
+    this->scale = scale;
+    this->surface_w = surface_w;
+    this->surface_h = surface_h;
 
     int tile_px = (int)(TILE_SIZE_CSS * scale);
     if (tile_px <= 0) tile_px = TILE_SIZE_CSS;
 
-    grid->cols = (surface_w + tile_px - 1) / tile_px;
-    grid->rows = (surface_h + tile_px - 1) / tile_px;
-    grid->total = grid->cols * grid->rows;
+    cols = (surface_w + tile_px - 1) / tile_px;
+    rows = (surface_h + tile_px - 1) / tile_px;
+    total = cols * rows;
 
-    grid->tiles = (Tile*)mem_calloc(grid->total, sizeof(Tile), MEM_CAT_RENDER);
+    size_t pixel_count = 0;
+    if (!lam::checked_mul((size_t)surface_w, (size_t)surface_h, &pixel_count)) {
+        log_error("[TILE_GRID] pixel slab size overflow for surface=%dx%d", surface_w, surface_h);
+        memset(this, 0, sizeof(TileGrid));
+        return;
+    }
 
-    for (int r = 0; r < grid->rows; r++) {
-        for (int c = 0; c < grid->cols; c++) {
-            int idx = r * grid->cols + c;
-            Tile* tile = &grid->tiles[idx];
+    tiles = (Tile*)mem_calloc(total, sizeof(Tile), MEM_CAT_RENDER);
+    // Tile buffers are slices of one slab so grid teardown cannot miss per-tile allocations.
+    pixel_slab = (uint32_t*)mem_calloc(pixel_count, sizeof(uint32_t), MEM_CAT_RENDER);
+    pixel_slab_count = pixel_count;
+    if (!tiles || !pixel_slab) {
+        log_error("[TILE_GRID] failed to allocate %d tiles and %zu pixels", total, pixel_count);
+        destroy();
+        return;
+    }
+
+    uint32_t* next_pixels = pixel_slab;
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            int idx = r * cols + c;
+            Tile* tile = &tiles[idx];
             tile->col = c;
             tile->row = r;
             tile->x = (float)(c * tile_px);
@@ -61,31 +78,31 @@ void tile_grid_init(TileGrid* grid, int surface_w, int surface_h, float scale) {
             tile->w = (float)tile->pixel_w;
             tile->h = (float)tile->pixel_h;
             tile->stride = tile->pixel_w;
-            tile->pixels = (uint32_t*)mem_calloc(tile->pixel_w * tile->pixel_h,
-                                                  sizeof(uint32_t), MEM_CAT_RENDER);
+            tile->pixels = next_pixels;
+            next_pixels += (size_t)tile->pixel_w * (size_t)tile->pixel_h;
         }
     }
 
     log_debug("[TILE_GRID] %dx%d tiles (%d total), tile_px=%d, surface=%dx%d scale=%.1f",
-              grid->cols, grid->rows, grid->total, tile_px, surface_w, surface_h, scale);
+              cols, rows, total, tile_px, surface_w, surface_h, scale);
 }
 
-void tile_grid_destroy(TileGrid* grid) {
-    if (grid->tiles) {
-        for (int i = 0; i < grid->total; i++) {
-            if (grid->tiles[i].pixels) {
-                mem_free(grid->tiles[i].pixels);
-            }
-        }
-        mem_free(grid->tiles);
-        grid->tiles = nullptr;
+void TileGrid::destroy() {
+    if (tiles) {
+        mem_free(tiles);
+        tiles = nullptr;
     }
-    grid->total = 0;
+    if (pixel_slab) {
+        mem_free(pixel_slab);
+        pixel_slab = nullptr;
+    }
+    pixel_slab_count = 0;
+    total = 0;
 }
 
-void tile_grid_clear(TileGrid* grid, uint32_t color) {
-    for (int i = 0; i < grid->total; i++) {
-        Tile* tile = &grid->tiles[i];
+void TileGrid::clear(uint32_t color) {
+    for (int i = 0; i < total; i++) {
+        Tile* tile = &tiles[i];
         uint32_t* px = tile->pixels;
         int count = tile->pixel_w * tile->pixel_h;
         if (color == 0) {
@@ -98,13 +115,13 @@ void tile_grid_clear(TileGrid* grid, uint32_t color) {
     }
 }
 
-void tile_grid_composite(TileGrid* grid, ImageSurface* surface) {
+void TileGrid::composite(ImageSurface* surface) {
     if (!surface || !surface->pixels) return;
     uint32_t* dst = (uint32_t*)surface->pixels;
     int dst_stride = surface->pitch / 4;  // pitch is in bytes, stride in pixels
 
-    for (int i = 0; i < grid->total; i++) {
-        Tile* tile = &grid->tiles[i];
+    for (int i = 0; i < total; i++) {
+        Tile* tile = &tiles[i];
         int tx = (int)tile->x;
         int ty = (int)tile->y;
 
@@ -118,6 +135,22 @@ void tile_grid_composite(TileGrid* grid, ImageSurface* surface) {
     }
 }
 
+void tile_grid_init(TileGrid* grid, int surface_w, int surface_h, float scale) {
+    if (grid) grid->init(surface_w, surface_h, scale);
+}
+
+void tile_grid_destroy(TileGrid* grid) {
+    if (grid) grid->destroy();
+}
+
+void tile_grid_clear(TileGrid* grid, uint32_t color) {
+    if (grid) grid->clear(color);
+}
+
+void tile_grid_composite(TileGrid* grid, ImageSurface* surface) {
+    if (grid) grid->composite(surface);
+}
+
 // ============================================================================
 // RenderPool — worker pool
 // ============================================================================
@@ -126,17 +159,21 @@ void tile_grid_composite(TileGrid* grid, ImageSurface* surface) {
 static thread_local WorkerState tl_worker = {};
 
 static void worker_init_local(Tile* tile) {
-    if (tl_worker.initialized) return;
+    tl_worker.init(tile);
+}
+
+void WorkerState::init(Tile* tile) {
+    if (initialized) return;
     // Initialize memory pool first — this calls ensure_rpmalloc_initialized()
     // which must happen before any malloc/new calls on this thread (rpmalloc
     // interposes on malloc; without per-thread init the shared fallback heap
     // is used, which is not thread-safe).
-    tl_worker.pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "tile.worker");
-    tl_worker.arena = mem_arena_create(NULL, tl_worker.pool, MEM_ROLE_RENDER, "tile.arena");
-    mem_scratch_init(NULL, &tl_worker.scratch, tl_worker.arena, MEM_ROLE_RENDER, "tile.scratch");
+    pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "tile.worker");
+    arena = mem_arena_create(NULL, pool, MEM_ROLE_RENDER, "tile.arena");
+    mem_scratch_init(NULL, &scratch, arena, MEM_ROLE_RENDER, "tile.scratch");
     // Now safe to create ThorVG canvas (internally uses malloc/new)
-    rdt_vector_init(&tl_worker.vec, tile->pixels, tile->pixel_w, tile->pixel_h, tile->stride);
-    tl_worker.initialized = true;
+    rdt_vector_init(&vec, tile->pixels, tile->pixel_w, tile->pixel_h, tile->stride);
+    initialized = true;
     log_debug("[WORKER] thread-local ThorVG canvas + scratch arena initialised");
 }
 
@@ -197,19 +234,28 @@ static void* worker_thread_fn(void* arg) {
     }
 
     // cleanup thread-local resources
-    if (tl_worker.initialized) {
-        rdt_vector_destroy(&tl_worker.vec);
-        scratch_release(&tl_worker.scratch);
-        if (tl_worker.arena) arena_destroy(tl_worker.arena);
-        if (tl_worker.pool) pool_destroy(tl_worker.pool);
-        tl_worker.initialized = false;
-    }
+    tl_worker.destroy();
 
     return nullptr;
 }
 
-void render_pool_init(RenderPool* pool, int threads) {
-    memset(pool, 0, sizeof(RenderPool));
+void WorkerState::destroy() {
+    if (!initialized) return;
+    rdt_vector_destroy(&vec);
+    scratch_release(&scratch);
+    if (arena) {
+        mem_arena_destroy(arena);
+        arena = nullptr;
+    }
+    if (pool) {
+        mem_pool_destroy(pool);
+        pool = nullptr;
+    }
+    initialized = false;
+}
+
+void RenderPool::init(int threads) {
+    memset(this, 0, sizeof(RenderPool));
 
     if (threads <= 0) {
         // auto-detect: hardware concurrency, cap at 8
@@ -218,57 +264,69 @@ void render_pool_init(RenderPool* pool, int threads) {
         if (threads > 8) threads = 8;
     }
 
-    pool->thread_count = threads;
-    pool->threads = (pthread_t*)mem_calloc(threads, sizeof(pthread_t), MEM_CAT_SYSTEM);
+    thread_count = threads;
+    this->threads = (pthread_t*)mem_calloc(threads, sizeof(pthread_t), MEM_CAT_SYSTEM);
     // ensure workers block initially (next_job >= job_count when both are 0)
-    pool->job_count = 0;
-    pool->next_job = 0;
+    job_count = 0;
+    next_job = 0;
 
-    pthread_mutex_init(&pool->mutex, nullptr);
-    pthread_cond_init(&pool->work_available, nullptr);
-    pthread_cond_init(&pool->all_done, nullptr);
+    pthread_mutex_init(&mutex, nullptr);
+    pthread_cond_init(&work_available, nullptr);
+    pthread_cond_init(&all_done, nullptr);
 
     for (int i = 0; i < threads; i++) {
-        pthread_create(&pool->threads[i], nullptr, worker_thread_fn, pool);
+        pthread_create(&this->threads[i], nullptr, worker_thread_fn, this);
     }
 
     log_info("[RENDER_POOL] created %d worker threads", threads);
 }
 
-void render_pool_destroy(RenderPool* pool) {
+void RenderPool::destroy() {
     // signal shutdown
-    pthread_mutex_lock(&pool->mutex);
-    pool->shutdown = true;
-    pthread_cond_broadcast(&pool->work_available);
-    pthread_mutex_unlock(&pool->mutex);
+    pthread_mutex_lock(&mutex);
+    shutdown = true;
+    pthread_cond_broadcast(&work_available);
+    pthread_mutex_unlock(&mutex);
 
     // join all workers
-    for (int i = 0; i < pool->thread_count; i++) {
-        pthread_join(pool->threads[i], nullptr);
+    for (int i = 0; i < thread_count; i++) {
+        pthread_join(threads[i], nullptr);
     }
 
-    mem_free(pool->threads);
-    pthread_mutex_destroy(&pool->mutex);
-    pthread_cond_destroy(&pool->work_available);
-    pthread_cond_destroy(&pool->all_done);
+    mem_free(threads);
+    pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&work_available);
+    pthread_cond_destroy(&all_done);
 
-    log_info("[RENDER_POOL] destroyed %d worker threads", pool->thread_count);
-    memset(pool, 0, sizeof(RenderPool));
+    log_info("[RENDER_POOL] destroyed %d worker threads", thread_count);
+    memset(this, 0, sizeof(RenderPool));
+}
+
+void RenderPool::dispatch(TileJob* jobs, int count) {
+    pthread_mutex_lock(&mutex);
+    this->jobs = jobs;
+    job_count = count;
+    next_job = 0;
+    completed_jobs = 0;
+    pthread_cond_broadcast(&work_available);
+
+    // wait for all jobs to complete
+    while (completed_jobs < job_count) {
+        pthread_cond_wait(&all_done, &mutex);
+    }
+    pthread_mutex_unlock(&mutex);
+}
+
+void render_pool_init(RenderPool* pool, int threads) {
+    if (pool) pool->init(threads);
+}
+
+void render_pool_destroy(RenderPool* pool) {
+    if (pool) pool->destroy();
 }
 
 void render_pool_dispatch(RenderPool* pool, TileJob* jobs, int count) {
-    pthread_mutex_lock(&pool->mutex);
-    pool->jobs = jobs;
-    pool->job_count = count;
-    pool->next_job = 0;
-    pool->completed_jobs = 0;
-    pthread_cond_broadcast(&pool->work_available);
-
-    // wait for all jobs to complete
-    while (pool->completed_jobs < pool->job_count) {
-        pthread_cond_wait(&pool->all_done, &pool->mutex);
-    }
-    pthread_mutex_unlock(&pool->mutex);
+    if (pool) pool->dispatch(jobs, count);
 }
 
 // ============================================================================

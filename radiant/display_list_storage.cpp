@@ -120,9 +120,9 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
     return out_depth;
 }
 
-void dl_init(DisplayList* dl, Arena* backing_arena) {
-    memset(dl, 0, sizeof(DisplayList));
-    mem_scratch_init(NULL, &dl->arena, backing_arena, MEM_ROLE_RENDER, "display_list.scratch");
+void DisplayList::init(Arena* backing_arena) {
+    memset(this, 0, sizeof(DisplayList));
+    mem_scratch_init(NULL, &arena, backing_arena, MEM_ROLE_RENDER, "display_list.scratch");
 }
 
 void dl_item_free_owned_payload(DisplayItem* item) {
@@ -140,38 +140,62 @@ void dl_item_free_owned_payload(DisplayItem* item) {
     }
 }
 
-void dl_clear(DisplayList* dl) {
-    if (!dl) return;
+void DisplayList::clear() {
+    DisplayList* dl = this;
 
     for (int i = 0; i < dl->count; i++) {
         dl_item_free_owned_payload(&dl->items[i]);
     }
     dl->count = 0;
+    Arena* backing_arena = dl->arena.arena;
     scratch_release(&dl->arena);
+    if (backing_arena) {
+        // reusable display lists release scratch nodes on clear; re-register so
+        // retained-fragment captures keep mem-dump accounting current.
+        mem_scratch_init(NULL, &dl->arena, backing_arena, MEM_ROLE_RENDER,
+                         "display_list.scratch");
+    }
+}
+
+void DisplayList::destroy() {
+    clear();
+    if (items) {
+        mem_free(items);
+        items = nullptr;
+    }
+    capacity = 0;
+    scratch_release(&arena);
+}
+
+int DisplayList::item_count() const {
+    return count;
+}
+
+bool DisplayList::contains_glyphs() const {
+    for (int i = 0; i < count; i++) {
+        if (items[i].op == DL_DRAW_GLYPH) return true;
+    }
+    return false;
+}
+
+void dl_init(DisplayList* dl, Arena* backing_arena) {
+    if (dl) dl->init(backing_arena);
+}
+
+void dl_clear(DisplayList* dl) {
+    if (dl) dl->clear();
 }
 
 void dl_destroy(DisplayList* dl) {
-    if (!dl) return;
-
-    dl_clear(dl);
-    if (dl->items) {
-        mem_free(dl->items);
-        dl->items = nullptr;
-    }
-    dl->capacity = 0;
-    scratch_release(&dl->arena);
+    if (dl) dl->destroy();
 }
 
 int dl_item_count(const DisplayList* dl) {
-    return dl ? dl->count : 0;
+    return dl ? dl->item_count() : 0;
 }
 
 bool dl_contains_glyphs(const DisplayList* dl) {
-    if (!dl) return false;
-    for (int i = 0; i < dl->count; i++) {
-        if (dl->items[i].op == DL_DRAW_GLYPH) return true;
-    }
-    return false;
+    return dl ? dl->contains_glyphs() : false;
 }
 
 static void dl_validation_set(DisplayListValidationResult* result, bool valid,

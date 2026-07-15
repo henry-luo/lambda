@@ -1,6 +1,5 @@
 #include "layout.hpp"
 #include "view.hpp"
-#include "../lib/mem_grow.hpp"
 extern "C" {
 #include <stdlib.h>
 #include <string.h>
@@ -171,9 +170,19 @@ static bool is_empty_flex_container(ViewElement* elem) {
     return true;
 }
 
+static int count_potential_flex_items(ViewBlock* container) {
+    int count = 0;
+    DomNode* child = container ? container->first_child : NULL;
+    while (child) {
+        if (child->is_element()) count++;
+        child = child->next_sibling;
+    }
+    return count;
+}
+
 // Initialize flex container layout state
 void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
-    if (!container) return;
+    if (!lycon || !container) return;
 
     // create embed structure if it doesn't exist
     if (!container->embed) {
@@ -182,14 +191,22 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         container->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
     }
 
-    FlexContainerLayout* flex = (FlexContainerLayout*)mem_calloc(1, sizeof(FlexContainerLayout), MEM_CAT_LAYOUT);
+    ScratchMark mark = scratch_mark(&lycon->scratch);
+    FlexContainerLayout* flex = (FlexContainerLayout*)scratch_calloc(&lycon->scratch, sizeof(FlexContainerLayout));
+    if (!flex) {
+        log_error("layout_flex: unable to allocate flex container scratch state for %s",
+                  container->source_loc());
+        return;
+    }
     lycon->flex_container = flex;
+    flex->scratch_mark = mark;
     flex->lycon = lycon;  // Store layout context for intrinsic sizing
     if (container->embed && container->embed->flex) {
         FlexProp* source = container->embed->flex;
         log_debug("%s init_flex_container: source->direction=%d (0x%04X), row=%d, col=%d", container->source_loc(),
                   source->direction, source->direction, DIR_ROW, DIR_COLUMN);
         memcpy(flex, container->embed->flex, sizeof(FlexProp));
+        flex->scratch_mark = mark;
         flex->lycon = lycon;  // Restore after memcpy
         log_debug("%s init_flex_container: after copy flex->direction=%d", container->source_loc(), flex->direction);
     }
@@ -565,24 +582,53 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
               has_max_width ? "true" : "false",
               has_max_height ? "true" : "false");
 
-    // Initialize dynamic arrays
-    flex->allocated_items = 8;
-    flex->flex_items = (View**)mem_calloc(flex->allocated_items, sizeof(View*), MEM_CAT_LAYOUT);
-    flex->allocated_lines = 4;
-    flex->lines = (FlexLineInfo*)mem_calloc(flex->allocated_lines, sizeof(FlexLineInfo), MEM_CAT_LAYOUT);
+    // Immediate children bound the pass-local flex item and line arrays; growing
+    // scratch allocations would break the mark/restore lifetime invariant.
+    int item_capacity = count_potential_flex_items(container);
+    flex->allocated_items = item_capacity;
+    flex->allocated_lines = item_capacity;
+    if (item_capacity > 0) {
+        flex->flex_items = (View**)scratch_calloc(&lycon->scratch,
+            (size_t)item_capacity * sizeof(View*));
+        flex->lines = (FlexLineInfo*)scratch_calloc(&lycon->scratch,
+            (size_t)item_capacity * sizeof(FlexLineInfo));
+        if (!flex->flex_items || !flex->lines) {
+            log_error("layout_flex: unable to allocate %d flex scratch slots for %s",
+                      item_capacity, container->source_loc());
+            cleanup_flex_container(lycon);
+            return;
+        }
+    }
     flex->needs_reflow = false;
 }
 
 // Cleanup flex container resources
 void cleanup_flex_container(LayoutContext* lycon) {
+    if (!lycon || !lycon->flex_container) return;
     FlexContainerLayout* flex = lycon->flex_container;
-    // Free line items arrays
-    for (int i = 0; i < flex->line_count; ++i) {
-        mem_free(flex->lines[i].items);
+    ScratchMark mark = flex->scratch_mark;
+    lycon->flex_container = NULL;
+    scratch_restore(&lycon->scratch, mark);
+}
+
+FlexLayoutScope::FlexLayoutScope(LayoutContext* l, ViewBlock* container)
+    : lycon(l), saved(l ? l->flex_container : NULL), active(l != NULL) {
+    if (lycon && container) {
+        init_flex_container(lycon, container);
     }
-    mem_free(flex->flex_items);
-    mem_free(flex->lines);
-    mem_free(flex);
+}
+
+FlexLayoutScope::~FlexLayoutScope() {
+    close();
+}
+
+void FlexLayoutScope::close() {
+    if (!active) return;
+    if (lycon->flex_container && lycon->flex_container != saved) {
+        cleanup_flex_container(lycon);
+    }
+    lycon->flex_container = saved;
+    active = false;
 }
 
 // Main flex layout algorithm entry point
@@ -1867,12 +1913,9 @@ static bool should_skip_flex_item(ViewElement* item) {
           (item->in_line && item->in_line->visibility == VIS_HIDDEN);
 }
 
-// Helper: Ensure flex items array has enough capacity
-// Returns false on overflow/OOM, leaving flex->flex_items and allocated_items unchanged
-// (still valid) so the caller can stop collecting instead of writing past the buffer.
+// Helper: Ensure the exact scratch-sized flex item array is not overrun.
 static bool ensure_flex_items_capacity(FlexContainerLayout* flex, int required) {
-    return lam::mem_grow_array(&flex->flex_items, &flex->allocated_items,
-                               required, 8, MEM_CAT_LAYOUT);
+    return flex && required >= 0 && required <= flex->allocated_items;
 }
 
 // UNIFIED: Single-pass collection that combines measurement + View creation + collection
@@ -3525,30 +3568,25 @@ bool is_main_axis_horizontal(FlexProp* flex) {
 static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_count) {
     if (!flex_layout || !items || item_count == 0) return 0;
 
-    // Ensure we have space for lines
-    if (flex_layout->allocated_lines == 0) {
-        flex_layout->lines = (FlexLineInfo*)mem_calloc(4, sizeof(FlexLineInfo), MEM_CAT_LAYOUT);
-        if (!flex_layout->lines) return 0;   // OOM — no lines
-        flex_layout->allocated_lines = 4;
-    }
-
     int line_count = 0;
     int current_item = 0;
 
     while (current_item < item_count) {
+        while (current_item < item_count && !lam::view_as_element(items[current_item])) {
+            current_item++;
+        }
+        if (current_item >= item_count) break;
+
         // Ensure we have space for another line
         if (line_count >= flex_layout->allocated_lines) {
-            if (!lam::mem_grow_array(&flex_layout->lines, &flex_layout->allocated_lines,
-                                     line_count + 1, 4, MEM_CAT_LAYOUT)) {
-                return line_count;   // OOM/overflow — keep old buffer, return what we have
-            }
+            return line_count;
         }
 
         FlexLineInfo* line = &flex_layout->lines[line_count];
         memset(line, 0, sizeof(FlexLineInfo));
-
-        // Allocate items array for this line
-        line->items = (View**)mem_alloc(item_count * sizeof(View*), MEM_CAT_LAYOUT);
+        // Lines are contiguous slices of the sorted flex item array; copying each
+        // line leaked pass-local heap buffers and fought scratch mark/restore.
+        line->items = &items[current_item];
         line->item_count = 0;
 
         float main_size = 0.0f;
@@ -3651,10 +3689,10 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
 
     float container_main_size = flex_layout->main_axis_size;
 
-    // Flex state is indexed by line item; keeping it in one record prevents parallel
-    // scratch arrays from drifting when the §9.7 loop gains another per-item value.
-    FlexLengthScratch* scratch = (FlexLengthScratch*)mem_calloc(
-        line->item_count, sizeof(FlexLengthScratch), MEM_CAT_LAYOUT);
+    if (!flex_layout->lycon) return;
+    // Flex resolution temporaries are pass-local and must unwind with the layout scratch arena.
+    FlexLengthScratch* scratch = (FlexLengthScratch*)scratch_calloc(
+        &flex_layout->lycon->scratch, (size_t)line->item_count * sizeof(FlexLengthScratch));
     if (!scratch) return;
 
     float total_hypothetical_size = 0.0f;
@@ -3759,7 +3797,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
               container_main_size, total_base_size, gap_space, free_space);
 
     if (free_space == 0.0f) {
-        mem_free(scratch);
+        scratch_free(&flex_layout->lycon->scratch, scratch);
         return;  // No space to distribute
     }
 
@@ -3876,8 +3914,9 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
 
         // CSS Flexbox §9.7 Step 5: Calculate target sizes for unfrozen items
         // Store target sizes and violation info for two-phase freezing
-        FlexIterationScratch* iteration_scratch = (FlexIterationScratch*)mem_calloc(
-            line->item_count, sizeof(FlexIterationScratch), MEM_CAT_LAYOUT);
+        // Iteration state is scoped to one §9.7 loop pass; keep it on layout scratch.
+        FlexIterationScratch* iteration_scratch = (FlexIterationScratch*)scratch_calloc(
+            &flex_layout->lycon->scratch, (size_t)line->item_count * sizeof(FlexIterationScratch));
         if (!iteration_scratch) {
             break;
         }
@@ -3982,7 +4021,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
             }
         }
 
-        mem_free(iteration_scratch);
+        scratch_free(&flex_layout->lycon->scratch, iteration_scratch);
 
         // If no items were frozen this iteration (total_violation was 0), we're done
         if (!any_frozen_this_iteration) {
@@ -4070,7 +4109,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
         }
     }
 
-    mem_free(scratch);
+    scratch_free(&flex_layout->lycon->scratch, scratch);
     log_info("ITERATIVE_FLEX COMPLETE - converged after %d iterations", iteration);
 }
 

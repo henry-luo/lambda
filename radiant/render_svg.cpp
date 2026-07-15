@@ -1642,6 +1642,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
         dl_destroy(&ctx.page_backdrop_dl);
     }
     if (ctx.page_backdrop_pool) {
+        // Page backdrop display-list storage is arena-in-pool; pool teardown owns the arena chunks.
         mem_pool_destroy(ctx.page_backdrop_pool);
     }
 

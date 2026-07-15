@@ -244,6 +244,9 @@ struct DomDocument {
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),
                     pending_scroll_into_view_target(nullptr),
                     js_ready_state("complete") {}
+
+    bool init(Input* input);
+    void destroy();
 };
 
 typedef void (*DomDocumentResourceDestroyFn)(void* data);
