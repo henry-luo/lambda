@@ -101,14 +101,20 @@ static FontHandle* font_resolve_ua_default_family(FontContext* ctx,
 // Cache lookup
 // ============================================================================
 
-FontHandle* font_cache_lookup(FontContext* ctx, const char* key) {
+FontHandle* font_cache_lookup(FontContext* ctx, const char* key,
+                              bool allow_global_fallback,
+                              bool* out_is_global_fallback) {
     if (!ctx || !ctx->face_cache || !key) return NULL;
 
-    FontCacheKey search = {.key_str = (char*)key, .handle = NULL};
+    FontCacheKey search = {.key_str = (char*)key, .handle = NULL, .is_global_fallback = false};
     FontCacheKey* found = (FontCacheKey*)hashmap_get(ctx->face_cache, &search);
-    if (found && found->handle) {
+    if (found && found->handle &&
+        (allow_global_fallback || !found->is_global_fallback)) {
         // update LRU tick
         found->handle->lru_tick = ++ctx->lru_counter;
+        if (out_is_global_fallback) {
+            *out_is_global_fallback = found->is_global_fallback;
+        }
         return found->handle;
     }
     return NULL;
@@ -118,7 +124,8 @@ FontHandle* font_cache_lookup(FontContext* ctx, const char* key) {
 // Cache insert
 // ============================================================================
 
-void font_cache_insert(FontContext* ctx, const char* key, FontHandle* handle) {
+void font_cache_insert(FontContext* ctx, const char* key, FontHandle* handle,
+                       bool is_global_fallback) {
     if (!ctx || !key || !handle) return;
 
     // evict if at capacity
@@ -136,7 +143,11 @@ void font_cache_insert(FontContext* ctx, const char* key, FontHandle* handle) {
 
     // arena-dup the key so it outlives the caller
     char* dup_key = arena_strdup(ctx->arena, key);
-    FontCacheKey entry = {.key_str = dup_key, .handle = handle};
+    FontCacheKey entry = {
+        .key_str = dup_key,
+        .handle = handle,
+        .is_global_fallback = is_global_fallback,
+    };
     const FontCacheKey* old = (const FontCacheKey*)hashmap_set(ctx->face_cache, &entry);
     if (old && old->handle) {
         font_handle_release(old->handle); // release replaced entry's handle
@@ -176,7 +187,11 @@ void font_cache_evict_lru(FontContext* ctx) {
     hashmap_scan(ctx->face_cache, lru_scan_callback, &state);
 
     if (state.min_key) {
-        FontCacheKey search = {.key_str = (char*)state.min_key, .handle = NULL};
+        FontCacheKey search = {
+            .key_str = (char*)state.min_key,
+            .handle = NULL,
+            .is_global_fallback = false,
+        };
         FontCacheKey* removed = (FontCacheKey*)hashmap_delete(ctx->face_cache, &search);
         if (removed && removed->handle) {
             log_debug("font_cache: evicted '%s' (tick=%u)", state.min_key, state.min_tick);
@@ -212,8 +227,11 @@ void font_cache_trim(FontContext* ctx) {
 //   7. Fallback font chain
 // ============================================================================
 
-FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
+static FontHandle* font_resolve_single(FontContext* ctx, const FontStyleDesc* style,
+                                       bool allow_global_fallback,
+                                       bool* out_is_global_fallback) {
     if (!ctx || !style) return NULL;
+    if (out_is_global_fallback) *out_is_global_fallback = false;
 
     // 1. build cache key
     char* key = font_cache_make_key(ctx->arena, style->family,
@@ -222,7 +240,8 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
     if (!key) return NULL;
 
     // 2. check face cache
-    FontHandle* handle = font_cache_lookup(ctx, key);
+    FontHandle* handle = font_cache_lookup(ctx, key, allow_global_fallback,
+                                           out_is_global_fallback);
     if (handle) {
         font_handle_retain(handle);
         return handle;
@@ -241,7 +260,7 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
             handle = font_face_load(ctx, desc, style->size_px);
             if (handle) {
                 log_info("font_resolve: loaded @font-face for '%s'", style->family);
-                font_cache_insert(ctx, key, handle);
+                font_cache_insert(ctx, key, handle, false);
                 return handle;
             }
         }
@@ -271,7 +290,7 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
                         apply_browser_metric_family_alias(ctx, handle, style->family);
                         log_info("font_resolve: browser alias '%s' → '%s'",
                                  style->family, aliases[i]);
-                        font_cache_insert(ctx, key, handle);
+                        font_cache_insert(ctx, key, handle, false);
                         return handle;
                     }
                 }
@@ -304,7 +323,7 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
                 if (handle) {
                     apply_browser_metric_family_alias(ctx, handle, style->family);
                     log_info("font_resolve: generic '%s' → '%s'", style->family, generics[i]);
-                    font_cache_insert(ctx, key, handle);
+                    font_cache_insert(ctx, key, handle, false);
                     return handle;
                 }
             }
@@ -329,7 +348,7 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
             if (handle) {
                 log_info("font_resolve: database match for '%s' (score=%.2f)",
                          style->family, result.match_score);
-                font_cache_insert(ctx, key, handle);
+                font_cache_insert(ctx, key, handle, false);
                 return handle;
             }
         }
@@ -355,7 +374,7 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
                                                       style->weight, style->slant);
                     if (handle) {
                         log_info("font_resolve: alias '%s' → '%s'", style->family, aliases[i]);
-                        font_cache_insert(ctx, key, handle);
+                        font_cache_insert(ctx, key, handle, false);
                         return handle;
                     }
                 }
@@ -373,17 +392,20 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
             mem_free(platform_path);
             if (handle) {
                 log_info("font_resolve: platform fallback for '%s'", style->family);
-                font_cache_insert(ctx, key, handle);
+                font_cache_insert(ctx, key, handle, false);
                 return handle;
             }
         }
     }
 
+    if (!allow_global_fallback) return NULL;
+
     // 7. css font matching fallback: use the UA default font family before
     // walking the broad glyph fallback chain.
     handle = font_resolve_ua_default_family(ctx, style);
     if (handle) {
-        font_cache_insert(ctx, key, handle);
+        if (out_is_global_fallback) *out_is_global_fallback = true;
+        font_cache_insert(ctx, key, handle, true);
         return handle;
     }
 
@@ -391,12 +413,54 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
     handle = font_resolve_fallback(ctx, style);
     if (handle) {
         log_info("font_resolve: using fallback font for '%s'", style->family);
-        font_cache_insert(ctx, key, handle);
+        if (out_is_global_fallback) *out_is_global_fallback = true;
+        font_cache_insert(ctx, key, handle, true);
         return handle;
     }
 
     log_error("font_resolve: failed to resolve any font for '%s'", style->family);
     return NULL;
+}
+
+FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
+    if (!ctx || !style || !style->family) return NULL;
+
+    char* list_key = font_cache_make_key(ctx->arena, style->family,
+                                         style->weight, style->slant,
+                                         style->size_px);
+    if (!list_key) return NULL;
+    FontHandle* cached = font_cache_lookup(ctx, list_key, true, NULL);
+    if (cached) {
+        font_handle_retain(cached);
+        return cached;
+    }
+
+    const char* cursor = style->family;
+    char family[256];
+    char first_family[256] = {0};
+    while (font_family_list_next(&cursor, family, sizeof(family))) {
+        if (!first_family[0]) {
+            strncpy(first_family, family, sizeof(first_family) - 1);
+        }
+        FontStyleDesc candidate = *style;
+        candidate.family = family;
+        FontHandle* handle = font_resolve_single(ctx, &candidate, false, NULL);
+        if (handle) {
+            // CSS Fonts requires trying each family before the global fallback chain
+            font_cache_insert(ctx, list_key, handle, false);
+            return handle;
+        }
+    }
+
+    FontStyleDesc fallback = *style;
+    if (first_family[0]) fallback.family = first_family;
+    bool is_global_fallback = false;
+    FontHandle* handle = font_resolve_single(ctx, &fallback, true,
+                                             &is_global_fallback);
+    if (handle) {
+        font_cache_insert(ctx, list_key, handle, is_global_fallback);
+    }
+    return handle;
 }
 
 // ============================================================================

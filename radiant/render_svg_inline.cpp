@@ -2758,51 +2758,21 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
     // family keyword (serif, sans-serif, monospace, cursive, fantasy).  Try
     // each candidate in order, applying weight-aware matching for each, before
     // falling back to a global default list.
-    char family_list[512];
-    strncpy(family_list, font_family, sizeof(family_list) - 1);
-    family_list[sizeof(family_list) - 1] = '\0';
-
-    // collect candidate family names by splitting on commas
+    // collect candidate family names with the shared CSS list parser
+    char candidate_storage[16][256];
     const char* candidates[16];
     int candidate_count = 0;
-    {
-        char* cursor = family_list;
-        while (cursor && *cursor && candidate_count < 16) {
-            // skip leading whitespace
-            while (*cursor == ' ' || *cursor == '\t') cursor++;
-            // strip surrounding quotes
-            char qc = 0;
-            if (*cursor == '"' || *cursor == '\'') { qc = *cursor; cursor++; }
-            char* start = cursor;
-            char* end;
-            if (qc) {
-                end = strchr(cursor, qc);
-                if (!end) end = cursor + strlen(cursor);
-                *end = '\0';
-                cursor = end + 1;
-                // skip until next comma (or end)
-                char* nc = strchr(cursor, ',');
-                cursor = nc ? nc + 1 : nullptr;
-            } else {
-                end = strchr(cursor, ',');
-                if (end) { *end = '\0'; cursor = end + 1; }
-                else { cursor = nullptr; }
-            }
-            // strip trailing whitespace
-            char* te = start + strlen(start);
-            while (te > start && (te[-1] == ' ' || te[-1] == '\t')) te--;
-            *te = '\0';
-            if (*start) {
-                // map generic CSS keywords to a concrete platform font
-                const char* mapped = start;
-                if (strcasecmp(start, "serif") == 0)            mapped = "Times New Roman";
-                else if (strcasecmp(start, "sans-serif") == 0)  mapped = "Arial";
-                else if (strcasecmp(start, "monospace") == 0)   mapped = "Courier New";
-                else if (strcasecmp(start, "cursive") == 0)     mapped = "Comic Sans MS";
-                else if (strcasecmp(start, "fantasy") == 0)     mapped = "Impact";
-                candidates[candidate_count++] = mapped;
-            }
-        }
+    const char* family_cursor = font_family;
+    while (candidate_count < 16 && font_family_list_next(
+            &family_cursor, candidate_storage[candidate_count],
+            sizeof(candidate_storage[candidate_count]))) {
+        const char* candidate = candidate_storage[candidate_count];
+        if (strcasecmp(candidate, "serif") == 0)            candidate = "Times New Roman";
+        else if (strcasecmp(candidate, "sans-serif") == 0)  candidate = "Arial";
+        else if (strcasecmp(candidate, "monospace") == 0)   candidate = "Courier New";
+        else if (strcasecmp(candidate, "cursive") == 0)     candidate = "Comic Sans MS";
+        else if (strcasecmp(candidate, "fantasy") == 0)     candidate = "Impact";
+        candidates[candidate_count++] = candidate;
     }
 
     // helper: try a single family with full resolution chain

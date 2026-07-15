@@ -278,6 +278,83 @@ static void intrinsic_apply_monospace_font_size_quirk(FontProp* font,
               original_size, font->font_size);
 }
 
+static bool intrinsic_has_ua_font_defaults(uintptr_t tag) {
+    return tag == HTM_TAG_B || tag == HTM_TAG_STRONG || tag == HTM_TAG_TH ||
+           (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) ||
+           tag == HTM_TAG_I || tag == HTM_TAG_EM || tag == HTM_TAG_CITE ||
+           tag == HTM_TAG_DFN || tag == HTM_TAG_VAR || tag == HTM_TAG_CODE ||
+           tag == HTM_TAG_KBD || tag == HTM_TAG_SAMP || tag == HTM_TAG_TT ||
+           tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING || tag == HTM_TAG_XMP;
+}
+
+static bool intrinsic_apply_ua_font_defaults(DomElement* element, FontProp* font,
+                                             FontProp* parent_font) {
+    if (!element || !font || !intrinsic_has_ua_font_defaults(element->tag())) return false;
+
+    StyleTree* style = element->specified_style;
+    bool specified_shorthand = style_tree_get_declaration(style, CSS_PROPERTY_FONT) != nullptr;
+    bool specified_family = specified_shorthand ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT_FAMILY) != nullptr;
+    bool specified_size = specified_shorthand ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT_SIZE) != nullptr;
+    bool specified_weight = specified_shorthand ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT_WEIGHT) != nullptr;
+    bool specified_style = specified_shorthand ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT_STYLE) != nullptr;
+    bool changed = false;
+    uintptr_t tag = element->tag();
+
+    // UA font declarations remain the cascade base when an unrelated author
+    // font longhand forces temporary intrinsic-measurement font resolution.
+    if ((tag == HTM_TAG_B || tag == HTM_TAG_STRONG || tag == HTM_TAG_TH) &&
+        !specified_weight) {
+        font->font_weight = CSS_VALUE_BOLD;
+        font->font_weight_numeric = 700;
+        changed = true;
+    } else if (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) {
+        if (!specified_size && parent_font) {
+            static const float heading_scale[] = {2.0f, 1.5f, 1.17f, 1.0f, 0.83f, 0.67f};
+            font->font_size = parent_font->font_size * heading_scale[tag - HTM_TAG_H1];
+            font->font_size_from_medium = false;
+            changed = true;
+        }
+        if (!specified_weight) {
+            font->font_weight = CSS_VALUE_BOLD;
+            font->font_weight_numeric = 700;
+            changed = true;
+        }
+    } else if ((tag == HTM_TAG_I || tag == HTM_TAG_EM || tag == HTM_TAG_CITE ||
+                tag == HTM_TAG_DFN || tag == HTM_TAG_VAR) &&
+               !specified_style) {
+        font->font_style = CSS_VALUE_ITALIC;
+        changed = true;
+    } else if ((tag == HTM_TAG_CODE || tag == HTM_TAG_KBD || tag == HTM_TAG_SAMP ||
+                tag == HTM_TAG_TT || tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING ||
+                tag == HTM_TAG_XMP) && !specified_family) {
+        radiant_retain_font_family(font, lam::GcPtr<char>((char*)"monospace"));
+        changed = true;
+    }
+    return changed;
+}
+
+static void intrinsic_complete_inherited_font(FontProp* font, FontProp* parent_font) {
+    if (!font || !parent_font) return;
+    if (!font->family) {
+        radiant_retain_font_family(font, lam::PoolPtr<char>(parent_font->family));
+    }
+    if (font->font_size <= 0.0f) {
+        font->font_size = parent_font->font_size;
+        font->font_size_from_medium = parent_font->font_size_from_medium;
+    }
+    if (font->font_weight == 0) {
+        font->font_weight = parent_font->font_weight;
+        font->font_weight_numeric = parent_font->font_weight_numeric;
+    }
+    if (font->font_style == 0) font->font_style = parent_font->font_style;
+    if (font->font_variant == 0) font->font_variant = parent_font->font_variant;
+    if (font->font_kerning == 0) font->font_kerning = parent_font->font_kerning;
+}
+
 static bool css_has_horizontal_box_decl(StyleTree* style) {
     if (!style) return false;
     return style_tree_get_declaration(style, CSS_PROPERTY_PADDING) ||
@@ -437,29 +514,52 @@ static void get_horizontal_padding_widths_from_css(LayoutContext* lycon, DomElem
                                                    float* padding_left, float* padding_right) {
     if (!element || !element->specified_style || !padding_left || !padding_right) return;
 
+    float left_width = *padding_left;
+    float right_width = *padding_right;
+    int64_t left_priority = -1;
+    int64_t right_priority = -1;
+
+    auto apply_width = [&](const CssDeclaration* decl, float width,
+                           bool apply_left, bool apply_right) {
+        if (!decl || !decl->value) return;
+        int64_t priority = get_cascade_priority(decl);
+        // A zero-valued longhand still overrides a lower-priority shorthand.
+        if (apply_left && priority >= left_priority) {
+            left_width = width;
+            left_priority = priority;
+        }
+        if (apply_right && priority >= right_priority) {
+            right_width = width;
+            right_priority = priority;
+        }
+    };
+
     CssDeclaration* padding_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_PADDING);
     if (padding_decl && padding_decl->value) {
         const CssValue* right_value = css_box_shorthand_side_value(padding_decl->value, 1);
         const CssValue* left_value = css_box_shorthand_side_value(padding_decl->value, 3);
-        if (right_value) *padding_right = intrinsic_resolve_box_length(
-            lycon, CSS_PROPERTY_PADDING_RIGHT, right_value, inline_base);
-        if (left_value) *padding_left = intrinsic_resolve_box_length(
-            lycon, CSS_PROPERTY_PADDING_LEFT, left_value, inline_base);
+        if (right_value) apply_width(padding_decl, intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_RIGHT, right_value, inline_base), false, true);
+        if (left_value) apply_width(padding_decl, intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_LEFT, left_value, inline_base), true, false);
     }
 
     CssDeclaration* left_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_PADDING_LEFT);
     if (left_decl && left_decl->value) {
-        *padding_left = intrinsic_resolve_box_length(
-            lycon, CSS_PROPERTY_PADDING_LEFT, left_decl->value, inline_base);
+        apply_width(left_decl, intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_LEFT, left_decl->value, inline_base), true, false);
     }
     CssDeclaration* right_decl = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_PADDING_RIGHT);
     if (right_decl && right_decl->value) {
-        *padding_right = intrinsic_resolve_box_length(
-            lycon, CSS_PROPERTY_PADDING_RIGHT, right_decl->value, inline_base);
+        apply_width(right_decl, intrinsic_resolve_box_length(
+            lycon, CSS_PROPERTY_PADDING_RIGHT, right_decl->value, inline_base), false, true);
     }
+
+    *padding_left = left_width;
+    *padding_right = right_width;
 }
 
 static inline bool intrinsic_is_simple_latin_shaping_byte(unsigned char ch) {
@@ -1621,6 +1721,16 @@ static bool intrinsic_node_has_inline_boundary_content(DomNode* node) {
     // before them must survive max-content sizing just like before text.
     if (node_is_table_cell_like(node) || element->display.inner == CSS_VALUE_TABLE) return true;
     if (!is_inline_level_element(element)) return false;
+    for (int pseudo = 1; pseudo <= 2; pseudo++) {
+        bool has_content = pseudo == 1 ? dom_element_has_before_content(element)
+                                       : dom_element_has_after_content(element);
+        StyleTree* style = pseudo == 1 ? element->before_styles : element->after_styles;
+        if (!has_content || !intrinsic_pseudo_style_is_inline(style)) continue;
+        const char* content = dom_element_get_pseudo_element_content(element, pseudo);
+        // Generated text is real inline boundary content, so adjacent collapsed
+        // whitespace must contribute to the containing block's max-content size.
+        if (content && *content) return true;
+    }
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (child->is_comment()) continue;
         if (intrinsic_node_has_inline_boundary_content(child)) return true;
@@ -2089,10 +2199,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     bool font_changed = false;
     ViewBlock* view_block_font = lam::unsafe_view_block_element_storage(element);
 
-    if (!element->styles_resolved && element->tag() == HTM_TAG_BUTTON) {
-        // Buttons are non-replaced controls with UA font, padding, border-box
-        // sizing, and author-overridable border styles. Resolve those defaults
-        // in measurement mode before intrinsic width walks the button content.
+    uintptr_t intrinsic_tag = element->tag();
+    if (!element->styles_resolved &&
+        (intrinsic_tag == HTM_TAG_BUTTON || intrinsic_tag == HTM_TAG_INPUT)) {
+        // Form-control intrinsic sizes depend on UA style, author font, and HTML
+        // attributes, so resolve them before the shared control measurement runs.
         radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
         dom_node_resolve_style(element, lycon);
     }
@@ -2107,7 +2218,20 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         FontProp* temp_font_prop = alloc_font_prop(lycon);  // Allocates from pool
         temp_font_guard.prop_a = temp_font_prop;
         bool need_font_setup = false;
+        bool spacing_font_ready = false;
         const char* css_family = NULL;
+
+        if (intrinsic_tag == HTM_TAG_TABLE && lycon->doc && lycon->doc->view_tree &&
+            is_quirks_mode(lycon->doc->view_tree->html_version)) {
+            // the quirks UA table reset is a cascade base for descendant intrinsic metrics.
+            temp_font_prop->font_size = 16.0f;
+            temp_font_prop->font_size_from_medium = true;
+            temp_font_prop->font_weight = CSS_VALUE_NORMAL;
+            temp_font_prop->font_weight_numeric = 400;
+            temp_font_prop->font_style = CSS_VALUE_NORMAL;
+            temp_font_prop->font_variant = CSS_VALUE_NORMAL;
+            need_font_setup = true;
+        }
 
         // Check for font shorthand (CSS_PROPERTY_FONT) first.
         // CSS 2.1 §15.8: The font shorthand sets all font sub-properties.
@@ -2115,6 +2239,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         CssDeclaration* font_shorthand_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT);
         if (font_shorthand_decl && font_shorthand_decl->value) {
+            // CSS Fonts 3: the shorthand resets omitted font subproperties to
+            // their initial values instead of inheriting UA or parent values.
+            temp_font_prop->font_style = CSS_VALUE_NORMAL;
+            temp_font_prop->font_weight = CSS_VALUE_NORMAL;
+            temp_font_prop->font_weight_numeric = 400;
+            temp_font_prop->font_variant = CSS_VALUE_NORMAL;
             const CssValue* fv = font_shorthand_decl->value;
             if (fv->type == CSS_VALUE_TYPE_KEYWORD) {
                 // System font keyword (caption, icon, menu, message-box, small-caption, status-bar)
@@ -2295,6 +2425,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
         CssDeclaration* letter_spacing_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_LETTER_SPACING);
+        CssDeclaration* word_spacing_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_WORD_SPACING);
+        if ((letter_spacing_decl && letter_spacing_decl->value) ||
+            (word_spacing_decl && word_spacing_decl->value)) {
+            // Font-relative spacing uses this element's computed font size, so
+            // finish its font cascade before resolving em/ex/ch spacing units.
+            intrinsic_apply_ua_font_defaults(element, temp_font_prop, saved_font.style);
+            intrinsic_complete_inherited_font(temp_font_prop, saved_font.style);
+            intrinsic_apply_monospace_font_size_quirk(temp_font_prop, saved_font.style);
+            setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
+            spacing_font_ready = true;
+            need_font_setup = true;
+        }
         if (letter_spacing_decl && letter_spacing_decl->value) {
             const CssValue* ls_val = letter_spacing_decl->value;
             if (ls_val->type == CSS_VALUE_TYPE_LENGTH) {
@@ -2310,8 +2453,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             temp_font_prop->letter_spacing = lycon->font.style->letter_spacing;
         }
 
-        CssDeclaration* word_spacing_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_WORD_SPACING);
         if (word_spacing_decl && word_spacing_decl->value) {
             const CssValue* ws_val = word_spacing_decl->value;
             if (ws_val->type == CSS_VALUE_TYPE_LENGTH) {
@@ -2328,17 +2469,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
 
         if (need_font_setup) {
-            // Ensure font-family is set (use parent's if not changed)
-            if (!temp_font_prop->family && lycon->font.style) {
-                radiant_retain_font_family(temp_font_prop, lam::PoolPtr<char>(lycon->font.style->family));
+            if (!spacing_font_ready) {
+                intrinsic_apply_ua_font_defaults(element, temp_font_prop, saved_font.style);
+                intrinsic_complete_inherited_font(temp_font_prop, saved_font.style);
+                intrinsic_apply_monospace_font_size_quirk(temp_font_prop, saved_font.style);
+                setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
             }
-            // Carry over font-size if not changed (needed for correct font loading)
-            if (temp_font_prop->font_size <= 0 && lycon->font.style) {
-                temp_font_prop->font_size = lycon->font.style->font_size;
-                temp_font_prop->font_size_from_medium = lycon->font.style->font_size_from_medium;
-            }
-            intrinsic_apply_monospace_font_size_quirk(temp_font_prop, saved_font.style);
-            setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
             font_changed = true;
         }
     }
@@ -2351,46 +2487,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // a specified_style from creation, but it may be empty (no CSS rules matched).
     // The !font_changed guard ensures we only apply UA defaults when neither resolved
     // font nor CSS styles provided font properties.
-    if (!font_changed && !element->font && lycon->ui_context && lycon->font.style) {
-        uintptr_t tag = element->tag();
-        FontProp* ua_font = nullptr;
-        if (tag == HTM_TAG_B || tag == HTM_TAG_STRONG || tag == HTM_TAG_TH) {
-            ua_font = alloc_font_prop(lycon);
-            temp_font_guard.prop_b = ua_font;
-            ua_font->font_weight = CSS_VALUE_BOLD;
-            ua_font->font_weight_numeric = 700;
-        } else if (tag >= HTM_TAG_H1 && tag <= HTM_TAG_H6) {
-            ua_font = alloc_font_prop(lycon);
-            temp_font_guard.prop_b = ua_font;
-            float em_size = 1.0f;
-            switch (tag) {
-                case HTM_TAG_H1: em_size = 2.0f; break;
-                case HTM_TAG_H2: em_size = 1.5f; break;
-                case HTM_TAG_H3: em_size = 1.17f; break;
-                case HTM_TAG_H4: em_size = 1.0f; break;
-                case HTM_TAG_H5: em_size = 0.83f; break;
-                case HTM_TAG_H6: em_size = 0.67f; break;
-                default: em_size = 1.0f; break;
-            }
-            ua_font->font_size = lycon->font.style->font_size * em_size;
-            ua_font->font_size_from_medium = false;
-            ua_font->font_weight = CSS_VALUE_BOLD;
-            ua_font->font_weight_numeric = 700;
-        } else if (tag == HTM_TAG_I || tag == HTM_TAG_EM || tag == HTM_TAG_CITE ||
-                   tag == HTM_TAG_DFN || tag == HTM_TAG_VAR) {
-            ua_font = alloc_font_prop(lycon);
-            temp_font_guard.prop_b = ua_font;
-            ua_font->font_style = CSS_VALUE_ITALIC;
-        } else if (tag == HTM_TAG_CODE || tag == HTM_TAG_KBD || tag == HTM_TAG_SAMP ||
-                   tag == HTM_TAG_TT || tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING ||
-                   tag == HTM_TAG_XMP) {
-            ua_font = alloc_font_prop(lycon);
-            temp_font_guard.prop_b = ua_font;
-            radiant_retain_font_family(ua_font, lam::GcPtr<char>((char*)"monospace"));
-        }
-        if (ua_font) {
-            if (!ua_font->family) radiant_retain_font_family(ua_font, lam::PoolPtr<char>(lycon->font.style->family));
-            if (ua_font->font_size <= 0) ua_font->font_size = lycon->font.style->font_size;
+    if (!font_changed && !element->font && lycon->ui_context && lycon->font.style &&
+        intrinsic_has_ua_font_defaults(element->tag())) {
+        FontProp* ua_font = alloc_font_prop(lycon);
+        temp_font_guard.prop_b = ua_font;
+        if (intrinsic_apply_ua_font_defaults(element, ua_font, lycon->font.style)) {
+            intrinsic_complete_inherited_font(ua_font, lycon->font.style);
             setup_font(lycon->ui_context, &lycon->font, ua_font);
             font_changed = true;
         }
@@ -2859,12 +2961,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             if (FormDefaults::OPTGROUP_OPTION_MIN_WIDTH > max_text_max) max_text_max = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
                         }
                     }
-                    // CSS `appearance: none` removes the UA dropdown arrow; skip its width overhead.
-                    float overhead = appearance_none ? 0.0f : (FormDefaults::SELECT_ARROW_WIDTH + 1.0f);
-                    float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f;
-                    float calc_max = max_text_max + overhead;
-                    if (calc_max < min_select_width) calc_max = min_select_width;
-                    replaced_width = calc_max;
+                    // CSS `appearance: none` removes the native arrow region.
+                    replaced_width = layout_select_combo_intrinsic_width(
+                        max_text_max, !appearance_none);
                     if (view_block_replaced->form)
                         view_block_replaced->form->intrinsic_width = replaced_width;
                     if (appearance_none) {
@@ -3240,6 +3339,27 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 return n;
             };
 
+            auto with_intrinsic_element_font = [&lycon](DomElement* font_element,
+                                                        auto&& callback) {
+                FontBox parent_font = lycon->font;
+                View* saved_view = lycon->view;
+                if (!font_element->styles_resolved) {
+                    lycon->view = static_cast<View*>(font_element);
+                    radiant::LayoutRunModeScope run_mode_scope(
+                        lycon, radiant::RunMode::ComputeSize);
+                    dom_node_resolve_style(font_element, lycon);
+                }
+                lycon->view = saved_view;
+                lycon->font = parent_font;
+                ViewBlock* font_block =
+                    lam::unsafe_view_block_element_storage(font_element);
+                if (font_block->font && lycon->ui_context) {
+                    setup_font(lycon->ui_context, &lycon->font, font_block->font);
+                }
+                callback();
+                lycon->font = parent_font;
+            };
+
             // Helper: iterate rows in table (handles direct rows and row groups)
             auto for_each_row = [&](auto&& callback) {
                 bool has_direct_anonymous_row_content = false;
@@ -3268,32 +3388,39 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         child_display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
                         child_display.inner == CSS_VALUE_TABLE_FOOTER_GROUP));
                     if (is_row) {
-                        callback(child_elem, INTRINSIC_ANON_ROW_NONE);
+                        // structural table boxes still establish the inherited font for cell percentages.
+                        with_intrinsic_element_font(child_elem, [&]() {
+                            callback(child_elem, INTRINSIC_ANON_ROW_NONE);
+                        });
                     } else if (is_row_group) {
-                        for (DomNode* row = child_elem->first_child; row; row = row->next_sibling) {
-                            if (!row->is_element()) continue;
-                            DomElement* row_elem = row->as_element();
-                            DisplayValue row_display = resolve_display_value((void*)row_elem);
-                            if (row_display.inner == CSS_VALUE_TABLE_ROW) {
-                                callback(row_elem, INTRINSIC_ANON_ROW_NONE);
+                        with_intrinsic_element_font(child_elem, [&]() {
+                            for (DomNode* row = child_elem->first_child; row; row = row->next_sibling) {
+                                if (!row->is_element()) continue;
+                                DomElement* row_elem = row->as_element();
+                                DisplayValue row_display = resolve_display_value((void*)row_elem);
+                                if (row_display.inner == CSS_VALUE_TABLE_ROW) {
+                                    with_intrinsic_element_font(row_elem, [&]() {
+                                        callback(row_elem, INTRINSIC_ANON_ROW_NONE);
+                                    });
+                                }
                             }
-                        }
-                        bool group_has_anonymous_row_content = false;
-                        for (DomNode* item = child_elem->first_child; item; item = item->next_sibling) {
-                            if (!item->is_element()) continue;
-                            DomElement* item_elem = item->as_element();
-                            DisplayValue item_display = resolve_display_value((void*)item_elem);
-                            if (item_display.inner != CSS_VALUE_TABLE_ROW) {
-                                group_has_anonymous_row_content = true;
-                                break;
+                            bool group_has_anonymous_row_content = false;
+                            for (DomNode* item = child_elem->first_child; item; item = item->next_sibling) {
+                                if (!item->is_element()) continue;
+                                DomElement* item_elem = item->as_element();
+                                DisplayValue item_display = resolve_display_value((void*)item_elem);
+                                if (item_display.inner != CSS_VALUE_TABLE_ROW) {
+                                    group_has_anonymous_row_content = true;
+                                    break;
+                                }
                             }
-                        }
-                        if (group_has_anonymous_row_content) {
-                            // CSS 2.1 §17.2.1: direct children of a row group
-                            // that are not table-row boxes are wrapped in an
-                            // anonymous table-row.
-                            callback(child_elem, INTRINSIC_ANON_ROW_GROUP);
-                        }
+                            if (group_has_anonymous_row_content) {
+                                // CSS 2.1 §17.2.1: direct children of a row group
+                                // that are not table-row boxes are wrapped in an
+                                // anonymous table-row.
+                                callback(child_elem, INTRINSIC_ANON_ROW_GROUP);
+                            }
+                        });
                     }
                 }
             };
@@ -4643,32 +4770,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             border_right = view->bound->border->width.right;
         }
     } else if (element->specified_style) {
-        // Fallback: read padding from CSS styles if bound hasn't been allocated yet
-        CssDeclaration* pad_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
-        if (pad_decl && pad_decl->value) {
-            const CssValue* right_value = css_box_shorthand_side_value(pad_decl->value, 1);
-            const CssValue* left_value = css_box_shorthand_side_value(pad_decl->value, 3);
-            if (right_value) {
-                pad_right = resolve_length_value(lycon, CSS_PROPERTY_PADDING, right_value);
-            }
-            if (left_value) {
-                pad_left = resolve_length_value(lycon, CSS_PROPERTY_PADDING, left_value);
-            }
-        }
-
-        // If no shorthand, check individual properties
-        if (pad_left == 0 && pad_right == 0) {
-            // Check individual padding properties
-            CssDeclaration* pl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_LEFT);
-            if (pl && pl->value && pl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                pad_left = resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, pl->value);
-            }
-            CssDeclaration* pr = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING_RIGHT);
-            if (pr && pr->value && pr->value->type == CSS_VALUE_TYPE_LENGTH) {
-                pad_right = resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, pr->value);
-            }
-        }
-
+        get_horizontal_padding_widths_from_css(
+            lycon, element, lycon->block.content_width, &pad_left, &pad_right);
         get_horizontal_border_widths_from_css(lycon, element, &border_left, &border_right);
     }
 

@@ -371,6 +371,20 @@ static float compute_grid_item_alignment_baseline(::LayoutContext* lycon, ViewBl
     return baseline;
 }
 
+static float compute_grid_item_baseline_alignment_height(GridContainerLayout* grid_layout,
+                                                         ViewBlock* item) {
+    if (!grid_layout || !item) return 0.0f;
+    if (item->blk && item->blk->given_height >= 0.0f) return item->height;
+
+    IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
+        grid_layout->lycon, item, true);
+    float intrinsic_height = sizes.max_content;
+    if (item->content_height > intrinsic_height) {
+        intrinsic_height = item->content_height;
+    }
+    return intrinsic_height > 0.0f ? intrinsic_height : item->height;
+}
+
 // Align all grid items
 void align_grid_items(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
@@ -420,7 +434,12 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             float baseline = compute_grid_item_alignment_baseline(grid_layout->lycon, item);
             if (baseline < 0) baseline = item->height;
 
-            float below = item->height - baseline;
+            // Baseline track sizing uses the item's auto block size, not its
+            // provisional track-stretched height from the positioning pass.
+            float alignment_height = compute_grid_item_baseline_alignment_height(
+                grid_layout, item);
+            float below = alignment_height - baseline;
+            if (below < 0.0f) below = 0.0f;
             if (baseline > row_max_baseline[row_idx])
                 row_max_baseline[row_idx] = baseline;
             if (below > row_max_below[row_idx])

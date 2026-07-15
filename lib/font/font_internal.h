@@ -304,6 +304,7 @@ struct FontContext {
 typedef struct FontCacheKey {
     char*       key_str;                // "family:weight:slant:size" — arena-allocated
     FontHandle* handle;                 // associated handle (for hashmap storage)
+    bool        is_global_fallback;     // unresolved family fell through to the UA fallback chain
 } FontCacheKey;
 
 // ============================================================================
@@ -491,8 +492,11 @@ char*               font_backend_dwrite_find_codepoint_font(uint32_t codepoint,
 #endif
 
 // font_cache.c
-FontHandle*         font_cache_lookup(FontContext* ctx, const char* key);
-void                font_cache_insert(FontContext* ctx, const char* key, FontHandle* handle);
+FontHandle*         font_cache_lookup(FontContext* ctx, const char* key,
+                                      bool allow_global_fallback,
+                                      bool* out_is_global_fallback);
+void                font_cache_insert(FontContext* ctx, const char* key, FontHandle* handle,
+                                      bool is_global_fallback);
 void                font_cache_evict_lru(FontContext* ctx);
 char*               font_cache_make_key(Arena* arena, const char* family,
                                         FontWeight weight, FontSlant slant, float size_px);
