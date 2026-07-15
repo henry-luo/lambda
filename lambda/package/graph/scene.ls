@@ -317,7 +317,8 @@ fn point_mismatches(actual, expected, edge_id, tolerance) {
       expected_value, actual_value, edge_id)] }
 }
 
-fn edge_mismatches(actual_scene, expected, geometry_tolerance, route_tolerance) {
+fn edge_mismatches(actual_scene, expected, geometry_tolerance, route_tolerance,
+    compare_route) {
   let actual = child_by_id(actual_scene, "edge", attr(expected, "id", ""));
   [
     *entity_mismatches(actual_scene, expected, "edge",
@@ -326,7 +327,9 @@ fn edge_mismatches(actual_scene, expected, geometry_tolerance, route_tolerance) 
         "tail-cluster", "head-cluster", "route-kind", "stroke", "dash-array",
         "arrow-size"],
       ["stroke-width", "opacity"], geometry_tolerance),
-    *point_mismatches(actual, expected, attr(expected, "id", null), route_tolerance)
+    for (issue in if (compare_route)
+      point_mismatches(actual, expected, attr(expected, "id", null), route_tolerance)
+      else []) issue
   ]
 }
 
@@ -469,7 +472,8 @@ pub fn compare_scenes(actual, expected, policy = null) {
       ["id", "parent", "fill", "stroke"],
       ["x", "y", "width", "height", "stroke-width", "opacity"], geometry_tolerance)) issue,
     for (edge in expected_edges, issue in edge_mismatches(
-      actual, edge, geometry_tolerance, route_tolerance)) issue,
+      actual, edge, geometry_tolerance, route_tolerance,
+      policy_enabled(policy, "route-geometry", true))) issue,
     for (issue in if (relations and policy_enabled(policy, "node-non-overlap", true))
       node_overlap_mismatches(actual, geometry_tolerance) else []) issue,
     for (issue in if (relations and policy_enabled(policy, "cluster-containment", true))

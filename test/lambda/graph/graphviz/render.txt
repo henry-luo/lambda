@@ -4,5 +4,5 @@
   nodes: [["a", true, true], ["b", true, true]],
   edges: [["a", "b"]],
   styled: [96, 96, true],
-  records: [true, true, true, true, true, true]
+  records: [true, true, true, true, true, true, true]
 }

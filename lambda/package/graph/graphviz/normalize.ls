@@ -6,6 +6,7 @@ import attributes: .attributes
 import labels: .labels
 import markers: .markers
 import records: .records
+import colors: .colors
 
 let MAX_EXPANDED_EDGES = 100000
 
@@ -20,14 +21,6 @@ fn optional(value, key) {
   // typed attribute maps omit absent keys; dynamic lookup errors mean absence here.
   if (found is error) null else found
 }
-
-fn optional_attr(name, value) => if (value == null) [] else [name, value]
-
-fn font_attr_map(known) => map([
-  *optional_attr("font-name", optional(known, "font-name")),
-  *optional_attr("font-size", optional(known, "font-size")),
-  *optional_attr("font-color", optional(known, "font-color"))
-])
 
 fn statement_id(value) {
   if (value.id != null) string(value.id)
@@ -345,10 +338,13 @@ fn interaction_element(target, known) {
 }
 
 fn annotation_element(kind, label, format, owner_kind, owner_id, known) {
-  let fonts = font_attr_map(known);
   if (label == null) null
+  // Runtime map spreads become element children, so optional fonts stay explicit attributes.
   else <annotation kind: kind, label: label, 'label-format': format,
-    'owner-kind': owner_kind, 'owner-id': owner_id, *:fonts>
+    'owner-kind': owner_kind, 'owner-id': owner_id,
+    'font-name': optional(known, "font-name"),
+    'font-size': optional(known, "font-size"),
+    'font-color': optional(known, "font-color")>
 }
 
 fn node_element(entry, graph_id) {
@@ -366,6 +362,7 @@ fn node_element(entry, graph_id) {
     'polygon-distortion': known["polygon-distortion"],
     regular: known.regular, peripheries: known.peripheries,
     width: known.width, height: known.height, 'fixed-size': known["fixed-size"],
+    'fixed-shape': optional(known, "fixed-shape"),
     'margin-x': optional(known, "margin-x"), 'margin-y': optional(known, "margin-y"),
     fill: known.fill, stroke: known.stroke, 'stroke-width': known["stroke-width"],
     'gradient-angle': optional(known, "gradient-angle"),
@@ -479,6 +476,21 @@ fn ordering_diagnostics(state) => [
       "node:" ++ node.id ++ ".ordering")) value
 ]
 
+fn colorscheme_diagnostics(state) {
+  let properties = [
+    *state.graph_properties,
+    for (node in state.nodes, entry in node.properties) entry,
+    for (edge in state.edges, entry in edge.properties) entry,
+    for (scope in state.scopes, entry in scope.properties) entry
+  ];
+  [for (entry in properties
+    where lower(entry.name) == "colorscheme" and not colors.supported_scheme(entry.value))
+    diagnostic.for_value(
+      "graph.graphviz.unsupported-colorscheme", "warning",
+      "Unsupported Graphviz colorscheme '" ++ entry.value ++ "'",
+      "colorscheme:" ++ entry.scope, entry.source)]
+}
+
 fn cluster_exists(scopes, id) => len([
   for (scope in scopes where scope.role == "cluster" and scope.id == id) scope
 ]) > 0
@@ -522,6 +534,7 @@ fn semantic_diagnostics(source, state) {
   let supported_route = splines == null or attributes.route_mode(splines) != null;
   [
     *rank_diagnostics(state), *engine_diagnostics(source, state),
+    *colorscheme_diagnostics(state),
     *ordering_diagnostics(state),
     *compound_reference_diagnostics(state),
     *compound_membership_diagnostics(state),

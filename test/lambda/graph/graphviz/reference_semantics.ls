@@ -28,11 +28,23 @@ let canonical = normalize.normalize(source)
 let actual = adapter.from_canonical(canonical.graph)
 let expected = adapter.from_dot_json(reference)
 let comparison = graph_transform.compare_scenes(actual, expected, {relations: false})
+let installed = graph_transform.install()
+let rendered = graph_transform.render_scene(source, 640, 480)
+let expected_geometry = adapter.from_dot_json(reference, true,
+  [for (edge in model.edges(canonical.graph)) edge.id])
+let geometry = graph_transform.compare_scenes(rendered.scene, expected_geometry, {
+  // Engines use different font metrics and separation constants; topology and
+  // relative geometry remain strict while absolute boxes allow one rank gap.
+  'geometry-tolerance': 75,
+  'route-geometry': false,
+  'rank-order': true
+})
 
 {
   valid: canonical.valid,
   equal: comparison["equal"],
   diagnostics: comparison.diagnostics,
+  geometry: [geometry["equal"], geometry.diagnostics],
   actual: summary(actual),
   expected: summary(expected)
 }

@@ -86,10 +86,11 @@ fn semantic_edges(children) {
         "normal" else "none")),
     arrow_size: float(attr_or(child, "data-arrow-size", 1.0)),
     style: string(attr_or(child, "data-style", "solid")),
-    stroke: parsed_style.stroke,
-    stroke_width: parsed_style.stroke_width,
-    opacity: parsed_style.opacity,
-    dash_array: parsed_style.dash_array,
+    // Direct canonical paint attributes must survive even without class declarations.
+    stroke: attr_or(child, "data-stroke", parsed_style.stroke),
+    stroke_width: attr_or(child, "data-stroke-width", parsed_style.stroke_width),
+    opacity: attr_or(child, "data-opacity", parsed_style.opacity),
+    dash_array: attr_or(child, "data-dash-array", parsed_style.dash_array),
     min_length: int(attr_or(child, "data-min-length", 1)),
     weight: float(attr_or(child, "data-weight", 1.0)),
     constraint: attr_or(child, "data-constraint", "true") != "false",
@@ -208,7 +209,18 @@ fn semantic_clusters(children, labels) => [
   }
 ]
 
-fn ports_for(ports, node_id) => [for (port in ports where port.node_id == node_id) port]
+fn ports_for(ports, node_id) => [for (port in ports where port.node_id == node_id) port];
+
+fn shape_clip_port(child, node_id) =>
+  if (not bool_attr(child, "data-fixed-shape") or
+      attr_or(child, "data-shape-width", null) == null or
+      attr_or(child, "data-shape-height", null) == null) []
+  else [{node_id: node_id, id: "", side: "shape", offset: 0.5,
+    x_offset: float(attr_or(child, "data-shape-width", 0)) /
+      max([1.0, child_width(child)]),
+    y_offset: float(attr_or(child, "data-shape-height", 0)) /
+      max([1.0, child_height(child)]),
+    z: 0, child_index: -1}]
 
 fn semantic_edge_labels(children) {
   [for (i, child in children where child_tag(child) == "edge-label") {
@@ -322,16 +334,63 @@ fn candidate_placement(label, anchor, dx, dy) => {
   z: label.z
 }
 
-fn placement_clear(candidate, occupied) {
+fn placement_clear(label, candidate, occupied) {
   let box = placement_box(candidate.x, candidate.y, candidate.width, candidate.height);
-  len([for (obstacle in occupied where boxes_overlap(box, obstacle)) obstacle]) == 0
+  len([for (obstacle in occupied
+    where not (label.owner_kind == "edge" and
+      obstacle.obstacle_kind == "route" and obstacle.owner_id == label.owner_id) and
+      boxes_overlap(box, obstacle)) obstacle]) == 0
 }
 
-fn first_clear_candidate(candidates, occupied, i) {
+fn first_clear_candidate(label, candidates, occupied, i) {
   if (i >= len(candidates)) candidates[0]
-  else if (placement_clear(candidates[i], occupied)) candidates[i]
-  else first_clear_candidate(candidates, occupied, i + 1)
+  else if (placement_clear(label, candidates[i], occupied)) candidates[i]
+  else first_clear_candidate(label, candidates, occupied, i + 1)
 }
+
+fn ring_candidates(label, anchor, gap, ring) {
+  let dx = float(ring) * (label.width + gap);
+  let dy = float(ring) * (label.height + gap);
+  [
+    candidate_placement(label, anchor, 0.0, 0.0 - dy),
+    candidate_placement(label, anchor, 0.0, dy),
+    candidate_placement(label, anchor, 0.0 - dx, 0.0),
+    candidate_placement(label, anchor, dx, 0.0),
+    candidate_placement(label, anchor, 0.0 - dx, 0.0 - dy),
+    candidate_placement(label, anchor, dx, 0.0 - dy),
+    candidate_placement(label, anchor, 0.0 - dx, dy),
+    candidate_placement(label, anchor, dx, dy)
+  ]
+}
+
+fn outside_candidate(label, anchor, occupied, gap) {
+  let right = if (len(occupied) > 0) max([for (box in occupied) box.right])
+    else anchor.x;
+  candidate_placement(label, anchor,
+    right + gap + label.width / 2.0 - anchor.x, 0.0)
+}
+
+fn label_candidates(label, anchor, occupied, gap) {
+  let centered = candidate_placement(label, anchor, 0.0, 0.0);
+  let rings = [for (ring in 1 to 6,
+    candidate in ring_candidates(label, anchor, gap, ring)) candidate];
+  let fallback = outside_candidate(label, anchor, occupied, gap);
+  if (label.owner_kind == "node" or label.kind == "center") { [centered, *rings, fallback] }
+  else { [*rings, centered, fallback] }
+}
+
+fn edge_route_obstacles(edge, clearance) => if (len(edge.points) < 2) [] else [
+  for (i in 1 to (len(edge.points) - 1),
+    let a = edge.points[i - 1], let b = edge.points[i])
+    {*:placement_box(min([a.x, b.x]) - clearance, min([a.y, b.y]) - clearance,
+      abs(b.x - a.x) + clearance * 2.0,
+      abs(b.y - a.y) + clearance * 2.0),
+      obstacle_kind: "route", owner_id: edge.id}
+]
+
+fn route_obstacles(edges, clearance) => [
+  for (edge in edges, box in edge_route_obstacles(edge, clearance)) box
+]
 
 fn place_edge_labels_at(labels, edges, nodes, occupied, i, result) {
   if (i >= len(labels)) result
@@ -342,16 +401,8 @@ fn place_edge_labels_at(labels, edges, nodes, occupied, i, result) {
     let gap = 6.0;
     let candidates = if (anchor == null) [{*:fallback,
       width: label.width, height: label.height}]
-    else [
-      candidate_placement(label, anchor, 0.0, 0.0),
-      candidate_placement(label, anchor, 0.0, 0.0 - label.height - gap),
-      candidate_placement(label, anchor, 0.0, label.height + gap),
-      candidate_placement(label, anchor, 0.0 - label.width - gap, 0.0),
-      candidate_placement(label, anchor, label.width + gap, 0.0),
-      candidate_placement(label, anchor, 0.0, 0.0 - 2.0 * (label.height + gap)),
-      candidate_placement(label, anchor, 0.0, 2.0 * (label.height + gap))
-    ];
-    let chosen = first_clear_candidate(candidates, occupied, 0);
+    else label_candidates(label, anchor, occupied, gap);
+    let chosen = first_clear_candidate(label, candidates, occupied, 0);
     let box = placement_box(chosen.x, chosen.y, chosen.width, chosen.height);
     place_edge_labels_at(labels, edges, nodes, [*occupied, box], i + 1,
       [*result, chosen])
@@ -364,7 +415,9 @@ fn edge_label_placements(labels, edges, nodes, cluster_labels, clusters) {
       node.y - node.height / 2.0, node.width, node.height),
     for (label in cluster_labels,
       let placement = cluster_label_placement(label, clusters))
-      placement_box(placement.x, placement.y, label.width, label.height)
+      placement_box(placement.x, placement.y, label.width, label.height),
+    // Labels need route-aware placement; otherwise dense parallel edges paint through text.
+    *route_obstacles(edges, 2.0)
   ];
   place_edge_labels_at(labels, edges, nodes, occupied, 0, [])
 }
@@ -429,7 +482,10 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
       order_group: attr_or(entry.child, "data-order-group", null),
       ordering: attr_or(entry.child, "data-ordering", null),
       group: attr_or(entry.child, "data-subgraph-id", null),
-      ports: ports_for(ports, child_id(entry.child, entry.order)),
+      // Reuse the established port record shape for fixed-shape clipping;
+      // extra node-map lanes are unstable in retained custom-layout JIT calls.
+      ports: [*ports_for(ports, child_id(entry.child, entry.order)),
+        *shape_clip_port(entry.child, child_id(entry.child, entry.order))],
       z: child_z(entry.child, 0)
     }],
     edges: edges,

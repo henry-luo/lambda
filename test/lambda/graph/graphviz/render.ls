@@ -45,8 +45,9 @@ let east_offset = (east_start.x - record_node.x) / record_node.width
   styled: [styled_node.width, styled_node.height,
     abs(styled_node.width - styled_node.height) < 0.01],
   records: [len(record_edges) == 2,
-    abs(west_start.y - (record_node.y + record_node.height)) < 0.01,
+    abs(west_start.x - (record_node.x + record_node.width)) < 0.01,
     abs(east_start.y - (record_node.y + record_node.height)) < 0.01,
-    west_offset < 0.22, east_offset > 0.72,
-    east_start.x - west_start.x > record_node.width / 2.0]
+    abs(west_start.y - (record_node.y + record_node.height / 2.0)) < 0.01,
+    west_offset > 0.99, east_offset > 0.72,
+    abs(east_start.x - west_start.x) > record_node.width / 5.0]
 }

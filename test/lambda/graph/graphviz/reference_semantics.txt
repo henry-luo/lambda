@@ -2,6 +2,7 @@
   valid: true,
   equal: true,
   diagnostics: [],
+  geometry: [true, []],
   actual: {
     direction: "LR",
     clusters: [["cluster_team", null, "Team"]],

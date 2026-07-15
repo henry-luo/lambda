@@ -1,5 +1,5 @@
 {
-  cases: 9,
+  cases: 11,
   results: [{
       id: "canonical",
       valid: true,
@@ -21,6 +21,20 @@
       edges: 8,
       annotations: 0,
       html: [9, 8, 0]
+    }, {
+      id: "specialized-shapes",
+      valid: true,
+      nodes: 21,
+      edges: 1,
+      annotations: 0,
+      html: [21, 1, 0]
+    }, {
+      id: "paint-styles",
+      valid: true,
+      nodes: 7,
+      edges: 1,
+      annotations: 0,
+      html: [7, 1, 0]
     }, {
       id: "html-interactions",
       valid: true,
@@ -63,5 +77,10 @@
       edges: 2,
       annotations: 0,
       html: [2, 2, 0]
+    }],
+  references: [{
+      id: "reference-semantics",
+      equal: true,
+      diagnostics: []
     }]
 }

@@ -1,7 +1,11 @@
 <graphviz-suite version: 1;
   <case id: 'canonical', source: 'canonical.dot'>
-  <case id: 'reference-semantics', source: 'reference_semantics.dot'>
+  <case id: 'reference-semantics', source: 'reference_semantics.dot',
+    reference: 'reference/reference_semantics.dot.json',
+    'geometry-tolerance': 75, 'route-geometry': false, 'rank-order': true>
   <case id: 'content-shapes-markers', source: 'content_shapes_markers.dot'>
+  <case id: 'specialized-shapes', source: 'specialized_shapes.dot'>
+  <case id: 'paint-styles', source: 'paint_styles.dot'>
   <case id: 'html-interactions', source: 'html_interactions.dot'>
   <case id: 'records-ports', source: 'records_ports.dot'>
   <case id: 'rank-layout', source: 'rank_layout.dot'>

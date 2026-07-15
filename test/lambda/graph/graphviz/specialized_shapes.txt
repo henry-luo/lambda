@@ -1,0 +1,6 @@
+{
+  valid: true,
+  roles: [["a", "promoter", "asymmetric", "polygon"], ["b", "lpromoter", "asymmetric-left", "polygon"], ["c", "cds", "tag-rect", "polygon"], ["d", "terminator", "lin-rect", "box"], ["e", "utr", "box", "box"], ["f", "primersite", "lean-r", "polygon"], ["g", "restrictionsite", "notch-rect", "polygon"], ["h", "fivepoverhang", "notch-rect", "polygon"], ["i", "threepoverhang", "notch-rect-right", "polygon"], ["j", "noverhang", "notch-rect", "polygon"], ["k", "assembly", "hourglass", "polygon"], ["l", "signature", "doc", "box"], ["m", "insulator", "doublecircle", "ellipse"], ["n", "ribosite", "circle", "ellipse"], ["o", "rnastab", "stadium", "box"], ["p", "proteasesite", "notch-rect", "polygon"], ["q", "proteinstab", "stadium", "box"], ["r", "rpromoter", "asymmetric", "polygon"], ["s", "rarrow", "tag-rect", "polygon"], ["t", "larrow", "tag-rect-left", "polygon"], ["u", "underline", "underline", "box"]],
+  fixed: [null, true, 96, 48, true, 96, 48, ["node-shape", "content"], true, true],
+  routing: [180, 72, true]
+}

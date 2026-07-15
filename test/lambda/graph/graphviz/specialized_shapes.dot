@@ -1,0 +1,25 @@
+digraph SpecializedShapes {
+  a [shape=promoter, label="a label wider than its fixed shape", width=1, height=0.5,
+    fixedsize=shape]
+  b [shape=lpromoter]
+  c [shape=cds]
+  d [shape=terminator]
+  e [shape=utr]
+  f [shape=primersite]
+  g [shape=restrictionsite]
+  h [shape=fivepoverhang]
+  i [shape=threepoverhang]
+  j [shape=noverhang]
+  k [shape=assembly]
+  l [shape=signature]
+  m [shape=insulator]
+  n [shape=ribosite]
+  o [shape=rnastab]
+  p [shape=proteasesite]
+  q [shape=proteinstab]
+  r [shape=rpromoter]
+  s [shape=rarrow]
+  t [shape=larrow]
+  u [shape=underline]
+  a -> b
+}
