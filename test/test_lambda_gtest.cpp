@@ -30,6 +30,7 @@ static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIR
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
+    "test/lambda/conc",
     "test/lambda/pdf",
     "test/benchmark/awfy",
     "test/benchmark/r7rs",

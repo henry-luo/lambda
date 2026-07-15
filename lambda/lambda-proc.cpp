@@ -946,7 +946,7 @@ RetItem pn_cmd2(Item cmd, Item args) {
 // Accepts: Path, String, Symbol
 // Returns StrBuf* that caller must free with strbuf_free()
 // Returns NULL if item cannot be converted to local path (e.g., http:// URLs)
-static StrBuf* get_local_path_from_item(Item item) {
+extern "C" StrBuf* lambda_get_local_path_from_item(Item item) {
     Target* target = item_to_target(item.item, NULL);
     if (!target) {
         return NULL;
@@ -977,7 +977,7 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
     }
 
     // Destination must always be local
-    StrBuf* dst_buf = get_local_path_from_item(dst_item);
+    StrBuf* dst_buf = lambda_get_local_path_from_item(dst_item);
     if (!dst_buf) {
         log_error("io.copy: destination must be a local path");
         target_free(src_target);
@@ -1080,8 +1080,8 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
 // io.move(src, dst) - Move/rename file or directory
 RetItem pn_io_move(Item src_item, Item dst_item) {
     if (g_dry_run) { log_debug("dry-run: fabricated io.move()"); return ri_ok(ItemNull); }
-    StrBuf* src_buf = get_local_path_from_item(src_item);
-    StrBuf* dst_buf = get_local_path_from_item(dst_item);
+    StrBuf* src_buf = lambda_get_local_path_from_item(src_item);
+    StrBuf* dst_buf = lambda_get_local_path_from_item(dst_item);
 
     if (!src_buf || !dst_buf) {
         log_error("io.move: invalid path argument");
@@ -1123,7 +1123,7 @@ RetItem pn_io_move(Item src_item, Item dst_item) {
 // io.delete(path) - Delete file or directory
 RetItem pn_io_delete(Item path_item) {
     if (g_dry_run) { log_debug("dry-run: fabricated io.delete()"); return ri_ok(ItemNull); }
-    StrBuf* path_buf = get_local_path_from_item(path_item);
+    StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
         log_error("io.delete: invalid path argument");
@@ -1154,7 +1154,7 @@ RetItem pn_io_delete(Item path_item) {
 // io.mkdir(path) - Create directory (recursive)
 RetItem pn_io_mkdir(Item path_item) {
     if (g_dry_run) { log_debug("dry-run: fabricated io.mkdir()"); return ri_ok(ItemNull); }
-    StrBuf* path_buf = get_local_path_from_item(path_item);
+    StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
         log_error("io.mkdir: invalid path argument");
@@ -1179,7 +1179,7 @@ RetItem pn_io_mkdir(Item path_item) {
 // io.touch(path) - Create file or update modification time
 RetItem pn_io_touch(Item path_item) {
     if (g_dry_run) { log_debug("dry-run: fabricated io.touch()"); return ri_ok(ItemNull); }
-    StrBuf* path_buf = get_local_path_from_item(path_item);
+    StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
         log_error("io.touch: invalid path argument");
@@ -1204,8 +1204,8 @@ RetItem pn_io_touch(Item path_item) {
 // io.symlink(target, link) - Create symbolic link
 RetItem pn_io_symlink(Item target_item, Item link_item) {
     if (g_dry_run) { log_debug("dry-run: fabricated io.symlink()"); return ri_ok(ItemNull); }
-    StrBuf* target_buf = get_local_path_from_item(target_item);
-    StrBuf* link_buf = get_local_path_from_item(link_item);
+    StrBuf* target_buf = lambda_get_local_path_from_item(target_item);
+    StrBuf* link_buf = lambda_get_local_path_from_item(link_item);
 
     if (!target_buf || !link_buf) {
         log_error("io.symlink: invalid path argument");
@@ -1236,7 +1236,7 @@ RetItem pn_io_symlink(Item target_item, Item link_item) {
 // mode can be string like "755" or int like 0755
 RetItem pn_io_chmod(Item path_item, Item mode_item) {
     if (g_dry_run) { log_debug("dry-run: fabricated io.chmod()"); return ri_ok(ItemNull); }
-    StrBuf* path_buf = get_local_path_from_item(path_item);
+    StrBuf* path_buf = lambda_get_local_path_from_item(path_item);
 
     if (!path_buf) {
         log_error("io.chmod: invalid path argument");
@@ -1278,8 +1278,8 @@ RetItem pn_io_chmod(Item path_item, Item mode_item) {
 // io.rename(old_path, new_path) - Rename file or directory (same as move but clearer intent)
 RetItem pn_io_rename(Item old_item, Item new_item) {
     if (g_dry_run) { log_debug("dry-run: fabricated io.rename()"); return ri_ok(ItemNull); }
-    StrBuf* old_buf = get_local_path_from_item(old_item);
-    StrBuf* new_buf = get_local_path_from_item(new_item);
+    StrBuf* old_buf = lambda_get_local_path_from_item(old_item);
+    StrBuf* new_buf = lambda_get_local_path_from_item(new_item);
 
     if (!old_buf || !new_buf) {
         log_error("io.rename: invalid path argument");

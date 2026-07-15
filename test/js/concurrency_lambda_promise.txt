@@ -1,0 +1,7 @@
+true
+1
+js-microtask
+immediate 8
+reject Lambda procedure failed
+worker 6
+await 8

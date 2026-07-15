@@ -2,7 +2,7 @@
 
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the *procedural* half of Lambda: the `pn` procedure flavour, the `run script.ls` / `main()` entry path, and the three machinery clusters that make procedural scripts possible on top of an otherwise pure-functional, JIT-compiled language — the IO/side-effect builtins in `lambda-proc.cpp`, the in-place growable-array mutation builtins `push()`/`splice()`, the for-*statement* loop form (`for i in a to b { arr[i] = v }`), and the static `safety_analyzer` that decides which functions get a stack-overflow guard. It explains what distinguishes procedural code from functional code at the language and codegen level, and where the procedural-specific lowering lives.
 >
-> **Primary sources:** `lambda/lambda-proc.cpp` (the `pn_*` IO/side-effect builtins: `pn_print`/`pn_output*`/`pn_fetch`/`pn_cmd*`/`pn_io_*`/`pn_clock`), `lambda/lambda-data.cpp` (the mutation builtins `pn_push`/`pn_splice`), `lambda/build_ast.cpp` (`build_for_stam`), `lambda/transpile-mir.cpp` (`transpile_for`, the `AST_NODE_INDEX_ASSIGN_STAM` lowering, `emit_null_item_reg`), `lambda/safety_analyzer.cpp`/`.hpp` (the conservative stack-check gate and the unwired TCO analysis), `lambda/sys_func_registry.c` (the `SYSPROC_*` table rows).
+> **Primary sources:** `lambda/lambda-proc.cpp` (the `pn_*` IO/side-effect builtins: `pn_print`/`pn_output*`/`pn_fetch`/`pn_cmd*`/`pn_io_*`/`pn_clock`), `lambda/concurrency.cpp` / `.h` (tasks, scopes, scheduler, mailboxes, suspension and async file I/O), `lambda/concurrency_js.cpp` / `.h` (Promise membrane), `lambda/lambda-data.cpp` (the mutation builtins `pn_push`/`pn_splice`), `lambda/build_ast.cpp` (`build_for_stam` and concurrency analysis), `lambda/transpile-mir.cpp` (`transpile_for`, resumable procedure lowering, the `AST_NODE_INDEX_ASSIGN_STAM` lowering, `emit_null_item_reg`), `lambda/safety_analyzer.cpp`/`.hpp` (the conservative stack-check gate and the unwired TCO analysis), `lambda/sys_func_registry.c` (the `SYSPROC_*` table rows).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names.
 
 ---
@@ -32,6 +32,39 @@ The CLI entry decides which path runs. `lambda script.ls` runs the script as a f
 - **The `io.*` module** — `pn_io_copy`/`move`/`delete`/`mkdir`/`touch`/`symlink`/`chmod`/`rename`/`fetch1`/`fetch2` (`:938`–`:1282`), each a `RetItem`/`can_raise` filesystem procedure.
 
 These builtins are *the* reason a script must be procedural to do IO: they have observable side effects and ordered semantics, which a pure-functional `fn` body is not permitted to express.
+
+### 2.1 Cooperative concurrency runtime
+
+The procedural runtime also owns Lambda's level-1 concurrency substrate. The
+front end recognizes contextual `start pn_call(...)` and computes a fixed-point
+`may_await` closure from async registry entries and procedure call edges;
+indirect `pn` calls are conservative. Only procedures needing task context are
+lowered to the resumable MIR convention. Their suspension points store state
+and live Items in heap-backed `LambdaAsyncFrame`s, so parked work remains
+ordinary GC-rooted data instead of a native stack.
+
+`concurrency.cpp` implements `LambdaScheduler`, `LambdaTask`, opaque VMap task
+handles, the 1024-entry default FIFO mailbox, wait/select links, libuv timers,
+completion observers, structured scopes, cancellation masking, and async
+`io.read`. Each `EvalContext` owns one scheduler attached to the process's
+unified libuv loop. Scheduler checkpoints are macrotasks: libuv first flushes JS
+microtasks, then drains ready Lambda tasks. Completion is published only after a
+task's final successful mailbox send.
+
+`start` records the child in the current lexical task scope. The generic MIR
+exit-edge helper emits join on normal exits and cancel-then-join on error exits,
+including `return`, `break`, `continue`, and propagated-error edges. Returning a
+handle marks it escaped; sending or copying the handle does not transfer its
+scope ownership. The analyzer rejects a started procedure that captures a
+mutable outer `var`, because a resumed child must never borrow shared mutable
+state.
+
+`concurrency_js.cpp` is the JS membrane. A JavaScript Promise can park a Lambda
+task through `wait`; its rejection is converted to a Lambda error. A Lambda
+handle can be observed as a Promise through `toPromise`, and module namespaces
+wrap every exported `pn` as a Promise-returning JavaScript function. Both sides
+share the same scheduler and libuv loop; no exception representation crosses
+the boundary.
 
 ---
 
@@ -95,6 +128,8 @@ The load-bearing fix lives in how the result of these statements is represented.
 | File | Responsibility (this doc) |
 |---|---|
 | `lambda/lambda-proc.cpp` | The `pn_*` IO/side-effect builtins: `pn_print`, `pn_emit`/`pn_set_selection`, `pn_clock`, `pn_output_internal`/`pn_output2/3`/`pn_output_append`, `pn_fetch`/`fetch_response_to_item`, `pn_cmd1/2`, the `pn_io_*` filesystem procedures, and the `g_dry_run` gate. |
+| `lambda/concurrency.cpp` / `.h` | Cooperative task scheduler, VMap handles, bounded FIFO mailboxes, structured task scopes, cancellation, async frames, wait/select/sleep, completion observers, and libuv-backed `io.read`. |
+| `lambda/concurrency_js.cpp` / `.h` | Lambda task-handle to JS Promise adaptation and JS Promise to parked-Lambda-task reactions. |
 | `lambda/lambda-data.cpp` | The in-place growable-array mutation builtins `pn_push` (`:629`) and `pn_splice` (`:652`, generic-`Array` shift and `ArrayNum` `memmove` with the view/N-D guard). |
 | `lambda/build_ast.cpp` | `build_for_stam` (`:5988`): the for-*statement* AST node, proc-scope inheritance, clause/body construction. |
 | `lambda/transpile-mir.cpp` | `transpile_for` (`:3274`), the `AST_NODE_INDEX_ASSIGN_STAM` lowering (`:8526`, multi-dim / mask-range / fast-path / `fn_array_set`), and `emit_null_item_reg` (`:348`) — the reg-0 "undeclared reg 0" fix. The `in_proc` flag (`:211`) and its statement/inference effects. |

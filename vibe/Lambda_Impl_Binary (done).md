@@ -176,6 +176,12 @@ verification snapshot above.
 
 ## 8. Phase 6 — convergence sketch (PL5 pointer, not this plan's scope)
 
+> **Follow-up accepted and planned:** the storage-not-type unification is now
+> authoritative in [Lambda_Type_Binary.md](Lambda_Type_Binary.md) §11, with the
+> phased implementation and verification plan in
+> [Lambda_Impl_Binary2.md](Lambda_Impl_Binary2.md). The paragraph below is kept
+> as the original compatibility target for Phases 1–5.
+
 End-state recorded so Phases 1–5 don't paint away from it: one **refcounted immutable flat byte buffer** (PL5) becomes the storage under *both* `binary` (immutable view: buffer+off+len) and `JsArrayBuffer.data` (mutable pages; detach = drop ref, not `mem_free`; transfer = ref move). Then `binary ⇄ Uint8Array` is view construction — zero-copy both directions — and `frames(...)` slicing (PL6) is free. The `ArrayNum` external-view machinery (`is_view`/`is_pinned`/`ArrayNumShape.base`, already GC-aware) is the template; the JS side already proves the view pattern at scale. Nothing in Phases 1–5 stores anything the flat buffer can't replace behind the same accessors (`chars`/`len` reads become view reads).
 
 ## 9. Sequencing and risk

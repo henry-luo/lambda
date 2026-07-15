@@ -3876,6 +3876,25 @@
                         "icon": "🐑"
                     },
                     {
+                        "source": "test/test_lambda_concurrency_gtest.cpp",
+                        "name": "Lambda Concurrency Runtime Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "additional_sources": [
+                            "lambda/concurrency.cpp",
+                            "lib/uv_loop.c"
+                        ],
+                        "binary": "test_lambda_concurrency_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "libuv"
+                        ],
+                        "icon": "🔀"
+                    },
+                    {
                         "source": "test/test_item_repr_gtest.cpp",
                         "name": "Lambda Item Representation Tests",
                         "dependencies": [

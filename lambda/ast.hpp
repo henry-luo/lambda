@@ -117,6 +117,7 @@ extern "C" {
 
 #define SYM_COMMENT sym_comment
 #define SYM_NAMED_ARGUMENT sym_named_argument
+#define SYM_START_EXPR sym_start_expr
 
 // View/Edit template symbols
 #define SYM_VIEW_STAM sym_view_stam

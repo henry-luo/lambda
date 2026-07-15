@@ -222,6 +222,7 @@ void print_help() {
     printf("  lambda --transpile-only [script.ls] - Transpile to C code only (no execution)\n");
 #endif
     printf("  lambda --max-errors N [script.ls]   - Set max type errors before stopping (default: 10)\n");
+    printf("  lambda --no-drain [script.ls]       - Return without draining spawned tasks\n");
     printf("  lambda --optimize=N [script.ls]     - Set MIR JIT optimization level (0-2, default: 2)\n");
 #ifdef LAMBDA_C2MIR
     printf("  lambda run [--c2mir] <script.ls>    - Run script with main function execution\n");
@@ -241,6 +242,7 @@ void print_help() {
     printf("  --transpile-only             - Transpile to C code without execution\n");
 #endif
     printf("  --max-errors N               - Stop after N type errors (default: 10, 0 = unlimited)\n");
+    printf("  --no-drain                   - Return without draining spawned tasks\n");
     printf("  --optimize=N                 - MIR JIT optimization level (0=debug/stack-trace, 1=basic, 2=full)\n");
     printf("  --dry-run                    - Skip real IO; return fabricated results for network/filesystem ops\n");
     printf("\nDiagnostic Options (global; place before the subcommand):\n");

@@ -223,6 +223,7 @@ Item js_get_length_item(Item object);
 Item js_new_function(void* func_ptr, int param_count);
 Item js_new_method_function(void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
+void js_set_formal_length(Item fn_item, int length);
 void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);
 Item* js_alloc_env(int count);
@@ -899,6 +900,10 @@ Item js_iterator_collect_rest(Item iterator);
 Item js_promise_create(Item executor);           // new Promise((resolve, reject) => ...)
 Item js_promise_resolve(Item value);             // Promise.resolve(value)
 Item js_promise_reject(Item reason);             // Promise.reject(reason)
+Item js_promise_create_pending(void);
+bool js_promise_is(Item promise);
+void js_promise_fulfill_existing(Item promise, Item value);
+void js_promise_reject_existing(Item promise, Item reason);
 const char* js_promise_state_name(Item promise); // "pending", "fulfilled", "rejected", or NULL
 int js_promise_pending_count(void);
 Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);

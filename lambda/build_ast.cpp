@@ -1284,6 +1284,11 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         }
         break;
     }
+    case AST_NODE_START: {
+        AstStartNode* start = (AstStartNode*)node;
+        collect_captures_from_node(tp, (AstNode*)start->call, fn_scope, global_scope, captures);
+        break;
+    }
     case AST_NODE_INDEX_EXPR:
     case AST_NODE_MEMBER_EXPR: {
         AstFieldNode* field = (AstFieldNode*)node;
@@ -8058,6 +8063,49 @@ AstNode* build_named_argument(Transpiler* tp, TSNode arg_node) {
     return (AstNode*)ast_node;
 }
 
+static AstNode* build_start_expr(Transpiler* tp, TSNode start_node) {
+    AstStartNode* ast_node = (AstStartNode*)alloc_ast_node(
+        tp, AST_NODE_START, start_node, sizeof(AstStartNode));
+    ast_node->type = &TYPE_ANY;
+    ast_node->owner_scope = tp->current_scope;
+
+    // The contextual scanner admits `start` only before a named call operand;
+    // accepting that spawn effect in an fn would violate the fn/pn boundary.
+    if (!tp->current_scope || !tp->current_scope->is_proc) {
+        record_semantic_error(tp, start_node, ERR_PROC_IN_FN,
+            "`start` is only allowed inside a procedure (pn)");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    TSNode operand_node = ts_node_child_by_field_id(start_node, FIELD_OPERAND);
+    AstNode* operand = build_expr(tp, operand_node);
+    log_debug("concurrency start AST: operand syntax=%s ast=%d",
+        ts_node_type(operand_node), operand ? (int)operand->node_type : -1);
+    if (operand && operand->node_type == AST_NODE_PRIMARY) {
+        operand = ((AstPrimaryNode*)operand)->expr;
+        log_debug("concurrency start AST: unwrapped primary ast=%d",
+            operand ? (int)operand->node_type : -1);
+    }
+    if (!operand || operand->node_type != AST_NODE_CALL_EXPR) {
+        record_semantic_error(tp, start_node, ERR_INVALID_CALL,
+            "`start` operand must be a procedure call");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    ast_node->call = (AstCallNode*)operand;
+    AstNode* callee = ast_node->call->function;
+    TypeFunc* fn_type = callee && callee->type && callee->type->type_id == LMD_TYPE_FUNC
+        ? (TypeFunc*)callee->type : NULL;
+    if (!fn_type || !fn_type->is_proc) {
+        record_semantic_error(tp, start_node, ERR_INVALID_CALL,
+            "`start` operand must resolve to a procedure (pn) call");
+        ast_node->type = &TYPE_ERROR;
+    }
+    return (AstNode*)ast_node;
+}
+
 // for both func expr and stam
 AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global) {
     log_debug("build function");
@@ -8945,6 +8993,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     case SYM_PRIMARY_EXPR:
         return build_primary_expr(tp, expr_node);
+    case SYM_CALL_EXPR:
+        // `start_expr` names its call operand directly instead of routing it
+        // through primary_expr, so the shared call builder must accept both.
+        return build_call_expr(tp, expr_node, symbol);
     case SYM_UNARY_EXPR:
         return build_unary_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
@@ -9133,6 +9185,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_return_occurrence_type(tp, expr_node);
     case SYM_NAMED_ARGUMENT:
         return build_named_argument(tp, expr_node);
+    case SYM_START_EXPR:
+        return build_start_expr(tp, expr_node);
     case SYM_IMPORT_MODULE:
         // already processed
         return NULL;
@@ -9774,6 +9828,416 @@ AstNode* build_string_pattern(Transpiler* tp, TSNode node, bool is_symbol) {
     return (AstNode*)ast_node;
 }
 
+typedef bool (*LambdaAstVisitor)(AstNode* node, void* data);
+
+static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
+                            bool descend_functions) {
+    if (!node || !visitor(node, data)) return;
+
+    switch (node->node_type) {
+    case AST_SCRIPT: {
+        for (AstNode* child = ((AstScript*)node)->child; child; child = child->next) {
+            walk_lambda_ast(child, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_PRIMARY:
+        walk_lambda_ast(((AstPrimaryNode*)node)->expr, visitor, data, descend_functions);
+        break;
+    case AST_NODE_UNARY:
+    case AST_NODE_SPREAD:
+        walk_lambda_ast(((AstUnaryNode*)node)->operand, visitor, data, descend_functions);
+        break;
+    case AST_NODE_BINARY:
+    case AST_NODE_PIPE: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        walk_lambda_ast(binary->left, visitor, data, descend_functions);
+        walk_lambda_ast(binary->right, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* call = (AstCallNode*)node;
+        walk_lambda_ast(call->function, visitor, data, descend_functions);
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            walk_lambda_ast(arg, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_START:
+        walk_lambda_ast((AstNode*)((AstStartNode*)node)->call, visitor, data, descend_functions);
+        break;
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        walk_lambda_ast(branch->cond, visitor, data, descend_functions);
+        walk_lambda_ast(branch->then, visitor, data, descend_functions);
+        walk_lambda_ast(branch->otherwise, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_MATCH_EXPR: {
+        AstMatchNode* match = (AstMatchNode*)node;
+        walk_lambda_ast(match->scrutinee, visitor, data, descend_functions);
+        for (AstMatchArm* arm = match->first_arm; arm; arm = (AstMatchArm*)arm->next) {
+            walk_lambda_ast(arm->pattern, visitor, data, descend_functions);
+            walk_lambda_ast(arm->body, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST:
+    case AST_NODE_ARRAY:
+    case AST_NODE_MAP:
+    case AST_NODE_ELEMENT: {
+        AstNode* item = ((AstArrayNode*)node)->item;
+        for (; item; item = item->next) {
+            walk_lambda_ast(item, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_ASSIGN:
+    case AST_NODE_KEY_EXPR:
+    case AST_NODE_NAMED_ARG:
+    case AST_NODE_PARAM:
+        walk_lambda_ast(((AstNamedNode*)node)->as, visitor, data, descend_functions);
+        break;
+    case AST_NODE_ASSIGN_STAM:
+        walk_lambda_ast(((AstAssignStamNode*)node)->value, visitor, data, descend_functions);
+        break;
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM: {
+        AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
+        walk_lambda_ast(assign->object, visitor, data, descend_functions);
+        walk_lambda_ast(assign->key, visitor, data, descend_functions);
+        walk_lambda_ast(assign->value, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR: {
+        AstFieldNode* field = (AstFieldNode*)node;
+        walk_lambda_ast(field->object, visitor, data, descend_functions);
+        walk_lambda_ast(field->field, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_WHILE_STAM: {
+        AstWhileNode* loop = (AstWhileNode*)node;
+        walk_lambda_ast(loop->cond, visitor, data, descend_functions);
+        walk_lambda_ast(loop->body, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_FOR_EXPR:
+    case AST_NODE_FOR_STAM: {
+        AstForNode* loop = (AstForNode*)node;
+        for (AstNode* binding = loop->loop; binding; binding = binding->next) {
+            AstLoopNode* loop_binding = (AstLoopNode*)binding;
+            walk_lambda_ast(loop_binding->as, visitor, data, descend_functions);
+            walk_lambda_ast(loop_binding->on, visitor, data, descend_functions);
+        }
+        for (AstNode* binding = loop->let_clause; binding; binding = binding->next) {
+            walk_lambda_ast(binding, visitor, data, descend_functions);
+        }
+        walk_lambda_ast(loop->where, visitor, data, descend_functions);
+        if (loop->group) {
+            for (AstGroupKey* key = loop->group->keys; key; key = (AstGroupKey*)key->next) {
+                walk_lambda_ast(key->expr, visitor, data, descend_functions);
+            }
+        }
+        for (AstNode* order = loop->order; order; order = order->next) {
+            walk_lambda_ast(((AstOrderSpec*)order)->expr, visitor, data, descend_functions);
+        }
+        walk_lambda_ast(loop->limit, visitor, data, descend_functions);
+        walk_lambda_ast(loop->offset, visitor, data, descend_functions);
+        walk_lambda_ast(loop->then, visitor, data, descend_functions);
+        break;
+    }
+    case AST_NODE_RETURN_STAM:
+        walk_lambda_ast(((AstReturnNode*)node)->value, visitor, data, descend_functions);
+        break;
+    case AST_NODE_RAISE_STAM:
+    case AST_NODE_RAISE_EXPR:
+        walk_lambda_ast(((AstRaiseNode*)node)->value, visitor, data, descend_functions);
+        break;
+    case AST_NODE_LET_STAM:
+    case AST_NODE_VAR_STAM:
+    case AST_NODE_PUB_STAM: {
+        for (AstNode* decl = ((AstLetNode*)node)->declare; decl; decl = decl->next) {
+            walk_lambda_ast(decl, visitor, data, descend_functions);
+        }
+        break;
+    }
+    case AST_NODE_FUNC:
+    case AST_NODE_FUNC_EXPR:
+    case AST_NODE_PROC:
+        if (descend_functions) {
+            walk_lambda_ast(((AstFuncNode*)node)->body, visitor, data, descend_functions);
+        }
+        break;
+    case AST_NODE_OBJECT_TYPE: {
+        AstObjectTypeNode* object = (AstObjectTypeNode*)node;
+        for (AstNode* method = object->methods; method; method = method->next) {
+            walk_lambda_ast(method, visitor, data, descend_functions);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static AstNode* unwrap_primary_ast(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    return node;
+}
+
+static AstFuncNode* direct_pn_callee(AstCallNode* call) {
+    if (!call) return NULL;
+    AstNode* function = unwrap_primary_ast(call->function);
+    if (!function || function->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* entry = ((AstIdentNode*)function)->entry;
+    if (!entry || !entry->node || entry->node->node_type != AST_NODE_PROC) return NULL;
+    return (AstFuncNode*)entry->node;
+}
+
+static bool collect_concurrency_function(AstNode* node, void* data) {
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) {
+        arraylist_append((ArrayList*)data, node);
+    }
+    return true;
+}
+
+typedef struct MayAwaitScan {
+    bool found;
+    bool indirect;
+    const char* cause;
+} MayAwaitScan;
+
+static bool call_may_await(AstCallNode* call, bool* indirect, const char** cause) {
+    AstNode* function = call ? unwrap_primary_ast(call->function) : NULL;
+    if (function && function->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
+        if (info && info->is_async) {
+            if (cause) *cause = info->name;
+            return true;
+        }
+        return false;
+    }
+    if (!function || !function->type || function->type->type_id != LMD_TYPE_FUNC ||
+            !((TypeFunc*)function->type)->is_proc) return false;
+    AstFuncNode* callee = direct_pn_callee(call);
+    if (!callee) {
+        if (indirect) *indirect = true;
+        if (cause) *cause = "indirect pn call";
+        return true;
+    }
+    if (callee->analysis && callee->analysis->may_await) {
+        if (cause) *cause = callee->name ? callee->name->chars : "anonymous pn";
+        return true;
+    }
+    return false;
+}
+
+static bool scan_may_await_node(AstNode* node, void* data) {
+    MayAwaitScan* scan = (MayAwaitScan*)data;
+    if (scan->found) return false;
+    if (node->node_type == AST_NODE_START) {
+        AstStartNode* start = (AstStartNode*)node;
+        // Creating a child is synchronous, but the owning block's implicit
+        // structured join can suspend unless ownership escapes by return.
+        if (!start->escapes) {
+            scan->found = true;
+            scan->cause = "implicit scoped-task join";
+        }
+        return false;
+    }
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) return false;
+    if (node->node_type != AST_NODE_CALL_EXPR) return true;
+
+    bool indirect = false;
+    const char* cause = NULL;
+    if (call_may_await((AstCallNode*)node, &indirect, &cause)) {
+        scan->found = true;
+        scan->indirect = indirect;
+        scan->cause = cause;
+    }
+    return !scan->found;
+}
+
+typedef struct TaskContextScan {
+    bool found;
+} TaskContextScan;
+
+static bool scan_task_context_node(AstNode* node, void* data) {
+    TaskContextScan* scan = (TaskContextScan*)data;
+    if (scan->found) return false;
+    if (node->node_type == AST_NODE_START) {
+        scan->found = true;
+        return false;
+    }
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) return false;
+    if (node->node_type != AST_NODE_CALL_EXPR) return true;
+    AstCallNode* call = (AstCallNode*)node;
+    if (call_may_await(call, NULL, NULL)) {
+        scan->found = true;
+        return false;
+    }
+    AstFuncNode* callee = direct_pn_callee(call);
+    if (callee && callee->analysis && callee->analysis->needs_task_context) {
+        scan->found = true;
+        return false;
+    }
+    return true;
+}
+
+typedef struct AwaitPointScan {
+    int count;
+} AwaitPointScan;
+
+static bool count_await_point_node(AstNode* node, void* data) {
+    if (node->node_type == AST_NODE_START) return false;
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) return false;
+    if (node->node_type == AST_NODE_CALL_EXPR &&
+            call_may_await((AstCallNode*)node, NULL, NULL)) {
+        ((AwaitPointScan*)data)->count++;
+    }
+    if ((node->node_type == AST_NODE_CALL_EXPR && ((AstCallNode*)node)->propagate) ||
+            node->node_type == AST_NODE_RETURN_STAM ||
+            node->node_type == AST_NODE_RAISE_STAM ||
+            node->node_type == AST_NODE_ASSIGN_STAM ||
+            node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
+            node->node_type == AST_NODE_MEMBER_ASSIGN_STAM ||
+            node->node_type == AST_NODE_PIPE_FILE_STAM) {
+        // These syntax edges can leave a lexical block before its tail, so
+        // each owns an unwind continuation in the resumable transform.
+        ((AwaitPointScan*)data)->count++;
+    }
+    if (node->node_type == AST_NODE_CONTENT) {
+        // Every lexical content block in a resumable pn has a synthetic scope
+        // leave. Empty scopes return immediately; owning scopes may park.
+        ((AwaitPointScan*)data)->count++;
+    }
+    return true;
+}
+
+typedef struct ConcurrencyValidation {
+    Transpiler* tp;
+} ConcurrencyValidation;
+
+static AstStartNode* returned_start_node(AstNode* value) {
+    value = unwrap_primary_ast(value);
+    if (!value) return NULL;
+    if (value->node_type == AST_NODE_START) return (AstStartNode*)value;
+    if (value->node_type != AST_NODE_IDENT) return NULL;
+    NameEntry* entry = ((AstIdentNode*)value)->entry;
+    if (!entry || !entry->node || entry->node->node_type != AST_NODE_ASSIGN) return NULL;
+    AstNode* assigned = unwrap_primary_ast(((AstNamedNode*)entry->node)->as);
+    return assigned && assigned->node_type == AST_NODE_START ? (AstStartNode*)assigned : NULL;
+}
+
+static bool validate_concurrency_node(AstNode* node, void* data) {
+    ConcurrencyValidation* validation = (ConcurrencyValidation*)data;
+    if (node->node_type == AST_NODE_RETURN_STAM) {
+        AstStartNode* start = returned_start_node(((AstReturnNode*)node)->value);
+        if (start) start->escapes = true;
+        return true;
+    }
+    if (node->node_type != AST_NODE_START) return true;
+
+    AstStartNode* start = (AstStartNode*)node;
+    AstFuncNode* callee = direct_pn_callee(start->call);
+    if (!callee) return false;
+    for (FnCapture* capture = callee->captures; capture; capture = capture->next) {
+        if (capture->entry && capture->entry->is_mutable) {
+            // A spawned task may resume after its lexical parent moves on, so
+            // borrowing an outer var by reference would create shared mutation.
+            record_semantic_error(validation->tp, start->node, ERR_INVALID_EXPR_CONTEXT,
+                "`start` cannot capture mutable var '%.*s'; copy it to a `let` value or use message passing",
+                (int)capture->lambda_name->len, capture->lambda_name->chars);
+        }
+    }
+    return false;
+}
+
+static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
+    ArrayList* functions = arraylist_new(16);
+    if (!functions) return;
+    walk_lambda_ast((AstNode*)script, collect_concurrency_function, functions, true);
+
+    for (int i = 0; i < functions->length; i++) {
+        AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+        if (!fn->analysis) fn->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
+        fn->analysis->may_await = false;
+        fn->analysis->needs_task_context = false;
+        fn->analysis->has_indirect_pn_call = false;
+        fn->analysis->await_point_count = 0;
+        fn->analysis->may_await_cause = NULL;
+    }
+
+    // Escape marking must precede may-await closure inference because a
+    // returned handle suppresses the birth block's implicit join.
+    ConcurrencyValidation validation = {.tp = tp};
+    walk_lambda_ast((AstNode*)script, validate_concurrency_node, &validation, true);
+
+    // Re-scan to a fixed point because forward calls can make callers suspend
+    // only after the callee's bit becomes known.
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (int i = 0; i < functions->length; i++) {
+            AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+            if (fn->node_type != AST_NODE_PROC || fn->analysis->may_await) continue;
+            MayAwaitScan scan = {};
+            walk_lambda_ast(fn->body, scan_may_await_node, &scan, false);
+            if (scan.found) {
+                fn->analysis->may_await = true;
+                fn->analysis->has_indirect_pn_call = scan.indirect;
+                fn->analysis->may_await_cause = scan.cause;
+                changed = true;
+                if (strcmp(scan.cause, "implicit scoped-task join") == 0) {
+                    log_debug("concurrency explain: pn %.*s suspends because it owns an %s",
+                        fn->name ? (int)fn->name->len : 6,
+                        fn->name ? fn->name->chars : "<anon>", scan.cause);
+                } else {
+                    log_debug("concurrency explain: pn %.*s suspends because it calls %s",
+                        fn->name ? (int)fn->name->len : 6,
+                        fn->name ? fn->name->chars : "<anon>", scan.cause);
+                }
+            }
+        }
+    }
+
+    // A procedure that starts a child but never parks still needs a scheduler
+    // task so `self()` and scoped ownership have a concrete parent. Propagate
+    // that requirement independently from the may-await closure.
+    changed = true;
+    while (changed) {
+        changed = false;
+        for (int i = 0; i < functions->length; i++) {
+            AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+            if (fn->node_type != AST_NODE_PROC || fn->analysis->needs_task_context) continue;
+            TaskContextScan scan = {};
+            walk_lambda_ast(fn->body, scan_task_context_node, &scan, false);
+            if (scan.found) {
+                fn->analysis->needs_task_context = true;
+                changed = true;
+            }
+        }
+    }
+
+    for (int i = 0; i < functions->length; i++) {
+        AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+        if (fn->node_type != AST_NODE_PROC || !fn->analysis->may_await) continue;
+        AwaitPointScan scan = {};
+        walk_lambda_ast(fn->body, count_await_point_node, &scan, false);
+        fn->analysis->await_point_count = scan.count;
+    }
+
+    arraylist_free(functions);
+}
+
 AstNode* build_script(Transpiler* tp, TSNode script_node) {
     log_debug("build script");
     AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
@@ -9807,6 +10271,11 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
         child = ts_node_next_named_sibling(child);
     }
     if (ast_node->child) ast_node->type = ast_node->child->type;
+    // Duplicate/invalid declarations can leave recovery placeholders linked
+    // into the partial AST; concurrency analysis is valid only after a clean build.
+    if (tp->error_count == 0) {
+        analyze_lambda_concurrency(tp, ast_node);
+    }
     log_debug("build script child: %p", ast_node->child);
     return (AstNode*)ast_node;
 }

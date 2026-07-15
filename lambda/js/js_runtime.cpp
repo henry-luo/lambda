@@ -30254,6 +30254,16 @@ extern "C" void js_promise_fulfill_existing(Item promise, Item value) {
     js_promise_resolve_with_value(p, value);
 }
 
+extern "C" bool js_promise_is(Item promise) {
+    return js_get_promise(promise) != NULL;
+}
+
+extern "C" void js_promise_reject_existing(Item promise, Item reason) {
+    JsPromise* p = js_get_promise(promise);
+    if (!p) return;
+    js_promise_settle(p, JS_PROMISE_REJECTED, reason);
+}
+
 extern "C" Item js_promise_reject(Item reason) {
     JsPromise* p = js_alloc_promise();
     if (!p) return ItemNull;

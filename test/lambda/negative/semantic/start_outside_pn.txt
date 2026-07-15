@@ -1,0 +1,1 @@
+error[E224]: `start` is only allowed inside a procedure (pn)

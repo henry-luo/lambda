@@ -88,6 +88,10 @@ struct Runtime {
     int mir_cache_misses;
     int mir_cache_compiles;
     int mir_cache_invalidations;
+    LambdaScheduler* scheduler;
+    EvalContext* js_bootstrap_context;
+    bool js_runtime_used;
+    bool no_task_drain;
 };
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
@@ -163,6 +167,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                                    double* out_mir_gen_ms = nullptr);
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
+Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
+                               const char* source, bool is_import = false);
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void preserve_context_last_error(EvalContext* ctx, Item result);

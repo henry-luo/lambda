@@ -118,6 +118,10 @@ module.exports = grammar({
     $.comment,
   ],
 
+  externals: $ => [
+    $._start,
+  ],
+
   word: $ => $.identifier,
 
   // an array of hidden rule names for the generated node types
@@ -436,6 +440,7 @@ module.exports = grammar({
       $.dotted_name,  // a.b, svg.rect — lower priority than member_expr
       $.parent_expr,  // expr.. for parent access shorthand
       $.call_expr,
+      $.start_expr,
       $.query_expr,         // expr?T or expr.?T - query by type
       $._parenthesized_expr,
       $.let_block,    // let-block: (let x = a, expr) — sequential let bindings
@@ -452,6 +457,12 @@ module.exports = grammar({
       field('function', choice($.primary_expr, 'import')),
       $._arguments,
       optional(field('propagate', '^')),
+    )),
+
+    // `_start` is scanned contextually so ordinary identifiers named `start`
+    // remain valid in parameters, fields, bindings, and call positions.
+    start_expr: $ => prec.right(90, seq(
+      $._start, field('operand', $.call_expr),
     )),
 
     // Indexing: arr[i] for 1-D / chained, or arr[i, j, k] for N-D multi-dim
