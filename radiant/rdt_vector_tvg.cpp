@@ -153,6 +153,45 @@ static int g_image_paint_cache_count = 0;
 static const int RDT_IMAGE_PAINT_CACHE_MAX_ENTRIES = 128;
 static pthread_mutex_t g_image_paint_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+typedef struct RdtVectorCacheOwner {
+    MemContext* context;
+    MemNode* registry_node;
+} RdtVectorCacheOwner;
+
+static RdtVectorCacheOwner g_vector_cache_owner = {};
+
+static void picture_cache_clear_all();
+static void paint_cache_clear_all();
+static void image_paint_cache_clear_all();
+
+static bool vector_cache_stat(void* allocator, MemStatSample* sample) {
+    (void)allocator;
+    if (!sample) return false;
+    pthread_mutex_lock(&g_picture_cache_mutex);
+    size_t picture_count = (g_picture_path_cache ? hashmap_count(g_picture_path_cache) : 0) +
+                           (g_picture_data_cache ? hashmap_count(g_picture_data_cache) : 0);
+    pthread_mutex_unlock(&g_picture_cache_mutex);
+    pthread_mutex_lock(&g_paint_cache_mutex);
+    size_t paint_count = g_paint_cache ? hashmap_count(g_paint_cache) : 0;
+    pthread_mutex_unlock(&g_paint_cache_mutex);
+    pthread_mutex_lock(&g_image_paint_cache_mutex);
+    size_t image_count = g_image_paint_cache ? hashmap_count(g_image_paint_cache) : 0;
+    pthread_mutex_unlock(&g_image_paint_cache_mutex);
+    sample->alloc_count = picture_count + paint_count + image_count;
+    sample->bytes_in_use = picture_count * sizeof(RdtPictureCacheEntry) +
+                           paint_count * sizeof(RdtPaintCacheEntry) +
+                           image_count * sizeof(RdtImagePaintCacheEntry);
+    sample->bytes_reserved = sample->bytes_in_use;
+    return true;
+}
+
+static void vector_cache_destroy(void* allocator) {
+    (void)allocator;
+    image_paint_cache_clear_all();
+    paint_cache_clear_all();
+    picture_cache_clear_all();
+}
+
 // Mutex to serialize tvg_paint_duplicate calls (ThorVG Picture::duplicate is not thread-safe:
 // it increments a shared non-atomic counter and may mutate the source loader's state).
 static pthread_mutex_t g_tvg_dup_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -173,6 +212,13 @@ static bool path_ensure_capacity(RdtPath* p) {
     log_error("RAD_CAP_RDT_PATH: unable to grow path entries from %d to %d",
               old_capacity, p->count + 1);
     return false;
+}
+
+static RdtPath::Entry* path_append_entry(RdtPath* path, RdtPath::Cmd command) {
+    if (!path_ensure_capacity(path)) return nullptr;
+    RdtPath::Entry* entry = &path->entries[path->count++];
+    entry->cmd = command;
+    return entry;
 }
 
 static uint64_t rdt_picture_data_hash(const char* data, int size, const char* mime_type) {
@@ -1175,49 +1221,42 @@ RdtPath* rdt_path_new(void) {
 }
 
 void rdt_path_move_to(RdtPath* p, float x, float y) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_MOVE;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_MOVE);
+    if (!e) return;
     e->args[0] = x; e->args[1] = y;
 }
 
 void rdt_path_line_to(RdtPath* p, float x, float y) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_LINE;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_LINE);
+    if (!e) return;
     e->args[0] = x; e->args[1] = y;
 }
 
 void rdt_path_cubic_to(RdtPath* p, float cx1, float cy1,
                        float cx2, float cy2, float x, float y) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_CUBIC;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_CUBIC);
+    if (!e) return;
     e->args[0] = cx1; e->args[1] = cy1;
     e->args[2] = cx2; e->args[3] = cy2;
     e->args[4] = x; e->args[5] = y;
 }
 
 void rdt_path_close(RdtPath* p) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_CLOSE;
+    path_append_entry(p, RdtPath::CMD_CLOSE);
 }
 
 void rdt_path_add_rect(RdtPath* p, float x, float y, float w, float h,
                        float rx, float ry) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_RECT;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_RECT);
+    if (!e) return;
     e->args[0] = x; e->args[1] = y;
     e->args[2] = w; e->args[3] = h;
     e->args[4] = rx; e->args[5] = ry;
 }
 
 void rdt_path_add_circle(RdtPath* p, float cx, float cy, float rx, float ry) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_CIRCLE;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_CIRCLE);
+    if (!e) return;
     e->args[0] = cx; e->args[1] = cy;
     e->args[2] = rx; e->args[3] = ry;
 }
@@ -2248,22 +2287,6 @@ RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
     return pic;
 }
 
-bool rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out) {
-    if (!pic || !out) return false;
-    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
-        if (!pic->has_transform) return false;
-        *out = pic->transform;
-        return true;
-    }
-    if (!pic->paint) return false;
-    Tvg_Matrix m;
-    if (tvg_paint_get_transform(pic->paint, &m) != TVG_RESULT_SUCCESS) return false;
-    out->e11 = m.e11; out->e12 = m.e12; out->e13 = m.e13;
-    out->e21 = m.e21; out->e22 = m.e22; out->e23 = m.e23;
-    out->e31 = m.e31; out->e32 = m.e32; out->e33 = m.e33;
-    return true;
-}
-
 void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
     if (!pic || !m) return;
     if (pic->kind == RdtPicture::KIND_SVG_DOM) {
@@ -2285,19 +2308,32 @@ void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
 
 void rdt_engine_init(int threads) {
     tvg_engine_init(threads);
+    if (!g_vector_cache_owner.context) {
+        g_vector_cache_owner.context = mem_context_create(
+            mem_context_root(), MEM_ROLE_RENDER, "rdt.vector.engine");
+        if (g_vector_cache_owner.context) {
+            g_vector_cache_owner.registry_node = mem_register(
+                g_vector_cache_owner.context, MEM_KIND_CACHE, MEM_ROLE_RENDER,
+                "rdt.vector.caches", &g_vector_cache_owner, NULL,
+                vector_cache_stat, vector_cache_destroy);
+        }
+    }
 }
 
 void rdt_engine_term(void) {
-    image_paint_cache_clear_all();
-    paint_cache_clear_all();
-    picture_cache_clear_all();
-    tvg_engine_term();
-}
-
-void rdt_font_load(const char* font_path) {
-    if (font_path) {
-        tvg_font_load(font_path);
+    if (g_vector_cache_owner.context && g_vector_cache_owner.registry_node) {
+        // The cache registry is the single vector-engine owner; cascading its
+        // context releases every cache before ThorVG itself is terminated.
+        mem_context_destroy(g_vector_cache_owner.context);
+    } else {
+        vector_cache_destroy(&g_vector_cache_owner);
+        if (g_vector_cache_owner.context) {
+            mem_context_destroy(g_vector_cache_owner.context);
+        }
     }
+    g_vector_cache_owner.context = NULL;
+    g_vector_cache_owner.registry_node = NULL;
+    tvg_engine_term();
 }
 
 void rdt_set_font_context(struct FontContext* ctx) {

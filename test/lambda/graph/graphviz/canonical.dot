@@ -1,0 +1,18 @@
+strict digraph G {
+  graph [rankdir=LR]
+  node [shape=box color=gray]
+  edge [color=blue weight=2]
+  a
+  node [shape=ellipse]
+  a [label=Final]
+  b
+  a -> { b; c } -> subgraph cluster_x {
+    node [color=red]
+    c
+    d
+    rank=same
+  } [label=go]
+  a -> b [color=green]
+  a -> b [weight=5]
+  subgraph rank_scope { rank=same; e; f }
+}

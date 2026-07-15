@@ -23,7 +23,6 @@
 #include <cstdint>
 #include <math.h>
 
-#include "layout.hpp"
 #include "../lib/log.h"
 
 // Undefine min/max macros if defined (commonly from windows.h or view.hpp)
@@ -467,6 +466,17 @@ struct TrackArray {
     const EnhancedGridTrack* begin() const { return data; }
     const EnhancedGridTrack* end()   const { return data + count; }
 };
+
+/** A track is definite when both sizing bounds resolve without content measurement. */
+inline bool grid_track_is_definite(const EnhancedGridTrack& track) {
+    SizingFunctionType min_type = track.min_track_sizing_function.type;
+    SizingFunctionType max_type = track.max_track_sizing_function.type;
+    bool definite_min = min_type == SizingFunctionType::Length ||
+        min_type == SizingFunctionType::Percent;
+    bool definite_max = max_type == SizingFunctionType::Length ||
+        max_type == SizingFunctionType::Percent;
+    return definite_min && definite_max;
+}
 
 /**
  * Fixed-capacity array of track indices (size_t).

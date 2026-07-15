@@ -63,11 +63,6 @@ static void sim_input_turn_yield() {
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 extern bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
-extern "C" bool radiant_dispatch_event_sim_simple_event(UiContext* uicon,
-                                                        View* target,
-                                                        const char* type,
-                                                        bool bubbles,
-                                                        bool cancelable);
 extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
                                                          View* target,
                                                          int selected_index);

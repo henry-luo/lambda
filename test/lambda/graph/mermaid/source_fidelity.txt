@@ -1,0 +1,4 @@
+[["title: Source fidelity
+config:
+  flowchart:
+    nodeSpacing: 48", "init: {"flowchart": {"curve": "basis"}}", "48", "basis", "true"], [["A", "C", 0, 0, 3, true], ["B", "C", 0, 1, 3, true], ["C", "D", 1, 2, 3, true], ["E", "F", 0, 0, 1, true]], [["A", "link", "https://example.com", null, "Open details"], ["B", "callback", null, "handleNode()", null], ["C", null, null, null, null], ["D", null, null, null, null], ["E", null, null, null, null], ["F", null, null, null, null]], [["graph-edge animate", "true", "fast", "basis", "stroke:#2455aa,stroke-width:2px"]]]

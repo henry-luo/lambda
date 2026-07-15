@@ -65,35 +65,6 @@ void init_text_flow_logging(void) {
     }
 }
 
-void setup_text_flow_log_categories(void) {
-    init_text_flow_logging();
-}
-
-// ============================================================================
-
-// Structured logging for font operations (replace printf)
-void log_font_loading_attempt(const char* family_name, const char* path) {
-    if (font_log) {
-        clog_debug(font_log, "Attempting to load font: %s from path: %s", family_name, path);
-    }
-}
-
-void log_font_loading_result(const char* family_name, bool success, const char* error) {
-    if (font_log) {
-        if (success) {
-            clog_info(font_log, "Successfully loaded font: %s", family_name);
-        } else {
-            clog_error(font_log, "Failed to load font: %s - %s", family_name, error ? error : "unknown error");
-        }
-    }
-}
-
-void log_font_fallback_triggered(const char* requested, const char* fallback) {
-    if (font_log) {
-        clog_warn(font_log, "Font fallback triggered: %s -> %s", requested, fallback);
-    }
-}
-
 static FontFaceDescriptor* font_face_descriptor_from_css(CssFontFaceDescriptor* css_desc) {
     FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: UiContext owns @font-face descriptors across layout passes.
     if (!descriptor) return nullptr;

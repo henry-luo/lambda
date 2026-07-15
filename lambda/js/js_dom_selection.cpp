@@ -122,11 +122,10 @@ static void js_doc_runtime_exit(JsDocRuntimeScope* scope) {
 static int item_to_int(Item v) {
     TypeId t = get_type_id(v);
     if (t == LMD_TYPE_INT) return (int)it2i(v);
-    if (t == LMD_TYPE_FLOAT) {
-        // JavaScript MIR can pass an inline IEEE-754 Item here; treating every
-        // float payload as a tagged pointer crashes on ordinary offsets like 4.
-        return (int)v.get_double();
-    }
+    // JIT offsets can be inline floats or boxed wide numerics; the canonical
+    // conversion respects both representations instead of forging a pointer.
+    if (t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT || t == LMD_TYPE_FLOAT64)
+        return (int)it2d(v);
     return 0;
 }
 

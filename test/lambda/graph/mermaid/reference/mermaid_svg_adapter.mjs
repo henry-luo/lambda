@@ -53,15 +53,18 @@ function mermaidIdentity(element, prefix) {
   const id = element?.id ?? '';
   const flowchartPrefix = `flowchart-${prefix}-`;
   if (id.startsWith(flowchartPrefix)) return id.slice(flowchartPrefix.length).replace(/-\d+$/, '');
-  if (prefix === 'node' && id.startsWith('flowchart-')) {
-    return id.slice('flowchart-'.length).replace(/-\d+$/, '');
+  const embeddedFlowchart = id.indexOf('-flowchart-');
+  if (prefix === 'node' && (id.startsWith('flowchart-') || embeddedFlowchart >= 0)) {
+    const value = embeddedFlowchart >= 0 ? id.slice(embeddedFlowchart + '-flowchart-'.length)
+      : id.slice('flowchart-'.length);
+    return value.replace(/-\d+$/, '');
   }
   return id;
 }
 
 function nodeShape(element) {
   const className = element?.getAttribute('class') ?? '';
-  const shapeClass = className.match(/\b(basic|rounded|diamond|hexagon|stadium|cylinder|circle|doublecircle)\b/);
+  const shapeClass = className.match(/\b(basic|rounded|diamond|hexagon|stadium|cylinder|circle|doublecircle|cloud|hourglass|bolt|notch-rect|lean-r|lean-l|tri|flip-tri)\b/);
   if (shapeClass) return shapeClass[1] === 'basic' ? 'box' : shapeClass[1];
   if (element?.querySelector('polygon')) return 'diamond';
   if (element?.querySelectorAll('circle').length >= 2) return 'doublecircle';
@@ -69,6 +72,32 @@ function nodeShape(element) {
   const rect = element?.querySelector('rect');
   if (rect && number(rect.getAttribute('rx')) > 0) return 'rounded';
   return 'box';
+}
+
+function paintStyle(element, selector = null) {
+  const target = selector ? element?.querySelector(selector) : element;
+  if (!target || typeof getComputedStyle !== 'function') return {};
+  const style = getComputedStyle(target);
+  const optional = (value) => value && value !== 'none' && value !== 'normal' ? value : null;
+  return {
+    fill: optional(style.fill),
+    stroke: optional(style.stroke),
+    strokeWidth: number(style.strokeWidth, null),
+    opacity: number(style.opacity, null),
+    dashArray: optional(style.strokeDasharray),
+  };
+}
+
+function endpointSide(point, node) {
+  if (!point || !node) return null;
+  const distances = [
+    ['west', Math.abs(point.x - node.x)],
+    ['east', Math.abs(point.x - (node.x + node.width))],
+    ['north', Math.abs(point.y - node.y)],
+    ['south', Math.abs(point.y - (node.y + node.height))],
+  ];
+  distances.sort((a, b) => a[1] - b[1]);
+  return distances[0][0];
 }
 
 function markerKind(path, side) {
@@ -80,11 +109,11 @@ function markerKind(path, side) {
   return 'normal';
 }
 
-function inferEdgeEndpoints(element, path) {
+function inferEdgeEndpoints(element, path, semanticId = '') {
   const from = element?.getAttribute('data-from') ?? path?.getAttribute('data-from');
   const to = element?.getAttribute('data-to') ?? path?.getAttribute('data-to');
   if (from && to) return {from, to};
-  const id = element?.getAttribute('data-edge') ?? element?.id ?? path?.id ?? '';
+  const id = semanticId || element?.getAttribute('data-edge') || element?.id || path?.id || '';
   const match = id.match(/(?:^|-)L[_-](.+?)[_-](.+?)(?:[_-]\d+)?$/);
   return match ? {from: match[1], to: match[2]} : {from: '', to: ''};
 }
@@ -125,6 +154,7 @@ export function adaptMermaidSvg(source, options = {}) {
     shape: nodeShape(element),
     group: element.closest('g.cluster') ? mermaidIdentity(element.closest('g.cluster'), 'cluster') : null,
     label: normalizeText(element.textContent),
+    ...paintStyle(element, 'polygon, circle, ellipse, rect, path'),
     ...transformedBounds(element, root),
   }));
 
@@ -133,6 +163,7 @@ export function adaptMermaidSvg(source, options = {}) {
     parent: element.parentElement?.closest('g.cluster')
       ? mermaidIdentity(element.parentElement.closest('g.cluster'), 'cluster') : null,
     label: normalizeText(element.querySelector('.cluster-label, .nodeLabel')?.textContent),
+    ...paintStyle(element, 'rect, polygon, path'),
     ...transformedBounds(element, root),
   }));
 
@@ -145,14 +176,20 @@ export function adaptMermaidSvg(source, options = {}) {
     const id = mermaidIdentity(element, 'edge') || `e${index}`;
     return {
       id,
-      ...inferEdgeEndpoints(element, path),
+      ...inferEdgeEndpoints(element, path, id),
       markerStart: markerKind(path, 'start'),
       markerEnd: markerKind(path, 'end'),
       routeKind: path?.getAttribute('data-route-kind') ?? options.routeKind ?? 'spline',
       label: edgeLabel(root, id, index),
+      ...paintStyle(path),
       route: sampleRoute(path, root, options.routeSamples ?? 12),
     };
   });
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  for (const edge of edges) {
+    edge.fromSide = endpointSide(edge.route[0], nodesById.get(edge.from));
+    edge.toSide = endpointSide(edge.route.at(-1), nodesById.get(edge.to));
+  }
 
   const bounds = transformedBounds(root, root) ?? {
     x: 0, y: 0, width: number(root.getAttribute('width')), height: number(root.getAttribute('height')),
@@ -183,19 +220,23 @@ export function formatGraphSceneMark(scene) {
   for (const cluster of scene.clusters ?? []) {
     lines.push(`  <cluster ${attrs([
       ['id', cluster.id], ['parent', cluster.parent], ['x', cluster.x], ['y', cluster.y],
-      ['width', cluster.width], ['height', cluster.height],
+      ['width', cluster.width], ['height', cluster.height], ['fill', cluster.fill],
+      ['stroke', cluster.stroke], ['stroke-width', cluster.strokeWidth], ['opacity', cluster.opacity],
     ])}${cluster.label ? `; <label; ${quote(cluster.label)}>>` : '>'}`);
   }
   for (const node of scene.nodes ?? []) {
     lines.push(`  <node ${attrs([
       ['id', node.id], ['shape', node.shape], ['group', node.group], ['x', node.x], ['y', node.y],
-      ['width', node.width], ['height', node.height],
+      ['width', node.width], ['height', node.height], ['fill', node.fill], ['stroke', node.stroke],
+      ['stroke-width', node.strokeWidth], ['opacity', node.opacity], ['dash-array', node.dashArray],
     ])}${node.label ? `; <label; ${quote(node.label)}>>` : '>'}`);
   }
   for (const edge of scene.edges ?? []) {
     lines.push(`  <edge ${attrs([
       ['id', edge.id], ['from', edge.from], ['to', edge.to], ['marker-start', edge.markerStart],
-      ['marker-end', edge.markerEnd], ['route-kind', edge.routeKind],
+      ['marker-end', edge.markerEnd], ['from-side', edge.fromSide], ['to-side', edge.toSide],
+      ['route-kind', edge.routeKind], ['stroke', edge.stroke],
+      ['stroke-width', edge.strokeWidth], ['opacity', edge.opacity], ['dash-array', edge.dashArray],
     ])};`);
     if (edge.label) lines.push(`    <label; ${quote(edge.label)}>`);
     lines.push('    <route;');
@@ -206,4 +247,8 @@ export function formatGraphSceneMark(scene) {
   }
   lines.push('>');
   return `${lines.join('\n')}\n`;
+}
+
+if (typeof window !== 'undefined') {
+  window.lambdaMermaidAdapter = {adaptMermaidSvg, formatGraphSceneMark};
 }

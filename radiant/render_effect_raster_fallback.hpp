@@ -116,6 +116,8 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     // effect rasterization is one-shot; dl_clear() retains the heap-grown item
     // buffer and leaked it when the backing arena was destroyed immediately after.
     dl_destroy(&dl);
+    // The arena object and its chunks live inside temp_pool, so destroying the
+    // pool is the single owner teardown and also unregisters the arena cascade.
     mem_pool_destroy(temp_pool);
 
     out->surface = surface;

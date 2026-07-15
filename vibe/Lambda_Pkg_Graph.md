@@ -3,13 +3,16 @@
 **Status:** Stage 1 is implemented for the initial rich-node release. The package
 split, semantic HTML transform, Velmt callback, generated SVG paint, signed
 stacking, runtime-scoped registration, CLI bridges, and C graph ABI removal are
-complete. Stage 2 is in progress: the first common Mark IR contract, declarative
-schema validation, recursive model queries, Mermaid flowchart normalization
+complete. Stage 2 flowchart support is implemented: the common Mark IR contract,
+declarative schema validation, recursive model queries, Mermaid normalization
 fixes, measured edge and cluster labels, visual recursive clusters, named
 ports, compound and parallel-edge routing, broader shape clipping, safe style
 cascade, final-SVG graph metadata, Graph Scene adaptation/comparison, in-process
-Radiant scene rendering, and the pinned semantic corpus runner are implemented.
-Section 18.12 records the current boundary and remaining work.
+Radiant scene rendering, relational scene validation, and the pinned semantic
+corpus runner are implemented. Section 18.12 records the current boundary;
+additional graph-oriented Mermaid families remain a subsequent phase.
+Stage 3, proposed in Section 19, adds source-faithful Graphviz DOT support on
+the same canonical Graph IR and retained Radiant layout path.
 
 ## 1. Summary
 
@@ -64,9 +67,10 @@ path now enters the Lambda HTML transform and normal Radiant renderer.
   or request child measurement or relayout.
 - The graph package does not replace the Mermaid, D2, or DOT parsers. Their C
   parsers may continue producing Lambda `<graph>` data elements.
-- Full Graphviz/Dagre parity is not required. Spline routing, obstacle
-  avoidance, cluster-aware ranking, and collision-aware label placement remain
-  later work.
+- Full Graphviz/Dagre parity is not required. The package implements the
+  deterministic cluster-aware ordering, orthogonal obstacle routing, and label
+  collision handling needed by the current Mermaid flowchart contract, without
+  claiming identical geometry to either renderer.
 - SVG primitives do not become individually measured CSS layout children.
 
 ## 4. Module Structure
@@ -1130,6 +1134,16 @@ The initial Stage 2 tranche is implemented as follows:
   `source-start`, `source-end`, `source-line`, and `source-column` attributes;
   repeated node references preserve the first declaration span rather than
   replacing provenance during semantic upsert;
+- each edge expanded from a chained or multi-node statement records the
+  statement span, segment index, expansion index/count, and stable `source-id`,
+  so normalization can relate generated edges back to one declaration;
+- YAML front matter and `%%{init: ...}%%` directives survive as source metadata
+  and are parsed structurally by `graph/mermaid/config.ls`; supported title,
+  node/rank spacing, curve, and HTML-label settings lower into the transform;
+- safe `click` link and callback declarations survive as inert `<interaction>`
+  metadata, including tooltip, target, and balanced callback arguments;
+  edge-ID class assignments and `@{ animate, animation, curve }` properties
+  resolve through generated `source-id` values;
 - parser errors and warnings are retained as structured `<diagnostic>` Mark
   values with stable code, severity, message, and source location; chart-family
   dispatch uses the explicit `mermaid.chart-family` code;
@@ -1210,6 +1224,10 @@ The initial Stage 2 tranche is implemented as follows:
   cylinder, subroutine, hexagon, trapezoid, inverse-trapezoid, and asymmetric
   families in addition to rectangle, ellipse/circle, diamond, and
   double-circle shapes;
+- semantic HTML and clipping also cover the general Mermaid shapes exercised by
+  the pinned corpus, including card/notch, cloud, hourglass, bolt, lean,
+  triangle, tag/document, delay, cylinder, brace, fork, divided, and lined
+  variants;
 - repeated edges with the same ordered endpoints receive deterministic,
   sibling-local lanes separated by `edge_sep`; semantic HTML carries this
   option as `data-edge-sep`, and route-bound normalization shifts nodes and
@@ -1228,7 +1246,15 @@ The initial Stage 2 tranche is implemented as follows:
   Mark, discarding wrapper tags and classes while retaining normalized nodes,
   clusters, edges, labels, markers, measured boxes, route classes, and points;
   its comparator performs exact textual semantics plus configurable tolerant
-  box and route-point comparison with structured mismatch values;
+  box and route-point comparison with structured mismatch values. Canonical
+  paint values, endpoint sides, node non-overlap, recursive cluster containment,
+  endpoint attachment, and optional rank order are checked as renderer-neutral
+  relations instead of wrapper- or class-specific SVG structure;
+- Dagre ordering keeps direct cluster members contiguous, reserves inter-cluster
+  padding, and iterates crossing reduction deterministically. Orthogonal routes
+  avoid unrelated node and cluster boxes, and edge-label placement avoids nodes,
+  cluster labels, and prior edge labels while expanding graph bounds when a
+  collision-free label lies outside the original geometry;
 - `graph.transform.render_svg()` and `render_scene()` run HTML parsing, Radiant
   measurement, the cached custom layout callback, generated paint, SVG lowering,
   and scene adaptation in one process. The paired `scene_render.ls` fixture
@@ -1242,6 +1268,10 @@ The initial Stage 2 tranche is implemented as follows:
   `f3dea58385fd5c7dd1f4e9c9c1876751ae6943cc` (Mermaid 11.16.0), carries the
   upstream MIT license, and records source file, upstream test name, features,
   status, policy, and reference version for every adapted case;
+- `reference/extract_cases.mjs` uses Acorn to verify or regenerate all 18
+  adapted source strings from their exact upstream tests. Pinned Mermaid and
+  Puppeteer maintenance tooling renders selected references and adapts their
+  live DOM into Graph Scene Mark; neither dependency is used by ordinary tests;
 - `test/test_graph_mermaid_gtest.cpp` reads
   `test/lambda/graph/mermaid/manifest.mark` once, retains one input runtime,
   dynamically registers every case as a named/filterable GTest, and compares
@@ -1253,6 +1283,10 @@ The initial Stage 2 tranche is implemented as follows:
   and the filtered Lambda package integration batch; the build generator now
   applies a target's platform library exclusions consistently to consuming
   tests.
+- the retained `scene_render.ls` fixture is manifest-driven: it discovers every
+  `scene-semantic` case, installs the compiled layout callback once, renders all
+  selected cases in one runtime, and compares five reviewed semantic scene
+  fixtures without per-case process startup.
 
 The checked-in manifest is a bootstrap corpus covering implicit endpoints,
 directions, shapes and labels, recursive subgraphs, class and style metadata,
@@ -1269,20 +1303,896 @@ parallel boundary routes, broader shape roles, cluster paint metadata, and
 port-reference diagnostics, plus schema type, enum, child-placement,
 cardinality, and required-attribute diagnostics.
 
-The following Stage 2 work remains open:
+The Stage 2 flowchart items covered by this proposal are complete: source
+fidelity and safe metadata, cluster-aware layout quality, Graph Scene paint and
+relational conformance, a broader reproducible Mermaid corpus, and a
+manifest-driven retained end-to-end runner. The package deliberately compares
+semantic and tolerant geometric relations rather than promising pixel parity
+with Mermaid.
 
-- source-stage provenance for parser-expanded chained and multi-node edge
-  declarations, including a stable way to relate generated canonical edges back
-  to one authored statement;
-- interaction metadata, edge-ID property/class statements, the remaining
-  Mermaid style properties beyond the initial safe paint allowlist, and
-  rendering semantics for general shape names beyond the implemented legacy
-  and polygon families;
-- cluster-aware ranking/ordering, obstacle avoidance between independently
-  placed clusters and nonmembers, and collision-aware route-label placement;
-- graph-oriented Mermaid family adapters beyond flowcharts and independent
-  chart-package dispatch tests for chart-oriented families.
+Graph-oriented Mermaid family adapters beyond flowcharts remain a subsequent
+phase. Chart-oriented family dispatch is already rejected with structured
+ownership diagnostics, but detailed sequence, Gantt, pie, Sankey, timeline, and
+XY support belongs to `lambda.package.chart` and its independent test suites.
 
-Accordingly, the current suite proves the parser-to-Mark baseline and the first
-semantic/tolerant final-render scene path. It does not yet claim full Mermaid
-compatibility or satisfy the final Stage 2 acceptance criteria in Section 18.11.
+## 19. Stage 3 - Graphviz DOT Support
+
+### 19.1 Scope and principles
+
+Stage 3 gives DOT input the same end-to-end status as Mermaid flowcharts:
+
+```text
+DOT source
+  -> source-stage Mark Graph IR
+  -> DOT semantic normalization
+  -> canonical Mark Graph IR
+  -> graph.transform.to_html()
+  -> Radiant child measurement
+  -> retained Lambda graph layout callback
+  -> generated graph paint
+  -> final HTML/SVG/PDF/PNG
+```
+
+The implementation supports the Graphviz `dot` layered-layout model first.
+DOT is the graph description language; `dot`, `neato`, `fdp`, `sfdp`, `circo`,
+`twopi`, `osage`, and `patchwork` are distinct layout engines. Parsing the DOT
+language must not imply that every Graphviz engine has been ported.
+
+Stage 3 follows these principles:
+
+1. Graphviz is not a production dependency. Lambda parses, normalizes, lays
+   out, and renders graphs without invoking a Graphviz executable or library.
+2. The parser preserves source structure and raw attributes. It does not apply
+   defaults, merge nodes, expand edge products, convert units, or rewrite
+   Graphviz names into CSS names.
+3. DOT semantics are implemented by pure Lambda normalization functions.
+4. Known Graphviz attributes lower into renderer-neutral Graph IR. Unknown
+   attributes remain available as namespaced properties because DOT permits
+   applications to define arbitrary attributes.
+5. Graphviz maintenance tools provide semantic and geometric references, never
+   raw SVG equality or image fixtures.
+6. Rich node content continues to be measured by Radiant before graph layout.
+   Graphviz geometry is a conformance reference, not a browser-layout oracle.
+
+Stage 3 does not initially promise pixel parity with Graphviz, support every
+Graphviz plugin, execute URLs or callbacks from authored DOT, or preserve source
+whitespace and comments through formatting.
+
+### 19.2 Pre-Stage 3 DOT baseline and required replacement
+
+Before Stage 3A, `lambda/input/input-graph-dot.cpp` was a useful bootstrap
+parser, but it was not a complete DOT parser. It handled simple identifiers,
+single-hop node-to-node edges, one attribute list, basic assignments/defaults,
+and named subgraph blocks. It did not preserve enough information to implement
+DOT semantics correctly, including:
+
+- numeric and HTML-string IDs;
+- quoted-string concatenation and escaped physical newlines;
+- case-insensitive keywords;
+- node ports and compass points;
+- chained edge right-hand sides;
+- subgraphs as edge endpoints and their Cartesian edge expansion;
+- anonymous subgraphs and brace-only endpoint sets;
+- repeated attribute lists and separator-free attribute assignments;
+- temporal, nested default-attribute scopes;
+- strict graph edge identity and update semantics;
+- source-order node redeclarations and implicit node creation;
+- Graphviz HTML-like labels, record labels, and label escape substitution;
+- structured diagnostics and complete source spans.
+
+The pre-Stage 3 parser also eagerly renamed attributes such as `rankdir`,
+`fontcolor`, `arrowhead`, `width`, and edge `style`. This loses the distinction
+between authored DOT values and resolved rendering values. Stage 3 moves all
+such interpretation into the DOT normalizer.
+
+The current DOT formatter is similarly a basic graph serializer. It emits only
+simple nodes, edges, labels, and clusters, always uses a directed edge spelling,
+and does not round-trip arbitrary attributes, ports, defaults, strictness, or
+source-stage statements. It will be revised after the source and canonical
+contracts are stable.
+
+### 19.3 Parser implementation options and size gate
+
+Mermaid and DOT may use either manual C/C+ parsers or generated Tree-sitter
+parsers. They do not have to make the same choice. Both implementations must
+emit the source-stage Mark contract in Section 19.4, so parser technology does
+not leak into normalization, transform, layout, or tests.
+
+#### 19.3.1 Option A - manual C/C+
+
+The manual option extends the current `SourceTracker` and `InputContext` style.
+Mermaid and DOT can share:
+
+- whitespace, line/block comment, source-location, and recovery helpers;
+- quoted string and escape handling where the languages agree;
+- bounded identifier/value readers;
+- source-spanned property and diagnostic constructors;
+- graph, statement, endpoint, and Mark child builders;
+- parser limits and progress/infinite-loop guards.
+
+The state machines cannot be usefully shared wholesale. DOT is a token grammar
+with nested brace scopes, arbitrary attributes, endpoint subgraphs, and
+case-insensitive keywords. Mermaid flowcharts are line-oriented and have
+different edge, shape, directive, label, class, and interaction forms. A shared
+"generic graph parser" would hide two grammars behind conditionals and would be
+harder to verify than two small parsers using common lexical/Mark helpers.
+
+Advantages:
+
+- smallest expected code and read-only table footprint;
+- direct source-to-Mark construction without a CST traversal layer;
+- no generated parse tables and no per-parse Tree-sitter tree allocation;
+- Mermaid already has broad tested flowchart coverage in this form;
+- precise control over recovery, limits, and source-stage edge expansion data.
+
+Costs:
+
+- the DOT grammar and recovery behavior must be maintained manually;
+- nested/ambiguous syntax requires more lookahead and progress invariants;
+- diagnostics and malformed-input recovery tend to become ad hoc unless they
+  are designed as first-class parser behavior;
+- grammar changes are distributed across parser code rather than reviewed as a
+  declarative grammar diff.
+
+If selected, shared code is extracted only after identifying actual duplicate
+logic in the Mermaid and DOT parsers. Parser state machines are not unified for
+the sake of nominal reuse.
+
+#### 19.3.2 Option B - Tree-sitter
+
+The Tree-sitter option vendors a pinned grammar per language:
+
+```text
+lambda/tree-sitter-dot/
+  grammar.js
+  src/parser.c                 generated, never edited manually
+  LICENSE
+```
+
+`input-graph-dot.cpp` then becomes a CST-to-Mark builder. It owns source
+locations, semantic diagnostics, allocation limits, and construction of
+source-stage Mark, while lexical recognition and syntax recovery come from the
+generated parser.
+
+Advantages:
+
+- grammar rules are declarative and easier to audit against language specs;
+- robust CST production and error recovery are supplied by a proven parser
+  runtime;
+- editor/incremental parsing can reuse the same grammar in the future;
+- generated parsers are easy to fuzz independently of Mark construction;
+- Lambda already links Tree-sitter, so its runtime has no incremental cost in
+  the main `lambda.exe` binary.
+
+Costs:
+
+- every grammar contributes its own parse tables even though the runtime is
+  shared;
+- Mermaid and DOT cannot share generated tables, only runtime and CST-to-Mark
+  helper code;
+- a CST-to-Mark adapter remains necessary and contributes code not represented
+  by generated-parser measurements;
+- available third-party grammars may lag the source language and require
+  substantial local extensions;
+- the CST and Tree-sitter parser have a higher transient memory cost than direct
+  Mark construction.
+
+The experiment used `rydesun/tree-sitter-dot`; its pinned revision and license
+are retained with the adapted fixture tranche. If the decision is revisited,
+Lambda would own compatibility extensions in `grammar.js` and regenerate
+`parser.c` through the build, following the same generated-source rule as the
+Lambda grammar.
+
+#### 19.3.3 Binary-size experiment
+
+An initial size experiment was run on 2026-07-15 on arm64 macOS with Apple
+Clang 17.0.0. All parser objects used:
+
+```text
+-O3 -DNDEBUG -ffunction-sections -fdata-sections -fvisibility=hidden
+```
+
+ThinLTO was disabled for object-level comparison because LTO objects contain
+LLVM bitcode rather than final Mach-O sections. Generated parsers were also
+linked into minimal `-dead_strip` probes to verify that the measured tables stay
+live when the language entry point is referenced. The production release still
+uses ThinLTO and dead stripping; a final implementation must be measured as a
+full release binary delta.
+
+Pinned experiment inputs:
+
+- DOT Tree-sitter commit
+  `80327abbba6f47530edeb0df9f11bd5d5c93c14d`;
+- Mermaid Tree-sitter commit
+  `90ae195b31933ceb9d079abfa8a3ad0a36fee4cc`;
+- pre-Stage 3 manual parsers in `input-graph-dot.cpp` and
+  `input-graph-mermaid.cpp`;
+- pre-Stage 3 release `lambda.exe`: 17,261,320 bytes.
+
+The Mermaid upstream grammar covers class, ER, flowchart, Gantt, mindmap, pie,
+sequence, and state diagrams. A second generated candidate restricted the same
+grammar entry point and supertypes to flowcharts. This flow-only build is a
+parse-table lower bound, not a production-ready Lambda grammar.
+
+`size` reports the following optimized object footprint (`dec`, including text,
+data, unwind, and other object sections):
+
+| Implementation | Scope | Object footprint | Difference from manual baseline |
+|---|---:|---:|---:|
+| pre-Stage 3 manual DOT | incomplete DOT subset plus Mark building | 8,436 B | baseline |
+| Tree-sitter DOT | generated DOT grammar only | 44,821 B | +36,385 B |
+| pre-Stage 3 manual Mermaid | Stage 2 flowchart parser plus Mark building | 28,439 B | baseline |
+| Tree-sitter Mermaid, flow-only | generated grammar only | 21,213 B | -7,226 B before adapter |
+| Tree-sitter Mermaid, all supported families | generated grammar only | 207,009 B | +178,570 B before adapter |
+
+The dead-stripped probe file deltas over an empty executable were 50,240 bytes
+for DOT, 33,896 bytes for flow-only Mermaid, and 215,360 bytes for full Mermaid.
+Mach-O page alignment makes those file deltas coarser than object sections, but
+they confirm that dead stripping does not remove the active parse tables.
+
+The existing Tree-sitter runtime object is approximately 171,731 bytes. This is
+not an incremental graph-parser cost in `lambda.exe`, which already needs the
+runtime for Lambda, JavaScript/TypeScript, LaTeX, and other parsing paths. It
+would matter for a future standalone graph-only binary.
+
+Grammar validation results:
+
+- the DOT candidate passed all 11 upstream corpus cases and the checked-in
+  `test/input/test_graph.dot` fixture;
+- the full Mermaid candidate passed its own 45 cases;
+- the flow-only Mermaid candidate passed its eight upstream flowchart cases;
+- both Mermaid candidates parsed only 8 of 34 current Lambda Stage 2 Mermaid
+  fixtures without an error node (23.5%). The candidate grammar therefore does
+  not currently cover Lambda's Mermaid v11.16-oriented feature surface.
+
+After the manual DOT implementation and shared-helper refactor, the same
+non-LTO object measurement was repeated. These numbers include direct Mark
+construction, unlike the generated-parser objects:
+
+| Manual unit | Before Stage 3A | Completed Stage 3A | Difference |
+|---|---:|---:|---:|
+| DOT parser and Mark builder | 8,436 B | 11,782 B | +3,346 B |
+| Mermaid parser and Mark builder | 28,439 B | 26,300 B | -2,139 B |
+| shared graph parser/Mark helpers | 3,056 B | 4,509 B | +1,453 B |
+| combined | 39,931 B | 42,591 B | +2,660 B |
+
+The production ThinLTO/dead-stripped `lambda.exe` grew from 17,261,320 to
+17,261,336 bytes, a 16-byte file-size delta. Across the three implementation
+units and their shared header, source size fell from 2,428 to 2,357 lines. The
+completed parser therefore adds the missing DOT grammar and source fidelity
+while using 71 fewer lines than the pre-Stage 3 implementation.
+
+The initial generated-versus-manual rows were not a complete apples-to-apples
+comparison: manual objects included Mark construction while generated objects
+excluded CST-to-Mark adapters, and the original DOT parser was incomplete. The
+post-implementation rows close the manual side of that comparison. A generated
+replacement would still need an adapter and equivalent corpus/source-Mark
+coverage, so the recorded Tree-sitter sizes remain conservative lower bounds.
+
+#### 19.3.4 Final decision from the experiment
+
+Stage 3 uses manual C/C+ parsers for both Mermaid and DOT:
+
+- keep the existing manual Mermaid flowchart parser. The full generated parser
+  costs about 179 KiB more before its required CST-to-Mark adapter and accepts
+  only 8 of the 34 existing Lambda Mermaid fixtures without an error node;
+- replace the incomplete manual DOT parser with a compact recursive-descent DOT
+  parser. The generated DOT grammar alone costs about 36 KiB more than the
+  current parser before adding its CST-to-Mark adapter, while DOT's grammar is
+  small enough to express directly;
+- share lexical, source-span, diagnostic, and Mark-construction helpers between
+  graph parsers, but keep the Mermaid and DOT grammar state machines separate;
+- measure the completed manual parser objects and release binary after corpus
+  coverage is complete. LOC and binary size are implementation constraints, not
+  permission to weaken source fidelity or diagnostics.
+
+Tree-sitter remains a useful experiment and an independent grammar reference,
+not a production dependency for either graph parser. The pinned commits,
+commands, and measurements above make the decision reproducible. The release
+measurement should still be repeated on Linux and Windows after Stage 3A, but
+there is no longer a 64 KiB technology gate.
+
+#### 19.3.5 Parser footprint ledger
+
+Parser LOC is an actively maintained constraint. The metric is physical source
+lines as reported by `wc -l`; it includes the two grammar implementations and
+their shared graph parser source/header, but excludes tests, schemas, generated
+files, and downstream normalization. The Stage 3A ledger is:
+
+| Source unit | Before Stage 3A | Current ceiling | Difference |
+|---|---:|---:|---:|
+| `input-graph-dot.cpp` | 546 | 471 | -75 |
+| `input-graph-mermaid.cpp` | 1,578 | 1,534 | -44 |
+| `input-graph.cpp` | 206 | 247 | +41 |
+| `input-graph.h` | 98 | 105 | +7 |
+| total | 2,428 | 2,357 | -71 |
+
+Reproduce the source measurement from the repository root with:
+
+```sh
+wc -l lambda/input/input-graph-dot.cpp \
+  lambda/input/input-graph-mermaid.cpp \
+  lambda/input/input-graph.cpp lambda/input/input-graph.h
+```
+
+`GraphParserTest.ParserLocBudget` enforces every current per-file ceiling and
+the combined ceiling during the native graph parser suite. A parser change that
+increases a ceiling must reduce duplication first, then update this ledger and
+the test with a short rationale in the change description. A reduction should
+lower both values in the same change. The ceilings are review gates, not spare
+LOC that a later feature may consume without justification.
+
+Optimized object and packaged-release measurements are repeated at each parser
+milestone using the flags and method in Section 19.3.3. They are tracked beside
+LOC because source reduction alone does not guarantee a smaller binary.
+
+Parser limits must be explicit and diagnostic-producing:
+
+- maximum statement and subgraph nesting depth;
+- maximum HTML-label nesting and table-cell count;
+- maximum chained endpoint count;
+- maximum edge count after endpoint-set expansion;
+- maximum identifier, string, and attribute value length.
+
+Invalid input returns the recoverable source graph plus structured diagnostics
+where possible. It must never silently skip an unsupported statement or emit a
+partially canonical graph that appears valid.
+
+### 19.4 Source-stage DOT Mark
+
+DOT uses the existing public Mark Graph IR with `ir-stage: "source"` and
+`flavor: "dot"`. It does not introduce a private C AST or a second public data
+model. Source-only elements preserve the statement forms needed by the pure
+normalizer:
+
+```mark
+<graph ir-stage: "source", flavor: "dot", id: "G",
+    directed: true, strict: false;
+  <dot-attr-statement target-kind: "graph";
+    <property name: "rankdir", value: "LR">
+  >
+  <dot-attr-statement target-kind: "node";
+    <property name: "shape", value: "box">
+    <property name: "color", value: "steelblue">
+  >
+  <node id: "a";
+    <properties namespace: "graphviz";
+      <property name: "label", value: "Start">
+      <property name: "shape", value: "ellipse">
+    >
+  >
+  <dot-edge-statement id: "dot-stmt-4";
+    <dot-endpoint kind: "node", id: "a", port: "out", compass: "e">
+    <dot-endpoint kind: "node", id: "b">
+    <dot-endpoint kind: "node", id: "c">
+    <properties namespace: "graphviz";
+      <property name: "label", value: "next">
+    >
+  >
+>
+```
+
+The exact schema may use the ordinary `subgraph` element inside a
+`dot-endpoint` for an inline endpoint set. The required invariants are more
+important than the spelling:
+
+- statement order is exact;
+- every statement, endpoint, attribute list, and property has a source span;
+- repeated declarations remain repeated;
+- multiple attribute lists and repeated property names remain ordered;
+- quoted, numeric, ordinary, and HTML IDs normalize to one string identity but
+  retain source-kind metadata;
+- raw DOT names and values are not converted during parsing;
+- edge chains remain one source statement until normalization;
+- anonymous subgraphs receive stable generated source identities without being
+  misclassified as visual clusters.
+
+`<properties namespace: "graphviz">` and `<property>` are generic Graph IR
+extensions rather than DOT-specific maps. A property records at least `name`,
+`value`, source span, and, after normalization, `origin` (`direct`, `default`,
+or `inherited`) plus its defining scope/statement identity. This representation
+preserves arbitrary DOT attributes while keeping known canonical attributes
+directly queryable on graph objects.
+
+### 19.5 DOT semantic normalization
+
+Add the following package modules:
+
+```text
+lambda/package/graph/graphviz/
+  normalize.ls              source order, identity, defaults, edge expansion
+  attributes.ls             typed attribute interpretation and unit conversion
+  labels.ls                 plain, record, and Graphviz HTML-like labels
+  markers.ls                Graphviz arrow-shape grammar
+  shapes.ls                 shape aliases and geometry families
+  engine.ls                 layout-engine selection and diagnostics
+```
+
+`graph.normalize` dispatches source-stage DOT values to
+`graphviz.normalize`. The normalizer performs these operations in source order:
+
+1. Establish graph kind, strictness, graph identity, and lexical scopes.
+2. Maintain independent graph, node, and edge default environments per
+   subgraph scope.
+3. Materialize implicit nodes at first reference and apply the defaults active
+   at creation time.
+4. Merge later declarations into the same node identity without retroactively
+   applying newer defaults.
+5. Resolve node ports and compass points.
+6. Resolve subgraph endpoint node sets and expand chained edge right-hand sides
+   into explicit pairwise canonical edges.
+7. Preserve source-statement, segment, and expansion provenance on every
+   generated edge.
+8. In strict graphs, canonicalize directed or unordered endpoint identity,
+   merge repeated edges, and apply later explicit attributes to the existing
+   edge.
+9. Classify only subgraphs whose names begin with `cluster` as visual clusters;
+   ordinary and anonymous subgraphs remain semantic/default/rank scopes.
+10. Resolve supported attributes into canonical values while retaining the
+    complete namespaced property set.
+11. Emit `ir-stage: "canonical"` and run the common graph schema and relational
+    validators.
+
+DOT graph-global assignment statements such as `rankdir=LR` and subgraph
+constraints such as `rank=same` are not ordinary node declarations. They remain
+scope properties and lower to canonical graph constraints where supported.
+
+Canonical `<subgraph>` gains a `role` of `cluster` or `scope`. The transform and
+layout paint and contain only `role: "cluster"` values. Scope-only subgraphs are
+flattened into their nearest visual container for node/edge ownership while
+their source identity, properties, memberships, and lowered constraints remain
+available as metadata. This permits anonymous endpoint sets and `rank=same`
+blocks without drawing a box around them.
+
+The normalizer emits structured diagnostics for semantic conflicts, including
+the wrong edge operator for graph kind, invalid compass points, duplicate ports,
+unresolved compound cluster references, expansion limits, malformed record or
+HTML labels, and known layout-affecting attributes that are not implemented.
+Unknown application attributes are preserved without an error.
+
+### 19.6 Attributes, units, and styles
+
+Graphviz attributes are strings at the language level and acquire meaning from
+the selected engine and object kind. `graphviz/attributes.ls` uses declarative
+tables keyed by object kind and attribute name. Each entry defines:
+
+- accepted value grammar;
+- default value when Lambda intentionally matches it;
+- canonical Graph IR target;
+- unit conversion;
+- inheritance/default behavior;
+- layout, content, paint, interaction, or metadata ownership;
+- supported, preserved-only, or unsupported status.
+
+The first conformance matrix includes:
+
+- graph: `rankdir`, `nodesep`, `ranksep`, `splines`, `compound`, `newrank`,
+  `ordering`, `outputorder`, `bgcolor`, `font*`, `label`, `labelloc`,
+  `labeljust`, `margin`, `pad`, `dpi`, and `layout`;
+- node: `label`, `xlabel`, `shape`, `width`, `height`, `fixedsize`, `margin`,
+  `style`, `color`, `fillcolor`, `font*`, `penwidth`, `peripheries`, `group`,
+  `orientation`, `regular`, `sides`, `skew`, `distortion`, `image`, `URL`,
+  `tooltip`, and `target`;
+- edge: `label`, `xlabel`, `headlabel`, `taillabel`, `dir`, `arrowhead`,
+  `arrowtail`, `arrowsize`, `headport`, `tailport`, `minlen`, `weight`,
+  `constraint`, `samehead`, `sametail`, `lhead`, `ltail`, `decorate`, `style`,
+  `color`, `font*`, `penwidth`, `URL`, `tooltip`, and `target`;
+- cluster: graph paint/label attributes plus `cluster`, `margin`, `pencolor`,
+  `peripheries`, and compound-edge participation.
+
+Input dimensions are converted only during normalization. Canonical geometry
+uses CSS pixels because Radiant measures border boxes in CSS pixels. Graphviz
+reference geometry, which is generally expressed in points, is converted by
+the reference adapter using `96 / 72`. Authored inch-valued node dimensions and
+point-valued font/pen dimensions use explicit attribute-specific conversions;
+they are never parsed as interchangeable unitless CSS numbers.
+
+Graphviz `style` is tokenized as a Graphviz style list, not treated as authored
+CSS. Supported styles lower to canonical fill, stroke, dash, radius, visibility,
+and emphasis values. Unsupported style tokens remain in Graphviz properties and
+produce a warning only when they affect declared conformance behavior.
+
+Authored `URL`, `href`, `tooltip`, and `target` values remain inert metadata.
+They may lower to safe link semantics in HTML, but no callback, command, image
+fetch, or external navigation occurs during parse, normalization, or layout.
+
+### 19.7 Labels, records, ports, and annotations
+
+DOT has three materially different label forms:
+
+1. Plain strings with object substitutions such as `\\N`, `\\G`, `\\E`,
+   `\\T`, `\\H`, and `\\L`, plus line-alignment escapes.
+2. Record labels with nested fields and `<port>` declarations.
+3. Graphviz HTML-like labels, including tables, cells, font styles, images, and
+   cell ports.
+
+The parser preserves the authored form. `graphviz/labels.ls` applies object
+substitutions only after identity resolution, parses record fields into nested
+content and canonical ports, and parses Graphviz HTML-like syntax with a
+dedicated allowlist. Graphviz HTML-like labels are not passed to the browser as
+raw HTML.
+
+Safe content lowers to ordinary Mark/HTML elements that Radiant can measure:
+text runs, line breaks, inline emphasis, tables, rows, cells, and explicit cell
+alignment. Unsupported tags or attributes produce diagnostics and safe fallback
+text. Image labels use Radiant's normal resource policy and are disabled in
+deterministic conformance tests unless the image is a checked-in fixture.
+
+The existing canonical main `<label>/<content>` pair remains. Stage 3 adds a
+generic measured annotation element for Graphviz's additional labels:
+
+```mark
+<annotation id: "edge-1-head-label", role: "head-label";
+  <label format: "text"; "accepted">
+  <content; "accepted">
+>
+```
+
+Roles initially include `external-label`, `head-label`, and `tail-label`.
+Annotations receive stable IDs, measured Velmts, placements, paint order, and
+Graph Scene roles. This avoids forcing several semantic labels into one string
+or adding Graphviz-specific fields to the layout callback.
+
+Graphviz node ports lower to the existing canonical `<port>` model. Port IDs,
+record/table geometry, and compass points determine attachment positions after
+Radiant has measured the complete node content.
+
+### 19.8 Shapes and arrow markers
+
+`graphviz/shapes.ls` maps Graphviz shape names and aliases into geometry
+families rather than implementing every name as unrelated code:
+
+- rectangle/polygon: `box`, `rect`, `rectangle`, `square`, `polygon`;
+- rounded or specialized polygon: `diamond`, `triangle`, `hexagon`, `octagon`,
+  `parallelogram`, `trapezium`, house variants, stars, and biological symbols;
+- ellipse: `ellipse`, `circle`, `doublecircle`, point variants;
+- record/content: `record`, `Mrecord`, `plain`, `plaintext`, `none`;
+- storage/document: cylinder, note, folder, component, tab, box3d, and related
+  families.
+
+Polygon parameters (`sides`, `regular`, `orientation`, `skew`, `distortion`),
+`peripheries`, fixed sizing, and content margins become explicit geometry data.
+Clipping and paint consume the shared family representation.
+
+Graphviz arrow specifications are a small compositional grammar, not a single
+marker enum. `graphviz/markers.ls` parses modifier and shape sequences into
+canonical marker components, including open/filled, left/right clipping,
+inversion, and multiple shapes. Paint places components in order at the routed
+endpoint. Unsupported marker components retain their raw specification and use
+a documented fallback marker with a warning.
+
+### 19.9 Layout-engine contract
+
+Stage 3 supports these engine modes:
+
+- `dot`: supported by the Lambda layered layout engine;
+- absent layout: select the Lambda `dot` layered engine for both directed and
+  undirected DOT graphs, while recording the choice;
+- `neato`, `fdp`, `sfdp`, `circo`, `twopi`, `osage`, `patchwork`: parsed and
+  preserved, but return `graph.graphviz.unsupported-engine` until a dedicated
+  engine is implemented;
+- fixed `pos` input and Graphviz `-n` semantics: deferred with a distinct
+  diagnostic rather than being mistaken for ordinary `dot` layout.
+
+The `dot` mapping extends the shared Lambda graph layout with:
+
+- `rankdir` and rank separation;
+- temporal defaults already resolved by normalization;
+- `rank=same|min|max|source|sink` subgraph constraints;
+- `minlen`, `weight`, and `constraint=false` edges;
+- stable source order, `ordering`, and node `group` hints;
+- nested visual clusters and `newrank` behavior;
+- record/HTML ports and compass attachment;
+- compound edges through `lhead` and `ltail` clusters;
+- parallel edges, self-loops, and label/annotation collision handling;
+- `splines=ortho`, `polyline`, `line`, and a deterministic curved/spline mode.
+
+Exact Graphviz ranking and crossing-minimization choices are not a requirement.
+Declared semantic constraints and Graph Scene relations are. Geometry policies
+may use tolerances for ranks, containment, attachment, route class, bends, and
+relative ordering without comparing every control point.
+
+### 19.10 Semantic HTML and rendering
+
+`graph.transform.to_html()` receives only canonical Graph IR. It does not know
+whether a node came from Mermaid, DOT, D2, or authored Mark except when a
+namespaced property is intentionally exposed for provenance.
+
+Stage 3 extends the existing transform with:
+
+- Graphviz shape-family and marker metadata;
+- safe plain, record, and HTML-like label content;
+- measured external/head/tail annotations;
+- periphery and gradient paint metadata;
+- compound cluster endpoints;
+- inert links and tooltips;
+- renderer-neutral source IDs and Graphviz property provenance.
+
+The same cached custom-layout registration and retained Lambda runtime are used
+for repeated layout. Parsing and normalization happen once per source graph;
+interactive relayout reuses canonical topology, resolved style data, measured
+Velmts, and the compiled callback. Cache keys include layout-affecting Graphviz
+properties and measured child dimensions.
+
+### 19.11 Formatter behavior
+
+The revised DOT formatter has two explicit modes:
+
+- canonical DOT: serialize canonical graph semantics and retained Graphviz
+  properties into stable DOT;
+- source-semantic DOT: serialize source-stage statements in preserved order,
+  without promising original whitespace or comments.
+
+The formatter supports graph kind and strictness, correct `->`/`--` operators,
+all DOT ID forms, safe quoting/escaping, ports and compass points, chained edge
+statements where provenance permits reconstruction, nested/anonymous subgraphs,
+defaults, assignments, repeated attribute lists, and HTML-string labels.
+
+Round-trip conformance is semantic:
+
+```text
+DOT -> source Mark -> DOT -> source Mark
+```
+
+The two source Mark values must normalize equivalently. Byte-for-byte source
+round trips are outside Stage 3.
+
+### 19.12 Graphviz conformance corpus
+
+All Stage 3 tests live under:
+
+```text
+test/lambda/graph/graphviz/
+  README.md
+  LICENSE.graphviz
+  UPSTREAM_COMMIT
+  manifest.mark
+  cases/dot/
+    language/
+    defaults/
+    edges/
+    subgraphs/
+    labels/
+    records/
+    html-labels/
+    shapes/
+    markers/
+    styles/
+    layout/
+    invalid/
+  expected/
+    source/
+    canonical/
+    html/
+    scene/
+  reference/
+    corpus.mark
+    sync_cases.mjs
+    generate_refs.mjs
+    graphviz_json_adapter.ls
+```
+
+The corpus pins one official Graphviz source commit and carries the applicable
+Graphviz license beside adapted fixtures. Cases are selected from the official
+language examples, `tests`, `tests/graphs`, `rtest/graphs`, and focused Lambda
+regressions. Every adapted case records upstream path, test name or fixture,
+commit, engine, options, features, status, and comparison policy.
+
+Reference generation uses pinned Graphviz only as an explicit maintenance tool:
+
+```text
+dot -Tdot_json case.dot      parser/cgraph semantic reference without layout
+dot -Tjson case.dot          laid-out semantic and geometry reference
+dot -Txdot_json case.dot     optional paint-operation reference
+```
+
+`dot_json` validates canonical topology, resolved object identities,
+subgraphs, and attributes. Laid-out `json` supplies node boxes, cluster boxes,
+edge splines, labels, and draw metadata. `xdot_json` is used only where paint
+semantics cannot be recovered from ordinary JSON attributes.
+
+`graphviz_json_adapter.ls` converts Graphviz JSON into the existing Graph Scene
+Mark vocabulary. It removes Graphviz object indices, draw-operation ordering,
+font-backend details, and engine-specific serialization while retaining stable
+identities, topology, labels, shapes, markers, paint, boxes, endpoint sides,
+routes, cluster containment, and rank relations. Point coordinates are converted
+to CSS pixels and the bottom-up Graphviz coordinate system is converted to
+Radiant's top-down coordinate system.
+
+No Graphviz binary, browser, network access, raw SVG fixture, or image comparison
+is part of an ordinary test run. Checked-in source, canonical Mark, HTML
+semantics, and Graph Scene Mark are the test inputs.
+
+### 19.13 Manifest-driven runners
+
+Before adding a second format-specific runner, extract the reusable Mermaid
+manifest discovery, status handling, semantic comparison, failure artifact, and
+retained-runtime logic into a shared graph conformance harness. Mermaid and
+Graphviz keep separate manifests and format-specific expectations but do not
+duplicate runner mechanics.
+
+Stage 3 provides:
+
+```text
+source: test/test_graph_graphviz_gtest.cpp
+binary: test/test_graph_graphviz_gtest.exe
+target: make test-graph-graphviz
+```
+
+The native runner dynamically registers every manifest case and checks parser
+diagnostics, source spans, source-stage structure, and canonical expectations.
+The Lambda fixture filters all render policies, installs the compiled layout
+callback once, and renders every selected case in one retained runtime.
+
+Policies are shared with Mermaid and extended where necessary:
+
+- `source`: exact source-stage Mark semantics;
+- `canonical`: normalized topology, defaults, properties, and diagnostics;
+- `html-semantic`: renderer-neutral transformed HTML roles/content;
+- `scene-semantic`: final topology, labels, shapes, paint, and relations;
+- `scene-geometry`: semantic comparison plus declared tolerant geometry.
+
+Failures write actual source IR, canonical IR, HTML, scene, and structured diffs
+under `temp/graph_graphviz/<case-id>/`. Normal test runs never update checked-in
+references.
+
+### 19.14 Implementation sequence
+
+#### Stage 3A - Parser and source contract (implemented 2026-07-15)
+
+Stage 3A is complete:
+
+- the manual-versus-Tree-sitter size and corpus experiment is recorded above;
+- the old DOT subset is replaced by a 471-line recursive-descent parser behind
+  the existing public parser entry point;
+- Mermaid remains a compact manual flowchart parser, covering Lambda's existing
+  Mermaid corpus; non-graph Mermaid families remain owned by `lambda.chart`;
+- both parsers reuse shared source-span and diagnostic-to-Mark helpers without
+  merging their distinct grammar state machines;
+- DOT source Mark preserves statement order, raw attributes, repeated lists,
+  assignments, ports, chained endpoints, and named or anonymous subgraphs;
+- quoted, numeric, Unicode, concatenated, multiline, and nested HTML-like IDs,
+  comments, case-insensitive keywords, limits, recovery, and diagnostics are
+  covered by parser fixtures;
+- source-only DOT schema and provenance expectations pass;
+- the initial adapted `tree-sitter-dot` lexical corpus tranche is checked in at
+  `test/lambda/graph/graphviz`, with its pinned revision and license.
+
+Expansion of edge endpoint products, scoped defaults, node merging, and strict
+edge identity remains intentionally in Stage 3B normalization. Keeping those
+operations out of the parser preserves exact source declarations and avoids a
+second source AST.
+
+#### Stage 3B - DOT semantics and canonical IR (in progress, 2026-07-15)
+
+The pure Lambda semantic implementation is complete:
+
+- temporal graph/node/edge defaults are resolved in source order, with global
+  node identity, implicit creation, and non-retroactive redeclaration merging;
+- edge chains and subgraph endpoint products expand into explicit edges with
+  statement, segment, and expansion provenance and a bounded expansion limit;
+- strict directed and unordered undirected edge identities update the first
+  canonical edge while retaining property-level defining statements;
+- ordinary and anonymous subgraphs remain nonvisual scopes, while only
+  `cluster*` subgraphs become visual clusters;
+- arbitrary Graphviz properties retain direct/default/inherited origin and
+  defining scope/statement metadata, while graph, node, edge, paint, spacing,
+  marker, and compound-edge attributes expose an initial typed canonical set;
+- `rank=same|min|max|source|sink` scope properties lower into validated
+  canonical `<constraint>` values; enforcement belongs to Stage 3D;
+- invalid compass points and rank values, graph-kind/operator mismatches,
+  unresolved ports, expansion overflow, and unsupported engines produce stable
+  diagnostics;
+- canonical normalization is idempotent, and semantic-only scopes are excluded
+  from visual cluster transformation.
+
+The implementation is covered by `canonical.ls` and `semantics.ls` under
+`test/lambda/graph/graphviz`. The remaining Stage 3B conformance item is the
+pinned `dot_json` adapter/reference comparison described in Section 19.12.
+Graphviz is not installed or invoked by ordinary tests.
+
+Lambda normalization size is tracked separately from native parser LOC:
+
+| Stage 3B module | Physical LOC |
+|---|---:|
+| `graphviz/attributes.ls` | 115 |
+| `graphviz/normalize.ls` | 479 |
+| total | 594 |
+
+These modules do not change the 2,357-line native parser ceiling in Section
+19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
+attribute families are added.
+
+#### Stage 3C - Content, shapes, markers, and HTML
+
+- implement plain-label substitutions, record labels, ports, and safe Graphviz
+  HTML-like labels;
+- add generic measured annotations;
+- implement Graphviz shape families, polygon parameters, peripheries, and arrow
+  composition;
+- lower safe styles, paint, links, and tooltips to semantic HTML;
+- add selected normalized HTML expectations.
+
+#### Stage 3D - Layered layout parity
+
+- implement rank constraints, ordering/group hints, spacing, and edge weights;
+- complete compound cluster and port behavior;
+- implement declared line/polyline/orthogonal/curved route classes;
+- place all labels and annotations without incoherent overlap;
+- compare Graph Scene semantics and tolerant geometry against pinned Graphviz
+  JSON references.
+
+#### Stage 3E - Formatter, runner, and integration
+
+- rewrite canonical and source-semantic DOT formatting;
+- extract and reuse the graph conformance runner infrastructure;
+- add `make test-graph-graphviz` and baseline discovery;
+- verify `.dot` and `.gv` CLI render/view paths through the Lambda package;
+- document the supported attribute/engine matrix and remaining diagnostics.
+
+### 19.15 Acceptance criteria
+
+Stage 3 basic Graphviz support is complete when:
+
+1. The DOT parser covers the official grammar forms listed in Section 19.3 and
+   emits structured source-spanned Mark without eager semantic rewriting.
+2. Source-stage declarations, defaults, assignments, endpoint sets, and raw
+   attributes survive parsing in exact statement order.
+3. Pure Lambda normalization implements temporal defaults, implicit/redeclared
+   nodes, edge expansion, strict graphs, and subgraph/cluster semantics.
+4. Canonical IR preserves arbitrary Graphviz properties while exposing known
+   layout, content, paint, marker, interaction, and metadata values.
+5. Plain, record, and the declared safe Graphviz HTML-like label subset render
+   as measured content, including ports.
+6. Baseline Graphviz shapes, polygon parameters, peripheries, and compositional
+   arrow markers survive final rendering and Graph Scene adaptation.
+7. The Lambda `dot` engine honors declared rank, spacing, constraint, port,
+   compound-cluster, and route-class behavior.
+8. Unsupported Graphviz engines and known unsupported layout attributes produce
+   stable diagnostics rather than silent fallback.
+9. Canonical DOT and source-semantic DOT formatting round-trip semantically.
+10. The pinned official corpus records provenance and passes source, canonical,
+    selected HTML, and Graph Scene policies without image fixtures.
+11. Reference regeneration is reproducible from a pinned Graphviz commit or
+    binary/container digest and is not required by ordinary tests.
+12. The manifest-driven native and retained-runtime runners discover every case
+    and do not duplicate Mermaid runner infrastructure.
+13. `.dot` and `.gv` render/view commands use the Lambda graph package without
+    Graphviz installed.
+14. Repeated Radiant layout reuses the retained JIT-compiled callback and does
+    not reparse or renormalize unchanged DOT source.
+15. Lambda and Radiant baseline tests remain green for the implemented surface.
+
+### 19.16 Deferred Graphviz work
+
+The following work is explicitly outside the initial Stage 3 acceptance gate:
+
+- force-directed `neato`, `fdp`, and `sfdp` layout engines;
+- radial/circular `twopi` and `circo` engines;
+- packing engines such as `osage` and `patchwork`;
+- exact Graphviz B-spline control-point parity;
+- PostScript shape files and Graphviz renderer/plugin loading;
+- unrestricted external images, URLs, scripts, or callbacks;
+- byte-identical DOT formatting and comment preservation;
+- pixel-identical output across Graphviz and Radiant font backends.
+
+These features can be added behind explicit engine or capability contracts.
+They must not weaken the source-faithful DOT parser, canonical Graph IR, or
+renderer-neutral conformance model established by Stage 3.
+
+### 19.17 Normative and reference sources
+
+Stage 3 implementation and corpus selection use these upstream sources:
+
+- official DOT language grammar: <https://graphviz.org/doc/info/lang.html>;
+- Graphviz attributes and value types: <https://graphviz.org/docs/attrs/>;
+- Graphviz JSON output contract: <https://graphviz.org/docs/outputs/json/>;
+- official Graphviz repository and tests:
+  <https://gitlab.com/graphviz/graphviz/-/tree/main/tests>;
+- rejected Tree-sitter DOT experiment grammar reference:
+  <https://github.com/rydesun/tree-sitter-dot>;
+- Graphviz license: <https://graphviz.org/license/>.
+
+The checked-in `UPSTREAM_COMMIT`, grammar revision, reference-tool version, and
+license files become the reproducibility authority once Stage 3 implementation
+starts. Moving upstream documentation does not silently change conformance.

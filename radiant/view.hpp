@@ -576,6 +576,7 @@ extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height
 extern void image_surface_destroy(ImageSurface* img_surface);
 extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
 extern void image_surface_bump_generation(ImageSurface* img_surface);
+extern void image_surface_detach_pixels(ImageSurface* img_surface);
 extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                               struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
@@ -1669,9 +1670,8 @@ struct DocState;
 typedef struct DocState DocState;
 
 // Forward declarations for state types (full definitions in state_store.hpp)
-struct CaretState;
 struct CursorState;
-struct SelectionState;
+struct SelectionPresentation;
 struct FocusState;
 struct BrowsingSession;  // Browsing session for web navigation
 struct EventStateLog;    // per-document JSONL event/state log
@@ -1765,7 +1765,6 @@ SymbolResolution resolve_symbol_string(const void* string_ptr);
 /**
  * Check if a symbol name is a known emoji shortcode
  */
-bool is_emoji_shortcode(const char* name, size_t len);
 
 /**
  * Check if a symbol name is a known HTML entity
@@ -1822,13 +1821,6 @@ extern log_category_t* layout_log;
 
 // Logging initialization
 void init_text_flow_logging(void);
-void setup_text_flow_log_categories(void);
-
-// Structured logging for font operations
-void log_font_loading_attempt(const char* family_name, const char* path);
-void log_font_loading_result(const char* family_name, bool success, const char* error);
-void log_font_fallback_triggered(const char* requested, const char* fallback);
-
 // ============================================================================
 // CSS @font-face parsing and registration
 // ============================================================================
@@ -2244,14 +2236,6 @@ inline FormControlType get_input_control_type(const char* type) {
     return FORM_CONTROL_TEXT;
 }
 
-/**
- * Check if input type is text-like (has text box appearance)
- */
-inline bool is_text_input_type(const char* type) {
-    FormControlType ct = get_input_control_type(type);
-    return ct == FORM_CONTROL_TEXT || ct == FORM_CONTROL_RANGE;
-}
-
 
 // ===== CSS animations =====
 
@@ -2324,9 +2308,6 @@ KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool);
 
 // Look up a @keyframes rule by name
 CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* name);
-
-// Destroy a keyframe registry
-void keyframe_registry_destroy(KeyframeRegistry* registry);
 
 // ============================================================================
 // CSS Animation Configuration (per element, populated during style resolution)

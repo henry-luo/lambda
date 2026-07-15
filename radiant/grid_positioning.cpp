@@ -38,7 +38,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
     // First, calculate the total grid content size (all tracks + gaps)
     float total_row_size = 0;
     for (int i = 0; i < grid_layout->computed_row_count; i++) {
-        total_row_size += grid_layout->computed_rows[i].computed_size;
+        total_row_size += (*grid_layout->computed_rows)[i].base_size;
         if (i < grid_layout->computed_row_count - 1) {
             total_row_size += grid_layout->row_gap;
         }
@@ -46,7 +46,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
 
     float total_column_size = 0;
     for (int i = 0; i < grid_layout->computed_column_count; i++) {
-        total_column_size += grid_layout->computed_columns[i].computed_size;
+        total_column_size += (*grid_layout->computed_columns)[i].base_size;
         if (i < grid_layout->computed_column_count - 1) {
             total_column_size += grid_layout->column_gap;
         }
@@ -119,7 +119,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         row_positions[i] = current_y_f;
         log_debug(" Row %d position: %.1f\n", i, row_positions[i]);
         if (i < grid_layout->computed_row_count) {
-            float track_size = grid_layout->computed_rows[i].computed_size;
+            float track_size = (*grid_layout->computed_rows)[i].base_size;
             log_debug(" Row %d size: %.1f\n", i, track_size);
             current_y_f += track_size;
             if (i < grid_layout->computed_row_count - 1) {
@@ -143,7 +143,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         column_positions[i] = current_x_f;
         log_debug(" Column %d position: %.1f\n", i, column_positions[i]);
         if (i < grid_layout->computed_column_count) {
-            float track_size = grid_layout->computed_columns[i].computed_size;
+            float track_size = (*grid_layout->computed_columns)[i].base_size;
             log_debug(" Column %d size: %.1f\n", i, track_size);
             current_x_f += track_size;
             if (i < grid_layout->computed_column_count - 1) {
@@ -186,7 +186,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         // Calculate track width by summing individual track sizes (not from positions, which include gaps)
         float track_width = 0;
         for (int c = col_start; c < col_end; c++) {
-            track_width += grid_layout->computed_columns[c].computed_size;
+            track_width += (*grid_layout->computed_columns)[c].base_size;
             // Add gap for interior tracks (not the last one in the span)
             if (c < col_end - 1) {
                 track_width += grid_layout->column_gap;
@@ -195,7 +195,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
 
         float track_height = 0;
         for (int r = row_start; r < row_end; r++) {
-            track_height += grid_layout->computed_rows[r].computed_size;
+            track_height += (*grid_layout->computed_rows)[r].base_size;
             // Add gap for interior tracks (not the last one in the span)
             if (r < row_end - 1) {
                 track_height += grid_layout->row_gap;
@@ -432,18 +432,16 @@ void align_grid_items(GridContainerLayout* grid_layout) {
         for (int r = 0; r < row_count; r++) {
             if (row_baseline_count[r] <= 0) continue;
             float needed = row_max_baseline[r] + row_max_below[r];
-            GridTrack* row_track = &grid_layout->computed_rows[r];
-            bool is_definite_track = row_track->size &&
-                (row_track->size->type == GRID_TRACK_SIZE_LENGTH ||
-                 row_track->size->type == GRID_TRACK_SIZE_PERCENTAGE);
+            radiant::grid::EnhancedGridTrack* row_track = &(*grid_layout->computed_rows)[r];
+            bool is_definite_track = radiant::grid::grid_track_is_definite(*row_track);
             bool has_baseline_group = row_baseline_count[r] > 1;
             bool should_resize = has_baseline_group
-                ? fabsf(needed - row_track->computed_size) > 0.5f
-                : needed > row_track->computed_size + 0.5f;
+                ? fabsf(needed - row_track->base_size) > 0.5f
+                : needed > row_track->base_size + 0.5f;
             if (!is_definite_track && should_resize) {
                 // True baseline-sharing groups need their fitted row size recomputed
                 // across passes; single-item rows keep align-content stretch space.
-                row_track->computed_size = needed;
+                row_track->base_size = needed;
                 rows_changed = true;
             }
         }
@@ -468,8 +466,8 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             // Recompute row offsets
             float row_offset = 0;
             for (int r = 0; r < row_count; r++) {
-                grid_layout->computed_rows[r].base_size = row_offset;
-                row_offset += grid_layout->computed_rows[r].computed_size + row_gap;
+                (*grid_layout->computed_rows)[r].offset = row_offset;
+                row_offset += (*grid_layout->computed_rows)[r].base_size + row_gap;
             }
 
             // Re-position items based on new row offsets
@@ -481,7 +479,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
                 int row_idx = gi->computed_grid_row_start - 1;
                 if (row_idx < 0 || row_idx >= row_count) continue;
 
-                gi->track_base_y = grid_layout->computed_rows[row_idx].base_size
+                gi->track_base_y = (*grid_layout->computed_rows)[row_idx].offset
                     + content_top_offset;
 
                 // Recompute track_area_height for multi-row items
@@ -490,7 +488,7 @@ void align_grid_items(GridContainerLayout* grid_layout) {
                 if (row_end_idx < row_idx) row_end_idx = row_idx;
                 float area_h = 0;
                 for (int r = row_idx; r < row_end_idx; r++) {
-                    area_h += grid_layout->computed_rows[r].computed_size;
+                    area_h += (*grid_layout->computed_rows)[r].base_size;
                     if (r < row_end_idx - 1) area_h += row_gap;
                 }
                 gi->track_area_height = area_h;

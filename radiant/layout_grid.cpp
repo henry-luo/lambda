@@ -13,7 +13,6 @@ extern "C" {
 
 // Forward declarations
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout);
-void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout);
 
 static int count_potential_grid_items(ViewBlock* container) {
     int count = 0;
@@ -23,6 +22,85 @@ static int count_potential_grid_items(ViewBlock* container) {
         child = child->next_sibling;
     }
     return count;
+}
+
+char* grid_scratch_strdup(ScratchArena* scratch, const char* source) {
+    if (!scratch || !source) return NULL;
+    size_t length = strlen(source);
+    char* copy = (char*)scratch_alloc(scratch, length + 1);
+    if (copy) memcpy(copy, source, length + 1);
+    return copy;
+}
+
+static GridTrackSize* grid_scratch_clone_track(ScratchArena* scratch,
+                                               const GridTrackSize* source) {
+    if (!scratch || !source) return NULL;
+    GridTrackSize* copy = (GridTrackSize*)scratch_calloc(scratch, sizeof(GridTrackSize));
+    if (!copy) return NULL;
+    *copy = *source;
+    copy->min_size = NULL;
+    copy->max_size = NULL;
+    copy->repeat_tracks = NULL;
+    copy->repeat_track_count = 0;
+
+    if (source->min_size) {
+        copy->min_size = grid_scratch_clone_track(scratch, source->min_size);
+        if (!copy->min_size) return NULL;
+    }
+    if (source->max_size) {
+        copy->max_size = grid_scratch_clone_track(scratch, source->max_size);
+        if (!copy->max_size) return NULL;
+    }
+    if (source->repeat_tracks && source->repeat_track_count > 0) {
+        copy->repeat_tracks = (GridTrackSize**)scratch_calloc(
+            scratch, (size_t)source->repeat_track_count * sizeof(GridTrackSize*));
+        if (!copy->repeat_tracks) return NULL;
+        copy->repeat_track_count = source->repeat_track_count;
+        for (int i = 0; i < source->repeat_track_count; i++) {
+            copy->repeat_tracks[i] = grid_scratch_clone_track(scratch, source->repeat_tracks[i]);
+            if (!copy->repeat_tracks[i]) return NULL;
+        }
+    }
+    return copy;
+}
+
+static GridTrackList* grid_scratch_clone_track_list(ScratchArena* scratch,
+                                                    const GridTrackList* source,
+                                                    int default_capacity) {
+    if (!scratch) return NULL;
+    int capacity = source && source->allocated_tracks > source->track_count
+        ? source->allocated_tracks : (source ? source->track_count : default_capacity);
+    if (capacity < default_capacity) capacity = default_capacity;
+    GridTrackList* copy = (GridTrackList*)scratch_calloc(scratch, sizeof(GridTrackList));
+    if (!copy) return NULL;
+    copy->allocated_tracks = capacity;
+    copy->tracks = (GridTrackSize**)scratch_calloc(
+        scratch, (size_t)capacity * sizeof(GridTrackSize*));
+    copy->line_names = (char**)scratch_calloc(
+        scratch, (size_t)(capacity + 1) * sizeof(char*));
+    if (!copy->tracks || !copy->line_names) return NULL;
+    if (!source) {
+        copy->repeat_count = 1;
+        return copy;
+    }
+
+    copy->track_count = source->track_count;
+    copy->line_name_count = source->line_name_count;
+    copy->is_repeat = source->is_repeat;
+    copy->repeat_count = source->repeat_count;
+    for (int i = 0; i < source->track_count; i++) {
+        copy->tracks[i] = grid_scratch_clone_track(scratch, source->tracks[i]);
+        if (source->tracks[i] && !copy->tracks[i]) return NULL;
+    }
+    int source_line_slots = source->allocated_tracks + 1;
+    int copy_line_slots = capacity + 1;
+    int slots = source_line_slots < copy_line_slots ? source_line_slots : copy_line_slots;
+    for (int i = 0; i < slots; i++) {
+        if (!source->line_names || !source->line_names[i]) continue;
+        copy->line_names[i] = grid_scratch_strdup(scratch, source->line_names[i]);
+        if (!copy->line_names[i]) return NULL;
+    }
+    return copy;
 }
 
 // Initialize grid container layout state
@@ -73,44 +151,46 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->column_gap = 0;
     }
 
-    // Only allocate new areas array if not already copied from embed->grid
-    if (!grid->grid_areas || grid->area_count == 0) {
-        grid->allocated_areas = 4;
-        grid->grid_areas = (GridArea*)scratch_calloc(&lycon->scratch,
-            (size_t)grid->allocated_areas * sizeof(GridArea));
-        grid->area_count = 0;  // Reset if we allocated new
-        grid->owns_grid_areas = true;
-    } else {
-        grid->owns_grid_areas = false;
+    // Pass-local mutations must never alias the persistent CSS GridProp graph;
+    // clone every area and name into this container's scratch lifetime.
+    GridArea* source_areas = grid->grid_areas;
+    int source_area_count = grid->area_count;
+    grid->allocated_areas = source_area_count > 4 ? source_area_count : 4;
+    grid->grid_areas = (GridArea*)scratch_calloc(&lycon->scratch,
+        (size_t)grid->allocated_areas * sizeof(GridArea));
+    if (!grid->grid_areas) {
+        cleanup_grid_container(lycon);
+        return;
     }
-    // If grid_areas was copied from embed->grid, keep it as-is
+    for (int i = 0; i < source_area_count; i++) {
+        grid->grid_areas[i] = source_areas[i];
+        if (source_areas[i].name) {
+            grid->grid_areas[i].name = grid_scratch_strdup(&lycon->scratch,
+                                                           source_areas[i].name);
+            if (!grid->grid_areas[i].name) {
+                cleanup_grid_container(lycon);
+                return;
+            }
+        }
+    }
     log_debug("%s Grid areas after init: area_count=%d, grid_areas=%p", container->source_loc(), grid->area_count, (void*)grid->grid_areas);
 
-    // Initialize track lists - only create new ones if not already copied from embed->grid
-    // Track ownership to avoid double-free
-    if (!grid->grid_template_rows) {
-        grid->grid_template_rows = create_grid_track_list(4);
-        grid->owns_template_rows = true;
-    } else {
-        grid->owns_template_rows = false;  // Shared with embed->grid
-    }
-    if (!grid->grid_template_columns) {
-        grid->grid_template_columns = create_grid_track_list(4);
-        grid->owns_template_columns = true;
-    } else {
-        grid->owns_template_columns = false;  // Shared with embed->grid
-    }
-    if (!grid->grid_auto_rows) {
-        grid->grid_auto_rows = create_grid_track_list(2);
-        grid->owns_auto_rows = true;
-    } else {
-        grid->owns_auto_rows = false;  // Shared with embed->grid
-    }
-    if (!grid->grid_auto_columns) {
-        grid->grid_auto_columns = create_grid_track_list(2);
-        grid->owns_auto_columns = true;
-    } else {
-        grid->owns_auto_columns = false;  // Shared with embed->grid
+    GridTrackList* source_template_rows = grid->grid_template_rows;
+    GridTrackList* source_template_columns = grid->grid_template_columns;
+    GridTrackList* source_auto_rows = grid->grid_auto_rows;
+    GridTrackList* source_auto_columns = grid->grid_auto_columns;
+    grid->grid_template_rows = grid_scratch_clone_track_list(
+        &lycon->scratch, source_template_rows, 4);
+    grid->grid_template_columns = grid_scratch_clone_track_list(
+        &lycon->scratch, source_template_columns, 4);
+    grid->grid_auto_rows = grid_scratch_clone_track_list(
+        &lycon->scratch, source_auto_rows, 2);
+    grid->grid_auto_columns = grid_scratch_clone_track_list(
+        &lycon->scratch, source_auto_columns, 2);
+    if (!grid->grid_template_rows || !grid->grid_template_columns ||
+        !grid->grid_auto_rows || !grid->grid_auto_columns) {
+        cleanup_grid_container(lycon);
+        return;
     }
 
     // Immediate children bound the pass-local grid item array; scratch arrays are
@@ -152,50 +232,6 @@ void cleanup_grid_container(LayoutContext* lycon) {
     log_debug("Cleaning up grid container for %p\n", lycon->grid_container);
     GridContainerLayout* grid = lycon->grid_container;
 
-    // Free track lists only if we own them (not shared with embed->grid)
-    if (grid->owns_template_rows) {
-        destroy_grid_track_list(grid->grid_template_rows);
-    }
-    if (grid->owns_template_columns) {
-        destroy_grid_track_list(grid->grid_template_columns);
-    }
-    if (grid->owns_auto_rows) {
-        destroy_grid_track_list(grid->grid_auto_rows);
-    }
-    if (grid->owns_auto_columns) {
-        destroy_grid_track_list(grid->grid_auto_columns);
-    }
-
-    // Free computed tracks
-    if (grid->computed_rows) {
-        for (int i = 0; i < grid->computed_row_count; i++) {
-            // Only free size if we own it (created during init, not shared)
-            if (grid->computed_rows[i].size && grid->computed_rows[i].owns_size) {
-                destroy_grid_track_size(grid->computed_rows[i].size);
-            }
-        }
-    }
-
-    if (grid->computed_columns) {
-        for (int i = 0; i < grid->computed_column_count; i++) {
-            // Only free size if we own it (created during init, not shared)
-            if (grid->computed_columns[i].size && grid->computed_columns[i].owns_size) {
-                destroy_grid_track_size(grid->computed_columns[i].size);
-            }
-        }
-    }
-
-    // Free grid areas only if this layout state allocated them locally.
-    if (grid->owns_grid_areas) {
-        for (int i = 0; i < grid->area_count; i++) {
-            destroy_grid_area(&grid->grid_areas[i]);
-        }
-    }
-
-    // Free line names
-    for (int i = 0; i < grid->line_name_count; i++) {
-        mem_free(grid->line_names[i].name);
-    }
     ScratchMark mark = grid->scratch_mark;
     lycon->grid_container = NULL;
     scratch_restore(&lycon->scratch, mark);
@@ -333,7 +369,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
             float total_row_height = 0;
             for (int r = 0; r < grid_layout->computed_row_count; r++) {
-                total_row_height += grid_layout->computed_rows[r].base_size;
+                total_row_height += (*grid_layout->computed_rows)[r].base_size;
             }
             if (grid_layout->computed_row_count > 1) {
                 total_row_height += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
@@ -877,133 +913,46 @@ static int calculate_track_pattern_min_size(GridTrackSize** tracks, int track_co
     return pattern_size;
 }
 
-static void destroy_grid_track_entries(GridTrackSize** tracks, int track_count) {
-    if (!tracks) return;
-    for (int i = 0; i < track_count; i++) {
-        destroy_grid_track_size(tracks[i]);
-        tracks[i] = nullptr;
-    }
-}
-
-static void free_grid_line_name_slots(GridTrackList* list) {
-    if (!list || !list->line_names) return;
-    int slot_count = list->allocated_tracks + 1;
-    for (int i = 0; i < slot_count; i++) {
-        mem_free(list->line_names[i]);
-        list->line_names[i] = nullptr;
-    }
-    mem_free(list->line_names);
-    list->line_names = nullptr;
-    list->line_name_count = 0;
-}
-
-static bool append_cloned_grid_track(GridTrackSize** tracks, int* dest, GridTrackSize* source) {
-    if (!tracks || !dest || !source) return false;
-    GridTrackSize* copy = clone_grid_track_size(source);
+static bool append_cloned_grid_track(ScratchArena* scratch, GridTrackSize** tracks,
+                                     int* dest, GridTrackSize* source) {
+    if (!scratch || !tracks || !dest || !source) return false;
+    GridTrackSize* copy = grid_scratch_clone_track(scratch, source);
     if (!copy) return false;
     tracks[*dest] = copy;
     (*dest)++;
     return true;
 }
 
-// CSS Grid §7.2.3.2: Collapse empty auto-fit tracks after item placement.
-// Empty auto-fit tracks are treated as having a fixed track sizing function of 0px,
-// and their gutters are also collapsed.
-void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout) {
-    if (!grid_layout) return;
-
-    // Process columns
-    if (grid_layout->auto_fit_col_count > 0 && grid_layout->grid_template_columns) {
-        GridTrackList* cols = grid_layout->grid_template_columns;
-        // Build occupancy bitmap: which column indices (0-based) have items
-        bool col_occupied[64] = {};
-        for (int idx = 0; idx < grid_layout->item_count; idx++) {
-            ViewBlock* item = grid_layout->grid_items[idx];
-            GridItemProp* gi = grid_item_prop(item);
-            if (!item || !gi) continue;
-            // computed positions are 1-based line numbers
-            int cs = gi->computed_grid_column_start - 1;
-            int ce = gi->computed_grid_column_end - 1;
-            for (int c = cs; c < ce && c < 64; c++) {
-                if (c >= 0) col_occupied[c] = true;
-            }
-        }
-        // Collapse unoccupied auto-fit tracks by setting their size to 0px
-        for (int c = 0; c < cols->track_count && c < 64; c++) {
-            if (c < grid_layout->auto_fit_col_count &&
-                grid_layout->auto_fit_columns[c] && !col_occupied[c]) {
-                // Replace with a 0px fixed track
-                GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
-                if (!zero_track) continue;
-                destroy_grid_track_size(cols->tracks[c]);
-                cols->tracks[c] = zero_track;
-                log_debug("GRID: auto-fit collapse column %d (empty)", c);
-            }
-        }
-    }
-
-    // Process rows
-    if (grid_layout->auto_fit_row_count > 0 && grid_layout->grid_template_rows) {
-        GridTrackList* rows = grid_layout->grid_template_rows;
-        bool row_occupied[64] = {};
-        for (int idx = 0; idx < grid_layout->item_count; idx++) {
-            ViewBlock* item = grid_layout->grid_items[idx];
-            GridItemProp* gi = grid_item_prop(item);
-            if (!item || !gi) continue;
-            int rs = gi->computed_grid_row_start - 1;
-            int re = gi->computed_grid_row_end - 1;
-            for (int r = rs; r < re && r < 64; r++) {
-                if (r >= 0) row_occupied[r] = true;
-            }
-        }
-        for (int r = 0; r < rows->track_count && r < 64; r++) {
-            if (r < grid_layout->auto_fit_row_count &&
-                grid_layout->auto_fit_rows[r] && !row_occupied[r]) {
-                GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
-                if (!zero_track) continue;
-                destroy_grid_track_size(rows->tracks[r]);
-                rows->tracks[r] = zero_track;
-                log_debug("GRID: auto-fit collapse row %d (empty)", r);
-            }
-        }
-    }
-}
-
-static GridTrackSize** expand_repeat_track_entries(GridTrackList* tracks, int repeat_index,
+static GridTrackSize** expand_repeat_track_entries(ScratchArena* scratch,
+                                                   GridTrackList* tracks, int repeat_index,
                                                    GridTrackSize* repeat, int repeat_count,
                                                    int new_track_count, int* repeat_start,
                                                    int* repeat_end) {
-    GridTrackSize** expanded = (GridTrackSize**)mem_calloc(
-        new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
+    GridTrackSize** expanded = (GridTrackSize**)scratch_calloc(
+        scratch, (size_t)new_track_count * sizeof(GridTrackSize*));
     if (!expanded) return nullptr;
 
     int dest = 0;
     for (int i = 0; i < repeat_index; i++) {
-        if (!append_cloned_grid_track(expanded, &dest, tracks->tracks[i])) goto fail;
+        if (!append_cloned_grid_track(scratch, expanded, &dest, tracks->tracks[i])) return NULL;
     }
     *repeat_start = dest;
     for (int i = 0; i < repeat_count; i++) {
         for (int j = 0; j < repeat->repeat_track_count; j++) {
-            if (!append_cloned_grid_track(expanded, &dest, repeat->repeat_tracks[j])) goto fail;
+            if (!append_cloned_grid_track(scratch, expanded, &dest,
+                                          repeat->repeat_tracks[j])) return NULL;
         }
     }
     *repeat_end = dest;
     for (int i = repeat_index + 1; i < tracks->track_count; i++) {
-        if (!append_cloned_grid_track(expanded, &dest, tracks->tracks[i])) goto fail;
+        if (!append_cloned_grid_track(scratch, expanded, &dest, tracks->tracks[i])) return NULL;
     }
     return expanded;
-
-fail:
-    destroy_grid_track_entries(expanded, dest);
-    mem_free(expanded);
-    return nullptr;
 }
 
 static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_column) {
     GridTrackList** list_slot = is_column ? &grid_layout->grid_template_columns
                                          : &grid_layout->grid_template_rows;
-    bool* owns_list = is_column ? &grid_layout->owns_template_columns
-                                : &grid_layout->owns_template_rows;
     bool* auto_fit_tracks = is_column ? grid_layout->auto_fit_columns
                                       : grid_layout->auto_fit_rows;
     int* auto_fit_count = is_column ? &grid_layout->auto_fit_col_count
@@ -1064,7 +1013,8 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
         int auto_fit_start = 0;
         int auto_fit_end = 0;
         GridTrackSize** new_tracks = expand_repeat_track_entries(
-            tracks, repeat_index, repeat, repeat_count, new_track_count,
+            &grid_layout->lycon->scratch, tracks, repeat_index, repeat,
+            repeat_count, new_track_count,
             &auto_fit_start, &auto_fit_end);
         if (!new_tracks) return false;
 
@@ -1075,31 +1025,18 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
             *auto_fit_count = new_track_count;
         }
 
-        if (*owns_list) {
-            destroy_grid_track_entries(tracks->tracks, tracks->track_count);
-            mem_free(tracks->tracks);
-            tracks->tracks = new_tracks;
-            tracks->track_count = new_track_count;
-            tracks->allocated_tracks = new_track_count;
-            tracks->is_repeat = false;
-            free_grid_line_name_slots(tracks);
-            tracks->line_names = (char**)mem_calloc(
-                new_track_count + 1, sizeof(char*), MEM_CAT_LAYOUT);
-        } else {
-            GridTrackList* expanded_list = create_grid_track_list(new_track_count);
-            if (!expanded_list) {
-                destroy_grid_track_entries(new_tracks, new_track_count);
-                mem_free(new_tracks);
-                return false;
-            }
-            mem_free(expanded_list->tracks);
-            expanded_list->tracks = new_tracks;
-            expanded_list->track_count = new_track_count;
-            expanded_list->allocated_tracks = new_track_count;
-            expanded_list->is_repeat = false;
-            *list_slot = expanded_list;
-            *owns_list = true;
-        }
+        // Auto-repeat mutates only the pass-local clone; abandoned generations
+        // remain owned by the container scratch mark and need no free chain.
+        tracks->tracks = new_tracks;
+        tracks->track_count = new_track_count;
+        tracks->allocated_tracks = new_track_count;
+        tracks->is_repeat = false;
+        tracks->line_names = (char**)scratch_calloc(
+            &grid_layout->lycon->scratch,
+            (size_t)(new_track_count + 1) * sizeof(char*));
+        tracks->line_name_count = 0;
+        if (!tracks->line_names) return false;
+        *list_slot = tracks;
 
         log_debug("GRID: Expanded to %d %s tracks", new_track_count, axis);
         break; // CSS permits only one auto-repeat per axis.

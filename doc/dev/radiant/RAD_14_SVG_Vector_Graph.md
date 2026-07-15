@@ -1,6 +1,6 @@
 # Radiant — SVG, Vector Graphics & Diagram Layout
 
-> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and its dual ThorVG / CoreGraphics backends selected at compile time; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and Lambda graph layout whose routed edges enter Radiant as generated SVG paint layers.
+> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and active ThorVG backend, with an excluded CoreGraphics implementation retained for future exploration; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and Lambda graph layout whose routed edges enter Radiant as generated SVG paint layers.
 >
 > **Primary sources:** `radiant/render.hpp`, `radiant/rdt_vector_tvg.cpp`, `radiant/rdt_vector_cg.mm`, `radiant/render_svg_inline.cpp`, `radiant/render_svg.cpp`, `radiant/render_vector_path.cpp`, `radiant/render_path.cpp`, `lambda/package/graph/layout.ls`, `lambda/package/graph/dagre.ls`, `lambda/package/graph/transform.ls`, and `radiant/graph_bridge.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
@@ -13,7 +13,7 @@ Everything Radiant paints as a vector — CSS backgrounds and borders, block cli
 
 Three sub-areas share this surface and are documented in turn:
 
-1. **The `RdtVector` abstraction** (§2–§3) — the API plus two interchangeable backends and a capability table that lets callers degrade gracefully.
+1. **The `RdtVector` abstraction** (§2–§3) — the API, active ThorVG implementation, retained CoreGraphics exploration source, and capability table that lets callers degrade gracefully.
 2. **SVG** (§4–§5) — the inline-SVG renderer (SVG *input*) and, separately, the view-tree→SVG-text serializer (SVG *output*); these run in opposite directions and are easy to confuse.
 3. **Graph / diagram layout** (§6–§8) — a Dagre-inspired Lambda layout over measured rich HTML nodes, with routed links lowered through generated SVG subscenes.
 
@@ -21,9 +21,9 @@ The recording substrate they share — PaintIR and the DisplayList — is owned 
 
 ---
 
-## 2. The `RdtVector` abstraction and its dual backend
+## 2. The `RdtVector` abstraction and backend sources
 
-<img alt="RdtVector API and dual backend selection" src="diagram/rad14_rdtvector_backends.svg" width="720">
+<img alt="RdtVector API, active ThorVG backend, and retained CoreGraphics source" src="diagram/rad14_rdtvector_backends.svg" width="720">
 
 ### 2.1 The API surface
 
@@ -31,21 +31,21 @@ The recording substrate they share — PaintIR and the DisplayList — is owned 
 
 `RdtPath` and `RdtVectorImpl` are opaque (`render.hpp,66`); each backend defines the concrete struct. `RdtMatrix` (`render.hpp`) is a 3×3 affine deliberately laid out identically to `Tvg_Matrix`, with inline `rdt_matrix_identity`/`rdt_matrix_multiply`/`rdt_matrix_translate` helpers (`render.hpp`) so transform composition needs no backend call.
 
-### 2.2 Backend selection is compile-time, and callers branch on capabilities not identity
+### 2.2 ThorVG is active; CoreGraphics is retained but excluded
 
-There is **no runtime dispatch**. Each translation unit — `rdt_vector_tvg.cpp` or `rdt_vector_cg.mm` — defines the entire `rdt_*` symbol set, and the linker resolves exactly one per build. `rdt_vector_cg.mm` is listed in the global `exclude_source_files` (`build_lambda_config.json:46`) and is compiled only into the macOS app build (the `LAMBDA_HEADLESS` GUI target); the CLI-only headless target also excludes it and excludes the ThorVG library entirely (`build_lambda_config.json`, `cli` platform block). ThorVG remains the portable default on Linux and Windows and is still linked on macOS for SVG-DOM pictures.
+There is **no runtime dispatch**. Both translation units define the complete `rdt_*` symbol set, so only one could be linked into a build. The current build configuration always compiles `rdt_vector_tvg.cpp` and lists `rdt_vector_cg.mm` in `exclude_source_files`, including the Jube overlay. CoreGraphics is intentionally not compiled or tested; its source is retained only for future backend exploration. ThorVG is therefore the sole active vector backend on every platform.
 
-Because both TUs export the same symbols, callers cannot and must not branch on "which backend am I." Instead every backend publishes an immutable `RdtVectorCaps` table (`render.hpp`), returned by `rdt_vector_get_caps` (`render.hpp`), and optional-feature code gates on the flag. The two instances are `g_tvg_caps` (`rdt_vector_tvg.cpp:774`) and `g_cg_caps` (`rdt_vector_cg.mm:273`). The table advertises `vector_paths`, `rounded_rects`, `gradients`, `nested_clips`, `image_scaling`, `picture_svg`, `picture_duplication`, `svg_dom_pictures`, `opacity_group`, `blend_modes`, `gaussian_blur`, `color_matrix_filters`, `native_text_runs`, `vector_batching`, `premultiplied_surface`, `tile_offsets`, and `clip_depth_save_restore`. The helper `rdt_backend_supports_gaussian_blur` (`render_backend_caps.cpp:10`) and the CSS-filter path (`render_filter.cpp:208`) are examples of callers honoring a cap rather than assuming a backend.
+Callers still must not branch on backend identity. The active implementation publishes an immutable `RdtVectorCaps` table (`render.hpp`), returned by `rdt_vector_get_caps`, and optional-feature code gates on the flag. The retained CoreGraphics source follows the same contract so it can be evaluated later without changing callers. The table advertises `vector_paths`, `rounded_rects`, `gradients`, `nested_clips`, `image_scaling`, `picture_svg`, `picture_duplication`, `svg_dom_pictures`, `opacity_group`, `blend_modes`, `gaussian_blur`, `color_matrix_filters`, `native_text_runs`, `vector_batching`, `premultiplied_surface`, `tile_offsets`, and `clip_depth_save_restore`.
 
-The current caps parity is: both backends set `vector_paths`/`rounded_rects`/`gradients`/`nested_clips`/`image_scaling`/`picture_svg`/`picture_duplication`/`svg_dom_pictures`/`vector_batching`/`tile_offsets`/`clip_depth_save_restore` = true and `opacity_group`/`blend_modes`/`color_matrix_filters`/`native_text_runs`/`premultiplied_surface` = false. They differ on `gaussian_blur`: CoreGraphics advertises it unconditionally (`rdt_vector_cg.mm:286`), while ThorVG advertises it only under `#ifdef __APPLE__` (`rdt_vector_tvg.cpp:787-791`) — i.e. the ThorVG *backend's native filter blur* is unavailable on Linux/Windows. This does **not** mean SVG blur is gone on those platforms — see the important clarification in §5.4.
+In the active ThorVG backend, native `gaussian_blur` is advertised only under `#ifdef __APPLE__`; the native CSS-filter blur path therefore degrades on Linux/Windows. This does **not** mean SVG blur is gone on those platforms — see the important clarification in §5.4. Any capability claims in the excluded CoreGraphics source are exploratory until that backend is deliberately reactivated and tested.
 
 ### 2.3 ThorVG backend internals
 
 `rdt_vector_tvg.cpp` wraps the ThorVG C API (`thorvg_capi.h`). `rdt_vector_init` creates a software canvas targeting the caller's ABGR8888 buffer (`rdt_vector_tvg.cpp:800`). Two performance structures matter. First, a **content-hash paint cache** dedupes repeated fills/strokes/gradients: `rdt_paint_hash_path`/`rdt_paint_hash_common` (`rdt_vector_tvg.cpp:190,202`) key a mutex-guarded cache (`g_paint_cache_mutex`) so an identical path re-issued across frames need not be rebuilt. Second, clipping is emulated: ThorVG has no clip stack, so the backend maintains a **thread-local mask stack** of fixed depth (`RDT_MAX_CLIP_DEPTH 8`, `rdt_vector_tvg.cpp:1461`; `struct ClipEntry`, `:1463`; `rdt_push_clip`/`rdt_pop_clip`/`rdt_clip_save_depth`/`rdt_clip_restore_depth`, `:1474-1516`) and applies each active clip as a per-shape alpha mask at draw time. The header comment (`:1441-1458`) documents this design and the tight push→draw→pop bracketing it assumes.
 
-### 2.4 CoreGraphics backend internals
+### 2.4 Retained CoreGraphics exploration source
 
-`rdt_vector_cg.mm` targets a `CGContextRef` (`RdtVectorImpl` at `rdt_vector_cg.mm:25`). CoreGraphics only draws to *premultiplied*-alpha bitmap contexts, but Radiant's public surface is straight-alpha ABGR; the backend therefore keeps a **private premultiplied backing surface** and converts at flush boundaries (design note at `rdt_vector_cg.mm:265-267`; `cg_premul_channel` at `:121`; `cg_flush_to_target` at `:152`). Batching is a flush-deferral counter: `rdt_vector_begin_batch`/`rdt_vector_end_batch` bump/decrement `batch_depth` (`rdt_vector_cg.mm:33,384-397`) and defer `cg_flush_to_target` until the outermost batch closes. Because CoreGraphics is y-up, the backend flips the CTM to y-down at context creation (`CGContextTranslateCTM`/`CGContextScaleCTM(ctx, 1, -1)`, `:199-200`), and re-applies the flip around image draws (`:834`, `:1237`). Note the caps table reports `premultiplied_surface = false` even though the *internal* backing is premultiplied — the flag describes the *public* surface contract (straight-alpha), which stays true.
+`rdt_vector_cg.mm` is excluded from compilation but retained for future exploration. It targets a `CGContextRef`, keeps a private premultiplied backing surface while preserving Radiant's straight-alpha ABGR public contract, defers flushes through `batch_depth`, and flips CoreGraphics' y-up CTM to Radiant's y-down coordinates. These internals are design notes, not a maintained capability guarantee, until the source is intentionally brought back under a compile/test target.
 
 ---
 

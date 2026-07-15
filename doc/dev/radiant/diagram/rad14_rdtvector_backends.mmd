@@ -9,10 +9,10 @@ flowchart TB
     Callers["All Radiant paint code (render_*, render_svg_inline)"] --> API
     Callers -. "branch on caps not backend id" .-> A4
 
-    API -->|link time selection| SEL{"Compile-time backend choice (build_lambda_config.json)"}
+    API --> SEL{"Backend source status (build_lambda_config.json)"}
 
-    SEL -->|"default all platforms"| TVG["rdt_vector_tvg.cpp ThorVG C API"]
-    SEL -->|"macOS headless app"| CG["rdt_vector_cg.mm CoreGraphics"]
+    SEL -->|"active all platforms"| TVG["rdt_vector_tvg.cpp ThorVG C API"]
+    SEL -.->|"excluded; future exploration"| CG["rdt_vector_cg.mm CoreGraphics"]
 
     TVG --> TVGb["SW canvas ABGR8888<br/>paint cache by content hash<br/>thread-local clip mask stack depth 8<br/>SVG-DOM pictures via Radiant parser"]
     CG --> CGb["CGBitmapContext premultiplied backing<br/>straight-alpha conversion at flush<br/>batch_depth defers flush<br/>y-down CTM flip"]

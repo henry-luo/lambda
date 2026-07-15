@@ -1,0 +1,9 @@
+{
+  "name": "Large parsed gradient stop count stays off the native stack",
+  "html": "test/ui/gradient_large_stop_count.html",
+  "description": "Builds a 100000-stop gradient and verifies rendering completes without an attacker-sized alloca frame.",
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#gradient"}, "count": 1},
+    {"type": "assert_visible", "target": {"selector": "#gradient"}, "visible": true}
+  ]
+}

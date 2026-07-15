@@ -55,10 +55,7 @@ void GifAnimation::finish(AnimationInstance* anim) {
     // Note: surface->pixels now points to freed memory.
     // The surface itself is not freed here — the caller owns it.
     // We reset to NULL so the renderer shows nothing (or the caller can re-set).
-    if (surface) {
-        surface->pixels = NULL;
-        image_surface_bump_generation(surface);
-    }
+    image_surface_detach_pixels(surface);
     mem_free(this);
     anim->state = NULL;
 }

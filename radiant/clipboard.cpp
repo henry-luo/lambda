@@ -37,22 +37,9 @@ extern struct UiContextRef ui_context;
 // Internal store + global state
 // ---------------------------------------------------------------------------
 
-typedef struct {
-    ArrayList*        items;          // ArrayList<ClipboardItem*>; canonical contents
-    char*             cached_text;    // null-terminated, owned; convenience for read_text
-    ClipboardBackend* backend;
-    ClipboardPermission perm_read;
-    ClipboardPermission perm_write;
-
-    bool init();
-    void shutdown();
-    void set_backend(ClipboardBackend* next_backend);
-    void clear();
-} ClipboardStoreState;
-
-static ClipboardStoreState g_store = { NULL, NULL, NULL,
-                                       CLIPBOARD_PERMISSION_PROMPT,
-                                       CLIPBOARD_PERMISSION_PROMPT };
+static ClipboardStore g_store = { NULL, NULL, NULL,
+                                  CLIPBOARD_PERMISSION_PROMPT,
+                                  CLIPBOARD_PERMISSION_PROMPT };
 
 // ---------------------------------------------------------------------------
 // ClipboardEntry / ClipboardItem helpers
@@ -116,10 +103,10 @@ static ClipboardEntry* item_find_entry(ClipboardItem* it, const char* mime) {
 }
 
 // Find the first entry across all items matching the requested MIME.
-static ClipboardEntry* store_find_entry(const char* mime) {
-    if (!g_store.items) return NULL;
-    for (int i = 0; i < g_store.items->length; i++) {
-        ClipboardItem* it = (ClipboardItem*)g_store.items->data[i];
+static ClipboardEntry* store_find_entry(ArrayList* items, const char* mime) {
+    if (!items) return NULL;
+    for (int i = 0; i < items->length; i++) {
+        ClipboardItem* it = (ClipboardItem*)items->data[i];
         ClipboardEntry* e = item_find_entry(it, mime);
         if (e) return e;
     }
@@ -246,19 +233,14 @@ void clipboard_store_init(void) {
 }
 
 void clipboard_store_shutdown(void) {
-    g_store.shutdown();
-    clipboard_backend_inmemory_shutdown();
-}
-
-void clipboard_store_set_backend(ClipboardBackend* backend) {
-    g_store.set_backend(backend);
+    g_store.destroy();
 }
 
 void clipboard_store_clear(void) {
     g_store.clear();
 }
 
-bool ClipboardStoreState::init() {
+bool ClipboardStore::init() {
     if (items) return true;     // idempotent
     items = arraylist_new(2);
     if (!items) return false;
@@ -268,7 +250,7 @@ bool ClipboardStoreState::init() {
     return true;
 }
 
-void ClipboardStoreState::shutdown() {
+void ClipboardStore::destroy() {
     if (items) {
         items_free(items);
         items = NULL;
@@ -276,13 +258,16 @@ void ClipboardStoreState::shutdown() {
     mem_free(cached_text);
     cached_text = NULL;
     backend = NULL;
+    // The process clipboard owner is also responsible for its default backend;
+    // tearing both down together prevents a live backend mirror outliving state.
+    clipboard_backend_inmemory_shutdown();
 }
 
-void ClipboardStoreState::set_backend(ClipboardBackend* next_backend) {
+void ClipboardStore::set_backend(ClipboardBackend* next_backend) {
     backend = next_backend ? next_backend : clipboard_backend_inmemory();
 }
 
-void ClipboardStoreState::clear() {
+void ClipboardStore::clear() {
     if (!items) init();
     items_free(items);
     items = arraylist_new(2);
@@ -291,81 +276,89 @@ void ClipboardStoreState::clear() {
     if (backend && backend->clear) backend->clear(backend);
 }
 
-void clipboard_store_write_mime(const char* mime, const char* text) {
+void ClipboardStore::write_mime(const char* mime, const char* text) {
     if (!mime || !text) return;
-    if (!g_store.items) clipboard_store_init();
-    clipboard_store_clear();
+    if (!items) init();
+    clear();
     ClipboardItem* it = item_new();
     arraylist_append(it->entries, entry_new(mime, text, strlen(text)));
-    arraylist_append(g_store.items, it);
-    if (g_store.backend && g_store.backend->write_items) {
-        g_store.backend->write_items(g_store.backend, g_store.items);
+    arraylist_append(items, it);
+    if (backend && backend->write_items) {
+        backend->write_items(backend, items);
     }
     log_debug("clipboard_store: wrote %zu bytes mime=%s", strlen(text), mime);
 }
 
-void clipboard_store_write_text(const char* text) {
-    clipboard_store_write_mime("text/plain", text ? text : "");
+void ClipboardStore::write_text(const char* text) {
+    write_mime("text/plain", text ? text : "");
 }
 
-void clipboard_store_write_html(const char* html, const char* plain_text) {
+void ClipboardStore::write_html(const char* html, const char* plain_text) {
     if (!html) return;
-    if (!g_store.items) clipboard_store_init();
-    clipboard_store_clear();
+    if (!items) init();
+    clear();
 
     ClipboardItem* it = item_new();
     if (!it) return;
     arraylist_append(it->entries, entry_new("text/html", html, strlen(html)));
     const char* text = plain_text ? plain_text : html;
     arraylist_append(it->entries, entry_new("text/plain", text, strlen(text)));
-    arraylist_append(g_store.items, it);
+    arraylist_append(items, it);
 
-    if (g_store.backend && g_store.backend->write_items) {
-        g_store.backend->write_items(g_store.backend, g_store.items);
+    if (backend && backend->write_items) {
+        backend->write_items(backend, items);
     }
     log_debug("clipboard_store: wrote html=%zu bytes plain=%zu bytes",
               strlen(html), strlen(text));
 }
 
-const char* clipboard_store_read_mime(const char* mime) {
-    if (!g_store.items) clipboard_store_init();
+const char* ClipboardStore::read_mime(const char* mime) {
+    if (!items) init();
     // pull from backend (if it has data not yet mirrored)
-    if (g_store.backend && g_store.backend->read_items) {
-        ArrayList* fresh = g_store.backend->read_items(g_store.backend);
+    if (backend && backend->read_items) {
+        ArrayList* fresh = backend->read_items(backend);
         if (fresh) {
-            items_free(g_store.items);
-            g_store.items = fresh;
+            items_free(items);
+            items = fresh;
         }
     }
-    ClipboardEntry* e = store_find_entry(mime);
+    ClipboardEntry* e = store_find_entry(items, mime);
     return e ? e->data : NULL;
 }
 
-const char* clipboard_store_read_text(void) {
-    return clipboard_store_read_mime("text/plain");
+const char* ClipboardStore::read_text() {
+    return read_mime("text/plain");
 }
 
-void clipboard_store_write_items(ArrayList* items) {
-    if (!g_store.items) clipboard_store_init();
-    items_free(g_store.items);
-    g_store.items = clone_items(items);
-    if (!g_store.items) g_store.items = arraylist_new(2);
-    if (g_store.backend && g_store.backend->write_items) {
-        g_store.backend->write_items(g_store.backend, g_store.items);
+void ClipboardStore::write_items(ArrayList* next_items) {
+    if (!items) init();
+    items_free(items);
+    items = clone_items(next_items);
+    if (!items) items = arraylist_new(2);
+    if (backend && backend->write_items) {
+        backend->write_items(backend, items);
     }
 }
 
-ArrayList* clipboard_store_read_items(void) {
-    if (!g_store.items) clipboard_store_init();
-    if (g_store.backend && g_store.backend->read_items) {
-        ArrayList* fresh = g_store.backend->read_items(g_store.backend);
+ArrayList* ClipboardStore::read_items() {
+    if (!items) init();
+    if (backend && backend->read_items) {
+        ArrayList* fresh = backend->read_items(backend);
         if (fresh) {
-            items_free(g_store.items);
-            g_store.items = fresh;
+            items_free(items);
+            items = fresh;
         }
     }
-    return clone_items(g_store.items);
+    return clone_items(items);
 }
+
+void clipboard_store_write_mime(const char* mime, const char* text) { g_store.write_mime(mime, text); }
+void clipboard_store_write_text(const char* text) { g_store.write_text(text); }
+void clipboard_store_write_html(const char* html, const char* plain_text) { g_store.write_html(html, plain_text); }
+const char* clipboard_store_read_mime(const char* mime) { return g_store.read_mime(mime); }
+const char* clipboard_store_read_text(void) { return g_store.read_text(); }
+void clipboard_store_write_items(ArrayList* items) { g_store.write_items(items); }
+ArrayList* clipboard_store_read_items(void) { return g_store.read_items(); }
 
 // ---------------------------------------------------------------------------
 // Permission slots

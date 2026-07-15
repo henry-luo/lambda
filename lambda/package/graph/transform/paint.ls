@@ -80,7 +80,10 @@ fn edge_path(edge, color, stroke_width, opacity) {
       'data-graph-role': "edge", 'data-edge-id': edge.id,
       'data-from': edge.from, 'data-to': edge.to,
       'data-route': route_data(edge.points), 'data-route-kind': route_kind(edge),
-      'data-marker-start': edge.marker_start, 'data-marker-end': edge.marker_end>
+      'data-marker-start': edge.marker_start, 'data-marker-end': edge.marker_end,
+      'data-stroke': color, 'data-stroke-width': stroke_width,
+      'data-opacity': opacity,
+      'data-dash-array': (if (edge.dash_array != null) edge.dash_array else dash_array(edge.style))>
 }
 
 fn edge_svg(edge, width, height, opts) {
@@ -107,7 +110,9 @@ fn cluster_svg(cluster, width, height) {
         fill: cluster.fill, stroke: cluster.stroke,
         'stroke-width': cluster.stroke_width,
         'data-graph-role': "cluster", 'data-cluster-id': cluster.id,
-        'data-parent-cluster-id': cluster.parent>
+        'data-parent-cluster-id': cluster.parent,
+        'data-fill': cluster.fill, 'data-stroke': cluster.stroke,
+        'data-stroke-width': cluster.stroke_width>
   >
 }
 

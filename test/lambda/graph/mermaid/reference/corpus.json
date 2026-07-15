@@ -1,0 +1,23 @@
+{
+  "upstreamCommit": "f3dea58385fd5c7dd1f4e9c9c1876751ae6943cc",
+  "cases": [
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js","test":"should handle a single diamond node","destination":"cases/flowchart/nodes/upstream_single_diamond.mmd","reference":true,"expected":"expected/scene/upstream_single_diamond.mark"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-direction.spec.js","test":"should handle a subgraph with a direction","destination":"cases/flowchart/subgraphs/upstream_direction_bt.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/subgraph.spec.js","test":"should handle subgraph with id and title notation","destination":"cases/flowchart/subgraphs/upstream_id_title.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js","test":"should handle a single circle node","destination":"cases/flowchart/nodes/upstream_single_circle.mmd","reference":true,"expected":"expected/scene/upstream_single_circle.mark"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js","test":"should handle a single round node","destination":"cases/flowchart/nodes/upstream_single_round.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js","test":"should handle a single odd node","destination":"cases/flowchart/nodes/upstream_single_odd.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js","test":"should handle a single hexagon node","destination":"cases/flowchart/nodes/upstream_single_hexagon.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-singlenode.spec.js","test":"should handle a single double circle node","destination":"cases/flowchart/nodes/upstream_single_doublecircle.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-node-data.spec.js","test":"should be possible to add multiple properties on the same line","destination":"cases/flowchart/nodes/upstream_shape_data.mmd","reference":true,"expected":"expected/scene/upstream_shape_data.mark"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-edges.spec.js","test":"should handle open ended edges","occurrence":0,"destination":"cases/flowchart/edges/upstream_open_edge.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-edges.spec.js","test":"should handle cross ended edges","destination":"cases/flowchart/edges/upstream_cross_edge.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-edges.spec.js","test":"should handle open ended edges","occurrence":1,"destination":"cases/flowchart/edges/upstream_circle_edge.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-text.spec.js","test":"should handle normal text on lines","destination":"cases/flowchart/edges/upstream_inline_label.mmd","reference":true,"expected":"expected/scene/upstream_inline_label.mark"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-text.spec.js","test":"should handle dotted text on lines (TD3)","destination":"cases/flowchart/edges/upstream_dotted_label.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-text.spec.js","test":"should handle thick text on lines","destination":"cases/flowchart/edges/upstream_thick_label.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-interactions.spec.js","test":"should handle interaction - click to a click and href link with tooltip and target","destination":"cases/flowchart/interactions/upstream_link_tooltip_target.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-interactions.spec.js","test":"should be possible to use click to a callback with an arbitrary number of args","destination":"cases/flowchart/interactions/upstream_callback_args.mmd"},
+    {"file":"packages/mermaid/src/diagrams/flowchart/parser/flow-comments.spec.js","test":"should handle a comment with mermaid flowchart code in them","destination":"cases/flowchart/comments/upstream_embedded_comment.mmd"}
+  ]
+}

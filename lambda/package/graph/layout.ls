@@ -191,6 +191,68 @@ fn label_placement(label, edges) {
   }
 }
 
+fn placement_box(x, y, width, height) =>
+  {left: x, top: y, right: x + width, bottom: y + height}
+
+fn boxes_overlap(a, b) =>
+  a.left < b.right and a.right > b.left and a.top < b.bottom and a.bottom > b.top
+
+fn candidate_placement(label, anchor, dx, dy) => {
+  index: label.child_index,
+  x: anchor.x - label.width / 2.0 + dx,
+  y: anchor.y - label.height / 2.0 + dy,
+  width: label.width,
+  height: label.height,
+  z: label.z
+}
+
+fn placement_clear(candidate, occupied) {
+  let box = placement_box(candidate.x, candidate.y, candidate.width, candidate.height);
+  len([for (obstacle in occupied where boxes_overlap(box, obstacle)) obstacle]) == 0
+}
+
+fn first_clear_candidate(candidates, occupied, i) {
+  if (i >= len(candidates)) candidates[0]
+  else if (placement_clear(candidates[i], occupied)) candidates[i]
+  else first_clear_candidate(candidates, occupied, i + 1)
+}
+
+fn place_edge_labels_at(labels, edges, occupied, i, result) {
+  if (i >= len(labels)) result
+  else {
+    let label = labels[i];
+    let anchor = route_anchor(routed_edge(edges, label.edge_id));
+    let fallback = label_placement(label, edges);
+    let gap = 6.0;
+    let candidates = if (anchor == null) [{*:fallback,
+      width: label.width, height: label.height}]
+    else [
+      candidate_placement(label, anchor, 0.0, 0.0),
+      candidate_placement(label, anchor, 0.0, 0.0 - label.height - gap),
+      candidate_placement(label, anchor, 0.0, label.height + gap),
+      candidate_placement(label, anchor, 0.0 - label.width - gap, 0.0),
+      candidate_placement(label, anchor, label.width + gap, 0.0),
+      candidate_placement(label, anchor, 0.0, 0.0 - 2.0 * (label.height + gap)),
+      candidate_placement(label, anchor, 0.0, 2.0 * (label.height + gap))
+    ];
+    let chosen = first_clear_candidate(candidates, occupied, 0);
+    let box = placement_box(chosen.x, chosen.y, chosen.width, chosen.height);
+    place_edge_labels_at(labels, edges, [*occupied, box], i + 1,
+      [*result, chosen])
+  }
+}
+
+fn edge_label_placements(labels, edges, nodes, cluster_labels, clusters) {
+  let occupied = [
+    for (node in nodes) placement_box(node.x - node.width / 2.0,
+      node.y - node.height / 2.0, node.width, node.height),
+    for (label in cluster_labels,
+      let placement = cluster_label_placement(label, clusters))
+      placement_box(placement.x, placement.y, label.width, label.height)
+  ];
+  place_edge_labels_at(labels, edges, occupied, 0, [])
+}
+
 fn cluster_label_placement(label, clusters) {
   let matches = [for (cluster in clusters where cluster.id == label.cluster_id) cluster];
   if (len(matches) == 0) {
@@ -246,21 +308,46 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
     direction: direction,
     node_sep: node_sep,
     rank_sep: rank_sep,
-    edge_sep: edge_sep
+    edge_sep: edge_sep,
+    use_splines: string(graph_option(parent, opts, "use_splines",
+      "data-use-splines", "false")) == "true"
   };
   let result = compute(graph_input, opts);
+  let placed_edge_labels = edge_label_placements(edge_labels, result.edges, result.nodes,
+    cluster_labels, result.clusters);
+  // Label collision resolution may place labels beyond the graph geometry. Shift
+  // every visual primitive together so the parent remains the true containing box.
+  let min_x = if (len(placed_edge_labels) > 0)
+    min([0.0, for (placement in placed_edge_labels) placement.x]) else 0.0;
+  let min_y = if (len(placed_edge_labels) > 0)
+    min([0.0, for (placement in placed_edge_labels) placement.y]) else 0.0;
+  let max_x = if (len(placed_edge_labels) > 0)
+    max([result.width, for (placement in placed_edge_labels)
+      placement.x + placement.width]) else result.width;
+  let max_y = if (len(placed_edge_labels) > 0)
+    max([result.height, for (placement in placed_edge_labels)
+      placement.y + placement.height]) else result.height;
+  let shift_x = 0.0 - min_x;
+  let shift_y = 0.0 - min_y;
+  let shifted_nodes = [for (node in result.nodes) {*:node,
+    x: node.x + shift_x, y: node.y + shift_y}];
+  let shifted_edges = [for (edge in result.edges) {*:edge,
+    points: [for (point in edge.points) {x: point.x + shift_x, y: point.y + shift_y}]}];
+  let shifted_clusters = [for (cluster in result.clusters) {*:cluster,
+    x: cluster.x + shift_x, y: cluster.y + shift_y,
+    label_x: cluster.label_x + shift_x, label_y: cluster.label_y + shift_y}];
   {
-    width: result.width,
-    height: result.height,
-    nodes: result.nodes,
-    edges: result.edges,
-    clusters: result.clusters,
+    width: max_x - min_x,
+    height: max_y - min_y,
+    nodes: shifted_nodes,
+    edges: shifted_edges,
+    clusters: shifted_clusters,
     layers: result.layers,
     placements: [
       for (place in result.placements) {
         index: place.index,
-        x: place.x,
-        y: place.y,
+        x: place.x + shift_x,
+        y: place.y + shift_y,
         z: placement_z(nodes, place.index)
       },
       for (edge in metadata_edges) {
@@ -281,8 +368,11 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
         y: 0.0,
         z: port.z
       },
-      for (label in edge_labels) label_placement(label, result.edges),
-      for (label in cluster_labels) cluster_label_placement(label, result.clusters)
+      for (placement in placed_edge_labels) {
+        index: placement.index, x: placement.x + shift_x,
+        y: placement.y + shift_y, z: placement.z
+      },
+      for (label in cluster_labels) cluster_label_placement(label, shifted_clusters)
     ],
     algorithm: result.algorithm,
     direction: result.direction

@@ -1935,15 +1935,6 @@ static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) 
 }
 
 /**
- * Recursively collect <style> inline CSS from HTML
- * Parses and adds to engine's stylesheet list
- */
-void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool, int depth = 0) {
-    collect_inline_styles_impl(elem, engine, nullptr, pool,
-                               nullptr, nullptr, nullptr, depth, true);
-}
-
-/**
  * Master function to extract and apply all CSS from HTML document
  * Handles linked stylesheets, <style> elements, and inline style attributes
  * Returns array of collected stylesheets

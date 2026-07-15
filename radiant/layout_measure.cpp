@@ -7,49 +7,6 @@
 
 void layout_form_control(LayoutContext* lycon, ViewBlock* block);
 
-IntrinsicSize layout_measure_intrinsic(LayoutContext* lycon, DomNode* node,
-    AvailableSpace space) {
-    IntrinsicSize result = {};
-    if (!lycon || !node) return result;
-
-    radiant::LayoutProfileScope profile_scope(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, node);
-    radiant::LayoutMeasureScope measure_scope(lycon, node);
-    lycon->available_space = space;
-
-    if (node->is_element()) {
-        ViewBlock* block = lam::view_as_block(node->as_element());
-        if (!block) return result;
-
-        if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
-            return layout_measure_form_control(lycon, block, space);
-        }
-        if (block->display.inner == RDT_DISPLAY_REPLACED ||
-            block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
-            block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-            (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data"))) {
-            return layout_measure_replaced(lycon, block, space);
-        }
-
-        IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, block, space);
-        result.min_width = sizes.min_content_width;
-        result.max_width = sizes.max_content_width;
-        result.min_height = sizes.min_content_height;
-        result.max_height = sizes.max_content_height;
-        return result;
-    }
-
-    if (node->is_text()) {
-        const char* text = (const char*)node->text_data();
-        if (!text) return result;
-
-        size_t length = strlen(text);
-        TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, length);
-        result.min_width = widths.min_content;
-        result.max_width = widths.max_content;
-    }
-    return result;
-}
-
 static bool layout_measure_cache_get(LayoutContext* lycon, ViewBlock* block,
     AvailableSpace space, IntrinsicSize* out, const char* label) {
     if (!lycon || !block || !out) return false;

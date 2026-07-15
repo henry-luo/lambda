@@ -14,8 +14,15 @@ using namespace lambda;
 static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker);
 static String* parse_mermaid_identifier(InputContext& ctx);
 static ArrayList* parse_mermaid_edge_def(InputContext& ctx, Element* graph,
-                                         Element* root_graph, const ArrayList* from_ids);
-static void parse_mermaid_class_def(InputContext& ctx, Element* graph);
+                                         Element* root_graph, const ArrayList* from_ids,
+                                         ArrayList* statement_edges, int chain_segment);
+static void parse_mermaid_class_def(InputContext& ctx, Element* graph,
+                                    const SourceLocation& source_start);
+static void parse_mermaid_interaction(InputContext& ctx, Element* graph,
+                                      const SourceLocation& source_start);
+static void parse_mermaid_edge_properties(InputContext& ctx, Element* graph,
+                                          Element* root_graph,
+                                          const SourceLocation& source_start);
 static void parse_mermaid_style_assignment(InputContext& ctx, Element* graph,
                                            const SourceLocation& source_start,
                                            bool edge_assignment);
@@ -25,6 +32,7 @@ static void parse_mermaid_accessibility(InputContext& ctx, Element* graph,
 static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id,
                                          const char** out_shape, const char** out_label_format);
 static bool parse_mermaid_general_shape(InputContext& ctx, const char* node_id,
+                                        const char* default_label, const char* default_shape,
                                         String** out_label, String** out_shape,
                                         const char** out_label_format);
 static void parse_mermaid_subgraph(InputContext& ctx, Element* parent_graph, Element* root_graph,
@@ -88,52 +96,19 @@ static size_t mermaid_edge_id_length(SourceTracker& tracker) {
         edge_start == '-' || edge_start == '=' || edge_start == '.' ? length : 0;
 }
 
+static size_t mermaid_property_target_length(SourceTracker& tracker) {
+    char first = tracker.current();
+    if (!(str_char_is_alpha(first) || first == '_')) return 0;
+    size_t length = 0;
+    while (str_char_is_alnum(tracker.peek(length)) || tracker.peek(length) == '_' ||
+           tracker.peek(length) == '-') {
+        length++;
+    }
+    return tracker.peek(length) == '@' && tracker.peek(length + 1) == '{' ? length : 0;
+}
+
 static bool is_mermaid_edge_start(SourceTracker& tracker) {
     return is_direct_mermaid_edge_start(tracker) || mermaid_edge_id_length(tracker) > 0;
-}
-
-static void set_mermaid_source_span(InputContext& ctx, Element* element,
-                                    const SourceLocation& start,
-                                    const SourceLocation& end,
-                                    bool preserve_existing) {
-    if (!element) return;
-    ElementReader reader(element);
-    if (preserve_existing && !reader.get_attr("source-start").isNull()) return;
-    add_graph_integer_attribute(ctx.input(), element, "source-start", (int64_t)start.offset);
-    add_graph_integer_attribute(ctx.input(), element, "source-end", (int64_t)end.offset);
-    add_graph_integer_attribute(ctx.input(), element, "source-line", (int64_t)start.line);
-    add_graph_integer_attribute(ctx.input(), element, "source-column", (int64_t)start.column);
-}
-
-static const char* mermaid_diagnostic_severity(ParseErrorSeverity severity) {
-    switch (severity) {
-        case ParseErrorSeverity::ERROR: return "error";
-        case ParseErrorSeverity::WARNING: return "warning";
-        case ParseErrorSeverity::NOTE: return "note";
-    }
-    return "error";
-}
-
-static void append_mermaid_diagnostics(InputContext& ctx, Element* graph) {
-    const ParseErrorList& errors = ctx.errors();
-    if (errors.size() == 0) return;
-
-    ElementBuilder diagnostics = ctx.builder.element("diagnostics");
-    for (size_t index = 0; index < errors.size(); index++) {
-        ParseError* error = errors.getError(index);
-        if (!error) continue;
-        ElementBuilder diagnostic = ctx.builder.element("diagnostic");
-        diagnostic.attr("code", error->code ? error->code : "mermaid.syntax");
-        diagnostic.attr("severity", mermaid_diagnostic_severity(error->severity));
-        diagnostic.attr("message", error->message ? error->message : "Mermaid parse error");
-        diagnostic.attr("source-start", (int64_t)error->location.offset);
-        diagnostic.attr("source-line", (int64_t)error->location.line);
-        diagnostic.attr("source-column", (int64_t)error->location.column);
-        if (error->context_line) diagnostic.attr("context", error->context_line);
-        if (error->hint) diagnostic.attr("hint", error->hint);
-        diagnostics.child(diagnostic.final());
-    }
-    add_node_to_graph(ctx.input(), graph, diagnostics.final().element);
 }
 
 static Element* find_direct_mermaid_child(Element* parent, const char* tag,
@@ -172,6 +147,26 @@ static Element* find_mermaid_node(Element* graph, const char* id) {
     return nullptr;
 }
 
+static Element* find_mermaid_edge(Element* graph, const char* id) {
+    ElementReader graph_reader(graph);
+    ElementReader child;
+    auto children = graph_reader.childElements();
+    while (children.next(&child)) {
+        if (child.hasTag("edge")) {
+            const char* edge_id = child.get_attr_string("id");
+            const char* source_id = child.get_attr_string("source-id");
+            if ((edge_id && strcmp(edge_id, id) == 0) ||
+                (source_id && strcmp(source_id, id) == 0)) {
+                return (Element*)child.element();
+            }
+        } else if (child.hasTag("subgraph")) {
+            Element* edge = find_mermaid_edge((Element*)child.element(), id);
+            if (edge) return edge;
+        }
+    }
+    return nullptr;
+}
+
 static Element* ensure_mermaid_node(InputContext& ctx, Element* graph, Element* root_graph,
                                      const char* id) {
     Element* node = find_mermaid_node(graph, id);
@@ -197,15 +192,6 @@ static Element* add_mermaid_node_declaration(InputContext& ctx, Element* graph,
     return node;
 }
 
-static void add_mermaid_metadata(InputContext& ctx, Element* graph, const char* tag,
-                                 const char* key1, const char* value1,
-                                 const char* key2, const char* value2) {
-    ElementBuilder builder = ctx.builder.element(tag);
-    if (key1 && value1) builder.attr(key1, value1);
-    if (key2 && value2) builder.attr(key2, value2);
-    add_node_to_graph(ctx.input(), graph, builder.final().element);
-}
-
 static String* create_trimmed_mermaid_text(InputContext& ctx, const char* start,
                                            size_t length, bool strip_semicolon) {
     while (length > 0 && str_char_is_ascii_space(*start)) {
@@ -226,6 +212,52 @@ static String* parse_mermaid_line_text(InputContext& ctx, bool strip_semicolon) 
     while (!tracker.atEnd() && tracker.current() != '\n') tracker.advance();
     return create_trimmed_mermaid_text(ctx, start,
         (size_t)(tracker.rest() - start), strip_semicolon);
+}
+
+static String* parse_mermaid_front_matter(InputContext& ctx,
+                                           SourceLocation* source_end) {
+    SourceTracker& tracker = ctx.tracker;
+    if (!tracker.match("---") ||
+        (tracker.peek(3) != '\n' && tracker.peek(3) != '\r')) return nullptr;
+    tracker.advance(3);
+    while (!tracker.atEnd() && tracker.current() != '\n') tracker.advance();
+    if (tracker.current() == '\n') tracker.advance();
+    const char* value_start = tracker.rest();
+
+    while (!tracker.atEnd()) {
+        const char* line_start = tracker.rest();
+        if (tracker.match("---") &&
+            (tracker.peek(3) == '\0' || tracker.peek(3) == '\n' || tracker.peek(3) == '\r')) {
+            String* value = create_trimmed_mermaid_text(ctx, value_start,
+                (size_t)(line_start - value_start), false);
+            tracker.advance(3);
+            while (!tracker.atEnd() && tracker.current() != '\n') tracker.advance();
+            if (tracker.current() == '\n') tracker.advance();
+            *source_end = tracker.location();
+            return value;
+        }
+        while (!tracker.atEnd() && tracker.current() != '\n') tracker.advance();
+        if (tracker.current() == '\n') tracker.advance();
+    }
+    ctx.addWarning(tracker.location(), "Unterminated Mermaid front matter");
+    *source_end = tracker.location();
+    return create_trimmed_mermaid_text(ctx, value_start,
+        (size_t)(tracker.rest() - value_start), false);
+}
+
+static String* parse_mermaid_init_directive(InputContext& ctx,
+                                             SourceLocation* source_end) {
+    SourceTracker& tracker = ctx.tracker;
+    if (!tracker.match("%%{")) return nullptr;
+    tracker.advance(3);
+    const char* value_start = tracker.rest();
+    while (!tracker.atEnd() && !tracker.match("}%%")) tracker.advance();
+    String* value = create_trimmed_mermaid_text(ctx, value_start,
+        (size_t)(tracker.rest() - value_start), false);
+    if (tracker.match("}%%")) tracker.advance(3);
+    else ctx.addWarning(tracker.location(), "Unterminated Mermaid initialization directive");
+    *source_end = tracker.location();
+    return value;
 }
 
 static bool mermaid_label_has_html_tag(const char* text, size_t length) {
@@ -270,7 +302,7 @@ static void add_mermaid_meta_value(InputContext& ctx, Element* graph, const char
     Element* semantic_value = ctx.builder.element(value_tag)
         .attr("value", value ? value->chars : "")
         .final().element;
-    set_mermaid_source_span(ctx, semantic_value, source_start, source_end, false);
+    graph_set_source_span(ctx, semantic_value, source_start, source_end, false);
     add_node_to_graph(ctx.input(), meta, semantic_value);
 }
 
@@ -278,27 +310,69 @@ static bool parse_mermaid_class_suffix(InputContext& ctx, Element* graph,
                                         const char* node_id) {
     SourceTracker& tracker = ctx.tracker;
     skip_inline_whitespace(tracker);
-    if (!tracker.match(":::")) return false;
-    tracker.advance(3);
+    SourceLocation source_start = tracker.location();
+    if (tracker.match(":::")) tracker.advance(3);
+    else if (tracker.current() == '.') tracker.advance();
+    else return false;
     String* class_name = read_graph_identifier(ctx, "-", true);
     if (!class_name) {
         ctx.addWarning(tracker.location(), "Expected class name after ':::'");
         return true;
     }
-    add_mermaid_metadata(ctx, graph, "class-assignment", "targets", node_id,
-                         "class", class_name->chars);
+    ElementBuilder assignment = ctx.builder.element("class-assignment");
+    assignment.attr("target-kind", "node");
+    assignment.attr("targets", node_id);
+    assignment.attr("class", class_name->chars);
+    Element* result = assignment.final().element;
+    graph_set_source_span(ctx, result, source_start, tracker.location(), false);
+    add_node_to_graph(ctx.input(), graph, result);
     return true;
 }
 
 // skip whitespace and %% line comments
 static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker) {
-    skip_wsc(tracker, "%%", nullptr, false);
+    bool advanced = true;
+    while (advanced) {
+        advanced = false;
+        while (!tracker.atEnd() && str_char_is_ascii_space(tracker.current())) {
+            tracker.advance();
+            advanced = true;
+        }
+        if (tracker.current() == ';') {
+            tracker.advance();
+            advanced = true;
+        } else if (tracker.match("%%") && !tracker.match("%%{")) {
+            while (!tracker.atEnd() && tracker.current() != '\n') tracker.advance();
+            advanced = true;
+        }
+    }
 }
 
 // read Mermaid identifier: [A-Za-z_][A-Za-z0-9_\-]* (whitespace skipped first)
 static String* parse_mermaid_identifier(InputContext& ctx) {
-    skip_whitespace_and_comments_mermaid(ctx.tracker);
-    return read_graph_identifier(ctx, "-", true);
+    SourceTracker& tracker = ctx.tracker;
+    skip_inline_whitespace(tracker);
+    if (tracker.atEnd()) return nullptr;
+    unsigned char first = (unsigned char)tracker.current();
+    if (!(str_char_is_alnum(tracker.current()) || tracker.current() == '_' || first >= 0x80)) {
+        return nullptr;
+    }
+    const char* start = tracker.rest();
+    size_t length = 0;
+    while (!tracker.atEnd()) {
+        char current = tracker.current();
+        unsigned char byte = (unsigned char)current;
+        if (current == '-' && (tracker.peek(1) == '-' || tracker.peek(1) == '.' ||
+                               tracker.peek(1) == '=' || tracker.peek(1) == '>')) {
+            break;
+        }
+        if (!(str_char_is_alnum(current) || current == '_' || current == '-' || byte >= 0x80)) {
+            break;
+        }
+        tracker.advance();
+        length++;
+    }
+    return length > 0 ? ctx.builder.createString(start, length) : nullptr;
 }
 
 // Parse Mermaid node shape and extract label
@@ -502,14 +576,15 @@ static String* parse_mermaid_property_value(InputContext& ctx) {
 }
 
 static bool parse_mermaid_general_shape(InputContext& ctx, const char* node_id,
+                                        const char* default_label, const char* default_shape,
                                         String** out_label, String** out_shape,
                                         const char** out_label_format) {
     SourceTracker& tracker = ctx.tracker;
     if (!tracker.match("@{")) return false;
     tracker.advance(2);
 
-    String* label = ctx.builder.createString(node_id);
-    String* shape = ctx.builder.createString("box");
+    String* label = ctx.builder.createString(default_label ? default_label : node_id);
+    String* shape = ctx.builder.createString(default_shape ? default_shape : "box");
     while (!tracker.atEnd()) {
         skip_inline_whitespace(tracker);
         if (tracker.current() == '}') {
@@ -546,7 +621,7 @@ static bool parse_mermaid_general_shape(InputContext& ctx, const char* node_id,
 
 static String* parse_mermaid_node_ref(InputContext& ctx, Element* graph,
                                       Element* root_graph) {
-    skip_whitespace_and_comments_mermaid(ctx.tracker);
+    skip_inline_whitespace(ctx.tracker);
     SourceLocation source_start = ctx.tracker.location();
     String* node_id = parse_mermaid_identifier(ctx);
     if (!node_id) return nullptr;
@@ -558,13 +633,23 @@ static String* parse_mermaid_node_ref(InputContext& ctx, Element* graph,
         const char* shape = "box";
         const char* label_format = "text";
         String* label = parse_mermaid_node_shape(ctx, node_id->chars, &shape, &label_format);
+        if (ctx.tracker.match("@{")) {
+            String* property_label = nullptr;
+            String* property_shape = nullptr;
+            parse_mermaid_general_shape(ctx, node_id->chars,
+                label ? label->chars : node_id->chars, shape,
+                &property_label, &property_shape, &label_format);
+            label = property_label;
+            shape = property_shape ? property_shape->chars : shape;
+        }
         node = add_mermaid_node_declaration(ctx, graph, node_id->chars,
             label ? label->chars : node_id->chars, shape, label_format);
     } else if (ctx.tracker.match("@{")) {
         String* label = nullptr;
         String* shape = nullptr;
         const char* label_format = "text";
-        parse_mermaid_general_shape(ctx, node_id->chars, &label, &shape, &label_format);
+        parse_mermaid_general_shape(ctx, node_id->chars, node_id->chars, "box",
+                                    &label, &shape, &label_format);
         node = add_mermaid_node_declaration(ctx, graph, node_id->chars,
             label ? label->chars : node_id->chars, shape ? shape->chars : "box", label_format);
     } else {
@@ -572,7 +657,7 @@ static String* parse_mermaid_node_ref(InputContext& ctx, Element* graph,
     }
 
     parse_mermaid_class_suffix(ctx, graph, node_id->chars);
-    set_mermaid_source_span(ctx, node, source_start, ctx.tracker.location(), true);
+    graph_set_source_span(ctx, node, source_start, ctx.tracker.location(), true);
     skip_inline_whitespace(ctx.tracker);
     return node_id;
 }
@@ -611,7 +696,8 @@ static void add_mermaid_edges(InputContext& ctx, Element* graph,
                               const char* edge_style,
                               const char* marker_start, const char* marker_end,
                               int min_length, const SourceLocation& source_start,
-                              const SourceLocation& source_end) {
+                              const SourceLocation& source_end,
+                              ArrayList* statement_edges, int chain_segment) {
     int edge_count = from_ids->length * to_ids->length;
     int edge_ordinal = 0;
     for (int from_index = 0; from_index < from_ids->length; from_index++) {
@@ -626,6 +712,7 @@ static void add_mermaid_edges(InputContext& ctx, Element* graph,
                 add_graph_attribute(ctx.input(), edge, "label-format", label_format);
             }
             if (edge_id) {
+                add_graph_attribute(ctx.input(), edge, "source-id", edge_id->chars);
                 if (edge_count == 1) {
                     add_graph_attribute(ctx.input(), edge, "id", edge_id->chars);
                 } else {
@@ -644,16 +731,53 @@ static void add_mermaid_edges(InputContext& ctx, Element* graph,
                 snprintf(length_text, sizeof(length_text), "%d", min_length);
                 add_graph_attribute(ctx.input(), edge, "min-length", length_text);
             }
-            set_mermaid_source_span(ctx, edge, source_start, source_end, false);
+            add_graph_integer_attribute(ctx.input(), edge, "source-segment-index",
+                                        (int64_t)chain_segment);
+            graph_set_source_span(ctx, edge, source_start, source_end, false);
             add_edge_to_graph(ctx.input(), graph, edge);
+            arraylist_append(statement_edges, edge);
             edge_ordinal++;
         }
     }
 }
 
+static const char* find_mermaid_inline_edge_close(const char* start,
+                                                   const char* pattern) {
+    size_t pattern_length = strlen(pattern);
+    for (const char* cursor = start; *cursor && *cursor != '\n'; cursor++) {
+        if (strncmp(cursor, pattern, pattern_length) == 0) return cursor;
+    }
+    return nullptr;
+}
+
+static void set_mermaid_edge_statement_provenance(InputContext& ctx,
+                                                   ArrayList* statement_edges,
+                                                   const SourceLocation& source_start,
+                                                   const SourceLocation& source_end) {
+    int64_t expansion_count = (int64_t)statement_edges->length;
+    for (int index = 0; index < statement_edges->length; index++) {
+        Element* edge = (Element*)arraylist_get(statement_edges, index);
+        // expanded edge products retain both their operator span and the common
+        // authored statement, so downstream merging never has to infer chains.
+        add_graph_integer_attribute(ctx.input(), edge, "source-statement-start",
+                                    (int64_t)source_start.offset);
+        add_graph_integer_attribute(ctx.input(), edge, "source-statement-end",
+                                    (int64_t)source_end.offset);
+        add_graph_integer_attribute(ctx.input(), edge, "source-statement-line",
+                                    (int64_t)source_start.line);
+        add_graph_integer_attribute(ctx.input(), edge, "source-statement-column",
+                                    (int64_t)source_start.column);
+        add_graph_integer_attribute(ctx.input(), edge, "source-expansion-index",
+                                    (int64_t)index);
+        add_graph_integer_attribute(ctx.input(), edge, "source-expansion-count",
+                                    expansion_count);
+    }
+}
+
 // parse one Mermaid edge operator and its possibly multi-node target list.
 static ArrayList* parse_mermaid_edge_def(InputContext& ctx, Element* graph,
-                                         Element* root_graph, const ArrayList* from_ids) {
+                                         Element* root_graph, const ArrayList* from_ids,
+                                         ArrayList* statement_edges, int chain_segment) {
     SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
     SourceLocation source_start = tracker.location();
@@ -721,6 +845,23 @@ static ArrayList* parse_mermaid_edge_def(InputContext& ctx, Element* graph,
         tracker.advance();
     }
 
+
+    if (strcmp(marker_end, "none") == 0) {
+        skip_inline_whitespace(tracker);
+        const char* label_start = tracker.rest();
+        const char* close_pattern = strcmp(edge_style, "thick") == 0 ? "==>"
+            : strcmp(edge_style, "dotted") == 0 ? ".->" : "-->";
+        const char* close = find_mermaid_inline_edge_close(label_start, close_pattern);
+        if (close && close > label_start) {
+            String* raw_label = create_trimmed_mermaid_text(ctx, label_start,
+                (size_t)(close - label_start), false);
+            label = normalize_mermaid_label(ctx, raw_label->chars, raw_label->len,
+                                             &label_format);
+            tracker.advance((size_t)(close - label_start) + strlen(close_pattern));
+            marker_end = "normal";
+        }
+    }
+
     int min_length = dotted_units > 0
         ? dotted_units
         : stroke_units - (strcmp(marker_end, "none") != 0 ? 1 : 2);
@@ -752,36 +893,56 @@ static ArrayList* parse_mermaid_edge_def(InputContext& ctx, Element* graph,
 
     add_mermaid_edges(ctx, graph, from_ids, to_ids, edge_id, label, label_format, edge_style,
                        marker_start, marker_end, min_length, source_start,
-                       tracker.location());
+                       tracker.location(), statement_edges, chain_segment);
     return to_ids;
 }
 
 static void parse_mermaid_edge_chain(InputContext& ctx, Element* graph, Element* root_graph,
-                                     ArrayList* from_ids) {
+                                     ArrayList* from_ids,
+                                     const SourceLocation& statement_start) {
+    ArrayList* statement_edges = arraylist_new(4);
+    if (!statement_edges) {
+        ctx.addError(statement_start, "Unable to allocate Mermaid edge provenance list");
+        arraylist_free(from_ids);
+        return;
+    }
     ArrayList* edge_from = from_ids;
+    int chain_segment = 0;
     while (is_mermaid_edge_start(ctx.tracker)) {
-        ArrayList* edge_to = parse_mermaid_edge_def(ctx, graph, root_graph, edge_from);
+        ArrayList* edge_to = parse_mermaid_edge_def(ctx, graph, root_graph, edge_from,
+                                                    statement_edges, chain_segment);
         arraylist_free(edge_from);
-        if (!edge_to) return;
+        if (!edge_to) {
+            arraylist_free(statement_edges);
+            return;
+        }
         // the previous target set is the source set for the next chained operator.
         edge_from = edge_to;
+        chain_segment++;
         skip_inline_whitespace(ctx.tracker);
     }
+    set_mermaid_edge_statement_provenance(ctx, statement_edges, statement_start,
+                                          ctx.tracker.location());
     arraylist_free(edge_from);
+    arraylist_free(statement_edges);
 }
 
 // Parse Mermaid class assignment (for styling): class nodeIds className
-static void parse_mermaid_class_def(InputContext& ctx, Element* graph) {
+static void parse_mermaid_class_def(InputContext& ctx, Element* graph,
+                                    const SourceLocation& source_start) {
     SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     StringBuf* targets = ctx.sb;
     stringbuf_reset(targets);
+    bool all_edges = true;
 
     // parse node IDs (can be comma-separated)
     while (!tracker.atEnd() && !str_char_is_ascii_space(tracker.current())) {
         String* node_id = parse_mermaid_identifier(ctx);
         if (!node_id) break;
+
+        if (!find_mermaid_edge(graph, node_id->chars)) all_edges = false;
 
         if (targets->str->len > 0) stringbuf_append_char(targets, ',');
         stringbuf_append_str_n(targets, node_id->chars, node_id->len);
@@ -806,12 +967,18 @@ static void parse_mermaid_class_def(InputContext& ctx, Element* graph) {
         return;
     }
 
-    add_mermaid_metadata(ctx, graph, "class-assignment", "targets", targets->str->chars,
-                         "class", class_name->chars);
+    Element* assignment = ctx.builder.element("class-assignment")
+        .attr("target-kind", all_edges ? "edge" : "node")
+        .attr("targets", targets->str->chars)
+        .attr("class", class_name->chars)
+        .final().element;
+    graph_set_source_span(ctx, assignment, source_start, tracker.location(), false);
+    add_node_to_graph(ctx.input(), graph, assignment);
 }
 
 // Parse Mermaid classDef into semantic style metadata without interpreting CSS here.
-static void parse_mermaid_style_rule(InputContext& ctx, Element* graph) {
+static void parse_mermaid_style_rule(InputContext& ctx, Element* graph,
+                                      const SourceLocation& source_start) {
     SourceTracker& tracker = ctx.tracker;
     skip_inline_whitespace(tracker);
     String* class_name = parse_mermaid_identifier(ctx);
@@ -822,8 +989,12 @@ static void parse_mermaid_style_rule(InputContext& ctx, Element* graph) {
     }
 
     String* declarations = parse_mermaid_line_text(ctx, true);
-    add_mermaid_metadata(ctx, graph, "style-rule", "class", class_name->chars,
-                         "declarations", declarations->chars);
+    Element* rule = ctx.builder.element("style-rule")
+        .attr("class", class_name->chars)
+        .attr("declarations", declarations->chars)
+        .final().element;
+    graph_set_source_span(ctx, rule, source_start, tracker.location(), false);
+    add_node_to_graph(ctx.input(), graph, rule);
 }
 
 static void parse_mermaid_style_assignment(InputContext& ctx, Element* graph,
@@ -866,8 +1037,128 @@ static void parse_mermaid_style_assignment(InputContext& ctx, Element* graph,
         .attr("targets", targets->chars)
         .attr("declarations", declarations->chars)
         .final().element;
-    set_mermaid_source_span(ctx, assignment, source_start, tracker.location(), false);
+    graph_set_source_span(ctx, assignment, source_start, tracker.location(), false);
     add_node_to_graph(ctx.input(), graph, assignment);
+}
+
+static String* parse_mermaid_interaction_token(InputContext& ctx) {
+    SourceTracker& tracker = ctx.tracker;
+    skip_inline_whitespace(tracker);
+    if (tracker.atEnd() || tracker.current() == '\n' || tracker.current() == ';') return nullptr;
+
+    StringBuf* token = ctx.sb;
+    stringbuf_reset(token);
+    char quote = 0;
+    int parentheses = 0;
+    if (tracker.current() == '"' || tracker.current() == '\'') {
+        quote = tracker.current();
+        tracker.advance();
+    }
+    while (!tracker.atEnd()) {
+        char current = tracker.current();
+        if ((quote && current == quote) ||
+            (!quote && parentheses == 0 &&
+             (str_char_is_ascii_space(current) || current == ';'))) {
+            break;
+        }
+        if (!quote && current == '(') parentheses++;
+        else if (!quote && current == ')' && parentheses > 0) parentheses--;
+        if (current == '\\' && tracker.peek(1) != '\0') tracker.advance();
+        stringbuf_append_char(token, tracker.current());
+        tracker.advance();
+    }
+    if (quote && tracker.current() == quote) tracker.advance();
+    return ctx.builder.createString(token->str->chars, token->str->len);
+}
+
+static bool is_mermaid_link_target(String* value) {
+    if (!value) return false;
+    return strcmp(value->chars, "_blank") == 0 || strcmp(value->chars, "_self") == 0 ||
+           strcmp(value->chars, "_parent") == 0 || strcmp(value->chars, "_top") == 0;
+}
+
+static void parse_mermaid_interaction(InputContext& ctx, Element* graph,
+                                      const SourceLocation& source_start) {
+    SourceTracker& tracker = ctx.tracker;
+    String* target = parse_mermaid_interaction_token(ctx);
+    if (!target || target->len == 0) {
+        ctx.addWarning(source_start, "Expected target after Mermaid click directive");
+        skip_to_eol(tracker);
+        return;
+    }
+
+    skip_inline_whitespace(tracker);
+    const char* action = "callback";
+    if (consume_keyword(tracker, "href")) action = "link";
+    else if (consume_keyword(tracker, "call")) action = "callback";
+    else if (tracker.current() == '"' || tracker.current() == '\'') action = "link";
+
+    String* value = parse_mermaid_interaction_token(ctx);
+    String* tooltip = parse_mermaid_interaction_token(ctx);
+    String* target_window = parse_mermaid_interaction_token(ctx);
+    if (!target_window && is_mermaid_link_target(tooltip)) {
+        target_window = tooltip;
+        tooltip = nullptr;
+    }
+    if (!value || value->len == 0) {
+        ctx.addWarning(source_start, "Expected link or callback after Mermaid click target");
+        return;
+    }
+
+    ElementBuilder interaction = ctx.builder.element("interaction");
+    interaction.attr("target", target->chars);
+    interaction.attr("action", action);
+    interaction.attr(strcmp(action, "link") == 0 ? "href" : "callback", value->chars);
+    if (tooltip && tooltip->len > 0) interaction.attr("tooltip", tooltip->chars);
+    if (target_window && target_window->len > 0) {
+        interaction.attr("target-window", target_window->chars);
+    }
+    Element* result = interaction.final().element;
+    graph_set_source_span(ctx, result, source_start, tracker.location(), false);
+    add_node_to_graph(ctx.input(), graph, result);
+}
+
+static void parse_mermaid_edge_properties(InputContext& ctx, Element* graph,
+                                          Element* root_graph,
+                                          const SourceLocation& source_start) {
+    SourceTracker& tracker = ctx.tracker;
+    size_t target_length = mermaid_property_target_length(tracker);
+    if (target_length == 0) return;
+    String* target = ctx.builder.createString(tracker.rest(), target_length);
+    tracker.advance(target_length + 2);
+    if (!find_mermaid_edge(root_graph, target->chars)) {
+        ctx.addWarning(source_start, "Mermaid edge property target '%s' is not declared",
+                       target->chars);
+    }
+
+    while (!tracker.atEnd()) {
+        skip_inline_whitespace(tracker);
+        if (tracker.current() == '}') {
+            tracker.advance();
+            break;
+        }
+        String* key = read_graph_identifier(ctx, "-", true);
+        if (!key) {
+            ctx.addWarning(tracker.location(), "Expected Mermaid edge property name");
+            break;
+        }
+        skip_inline_whitespace(tracker);
+        if (tracker.current() != ':') {
+            ctx.addWarning(tracker.location(), "Expected ':' after Mermaid edge property");
+            break;
+        }
+        tracker.advance();
+        String* value = parse_mermaid_property_value(ctx);
+        Element* property = ctx.builder.element("edge-property")
+            .attr("target", target->chars)
+            .attr("key", key->chars)
+            .attr("value", value ? value->chars : "")
+            .final().element;
+        graph_set_source_span(ctx, property, source_start, tracker.location(), false);
+        add_node_to_graph(ctx.input(), graph, property);
+        skip_inline_whitespace(tracker);
+        if (tracker.current() == ',') tracker.advance();
+    }
 }
 
 static void parse_mermaid_accessibility(InputContext& ctx, Element* graph,
@@ -969,7 +1260,7 @@ static void parse_mermaid_subgraph(InputContext& ctx, Element* parent_graph, Ele
 
     // Parse subgraph content until "end" keyword
     parse_mermaid_subgraph_content(ctx, subgraph_elem, root_graph);
-    set_mermaid_source_span(ctx, subgraph_elem, source_start, tracker.location(), false);
+    graph_set_source_span(ctx, subgraph_elem, source_start, tracker.location(), false);
 
     // Add subgraph to parent graph
     add_node_to_graph(ctx.input(), parent_graph, subgraph_elem);
@@ -1009,12 +1300,17 @@ static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_
         }
 
         if (consume_keyword(tracker, "classDef")) {
-            parse_mermaid_style_rule(ctx, subgraph_elem);
+            parse_mermaid_style_rule(ctx, subgraph_elem, statement_start);
             continue;
         }
 
         if (consume_keyword(tracker, "class")) {
-            parse_mermaid_class_def(ctx, subgraph_elem);
+            parse_mermaid_class_def(ctx, subgraph_elem, statement_start);
+            continue;
+        }
+
+        if (consume_keyword(tracker, "click")) {
+            parse_mermaid_interaction(ctx, subgraph_elem, statement_start);
             continue;
         }
 
@@ -1028,12 +1324,22 @@ static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_
             continue;
         }
 
+        if (mermaid_property_target_length(tracker) > 0) {
+            size_t target_length = mermaid_property_target_length(tracker);
+            String* target = ctx.builder.createString(tracker.rest(), target_length);
+            if (find_mermaid_edge(root_graph, target->chars)) {
+                parse_mermaid_edge_properties(ctx, subgraph_elem, root_graph, statement_start);
+                continue;
+            }
+        }
+
         const char* line_start = tracker.rest();
 
         ArrayList* potential_nodes = parse_mermaid_node_list(ctx, subgraph_elem, root_graph);
         if (potential_nodes) {
             if (is_mermaid_edge_start(tracker)) {
-                parse_mermaid_edge_chain(ctx, subgraph_elem, root_graph, potential_nodes);
+                parse_mermaid_edge_chain(ctx, subgraph_elem, root_graph, potential_nodes,
+                                          statement_start);
             } else {
                 arraylist_free(potential_nodes);
             }
@@ -1062,6 +1368,13 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
     SourceLocation graph_start = tracker.location();
+    SourceLocation front_matter_end = graph_start;
+    String* front_matter = parse_mermaid_front_matter(ctx, &front_matter_end);
+    if (front_matter) skip_whitespace_and_comments_mermaid(tracker);
+    SourceLocation init_start = tracker.location();
+    SourceLocation init_end = init_start;
+    String* init_directive = parse_mermaid_init_directive(ctx, &init_end);
+    if (init_directive) skip_whitespace_and_comments_mermaid(tracker);
 
     const char* diagram_type = "flowchart";
     char direction[3] = {'T', 'B', '\0'};
@@ -1098,6 +1411,20 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     add_graph_attribute(input, graph, "directed", "true");
     add_graph_attribute(input, graph, "direction", normalize_direction(direction));
     add_graph_attribute(input, graph, "rank-dir", normalize_direction(direction));
+    if (front_matter) {
+        Element* metadata = ctx.builder.element("front-matter")
+            .attr("value", front_matter->chars)
+            .final().element;
+        graph_set_source_span(ctx, metadata, graph_start, front_matter_end, false);
+        add_node_to_graph(input, graph, metadata);
+    }
+    if (init_directive) {
+        Element* metadata = ctx.builder.element("init")
+            .attr("value", init_directive->chars)
+            .final().element;
+        graph_set_source_span(ctx, metadata, init_start, init_end, false);
+        add_node_to_graph(input, graph, metadata);
+    }
 
     if (unsupported_chart) {
         // Chart-oriented Mermaid families have different semantic models; treating
@@ -1105,8 +1432,8 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         add_graph_attribute(input, graph, "status", "unsupported");
         ctx.addErrorCode(graph_start, "mermaid.chart-family",
             "Mermaid %s diagrams belong to lambda.package.chart", diagram_type);
-        set_mermaid_source_span(ctx, graph, graph_start, tracker.location(), false);
-        append_mermaid_diagnostics(ctx, graph);
+        graph_set_source_span(ctx, graph, graph_start, tracker.location(), false);
+        graph_append_diagnostics(ctx, graph, "mermaid.syntax");
         input->root = {.element = graph};
         ctx.logErrors();
         return;
@@ -1135,13 +1462,18 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
 
         // check for classDef
         if (consume_keyword(tracker, "classDef")) {
-            parse_mermaid_style_rule(ctx, graph);
+            parse_mermaid_style_rule(ctx, graph, statement_start);
             continue;
         }
 
         // check for class assignments
         if (consume_keyword(tracker, "class")) {
-            parse_mermaid_class_def(ctx, graph);
+            parse_mermaid_class_def(ctx, graph, statement_start);
+            continue;
+        }
+
+        if (consume_keyword(tracker, "click")) {
+            parse_mermaid_interaction(ctx, graph, statement_start);
             continue;
         }
 
@@ -1155,6 +1487,15 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             continue;
         }
 
+        if (mermaid_property_target_length(tracker) > 0) {
+            size_t target_length = mermaid_property_target_length(tracker);
+            String* target = ctx.builder.createString(tracker.rest(), target_length);
+            if (find_mermaid_edge(graph, target->chars)) {
+                parse_mermaid_edge_properties(ctx, graph, graph, statement_start);
+                continue;
+            }
+        }
+
         // check for subgraph
         if (consume_keyword(tracker, "subgraph")) {
             parse_mermaid_subgraph(ctx, graph, graph, statement_start);
@@ -1164,7 +1505,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         ArrayList* potential_nodes = parse_mermaid_node_list(ctx, graph, graph);
         if (potential_nodes) {
             if (is_mermaid_edge_start(tracker)) {
-                parse_mermaid_edge_chain(ctx, graph, graph, potential_nodes);
+                parse_mermaid_edge_chain(ctx, graph, graph, potential_nodes, statement_start);
             } else {
                 arraylist_free(potential_nodes);
             }
@@ -1180,8 +1521,8 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         }
     }
 
-    set_mermaid_source_span(ctx, graph, graph_start, tracker.location(), false);
-    append_mermaid_diagnostics(ctx, graph);
+    graph_set_source_span(ctx, graph, graph_start, tracker.location(), false);
+    graph_append_diagnostics(ctx, graph, "mermaid.syntax");
 
     // set graph as root
     input->root = {.element = graph};

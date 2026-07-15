@@ -7,6 +7,7 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-graph.h"
 #include "../lib/arraylist.h"
+#include "../lib/file.h"
 #include "../lib/mempool.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
@@ -53,6 +54,34 @@ protected:
         // Clean up test environment
     }
 };
+
+static size_t source_line_count(const char* path) {
+    char* source = read_text_file(path);
+    if (!source) return 0;
+    size_t lines = 0;
+    for (const char* cursor = source; *cursor; cursor++) {
+        if (*cursor == '\n') lines++;
+    }
+    free(source);
+    return lines;
+}
+
+TEST_F(GraphParserTest, ParserLocBudget) {
+    size_t dot = source_line_count("lambda/input/input-graph-dot.cpp");
+    size_t mermaid = source_line_count("lambda/input/input-graph-mermaid.cpp");
+    size_t shared = source_line_count("lambda/input/input-graph.cpp");
+    size_t header = source_line_count("lambda/input/input-graph.h");
+
+    ASSERT_GT(dot, 0u);
+    ASSERT_GT(mermaid, 0u);
+    ASSERT_GT(shared, 0u);
+    ASSERT_GT(header, 0u);
+    EXPECT_LE(dot, 471u);
+    EXPECT_LE(mermaid, 1534u);
+    EXPECT_LE(shared, 247u);
+    EXPECT_LE(header, 105u);
+    EXPECT_LE(dot + mermaid + shared + header, 2357u);
+}
 
 // Test DOT graph parsing
 TEST_F(GraphParserTest, ParseDOTGraph) {

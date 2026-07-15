@@ -33,8 +33,7 @@
         "lambda/ts",
         "lambda/npm",
         "lambda/network",
-        "radiant",
-        "radiant/webdriver"
+        "radiant"
     ],
     "source_files": [
         "lib/sqlite/sqlite3.c",
@@ -49,9 +48,7 @@
         "lambda/format/format_latex_html_v2.cpp",
         "lambda/input/input-adoc.cpp",
         "lib/font/font_config.c",
-        "lambda/http_module.cpp",
-        "radiant/webdriver/webdriver_server.cpp",
-        "radiant/webdriver/cmd_webdriver.cpp"
+        "lambda/http_module.cpp"
     ],
     "defines": [
         "SQLITE_THREADSAFE=0",
@@ -660,8 +657,7 @@
                 "lambda/rb",
                 "lambda/network",
                 "lambda/npm",
-                "radiant",
-                "radiant/webdriver"
+                "radiant"
             ],
             "includes": [
                 ".",
@@ -714,9 +710,7 @@
                 "lambda/format/format_latex_html_v2.cpp",
                 "lambda/input/input-adoc.cpp",
                 "lib/font/font_config.c",
-                "lambda/http_module.cpp",
-                "radiant/webdriver/webdriver_server.cpp",
-                "radiant/webdriver/cmd_webdriver.cpp"
+                "lambda/http_module.cpp"
             ],
             "debug": false
         },
@@ -3093,6 +3087,40 @@
                         ],
                         "binary": "test_dom_range_gtest.exe",
                         "icon": "🎯"
+                    },
+                    {
+                        "source": "test_browsing_session_gtest.cpp",
+                        "name": "Browsing Session Memory Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/browsing_session.cpp"
+                        ],
+                        "binary": "test_browsing_session_gtest.exe",
+                        "icon": "🧭"
+                    },
+                    {
+                        "source": "test_clipboard_store_gtest.cpp",
+                        "name": "Clipboard Store Ownership Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/clipboard.cpp"
+                        ],
+                        "binary": "test_clipboard_store_gtest.exe",
+                        "icon": "📋"
                     },
                     {
                         "source": "test_source_pos_bridge_gtest.cpp",

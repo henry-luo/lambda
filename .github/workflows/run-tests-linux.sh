@@ -59,8 +59,28 @@ echo "Stage 4C took $((EDITOR4C_TIME - TEST_TIME))s (exit $EDITOR4C_EXIT)"
 # Fold Stage 4C into the overall result (only downgrade a passing run).
 if [ $TEST_EXIT -eq 0 ] && [ $EDITOR4C_EXIT -ne 0 ]; then TEST_EXIT=$EDITOR4C_EXIT; fi
 
+# A layout subcommand used to bypass the common process-exit snapshot path, so
+# CI exercises the real command and requires every registered allocator to be gone.
+echo ""
+echo "--- Running Radiant memory survivor check ---"
+set +e
+mkdir -p temp
+./lambda.exe --mem-dump=./temp/ci_mem_snapshot.json \
+    layout test/layout/data/baseline/box_010_line_height.html --no-log \
+    2>&1 | tee -a test_output.txt
+MEM_DUMP_EXIT=${PIPESTATUS[0]}
+if [ $MEM_DUMP_EXIT -eq 0 ]; then
+    python3 -c 'import json, sys; data = json.load(open(sys.argv[1], encoding="utf-8")); sys.exit(0 if data.get("count") == 0 and data.get("nodes") == [] else 1)' \
+        ./temp/ci_mem_snapshot.json
+    MEM_DUMP_EXIT=$?
+fi
+set -e
+MEM_DUMP_TIME=$(date +%s)
+echo "Memory survivor check took $((MEM_DUMP_TIME - EDITOR4C_TIME))s (exit $MEM_DUMP_EXIT)"
+if [ $TEST_EXIT -eq 0 ] && [ $MEM_DUMP_EXIT -ne 0 ]; then TEST_EXIT=$MEM_DUMP_EXIT; fi
+
 # Summary
-TOTAL_TIME=$((TEST_TIME - START_TIME))
+TOTAL_TIME=$((MEM_DUMP_TIME - START_TIME))
 echo ""
 echo "========================================"
 echo "SUMMARY"
@@ -68,6 +88,8 @@ echo "========================================"
 echo "Dependencies: $((DEPS_TIME - START_TIME))s"
 echo "Build:        $((BUILD_TIME - DEPS_TIME))s"
 echo "Tests:        $((TEST_TIME - BUILD_TIME))s"
+echo "Stage 4C:     $((EDITOR4C_TIME - TEST_TIME))s"
+echo "Memory check: $((MEM_DUMP_TIME - EDITOR4C_TIME))s"
 echo "Total:        ${TOTAL_TIME}s"
 echo "Test result:  $([ $TEST_EXIT -eq 0 ] && echo 'PASS' || echo 'FAIL')"
 echo "========================================"

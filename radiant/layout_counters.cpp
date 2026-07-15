@@ -101,11 +101,6 @@ void CounterContext::push_scope() {
     current_scope = scope;
 }
 
-void counter_pop_scope(CounterContext* ctx) {
-    if (!ctx || !ctx->scope_stack) return;
-    ctx->pop_scope();
-}
-
 void CounterContext::pop_scope() {
     if (!scope_stack) return;
 

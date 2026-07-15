@@ -196,8 +196,6 @@ uint32_t te_line_end(const char* buf, uint32_t buf_len, uint32_t byte_off) {
     return i;
 }
 
-// ---------- selection helpers (F2) -------------------------------------
-
 bool te_apply_byte_range(DocState* state, void* target,
                          uint32_t start, uint32_t end) {
     if (!state || !target) return false;
@@ -210,44 +208,6 @@ bool te_apply_byte_range(DocState* state, void* target,
     log_debug("text_edit: applied selection bytes=[%u..%u] view=%p",
               start, end, view);
     return true;
-}
-
-typedef uint32_t (*TextBoundaryFn)(const char*, uint32_t, uint32_t);
-
-static bool te_select_boundaries_at(DomElement* elem, DocState* state, void* target,
-                                    uint32_t byte_off, TextBoundaryFn start_fn,
-                                    TextBoundaryFn end_fn, bool require_nonempty) {
-    if (!elem || !state || !target || !tc_is_text_control(elem)) return false;
-    FormControlProp* form = elem->form;
-    uint32_t length = 0;
-    const char* buffer = tc_buffer(form, &length);
-    if (!buffer || (require_nonempty && length == 0)) return false;
-
-    uint32_t start = start_fn(buffer, length, byte_off);
-    uint32_t end = end_fn(buffer, length, byte_off);
-    if (require_nonempty && start == end) return false;
-    return te_apply_byte_range(state, target, start, end);
-}
-
-bool te_select_word_at(DomElement* elem, DocState* state,
-                       void* target, uint32_t byte_off) {
-    return te_select_boundaries_at(
-        elem, state, target, byte_off, te_word_start, te_word_end, true);
-}
-
-bool te_select_line_at(DomElement* elem, DocState* state,
-                       void* target, uint32_t byte_off) {
-    return te_select_boundaries_at(
-        elem, state, target, byte_off, te_line_start, te_line_end, false);
-}
-
-bool te_select_all(DomElement* elem, DocState* state, void* target) {
-    if (!elem || !state || !target) return false;
-    if (!tc_is_text_control(elem)) return false;
-    FormControlProp* f = elem->form;
-    uint32_t blen = 0;
-    (void)tc_buffer(f, &blen);
-    return te_apply_byte_range(state, target, 0, blen);
 }
 
 // ---------- F3: word-granularity navigation ----------------------------

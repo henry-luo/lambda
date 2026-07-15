@@ -4,6 +4,7 @@ import theme_defaults: .theme
 import graph_content: .content
 import model: lambda.package.graph.model
 import graph_style: lambda.package.graph.style
+import mermaid_config: lambda.package.graph.mermaid.config
 
 fn opt(opts, key, fallback) {
   if (opts != null and opts[key] != null) opts[key] else fallback
@@ -52,8 +53,13 @@ fn node_class(node, assigned_classes) {
   if (len(classes) > 0) "graph-node " ++ join(classes, " ") else "graph-node"
 }
 
+fn edge_class(assigned_classes) {
+  if (len(assigned_classes) > 0) "graph-edge " ++ join(assigned_classes, " ")
+  else "graph-edge"
+}
+
 fn shape_css(shape, palette) {
-  if (shape == "circle" or shape == "ellipse") "border-radius:50%;"
+  if (shape == "circle" or shape == "ellipse" or shape == "f-circ") "border-radius:50%;"
   else if (shape == "doublecircle")
     "border-radius:50%;box-shadow:inset 0 0 0 3px " ++ palette.node_background ++
       ",inset 0 0 0 4px " ++ palette.node_border ++ ";"
@@ -69,19 +75,58 @@ fn shape_css(shape, palette) {
     "clip-path:polygon(0 0,100% 0,80% 100%,20% 100%);"
   else if (shape == "asymmetric")
     "clip-path:polygon(0 0,85% 0,100% 50%,85% 100%,0 100%,15% 50%);"
+  else if (shape == "lean-r")
+    "clip-path:polygon(15% 0,100% 0,85% 100%,0 100%);"
+  else if (shape == "lean-l" or shape == "sl-rect")
+    "clip-path:polygon(0 0,85% 0,100% 100%,15% 100%);"
+  else if (shape == "tri")
+    "clip-path:polygon(50% 0,100% 100%,0 100%);"
+  else if (shape == "flip-tri")
+    "clip-path:polygon(0 0,100% 0,50% 100%);"
+  else if (shape == "hourglass")
+    "clip-path:polygon(0 0,100% 0,65% 50%,100% 100%,0 100%,35% 50%);"
+  else if (shape == "bolt")
+    "clip-path:polygon(42% 0,100% 0,62% 42%,88% 42%,30% 100%,43% 58%,12% 58%);"
+  else if (shape == "notch-rect" or shape == "card")
+    "clip-path:polygon(12% 0,100% 0,100% 100%,0 100%,0 12%);"
+  else if (shape == "notch-pent")
+    "clip-path:polygon(12% 0,100% 0,100% 80%,50% 100%,0 80%,0 12%);"
+  else if (shape == "tag-rect" or shape == "tag-doc")
+    "clip-path:polygon(0 0,85% 0,100% 50%,85% 100%,0 100%);"
+  else if (shape == "bang")
+    "clip-path:polygon(18% 0,82% 0,100% 18%,86% 50%,100% 82%,82% 100%,18% 100%,0 82%,14% 50%,0 18%);"
+  else if (shape == "cloud") "border-radius:45% 55% 48% 52% / 55% 45% 55% 45%;"
+  else if (shape == "delay") "border-radius:4px 50% 50% 4px;"
+  else if (shape == "h-cyl") "border-radius:18px / 50%;"
+  else if (shape == "curv-trap") "border-radius:45% 45% 8px 8px / 20% 20% 8px 8px;"
+  else if (shape == "doc" or shape == "lin-doc") "border-radius:4px 4px 35% 12%;"
+  else if (shape == "brace") "border-width:0 0 0 3px;border-radius:50% 0 0 50%;"
+  else if (shape == "brace-r") "border-width:0 3px 0 0;border-radius:0 50% 50% 0;"
+  else if (shape == "braces") "border-width:0 3px;border-radius:45%;"
+  else if (shape == "fork") "height:8px;padding:0;border-width:4px 0 0;background:transparent;"
+  else if (shape == "win-pane" or shape == "div-rect")
+    "box-shadow:inset 0 1px 0 " ++ palette.node_border ++
+      ",inset 1px 0 0 " ++ palette.node_border ++ ";"
+  else if (shape == "lin-rect") "border-width:3px 1px;"
+  else if (shape == "lin-cyl") "border-radius:50% / 12px;border-width:3px 1px;"
+  else if (shape == "text") "border-color:transparent;background:transparent;"
   else if (shape == "subroutine")
     "box-shadow:inset 4px 0 0 -3px " ++ palette.node_border ++
       ",inset -4px 0 0 -3px " ++ palette.node_border ++ ";"
   else "border-radius:4px;"
 }
 
-fn node_style(node, style_declarations, palette) {
+fn resolved_node_style(node, style_declarations) {
   let source = if (node.style != null) string(node.style) else "";
-  let parsed = graph_style.parse(source ++ ";" ++ style_declarations);
+  graph_style.parse(source ++ ";" ++ style_declarations)
+}
+
+fn node_style(node, parsed, palette) {
   let shape = string(source_attr(node, "shape", "box"));
   "display:inline-block;box-sizing:border-box;padding:10px 14px;" ++
-    "border:1px solid " ++ palette.node_border ++ ";" ++ shape_css(shape, palette) ++
-    "background:" ++ palette.node_background ++ ";color:" ++ palette.node_text ++
+    "border:1px solid " ++ palette.node_border ++ ";" ++
+    "background:" ++ palette.node_background ++ ";" ++ shape_css(shape, palette) ++
+    "color:" ++ palette.node_text ++
     ";white-space:" ++
     (if (graph_content.is_rich(label_format(node))) "normal" else "nowrap") ++
     ";" ++ graph_style.node_css(parsed)
@@ -110,9 +155,10 @@ fn node_content(node, id) {
   else { [id] }
 }
 
-fn html_node(node, index, group, assigned_classes, style_declarations, palette) {
+fn html_node(node, index, group, assigned_classes, style_declarations, interaction, palette) {
   let id = node_id(node, index);
   let content = node_content(node, id);
+  let parsed_style = resolved_node_style(node, style_declarations);
   <node class: node_class(node, assigned_classes),
       'data-graph-role': "node", 'data-node-id': id,
       'data-subgraph-id': group,
@@ -120,8 +166,19 @@ fn html_node(node, index, group, assigned_classes, style_declarations, palette) 
       'data-label': label_source(node, id),
       'data-label-format': label_format(node),
       'data-style-declarations': style_declarations,
+      'data-fill': if (parsed_style.fill != null) parsed_style.fill else palette.node_background,
+      'data-stroke': if (parsed_style.stroke != null) parsed_style.stroke else palette.node_border,
+      'data-stroke-width': if (parsed_style.stroke_width != null) parsed_style.stroke_width else 1,
+      'data-color': if (parsed_style.color != null) parsed_style.color else palette.node_text,
+      'data-opacity': parsed_style.opacity,
+      'data-dash-array': parsed_style.dash_array,
+      'data-interaction-action': source_attr(interaction, "action", null),
+      'data-href': source_attr(interaction, "href", null),
+      'data-callback': source_attr(interaction, "callback", null),
+      'data-tooltip': source_attr(interaction, "tooltip", null),
+      'data-link-target': source_attr(interaction, "target-window", null),
       'data-z': string(source_attr(node, "z", 0)),
-      style: node_style(node, style_declarations, palette);
+      style: node_style(node, parsed_style, palette);
     for (child in content) child
   >
 }
@@ -141,14 +198,17 @@ fn marker_text(value, enabled) {
   else string(value)
 }
 
-fn html_edge(edge, index, group, graph_directed, style_declarations) {
+fn html_edge(edge, index, group, graph_directed, assigned_classes,
+    style_declarations, graph) {
+  let id = string(source_attr(edge, "id", "e" ++ string(index)));
+  let source_id = source_attr(edge, "source-id", null);
   let directed = bool_text(source_attr(edge, "directed", null), graph_directed);
   let marker_start = marker_text(source_attr(edge, "arrow-tail", source_attr(edge, "marker-start", null)),
     source_attr(edge, "arrow-start", source_attr(edge, "arrow_start", false)));
   let explicit_end = source_attr(edge, "arrow-end", source_attr(edge, "arrow_end", null));
   let marker_end = marker_text(source_attr(edge, "arrow-head", source_attr(edge, "marker-end", null)),
     if (explicit_end != null) explicit_end else directed == "true");
-  <edge 'data-edge-id': string(source_attr(edge, "id", "e" ++ string(index))),
+  <edge class: edge_class(assigned_classes), 'data-edge-id': id,
       'data-from': string(source_attr(edge, "from", source_attr(edge, "from_id", ""))),
       'data-to': string(source_attr(edge, "to", source_attr(edge, "to_id", ""))),
       'data-from-port': source_attr(edge, "from-port", source_attr(edge, "from_port", null)),
@@ -162,6 +222,9 @@ fn html_edge(edge, index, group, graph_directed, style_declarations) {
       'data-marker-start': marker_start, 'data-marker-end': marker_end,
       'data-style': string(source_attr(edge, "style", "solid")),
       'data-style-declarations': style_declarations,
+      'data-animate': string(model.edge_property(graph, id, source_id, "animate", "false")),
+      'data-animation': model.edge_property(graph, id, source_id, "animation", null),
+      'data-curve': model.edge_property(graph, id, source_id, "curve", null),
       'data-min-length': string(source_attr(edge, "min-length", source_attr(edge, "min_length", 1))),
       'data-z': string(source_attr(edge, "z", -1)),
       style: "display:block;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;">
@@ -232,18 +295,23 @@ pub fn to_html(graph, opts = null) {
     else [for (node in source_children(graph, "node")) {value: node, group: null}];
   let edge_entries = if (graph is element) model.edge_entries(graph)
     else [for (edge in source_children(graph, "edge")) {value: edge, group: null}];
-  let subgraph_entries = if (graph is element) model.subgraph_entries(graph) else [];
+  let subgraph_entries = if (graph is element) model.visual_subgraph_entries(graph) else [];
   let port_entries = if (graph is element) model.port_entries(graph) else [];
   let direction = string(opt(opts, "direction",
     if (graph is element) model.direction(graph)
     else source_attr(graph, "direction", source_attr(graph, "rank-dir", "TB"))));
-  let node_sep = string(opt(opts, "node_sep", source_attr(graph, "node-sep", 60)));
-  let rank_sep = string(opt(opts, "rank_sep", source_attr(graph, "rank-sep", 80)));
+  let config = if (graph is element and graph.flavor == "mermaid")
+    mermaid_config.options(graph) else {};
+  let node_sep = string(opt(opts, "node_sep", source_attr(graph, "node-sep",
+    if (config.node_sep != null) config.node_sep else 60)));
+  let rank_sep = string(opt(opts, "rank_sep", source_attr(graph, "rank-sep",
+    if (config.rank_sep != null) config.rank_sep else 80)));
   let edge_sep = string(opt(opts, "edge_sep", source_attr(graph, "edge-sep", 10)));
   let directed = graph_directed(graph);
   let theme = string(opt(opts, "theme", "light"));
   let palette = theme_defaults.palette(theme);
-  let title = if (graph is element) model.title(graph) else source_attr(graph, "title", null);
+  let title = if (graph is element and model.title(graph) != null) model.title(graph)
+    else if (config.title != null) config.title else source_attr(graph, "title", null);
   let description = if (graph is element) model.description(graph)
     else source_attr(graph, "description", null);
   let children = [
@@ -254,15 +322,21 @@ pub fn to_html(graph, opts = null) {
     for (i, entry in node_entries) html_node(entry.value, i, entry.group,
       if (graph is element) model.classes_for(graph, node_id(entry.value, i)) else [],
       if (graph is element) model.node_style_declarations_for(
-        graph, node_id(entry.value, i)) else "", palette),
+        graph, node_id(entry.value, i)) else "",
+      if (graph is element) model.interaction_for(graph, node_id(entry.value, i)) else null,
+      palette),
     for (i, entry in port_entries) html_port(entry, i),
     for (i, entry in edge_entries,
       let label = html_edge_label(entry.value, i, entry.group, palette)
       where label != null) label,
-    for (i, entry in edge_entries) html_edge(entry.value, i, entry.group, directed,
-      if (graph is element) model.style_declarations_for(graph, "edge", [
-        string(i), string(source_attr(entry.value, "id", "e" ++ string(i)))
-      ]) else "")
+    for (i, entry in edge_entries,
+      let edge_id = string(source_attr(entry.value, "id", "e" ++ string(i))),
+      let source_id = source_attr(entry.value, "source-id", null))
+      html_edge(entry.value, i, entry.group, directed,
+        if (graph is element) model.edge_classes_for(graph, edge_id, source_id) else [],
+        if (graph is element) model.edge_style_declarations_for(
+          graph, edge_id, source_id, i) else "",
+        graph)
   ];
   <'graph' class: "lambda-graph lambda-graph-theme-" ++ theme,
       'data-graph-role': "graph", 'data-radiant-layout': "lambda-graph", 'data-theme': theme,
@@ -271,6 +345,8 @@ pub fn to_html(graph, opts = null) {
       'data-edge-color': palette.edge,
       'data-direction': direction, 'data-node-sep': node_sep,
       'data-rank-sep': rank_sep, 'data-edge-sep': edge_sep,
+      'data-curve': config.curve,
+      'data-use-splines': if (config.use_splines == true) "true" else "false",
       style: "position:relative;background:" ++ palette.graph_background ++ ";";
     for child in children { child }>
 }

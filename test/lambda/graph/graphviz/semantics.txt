@@ -1,0 +1,12 @@
+{
+  invalid: {
+    valid: false,
+    codes: ["graph.graphviz.invalid-compass", "graph.graphviz.edge-operator", "graph.graphviz.invalid-rank", "graph.graphviz.unsupported-engine", "graph.edge.unresolved-port"],
+    nodes: ["a", "b"]
+  },
+  strict: {
+    valid: true,
+    directed: false,
+    edges: [["dot-stmt-0-s0-e0", "a", "b", "red", 4, [["color", "red", "direct", "root"], ["weight", "4", "direct", "root"]]]]
+  }
+}

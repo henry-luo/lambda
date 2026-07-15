@@ -41,7 +41,6 @@ ignores:
   - "lambda/headless_stubs.cpp"           # CLI-only build stubs
   - "lambda/npm/**"                       # npm-compat CLI
   - "lambda/runner.cpp"                   # CLI runner
-  - "radiant/webdriver/**"                # `lambda webdriver` subcommand
   - "radiant/cmd_layout.cpp"              # `lambda layout` subcommand
   - "radiant/event_sim.cpp"               # event-simulation test driver
   - "radiant/render_img.cpp"              # image-rendering dump path
