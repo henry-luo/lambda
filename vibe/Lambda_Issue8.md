@@ -92,3 +92,34 @@ before calling `map(...)` works in isolation, but the resulting dynamic map
 still cannot cross an element-spread boundary. Map spread should have the same
 flattening semantics for statically shaped and dynamically constructed maps, or
 report that the operand cannot be spread.
+
+## Resolved: retained Radiant layout crashes during document teardown
+
+While verifying Graphviz Stage 3, `make test-lambda-baseline` reproducibly
+segfaulted in `lambda.exe test-batch` when a sub-batch began with
+`test/lambda/radiant_custom_layout_bfc.ls`. Running the failed tranche alone
+reported the same process-level crash before the first script result:
+
+```text
+Segmentation fault: 11  ./lambda.exe test-batch --no-log --timeout=60
+Script not found in batch results: test/lambda/radiant_custom_layout_bfc.ls
+```
+
+The crash was not caused by the retained callback or runtime reset. The
+`radiant.layout()` module function created a stack-local `UiContext`, built a
+view tree whose font handles borrowed allocations from that context, then
+destroyed the context while retaining the document. `radiant.free()` later
+dereferenced those dangling font handles in `view_teardown_visit_node()`.
+Release optimization made the use-after-free deterministic.
+
+The module now attaches one reusable headless `UiContext` to the document's
+native resource list. The context remains alive through repeated reflow passes
+and is destroyed after the view tree during document teardown. Repeated
+`radiant.layout()` calls also use Radiant's reflow path instead of replacing and
+leaking the existing `ViewTree` shell. The release binary and retained
+`test-batch` both pass the BFC and flow custom-layout fixtures.
+
+The harness still reports every later script in a crashed sub-batch as a
+separate missing-result failure. It should preserve one process-crash diagnostic
+for the unexecuted entries instead of presenting them as unrelated missing
+scripts.

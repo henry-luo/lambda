@@ -1,5 +1,7 @@
 // Typed lowering for the first Graphviz attribute conformance slice.
 
+import shapes: .shapes
+
 fn property_matches(entry, name) => lower(string(entry.name)) == name
 
 pub fn last_entry(properties, name) {
@@ -77,9 +79,12 @@ fn graph_attrs(properties) {
 }
 
 fn node_attrs(properties) {
+  let raw_shape = value(properties, "shape");
   map([
     *label_attrs(properties),
-    *attr("shape", value(properties, "shape")),
+    *attr("shape", shapes.role(raw_shape)),
+    *attr("shape-family", shapes.family(raw_shape)),
+    *attr("graphviz-shape", shapes.source_name(raw_shape)),
     *attr("width", number_value(properties, "width", 96.0)),
     *attr("height", number_value(properties, "height", 96.0)),
     *attr("fixed-size", bool_value(properties, "fixedsize")),
@@ -96,6 +101,7 @@ fn edge_attrs(properties) {
     *label_attrs(properties),
     *attr("arrow-head", value(properties, "arrowhead")),
     *attr("arrow-tail", value(properties, "arrowtail")),
+    *attr("arrow-direction", value(properties, "dir")),
     *attr("min-length", number_value(properties, "minlen")),
     *attr("weight", number_value(properties, "weight")),
     *attr("constraint", bool_value(properties, "constraint")),

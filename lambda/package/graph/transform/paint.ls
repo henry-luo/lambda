@@ -39,8 +39,43 @@ fn dash_array(style) {
 fn marker_id(edge, end_name) => "lambda-graph-arrow-" ++ string(edge.index) ++ "-" ++ end_name
 
 fn marker_shape(marker_type, color) {
-  if (marker_type == "circle") {
+  if (marker_type == "circle" or marker_type == "dot") {
     <circle cx: 4, cy: 4, r: 3, fill: color>
+  }
+  else if (marker_type == "odot") {
+    <circle cx: 4, cy: 4, r: 3, fill: "none", stroke: color, 'stroke-width': 1.2>
+  }
+  else if (marker_type == "diamond") {
+    <path d: "M 0 4 L 4 0 L 8 4 L 4 8 z", fill: color>
+  }
+  else if (marker_type == "odiamond" or marker_type == "ediamond") {
+    <path d: "M 0 4 L 4 0 L 8 4 L 4 8 z", fill: "none", stroke: color,
+        'stroke-width': 1.2>
+  }
+  else if (marker_type == "box") {
+    <rect x: 1, y: 1, width: 6, height: 6, fill: color>
+  }
+  else if (marker_type == "obox") {
+    <rect x: 1, y: 1, width: 6, height: 6, fill: "none", stroke: color,
+        'stroke-width': 1.2>
+  }
+  else if (marker_type == "tee") {
+    <path d: "M 6 0 L 6 8", fill: "none", stroke: color, 'stroke-width': 2>
+  }
+  else if (marker_type == "vee" or marker_type == "open" or marker_type == "halfopen") {
+    <path d: "M 0 0 L 8 4 L 0 8", fill: "none", stroke: color,
+        'stroke-width': 1.5>
+  }
+  else if (marker_type == "empty") {
+    <path d: "M 0 0 L 8 4 L 0 8 z", fill: "none", stroke: color,
+        'stroke-width': 1.2>
+  }
+  else if (marker_type == "inv") {
+    <path d: "M 8 0 L 0 4 L 8 8 z", fill: color>
+  }
+  else if (marker_type == "crow") {
+    <path d: "M 8 0 L 2 4 L 8 8 M 2 0 L 2 8", fill: "none", stroke: color,
+        'stroke-width': 1.2>
   }
   else if (marker_type == "cross") {
     <path d: "M 1 1 L 7 7 M 7 1 L 1 7", fill: "none", stroke: color,

@@ -496,6 +496,20 @@ fn shape_vertices(node) {
     {x: right, y: node.y}, {x: right - quarter, y: bottom},
     {x: left + quarter, y: bottom}, {x: left, y: node.y}
   ]
+  else if (node.shape == "octagon") [
+    {x: left + quarter, y: top}, {x: right - quarter, y: top},
+    {x: right, y: top + node.height / 4.0}, {x: right, y: bottom - node.height / 4.0},
+    {x: right - quarter, y: bottom}, {x: left + quarter, y: bottom},
+    {x: left, y: bottom - node.height / 4.0}, {x: left, y: top + node.height / 4.0}
+  ]
+  else if (node.shape == "house") [
+    {x: node.x, y: top}, {x: right, y: node.y}, {x: right, y: bottom},
+    {x: left, y: bottom}, {x: left, y: node.y}
+  ]
+  else if (node.shape == "invhouse") [
+    {x: left, y: top}, {x: right, y: top}, {x: right, y: node.y},
+    {x: node.x, y: bottom}, {x: left, y: node.y}
+  ]
   else if (node.shape == "trapezoid") [
     {x: left + quarter, y: top}, {x: right - quarter, y: top},
     {x: right, y: bottom}, {x: left, y: bottom}

@@ -82,6 +82,10 @@ typedef struct RadiantCustomPaintResource {
     Heap* owner_heap;
 } RadiantCustomPaintResource;
 
+typedef struct RadiantLayoutResource {
+    UiContext ui_context;
+} RadiantLayoutResource;
+
 static RadiantCustomLayoutEntry g_radiant_custom_layouts[RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY];
 static int g_radiant_custom_layout_count = 0;
 static uint64_t g_radiant_velmt_next_pass_id = 1;
@@ -942,15 +946,46 @@ static DomDocument* radiant_load_html_document(const char* path, const char* fun
     return doc;
 }
 
+static void radiant_layout_resource_destroy(void* data) {
+    RadiantLayoutResource* resource = (RadiantLayoutResource*)data;
+    if (!resource) return;
+    // The document destroys resources after its view tree; detaching prevents
+    // UiContext cleanup from recursively taking ownership of the same document.
+    resource->ui_context.document = nullptr;
+    ui_context_cleanup(&resource->ui_context);
+    mem_free(resource);
+}
+
+static RadiantLayoutResource* radiant_layout_resource_for_document(
+    DomDocument* doc, const char* func_name) {
+    if (!doc) return nullptr;
+    for (DomDocumentResource* entry = doc->resources; entry; entry = entry->next) {
+        if (entry->destroy == radiant_layout_resource_destroy) {
+            return (RadiantLayoutResource*)entry->data;
+        }
+    }
+
+    RadiantLayoutResource* resource = (RadiantLayoutResource*)mem_calloc(
+        1, sizeof(RadiantLayoutResource), MEM_CAT_LAYOUT);
+    if (!resource) return nullptr;
+    if (ui_context_init(&resource->ui_context, true) != 0) {
+        log_error("JUBE_RADIANT_%s: failed to initialize retained UI context", func_name);
+        mem_free(resource);
+        return nullptr;
+    }
+    if (!dom_document_add_resource(doc, resource, radiant_layout_resource_destroy)) {
+        resource->ui_context.document = nullptr;
+        ui_context_cleanup(&resource->ui_context);
+        mem_free(resource);
+        return nullptr;
+    }
+    return resource;
+}
+
 static bool radiant_layout_document(DomDocument* doc, UiContext* uicon,
                                     int viewport_width, int viewport_height,
                                     const char* func_name) {
     if (!doc || !uicon) return false;
-    memset(uicon, 0, sizeof(*uicon));
-    if (ui_context_init(uicon, true) != 0) {
-        log_error("JUBE_RADIANT_%s: failed to initialize headless UI context", func_name);
-        return false;
-    }
 
     ui_context_create_surface(uicon, viewport_width, viewport_height);
     uicon->window_width = viewport_width;
@@ -959,7 +994,9 @@ static bool radiant_layout_document(DomDocument* doc, UiContext* uicon,
     process_document_font_faces(uicon, doc);
     // custom layout callbacks run only during an explicit layout pass; geometry
     // reads cannot substitute for this lifecycle boundary.
-    layout_html_doc(uicon, doc, false);
+    // A retained document already owns its ViewTree shell; treating another
+    // pass as initial layout overwrites that shell and leaks its layout pool.
+    layout_html_doc(uicon, doc, doc->view_tree != nullptr);
     return doc->view_tree && doc->view_tree->root;
 }
 
@@ -1025,13 +1062,12 @@ RADIANT_C_API Item fn_radiant_layout(Item node_item) {
 
     int viewport_width = doc->viewport_width > 0 ? doc->viewport_width : 800;
     int viewport_height = doc->viewport_height > 0 ? doc->viewport_height : 600;
-    UiContext uicon;
-    bool ok = radiant_layout_document(doc, &uicon, viewport_width, viewport_height, "LAYOUT");
-    // radiant.layout() borrows the document; radiant.free() remains its owner.
-    if (uicon.document) {
-        uicon.document = nullptr;
-        ui_context_cleanup(&uicon);
-    }
+    RadiantLayoutResource* resource = radiant_layout_resource_for_document(doc, "LAYOUT");
+    if (!resource) return radiant_bool_item(false);
+    // View-tree font handles borrow allocations from UiContext, so retained
+    // layouts must reuse the document resource until free_document tears down the tree.
+    bool ok = radiant_layout_document(doc, &resource->ui_context,
+                                      viewport_width, viewport_height, "LAYOUT");
     return radiant_bool_item(ok);
 }
 
@@ -1053,10 +1089,14 @@ RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item h
                                                 viewport_height, "RENDER_SVG");
     if (!doc) return ItemNull;
 
-    UiContext uicon;
+    UiContext uicon = {};
+    if (ui_context_init(&uicon, true) != 0) {
+        log_error("JUBE_RADIANT_RENDER_SVG: failed to initialize headless UI context");
+        free_document(doc);
+        return ItemNull;
+    }
     if (!radiant_layout_document(doc, &uicon, viewport_width, viewport_height, "RENDER_SVG")) {
-        if (uicon.document) ui_context_cleanup(&uicon);
-        else free_document(doc);
+        ui_context_cleanup(&uicon);
         return ItemNull;
     }
 

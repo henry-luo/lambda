@@ -69,6 +69,12 @@ fn shape_css(shape, palette) {
   else if (shape == "diamond") "clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);"
   else if (shape == "hexagon")
     "clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);"
+  else if (shape == "octagon")
+    "clip-path:polygon(25% 0,75% 0,100% 25%,100% 75%,75% 100%,25% 100%,0 75%,0 25%);"
+  else if (shape == "house")
+    "clip-path:polygon(50% 0,100% 50%,100% 100%,0 100%,0 50%);"
+  else if (shape == "invhouse")
+    "clip-path:polygon(0 0,100% 0,100% 50%,50% 100%,0 50%);"
   else if (shape == "trapezoid")
     "clip-path:polygon(20% 0,80% 0,100% 100%,0 100%);"
   else if (shape == "trapezoid-alt")
@@ -163,6 +169,8 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
       'data-graph-role': "node", 'data-node-id': id,
       'data-subgraph-id': group,
       'data-shape': source_attr(node, "shape", "box"),
+      'data-shape-family': source_attr(node, "shape-family", null),
+      'data-graphviz-shape': source_attr(node, "graphviz-shape", null),
       'data-label': label_source(node, id),
       'data-label-format': label_format(node),
       'data-style-declarations': style_declarations,
