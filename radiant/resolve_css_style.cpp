@@ -4977,6 +4977,17 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 continue;
             }
 
+            if (prop_id == CSS_PROPERTY_WHITE_SPACE) {
+                uintptr_t tag = dom_elem->tag();
+                ViewSpan* span = lam::view_require_element(lycon->view);
+                if ((tag == HTM_TAG_PRE || tag == HTM_TAG_LISTING || tag == HTM_TAG_XMP) &&
+                    span->blk && span->blk->white_space == CSS_VALUE_PRE) {
+                    // The UA preformatted declaration applies on this element,
+                    // so it wins over an inherited author value from its parent.
+                    continue;
+                }
+            }
+
             // HTML spec: <th> uses "-internal-center-or-inherit" UA rule.
             // This means: use center if the inherited value is the initial value (start),
             // otherwise use the inherited value. E.g.:
@@ -5153,6 +5164,20 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 // Copy font-family from parent's computed font
                 radiant_retain_font_family(span->font, lam::PoolPtr<char>(ancestor->font->family));
                 continue;  // Move to next property
+            }
+
+            if ((prop_id == CSS_PROPERTY_LETTER_SPACING ||
+                 prop_id == CSS_PROPERTY_WORD_SPACING) &&
+                ancestor && ancestor->font) {
+                ViewSpan* span = lam::view_require_element(lycon->view);
+                if (!span->font) span->font = alloc_font_prop(lycon);
+                // font-relative spacing inherits its computed px length; re-resolving em would compound
+                if (prop_id == CSS_PROPERTY_LETTER_SPACING) {
+                    span->font->letter_spacing = ancestor->font->letter_spacing;
+                } else {
+                    span->font->word_spacing = ancestor->font->word_spacing;
+                }
+                continue;
             }
 
             // Special handling for line-height: also check ancestor's computed blk->line_height
@@ -6067,11 +6092,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     }
                 }
 
-                // Apply line-height
-                if (line_height_value) {
+                // a valid font shorthand resets an omitted line-height to normal;
+                // retaining the inherited value changes intrinsic form-control rows.
+                if (size_value && font_family_name) {
                     ensure_span_block(lycon, span);
-                    span->blk->line_height = line_height_value;
-                    log_debug("[CSS] Font shorthand: set line-height");
+                    span->blk->line_height = line_height_value
+                        ? line_height_value
+                        : css_value_create_keyword(lycon->doc->view_tree->pool, "normal");
+                    log_debug("[CSS] Font shorthand: %s line-height",
+                              line_height_value ? "set" : "reset");
                 }
 
                 // Apply font-family

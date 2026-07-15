@@ -249,6 +249,7 @@ typedef struct IntrinsicSize {
 
 IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
+float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow);
 
 IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement* element,
     const char* log_context = nullptr, bool content_only = false);
@@ -1280,6 +1281,7 @@ typedef struct Linebox {
     float last_non_shy_space_hanging_width;
     float last_non_shy_space_hanging_text_trim;
     View* start_view;
+    bool has_phantom_inline_fragment; // zero-height inline run still needing text-align
     CssEnum vertical_align;
     float vertical_align_offset;    // length/percentage vertical-align offset (px), positive = raise
     bool is_line_start;
@@ -2262,6 +2264,7 @@ const char* map_lambda_font_family_keyword(const char* keyword);
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
+View* layout_inline_fragment_root(View* view);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_text(LayoutContext* lycon, DomNode* text_node);
@@ -2365,6 +2368,10 @@ bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
 void view_vertical_align(LayoutContext* lycon, View* view);
 float line_baseline_position(LayoutContext* lycon, float* out_line_height);
+float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
+                               float span_line_height,
+                               float ascender, float descender,
+                               float baseline_pos, float border_top, float padding_top);
 
 // Structure for OS/2 sTypo metrics (shared across layout modules)
 struct TypoMetrics {
@@ -2382,6 +2389,8 @@ TypoMetrics get_os2_typo_metrics(struct FontHandle* handle);
 // Calculate normal line height following Chrome's algorithm
 // Delegates to font_calc_normal_line_height() from lib/font/
 float calc_normal_line_height(struct FontHandle* handle);
+bool layout_quirky_container_ignores_child_margin_bottom(
+    LayoutContext* lycon, ViewBlock* container, ViewBlock* child);
 CssEnum layout_specified_keyword(DomElement* element, CssPropertyId property,
                                  CssEnum fallback = (CssEnum)0);
 float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* value,

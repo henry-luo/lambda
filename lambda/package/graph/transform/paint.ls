@@ -80,67 +80,121 @@ fn dash_array(style) {
 
 fn marker_id(edge, end_name) => "lambda-graph-arrow-" ++ string(edge.index) ++ "-" ++ end_name
 
+fn marker_spec(marker_type) {
+  let parts = split(marker_type, ":");
+  let named = parts[0];
+  let open_alias = contains(["odot", "obox", "odiamond", "ediamond", "empty"], named);
+  let base = if (named == "odot") "dot"
+    else if (named == "obox") "box"
+    else if (named == "odiamond" or named == "ediamond") "diamond"
+    else if (named == "empty") "normal" else named;
+  {base: base, open: open_alias or contains(parts, "open"),
+    side: if (contains(parts, "left")) "left"
+      else if (contains(parts, "right")) "right" else null}
+}
+
 fn marker_shape(marker_type, color) {
-  if (marker_type == "circle" or marker_type == "dot") {
-    <circle cx: 4, cy: 4, r: 3, fill: color>
+  let spec = marker_spec(marker_type);
+  let fill = if (spec.open) "none" else color;
+  let stroke = if (spec.open) color else null;
+  let outline_width = if (spec.open) 1.2 else null;
+  if (spec.base == "none") {
+    <path d: "M 0 0 L 8 4 L 0 8 z", fill: color>
   }
-  else if (marker_type == "odot") {
-    <circle cx: 4, cy: 4, r: 3, fill: "none", stroke: color, 'stroke-width': 1.2>
+  else if (spec.base == "circle" or spec.base == "dot") {
+    <circle cx: 4, cy: 4, r: 3, fill: fill,
+      stroke: stroke, 'stroke-width': outline_width>
   }
-  else if (marker_type == "diamond") {
-    <path d: "M 0 4 L 4 0 L 8 4 L 4 8 z", fill: color>
+  else if (spec.base == "diamond") {
+    <path d: "M 0 4 L 4 0 L 8 4 L 4 8 z", fill: fill,
+      stroke: stroke, 'stroke-width': outline_width>
   }
-  else if (marker_type == "odiamond" or marker_type == "ediamond") {
-    <path d: "M 0 4 L 4 0 L 8 4 L 4 8 z", fill: "none", stroke: color,
-        'stroke-width': 1.2>
+  else if (spec.base == "box") {
+    <rect x: 1, y: 1, width: 6, height: 6, fill: fill,
+      stroke: stroke, 'stroke-width': outline_width>
   }
-  else if (marker_type == "box") {
-    <rect x: 1, y: 1, width: 6, height: 6, fill: color>
-  }
-  else if (marker_type == "obox") {
-    <rect x: 1, y: 1, width: 6, height: 6, fill: "none", stroke: color,
-        'stroke-width': 1.2>
-  }
-  else if (marker_type == "tee") {
+  else if (spec.base == "tee") {
     <path d: "M 6 0 L 6 8", fill: "none", stroke: color, 'stroke-width': 2>
   }
-  else if (marker_type == "vee" or marker_type == "open" or marker_type == "halfopen") {
+  else if (spec.base == "vee" or spec.base == "open" or spec.base == "halfopen") {
     <path d: "M 0 0 L 8 4 L 0 8", fill: "none", stroke: color,
         'stroke-width': 1.5>
   }
-  else if (marker_type == "empty") {
-    <path d: "M 0 0 L 8 4 L 0 8 z", fill: "none", stroke: color,
-        'stroke-width': 1.2>
+  else if (spec.base == "inv") {
+    <path d: "M 8 0 L 0 4 L 8 8 z", fill: fill,
+      stroke: stroke, 'stroke-width': outline_width>
   }
-  else if (marker_type == "inv") {
-    <path d: "M 8 0 L 0 4 L 8 8 z", fill: color>
-  }
-  else if (marker_type == "crow") {
+  else if (spec.base == "crow") {
     <path d: "M 8 0 L 2 4 L 8 8 M 2 0 L 2 8", fill: "none", stroke: color,
         'stroke-width': 1.2>
   }
-  else if (marker_type == "cross") {
+  else if (spec.base == "cross") {
     <path d: "M 1 1 L 7 7 M 7 1 L 1 7", fill: "none", stroke: color,
         'stroke-width': 1.5>
   }
+  else if (spec.base == "curve" or spec.base == "icurve") {
+    <path d: if (spec.base == "icurve") "M 7 0 Q 1 4 7 8" else "M 1 0 Q 7 4 1 8",
+      fill: "none", stroke: color, 'stroke-width': 1.2>
+  }
   else {
-    <path d: "M 0 0 L 8 4 L 0 8 z", fill: color>
+    <path d: "M 0 0 L 8 4 L 0 8 z", fill: fill,
+      stroke: stroke, 'stroke-width': outline_width>
   }
 }
 
-fn edge_marker(id, marker_type, color, opacity) {
-  let ref_x = if (marker_type == "normal") 7 else 4;
-  <marker id: id, markerWidth: 8, markerHeight: 8,
-      refX: ref_x, refY: 4, orient: "auto-start-reverse", markerUnits: "strokeWidth",
+fn marker_tokens(marker_type) =>
+  [for (token in split(trim(marker_type), " ") where token != "") token]
+
+fn marker_component(id, token, index, count, color) {
+  let spec = marker_spec(token);
+  let clip_id = id ++ "-clip-" ++ string(index);
+  let shape = if (spec.base == "none") <g 'data-marker-empty': true>
+    else marker_shape(token, color);
+  let clipped = if (spec.side == null or spec.base == "none") shape
+    else <g;
+      <clipPath id: clip_id;
+        <rect x: 0, y: if (spec.side == "left") 0 else 4,
+          width: 8, height: 4>
+      >
+      <g 'clip-path': "url(#" ++ clip_id ++ ")"; shape>
+    >;
+  <g transform: "translate(" ++ string((count - index - 1) * 8) ++ " 0)",
+      'data-marker-component': token, 'data-marker-side': spec.side;
+    clipped
+  >
+}
+
+fn marker_content(id, marker_type, color) {
+  let tokens = marker_tokens(marker_type);
+  if (len(tokens) == 1 and marker_spec(tokens[0]).side == null)
+    marker_shape(tokens[0], color)
+  else <g;
+    for (i, token in tokens) marker_component(id, token, i, len(tokens), color)
+  >
+}
+
+fn marker_ref_x(tokens) {
+  let nearest = marker_spec(tokens[0]).base;
+  len(tokens) * 8 - (if (nearest == "normal") 1 else 4)
+}
+
+fn edge_marker(id, marker_type, color, opacity, size) {
+  let tokens = marker_tokens(marker_type);
+  let width = max([1, len(tokens)]) * 8;
+  <marker id: id, markerWidth: width * size, markerHeight: 8 * size,
+      viewBox: "0 0 " ++ string(width) ++ " 8",
+      refX: marker_ref_x(tokens), refY: 4,
+      orient: "auto-start-reverse", markerUnits: "strokeWidth",
       opacity: opacity, 'data-marker-type': marker_type;
-    marker_shape(marker_type, color)
+    marker_content(id, marker_type, color)
   >
 }
 
 fn edge_defs(edge, color, opacity) {
+  let size = max([0.1, float(if (edge.arrow_size != null) edge.arrow_size else 1.0)]);
   [<defs;
-    edge_marker(marker_id(edge, "start"), edge.marker_start, color, opacity)
-    edge_marker(marker_id(edge, "end"), edge.marker_end, color, opacity)
+    edge_marker(marker_id(edge, "start"), edge.marker_start, color, opacity, size)
+    edge_marker(marker_id(edge, "end"), edge.marker_end, color, opacity, size)
   >]
 }
 

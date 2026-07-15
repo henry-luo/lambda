@@ -92,10 +92,20 @@ fn canonical_node(node) {
   let fallback = if (node.id != null and node.id != "") string(node.id) else null;
   let label = canonical_label(node, fallback);
   let content = canonical_content(node, label, true, node_content_children(node));
+  let authored_ports = node_ports(node);
+  let names = if (content != null)
+    graph_content.port_names(model.child_items(content)) else [];
+  let generated_names = [for (name in names where len([
+    for (port in authored_ports where port.id != null and
+      string(port.id) == string(name)) port
+  ]) == 0) name];
+  let ports = [*authored_ports, for (i, name in generated_names)
+    <port id: name, side: "auto",
+      offset: (float(i) + 0.5) / float(len(generated_names))>];
   <node *:attrs;
     if (label != null) { label }
     if (content != null) { content }
-    for (port in node_ports(node)) port
+    for (port in ports) port
     for (metadata in node_metadata(node)) metadata
   >
 }

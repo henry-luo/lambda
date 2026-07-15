@@ -1919,6 +1919,7 @@
                         ],
                         "additional_sources": [
                             "lib/font/font_context_glyph_cache.c",
+                            "lib/font/font_family.c",
                             "lib/arena.c",
                             "lib/hashmap.c",
                             "lib/log.c",

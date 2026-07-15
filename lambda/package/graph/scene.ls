@@ -17,6 +17,12 @@ fn nullable_number_attr(value, key) {
   if (found == null or found == "") null else float(found)
 }
 
+fn nullable_bool_attr(value, key) {
+  let found = attr(value, key, null);
+  if (found == null or found == "") null
+  else found == true or lower(string(found)) == "true"
+}
+
 fn descendants(value) => [
   for (child in model.element_children(value), nested in [child, *descendants(child)]) nested
 ]
@@ -107,6 +113,13 @@ fn scene_node(node, graph_box) {
   let label = scene_label(node);
   <node id: string(attr(node, "data-node-id", "")),
       shape: string(attr(node, "data-shape", "box")),
+      'shape-family': attr(node, "data-shape-family", null),
+      'polygon-sides': nullable_number_attr(node, "data-polygon-sides"),
+      'polygon-orientation': nullable_number_attr(node, "data-polygon-orientation"),
+      'polygon-skew': nullable_number_attr(node, "data-polygon-skew"),
+      'polygon-distortion': nullable_number_attr(node, "data-polygon-distortion"),
+      regular: nullable_bool_attr(node, "data-regular"),
+      peripheries: nullable_number_attr(node, "data-peripheries"),
       group: attr(node, "data-subgraph-id", null),
       x: box.x, y: box.y, width: box.width, height: box.height,
       fill: attr(node, "data-fill", null), stroke: attr(node, "data-stroke", null),
@@ -144,6 +157,7 @@ fn scene_edge(edge, labels, nodes) {
       'to-side': endpoint_side(last_point, scene_node_by_id(nodes, to_id)),
       'marker-start': string(attr(edge, "data-marker-start", "none")),
       'marker-end': string(attr(edge, "data-marker-end", "none")),
+      'arrow-size': nullable_number_attr(edge, "data-arrow-size"),
       'route-kind': string(attr(edge, "data-route-kind", "straight")),
       'route-mode': attr(edge, "data-route-mode", null),
       stroke: attr(edge, "data-stroke", null),
@@ -302,7 +316,7 @@ fn edge_mismatches(actual_scene, expected, geometry_tolerance, route_tolerance) 
   [
     *entity_mismatches(actual_scene, expected, "edge",
       ["id", "from", "to", "from-side", "to-side", "marker-start", "marker-end",
-        "route-kind", "stroke", "dash-array"],
+        "route-kind", "stroke", "dash-array", "arrow-size"],
       ["stroke-width", "opacity"], geometry_tolerance),
     *point_mismatches(actual, expected, attr(expected, "id", null), route_tolerance)
   ]
@@ -439,7 +453,9 @@ pub fn compare_scenes(actual, expected, policy = null) {
     for (issue in if (len(children_by_tag(actual, "edge")) != len(expected_edges))
       [mismatch("edge-count", len(expected_edges), len(children_by_tag(actual, "edge")))] else []) issue,
     for (node in expected_nodes, issue in entity_mismatches(actual, node, "node",
-      ["id", "shape", "group", "fill", "stroke", "color", "dash-array"],
+      ["id", "shape", "shape-family", "polygon-sides", "polygon-orientation",
+        "polygon-skew", "polygon-distortion", "regular", "peripheries",
+        "group", "fill", "stroke", "color", "dash-array"],
       ["x", "y", "width", "height", "stroke-width", "opacity"], geometry_tolerance)) issue,
     for (cluster in expected_clusters, issue in entity_mismatches(actual, cluster, "cluster",
       ["id", "parent", "fill", "stroke"],

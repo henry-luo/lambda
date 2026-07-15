@@ -1,0 +1,11 @@
+{
+  valid: true,
+  graph: ["out", true, true, "out", true, true],
+  source_order: ["c", "b", "a"],
+  incoming_order: ["left", "right"],
+  group_order: ["middle", "lane1", "lane2"],
+  compound_route: ["cluster_source", "cluster_target", true, true],
+  nodes: [["lane1", "lane", null], ["lane2", "lane", null], ["group_root", null, "in"], ["override", null, "in"]],
+  html: ["out", true, true, ["cluster_source", "cluster_target"], ["lane1", "lane", null], ["lane2", "lane", null], ["group_root", null, "in"], ["override", null, "in"]],
+  invalid: [false, [["graph.graphviz.invalid-ordering", "graph.ordering"], ["graph.graphviz.invalid-ordering", "node:a.ordering"], ["graph.graphviz.unresolved-compound-cluster", "edge:dot-stmt-0-s0-e0.lhead"]]]
+}

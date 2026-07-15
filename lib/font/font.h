@@ -87,6 +87,9 @@ typedef struct FontStyleDesc {
     FontSlant   slant;
 } FontStyleDesc;
 
+// advance through a CSS font-family list, returning one unquoted, trimmed family
+bool font_family_list_next(const char** cursor, char* family, size_t family_capacity);
+
 // ============================================================================
 // Font Handle — an opened, sized font face (opaque, ref-counted)
 // ============================================================================

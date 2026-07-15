@@ -1,5 +1,5 @@
 {
-  cases: 8,
+  cases: 9,
   results: [{
       id: "canonical",
       valid: true,
@@ -17,10 +17,10 @@
     }, {
       id: "content-shapes-markers",
       valid: true,
-      nodes: 5,
-      edges: 4,
+      nodes: 9,
+      edges: 8,
       annotations: 0,
-      html: [5, 4, 0]
+      html: [9, 8, 0]
     }, {
       id: "html-interactions",
       valid: true,
@@ -31,10 +31,10 @@
     }, {
       id: "records-ports",
       valid: true,
-      nodes: 3,
+      nodes: 4,
       edges: 2,
       annotations: 0,
-      html: [3, 2, 0]
+      html: [4, 2, 0]
     }, {
       id: "rank-layout",
       valid: true,
@@ -42,6 +42,13 @@
       edges: 8,
       annotations: 0,
       html: [14, 8, 0]
+    }, {
+      id: "ordering-groups",
+      valid: true,
+      nodes: 13,
+      edges: 9,
+      annotations: 0,
+      html: [13, 9, 0]
     }, {
       id: "annotations",
       valid: true,

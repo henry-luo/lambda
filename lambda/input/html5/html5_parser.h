@@ -242,6 +242,11 @@ void html5_parser_destroy(Html5Parser* parser);
 // Main parsing function
 Element* html5_parse(Input* input, const char* html);
 
+// WHATWG initial-insertion-mode doctype classification:
+// 0 = no quirks, 1 = quirks, 2 = limited quirks.
+int html5_determine_quirks_mode(const char* name, const char* public_id,
+                                const char* system_id, bool force_quirks);
+
 // Extended parsing function with options
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
 

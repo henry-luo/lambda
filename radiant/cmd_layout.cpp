@@ -267,6 +267,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                         // Found #doctype — examine attributes per WHATWG spec
                         const char* name = extract_element_attribute(child_elem, "name", nullptr);
                         const char* public_id = extract_element_attribute(child_elem, "publicId", nullptr);
+                        const char* system_id = extract_element_attribute(child_elem, "systemId", nullptr);
 
                         log_debug("Found #doctype: name=%s publicId=%s",
                                   name ? name : "null", public_id ? public_id : "null");
@@ -277,6 +278,17 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                             return HTML5;
                         }
 
+                        int quirks_mode = html5_determine_quirks_mode(
+                            name, public_id, system_id, false);
+                        if (quirks_mode == 1) {
+                            log_debug("DOCTYPE triggers quirks mode: %s", public_id);
+                            return HTML_QUIRKS;
+                        }
+                        if (quirks_mode == 2) {
+                            log_debug("DOCTYPE triggers limited quirks mode: %s", public_id);
+                            return HTML4_01_STRICT;
+                        }
+
                         // Check known public identifiers for HTML version
                         if (strstr(public_id, "-//W3C//DTD HTML 4.01//EN") ||
                             strstr(public_id, "-//W3C//DTD HTML 4.0//EN")) {
@@ -284,29 +296,19 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                             return HTML4_01_STRICT;
                         }
                         if (strstr(public_id, "Transitional")) {
-                            const char* system_id = extract_element_attribute(child_elem, "systemId", nullptr);
-                            // WHATWG §13.2.6.4.1: Transitional WITHOUT system identifier → quirks
-                            // Transitional WITH system identifier → limited quirks (standards-like)
-                            if (system_id && system_id[0] != '\0') {
-                                log_debug("Detected Transitional with system ID (limited quirks / standards-like)");
-                                return HTML4_01_STRICT;
-                            }
-                            log_debug("Detected Transitional without system ID (quirks mode)");
-                            return HTML4_01_TRANSITIONAL;
+                            return HTML4_01_STRICT;
                         }
                         if (strstr(public_id, "Frameset")) {
                             log_debug("Detected Frameset DOCTYPE");
                             return HTML4_01_FRAMESET;
                         }
                         if (strstr(public_id, "-//W3C//DTD XHTML 1.0")) {
-                            if (strstr(public_id, "Strict")) return HTML4_01_STRICT;
-                            return HTML4_01_TRANSITIONAL;
+                            return HTML4_01_STRICT;
                         }
-                        // WHATWG §13.2.6.4.1: Unrecognized publicId → quirks mode
-                        // Legacy doctypes (e.g., -//IETF//DTD HTML 2.0, -//SoftQuad//, etc.)
-                        // do not match any known standards-mode doctype, so they trigger quirks.
-                        log_debug("Unrecognized publicId, using quirks mode: %s", public_id);
-                        return HTML_QUIRKS;
+                        // Only identifiers in the WHATWG trigger lists enter quirks;
+                        // all other public identifiers are standards mode.
+                        log_debug("Detected standards-mode publicId: %s", public_id);
+                        return HTML4_01_STRICT;
                     }
                 }
             }

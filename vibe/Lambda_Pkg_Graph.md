@@ -1859,7 +1859,8 @@ marker enum. `graphviz/markers.ls` parses modifier and shape sequences into
 canonical marker components, including open/filled, left/right clipping,
 inversion, and multiple shapes. Paint places components in order at the routed
 endpoint. Unsupported marker components retain their raw specification and use
-a documented fallback marker with a warning.
+a documented fallback marker. A stable diagnostic for that fallback remains
+part of Stage 3C completion.
 
 ### 19.9 Layout-engine contract
 
@@ -2097,9 +2098,9 @@ Lambda normalization size is tracked separately from native parser LOC:
 
 | Stage 3B module | Physical LOC |
 |---|---:|
-| `graphviz/attributes.ls` | 166 |
-| `graphviz/normalize.ls` | 544 |
-| total | 710 |
+| `graphviz/attributes.ls` | 223 |
+| `graphviz/normalize.ls` | 622 |
+| total | 845 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
@@ -2107,7 +2108,7 @@ attribute families are added.
 
 #### Stage 3C - Content, shapes, markers, and HTML (in progress, 2026-07-15)
 
-The first Stage 3C slice is implemented:
+The implemented Stage 3C surface is:
 
 - plain labels resolve `\\N`, `\\G`, `\\E`, `\\T`, `\\H`, and `\\L` only
   after object identity is known; `\\n`, `\\l`, and `\\r` become measured line
@@ -2117,17 +2118,52 @@ The first Stage 3C slice is implemented:
   `graphviz-shape` name;
 - ellipse, triangle, parallelogram, trapezium, octagon, and house families use
   matching HTML geometry and layout clipping;
+- Graphviz `polygon` parameters (`sides`, `orientation`, `skew`, and
+  `distortion`) lower to explicit canonical geometry. A shared pure
+  `graph/polygon.ls` helper generates both normalized CSS clip polygons and the
+  vertices used for routed-edge clipping, so HTML paint and layout do not carry
+  independent polygon formulas;
+- `regular` reaches semantic HTML and layout input, while authored and
+  shape-implied `peripheries` reach CSS paint and Graph Scene Mark. Polygon,
+  pentagon, septagon, double/triple-octagon, modified circle/square/diamond,
+  note, tab, folder, box3d, and component aliases lower through shared shape
+  roles rather than separate layout implementations;
 - `dir=forward|back|both|none` resolves endpoint marker presence, and baseline
   single-component normal, inverted, open, circle, diamond, box, tee, vee,
   crow, and empty markers reach generated SVG paint;
+- the manual arrow-name parser recognizes up to four Graphviz components with
+  `o`, `l`, and `r` modifiers. Canonical components survive HTML/Velmt layout,
+  and SVG paint composes, half-clips, orders, and scales them with `arrowsize`;
+- routed edge reconstruction retains `arrowsize`, and Graph Scene adaptation
+  and comparison retain polygon parameters, regular/periphery metadata, and
+  composed marker names;
+- Graphviz dimensions and interior `margin` values lower from inches to CSS
+  pixels. `fixedsize=true` becomes a definite border box, while `regular=true`
+  applies a square preferred ratio and equal authored minima. The retained
+  Radiant render fixture verifies that a `1in` by `0.5in` regular fixed node is
+  measured as `96px` by `96px` before custom layout;
+- safe two-color `fillcolor` gradients lower to CSS linear or radial gradients,
+  with `gradientangle` retained for linear paint. `fontname`, `fontsize`, and
+  `fontcolor` lower through allowlisted family/color syntax for graph, node,
+  edge-label, cluster-label, and annotation content; unsafe values fall back to
+  the active graph theme without entering CSS declarations;
+- unsupported arrow components preserve their raw marker for deterministic
+  fallback paint and emit the non-fatal
+  `graph.graphviz.unsupported-arrow` diagnostic;
 - `content_shapes_markers.ls` checks canonical labels/shapes/markers, selected
   semantic HTML attributes, pure layout propagation, and generated marker tags.
-- flat record fields lower to measured table content, named fields lower to
-  canonical ports with distinct attachment offsets, and record edges route
-  through the existing shared port implementation;
+- flat and recursively nested record fields lower to measured table content;
+  each nested group alternates horizontal/vertical orientation, named fields
+  lower to canonical ports with distinct attachment offsets, and record edges
+  route through the existing shared port implementation;
 - Graphviz HTML-label delimiters are removed before fragment parsing; safe
   table/row/cell and inline emphasis structure survives while script, style,
   template, authored link, and unknown wrapper markup is stripped;
+- allowlisted table/row/cell alignment, cell vertical alignment, and bounded
+  positive row/column spans survive as semantic HTML; invalid enum and span
+  values are removed. `<TD PORT>` uses the same measured-content port walker as
+  record fields, so canonical ports, edge endpoint metadata, and zero-size HTML
+  port elements stay source ordered without a second Graphviz-only port model;
 - node and edge `URL`/`href`, `tooltip`, and `target` attributes lower to inert
   canonical interactions and semantic HTML metadata without navigation or
   callback execution;
@@ -2141,21 +2177,20 @@ The new pure Stage 3C modules remain small:
 | Stage 3C module | Physical LOC |
 |---|---:|
 | `graphviz/labels.ls` | 35 |
-| `graphviz/shapes.ls` | 28 |
-| `graphviz/markers.ls` | 25 |
-| `graphviz/records.ls` | 55 |
-| total | 143 |
+| `graphviz/shapes.ls` | 53 |
+| `graphviz/markers.ls` | 73 |
+| `graphviz/records.ls` | 83 |
+| shared `graph/polygon.ls` | 32 |
+| total | 276 |
 
 Still outstanding in Stage 3C:
 
-- complete nested record groups, HTML table ports, and safe HTML cell
-  alignment/span attributes after the recursive-frame runtime issue recorded
-  in `vibe/Lambda_Issue8.md` is fixed;
-- complete specialized Graphviz shape families, polygon parameters,
-  peripheries, and multi-component arrow composition;
-- complete safe gradient/font/periphery paint lowering;
-- expand normalized HTML expectations to nested records, annotations, and
-  remaining styles.
+- complete remaining specialized Graphviz shape families and
+  `fixedsize=shape` fidelity;
+- add weighted/multi-stop Graphviz color lists, colorscheme resolution, and
+  closer Graphviz font fallback matching;
+- expand normalized HTML expectations for remaining annotation and paint
+  styles.
 
 #### Stage 3D - Layered layout parity (in progress, 2026-07-15)
 
@@ -2177,8 +2212,26 @@ direct `line` segments, emits waypoint paths for `polyline` and `orthogonal`,
 and produces deterministic quadratic/cubic paths for `curved`. The retained
 `route_classes.ls` fixture covers aliases, diagnostics, routing, and SVG paint.
 
-- complete `ordering`, `newrank`, and stronger group ordering behavior;
-- complete compound cluster and port behavior;
+Graph and node `ordering=in|out` now lower into canonical IR and semantic HTML.
+After barycentric crossing reduction, the layered engine reapplies each
+authored incoming or outgoing edge sequence, so optimization cannot reverse a
+declared order. DOT node `group` is carried separately from structural cluster
+membership and forms stable ordering blocks for top-level nodes. Invalid
+ordering values produce `graph.graphviz.invalid-ordering`. The
+`ordering_groups.ls` fixture covers graph defaults, node overrides, group
+blocks, and the retained layout metadata contract.
+
+Graph `compound` and `newrank` values now survive canonical IR, semantic HTML,
+Velmt adaptation, and layout options. Edge `lhead` and `ltail` values likewise
+reach the router. With `compound=true`, an explicit tail or head cluster is the
+route endpoint and clips to that cluster's border; outer nested boundaries
+remain in the route. Unknown cluster references produce
+`graph.graphviz.unresolved-compound-cluster`.
+
+- implement the rank-policy difference for `newrank` and strengthen authored
+  group alignment inside nested structural clusters;
+- validate `lhead`/`ltail` endpoint membership and finish compass/table-port
+  attachment fidelity;
 - place all labels and annotations without incoherent overlap;
 - compare Graph Scene semantics and tolerant geometry against pinned Graphviz
   JSON references.
