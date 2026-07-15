@@ -1592,6 +1592,40 @@ commands, and measurements above make the decision reproducible. The release
 measurement should still be repeated on Linux and Windows after Stage 3A, but
 there is no longer a 64 KiB technology gate.
 
+#### 19.3.5 Parser footprint ledger
+
+Parser LOC is an actively maintained constraint. The metric is physical source
+lines as reported by `wc -l`; it includes the two grammar implementations and
+their shared graph parser source/header, but excludes tests, schemas, generated
+files, and downstream normalization. The Stage 3A ledger is:
+
+| Source unit | Before Stage 3A | Current ceiling | Difference |
+|---|---:|---:|---:|
+| `input-graph-dot.cpp` | 546 | 471 | -75 |
+| `input-graph-mermaid.cpp` | 1,578 | 1,534 | -44 |
+| `input-graph.cpp` | 206 | 247 | +41 |
+| `input-graph.h` | 98 | 105 | +7 |
+| total | 2,428 | 2,357 | -71 |
+
+Reproduce the source measurement from the repository root with:
+
+```sh
+wc -l lambda/input/input-graph-dot.cpp \
+  lambda/input/input-graph-mermaid.cpp \
+  lambda/input/input-graph.cpp lambda/input/input-graph.h
+```
+
+`GraphParserTest.ParserLocBudget` enforces every current per-file ceiling and
+the combined ceiling during the native graph parser suite. A parser change that
+increases a ceiling must reduce duplication first, then update this ledger and
+the test with a short rationale in the change description. A reduction should
+lower both values in the same change. The ceilings are review gates, not spare
+LOC that a later feature may consume without justification.
+
+Optimized object and packaged-release measurements are repeated at each parser
+milestone using the flags and method in Section 19.3.3. They are tracked beside
+LOC because source reduction alone does not guarantee a smaller binary.
+
 Parser limits must be explicit and diagnostic-producing:
 
 - maximum statement and subgraph nesting depth;
