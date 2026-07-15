@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    #cache { display: grid; grid-template-columns: repeat(10, 12px); }
+    img { width: 10px; height: 10px; }
+  </style>
+</head>
+<body>
+  <div id="cache"></div>
+  <script>
+    const cache = document.getElementById('cache');
+    for (let i = 0; i < 70; i++) {
+      const image = document.createElement('img');
+      const color = 'rgb(' + (i * 17 % 255) + ',' + (i * 31 % 255) + ',' + (i * 47 % 255) + ')';
+      image.src = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='10' height='10' fill='" + color + "'/><text>" + i + "</text></svg>";
+      image.alt = 'cached-' + i;
+      cache.appendChild(image);
+    }
+  </script>
+</body>
+</html>

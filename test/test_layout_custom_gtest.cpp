@@ -7,6 +7,43 @@
 #include "../lib/mempool.h"
 #include <string.h>
 
+static void* g_layout_pass_test_resource = nullptr;
+static int g_layout_pass_test_init_count = 0;
+static int g_layout_pass_test_cleanup_count = 0;
+
+void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
+    (void)lycon;
+    (void)doc;
+    (void)uicon;
+    g_layout_pass_test_resource = mem_calloc(1, 64, MEM_CAT_LAYOUT);
+    g_layout_pass_test_init_count++;
+}
+
+void layout_cleanup(LayoutContext* lycon) {
+    (void)lycon;
+    mem_free(g_layout_pass_test_resource);
+    g_layout_pass_test_resource = nullptr;
+    g_layout_pass_test_cleanup_count++;
+}
+
+static void layout_pass_test_return_after_init(LayoutContext* lycon) {
+    LayoutPassScope scope(lycon, nullptr, nullptr);
+    return;
+}
+
+TEST(LayoutPassScopeTest, EarlyReturnReleasesInitializedPassResources) {
+    LayoutContext lycon = {};
+    g_layout_pass_test_resource = nullptr;
+    g_layout_pass_test_init_count = 0;
+    g_layout_pass_test_cleanup_count = 0;
+
+    layout_pass_test_return_after_init(&lycon);
+
+    EXPECT_EQ(g_layout_pass_test_resource, nullptr);
+    EXPECT_EQ(g_layout_pass_test_init_count, 1);
+    EXPECT_EQ(g_layout_pass_test_cleanup_count, 1);
+}
+
 class CustomLayoutTest : public ::testing::Test {
 protected:
     Pool* pool = nullptr;

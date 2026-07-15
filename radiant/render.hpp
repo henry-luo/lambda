@@ -3501,6 +3501,7 @@ struct SvgInlineRenderContext {
     FontContext* font_ctx;       // font context for font resolution (may be nullptr)
     DisplayList* dl;             // required display list target for deferred rendering
     PaintList* paint_list;       // required PaintIR gateway used before lowering to dl
+    ScratchArena* resource_scratch; // per-render defs/style tables
     const char* source_path;      // source SVG path for resolving nested resources
     SvgImageResolverFn image_resolver;  // optional resolver for document-owned image handles
     void* image_resolver_context;

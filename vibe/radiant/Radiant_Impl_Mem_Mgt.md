@@ -7,24 +7,24 @@
 
 ---
 
-## Implementation status (verified 2026-07-15)
+## Implementation status (verified 2026-07-15, completion pass)
 
 Legend: ✅ done · ◑ partial · ❌ not done. Verified against the codebase; line numbers in tasks below are the original plan's and are often stale (real locations noted where checked).
 
-**The code work is essentially complete; the §8 test plan is mostly not.** Several P0 fixes shipped directly in their stronger later-phase form (P0.2 → `LayoutPassScope`, P0.7 → `~InputIntent`).
+**The implementation, regression tests, and CI survivor check are complete.** Several P0 fixes shipped directly in their stronger later-phase form (P0.2 → `LayoutPassScope`, P0.7 → `~InputIntent`). Two planned mechanisms were superseded by stronger existing designs: injected factory-owned `FontContext` allocators (P2.6) and a persistent registered retained-fragment arena (P6.3).
 
 | Phase | Status | One-line |
 |---|---|---|
-| P0 safety fixes | ✅ 8/8 | all implemented; 2 cosmetic deviations (P0.1 missing `show_html_doc` comment, P0.8 lives in `radiant.hpp`) |
-| P1 lint | ◑ 5.8/6 | R3–R6 rules landed error-clean, zero `alloca`/`mem_realloc` in radiant; P1.6 = 4/5 invariant comments |
-| P2 stragglers | ◑ 3 done, 3 partial | P2.1/P2.3/P2.4 ✅; P2.2/P2.5/P2.6 ◑ (outcomes met, ownership/mechanism differs) |
-| P3 scratch conversion | ◑ flex ✅, grid ◑ | flex zero-heap; grid track lists still heap with `owns_*` intact; exit-check untagged |
+| P0 safety fixes | ✅ 8/8 | all implemented; `show_html_doc` documents the caller/session ownership boundary, and P0.8 lives in `radiant.hpp` where `WebViewProp` is declared |
+| P1 lint | ✅ 6/6 | R3–R6 rules error-clean, zero `alloca`/`mem_realloc` in radiant, all V1–V5 invariant comments present |
+| P2 stragglers | ✅ 6/6 | vector caches registered to engine context; SVG resources use render scratch/registered resolver cache; FontContext outcome met by injected tracked allocators |
+| P3 scratch conversion | ✅ flex + grid | all grid pass mutations use scratch clones; `owns_*` dissolved; persistent CSS heap roots explicitly tagged |
 | P4 RAII scopes | ✅ 4/4 | all four scope classes exist and are in use |
-| P5 owner classes | ◑ 4.8/5 | all done except ClipboardStore (singleton `ClipboardStoreState` + free API, not owner class) |
-| P6 lifecycle | ◑ 2 done, 2 partial | P6.1/P6.2 ✅; P6.3 different mechanism; **P6.4 reset exists but only called from a unit test, not a live path** |
-| §8 tests | ❌ 1/8 + no CI | only `range_churn_stress` (renamed) exists; CI `--mem-dump` step absent |
+| P5 owner classes | ✅ 5/5 | `ClipboardStore` now owns canonical contents/backend lifecycle while C-compatible shims remain |
+| P6 lifecycle | ✅ 4/4 | range recycling, picture refcounts/eviction, registered retained cache, and live glyph-arena enforcement are covered |
+| §8 tests + CI | ✅ 8/8 + CI | dedicated regressions added/found for every listed invariant; Linux CI requires a zero-node layout exit snapshot |
 
-**Top remaining work, ranked:** (1) write the §8 regression tests — the P0 fixes have no fails-before/passes-after protection; (2) finish P3.3 (grid track lists onto scratch or tag the heap roots); (3) wire P6.4's size trigger into a live relayout path; (4) smaller: P2.2 cache registration, P2.5 def-table/resolver homes, `ClipboardStore` owner class, 2 missing comments.
+**Completion verification:** `make build` passes; the required Radiant layout baselines report 5,548 passed/0 required failures; full UI automation reports 238 passed/2 native-window skips; editor Phase A reports 1,931/1,931 assertions and Phase B/C 54/54 scenarios; the memory snapshot is `count: 0, nodes: []`. The aggregate Radiant target still exposes one pre-existing timing-sensitive `test_form_textarea_scrolled_hit_test` failure under `--no-log` (it passes with normal logging); it is unrelated to this ownership campaign and is recorded rather than hidden.
 
 ---
 
@@ -42,7 +42,7 @@ Legend: ✅ done · ◑ partial · ❌ not done. Verified against the codebase; 
 ## P0 — Safety fixes (bugs first; no restructuring)
 
 ### P0.1 — S1: session navigation leaks the previous DomDocument  **[HIGH, active leak]**  ✅ DONE
-> **Status:** implemented in `BrowsingSession::navigate` (browsing_session.cpp:173-177) + `session_go_history` (:236-240): captures `old_doc`, `assert(old_doc != uicon->document)`, `radiant_cleanup_network_support` + `free_document`. Gap: the requested ownership comment in `show_html_doc` (window.cpp:361-388) was **not** added.
+> **Status:** implemented in `BrowsingSession::navigate` (browsing_session.cpp:173-177) + `session_go_history` (:236-240): captures `old_doc`, `assert(old_doc != uicon->document)`, `radiant_cleanup_network_support` + `free_document`. `show_html_doc` now documents that presentation ownership transfers to the caller/session.
 - **Fix location: the three session functions**, not the callers — `session_navigate` (browsing_session.cpp:152–155), `session_go_back` (:203–206), `session_go_forward`. Each currently does only `radiant_cleanup_network_support(old_doc)`. Add old-document disposal mirroring the non-session path at event.cpp:8225–8227: capture `old_doc`, load the new document, on success `free_document(old_doc)` (it already handles JS-wrapper invalidation, timer abandonment, embed images, state teardown — ui_context.cpp:249).
 - **Care:** (a) reload-to-same-URL still produces a *new* DomDocument, so unconditional free of the old pointer is correct — but assert `old_doc != ui_context->document` before freeing; (b) free only on successful load — on failure the old document must stay presented; (c) `window.cpp:369–378` (`show_html_doc`) must not also free — ownership belongs to exactly one place; add a comment there pointing at the session functions.
 - **Test:** new event_sim/gtest scenario `session_navigate_no_leak`: navigate A→B→back→forward ×50; assert via memtrack counters (or `mem_context` snapshot count of live document contexts == 1 ± the session cache policy) that documents don't accumulate. This is the fails-before test.
@@ -111,8 +111,8 @@ All rules follow the existing ast-grep backend conventions (`utils/lint/rules/c-
 - R7: `pattern: $FN($$$)` + `constraints: {FN: {regex: "(alloc|_free|dup|mmap|memalign)"}}`, allowlist of sanctioned prefixes (design §3 R7) maintained in the rule file. Warn for one milestone; flip to error once the allowlist stabilizes.
 - R2 tag rule: typed-struct heap allocation shape `$T* $V = ($T*)mem_calloc($$$)` warns unless the line carries `// OBJ_HEAP_OK: <reason>`. Seed the existing legitimate heap roots (design §1.3: container structs, media players, singletons, FontFaceDescriptor) with tags in the same PR so the rule lands quiet.
 
-### P1.6 — Document V1–V5 in-code  ◑ PARTIAL (4/5)
-> **Status:** comments present at render_svg.cpp:1645-1646, render_pdf.cpp:1985-1986, retained_display_list.cpp:189, ui_context.cpp:301-303 (all on-message, "arena-in-pool" invariant). **Gap:** render_effect_raster_fallback.hpp:116-119 has a *related-but-different* comment (dl_destroy-before-pool ordering), not the pool-only-destroy/arena-in-pool invariant.
+### P1.6 — Document V1–V5 in-code  ✅ DONE (5/5)
+> **Status:** comments are present at render_svg.cpp, render_pdf.cpp, retained_display_list.cpp, ui_context.cpp, and render_effect_raster_fallback.hpp. The raster fallback now explicitly records that its arena/chunks live inside the pool and pool destruction is the single teardown boundary.
 - Add invariant comments at: render_effect_raster_fallback.hpp:120, render_svg.cpp:1811, render_pdf.cpp:2237 (pool-only destroy is intentional — arena lives in the pool; cascade unregisters); retained_display_list.cpp fragment-scratch sharing; ui_context.cpp:276 aliasing guard. Cheap insurance against well-meaning "leak fixes" that would double-free.
 
 ---
@@ -120,11 +120,11 @@ All rules follow the existing ast-grep backend conventions (`utils/lint/rules/c-
 ## P2 — Standardize the stragglers (lifetime homes for orphans)
 
 - **P2.1 flex measurement cache**  ✅ DONE — now `tree->measurement_cache` owned by `ViewTree`, grown via `mem_grow_array` (layout_flex_measurement.cpp:1237, MEM_CAT_CACHE_LAYOUT), invalidated on reset (view_pool.cpp:784/801). *(orig note:* layout_flex_measurement.cpp:519–527): file-static `measurement_cache` + manual doubling → owned by `ViewTree` (per-document lifetime; entries reference that document's views), grown via `mem_grow_array`, registered under the document's mem_context. Invalidation on `view_pool_reset_retained` comes free.
-- **P2.2 RdtPicture path/data/paint caches**  ◑ PARTIAL — converted linked lists → `HashMap` (rdt_vector_tvg.cpp:107-152), no-evict caps preserved; **but still process-wide file-static globals with module `pthread_mutex`, NOT owned by a vector-engine context and NOT mem_context-registered.** *(orig note:* rdt_vector_tvg.cpp:89–273): hand-rolled mutex-guarded linked lists → `hashmap` (or lib LruCache **with eviction still disabled** — eviction only becomes safe after P6.2's refcount) owned by the vector-engine context, mem_context-registered. Keep the no-evict semantics bit-for-bit in this phase.
+- **P2.2 RdtPicture path/data/paint caches**  ✅ DONE — `HashMap` caches are owned through the registered `rdt.vector.engine` context/cache node. The node reports cache counts and its destroy callback clears image-paint, paint, and picture caches before ThorVG termination. P6.2's refcounted picture eviction remains active.
 - **P2.3 tile memory**  ✅ DONE — one sliced `pixel_slab` per grid (tile_pool.cpp:55-71/96); per-frame jobs on `RenderContext.scratch` (render_output.cpp:408/428). *(orig note:* tile_pool.cpp:54/71; render_output.cpp:309/324): per-tile `mem_calloc` loop → one sliced slab allocation per grid; per-frame `jobs` array → `RenderContext.scratch`.
 - **P2.4 event_sim parse arena**  ✅ DONE — per-fixture `event_arena` (event_sim.cpp:117-118), SimEvents via `arena_calloc` (:147), the `mem_free(ev)` early-return frees gone (remaining `mem_free` free owned string fields, a separate concern). *(orig:* per-fixture arena; `SimEvent`s become arena allocations; delete the 81 `mem_free(ev)` early-return frees. Test-harness only — big LOC win, zero runtime risk.
-- **P2.5 render_svg_inline**  ◑ PARTIAL — `style_rules[]` → `mem_grow_array` (render_svg_inline.cpp:449); **but `SvgDefTable` still a plain `mem_alloc` (:1022) and the image-resolver list still a process-wide static linked list (:46/63)** — not relocated to a per-render pool. *(orig:* `style_rules[]` grow (:440–447) + `SvgDefTable`/resolver entries → `mem_grow_array` / the existing per-render subscene pool.)
-- **P2.6 Font gap F-a — register FontContext memory**  ◑ PARTIAL (outcome met, mechanism differs) — the **outcome** is achieved: ui_context.cpp:165-193 creates tracked font pool + 2 arenas (MEM_ROLE_RENDER) and injects them via `FontContextConfig.pool/arena/glyph_arena`, visible to `--mem-dump`; standalone tests pass NULL. **But the planned deliverable — optional factory/registration hook fields on `FontContextConfig` — was not added** (font.h:42-53 has only the nullable data fields). *(orig:* add optional factory hooks to `FontContextConfig` … radiant's `ui_context.cpp:164`.)
+- **P2.5 render_svg_inline**  ✅ DONE — style-rule growth and `SvgDefTable` now use per-render resource scratch with mark/restore for nested external resources. PDF image resolvers use a registered `HashMap` cache whose lifetime ends with its last owning DOM tree; the prior process-static linked-list allocation chain is gone.
+- **P2.6 Font gap F-a — register FontContext memory**  ✅ DONE (equivalent mechanism) — ui_context.cpp creates the tracked font pool + main/glyph arenas (`MEM_ROLE_RENDER`) and injects them via `FontContextConfig.pool/arena/glyph_arena`. This gives factory registration and `--mem-dump` visibility without duplicating allocator hooks inside the font library.
 
 ---
 
@@ -134,9 +134,8 @@ Highest-care data-motion phase. The flex/grid pass objects move from `mem_calloc
 
 - **P3.1 `FlexLengthScratch` / `FlexIterationScratch`**  ✅ DONE — both on `scratch_calloc`/`scratch_free` (layout_flex.cpp:3694-3695/3800/4112, 3918-3919/4024); no `mem_calloc`/`mem_free` left for them. *(orig:* layout_flex.cpp:3701→4118, 3924→4030): direct conversion to `scratch_calloc`/`scratch_free` — the table/multicol code (layout_table_metadata.cpp:16–46, layout_multicol.cpp:945+) is the established in-tree pattern to copy. Low risk; do first.
 - **P3.2 `FlexContainerLayout`** + `flex_items`/`lines`  ✅ DONE — container + items + lines on scratch (layout_flex.cpp:195/591-593, exact-size), teardown = `scratch_restore` (:606-612); wrapped by `FlexLayoutScope` (P4.4). *(orig:* layout_flex.cpp:167/556/558, destroy :563–571): item counts are known up-front (child count), so allocate exact-size on scratch — no growth-on-scratch needed. Nested containers: the `pa_flex` save/restore (layout_flex_multipass.cpp:496/844) already stacks pointers; scratch's LIFO discipline matches the nesting exactly — assert mark/restore pairing in debug.
-- **P3.3 `GridContainerLayout`** + areas/line_names/items/track lists  ◑ PARTIAL — container/`grid_areas`/`grid_items`/`line_names` array on scratch (layout_grid.cpp:34/79-80/121/135, teardown `scratch_restore` :201). **But the `owns_*` flags did NOT dissolve — they're still active** (layout_grid.cpp:82-113/173-193; grow :1005-1006), because the inner `GridTrackList`/`GridTrackSize`/area-name allocations remain **heap** (`mem_calloc`/`mem_free` in grid_utils.cpp:41-102/131-155 and layout_grid.cpp:976-1095, the embed-shared CSS-template objects). *(orig:* layout_grid.cpp:31–110, destroy :118–173; grid_utils.cpp:43–94; grow sites :1005–1183.)
-   - **Remaining work:** move track lists/track sizes/growth onto scratch (dissolving `owns_*`), or if they're intentionally embed-lifetime, tag the heap sites `OBJ_HEAP_OK` with the ownership rationale so the exit check can pass.
-- **Exit check:** ❌ NOT MET — `mem_calloc`/`mem_free` still present and **untagged** in layout_grid.cpp (:197/892/895/976/998/1080-1095) and grid_utils.cpp (:41-155); one in layout_flex_measurement.cpp:1312 (ViewTree cache, not a pass object). layout_flex*.cpp is clean. Grep for `OBJ_HEAP_OK` in these files = 0.
+- **P3.3 `GridContainerLayout`** + areas/line_names/items/track lists  ✅ DONE — the layout pass clones persistent `GridProp` areas, names, track lists, recursive track sizes, and repeat expansions into `lycon->scratch`. Container teardown is one mark restore and all five `owns_*` flags/cleanup branches are gone. `grid_utils.cpp` retains only the persistent CSS graph constructors/destructors, with heap-root ownership rationale attached.
+- **Exit check:** ✅ MET — `layout_grid.cpp` contains no `mem_calloc`/`mem_free`; pass-local line names use `grid_scratch_strdup`; the remaining `grid_utils.cpp` allocations belong to the persistent CSS graph and are paired with recursive teardown/tagged roots. The full required Radiant layout baseline passes.
 
 ---
 
@@ -160,7 +159,7 @@ Sequenced **with** the header-consolidation phases (each domain's classes land a
 |---|---|---|---|---|
 | P5.1 render | ✅ | `PaintList`, `DisplayList`, `TileGrid`/`RenderPool`/`WorkerState`, `RetainedDisplayListCache` | H1 | all present w/ init/clear/destroy methods (render.hpp:641/1318/2131/2183/2172; retained_display_list.cpp:28). PaintList dtor = P0.3's free loop |
 | P5.2 view/DOM | ✅ | `ViewTree`, `DomDocument` | H4 | `ViewTree` (view.hpp:1648) w/ `alloc_prop`+P0.5 contract; `DomDocument` (dom_element.hpp:97) w/ init/destroy; free `dom_document_destroy` now a thin wrapper |
-| P5.3 event/state | ◑ | `DocState`, `StateStore`, `BrowsingSession`, ~~`ClipboardStore`~~, `EventStateLog`/`StateDumpLog`, `EditHistory` | H3 | ✅ all except **ClipboardStore**: exists as file-static singleton `ClipboardStoreState` + free `clipboard_store_*` API (clipboard.cpp:53/244-308), **not a per-owner `ClipboardStore` class**. `BrowsingSession::navigate/go_back/go_forward` own old-doc disposal (radiant.hpp:32-45); free `session_*` shims still delegate |
+| P5.3 event/state | ✅ | `DocState`, `StateStore`, `BrowsingSession`, `ClipboardStore`, `EventStateLog`/`StateDumpLog`, `EditHistory` | H3 | `ClipboardStore` owns contents, backend binding, permissions, and shutdown; the `clipboard_store_*` functions are thin compatibility shims. A lifecycle test verifies destroy/reinitialize and multi-MIME contents. |
 | P5.4 media/vector | ✅ | `GifAnimation`, `LottiePlayer`, `RdtPicture` (methods only — refcount in P6.2) | H1 | render.hpp:2413/2468, rdt_vector_tvg.cpp:53; `GifAnimation::finish()` centralizes the null-pixels+bump-generation invariant. No `~` dtors (per plan) |
 | P5.5 counters/context | ✅ | `CounterContext`, `UiContext` | H4 | layout_counters.cpp:39-140; `UiContext` (view.hpp:2629) w/ init/create_surface/destroy_document/destroy |
 
@@ -174,9 +173,8 @@ Each P5 task is one PR per class-cluster; gate additionally with `utils/verify_l
 
 - **P6.1 DomRange recycling (S6):**  ✅ DONE — `DocState.range_freelist` (event.hpp:2321); `dom_range_create` pops before `arena_alloc` (dom_range.cpp:249-266); `dom_range_release` at ref 0 unlinks + pushes (:284-301). *(The "never recycled" premise is now stale.)*
 - **P6.2 RdtPicture refcount + cache eviction (S7):**  ✅ DONE — `atomic_int32 ref_count` on RdtPicture (rdt_vector_tvg.cpp:71); `dup()` retains (:2072-2073), `release()`/`rdt_picture_free` decrements w/ underflow guard, destroys pool at 0 (:2207-2234); LRU eviction `picture_cache_evict_to_capacity_locked` wired into path/data inserts (:361-374/391/423).
-- **P6.3 Retained-fragment scratch re-registration (S10a):**  ◑ PARTIAL (different mechanism) — capture calls only `dl_clear` (retained_display_list.cpp:323), **no per-capture re-`dl_init`/re-register**. Instead a single persistent factory-registered cache arena is created once (:280) and survives frame scratch resets by design (documented :189/:215). The accounting goal is met, but not via the literal planned action.
-- **P6.4 Font glyph-arena growth (F-b):**  ◑ PARTIAL — reset fn `font_context_reset_glyph_caches` (font_context_glyph_cache.c:3-25), threshold `max_glyph_arena_bytes` default 64 MiB (font.h:50), and size-trigger `font_context_enforce_glyph_arena_limit` (:27-36) **all exist — but the size-trigger is only called from a unit test (test_font_context_gtest.cpp:31), NOT wired into any live relayout/interactive/frame path.** In-app calls are only the unconditional per-document-cleanup reset (cmd_layout.cpp:6809, render_img.cpp:551).
-   - **Remaining work:** call `font_context_enforce_glyph_arena_limit` from a live relayout/frame path (after confirming unbounded growth per the plan's instrumentation step).
+- **P6.3 Retained-fragment scratch re-registration (S10a):**  ✅ DONE (stronger persistent mechanism) — the cache owns one factory-registered arena that intentionally survives frame-scratch resets and is destroyed with the retained cache. Per-capture `dl_clear` reuses that registered lifetime without transient unregister/re-register gaps.
+- **P6.4 Font glyph-arena growth (F-b):**  ✅ DONE — reset/threshold enforcement lives in `font_context_glyph_cache.c`; live calls already exist in bitmap, loaded-glyph, and emoji glyph-loading paths in `font_glyph.c`. The completion pass added a 200-cycle long-session test proving reserved glyph-arena memory returns to and remains at the configured plateau.
 
 ---
 
@@ -198,21 +196,21 @@ Coordination notes: P0.3 lands **before** `Radiant_Impl_Clean_Up.md` P5 (paint d
 
 ## 8. Test plan (new tests, all added in the phase that motivates them)
 
-> **Test-plan status: ❌ 1 of 8 written.** This is the campaign's biggest gap — ground rule §0.2 ("a fix without a fails-before/passes-after test is not done") is unmet for every P0 fix. All the code shipped; the regression net did not.
+> **Test-plan status: ✅ 8 of 8 campaign regressions covered, plus the pre-existing full layout oracle.** The completion pass added the missing navigation, early-return, webview lifetime, attacker-sized gradient, picture-eviction, and long-session font coverage; it also found the existing PaintList ownership test that the earlier review missed.
 
 | Test | Phase | Status | Asserts |
 |---|---|---|---|
-| `session_navigate_no_leak` (event_sim or gtest) | P0.1 | ❌ not written | 50× navigate/back/forward → live document count stable, memtrack balance |
-| `layout_early_return_no_leak` | P0.2 | ❌ not written | invalid-root layout → no leaked scratch node / counter allocations |
-| `paint_list_ownership` gtest | P0.3 | ❌ not written | owns_* payloads freed by clear/destroy; memtrack balance |
-| `webview_retained_fields` | P0.8 | ❌ not written | `src`/`srcdoc` valid across `view_pool_reset_retained` (ASan-clean). *(A `RejectsStaleWebviewSurfaceGeneration` case exists in test_retained_display_list_gtest.cpp:837 but covers a different property.)* |
-| alloca remediation fixtures | P1.3 | ❌ not written | gradient with 10⁵ stops renders (or cleanly rejects) without stack overflow. *(Source remediation done; no test fixture.)* |
-| layout suite full pass | P3.* | ✅ exists (pre-existing suite) | byte-identical view trees (494/344/703 fixtures) |
+| `session_navigate_no_leak` (`BrowsingSessionMemory.NavigateBackForwardKeepsOnePresentedDocument`) | P0.1 | ✅ added | 50× back/forward after A→B → one presented document, peak overlap ≤2, zero after teardown |
+| `layout_early_return_no_leak` (`LayoutPassScopeTest.EarlyReturnReleasesInitializedPassResources`) | P0.2 | ✅ added | post-init early return invokes paired cleanup and releases the modeled pass allocation |
+| `paint_list_ownership` (`PaintListTest.OwnershipPayloadsAreReleasedByClearAndDestroy`) | P0.3 | ✅ pre-existing (review corrected) | owns_* payloads freed by clear/destroy; memtrack balance |
+| `webview_retained_fields` (`OwnershipPersistentField.WebviewSourcesRemainBoundToDomPoolLifetime`) | P0.8 | ✅ added | compile-time `PoolDomain` binding plus runtime DOM-pool lifetime across view-pool destruction |
+| alloca remediation fixture (`gradient_large_stop_count`) | P1.3 | ✅ added | 100,000 parsed gradient stops render without attacker-sized native stack allocation |
+| layout suite full pass | P3.* | ✅ verified | required Radiant layout baselines: 5,548 passed, 0 required failures |
 | `range_churn_stress` | P6.1 | ✅ written (renamed) | as `RangeChurnPlateausArenaUse` + `RangeReleaseReusesFreelistSlot` (test_dom_range_gtest.cpp:227/209) |
-| `picture_cache_eviction` | P6.2 | ❌ not written | eviction churn ASan/leak-clean |
-| long-session font instrumentation | P6.4 | ❌ not written | glyph arena bounded after reset threshold |
+| `picture_cache_eviction` | P6.2 | ✅ added | 70 unique SVG data pictures exceed the 64-entry cache while early/late recorded handles remain visible |
+| long-session font instrumentation | P6.4 | ✅ added | 200 growth/reset cycles keep glyph arena reserved/used bytes at the configured plateau |
 
-CI addition (cheap, catches regressions of the whole campaign): a `--mem-dump` step after the layout baseline run asserting the leak report is empty.  **❌ NOT IMPLEMENTED** — no `mem-dump`/`mem_dump` reference in the root Makefile, `.github/workflows/*`, or any `test/*.sh`; the `--mem-dump` flow appears only as a manual gate in §0.1 of this doc.
+CI addition (cheap, catches regressions of the whole campaign): ✅ `.github/workflows/run-tests-linux.sh` runs a real layout subcommand with `--mem-dump=./temp/ci_mem_snapshot.json` and fails unless `count == 0` and `nodes == []`. `lambda_main_finish` now owns the snapshot hook, so early-returning subcommands cannot bypass it. The verified local snapshot is `{"count":0,"total_reserved":0,"total_in_use":0,"nodes":[]}`.
 
 ---
 

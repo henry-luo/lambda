@@ -153,6 +153,45 @@ static int g_image_paint_cache_count = 0;
 static const int RDT_IMAGE_PAINT_CACHE_MAX_ENTRIES = 128;
 static pthread_mutex_t g_image_paint_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+typedef struct RdtVectorCacheOwner {
+    MemContext* context;
+    MemNode* registry_node;
+} RdtVectorCacheOwner;
+
+static RdtVectorCacheOwner g_vector_cache_owner = {};
+
+static void picture_cache_clear_all();
+static void paint_cache_clear_all();
+static void image_paint_cache_clear_all();
+
+static bool vector_cache_stat(void* allocator, MemStatSample* sample) {
+    (void)allocator;
+    if (!sample) return false;
+    pthread_mutex_lock(&g_picture_cache_mutex);
+    size_t picture_count = (g_picture_path_cache ? hashmap_count(g_picture_path_cache) : 0) +
+                           (g_picture_data_cache ? hashmap_count(g_picture_data_cache) : 0);
+    pthread_mutex_unlock(&g_picture_cache_mutex);
+    pthread_mutex_lock(&g_paint_cache_mutex);
+    size_t paint_count = g_paint_cache ? hashmap_count(g_paint_cache) : 0;
+    pthread_mutex_unlock(&g_paint_cache_mutex);
+    pthread_mutex_lock(&g_image_paint_cache_mutex);
+    size_t image_count = g_image_paint_cache ? hashmap_count(g_image_paint_cache) : 0;
+    pthread_mutex_unlock(&g_image_paint_cache_mutex);
+    sample->alloc_count = picture_count + paint_count + image_count;
+    sample->bytes_in_use = picture_count * sizeof(RdtPictureCacheEntry) +
+                           paint_count * sizeof(RdtPaintCacheEntry) +
+                           image_count * sizeof(RdtImagePaintCacheEntry);
+    sample->bytes_reserved = sample->bytes_in_use;
+    return true;
+}
+
+static void vector_cache_destroy(void* allocator) {
+    (void)allocator;
+    image_paint_cache_clear_all();
+    paint_cache_clear_all();
+    picture_cache_clear_all();
+}
+
 // Mutex to serialize tvg_paint_duplicate calls (ThorVG Picture::duplicate is not thread-safe:
 // it increments a shared non-atomic counter and may mutate the source loader's state).
 static pthread_mutex_t g_tvg_dup_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -2269,12 +2308,31 @@ void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
 
 void rdt_engine_init(int threads) {
     tvg_engine_init(threads);
+    if (!g_vector_cache_owner.context) {
+        g_vector_cache_owner.context = mem_context_create(
+            mem_context_root(), MEM_ROLE_RENDER, "rdt.vector.engine");
+        if (g_vector_cache_owner.context) {
+            g_vector_cache_owner.registry_node = mem_register(
+                g_vector_cache_owner.context, MEM_KIND_CACHE, MEM_ROLE_RENDER,
+                "rdt.vector.caches", &g_vector_cache_owner, NULL,
+                vector_cache_stat, vector_cache_destroy);
+        }
+    }
 }
 
 void rdt_engine_term(void) {
-    image_paint_cache_clear_all();
-    paint_cache_clear_all();
-    picture_cache_clear_all();
+    if (g_vector_cache_owner.context && g_vector_cache_owner.registry_node) {
+        // The cache registry is the single vector-engine owner; cascading its
+        // context releases every cache before ThorVG itself is terminated.
+        mem_context_destroy(g_vector_cache_owner.context);
+    } else {
+        vector_cache_destroy(&g_vector_cache_owner);
+        if (g_vector_cache_owner.context) {
+            mem_context_destroy(g_vector_cache_owner.context);
+        }
+    }
+    g_vector_cache_owner.context = NULL;
+    g_vector_cache_owner.registry_node = NULL;
     tvg_engine_term();
 }
 

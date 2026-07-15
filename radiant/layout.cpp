@@ -3116,17 +3116,6 @@ void layout_cleanup(LayoutContext* lycon) {
     (void)lycon;
 }
 
-LayoutPassScope::LayoutPassScope(LayoutContext* l, DomDocument* doc, UiContext* uicon)
-    : lycon(l), active(false) {
-    if (!lycon) return;
-    layout_init(lycon, doc, uicon);
-    active = true;
-}
-
-LayoutPassScope::~LayoutPassScope() {
-    if (active) layout_cleanup(lycon);
-}
-
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();

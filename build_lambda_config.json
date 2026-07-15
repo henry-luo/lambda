@@ -3089,6 +3089,40 @@
                         "icon": "🎯"
                     },
                     {
+                        "source": "test_browsing_session_gtest.cpp",
+                        "name": "Browsing Session Memory Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/browsing_session.cpp"
+                        ],
+                        "binary": "test_browsing_session_gtest.exe",
+                        "icon": "🧭"
+                    },
+                    {
+                        "source": "test_clipboard_store_gtest.cpp",
+                        "name": "Clipboard Store Ownership Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/clipboard.cpp"
+                        ],
+                        "binary": "test_clipboard_store_gtest.exe",
+                        "icon": "📋"
+                    },
+                    {
                         "source": "test_source_pos_bridge_gtest.cpp",
                         "name": "Editor Source-Position Bridge Tests",
                         "dependencies": [

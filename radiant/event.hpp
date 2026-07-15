@@ -1774,6 +1774,30 @@ typedef enum ClipboardPermission {
     CLIPBOARD_PERMISSION_DENIED  = 2,
 } ClipboardPermission;
 
+#ifdef __cplusplus
+// Process owner for the canonical clipboard contents and backend binding.
+// The free clipboard_store_* functions below remain the C-compatible facade.
+struct ClipboardStore {
+    ArrayList* items;
+    char* cached_text;
+    ClipboardBackend* backend;
+    ClipboardPermission perm_read;
+    ClipboardPermission perm_write;
+
+    bool init();
+    void destroy();
+    void clear();
+    void set_backend(ClipboardBackend* next_backend);
+    void write_mime(const char* mime, const char* text);
+    void write_text(const char* text);
+    void write_html(const char* html, const char* plain_text);
+    const char* read_mime(const char* mime);
+    const char* read_text();
+    void write_items(ArrayList* next_items);
+    ArrayList* read_items();
+};
+#endif
+
 void                clipboard_store_set_permission_read(ClipboardPermission state);
 void                clipboard_store_set_permission_write(ClipboardPermission state);
 ClipboardPermission clipboard_store_get_permission_read(void);

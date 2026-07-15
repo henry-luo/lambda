@@ -38,10 +38,12 @@ static bool grid_item_has_in_flow_content(ViewBlock* item) {
 
 // Create a new grid track list
 GridTrackList* create_grid_track_list(int initial_capacity) {
-    GridTrackList* track_list = (GridTrackList*)mem_calloc(1, sizeof(GridTrackList), MEM_CAT_LAYOUT);
+    GridTrackList* track_list = (GridTrackList*)mem_calloc(1, sizeof(GridTrackList), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: persistent CSS GridProp owns this track-list graph until view teardown.
     if (!track_list) return nullptr;
 
     track_list->allocated_tracks = initial_capacity;
+    // These arrays are children of the persistent track-list heap root and are
+    // released together by destroy_grid_track_list during view teardown.
     track_list->tracks = (GridTrackSize**)mem_calloc(initial_capacity, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
     track_list->line_names = (char**)mem_calloc(initial_capacity + 1, sizeof(char*), MEM_CAT_LAYOUT); // +1 for end line
     track_list->track_count = 0;
@@ -73,7 +75,7 @@ void destroy_grid_track_list(GridTrackList* track_list) {
 
 // Create a new grid track size
 GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value) {
-    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
+    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: persistent CSS GridProp owns this track node until view teardown.
     if (!track_size) return nullptr;
 
     track_size->type = type;
@@ -89,7 +91,7 @@ GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value) {
 GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size) {
     if (!track_size) return nullptr;
 
-    GridTrackSize* copy = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
+    GridTrackSize* copy = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: cloned CSS track remains in the persistent GridProp graph.
     if (!copy) return nullptr;
 
     *copy = *track_size;
@@ -99,6 +101,8 @@ GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size) {
     copy->repeat_track_count = 0;
 
     if (track_size->repeat_tracks && track_size->repeat_track_count > 0) {
+        // Repeat children are part of the cloned persistent GridProp graph, not
+        // layout-pass scratch; destroy_grid_track_size recursively owns them.
         copy->repeat_tracks = (GridTrackSize**)mem_calloc(
             track_size->repeat_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
         if (!copy->repeat_tracks) {
@@ -136,9 +140,10 @@ void destroy_grid_track_size(GridTrackSize* track_size) {
 
 // Create a new grid area
 GridArea* create_grid_area(const char* name, int row_start, int row_end, int column_start, int column_end) {
-    GridArea* area = (GridArea*)mem_calloc(1, sizeof(GridArea), MEM_CAT_LAYOUT);
+    GridArea* area = (GridArea*)mem_calloc(1, sizeof(GridArea), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: caller attaches this area to persistent CSS grid state.
     if (!area) return nullptr;
 
+    // The area root and its name have identical persistent CSS ownership.
     area->name = mem_strdup(name, MEM_CAT_LAYOUT);
     area->row_start = row_start;
     area->row_end = row_end;
@@ -182,7 +187,10 @@ void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_nu
     }
 
     GridLineName* line_name = &grid->line_names[grid->line_name_count];
-    line_name->name = mem_strdup(name, MEM_CAT_LAYOUT);
+    // Layout line-name projections share the grid pass mark; heap strings here
+    // previously required a separate cleanup loop on every early-exit path.
+    line_name->name = grid_scratch_strdup(&grid->lycon->scratch, name);
+    if (!line_name->name) return;
     line_name->line_number = line_number;
     line_name->is_row = is_row;
 

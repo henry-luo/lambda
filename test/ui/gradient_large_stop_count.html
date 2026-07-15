@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+  <div id="gradient" style="width:64px;height:64px"></div>
+  <script>
+    const stops = [];
+    for (let i = 0; i < 100000; i++) stops.push(i % 2 ? '#fff' : '#000');
+    document.getElementById('gradient').style.background =
+      'linear-gradient(90deg,' + stops.join(',') + ')';
+  </script>
+</body>
+</html>

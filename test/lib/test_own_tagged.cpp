@@ -3,6 +3,7 @@
 
 #include "../../lib/ownership.hpp"
 #include "../../lib/tagged.hpp"
+#include "../../radiant/radiant.hpp"
 
 namespace {
 
@@ -105,6 +106,27 @@ TEST(OwnershipPersistentField, PromotesSessionStringBeforeRetaining) {
 
     pool_destroy(pool);
     memtrack_shutdown();
+}
+
+TEST(OwnershipPersistentField, WebviewSourcesRemainBoundToDomPoolLifetime) {
+    Pool* dom_pool = pool_create();
+    Pool* view_pool = pool_create();
+    ASSERT_NE(dom_pool, nullptr);
+    ASSERT_NE(view_pool, nullptr);
+
+    const char* src = pool_strdup(dom_pool, "https://example.test/page");
+    const char* srcdoc = pool_strdup(dom_pool, "<p>retained</p>");
+    WebViewProp webview = {};
+    radiant_retain_webview_src(&webview, lam::PoolPtr<const char>(src));
+    radiant_retain_webview_srcdoc(&webview, lam::PoolPtr<const char>(srcdoc));
+
+    // A retained view-pool reset destroys only view-owned properties; the DOM
+    // attribute pool remains the lifetime source for recreated WebViewProp data.
+    pool_destroy(view_pool);
+    EXPECT_STREQ(webview.src, "https://example.test/page");
+    EXPECT_STREQ(webview.srcdoc, "<p>retained</p>");
+
+    pool_destroy(dom_pool);
 }
 
 TEST(TaggedView, CastsOnlyWhenRuntimeTagMatches) {

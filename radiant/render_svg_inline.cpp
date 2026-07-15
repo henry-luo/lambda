@@ -10,7 +10,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
-#include "../lib/mem_grow.hpp"
+#include "../lib/hashmap.h"
 #include "../lib/log.h"
 #include "../lib/arena.h"
 #include "../lib/font/font.h"
@@ -40,33 +40,85 @@ static thread_local RenderContext* g_svg_active_rdcon = nullptr;
 struct SvgImageResolverEntry {
     Element* svg_root;
     Item pdf_root;
-    SvgImageResolverEntry* next;
 };
 
-static SvgImageResolverEntry* g_svg_image_resolvers = nullptr;
+typedef struct SvgImageResolverRegistry {
+    HashMap* entries;
+    MemContext* context;
+    MemNode* registry_node;
+} SvgImageResolverRegistry;
+
+static SvgImageResolverRegistry g_svg_image_resolvers = {};
 
 static bool svg_item_number_equals(ItemReader item, int value);
 static const char* svg_pdf_registered_image_resolver(void* context, int object_num);
 
-static SvgImageResolverEntry* svg_find_image_resolver_entry(Element* svg_root) {
-    for (SvgImageResolverEntry* entry = g_svg_image_resolvers; entry; entry = entry->next) {
-        if (entry->svg_root == svg_root) return entry;
+static uint64_t svg_image_resolver_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const SvgImageResolverEntry* entry = (const SvgImageResolverEntry*)item;
+    return hashmap_sip(&entry->svg_root, sizeof(entry->svg_root), seed0, seed1);
+}
+
+static int svg_image_resolver_compare(const void* left, const void* right, void* udata) {
+    (void)udata;
+    const SvgImageResolverEntry* a = (const SvgImageResolverEntry*)left;
+    const SvgImageResolverEntry* b = (const SvgImageResolverEntry*)right;
+    uintptr_t a_address = (uintptr_t)a->svg_root;
+    uintptr_t b_address = (uintptr_t)b->svg_root;
+    return a_address == b_address ? 0 : (a_address < b_address ? -1 : 1);
+}
+
+static bool svg_image_resolver_registry_stat(void* allocator, MemStatSample* sample) {
+    SvgImageResolverRegistry* registry = (SvgImageResolverRegistry*)allocator;
+    if (!registry || !registry->entries || !sample) return false;
+    sample->alloc_count = hashmap_count(registry->entries);
+    sample->bytes_in_use = sample->alloc_count * sizeof(SvgImageResolverEntry);
+    sample->bytes_reserved = sample->bytes_in_use;
+    return true;
+}
+
+static void svg_image_resolver_registry_destroy(void* allocator) {
+    SvgImageResolverRegistry* registry = (SvgImageResolverRegistry*)allocator;
+    if (!registry) return;
+    HashMap* entries = registry->entries;
+    registry->entries = nullptr;
+    if (entries) hashmap_free(entries);
+}
+
+static bool svg_image_resolver_registry_ensure() {
+    if (g_svg_image_resolvers.entries) return true;
+    g_svg_image_resolvers.entries = hashmap_new(
+        sizeof(SvgImageResolverEntry), 16, 0, 0,
+        svg_image_resolver_hash, svg_image_resolver_compare, NULL, NULL);
+    if (!g_svg_image_resolvers.entries) return false;
+    g_svg_image_resolvers.context = mem_context_create(
+        mem_context_root(), MEM_ROLE_RENDER, "render.svg.image_resolvers");
+    if (g_svg_image_resolvers.context) {
+        g_svg_image_resolvers.registry_node = mem_register(
+            g_svg_image_resolvers.context, MEM_KIND_CACHE, MEM_ROLE_RENDER,
+            "render.svg.image_resolver_cache", &g_svg_image_resolvers, NULL,
+            svg_image_resolver_registry_stat, svg_image_resolver_registry_destroy);
     }
-    return nullptr;
+    return true;
+}
+
+static SvgImageResolverEntry* svg_find_image_resolver_entry(Element* svg_root) {
+    if (!g_svg_image_resolvers.entries || !svg_root) return nullptr;
+    SvgImageResolverEntry query = {};
+    query.svg_root = svg_root;
+    return (SvgImageResolverEntry*)hashmap_get(g_svg_image_resolvers.entries, &query);
 }
 
 extern "C" void svg_register_pdf_image_resolver(Element* svg_root, Item pdf_root) {
     if (!svg_root || get_type_id(pdf_root) != LMD_TYPE_MAP) return;
 
-    SvgImageResolverEntry* entry = svg_find_image_resolver_entry(svg_root);
-    if (!entry) {
-        entry = (SvgImageResolverEntry*)mem_calloc(1, sizeof(SvgImageResolverEntry), MEM_CAT_RENDER);
-        if (!entry) return;
-        entry->svg_root = svg_root;
-        entry->next = g_svg_image_resolvers;
-        g_svg_image_resolvers = entry;
+    if (!svg_image_resolver_registry_ensure()) return;
+    SvgImageResolverEntry entry = {};
+    entry.svg_root = svg_root;
+    entry.pdf_root = pdf_root;
+    hashmap_set(g_svg_image_resolvers.entries, &entry);
+    if (hashmap_oom(g_svg_image_resolvers.entries)) {
+        log_error("[SVG] failed to register PDF image resolver");
     }
-    entry->pdf_root = pdf_root;
 }
 
 static bool svg_element_tree_contains(Element* root, Element* needle) {
@@ -83,15 +135,43 @@ static bool svg_element_tree_contains(Element* root, Element* needle) {
 
 extern "C" void svg_unregister_image_resolvers_for_tree(Element* root) {
     if (!root) return;
-    SvgImageResolverEntry** link = &g_svg_image_resolvers;
-    while (*link) {
-        SvgImageResolverEntry* entry = *link;
-        if (svg_element_tree_contains(root, entry->svg_root)) {
-            *link = entry->next;
-            mem_free(entry);
-        } else {
-            link = &entry->next;
+    if (!g_svg_image_resolvers.entries) return;
+    struct ResolverRemoval {
+        Element* svg_root;
+        Element* tree_root;
+    } removal = { nullptr, root };
+    auto find_removal = [](const void* item, void* udata) -> bool {
+        const SvgImageResolverEntry* entry = (const SvgImageResolverEntry*)item;
+        ResolverRemoval* candidate = (ResolverRemoval*)udata;
+        if (svg_element_tree_contains(candidate->tree_root, entry->svg_root)) {
+            candidate->svg_root = entry->svg_root;
+            return false;
         }
+        return true;
+    };
+    do {
+        removal.svg_root = nullptr;
+        hashmap_scan(g_svg_image_resolvers.entries, find_removal, &removal);
+        if (removal.svg_root) {
+            SvgImageResolverEntry query = {};
+            query.svg_root = removal.svg_root;
+            hashmap_delete(g_svg_image_resolvers.entries, &query);
+        }
+    } while (removal.svg_root);
+
+    if (hashmap_count(g_svg_image_resolvers.entries) == 0) {
+        // Resolver registry lifetime follows its last owning DOM tree, so empty
+        // registries do not survive into the process leak report.
+        MemContext* context = g_svg_image_resolvers.context;
+        MemNode* node = g_svg_image_resolvers.registry_node;
+        if (context && node) {
+            mem_context_destroy(context);
+        } else {
+            svg_image_resolver_registry_destroy(&g_svg_image_resolvers);
+            if (context) mem_context_destroy(context);
+        }
+        g_svg_image_resolvers.context = nullptr;
+        g_svg_image_resolvers.registry_node = nullptr;
     }
 }
 
@@ -103,7 +183,7 @@ extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
     SvgImageResolverEntry* entry = svg_find_image_resolver_entry(svg_root);
     if (!entry) return false;
     if (out_resolver) *out_resolver = svg_pdf_registered_image_resolver;
-    if (out_context) *out_context = entry;
+    if (out_context) *out_context = svg_root;
     return true;
 }
 
@@ -445,15 +525,25 @@ static void svg_add_style_rule(SvgInlineRenderContext* ctx, const char* selector
                                const char* value_start, const char* value_end) {
     if (!ctx || !selector_start || !name_start || !value_start) return;
     if (ctx->style_rule_count >= 256) return;
-    SvgStyleRule* style_rules = (SvgStyleRule*)ctx->style_rules;
-    if (!lam::mem_grow_array(&style_rules, &ctx->style_rule_capacity,
-                             ctx->style_rule_count + 1, 64, MEM_CAT_RENDER)) {
-        // Style rules are appended immediately after growth; failing closed avoids writing past the old array.
-        log_error("[SVG] failed to grow inline style rule array to %d entries",
-                  ctx->style_rule_count + 1);
-        return;
+    if (ctx->style_rule_count >= ctx->style_rule_capacity) {
+        if (!ctx->resource_scratch) return;
+        int next_capacity = ctx->style_rule_capacity > 0
+            ? ctx->style_rule_capacity * 2 : 64;
+        while (next_capacity <= ctx->style_rule_count) next_capacity *= 2;
+        SvgStyleRule* grown = (SvgStyleRule*)scratch_calloc(
+            ctx->resource_scratch, (size_t)next_capacity * sizeof(SvgStyleRule));
+        if (!grown) {
+            log_error("[SVG] failed to grow inline style rule scratch table to %d entries",
+                      ctx->style_rule_count + 1);
+            return;
+        }
+        if (ctx->style_rules && ctx->style_rule_count > 0) {
+            memcpy(grown, ctx->style_rules,
+                   (size_t)ctx->style_rule_count * sizeof(SvgStyleRule));
+        }
+        ctx->style_rules = grown;
+        ctx->style_rule_capacity = next_capacity;
     }
-    ctx->style_rules = style_rules;
     SvgStyleRule* rules = (SvgStyleRule*)ctx->style_rules;
     SvgStyleRule* rule = &rules[ctx->style_rule_count];
     svg_copy_trim(rule->selector, sizeof(rule->selector), selector_start, selector_end);
@@ -1019,8 +1109,10 @@ static Element* lookup_elem_def(SvgDefTable* table, const char* id) {
 
 static SvgDefTable* ensure_svg_def_table(SvgInlineRenderContext* ctx) {
     if (!ctx->defs) {
-        SvgDefTable* table = (SvgDefTable*)mem_alloc(sizeof(SvgDefTable), MEM_CAT_RENDER);
-        memset(table, 0, sizeof(SvgDefTable));
+        if (!ctx->resource_scratch) return nullptr;
+        SvgDefTable* table = (SvgDefTable*)scratch_calloc(
+            ctx->resource_scratch, sizeof(SvgDefTable));
+        if (!table) return nullptr;
         ctx->defs = (HashMap*)table;
     }
     return (SvgDefTable*)ctx->defs;
@@ -1032,6 +1124,7 @@ static void register_svg_def_element(SvgInlineRenderContext* ctx, Element* elem)
     if (!tag) return;
     const char* id = get_svg_attr(elem, "id");
     SvgDefTable* table = ensure_svg_def_table(ctx);
+    if (!table) return;
 
     if (strcmp(tag, "linearGradient") == 0 || strcmp(tag, "radialGradient") == 0) {
         if (!id) return;
@@ -3677,7 +3770,7 @@ static bool svg_item_number_equals(ItemReader item, int value) {
 }
 
 static const char* svg_pdf_registered_image_resolver(void* context, int object_num) {
-    SvgImageResolverEntry* entry = (SvgImageResolverEntry*)context;
+    SvgImageResolverEntry* entry = svg_find_image_resolver_entry((Element*)context);
     if (!entry || object_num <= 0) return nullptr;
 
     MapReader pdf_root = MapReader::fromItem(entry->pdf_root);
@@ -4480,6 +4573,7 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
         return false;
     }
 
+    ScratchMark nested_resource_mark = scratch_mark(ctx->resource_scratch);
     HashMap* saved_defs = ctx->defs;
     void* saved_rules = ctx->style_rules;
     int saved_rule_count = ctx->style_rule_count;
@@ -4492,8 +4586,9 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     ctx->source_path = rdt_picture_get_source_path(pic);  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
     process_svg_root_resources(ctx, root);
     render_svg_use_target(ctx, use_elem, ref, href);
-    if (ctx->style_rules) mem_free(ctx->style_rules);
-    if (ctx->defs) mem_free(ctx->defs);
+    // Nested resource tables are pass scratch; restoring their mark leaves the
+    // outer SVG tables intact without maintaining a parallel heap free chain.
+    scratch_restore(ctx->resource_scratch, nested_resource_mark);
     ctx->defs = saved_defs;
     ctx->style_rules = saved_rules;
     ctx->style_rule_count = saved_rule_count;
@@ -4762,7 +4857,8 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
-                       float initial_stroke_width, PaintList* paint_list) {
+                       float initial_stroke_width, PaintList* paint_list,
+                       ScratchArena* resource_scratch) {
     if (!svg_element) return;
     if (!dl || !paint_list) {
         log_error("[SVG] render_svg_to_display_list requires display-list and PaintIR targets");
@@ -4772,6 +4868,11 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
         log_debug("[SVG] skipped recursive render of SVG resource: %s", source_path);
         return;
     }
+    if (!resource_scratch) {
+        log_error("[SVG] render_svg_to_display_list requires resource scratch");
+        return;
+    }
+    ScratchMark resource_mark = scratch_mark(resource_scratch);
     bool pushed_source = svg_resource_stack_push(source_path);
 
     log_debug("[SVG] render_svg_to_display_list: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
@@ -4783,6 +4884,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     ctx.font_ctx = font_ctx;
     ctx.dl = dl;
     ctx.paint_list = paint_list;
+    ctx.resource_scratch = resource_scratch;
     ctx.source_path = source_path;
     svg_get_registered_image_resolver(svg_element, &ctx.image_resolver, &ctx.image_resolver_context);
     ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;
@@ -4893,8 +4995,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     }
 
     log_debug("[SVG] render_svg_to_display_list complete");
-    if (ctx.style_rules) mem_free(ctx.style_rules);
-    if (ctx.defs) mem_free(ctx.defs);
+    scratch_restore(resource_scratch, resource_mark);
     if (pushed_source) svg_resource_stack_pop(source_path);
 }
 
@@ -5170,7 +5271,10 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
     }
 
     PaintList nested_paint = {};
+    ScratchArena resource_scratch = {};
     paint_list_init(&nested_paint, temp_arena);
+    mem_scratch_init(NULL, &resource_scratch, temp_arena,
+                     MEM_ROLE_RENDER, "render.svg_inline.resources");
 
     Color* current_color = subscene->has_color ? (Color*)&subscene->color : nullptr;
     Color* fill_color = subscene->has_fill ? (Color*)&subscene->fill : nullptr;
@@ -5196,8 +5300,10 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
                       stroke_color,
                       subscene->stroke_none,
                       subscene->stroke_width,
-                      &nested_paint);
+                      &nested_paint,
+                      &resource_scratch);
 
+    scratch_release(&resource_scratch);
     paint_list_destroy(&nested_paint);
     mem_arena_destroy(temp_arena);
     mem_pool_destroy(temp_pool);
@@ -5213,7 +5319,8 @@ static void render_svg_to_display_list(Element* svg_element, float viewport_widt
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
-                       float initial_stroke_width, PaintList* paint_list) {
+                       float initial_stroke_width, PaintList* paint_list,
+                       ScratchArena* resource_scratch) {
     render_svg_inline_register_paint_ir_lowerers();
     render_svg_to_display_list_primitives(svg_element,
                                           viewport_width,
@@ -5231,7 +5338,8 @@ static void render_svg_to_display_list(Element* svg_element, float viewport_widt
                                           initial_stroke_color,
                                           initial_stroke_none,
                                           initial_stroke_width,
-                                          paint_list);
+                                          paint_list,
+                                          resource_scratch);
 }
 
 void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
@@ -5273,7 +5381,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
                                initial_current_color, initial_fill_color, source_path,
                                initial_opacity, initial_fill_none,
                                initial_stroke_color, initial_stroke_none,
-                               initial_stroke_width, &paint_list);
+                               initial_stroke_width, &paint_list, &scratch);
 
     if (dl_validate_or_log(&dl, "render_svg_picture_display_list")) {
         ImageSurface surface = {};
@@ -5382,7 +5490,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
                                nullptr, 1.0f, initial_paint.fill_none,
                                initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                                initial_paint.stroke_none, initial_paint.stroke_width,
-                               rdcon->paint_list);
+                               rdcon->paint_list, &rdcon->scratch);
     g_svg_active_rdcon = saved_svg_rdcon;
 
     if (has_content_clip) {
@@ -5419,6 +5527,7 @@ void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
     render_svg_to_display_list(svg_element, viewport_width, viewport_height,
                                pool, scale, font_ctx, &base_transform, rdcon->dl,
                                &current_color, nullptr, nullptr, 1.0f, false,
-                               nullptr, true, -1.0f, rdcon->paint_list);
+                               nullptr, true, -1.0f, rdcon->paint_list,
+                               &rdcon->scratch);
     g_svg_active_rdcon = saved_svg_rdcon;
 }

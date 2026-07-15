@@ -1848,11 +1848,6 @@ typedef struct GridContainerLayout : GridProp {
     bool auto_fit_rows[64];
     int auto_fit_col_count;
     int auto_fit_row_count;
-    bool owns_template_rows;
-    bool owns_template_columns;
-    bool owns_auto_rows;
-    bool owns_auto_columns;
-    bool owns_grid_areas;
     // pass-local grid state lives above this mark and is released together.
     ScratchMark scratch_mark;
 } GridContainerLayout;
@@ -1881,6 +1876,7 @@ GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value);
 GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size);
 void destroy_grid_track_size(GridTrackSize* track_size);
 GridArea* create_grid_area(const char* name, int row_start, int row_end, int column_start, int column_end);
+char* grid_scratch_strdup(ScratchArena* scratch, const char* source);
 void destroy_grid_area(GridArea* area);
 void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_number, bool is_row);
 int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_row);
@@ -2501,11 +2497,23 @@ struct LayoutContextScope {
  * Mirrors BlockContextScope: constructor initializes pass resources, destructor
  * releases scratch/counters even when later layout code returns early.
  */
+void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon);
+void layout_cleanup(LayoutContext* lycon);
+
 struct LayoutPassScope {
     LayoutContext* lycon;
     bool active;
-    LayoutPassScope(LayoutContext* l, DomDocument* doc, UiContext* uicon);
-    ~LayoutPassScope();
+    LayoutPassScope(LayoutContext* l, DomDocument* doc, UiContext* uicon)
+        : lycon(l), active(false) {
+        if (!lycon) return;
+        layout_init(lycon, doc, uicon);
+        active = true;
+    }
+    ~LayoutPassScope() {
+        // Pass resources are paired structurally so post-init early returns
+        // cannot strand counter or scratch registrations.
+        if (active) layout_cleanup(lycon);
+    }
     LayoutPassScope(const LayoutPassScope&) = delete;
     LayoutPassScope& operator=(const LayoutPassScope&) = delete;
 };

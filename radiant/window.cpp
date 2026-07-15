@@ -367,6 +367,8 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     doc->given_scale = 1.0f;
     doc->scale = doc->given_scale * ui_context.pixel_ratio;
 
+    // BrowsingSession owns replacement of the previously presented document;
+    // this presentation helper only publishes the newly loaded document.
     ui_context.document = doc;
 
     radiant_document_ensure_state(doc, "show_html_doc");
