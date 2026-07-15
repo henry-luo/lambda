@@ -1,0 +1,5 @@
+digraph Invalid {
+  graph [layout=neato]
+  subgraph rank_scope { rank=middle; a }
+  a:out:sideways -- b
+}

@@ -2063,14 +2063,45 @@ edge identity remains intentionally in Stage 3B normalization. Keeping those
 operations out of the parser preserves exact source declarations and avoids a
 second source AST.
 
-#### Stage 3B - DOT semantics and canonical IR
+#### Stage 3B - DOT semantics and canonical IR (in progress, 2026-07-15)
 
-- implement temporal scoped defaults and node identity merging;
-- expand edge chains and subgraph endpoint products with provenance;
-- implement strict graph edge updates;
-- distinguish ordinary subgraphs, rank scopes, and visual clusters;
-- retain arbitrary Graphviz properties and lower the first typed attribute set;
-- compare canonical output against pinned `dot_json` references.
+The pure Lambda semantic implementation is complete:
+
+- temporal graph/node/edge defaults are resolved in source order, with global
+  node identity, implicit creation, and non-retroactive redeclaration merging;
+- edge chains and subgraph endpoint products expand into explicit edges with
+  statement, segment, and expansion provenance and a bounded expansion limit;
+- strict directed and unordered undirected edge identities update the first
+  canonical edge while retaining property-level defining statements;
+- ordinary and anonymous subgraphs remain nonvisual scopes, while only
+  `cluster*` subgraphs become visual clusters;
+- arbitrary Graphviz properties retain direct/default/inherited origin and
+  defining scope/statement metadata, while graph, node, edge, paint, spacing,
+  marker, and compound-edge attributes expose an initial typed canonical set;
+- `rank=same|min|max|source|sink` scope properties lower into validated
+  canonical `<constraint>` values; enforcement belongs to Stage 3D;
+- invalid compass points and rank values, graph-kind/operator mismatches,
+  unresolved ports, expansion overflow, and unsupported engines produce stable
+  diagnostics;
+- canonical normalization is idempotent, and semantic-only scopes are excluded
+  from visual cluster transformation.
+
+The implementation is covered by `canonical.ls` and `semantics.ls` under
+`test/lambda/graph/graphviz`. The remaining Stage 3B conformance item is the
+pinned `dot_json` adapter/reference comparison described in Section 19.12.
+Graphviz is not installed or invoked by ordinary tests.
+
+Lambda normalization size is tracked separately from native parser LOC:
+
+| Stage 3B module | Physical LOC |
+|---|---:|
+| `graphviz/attributes.ls` | 115 |
+| `graphviz/normalize.ls` | 479 |
+| total | 594 |
+
+These modules do not change the 2,357-line native parser ceiling in Section
+19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
+attribute families are added.
 
 #### Stage 3C - Content, shapes, markers, and HTML
 

@@ -295,7 +295,7 @@ pub fn to_html(graph, opts = null) {
     else [for (node in source_children(graph, "node")) {value: node, group: null}];
   let edge_entries = if (graph is element) model.edge_entries(graph)
     else [for (edge in source_children(graph, "edge")) {value: edge, group: null}];
-  let subgraph_entries = if (graph is element) model.subgraph_entries(graph) else [];
+  let subgraph_entries = if (graph is element) model.visual_subgraph_entries(graph) else [];
   let port_entries = if (graph is element) model.port_entries(graph) else [];
   let direction = string(opt(opts, "direction",
     if (graph is element) model.direction(graph)

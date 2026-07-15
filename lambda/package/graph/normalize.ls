@@ -4,6 +4,7 @@ import model: .model
 import diagnostic: .diagnostics
 import schema: .schema
 import graph_content: .transform.content
+import graphviz_normalize: .graphviz.normalize
 
 fn noncanonical_children(value) => [
   for (child in model.child_items(value)
@@ -13,12 +14,18 @@ fn noncanonical_children(value) => [
 
 fn node_content_children(value) => [
   for (child in noncanonical_children(value)
-    where not (child is element and model.tag(child) == "port")) child
+    where not (child is element and
+      (model.tag(child) == "port" or model.tag(child) == "properties"))) child
 ]
 
 fn node_ports(value) => [
   for (child in model.child_items(value)
     where child is element and model.tag(child) == "port") child
+]
+
+fn node_metadata(value) => [
+  for (child in noncanonical_children(value)
+    where child is element and model.tag(child) == "properties") child
 ]
 
 fn direct_tag_count(value, wanted_tag) => len([
@@ -39,11 +46,12 @@ fn is_canonical_child(child) {
     let child_tag = model.tag(child);
     if (child_tag == "node") {
       has_canonical_label_content(child, true) and
-        len(noncanonical_children(child)) == len(node_ports(child))
+        len(noncanonical_children(child)) == len(node_ports(child)) + len(node_metadata(child))
     }
     else if (child_tag == "edge") { has_canonical_label_content(child, false) }
     else if (child_tag == "subgraph") {
-      has_canonical_label_content(child, child.id != null and child.id != "") and
+      has_canonical_label_content(child,
+        child.role != "scope" and child.id != null and child.id != "") and
         all([for (nested in noncanonical_children(child)) is_canonical_child(nested)])
     }
     else { true }
@@ -88,6 +96,7 @@ fn canonical_node(node) {
     if (label != null) { label }
     if (content != null) { content }
     for (port in node_ports(node)) port
+    for (metadata in node_metadata(node)) metadata
   >
 }
 
@@ -104,7 +113,8 @@ fn canonical_edge(edge) {
 
 fn canonical_subgraph(subgraph) {
   let attrs = map(subgraph);
-  let fallback = if (subgraph.id != null and subgraph.id != "") string(subgraph.id) else null;
+  let fallback = if (subgraph.role != "scope" and subgraph.id != null and subgraph.id != "")
+    string(subgraph.id) else null;
   let label = canonical_label(subgraph, fallback);
   let content = canonical_content(subgraph, label, false);
   <subgraph *:attrs;
@@ -135,6 +145,10 @@ fn canonical_graph(graph) {
 fn is_mermaid_source_graph(graph) =>
   graph is element and model.tag(graph) == "graph" and
     graph.flavor == "mermaid" and graph["ir-stage"] == "source"
+
+fn is_dot_source_graph(graph) =>
+  graph is element and model.tag(graph) == "graph" and
+    graph.flavor == "dot" and graph["ir-stage"] == "source"
 
 fn node_declaration_groups(graph) {
   let entries = [for (entry in model.node_entries(graph)
@@ -337,13 +351,16 @@ pub fn validate(graph) {
 pub fn normalize(graph) {
   // mermaid parser output retains redeclarations; merge that source stage before
   // canonical uniqueness checks while authored canonical Mark keeps strict IDs.
-  let resolved = if (is_mermaid_source_graph(graph)) merge_mermaid_source_graph(graph)
-    else graph;
+  let dot_result = if (is_dot_source_graph(graph)) graphviz_normalize.normalize(graph)
+    else {graph: graph, diagnostics: []};
+  let resolved = if (is_mermaid_source_graph(dot_result.graph))
+    merge_mermaid_source_graph(dot_result.graph) else dot_result.graph;
   let canonical = if (resolved is element and string(name(resolved)) == "graph")
     (if (is_canonical_graph(resolved)) resolved else canonical_graph(resolved)) else resolved;
   // Validate authored structure before rebuilding so duplicate canonical children
   // cannot disappear without a diagnostic when the canonical pair is selected.
-  let values = validate(resolved);
+  let values = [*dot_result.diagnostics,
+    *validate(if (is_dot_source_graph(graph)) canonical else resolved)];
   {
     graph: canonical,
     diagnostics: values,

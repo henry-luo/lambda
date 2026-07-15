@@ -80,6 +80,10 @@ fn nested_subgraph_entries(container, parent_group, prefix) {
 
 pub fn subgraph_entries(graph) => nested_subgraph_entries(graph, null, "g")
 
+pub fn visual_subgraph_entries(graph) => [
+  for (entry in subgraph_entries(graph) where entry.value.role != "scope") entry
+]
+
 pub fn ports(node) => [for (child in element_children(node) where tag(child) == "port") child]
 
 pub fn port_entries(graph) => [
@@ -105,6 +109,11 @@ pub fn style_assignments(graph) => metadata_entries(graph, "style-assignment")
 pub fn interactions(graph) => metadata_entries(graph, "interaction")
 
 pub fn edge_properties(graph) => metadata_entries(graph, "edge-property")
+
+pub fn constraints(graph) => [
+  for (group in element_children(graph), value in element_children(group)
+    where tag(group) == "constraints" and tag(value) == "constraint") value
+]
 
 fn meta_values(graph, wanted_tag) {
   [for (child in element_children(graph),
