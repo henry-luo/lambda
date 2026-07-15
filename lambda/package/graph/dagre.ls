@@ -1,3 +1,5 @@
+import polygon: .polygon
+
 pub fn make_options() {
   let opts = {
     algorithm: "dagre",
@@ -43,10 +45,19 @@ fn normalize_node(node, index) {
   let hg = if (node.height != null) float(node.height)
     else if (node.hg != null) float(node.hg)
     else 40.0;
+  let regular = edge_bool(node.regular, false);
   {
     id: id,
     label: if (node.label != null) string(node.label) else id,
     shape: if (node.shape != null) string(node.shape) else "box",
+    polygon_sides: if (node.polygon_sides != null) int(node.polygon_sides) else null,
+    polygon_orientation: if (node.polygon_orientation != null)
+      float(node.polygon_orientation) else 0.0,
+    polygon_skew: if (node.polygon_skew != null) float(node.polygon_skew) else 0.0,
+    polygon_distortion: if (node.polygon_distortion != null)
+      float(node.polygon_distortion) else 0.0,
+    regular: regular,
+    peripheries: if (node.peripheries != null) int(node.peripheries) else 1,
     width: wd,
     height: hg,
     group: if (node.group != null and node.group != "") string(node.group) else null,
@@ -103,6 +114,8 @@ fn normalize_edge(edge, nodes, index, directed) {
       arrow_end: marker_end != "none",
       marker_start: marker_start,
       marker_end: marker_end,
+      arrow_size: float(if (edge.arrow_size != null) edge.arrow_size
+        else if (edge["arrow-size"] != null) edge["arrow-size"] else 1.0),
       style: if (edge.style != null) string(edge.style) else "solid",
       stroke: if (edge.stroke != null) string(edge.stroke) else null,
       stroke_width: if (edge.stroke_width != null) float(edge.stroke_width) else null,
@@ -581,7 +594,10 @@ fn shape_vertices(node) {
   let top = node.y - node.height / 2.0;
   let bottom = node.y + node.height / 2.0;
   let quarter = node.width / 4.0;
-  let vertices = if (node.shape == "hexagon") [
+  let vertices = if (node.polygon_sides != null) polygon.vertices(
+    node.x, node.y, node.width, node.height, node.polygon_sides,
+    node.polygon_orientation, node.polygon_skew, node.polygon_distortion)
+  else if (node.shape == "hexagon") [
     {x: left + quarter, y: top}, {x: right - quarter, y: top},
     {x: right, y: node.y}, {x: right - quarter, y: bottom},
     {x: left + quarter, y: bottom}, {x: left, y: node.y}
@@ -997,6 +1013,8 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       arrow_end: edge.arrow_end,
       marker_start: edge.marker_start,
       marker_end: edge.marker_end,
+      // routed edges must retain marker scale after geometry reconstruction.
+      arrow_size: edge.arrow_size,
       style: edge.style,
       stroke: edge.stroke,
       stroke_width: edge.stroke_width,

@@ -2,11 +2,18 @@ import layout: lambda.package.graph.layout
 import model: lambda.package.graph.model
 import normalize: lambda.package.graph.normalize
 import paint: lambda.package.graph.transform.paint
+import scene: lambda.package.graph.scene
 import transform: lambda.package.graph.transform
 
 fn direct_children(value, wanted) => [
   for (child in model.element_children(value) where model.tag(child) == wanted) child
 ]
+
+fn marker_components(marker) {
+  let content = if (len(marker) > 0) marker[0] else null;
+  [for (child in model.element_children(content)
+    where child["data-marker-component"] != null) child["data-marker-component"]]
+}
 
 let source^source_error = input(
   "test/lambda/graph/graphviz/content_shapes_markers.dot", {type: "graph", flavor: "dot"})
@@ -19,27 +26,73 @@ let html_nodes = direct_children(html, "node")
 let html_edges = direct_children(html, "edge")
 let result = layout.compute({
   nodes: [for (node in nodes) {
-    id: node.id, width: 72.0, height: 42.0, shape: node.shape
+    id: node.id, width: 72.0, height: 42.0, shape: node.shape,
+    polygon_sides: node["polygon-sides"],
+    polygon_orientation: node["polygon-orientation"],
+    polygon_skew: node["polygon-skew"],
+    polygon_distortion: node["polygon-distortion"],
+    regular: node.regular, peripheries: node.peripheries
   }],
   edges: edges,
   directed: true,
   direction: "LR"
 })
 let layers = paint.layers(result)
+let polygon_layout = [for (node in result.nodes where node.id == "f") node][0]
+let polygon_html = [for (node in html_nodes where node["data-node-id"] == "f") node][0]
+let composed_html = [for (edge in html_edges
+  where edge["data-from"] == "e" and edge["data-to"] == "f") edge][0]
+let graph_scene = scene.from_svg(<svg;
+  <g 'data-graph-role': "graph", 'data-x': 0, 'data-y': 0,
+      'data-width': 160, 'data-height': 80, 'data-direction': "LR";
+    <node 'data-graph-role': "node", 'data-node-id': "e", 'data-shape': "house",
+      'data-x': 0, 'data-y': 10, 'data-width': 40, 'data-height': 40>
+    <node 'data-graph-role': "node", 'data-node-id': "f",
+      'data-shape': polygon_html["data-shape"],
+      'data-shape-family': polygon_html["data-shape-family"],
+      'data-polygon-sides': polygon_html["data-polygon-sides"],
+      'data-polygon-orientation': polygon_html["data-polygon-orientation"],
+      'data-polygon-skew': polygon_html["data-polygon-skew"],
+      'data-polygon-distortion': polygon_html["data-polygon-distortion"],
+      'data-regular': polygon_html["data-regular"],
+      'data-peripheries': polygon_html["data-peripheries"],
+      'data-x': 100, 'data-y': 0, 'data-width': 60, 'data-height': 60>
+    <path 'data-graph-role': "edge", 'data-edge-id': "ef",
+      'data-from': "e", 'data-to': "f", 'data-route': "40,30 100,30",
+      'data-marker-start': composed_html["data-marker-start"],
+      'data-marker-end': composed_html["data-marker-end"],
+      'data-arrow-size': composed_html["data-arrow-size"]>
+  >
+>)
+let scene_polygon = model.nodes(graph_scene)[1]
+let scene_edge = model.edges(graph_scene)[0]
 
 {
   valid: normalized.valid,
   graph_label: graph.label,
   nodes: [for (node in nodes) [node.id, node.label, node.shape,
-    node["shape-family"], node["graphviz-shape"]]],
+    node["shape-family"], node["graphviz-shape"], node["polygon-sides"],
+    node["polygon-orientation"], node["polygon-skew"], node["polygon-distortion"],
+    node.regular, node.peripheries]],
   edges: [for (edge in edges) [edge.from, edge.to, edge.label,
-    edge["arrow-tail"], edge["arrow-head"], edge["arrow-direction"]]],
+    edge["arrow-tail"], edge["arrow-head"], edge["arrow-direction"], edge["arrow-size"]]],
   html_nodes: [for (node in html_nodes) [node["data-node-id"], node["data-label"],
-    node["data-shape"], node["data-shape-family"], node["data-graphviz-shape"]]],
+    node["data-shape"], node["data-shape-family"], node["data-graphviz-shape"],
+    node["data-polygon-sides"], node["data-peripheries"],
+    contains(string(node.style), "clip-path:polygon"),
+    contains(string(node.style), "box-shadow:")]],
   html_edges: [for (edge in html_edges) [edge["data-from"], edge["data-to"],
-    edge["data-marker-start"], edge["data-marker-end"]]],
+    edge["data-marker-start"], edge["data-marker-end"], edge["data-arrow-size"]]],
+  polygon_layout: [polygon_layout.width, polygon_layout.height],
+  scene: [scene_polygon.shape, scene_polygon["shape-family"],
+    scene_polygon["polygon-sides"], scene_polygon["polygon-orientation"],
+    scene_polygon["polygon-skew"], scene_polygon["polygon-distortion"],
+    scene_polygon.regular, scene_polygon.peripheries,
+    scene_edge["marker-start"], scene_edge["marker-end"], scene_edge["arrow-size"]],
   paint: [for (layer in layers, let defs = layer.content[0]) [
     layer.edge_id, defs[0]["data-marker-type"], defs[1]["data-marker-type"],
-    string(name(defs[0][0])), string(name(defs[1][0]))
+    string(name(defs[0][0])), string(name(defs[1][0])),
+    marker_components(defs[0]), marker_components(defs[1]),
+    defs[1].markerWidth, defs[1].markerHeight
   ]]
 }

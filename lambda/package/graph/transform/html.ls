@@ -5,13 +5,16 @@ import graph_content: .content
 import model: lambda.package.graph.model
 import graph_style: lambda.package.graph.style
 import mermaid_config: lambda.package.graph.mermaid.config
+import polygon: lambda.package.graph.polygon
 
 fn opt(opts, key, fallback) {
   if (opts != null and opts[key] != null) opts[key] else fallback
 }
 
 fn source_attr(source, key, fallback) {
-  if (source != null and source[key] != null) source[key] else fallback
+  let found = if (source == null) null else source[key];
+  // format-specific optional fields may be missing on another graph dialect.
+  if (found == null or found is error) fallback else found
 }
 
 fn label_source(value, fallback = null) {
@@ -58,11 +61,15 @@ fn edge_class(assigned_classes) {
   else "graph-edge"
 }
 
-fn shape_css(shape, palette) {
-  if (shape == "circle" or shape == "ellipse" or shape == "f-circ") "border-radius:50%;"
-  else if (shape == "doublecircle")
-    "border-radius:50%;box-shadow:inset 0 0 0 3px " ++ palette.node_background ++
-      ",inset 0 0 0 4px " ++ palette.node_border ++ ";"
+fn shape_css(node, palette) {
+  let shape = string(source_attr(node, "shape", "box"));
+  let sides = source_attr(node, "polygon-sides", null);
+  if (sides != null) polygon.css(int(sides),
+    float(source_attr(node, "polygon-orientation", 0.0)),
+    float(source_attr(node, "polygon-skew", 0.0)),
+    float(source_attr(node, "polygon-distortion", 0.0)))
+  else if (shape == "circle" or shape == "ellipse" or shape == "f-circ") "border-radius:50%;"
+  else if (shape == "doublecircle") "border-radius:50%;"
   else if (shape == "stadium" or shape == "round" or shape == "rounded")
     "border-radius:999px;"
   else if (shape == "cylinder") "border-radius:50% / 12px;"
@@ -102,6 +109,8 @@ fn shape_css(shape, palette) {
   else if (shape == "bang")
     "clip-path:polygon(18% 0,82% 0,100% 18%,86% 50%,100% 82%,82% 100%,18% 100%,0 82%,14% 50%,0 18%);"
   else if (shape == "cloud") "border-radius:45% 55% 48% 52% / 55% 45% 55% 45%;"
+  else if (shape == "star")
+    "clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 94%,50% 72%,21% 94%,32% 57%,2% 35%,39% 35%);"
   else if (shape == "delay") "border-radius:4px 50% 50% 4px;"
   else if (shape == "h-cyl") "border-radius:18px / 50%;"
   else if (shape == "curv-trap") "border-radius:45% 45% 8px 8px / 20% 20% 8px 8px;"
@@ -122,6 +131,22 @@ fn shape_css(shape, palette) {
   else "border-radius:4px;"
 }
 
+fn periphery_shadows(count, i, palette, values) {
+  if (i >= count) join(values, ",")
+  else periphery_shadows(count, i + 1, palette, [*values,
+    "inset 0 0 0 " ++ string(i * 4 - 1) ++ "px " ++ palette.node_background,
+    "inset 0 0 0 " ++ string(i * 4) ++ "px " ++ palette.node_border])
+}
+
+fn periphery_css(node, shape, palette) {
+  let authored = source_attr(node, "peripheries", null);
+  let count = if (authored != null) int(authored)
+    else if (shape == "doublecircle") 2 else 1;
+  if (count == 0) "border-color:transparent;"
+  else if (count == 1) ""
+  else "box-shadow:" ++ periphery_shadows(count, 1, palette, []) ++ ";"
+}
+
 fn resolved_node_style(node, style_declarations) {
   let source = if (node.style != null) string(node.style) else "";
   graph_style.parse(source ++ ";" ++ style_declarations)
@@ -131,7 +156,8 @@ fn node_style(node, parsed, palette) {
   let shape = string(source_attr(node, "shape", "box"));
   "display:inline-block;box-sizing:border-box;padding:10px 14px;" ++
     "border:1px solid " ++ palette.node_border ++ ";" ++
-    "background:" ++ palette.node_background ++ ";" ++ shape_css(shape, palette) ++
+    "background:" ++ palette.node_background ++ ";" ++ shape_css(node, palette) ++
+    periphery_css(node, shape, palette) ++
     "color:" ++ palette.node_text ++
     ";white-space:" ++
     (if (graph_content.is_rich(label_format(node))) "normal" else "nowrap") ++
@@ -171,6 +197,12 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
       'data-shape': source_attr(node, "shape", "box"),
       'data-shape-family': source_attr(node, "shape-family", null),
       'data-graphviz-shape': source_attr(node, "graphviz-shape", null),
+      'data-polygon-sides': source_attr(node, "polygon-sides", null),
+      'data-polygon-orientation': source_attr(node, "polygon-orientation", null),
+      'data-polygon-skew': source_attr(node, "polygon-skew", null),
+      'data-polygon-distortion': source_attr(node, "polygon-distortion", null),
+      'data-regular': source_attr(node, "regular", null),
+      'data-peripheries': source_attr(node, "peripheries", null),
       'data-label': label_source(node, id),
       'data-label-format': label_format(node),
       'data-style-declarations': style_declarations,
@@ -228,6 +260,7 @@ fn html_edge(edge, index, group, graph_directed, assigned_classes,
       'data-arrow-start': bool_text(marker_start != "none", false),
       'data-arrow-end': bool_text(marker_end != "none", false),
       'data-marker-start': marker_start, 'data-marker-end': marker_end,
+      'data-arrow-size': source_attr(edge, "arrow-size", null),
       'data-style': string(source_attr(edge, "style", "solid")),
       'data-style-declarations': style_declarations,
       'data-interaction-action': source_attr(interaction, "action", null),

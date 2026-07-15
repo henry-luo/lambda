@@ -1,11 +1,13 @@
 {
   valid: true,
   graph_label: "Graph Escapes / L",
-  nodes: [["a", "Node a / \N / L", "ellipse", "ellipse", "oval"], ["b", "Second
-Line", "flip-tri", "polygon", "invtriangle"], ["c", "c", "lean-r", "polygon", "parallelogram"], ["d", "d", "octagon", "polygon", "octagon"], ["e", "e", "house", "polygon", "house"]],
-  edges: [["a", "b", "a to b (a->b) in Escapes / L", "odot", "diamond", "both"], ["b", "c", null, "none", "vee", null], ["c", "d", null, "obox", "none", "back"], ["d", "e", null, "none", "none", "none"]],
-  html_nodes: [["a", "Node a / \N / L", "ellipse", "ellipse", "oval"], ["b", "Second
-Line", "flip-tri", "polygon", "invtriangle"], ["c", "c", "lean-r", "polygon", "parallelogram"], ["d", "d", "octagon", "polygon", "octagon"], ["e", "e", "house", "polygon", "house"]],
-  html_edges: [["a", "b", "odot", "diamond"], ["b", "c", "none", "vee"], ["c", "d", "obox", "none"], ["d", "e", "none", "none"]],
-  paint: [["dot-stmt-0-s0-e0", "odot", "diamond", "circle", "path"], ["dot-stmt-1-s0-e0", "none", "vee", "path", "path"], ["dot-stmt-2-s0-e0", "obox", "none", "rect", "path"], ["dot-stmt-3-s0-e0", "none", "none", "path", "path"]]
+  nodes: [["a", "Node a / \N / L", "ellipse", "ellipse", "oval", null, null, null, null, null, null], ["b", "Second
+Line", "flip-tri", "polygon", "invtriangle", null, null, null, null, null, null], ["c", "c", "lean-r", "polygon", "parallelogram", null, null, null, null, null, null], ["d", "d", "octagon", "polygon", "octagon", null, null, null, null, null, null], ["e", "e", "house", "polygon", "house", null, null, null, null, null, null], ["f", "f", "polygon", "polygon", "polygon", 5, 18, 0.2, 0.1, true, 2], ["g", "g", "octagon", "polygon", "doubleoctagon", null, null, null, null, null, 2], ["h", "h", "doc", "box", "note", null, null, null, null, null, null]],
+  edges: [["a", "b", "a to b (a->b) in Escapes / L", "odot", "diamond", "both", null], ["b", "c", null, "none", "vee", null, null], ["c", "d", null, "obox", "none", "back", null], ["d", "e", null, "none", "none", "none", null], ["e", "f", null, "box:left box:right", "odiamond normal", "both", 1.25], ["f", "g", null, "none", "normal", null, null], ["g", "h", null, "none", "normal", null, null]],
+  html_nodes: [["a", "Node a / \N / L", "ellipse", "ellipse", "oval", null, null, false, false], ["b", "Second
+Line", "flip-tri", "polygon", "invtriangle", null, null, true, false], ["c", "c", "lean-r", "polygon", "parallelogram", null, null, true, false], ["d", "d", "octagon", "polygon", "octagon", null, null, true, false], ["e", "e", "house", "polygon", "house", null, null, true, false], ["f", "f", "polygon", "polygon", "polygon", 5, 2, true, true], ["g", "g", "octagon", "polygon", "doubleoctagon", null, 2, true, true], ["h", "h", "doc", "box", "note", null, null, false, false]],
+  html_edges: [["a", "b", "odot", "diamond", null], ["b", "c", "none", "vee", null], ["c", "d", "obox", "none", null], ["d", "e", "none", "none", null], ["e", "f", "box:left box:right", "odiamond normal", 1.25], ["f", "g", "none", "normal", null], ["g", "h", "none", "normal", null]],
+  polygon_layout: [72, 42],
+  scene: ["polygon", "polygon", 5, 18, 0.2, 0.1, true, 2, "box:left box:right", "odiamond normal", 1.25],
+  paint: [["dot-stmt-0-s0-e0", "odot", "diamond", "circle", "path", [], [], 8, 8], ["dot-stmt-1-s0-e0", "none", "vee", "path", "path", [], [], 8, 8], ["dot-stmt-2-s0-e0", "obox", "none", "rect", "path", [], [], 8, 8], ["dot-stmt-3-s0-e0", "none", "none", "path", "path", [], [], 8, 8], ["dot-stmt-4-s0-e0", "box:left box:right", "odiamond normal", "g", "g", ["box:left", "box:right"], ["odiamond", "normal"], 20, 10], ["dot-stmt-5-s0-e0", "none", "normal", "path", "path", [], [], 8, 8], ["dot-stmt-6-s0-e0", "none", "normal", "path", "path", [], [], 8, 8]]
 }

@@ -1859,7 +1859,8 @@ marker enum. `graphviz/markers.ls` parses modifier and shape sequences into
 canonical marker components, including open/filled, left/right clipping,
 inversion, and multiple shapes. Paint places components in order at the routed
 endpoint. Unsupported marker components retain their raw specification and use
-a documented fallback marker with a warning.
+a documented fallback marker. A stable diagnostic for that fallback remains
+part of Stage 3C completion.
 
 ### 19.9 Layout-engine contract
 
@@ -2097,9 +2098,9 @@ Lambda normalization size is tracked separately from native parser LOC:
 
 | Stage 3B module | Physical LOC |
 |---|---:|
-| `graphviz/attributes.ls` | 166 |
-| `graphviz/normalize.ls` | 543 |
-| total | 709 |
+| `graphviz/attributes.ls` | 182 |
+| `graphviz/normalize.ls` | 549 |
+| total | 731 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
@@ -2107,7 +2108,7 @@ attribute families are added.
 
 #### Stage 3C - Content, shapes, markers, and HTML (in progress, 2026-07-15)
 
-The first Stage 3C slice is implemented:
+The implemented Stage 3C surface is:
 
 - plain labels resolve `\\N`, `\\G`, `\\E`, `\\T`, `\\H`, and `\\L` only
   after object identity is known; `\\n`, `\\l`, and `\\r` become measured line
@@ -2117,9 +2118,25 @@ The first Stage 3C slice is implemented:
   `graphviz-shape` name;
 - ellipse, triangle, parallelogram, trapezium, octagon, and house families use
   matching HTML geometry and layout clipping;
+- Graphviz `polygon` parameters (`sides`, `orientation`, `skew`, and
+  `distortion`) lower to explicit canonical geometry. A shared pure
+  `graph/polygon.ls` helper generates both normalized CSS clip polygons and the
+  vertices used for routed-edge clipping, so HTML paint and layout do not carry
+  independent polygon formulas;
+- `regular` reaches semantic HTML and layout input, while authored and
+  shape-implied `peripheries` reach CSS paint and Graph Scene Mark. Polygon,
+  pentagon, septagon, double/triple-octagon, modified circle/square/diamond,
+  note, tab, folder, box3d, and component aliases lower through shared shape
+  roles rather than separate layout implementations;
 - `dir=forward|back|both|none` resolves endpoint marker presence, and baseline
   single-component normal, inverted, open, circle, diamond, box, tee, vee,
   crow, and empty markers reach generated SVG paint;
+- the manual arrow-name parser recognizes up to four Graphviz components with
+  `o`, `l`, and `r` modifiers. Canonical components survive HTML/Velmt layout,
+  and SVG paint composes, half-clips, orders, and scales them with `arrowsize`;
+- routed edge reconstruction retains `arrowsize`, and Graph Scene adaptation
+  and comparison retain polygon parameters, regular/periphery metadata, and
+  composed marker names;
 - `content_shapes_markers.ls` checks canonical labels/shapes/markers, selected
   semantic HTML attributes, pure layout propagation, and generated marker tags.
 - flat and recursively nested record fields lower to measured table content;
@@ -2147,16 +2164,19 @@ The new pure Stage 3C modules remain small:
 | Stage 3C module | Physical LOC |
 |---|---:|
 | `graphviz/labels.ls` | 35 |
-| `graphviz/shapes.ls` | 28 |
-| `graphviz/markers.ls` | 25 |
+| `graphviz/shapes.ls` | 53 |
+| `graphviz/markers.ls` | 68 |
 | `graphviz/records.ls` | 83 |
-| total | 171 |
+| shared `graph/polygon.ls` | 32 |
+| total | 271 |
 
 Still outstanding in Stage 3C:
 
-- complete specialized Graphviz shape families, polygon parameters,
-  peripheries, and multi-component arrow composition;
-- complete safe gradient/font/periphery paint lowering;
+- complete remaining specialized Graphviz shape families and fixed-size/margin
+  paint fidelity, including making `regular=true` square during Radiant's
+  pre-custom-layout sizing rather than changing only Dagre's virtual bounds;
+- complete safe gradient/font paint lowering and diagnose unsupported arrow
+  components instead of retaining them with only the fallback marker;
 - expand normalized HTML expectations for remaining annotation and paint
   styles.
 

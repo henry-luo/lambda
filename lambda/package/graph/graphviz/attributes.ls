@@ -45,6 +45,11 @@ fn number_value(properties, name, scale = 1.0) {
   if (text == null) null else float(text) * scale
 }
 
+fn bounded_integer(properties, name, low, high, fallback = null) {
+  let numeric = number_value(properties, name);
+  if (numeric == null) fallback else min([high, max([low, int(numeric)])])
+}
+
 fn bool_value(properties, name) {
   let raw = lower(string(value(properties, name, "")));
   if (raw == "true" or raw == "yes" or raw == "1") true
@@ -119,12 +124,22 @@ fn graph_attrs(properties) {
 
 fn node_attrs(properties) {
   let raw_shape = value(properties, "shape");
+  let sides = bounded_integer(properties, "sides", 3, 64,
+    shapes.default_sides(raw_shape));
+  let peripheries = bounded_integer(properties, "peripheries", 0, 10,
+    shapes.default_peripheries(raw_shape));
   map([
     *label_attrs(properties),
     *label_attrs(properties, "xlabel", "external-label"),
     *attr("shape", shapes.role(raw_shape)),
     *attr("shape-family", shapes.family(raw_shape)),
     *attr("graphviz-shape", shapes.source_name(raw_shape)),
+    *attr("polygon-sides", sides),
+    *attr("polygon-orientation", number_value(properties, "orientation")),
+    *attr("polygon-skew", number_value(properties, "skew")),
+    *attr("polygon-distortion", number_value(properties, "distortion")),
+    *attr("regular", bool_value(properties, "regular")),
+    *attr("peripheries", peripheries),
     *attr("width", number_value(properties, "width", 96.0)),
     *attr("height", number_value(properties, "height", 96.0)),
     *attr("fixed-size", bool_value(properties, "fixedsize")),
@@ -146,6 +161,7 @@ fn edge_attrs(properties) {
     *attr("arrow-head", value(properties, "arrowhead")),
     *attr("arrow-tail", value(properties, "arrowtail")),
     *attr("arrow-direction", value(properties, "dir")),
+    *attr("arrow-size", number_value(properties, "arrowsize")),
     *attr("min-length", number_value(properties, "minlen")),
     *attr("weight", number_value(properties, "weight")),
     *attr("constraint", bool_value(properties, "constraint")),

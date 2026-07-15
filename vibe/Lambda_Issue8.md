@@ -235,3 +235,56 @@ Receiver syntax, `string(value).lower()`, selects the intended string method and
 fixed the result. Either overload resolution should reject the incompatible
 local call, or diagnostics/tooling should make system-function shadowing clear;
 the previous behavior looked like a data or GC failure far downstream.
+
+## Conditional Mark attributes can collapse the parser diagnostic to line 1
+
+While composing Graphviz SVG markers, several adjacent Mark attributes used
+inline `if` expressions, including a quoted attribute name:
+
+```lambda
+<path fill: if (open) "none" else color,
+  stroke: if (open) color else null,
+  'stroke-width': if (open) 1.2 else null>
+```
+
+The compiler reported only `paint.ls:1:1` at the file comment and marked the
+whole module as erroneous. Tree-sitter's raw tree contained narrower recovery
+errors around the second and third conditional attributes, but those locations
+were lost by the normal diagnostic path. Computing the three values in locals
+before constructing the element compiled correctly.
+
+The grammar should either accept adjacent conditional attribute values
+consistently or reject the first ambiguous attribute at its own location. AST
+diagnostics should also prefer the smallest error node instead of the enclosing
+file-wide recovery node.
+
+## A map literal immediately after `if` is parsed as a statement block
+
+The compact parser-result form below is visually consistent with a map-valued
+conditional but is not accepted:
+
+```lambda
+if (valid) {valid: true, values: values}
+else {valid: false, values: values}
+```
+
+The diagnostic points at `valid:` but does not explain that braces after a
+condition select statement-block syntax. Calling a small map-constructor
+function avoids the ambiguity. Documentation or a targeted diagnostic should
+state how to return a map literal directly from an `if` expression.
+
+## Missing dynamic Velmt attributes can evaluate to errors instead of null
+
+The graph layout adapter used a generic optional-attribute helper that expected
+both map-backed and Velmt-backed missing fields to evaluate to `null`. During a
+retained Radiant render, newly queried `data-regular` and polygon fields instead
+returned error values. The error values passed `value != null`, became truthy or
+were sent through numeric conversion, and ordinary Mermaid nodes were routed as
+large regular polygons. The runtime also logged indirect `expected a map` and
+`unknown range type` messages rather than identifying the missing attribute.
+
+Both semantic HTML source lookup and the Velmt adapter now treat an error from
+dynamic indexing as absence and apply the declared fallback. Dynamic
+object/element/Velmt indexing should ideally use the same missing-member
+contract as maps, or expose a non-throwing attribute lookup primitive for
+optional metadata.
