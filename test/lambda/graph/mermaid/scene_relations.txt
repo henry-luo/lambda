@@ -1,0 +1,4 @@
+{
+  canonical_paint_and_relations: true,
+  bad_relations: ["relation.cluster-contains-node", "relation.endpoint-attachment.from", "relation.endpoint-attachment.to", "relation.node-overlap", "relation.rank-order"]
+}

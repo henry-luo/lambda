@@ -11,7 +11,14 @@ fn common_attrs() => [
   attr("source-start", "int"),
   attr("source-end", "int"),
   attr("source-line", "int"),
-  attr("source-column", "int")
+  attr("source-column", "int"),
+  attr("source-statement-start", "int"),
+  attr("source-statement-end", "int"),
+  attr("source-statement-line", "int"),
+  attr("source-statement-column", "int"),
+  attr("source-segment-index", "int"),
+  attr("source-expansion-index", "int"),
+  attr("source-expansion-count", "int")
 ]
 
 fn graph_spec() => {
@@ -26,7 +33,8 @@ fn graph_spec() => {
     attr("edge-sep", "number")
   ],
   children: ["meta", "styles", "defs", "constraints", "node", "edge", "subgraph",
-    "style-rule", "class-assignment", "style-assignment", "diagnostics", "diagnostic"],
+    "style-rule", "class-assignment", "style-assignment", "interaction",
+    "edge-property", "front-matter", "init", "diagnostics", "diagnostic"],
   open_children: false, scalar_children: false
 }
 
@@ -82,7 +90,8 @@ fn subgraph_spec() => {
     attr("label-z", "integerish")
   ],
   children: ["label", "content", "node", "edge", "subgraph", "style-rule",
-    "class-assignment", "style-assignment", "diagnostics", "diagnostic"],
+    "class-assignment", "style-assignment", "interaction", "edge-property",
+    "diagnostics", "diagnostic"],
   open_children: false, scalar_children: false
 }
 
@@ -113,6 +122,7 @@ fn metadata_spec(value_tag) {
   }
   else if (value_tag == "class-assignment") {
     {attrs: [*common_attrs(), attr("targets", "text", true),
+      attr("target-kind", "text", false, ["node", "edge"]),
       attr("class", "text", true)], children: [], open_children: false,
       scalar_children: false}
   }
@@ -120,6 +130,24 @@ fn metadata_spec(value_tag) {
     {attrs: [*common_attrs(), attr("target-kind", "text", true, ["node", "edge"]),
       attr("targets", "text", true), attr("declarations", "text", true)],
       children: [], open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "interaction") {
+    {attrs: [*common_attrs(), attr("target", "text", true),
+      attr("action", "text", true, ["link", "callback"]), attr("href", "text"),
+      attr("callback", "text"), attr("tooltip", "text"), attr("target-window", "text")],
+      children: [], open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "edge-property") {
+    {attrs: [*common_attrs(), attr("target", "text", true), attr("key", "text", true),
+      attr("value", "text")], children: [], open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "front-matter") {
+    {attrs: [*common_attrs(), attr("value", "text")], children: [],
+      open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "init") {
+    {attrs: [*common_attrs(), attr("value", "text")], children: [],
+      open_children: false, scalar_children: false}
   }
   else if (value_tag == "diagnostic") {
     {attrs: [*common_attrs(), attr("code", "text", true),

@@ -1,0 +1,14 @@
+---
+title: Source fidelity
+config:
+  flowchart:
+    nodeSpacing: 48
+---
+%%{init: {"flowchart": {"curve": "basis"}}}%%
+flowchart LR
+  A[Start] & B[Other] e1@--> C{Decision} --> D[Done]; E-->F
+  classDef animate stroke:#2455aa,stroke-width:2px
+  class e1 animate
+  e1@{ animate: true, animation: fast, curve: basis }
+  click A href "https://example.com" "Open details" _blank
+  click B call handleNode()

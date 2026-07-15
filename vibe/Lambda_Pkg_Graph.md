@@ -3,13 +3,14 @@
 **Status:** Stage 1 is implemented for the initial rich-node release. The package
 split, semantic HTML transform, Velmt callback, generated SVG paint, signed
 stacking, runtime-scoped registration, CLI bridges, and C graph ABI removal are
-complete. Stage 2 is in progress: the first common Mark IR contract, declarative
+complete. Stage 2 flowchart support is implemented: the common Mark IR contract, declarative
 schema validation, recursive model queries, Mermaid flowchart normalization
 fixes, measured edge and cluster labels, visual recursive clusters, named
 ports, compound and parallel-edge routing, broader shape clipping, safe style
 cascade, final-SVG graph metadata, Graph Scene adaptation/comparison, in-process
-Radiant scene rendering, and the pinned semantic corpus runner are implemented.
-Section 18.12 records the current boundary and remaining work.
+Radiant scene rendering, relational scene validation, and the pinned semantic
+corpus runner are implemented. Section 18.12 records the current boundary;
+additional graph-oriented Mermaid families remain a subsequent phase.
 
 ## 1. Summary
 
@@ -64,9 +65,10 @@ path now enters the Lambda HTML transform and normal Radiant renderer.
   or request child measurement or relayout.
 - The graph package does not replace the Mermaid, D2, or DOT parsers. Their C
   parsers may continue producing Lambda `<graph>` data elements.
-- Full Graphviz/Dagre parity is not required. Spline routing, obstacle
-  avoidance, cluster-aware ranking, and collision-aware label placement remain
-  later work.
+- Full Graphviz/Dagre parity is not required. The package implements the
+  deterministic cluster-aware ordering, orthogonal obstacle routing, and label
+  collision handling needed by the current Mermaid flowchart contract, without
+  claiming identical geometry to either renderer.
 - SVG primitives do not become individually measured CSS layout children.
 
 ## 4. Module Structure
@@ -1130,6 +1132,16 @@ The initial Stage 2 tranche is implemented as follows:
   `source-start`, `source-end`, `source-line`, and `source-column` attributes;
   repeated node references preserve the first declaration span rather than
   replacing provenance during semantic upsert;
+- each edge expanded from a chained or multi-node statement records the
+  statement span, segment index, expansion index/count, and stable `source-id`,
+  so normalization can relate generated edges back to one declaration;
+- YAML front matter and `%%{init: ...}%%` directives survive as source metadata
+  and are parsed structurally by `graph/mermaid/config.ls`; supported title,
+  node/rank spacing, curve, and HTML-label settings lower into the transform;
+- safe `click` link and callback declarations survive as inert `<interaction>`
+  metadata, including tooltip, target, and balanced callback arguments;
+  edge-ID class assignments and `@{ animate, animation, curve }` properties
+  resolve through generated `source-id` values;
 - parser errors and warnings are retained as structured `<diagnostic>` Mark
   values with stable code, severity, message, and source location; chart-family
   dispatch uses the explicit `mermaid.chart-family` code;
@@ -1210,6 +1222,10 @@ The initial Stage 2 tranche is implemented as follows:
   cylinder, subroutine, hexagon, trapezoid, inverse-trapezoid, and asymmetric
   families in addition to rectangle, ellipse/circle, diamond, and
   double-circle shapes;
+- semantic HTML and clipping also cover the general Mermaid shapes exercised by
+  the pinned corpus, including card/notch, cloud, hourglass, bolt, lean,
+  triangle, tag/document, delay, cylinder, brace, fork, divided, and lined
+  variants;
 - repeated edges with the same ordered endpoints receive deterministic,
   sibling-local lanes separated by `edge_sep`; semantic HTML carries this
   option as `data-edge-sep`, and route-bound normalization shifts nodes and
@@ -1228,7 +1244,15 @@ The initial Stage 2 tranche is implemented as follows:
   Mark, discarding wrapper tags and classes while retaining normalized nodes,
   clusters, edges, labels, markers, measured boxes, route classes, and points;
   its comparator performs exact textual semantics plus configurable tolerant
-  box and route-point comparison with structured mismatch values;
+  box and route-point comparison with structured mismatch values. Canonical
+  paint values, endpoint sides, node non-overlap, recursive cluster containment,
+  endpoint attachment, and optional rank order are checked as renderer-neutral
+  relations instead of wrapper- or class-specific SVG structure;
+- Dagre ordering keeps direct cluster members contiguous, reserves inter-cluster
+  padding, and iterates crossing reduction deterministically. Orthogonal routes
+  avoid unrelated node and cluster boxes, and edge-label placement avoids nodes,
+  cluster labels, and prior edge labels while expanding graph bounds when a
+  collision-free label lies outside the original geometry;
 - `graph.transform.render_svg()` and `render_scene()` run HTML parsing, Radiant
   measurement, the cached custom layout callback, generated paint, SVG lowering,
   and scene adaptation in one process. The paired `scene_render.ls` fixture
@@ -1242,6 +1266,10 @@ The initial Stage 2 tranche is implemented as follows:
   `f3dea58385fd5c7dd1f4e9c9c1876751ae6943cc` (Mermaid 11.16.0), carries the
   upstream MIT license, and records source file, upstream test name, features,
   status, policy, and reference version for every adapted case;
+- `reference/extract_cases.mjs` uses Acorn to verify or regenerate all 18
+  adapted source strings from their exact upstream tests. Pinned Mermaid and
+  Puppeteer maintenance tooling renders selected references and adapts their
+  live DOM into Graph Scene Mark; neither dependency is used by ordinary tests;
 - `test/test_graph_mermaid_gtest.cpp` reads
   `test/lambda/graph/mermaid/manifest.mark` once, retains one input runtime,
   dynamically registers every case as a named/filterable GTest, and compares
@@ -1253,6 +1281,10 @@ The initial Stage 2 tranche is implemented as follows:
   and the filtered Lambda package integration batch; the build generator now
   applies a target's platform library exclusions consistently to consuming
   tests.
+- the retained `scene_render.ls` fixture is manifest-driven: it discovers every
+  `scene-semantic` case, installs the compiled layout callback once, renders all
+  selected cases in one runtime, and compares five reviewed semantic scene
+  fixtures without per-case process startup.
 
 The checked-in manifest is a bootstrap corpus covering implicit endpoints,
 directions, shapes and labels, recursive subgraphs, class and style metadata,
@@ -1269,20 +1301,14 @@ parallel boundary routes, broader shape roles, cluster paint metadata, and
 port-reference diagnostics, plus schema type, enum, child-placement,
 cardinality, and required-attribute diagnostics.
 
-The following Stage 2 work remains open:
+The Stage 2 flowchart items covered by this proposal are complete: source
+fidelity and safe metadata, cluster-aware layout quality, Graph Scene paint and
+relational conformance, a broader reproducible Mermaid corpus, and a
+manifest-driven retained end-to-end runner. The package deliberately compares
+semantic and tolerant geometric relations rather than promising pixel parity
+with Mermaid.
 
-- source-stage provenance for parser-expanded chained and multi-node edge
-  declarations, including a stable way to relate generated canonical edges back
-  to one authored statement;
-- interaction metadata, edge-ID property/class statements, the remaining
-  Mermaid style properties beyond the initial safe paint allowlist, and
-  rendering semantics for general shape names beyond the implemented legacy
-  and polygon families;
-- cluster-aware ranking/ordering, obstacle avoidance between independently
-  placed clusters and nonmembers, and collision-aware route-label placement;
-- graph-oriented Mermaid family adapters beyond flowcharts and independent
-  chart-package dispatch tests for chart-oriented families.
-
-Accordingly, the current suite proves the parser-to-Mark baseline and the first
-semantic/tolerant final-render scene path. It does not yet claim full Mermaid
-compatibility or satisfy the final Stage 2 acceptance criteria in Section 18.11.
+Graph-oriented Mermaid family adapters beyond flowcharts remain a subsequent
+phase. Chart-oriented family dispatch is already rejected with structured
+ownership diagnostics, but detailed sequence, Gantt, pie, Sankey, timeline, and
+XY support belongs to `lambda.package.chart` and its independent test suites.

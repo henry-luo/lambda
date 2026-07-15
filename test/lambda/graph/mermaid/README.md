@@ -26,3 +26,28 @@ Case policy values are:
 
 `baseline`, `extended`, `unsupported`, and `invalid` status values remain
 visible as named GTest cases; no manifest entry is silently skipped.
+
+The adapted source corpus is reproducible from Mermaid's pinned revision:
+
+```bash
+cd test/lambda/graph/mermaid/reference
+npm ci
+npm run extract
+```
+
+`npm run extract` parses the upstream JavaScript tests with Acorn and verifies
+all 18 checked-in Mermaid sources. `npm run extract:write` is an explicit
+maintenance command that rewrites them from the pinned checkout.
+
+Browser references are also maintenance-only:
+
+```bash
+npm run references
+npm run references:write
+```
+
+The first command renders the selected cases with pinned Mermaid and Puppeteer,
+adapts the live SVG DOM into Graph Scene Mark, and checks the reviewed semantic
+fixtures. The second command updates generated reference artifacts and must be
+reviewed. Ordinary `make test-graph-mermaid` runs only checked-in fixtures and
+uses one retained Lambda runtime for all `scene-semantic` manifest cases.

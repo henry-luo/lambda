@@ -1,0 +1,7 @@
+<'graph-scene' direction: 'TB';
+  <node id: 'A', shape: 'box'; <label; 'A'>>
+  <node id: 'B', shape: 'box'; <label; 'B'>>
+  <edge id: 'e0', from: 'A', to: 'B', marker-start: 'none', marker-end: 'normal';
+    <label; 'test text with =='>
+  >
+>

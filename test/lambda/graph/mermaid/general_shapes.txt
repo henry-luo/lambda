@@ -1,0 +1,5 @@
+{
+  count: 25,
+  shapes: ["bang", "notch-rect", "cloud", "hourglass", "bolt", "lean-r", "lean-l", "delay", "h-cyl", "curv-trap", "doc", "tri", "flip-tri", "notch-pent", "tag-rect", "f-circ", "sl-rect", "text", "brace", "brace-r", "braces", "fork", "win-pane", "lin-rect", "lin-cyl"],
+  styled: true
+}

@@ -144,6 +144,17 @@ static void expect_manifest_policy(const ElementReader& test_case) {
         ASSERT_NE(attr_text(test_case, "upstream-test"), nullptr);
         EXPECT_STREQ(attr_text(test_case, "reference-version"), "11.16.0");
     }
+    const char* policy = attr_text(test_case, "policy");
+    if (policy && strcmp(policy, "scene-semantic") == 0) {
+        const char* expected_scene = attr_text(test_case, "expected-scene");
+        ASSERT_NE(expected_scene, nullptr);
+        char* expected_path = file_path_join(MERMAID_CORPUS_DIR, expected_scene);
+        ASSERT_NE(expected_path, nullptr);
+        char* expected_source = read_text_file(expected_path);
+        free(expected_path);
+        ASSERT_NE(expected_source, nullptr) << "missing expected scene " << expected_scene;
+        free(expected_source);
+    }
 }
 
 static void run_manifest_case(int case_index) {
@@ -187,6 +198,14 @@ static void run_manifest_case(int case_index) {
               expected.get_int_attr("class-assignments", 0));
     EXPECT_EQ(count_tag_recursive(graph, "style-assignment"),
               expected.get_int_attr("style-assignments", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "interaction"),
+              expected.get_int_attr("interactions", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "edge-property"),
+              expected.get_int_attr("edge-properties", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "front-matter"),
+              expected.get_int_attr("front-matters", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "init"),
+              expected.get_int_attr("init-directives", 0));
 
     ElementReader expected_item;
     auto expected_items = expected.childElements();
@@ -197,7 +216,11 @@ static void run_manifest_case(int case_index) {
         if (expected_item.hasTag("node") || expected_item.hasTag("edge") ||
             expected_item.hasTag("subgraph") || expected_item.hasTag("title") ||
             expected_item.hasTag("description") ||
-            expected_item.hasTag("style-assignment")) {
+            expected_item.hasTag("style-assignment") ||
+            expected_item.hasTag("style-rule") ||
+            expected_item.hasTag("class-assignment") ||
+            expected_item.hasTag("interaction") ||
+            expected_item.hasTag("edge-property")) {
             expect_source_span(actual_item);
         }
     }

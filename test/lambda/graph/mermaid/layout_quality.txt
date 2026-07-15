@@ -1,0 +1,8 @@
+{
+  grouped: ["inside-a", "inside-b", "outside"],
+  cluster_separated: true,
+  obstacle_detour: true,
+  label_positions: [[35, 0], [35, 64]],
+  labels_separated: true,
+  labels_contained: true
+}
