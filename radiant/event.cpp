@@ -65,7 +65,7 @@ static inline bool event_mod_alt(int mods) { return (mods & RDT_MOD_ALT) != 0; }
 static inline bool event_mod_super(int mods) { return (mods & RDT_MOD_SUPER) != 0; }
 void to_repaint();
 void update_window_title(const char* title);
-extern "C" void state_store_refresh_caret_projection(DocState* state);
+extern "C" void selection_refresh_presentation(DocState* state);
 void rebuild_lambda_doc(UiContext* uicon);
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
 
@@ -3633,39 +3633,6 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
     return true;
 }
 
-extern "C" bool radiant_dispatch_form_text_ime_cancel(UiContext* uicon,
-                                                       DomElement* elem,
-                                                       View* target) {
-    FormImeDispatchContext context;
-    if (!prepare_form_ime_dispatch(uicon, elem, target, true, true, &context)) return false;
-
-    InputIntent intent;
-    intent.type = INPUT_INTENT_DELETE_COMPOSITION_TEXT;
-    intent.data = "";
-    intent.is_composing = false;
-
-    EditingDispatchHooks hooks = dispatch_editing_hooks();
-
-    radiant_dispatch_composition_event(&context.event, context.target,
-                                       "compositionend", "");
-    bool prevented = false;
-    editing_dispatch_form_beforeinput(&context.event, &context.surface, &intent, &hooks,
-                                      &prevented);
-    if (prevented) {
-        log_debug("radiant_dispatch_form_text_ime_cancel: beforeinput prevented");
-        event_log_editing_composition(context.state, context.surface_ptr, &intent,
-                                      "cancel", 0, 0, 0);
-        return true;
-    }
-    te_ime_cancel(elem);
-    editing_interaction_set_composing(context.state, context.surface_ptr, false);
-    editing_dispatch_form_input(&context.event, &context.surface, &intent, &hooks);
-    event_log_editing_composition(context.state, context.surface_ptr, &intent,
-                                  "cancel", 0, 0, 0);
-    doc_state_request_repaint(context.state);
-    return true;
-}
-
 extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
                                                        DomElement* elem,
                                                        View* target,
@@ -3735,14 +3702,6 @@ static void dispatch_selectionchange(EventContext* evcon, DocState* state, View*
     // notifier (js_dom_queue_selectionchange) and delivered to page-JS document
     // listeners when the event loop ticks; the headless simulator pumps it via
     // js_event_loop_pump_nowait between events.
-}
-
-extern "C" bool radiant_dispatch_rich_composition_event(UiContext* uicon,
-                                                        EventType event_type,
-                                                        const char* text,
-                                                        uint32_t caret_cp) {
-    return radiant_dispatch_editing_composition_event(uicon, event_type,
-                                                      text, caret_cp);
 }
 
 extern "C" bool radiant_dispatch_editing_composition_event(UiContext* uicon,
@@ -4682,7 +4641,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     int state_pruned = 0;
     if (state) {
         state_pruned = (int)state_store_prune_after_reflow(state); // INT_CAST_OK: log/test telemetry count
-        state_store_refresh_caret_projection(state);
+        selection_refresh_presentation(state);
     }
 
     auto t2 = high_resolution_clock::now();
@@ -5125,28 +5084,6 @@ static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event);
 void event_context_cleanup(EventContext* evcon);
 extern "C" void js_dom_select_set_selected_index_bridge(void* dom_elem, Item value);
-
-extern "C" bool radiant_dispatch_event_sim_simple_event(UiContext* uicon,
-                                                        View* target,
-                                                        const char* type,
-                                                        bool bubbles,
-                                                        bool cancelable)
-{
-    if (!uicon || !target || !type) return false;
-    RdtEvent event;
-    memset(&event, 0, sizeof(event));
-    event.type = RDT_EVENT_NIL;
-    event.timestamp = 0;
-    EventContext evcon;
-    event_context_init(&evcon, uicon, &event);
-    evcon.target = target;
-    // event_sim mutates form controls directly; dispatch the browser-observed
-    // notification so script-owned controls see the same change a user made.
-    bool prevented = radiant_dispatch_simple_event(&evcon, target, type,
-                                                   bubbles, cancelable);
-    event_context_cleanup(&evcon);
-    return prevented;
-}
 
 extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
                                                          View* target,
@@ -6643,7 +6580,7 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
 // Static registration: hooks the resolver into dom_range_resolver.cpp at
 // program start so selection painting always uses glyph-precise widths.
 __attribute__((constructor))
-static void register_event_glyph_x_resolver() {
+static void register_event_glyph_x_resolver() { // UNUSED_FUNCTION_OK: process constructor installs the DOM range resolver
     dom_range_set_glyph_x_resolver(event_glyph_x_resolver);
 }
 
@@ -6700,7 +6637,7 @@ static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
 }
 
 __attribute__((constructor))
-static void register_event_byte_offset_for_x_resolver() {
+static void register_event_byte_offset_for_x_resolver() { // UNUSED_FUNCTION_OK: process constructor installs the DOM range resolver
     dom_range_set_byte_offset_for_x_resolver(event_byte_offset_for_x_resolver);
 }
 
@@ -7726,7 +7663,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         form_control_is_disabled(state, static_cast<View*>(target_elem));
                     if (disabled_form_control) {
                         if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
-                            state_store_refresh_caret_projection(state);
+                            selection_refresh_presentation(state);
                         }
                     } else {
                         // Non-text replaced elements: clear caret

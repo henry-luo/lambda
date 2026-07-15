@@ -96,13 +96,6 @@ const char* html_element_get_contentEditable(DomElement* element) {
     return "inherit";
 }
 
-bool html_element_get_isContentEditable(DomElement* element) {
-    if (!element) return false;
-    EditingHost h;
-    if (!editing_host_lookup(element, &h)) return false;
-    return !h.target_in_false_island;
-}
-
 bool html_element_set_contentEditable(DomElement* element, const char* value) {
     if (!element || !value) return false;
 

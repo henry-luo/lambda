@@ -412,12 +412,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
 // Layout command implementation (Lambda HTML/CSS layout with Radiant engine)
 int cmd_layout(int argc, char** argv);
 
-// WebDriver server command implementation
-int cmd_webdriver(int argc, char** argv);
-
-// Legacy layout function from radiant (for backward compatibility)
-int run_layout(const char* html_file);
-
 // Render/export declarations come from render.hpp; repeating default arguments
 // here breaks once render_export_support.hpp is a DD4 shim to the global header.
 
@@ -3632,17 +3626,6 @@ int main(int argc, char *argv[]) {
                 host, port, workers);
         fprintf(stderr, "Server infrastructure is ready in lambda/serve/.\n");
         return lambda_main_finish(1);
-    }
-
-    // Handle webdriver command
-    log_debug("Checking for webdriver command");
-    if (argc >= 2 && strcmp(argv[1], "webdriver") == 0) {
-        log_debug("Entering webdriver command handler");
-
-        int exit_code = cmd_webdriver(argc - 2, argv + 2);
-
-        log_debug("webdriver command completed with result: %d", exit_code);
-        return lambda_main_finish(exit_code);
     }
 
     // Handle fetch command (network resource download)

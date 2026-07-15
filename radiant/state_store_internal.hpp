@@ -3,44 +3,24 @@
 #include "event.hpp"
 
 /**
- * Caret projection state for editable elements.
- * DomSelection remains canonical; this storage exists for compatibility with
- * rendering, validation, and dirty-rect projection paths.
+ * Presentation-only cache for selection painting.
+ * EditingSelection and DomSelection own all logical boundaries.
  */
-struct CaretState {
-    View* view;
-    int char_offset;
-    int line;
-    int column;
-    float x;
-    float y;
-    float height;
+struct SelectionPresentation {
+    float caret_x;
+    float caret_y;
+    float caret_height;
+    float range_start_x;
+    float range_start_y;
+    float range_end_x;
+    float range_end_y;
     float iframe_offset_x;
     float iframe_offset_y;
-    bool visible;
-    uint64_t blink_time;
-    float prev_abs_x;
-    float prev_abs_y;
-    float prev_abs_height;
-};
-
-/**
- * Selection projection state for text selection.
- */
-struct SelectionState {
-    View* view;
-    View* anchor_view;
-    View* focus_view;
-    int anchor_offset;
-    int anchor_line;
-    int focus_offset;
-    int focus_line;
-    bool is_collapsed;
-    bool is_selecting;
-    float start_x, start_y;
-    float end_x, end_y;
-    float iframe_offset_x;
-    float iframe_offset_y;
+    bool caret_visible;
+    uint64_t caret_blink_time;
+    float previous_caret_abs_x;
+    float previous_caret_abs_y;
+    float previous_caret_abs_height;
 };
 
 /**

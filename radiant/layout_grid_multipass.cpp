@@ -308,20 +308,17 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 }
                 if (h > max_content_h) max_content_h = h;
             }
-            if (max_content_h > gl->computed_rows[r].computed_size + 0.5f) {
+            radiant::grid::EnhancedGridTrack* row_track = &(*gl->computed_rows)[r];
+            if (max_content_h > row_track->base_size + 0.5f) {
                 // CSS Grid §7.2.1: Fixed-size tracks (length, percentage) are definite
                 // and should NOT be changed from content — content overflows instead.
                 // Only auto/intrinsic/flexible tracks reconcile to laid-out content.
-                GridTrack* row_track = &gl->computed_rows[r];
-                if (row_track->size &&
-                    (row_track->size->type == GRID_TRACK_SIZE_LENGTH ||
-                     row_track->size->type == GRID_TRACK_SIZE_PERCENTAGE)) {
+                if (radiant::grid::grid_track_is_definite(*row_track)) {
                     continue;
                 }
                 log_debug("GRID row[%d] height updated: %.1f -> %.1f (from content)",
-                          r, gl->computed_rows[r].computed_size, max_content_h);
-                gl->computed_rows[r].computed_size = max_content_h;
-                gl->computed_rows[r].base_size = max_content_h;
+                          r, row_track->base_size, max_content_h);
+                row_track->base_size = max_content_h;
                 rows_changed = true;
             }
         }
@@ -452,7 +449,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         // Calculate total height from row sizes plus gaps
         float total_row_height = 0;
         for (int i = 0; i < grid_layout->computed_row_count; i++) {
-            total_row_height += grid_layout->computed_rows[i].base_size;
+            total_row_height += (*grid_layout->computed_rows)[i].base_size;
         }
         // Add gaps between rows
         total_row_height += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
@@ -1011,16 +1008,6 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
 }
 
 // ============================================================================
-// Utility Functions
-// ============================================================================
-
-bool grid_item_is_nested_container(ViewBlock* item) {
-    if (!item) return false;
-    return (item->display.inner == CSS_VALUE_GRID ||
-            item->display.inner == CSS_VALUE_FLEX);
-}
-
-// ============================================================================
 // Grid Absolute Positioning Helpers
 // ============================================================================
 
@@ -1030,7 +1017,8 @@ static float* calculate_grid_line_positions(GridContainerLayout* grid_layout, bo
                                             float container_offset, int* out_line_count) {
     if (!grid_layout || !grid_layout->lycon) return nullptr;
     int track_count = is_row_axis ? grid_layout->computed_row_count : grid_layout->computed_column_count;
-    GridTrack* tracks = is_row_axis ? grid_layout->computed_rows : grid_layout->computed_columns;
+    radiant::grid::TrackArray* tracks = is_row_axis
+        ? grid_layout->computed_rows : grid_layout->computed_columns;
     float gap = is_row_axis ? grid_layout->row_gap : grid_layout->column_gap;
 
     // We need (track_count + 1) positions for grid lines
@@ -1043,7 +1031,7 @@ static float* calculate_grid_line_positions(GridContainerLayout* grid_layout, bo
     for (int i = 0; i <= track_count; i++) {
         positions[i] = current_pos;
         if (i < track_count) {
-            current_pos += tracks[i].computed_size;
+            current_pos += (*tracks)[i].base_size;
             if (i < track_count - 1) {
                 current_pos += gap;
             }

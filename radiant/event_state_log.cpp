@@ -465,11 +465,6 @@ void event_state_log_finish_record(EventStateLog* log, JsonWriter* w) {
     }
 }
 
-void event_state_log_emit_raw(EventStateLog* log, const char* json_line) {
-    if (!event_state_log_enabled(log) || !json_line) return;
-    if (clog_raw(log->category, json_line) != LOG_OK) g_event_log_dropped++;
-}
-
 static void build_node_path(const DomNode* node, char* buf, size_t buf_sz) {
     if (!buf || buf_sz == 0) return;
     buf[0] = '\0';
@@ -637,21 +632,5 @@ void event_state_log_document(EventStateLog* log, const char* sub_type) {
     char buf[EVENT_LOG_RECORD_BUFSZ];
     JsonWriter w;
     event_state_log_begin_record(log, &w, buf, sizeof(buf), type, 0);
-    event_state_log_finish_record(log, &w);
-}
-
-void event_state_log_warning(EventStateLog* log, const char* code,
-                              const char* message) {
-    if (!event_state_log_enabled(log)) return;
-
-    char buf[EVENT_LOG_RECORD_BUFSZ];
-    JsonWriter w;
-    event_state_log_begin_record(log, &w, buf, sizeof(buf),
-                                  "logger.warning", 0);
-    jw_key(&w, "data");
-    jw_obj_begin(&w);
-        if (code)    jw_kv_str(&w, "code", code);
-        if (message) jw_kv_str(&w, "message", message);
-    jw_obj_end(&w);
     event_state_log_finish_record(log, &w);
 }

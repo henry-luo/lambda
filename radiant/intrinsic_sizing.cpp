@@ -5774,35 +5774,6 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
 }
 
 // ============================================================================
-// Table Cell Intrinsic Width Measurement
-// ============================================================================
-
-CellIntrinsicWidths measure_table_cell_intrinsic_widths(
-    LayoutContext* lycon,
-    ViewBlock* cell
-) {
-    CellIntrinsicWidths result = {0, 0};
-
-    if (!lycon || !cell) {
-        return result;
-    }
-
-    // Use unified API with max-content available space
-    AvailableSpace available = AvailableSpace::make_max_content();
-
-    IntrinsicSizesBidirectional sizes = measure_intrinsic_sizes(lycon, cell, available);
-
-    result.min_width = sizes.min_content_width;
-    result.max_width = sizes.max_content_width;
-
-    // Apply minimum usable width per CSS 2.1
-    if (result.min_width < 16.0f) result.min_width = 16.0f;
-    if (result.max_width < 16.0f) result.max_width = 16.0f;
-
-    return result;
-}
-
-// ============================================================================
 // Backward Compatibility Notes
 // ============================================================================
 //

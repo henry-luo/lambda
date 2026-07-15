@@ -13,7 +13,6 @@ extern "C" {
 
 // Forward declarations
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout);
-void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout);
 
 static int count_potential_grid_items(ViewBlock* container) {
     int count = 0;
@@ -166,25 +165,6 @@ void cleanup_grid_container(LayoutContext* lycon) {
         destroy_grid_track_list(grid->grid_auto_columns);
     }
 
-    // Free computed tracks
-    if (grid->computed_rows) {
-        for (int i = 0; i < grid->computed_row_count; i++) {
-            // Only free size if we own it (created during init, not shared)
-            if (grid->computed_rows[i].size && grid->computed_rows[i].owns_size) {
-                destroy_grid_track_size(grid->computed_rows[i].size);
-            }
-        }
-    }
-
-    if (grid->computed_columns) {
-        for (int i = 0; i < grid->computed_column_count; i++) {
-            // Only free size if we own it (created during init, not shared)
-            if (grid->computed_columns[i].size && grid->computed_columns[i].owns_size) {
-                destroy_grid_track_size(grid->computed_columns[i].size);
-            }
-        }
-    }
-
     // Free grid areas only if this layout state allocated them locally.
     if (grid->owns_grid_areas) {
         for (int i = 0; i < grid->area_count; i++) {
@@ -333,7 +313,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         if (!grid_layout->has_explicit_height && grid_layout->computed_row_count > 0) {
             float total_row_height = 0;
             for (int r = 0; r < grid_layout->computed_row_count; r++) {
-                total_row_height += grid_layout->computed_rows[r].base_size;
+                total_row_height += (*grid_layout->computed_rows)[r].base_size;
             }
             if (grid_layout->computed_row_count > 1) {
                 total_row_height += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
@@ -904,69 +884,6 @@ static bool append_cloned_grid_track(GridTrackSize** tracks, int* dest, GridTrac
     tracks[*dest] = copy;
     (*dest)++;
     return true;
-}
-
-// CSS Grid §7.2.3.2: Collapse empty auto-fit tracks after item placement.
-// Empty auto-fit tracks are treated as having a fixed track sizing function of 0px,
-// and their gutters are also collapsed.
-void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout) {
-    if (!grid_layout) return;
-
-    // Process columns
-    if (grid_layout->auto_fit_col_count > 0 && grid_layout->grid_template_columns) {
-        GridTrackList* cols = grid_layout->grid_template_columns;
-        // Build occupancy bitmap: which column indices (0-based) have items
-        bool col_occupied[64] = {};
-        for (int idx = 0; idx < grid_layout->item_count; idx++) {
-            ViewBlock* item = grid_layout->grid_items[idx];
-            GridItemProp* gi = grid_item_prop(item);
-            if (!item || !gi) continue;
-            // computed positions are 1-based line numbers
-            int cs = gi->computed_grid_column_start - 1;
-            int ce = gi->computed_grid_column_end - 1;
-            for (int c = cs; c < ce && c < 64; c++) {
-                if (c >= 0) col_occupied[c] = true;
-            }
-        }
-        // Collapse unoccupied auto-fit tracks by setting their size to 0px
-        for (int c = 0; c < cols->track_count && c < 64; c++) {
-            if (c < grid_layout->auto_fit_col_count &&
-                grid_layout->auto_fit_columns[c] && !col_occupied[c]) {
-                // Replace with a 0px fixed track
-                GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
-                if (!zero_track) continue;
-                destroy_grid_track_size(cols->tracks[c]);
-                cols->tracks[c] = zero_track;
-                log_debug("GRID: auto-fit collapse column %d (empty)", c);
-            }
-        }
-    }
-
-    // Process rows
-    if (grid_layout->auto_fit_row_count > 0 && grid_layout->grid_template_rows) {
-        GridTrackList* rows = grid_layout->grid_template_rows;
-        bool row_occupied[64] = {};
-        for (int idx = 0; idx < grid_layout->item_count; idx++) {
-            ViewBlock* item = grid_layout->grid_items[idx];
-            GridItemProp* gi = grid_item_prop(item);
-            if (!item || !gi) continue;
-            int rs = gi->computed_grid_row_start - 1;
-            int re = gi->computed_grid_row_end - 1;
-            for (int r = rs; r < re && r < 64; r++) {
-                if (r >= 0) row_occupied[r] = true;
-            }
-        }
-        for (int r = 0; r < rows->track_count && r < 64; r++) {
-            if (r < grid_layout->auto_fit_row_count &&
-                grid_layout->auto_fit_rows[r] && !row_occupied[r]) {
-                GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
-                if (!zero_track) continue;
-                destroy_grid_track_size(rows->tracks[r]);
-                rows->tracks[r] = zero_track;
-                log_debug("GRID: auto-fit collapse row %d (empty)", r);
-            }
-        }
-    }
 }
 
 static GridTrackSize** expand_repeat_track_entries(GridTrackList* tracks, int repeat_index,

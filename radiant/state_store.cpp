@@ -605,27 +605,40 @@ static void state_dump_emit_doc_attrs(DumpBuildContext* ctx, ElementBuilder& doc
         doc.attr("focus", map.final());
     }
 
-    if (state->caret && state->caret->view) {
+    View* caret_view = NULL;
+    int caret_offset = 0;
+    int caret_line = 0;
+    int caret_column = 0;
+    if (caret_get_debug_snapshot(state, &caret_view, &caret_offset,
+            &caret_line, &caret_column, NULL, NULL, NULL, NULL)) {
         MapBuilder map = ctx->builder->map();
-        state_dump_node_ref((const DomNode*)state->caret->view, ref, sizeof(ref));
+        state_dump_node_ref((const DomNode*)caret_view, ref, sizeof(ref));
         map.put("target", ref);
-        map.put("offset", (int64_t)state->caret->char_offset);
-        if (state->caret->line != 0) map.put("line", (int64_t)state->caret->line);
-        if (state->caret->column != 0) map.put("column", (int64_t)state->caret->column);
+        map.put("offset", (int64_t)caret_offset);
+        if (caret_line != 0) map.put("line", (int64_t)caret_line);
+        if (caret_column != 0) map.put("column", (int64_t)caret_column);
         doc.attr("caret", map.final());
     }
 
-    if (state->selection && !state->selection->is_collapsed) {
+    View* anchor_view = NULL;
+    View* focus_view = NULL;
+    int anchor_offset = 0;
+    int focus_offset = 0;
+    bool collapsed = true;
+    selection_get_anchor_snapshot(state, &anchor_view, &anchor_offset, &collapsed);
+    selection_get_focus_snapshot(state, &focus_view, &focus_offset,
+        NULL, NULL, NULL);
+    if (!collapsed && anchor_view && focus_view) {
         MapBuilder map = ctx->builder->map();
         MapBuilder anchor = ctx->builder->map();
-        state_dump_node_ref((const DomNode*)state->selection->anchor_view, ref, sizeof(ref));
+        state_dump_node_ref((const DomNode*)anchor_view, ref, sizeof(ref));
         anchor.put("node", ref);
-        anchor.put("offset", (int64_t)state->selection->anchor_offset);
+        anchor.put("offset", (int64_t)anchor_offset);
         map.put("anchor", anchor.final());
         MapBuilder focus = ctx->builder->map();
-        state_dump_node_ref((const DomNode*)state->selection->focus_view, ref, sizeof(ref));
+        state_dump_node_ref((const DomNode*)focus_view, ref, sizeof(ref));
         focus.put("node", ref);
-        focus.put("offset", (int64_t)state->selection->focus_offset);
+        focus.put("offset", (int64_t)focus_offset);
         map.put("focus", focus.final());
         doc.attr("selection", map.final());
     }
@@ -839,23 +852,6 @@ StrBuf* radiant_state_dump_mark(DocState* state) {
     }
     mem_pool_destroy(scratch_pool);
     return out;
-}
-
-bool radiant_state_dump_to_file(DocState* state, const char* path) {
-    if (!state || !path) return false;
-    StrBuf* mark = radiant_state_dump_mark(state);
-    if (!mark) return false;
-
-    FILE* out = fopen(path, "w");
-    if (!out) {
-        log_error("state_dump: failed to write %s: %s", path, strerror(errno));
-        strbuf_free(mark);
-        return false;
-    }
-    if (mark->str && mark->length > 0) fwrite(mark->str, 1, mark->length, out);
-    fclose(out);
-    strbuf_free(mark);
-    return true;
 }
 
 void radiant_state_dump_emit_cascade(DocState* state, uint64_t cascade_id) {
@@ -1072,7 +1068,6 @@ static void state_store_detach_selection_for_unload(DocState* state) {
 
     state_store_note_selection_mutation(state);
     state_store_refresh_editing_selection_shadow(state);
-    state->selection_projection_seq = state->selection_mutation_seq;
     state->selection_event_seq = state->selection_mutation_seq;
     state->selectionchange_pending = false;
     state->selection_layout_dirty = false;
@@ -1081,13 +1076,9 @@ static void state_store_detach_selection_for_unload(DocState* state) {
     state->active_text_control = NULL;
     state->last_focused_text_control = NULL;
 
-    if (state->selection) {
-        memset(state->selection, 0, sizeof(*state->selection));
-        state->selection->is_collapsed = true;
-    }
-    if (state->caret) {
-        memset(state->caret, 0, sizeof(*state->caret));
-        state->caret->visible = false;
+    if (state->selection_presentation) {
+        memset(state->selection_presentation, 0, sizeof(*state->selection_presentation));
+        state->selection_presentation->previous_caret_abs_x = -1;
     }
     selection_finish_active_gesture(state);
 }
@@ -1191,19 +1182,17 @@ extern "C" struct DomSelection* dom_range_state_selection(DocState* state) {
 // ----------------------------------------------------------------------------
 // Selection/caret machine helpers.
 // EditingSelection is the canonical StateStore selection surface. DOM ranges
-// and text controls publish through separate writers, while CaretState and
-// SelectionState remain private render/event projections.
+// and text controls publish through separate writers. The only derived storage
+// is presentation geometry and animation state.
 // ----------------------------------------------------------------------------
-static bool state_store_ensure_projection_storage(DocState* state);
+static bool state_store_ensure_selection_presentation(DocState* state);
 
 static DomSelection* sync_ensure_selection(DocState* state) {
     if (!state) return NULL;
     if (!state->dom_selection) {
         state->dom_selection = dom_selection_create(state);
     }
-    if (state->dom_selection) {
-        state_store_ensure_projection_storage(state);
-    }
+    if (state->dom_selection) state_store_ensure_selection_presentation(state);
     return state->dom_selection;
 }
 
@@ -1307,7 +1296,7 @@ extern "C" bool state_store_set_selection(DocState* state,
         state->editing.inline_format_state = 0;
         state->editing.inline_format_state_mask = 0;
         dom_selection_remove_all_ranges(selection);
-        state_store_refresh_caret_projection(state);
+        selection_refresh_presentation(state);
         return true;
     }
 
@@ -1498,7 +1487,7 @@ extern "C" void state_store_set_text_control_selection(DocState* state,
     sel->end_u16 = end_u16;
     sel->mutation_seq = state->selection_mutation_seq;
 
-    state_store_refresh_caret_projection(state);
+    selection_refresh_presentation(state);
 }
 
 static void selection_write_optional_ref(JsonWriter* w, const char* key, View* view) {
@@ -1560,28 +1549,17 @@ static bool selection_is_text_control_view(View* view) {
     return view && view->is_element() && tc_is_text_control(lam::dom_require_element(view));
 }
 
-static bool state_store_ensure_projection_storage(DocState* state) {
+static bool state_store_ensure_selection_presentation(DocState* state) {
     if (!state || !state->arena) return false;
-    if (!state->caret) {
-        state->caret = (CaretState*)arena_alloc(state->arena, sizeof(CaretState));
-        if (state->caret) {
-            memset(state->caret, 0, sizeof(CaretState));
-            state->caret->prev_abs_x = -1;  // not yet rendered
+    if (!state->selection_presentation) {
+        state->selection_presentation = (SelectionPresentation*)arena_alloc(
+            state->arena, sizeof(SelectionPresentation));
+        if (state->selection_presentation) {
+            memset(state->selection_presentation, 0, sizeof(SelectionPresentation));
+            state->selection_presentation->previous_caret_abs_x = -1;
         }
     }
-    if (!state->selection) {
-        state->selection = (SelectionState*)arena_alloc(state->arena, sizeof(SelectionState));
-        if (state->selection) {
-            memset(state->selection, 0, sizeof(SelectionState));
-            // An empty (no-range) selection is collapsed by definition. Without
-            // this, the zero-initialized projection is non-collapsed with null
-            // endpoints, which violates the DocState interaction invariant
-            // ("non-collapsed selection has missing endpoints") the moment any
-            // state mutation triggers a validation pass before a selection is set.
-            state->selection->is_collapsed = true;
-        }
-    }
-    return state->caret != NULL && state->selection != NULL;
+    return state->selection_presentation != NULL;
 }
 
 // View* in the projection adapters IS a DomNode* (typedef in dom_node.hpp).
@@ -1732,70 +1710,6 @@ static bool selection_extend_dom_to_focus(DomSelection* selection,
     return state_store_set_selection(selection->state, &anchor, focus, out_exception);
 }
 
-extern "C" void dom_selection_sync_from_selection_projection(DocState* state) {
-    if (!state || !state->selection) return;
-    SelectionState* sel = state->selection;
-    DomBoundary anc = boundary_from_view_offset(sel->anchor_view, sel->anchor_offset);
-    DomBoundary foc = boundary_from_view_offset(sel->focus_view,  sel->focus_offset);
-    if (!anc.node || !foc.node) return;
-
-    DomNode* current_root = selection_sync_root_from_boundary(&foc);
-    if (!current_root) current_root = selection_sync_root_from_boundary(&anc);
-    if (current_root) {
-        DomBoundary rebound_anc = anc;
-        DomBoundary rebound_foc = foc;
-        if (!selection_sync_rebind_boundary(current_root, &anc, &rebound_anc) ||
-            !selection_sync_rebind_boundary(current_root, &foc, &rebound_foc)) {
-            log_debug("[DOM-SYNC REBIND] skipped selection projection sync; endpoint cannot resolve in current tree");
-            return;
-        }
-        anc = rebound_anc;
-        foc = rebound_foc;
-    }
-
-    const char* exc = NULL;
-    if (!state_store_set_selection(state, &anc, &foc, &exc)) {
-        log_debug("[DOM-SYNC] set_base_and_extent rejected: %s", exc ? exc : "?");
-    }
-    state->selection_layout_dirty = true;
-}
-
-extern "C" void dom_selection_sync_from_caret_projection(DocState* state) {
-    if (!state || !state->caret) return;
-    DomSelection* ds = sync_ensure_selection(state);
-    if (!ds) return;
-    // During an active drag-selection (or any non-collapsed projection
-    // whose focus matches the caret), the state_store_caret_collapse_to_view_offset() call is just
-    // moving the focus end of the selection — NOT collapsing it. Mirroring
-    // it as `collapse(...)` here would wipe out the selection that
-    // `state_store_selection_extend_to_offset()` just synced into DomSelection a moment ago.
-    // In that case skip the sync; the projection-to-DomSelection
-    // mirror in selection_extend already updated the focus boundary.
-    SelectionState* sel = state->selection;
-    if (sel && !sel->is_collapsed && sel->is_selecting &&
-        sel->focus_view == state->caret->view &&
-        sel->focus_offset == state->caret->char_offset) {
-        return;
-    }
-    bool preserve_pointer_selection = sel && sel->is_selecting;
-    View* preserve_anchor_view = sel ? sel->anchor_view : NULL;
-    int preserve_anchor_offset = sel ? sel->anchor_offset : 0;
-    DomBoundary b = boundary_from_view_offset(state->caret->view, state->caret->char_offset);
-    if (!b.node) return;
-    const char* exc = NULL;
-    if (!state_store_set_selection(state, &b, &b, &exc)) {
-        log_debug("[DOM-SYNC] collapse rejected: %s", exc ? exc : "?");
-    }
-    if (preserve_pointer_selection && state->selection) {
-        state->selection->is_selecting = true;
-        if (preserve_anchor_view) {
-            state->selection->anchor_view = preserve_anchor_view;
-            state->selection->anchor_offset = preserve_anchor_offset;
-        }
-    }
-    state->selection_layout_dirty = true;
-}
-
 static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
                                       float* out_x, float* out_y) {
     float x = abs_x;
@@ -1817,32 +1731,6 @@ static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
     }
     if (out_x) *out_x = x;
     if (out_y) *out_y = y;
-}
-
-// Mirror of state_machine.cpp's projection_view_offset_limit: the maximum caret
-// char_offset a view can legally hold. Used to reject a geometry-resolved caret
-// target that would violate the DocState interaction invariant (e.g. a void/
-// atomic element like <br> whose boundary length is 0).
-static bool caret_target_offset_valid(View* view, int offset) {
-    if (!view) return true;
-    if (offset < 0) return false;
-    DomNode* node = static_cast<DomNode*>(view);
-    uint32_t limit;
-    if (node->is_text()) {
-        DomText* text = lam::dom_require_text(node);
-        limit = dom_text_utf16_to_utf8(text, dom_text_utf16_length(text));
-    } else if (node->is_element()) {
-        DomElement* elem = lam::dom_require_element(node);
-        if (tc_is_text_control(elem)) {
-            tc_ensure_init(elem);
-            limit = elem->form ? elem->form->current_value_len : 0;
-        } else {
-            limit = dom_node_boundary_length(node);
-        }
-    } else {
-        limit = dom_node_boundary_length(node);
-    }
-    return (uint32_t)offset <= limit;
 }
 
 static void dom_boundary_to_projection(const DomBoundary& boundary,
@@ -1867,19 +1755,14 @@ static void dom_boundary_to_projection(const DomBoundary& boundary,
 // ---------------------------------------------------------------------------
 // Canonical selection → projection refresh.
 //
-// The StateStore selection mutation sequence is authoritative. CaretState and
-// SelectionState are cache projections for render/debug/event compatibility and
-// are rebuilt when their projection stamp falls behind.
-// Layout cache fields (caret x/y/height) are derived via the resolver.
-// View* IS DomNode*, so node→view conversion is just a cast; UTF-16→UTF-8 for
-// text offsets.
+// Canonical selection → presentation refresh. Boundaries are intentionally
+// absent from this cache: readers derive them from EditingSelection/DomSelection.
 // ---------------------------------------------------------------------------
-extern "C" void state_store_refresh_caret_projection(DocState* state) {
-    if (!state) return;
+extern "C" void selection_refresh_presentation(DocState* state) {
+    if (!state || !state_store_ensure_selection_presentation(state)) return;
+    SelectionPresentation* presentation = state->selection_presentation;
 
     if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
-        if (!state_store_ensure_projection_storage(state)) return;
-
         EditingSelection* current = &state->sel;
         DomElement* control = current->control;
         if (!control || !tc_is_text_control(control)) return;
@@ -1929,50 +1812,18 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
             current->mutation_seq = state->selection_mutation_seq;
         }
 
-        uint32_t start_byte = text_control_u16_offset_to_byte(form, start_u16);
-        uint32_t end_byte = text_control_u16_offset_to_byte(form, end_u16);
-        int start_offset = static_cast<int>(start_byte); // INT_CAST_OK: projection cache stores text-control byte offsets as int.
-        int end_offset = static_cast<int>(end_byte); // INT_CAST_OK: projection cache stores text-control byte offsets as int.
-        bool backward = current->direction == DOM_SEL_DIR_BACKWARD;
-        int anchor_offset = backward ? end_offset : start_offset;
-        int focus_offset = backward ? start_offset : end_offset;
         View* view = static_cast<View*>(control);
-
-        SelectionState* projection = state->selection;
         bool collapsed = start_u16 == end_u16;
         bool control_focused = state->focus && state->focus->current == view;
         bool caret_visible = collapsed && control_focused;
-        CaretState* caret = state->caret;
-        bool projection_changed =
-            projection->anchor_view != view ||
-            projection->focus_view != view ||
-            projection->view != view ||
-            projection->anchor_offset != anchor_offset ||
-            projection->focus_offset != focus_offset ||
-            projection->is_collapsed != collapsed ||
-            caret->view != view ||
-            caret->char_offset != focus_offset ||
-            caret->visible != caret_visible;
-
-        bool was_selecting = projection->is_selecting;
-        projection->anchor_view = view;
-        projection->focus_view = view;
-        projection->view = view;
-        projection->anchor_offset = anchor_offset;
-        projection->focus_offset = focus_offset;
-        projection->is_collapsed = collapsed;
-        projection->is_selecting = was_selecting;
-
-        caret->view = view;
-        caret->char_offset = focus_offset;
-        caret->visible = caret_visible;
-        caret->blink_time = 0;
+        bool visibility_changed = presentation->caret_visible != caret_visible;
+        presentation->caret_visible = caret_visible;
+        presentation->caret_blink_time = 0;
 
         state->selection_layout_dirty = false;
-        state->selection_projection_seq = state->selection_mutation_seq;
-        if (projection_changed) state->needs_repaint = true;
-        log_debug("[SEL-PROJECT] text-control projection view=%p anchor=%d focus=%d collapsed=%d",
-            (void*)view, anchor_offset, focus_offset, projection->is_collapsed);
+        if (visibility_changed) state->needs_repaint = true;
+        log_debug("[SEL-PRESENTATION] text-control view=%p collapsed=%d",
+            (void*)view, collapsed);
         return;
     }
 
@@ -1980,134 +1831,55 @@ extern "C" void state_store_refresh_caret_projection(DocState* state) {
     DomSelection* ds = state->dom_selection;
     if (!ds) return;
 
-    // Empty selection: clear legacy state too.
     DomBoundary anchor = dom_selection_anchor_boundary(ds);
     DomBoundary focus = dom_selection_focus_boundary(ds);
     if (ds->range_count == 0 || !anchor.node) {
-        if (state->selection) {
-            state->selection->anchor_view = NULL;
-            state->selection->focus_view = NULL;
-            state->selection->view = NULL;
-            state->selection->anchor_offset = 0;
-            state->selection->focus_offset = 0;
-            state->selection->is_collapsed = true;
-            state->selection->is_selecting = false;
-        }
-        if (state->caret) {
-            state->caret->view = NULL;
-            state->caret->char_offset = 0;
-            state->caret->visible = false;
-        }
-        state->selection_projection_seq = state->selection_mutation_seq;
+        presentation->caret_visible = false;
+        presentation->caret_blink_time = 0;
         state->selection_layout_dirty = false;
         state->needs_repaint = true;
         return;
     }
 
-    // Convert DomBoundary (node, utf16-or-child-offset) → (View*, byte_offset).
-    View* anc_view = NULL; int anc_off = 0;
-    View* foc_view = NULL; int foc_off = 0;
-    dom_boundary_to_projection(anchor, &anc_view, &anc_off);
-    dom_boundary_to_projection(focus,  &foc_view, &foc_off);
-
-    if (!state_store_ensure_projection_storage(state)) {
-        return;
-    }
-    SelectionState* sel = state->selection;
-
-    // A non-collapsed DOM selection whose endpoint(s) do not map to a rendered
-    // view — e.g. a boundary inside a replaced/text-control element, as produced
-    // by selectAllChildren(<input>) — cannot be represented by the legacy
-    // SelectionState. Leaving it non-collapsed with missing endpoints trips the
-    // DocState interaction invariant ("non-collapsed selection has missing
-    // endpoints"). Reset the projection to a clean empty/collapsed state,
-    // mirroring the empty-selection branch above; the canonical EditingSelection
-    // (state->sel) still holds the true range for API queries.
-    if ((!anc_view || !foc_view) && !dom_selection_is_collapsed(ds)) {
-        sel->anchor_view   = NULL;
-        sel->focus_view    = NULL;
-        sel->view          = NULL;
-        sel->anchor_offset = 0;
-        sel->focus_offset  = 0;
-        sel->is_collapsed  = true;
-        sel->is_selecting  = false;
-        if (state->caret) {
-            state->caret->view = NULL;
-            state->caret->char_offset = 0;
-            state->caret->visible = false;
-        }
+    View* focus_view = NULL;
+    dom_boundary_to_projection(focus, &focus_view, NULL);
+    bool collapsed = dom_selection_is_collapsed(ds);
+    if (!focus_view) {
+        presentation->caret_visible = false;
         state->selection_layout_dirty = false;
-        state->selection_projection_seq = state->selection_mutation_seq;
         state->needs_repaint = true;
         return;
     }
 
-    sel->anchor_view   = anc_view;
-    sel->focus_view    = foc_view;
-    sel->view          = foc_view;  // legacy single-view fallback
-    sel->anchor_offset = anc_off;
-    sel->focus_offset  = foc_off;
-    bool dom_collapsed = dom_selection_is_collapsed(ds);
-    sel->is_collapsed  = dom_collapsed;
-
-    {
-        CaretState* caret = state->caret;
-        caret->view        = foc_view;
-        caret->char_offset = foc_off;
-        caret->visible     = false;
-        caret->blink_time  = 0;
-
-        // Resolve layout cache (x/y/height) via the resolver. Best-effort:
-        // if no layout has run yet, leave previous cache values in place.
-        DomRange* r = ds->ranges[0];
-        if (r) {
-            // Force re-resolve to reflect possibly-mutated layout.
-            r->layout_valid = false;
-            if (dom_range_resolve_layout(r)) {
-                // Use END boundary (focus) for caret position when range is
-                // forward-directed; spec direction tells us which is focus.
-                bool focus_at_end = (ds->direction != DOM_SEL_DIR_BACKWARD);
-                float abs_x = focus_at_end ? r->end_x : r->start_x;
-                float abs_y = focus_at_end ? r->end_y : r->start_y;
-                View* resolved_caret_view = focus_at_end
-                    ? static_cast<View*>(r->end_view)
-                    : static_cast<View*>(r->start_view);
-                int resolved_caret_offset = focus_at_end
-                    ? r->end_byte_offset : r->start_byte_offset;
-                // The resolver picks the nearest laid-out box for caret GEOMETRY
-                // (x/y/height) — e.g. a trailing <br>'s edge for a caret at
-                // end-of-block-after-<br>. Only adopt it as the LOGICAL caret
-                // view/offset when that offset is valid for the target; a void/
-                // atomic element (br) would carry an out-of-bounds offset and
-                // trip the DocState interaction invariant. Otherwise keep the
-                // boundary projection (foc_view/foc_off), which is a valid block
-                // boundary, and still use the resolved x/y/height below.
-                if (dom_collapsed && resolved_caret_view &&
-                    caret_target_offset_valid(resolved_caret_view, resolved_caret_offset)) {
-                    caret->view = resolved_caret_view;
-                    caret->char_offset = resolved_caret_offset;
-                }
-                bool caret_can_render = !caret->view ||
-                    !caret->view->is_element() ||
-                    tc_is_text_control(lam::dom_require_element(caret->view));
-                caret->visible = dom_collapsed && caret_can_render;
-                caret_local_from_absolute(caret->view, abs_x, abs_y,
-                                          &caret->x, &caret->y);
-                caret->height = focus_at_end ? r->end_height : r->start_height;
-                // Mirror into selection start/end for legacy renderer.
-                sel->start_x = r->start_x;
-                sel->start_y = r->start_y;
-                sel->end_x   = r->end_x;
-                sel->end_y   = r->end_y;
-            }
+    presentation->caret_visible = false;
+    presentation->caret_blink_time = 0;
+    DomRange* range = ds->ranges[0];
+    if (range) {
+        range->layout_valid = false;
+        if (dom_range_resolve_layout(range)) {
+            bool focus_at_end = ds->direction != DOM_SEL_DIR_BACKWARD;
+            float abs_x = focus_at_end ? range->end_x : range->start_x;
+            float abs_y = focus_at_end ? range->end_y : range->start_y;
+            bool caret_can_render = !focus_view->is_element() ||
+                tc_is_text_control(lam::dom_require_element(focus_view));
+            presentation->caret_visible = collapsed && caret_can_render;
+            // Canonical boundaries must never follow the resolver's nearest
+            // paint box; trailing atomic boxes are geometry, not selection truth.
+            caret_local_from_absolute(focus_view, abs_x, abs_y,
+                &presentation->caret_x, &presentation->caret_y);
+            presentation->caret_height = focus_at_end
+                ? range->end_height : range->start_height;
+            presentation->range_start_x = range->start_x;
+            presentation->range_start_y = range->start_y;
+            presentation->range_end_x = range->end_x;
+            presentation->range_end_y = range->end_y;
         }
     }
 
     state->selection_layout_dirty = false;
-    state->selection_projection_seq = state->selection_mutation_seq;
     state->needs_repaint = true;
-    log_debug("[SEL-PROJECT] state_store_refresh_caret_projection: anc=(%p,%d) foc=(%p,%d) collapsed=%d",
-              (void*)anc_view, anc_off, (void*)foc_view, foc_off, dom_collapsed);
+    log_debug("[SEL-PRESENTATION] document focus=%p collapsed=%d",
+        (void*)focus_view, collapsed);
 }
 
 void DocState::destroy() {
@@ -2369,12 +2141,15 @@ void editing_interaction_sync_projection(DocState* state) {
     state->editing.autoscroll.pointer_y = state->editing_autoscroll_pointer_y;
     state->editing.autoscroll.tick_last_time = state->editing_tick_last_time;
     state->editing.autoscroll.caret_blink_elapsed = state->editing_caret_blink_elapsed;
-    bool pointer_selecting = selection_is_pointer_range_active(state);
-    state->editing.pointer_selecting = pointer_selecting;
+    // A pointer gesture begins with a collapsed anchor, so its lifetime cannot
+    // be reconstructed from whether the canonical range is already extended.
+    bool pointer_selecting = state->editing.pointer_selecting;
+    View* pointer_anchor_view = NULL;
+    int pointer_anchor_offset = 0;
     if (pointer_selecting && !state->editing.drag_anchor_view &&
-        state->selection && state->selection->anchor_view) {
-        state->editing.drag_anchor_view = state->selection->anchor_view;
-        state->editing.drag_anchor_offset = state->selection->anchor_offset;
+        selection_get_pointer_anchor(state, &pointer_anchor_view, &pointer_anchor_offset)) {
+        state->editing.drag_anchor_view = pointer_anchor_view;
+        state->editing.drag_anchor_offset = pointer_anchor_offset;
         state->editing.drag_mode = EDITING_DRAG_CHAR;
     } else if (!pointer_selecting && !state->text_selection_press_in_range) {
         state->editing.drag_anchor_view = NULL;
@@ -3060,6 +2835,18 @@ uint32_t view_state_prune_orphans(DocState* state) {
                 removed++;
                 found_orphan = true;
                 break;
+            }
+            // Relayout can replace a form's pass-local cache while its durable registry entry survives.
+            view_state_primary_cache(key_live, entry->state);
+            if (key_live->is_element()) {
+                DomElement* elem = lam::dom_require_element(key_live);
+                if (elem && elem->form) {
+                    if (entry->kind == VIEW_STATE_FORM_CONTROL) {
+                        elem->form->form_state_ref = entry->state;
+                    } else if (entry->kind == VIEW_STATE_SCROLL) {
+                        elem->form->scroll_state_ref = entry->state;
+                    }
+                }
             }
         }
     }
@@ -3885,25 +3672,6 @@ void doc_state_sync_viewport_scroll(DocState* state, DomDocument* doc,
     state_assert_after_mutation(state, "doc_state_sync_viewport_scroll");
 }
 
-bool state_has(DocState* state, void* node, const char* name) {
-    if (!state || !node || !name) return false;
-
-    if (strcmp(name, STATE_HOVER) == 0 ||
-        strcmp(name, STATE_ACTIVE) == 0 ||
-        strcmp(name, STATE_FOCUS) == 0 ||
-        strcmp(name, STATE_CHECKED) == 0 ||
-        strcmp(name, STATE_DISABLED) == 0 ||
-        strcmp(name, STATE_READONLY) == 0 ||
-        strcmp(name, STATE_REQUIRED) == 0) {
-        return view_state_get(state, static_cast<View*>(node)) != NULL;
-    }
-
-    const char* interned = intern_state_name(name);
-    StateEntry query = { .key = { node, interned } };
-
-    return hashmap_get(state->state_map, &query) != NULL;
-}
-
 static bool s_in_batch = false;
 
 static void state_sync_selection_before_assert(DocState* state);
@@ -4402,52 +4170,6 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
     return true;
 }
 
-void form_control_set_value(DocState* state, View* view, const char* value, uint32_t len) {
-    ViewBlock* block = form_block_for_view(view);
-    if (!block) return;
-    SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT, SM_EV_FORM_SET_VALUE, view);
-
-    DomElement* elem = lam::dom_require_element(block);
-    block->form->state_ref = state;
-
-    // For text controls (input text, textarea), route through tc_set_value
-    // to ensure all side effects (validation, events, history) are handled.
-    if (tc_is_text_control(elem)) {
-        tc_set_value(elem, value, len);
-    } else {
-        // For non-text controls, directly update the value field.
-        // (Selects, file inputs, etc. don't have the complex mutation semantics
-        // of text editing and validation history that tc_set_value provides.)
-        FormControlProp* form = block->form;
-        if (form->current_value) {
-            mem_free(form->current_value);
-        }
-        form->current_value = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
-        memcpy(form->current_value, value, len);
-        form->current_value[len] = '\0';
-        form->current_value_len = len;
-        extern uint32_t tc_utf8_to_utf16_length(const char* utf8, uint32_t byte_len);
-        form->current_value_u16_len = tc_utf8_to_utf16_length(form->current_value, len);
-        form->selection_start = form->current_value_u16_len;
-        form->selection_end = form->current_value_u16_len;
-        form->selection_direction = 0;
-        form->value = form->current_value;
-    }
-
-    ViewState* view_state = form_view_state_get_or_create(state, view, block->form);
-    if (view_state) {
-        view_state->data.form.selection_start = block->form->selection_start;
-        view_state->data.form.selection_end = block->form->selection_end;
-        view_state->data.form.selection_direction = block->form->selection_direction;
-        if (tc_is_text_control(elem) && block->form->current_value) {
-            form_view_state_store_text_value(view_state, block->form);
-        }
-    }
-
-    sm_guard.commit();
-    form_state_mark_dirty(state);
-}
-
 void form_control_peek_selection(DocState* state, View* view,
                                  uint32_t* out_start, uint32_t* out_end, uint8_t* out_direction) {
     if (out_start) *out_start = 0;
@@ -4589,13 +4311,13 @@ void form_control_sync_text_control_focus_state(DocState* state, View* view) {
     if (state->focus && state->focus->current == view) {
         should_sync = true;
     }
-    if (!should_sync && state->caret && state->caret->view == view) {
+    if (!should_sync && caret_get_view(state) == view) {
         should_sync = true;
     }
-    if (!should_sync && state->selection &&
-        (state->selection->view == view ||
-         state->selection->anchor_view == view ||
-         state->selection->focus_view == view)) {
+    View* anchor_view = NULL;
+    View* focus_view = NULL;
+    if (!should_sync && selection_get_extent_views(state, &anchor_view, &focus_view) &&
+        (anchor_view == view || focus_view == view)) {
         should_sync = true;
     }
     if (!should_sync && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
@@ -5106,31 +4828,6 @@ DocState* state_remove_immutable(DocState* state, void* node, const char* name) 
 // Callback Registration
 // ============================================================================
 
-void state_on_change(DocState* state, void* node, const char* name,
-    StateChangeCallback callback, void* udata) {
-    if (!state || !node || !name) return;
-
-    StateEntry query = {};
-    const StateEntry* existing = state_entry_get(state, node, name, &query);
-    if (existing) {
-        // Update callback on existing entry
-        StateEntry updated = *existing;
-        updated.on_change = callback;
-        updated.callback_udata = udata;
-        hashmap_set(state->state_map, &updated);
-    } else {
-        // Create entry with callback but null value
-        StateEntry entry = {
-            .key = query.key,
-            .value = ItemNull,
-            .last_modified = 0,
-            .on_change = callback,
-            .callback_udata = udata
-        };
-        hashmap_set(state->state_map, &entry);
-    }
-}
-
 // ============================================================================
 // Batch Operations
 // ============================================================================
@@ -5142,7 +4839,7 @@ void state_begin_batch(DocState* state) {
 
 static void state_sync_selection_before_assert(DocState* state) {
     if (!state) return;
-    state_store_refresh_caret_projection(state);
+    selection_refresh_presentation(state);
 }
 
 static void state_sync_dirty_flags_before_assert(DocState* state) {
@@ -5486,13 +5183,6 @@ void visited_links_add(VisitedLinks* visited, const char* url) {
     log_debug("visited_links_add: hash=0x%llx", hash);
 }
 
-bool visited_links_check(VisitedLinks* visited, const char* url) {
-    if (!visited || !url) return false;
-
-    uint64_t hash = hashmap_murmur(url, strlen(url), visited->seed0, visited->seed1);
-    return hashmap_get(visited->url_hash_set, &hash) != NULL;
-}
-
 // ============================================================================
 // Selection/caret canonical write API
 // ============================================================================
@@ -5513,36 +5203,22 @@ void state_store_caret_collapse_to_view_offset(DocState* state, View* view, int 
     }
 
     DomSelection* selection = sync_ensure_selection(state);
-    if (!selection || !state->caret) {
-        log_error("caret_set: failed to ensure DomSelection / projection storage");
+    if (!selection) {
+        log_error("caret_set: failed to ensure DomSelection");
         return;
     }
 
-    SelectionState* active_selection = state->selection;
-    if (active_selection && active_selection->is_selecting && !active_selection->is_collapsed &&
-        active_selection->focus_view == view && active_selection->focus_offset == char_offset) {
-        if (selection_is_text_control_view(view)) {
-            if (text_control_set_selection_from_byte_offsets(state, view,
-                    active_selection->anchor_offset, char_offset, "caret_set_active_text_control") &&
-                state->selection) {
-                state->selection->is_selecting = true;
-            }
-            state->needs_repaint = true;
-            log_debug("caret_set: projected active text-control selection focus view=%p offset=%d",
-                view, char_offset);
-            return;
+    if (state->editing.pointer_selecting || state->editing.selection_extending) {
+        // Active extension owns the canonical anchor; a caret paint update
+        // must not collapse that range as the old projection-only write did.
+        if (state_store_ensure_selection_presentation(state)) {
+            state->selection_presentation->caret_visible = true;
+            state->selection_presentation->caret_blink_time = 0;
         }
-        state->caret->view = view;
-        state->caret->char_offset = char_offset;
-        state->caret->visible = true;
-        state->caret->blink_time = 0;
         state->needs_repaint = true;
-        log_debug("caret_set: projected active selection focus view=%p offset=%d", view, char_offset);
+        log_debug("caret_set: deferred collapse during active pointer selection");
         return;
     }
-    bool preserve_pointer_selection = active_selection && active_selection->is_selecting;
-    View* preserve_anchor_view = active_selection ? active_selection->anchor_view : NULL;
-    int preserve_anchor_offset = active_selection ? active_selection->anchor_offset : 0;
 
     if (selection_is_text_control_view(view)) {
         if (!text_control_set_selection_from_byte_offsets(state, view, char_offset,
@@ -5550,15 +5226,7 @@ void state_store_caret_collapse_to_view_offset(DocState* state, View* view, int 
             log_debug("caret_set: text-control collapse rejected");
             return;
         }
-        if (preserve_pointer_selection && state->selection) {
-            state->selection->is_selecting = true;
-            if (preserve_anchor_view) {
-                state->selection->anchor_view = preserve_anchor_view;
-                state->selection->anchor_offset = preserve_anchor_offset;
-            }
-        } else if (state->selection) {
-            state->selection->is_selecting = false;
-        }
+        state->editing.pointer_selecting = false;
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
         selection_log_transition(state, "collapse_to_text_control_boundary",
@@ -5575,17 +5243,7 @@ void state_store_caret_collapse_to_view_offset(DocState* state, View* view, int 
         log_debug("caret_set: collapse rejected: %s", exc ? exc : "?");
         return;
     }
-    if (state->selection) {
-        if (preserve_pointer_selection) {
-            state->selection->is_selecting = true;
-            if (preserve_anchor_view) {
-                state->selection->anchor_view = preserve_anchor_view;
-                state->selection->anchor_offset = preserve_anchor_offset;
-            }
-        } else {
-            state->selection->is_selecting = false;
-        }
-    }
+    state->editing.pointer_selecting = false;
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
     selection_log_transition(state, "collapse_to_boundary", view, char_offset, view, char_offset);
@@ -5924,10 +5582,16 @@ static bool state_store_commit_collapsed_caret(DocState* state,
                                                int char_offset,
                                                const char* source) {
     if (!state || !view) return false;
-    if (state->selection && state->selection->is_selecting) {
-        if (state->caret) {
-            state->caret->visible = true;
-            state->caret->blink_time = 0;
+    if (state->editing.selection_extending) {
+        // Keyboard extension previously moved only the deleted caret projection;
+        // publish the moved focus directly so the following snapshot is canonical.
+        state_store_selection_extend_to_view(state, view, char_offset);
+        return true;
+    }
+    if (state->editing.pointer_selecting) {
+        if (state_store_ensure_selection_presentation(state)) {
+            state->selection_presentation->caret_visible = true;
+            state->selection_presentation->caret_blink_time = 0;
         }
         state->needs_repaint = true;
         log_debug("%s: deferred canonical collapse during active selection",
@@ -5941,10 +5605,10 @@ static bool state_store_commit_collapsed_caret(DocState* state,
                 source ? source : "state_store_commit_collapsed_caret");
             return false;
         }
-        if (state->selection) state->selection->is_selecting = false;
-        if (state->caret) {
-            state->caret->visible = true;
-            state->caret->blink_time = 0;
+        state->editing.pointer_selecting = false;
+        if (state_store_ensure_selection_presentation(state)) {
+            state->selection_presentation->caret_visible = true;
+            state->selection_presentation->caret_blink_time = 0;
         }
         state->needs_repaint = true;
         return true;
@@ -5958,24 +5622,31 @@ static bool state_store_commit_collapsed_caret(DocState* state,
             exc ? exc : "?");
         return false;
     }
-    if (state->selection) state->selection->is_selecting = false;
-    if (state->caret) {
-        state->caret->visible = true;
-        state->caret->blink_time = 0;
+    state->editing.pointer_selecting = false;
+    if (state_store_ensure_selection_presentation(state)) {
+        state->selection_presentation->caret_visible = true;
+        state->selection_presentation->caret_blink_time = 0;
     }
     state->needs_repaint = true;
     return true;
 }
 
+typedef struct CaretNavigationPosition {
+    View* view;
+    int char_offset;
+    int line;
+    int column;
+    float x;
+} CaretNavigationPosition;
+
 void state_store_caret_move(DocState* state, int delta) {
-    if (!state || !state->caret || !state->caret->view) {
-        log_debug("caret_move: early return - state=%p, caret=%p, view=%p",
-            state, state ? state->caret : nullptr,
-            (state && state->caret) ? state->caret->view : nullptr);
+    CaretNavigationPosition position = {};
+    if (!state || !caret_get_position(state, &position.view, &position.char_offset)) {
+        log_debug("caret_move: no canonical caret position state=%p", state);
         return;
     }
 
-    CaretState* caret = state->caret;
+    CaretNavigationPosition* caret = &position;
     View* view = caret->view;
     int current_offset = caret->char_offset;
 
@@ -6172,9 +5843,9 @@ static TextRect* caret_rect_at_offset(TextRect* rect, int offset,
 }
 
 void state_store_caret_move_to_boundary(DocState* state, int where) {
-    if (!state || !state->caret || !state->caret->view) return;
-
-    CaretState* caret = state->caret;
+    CaretNavigationPosition position = {};
+    if (!state || !caret_get_position(state, &position.view, &position.char_offset)) return;
+    CaretNavigationPosition* caret = &position;
     View* view = caret->view;
 
     // Handle text views with proper line/offset calculation
@@ -6554,9 +6225,12 @@ done_down: ;
 }
 
 void state_store_caret_move_line(DocState* state, int delta, struct UiContext* uicon) {
-    if (!state || !state->caret || !state->caret->view) return;
-
-    CaretState* caret = state->caret;
+    CaretNavigationPosition position = {};
+    if (!state || !caret_get_position(state, &position.view, &position.char_offset)) return;
+    if (state->selection_presentation) {
+        position.x = state->selection_presentation->caret_x;
+    }
+    CaretNavigationPosition* caret = &position;
     View* view = caret->view;
 
     // Get current visual position. caret->x is rect-relative (same coord space
@@ -6602,8 +6276,9 @@ void state_store_caret_clear(DocState* state) {
     const char* exc = NULL;
     state_store_set_selection(state, NULL, NULL, &exc);
 
-    if (state->caret) {
-        memset(state->caret, 0, sizeof(CaretState));
+    if (state->selection_presentation) {
+        memset(state->selection_presentation, 0, sizeof(SelectionPresentation));
+        state->selection_presentation->previous_caret_abs_x = -1;
     }
 
     state->needs_repaint = true;
@@ -6627,52 +6302,44 @@ static void projection_chain_offset(View* view, float* out_x, float* out_y) {
 }
 
 void caret_project_visual(DocState* state, float x, float y, float height) {
-    if (!state || !state->caret) return;
-    state->caret->x = x;
-    state->caret->y = y;
-    state->caret->height = height;
+    if (!state || !state_store_ensure_selection_presentation(state)) return;
+    state->selection_presentation->caret_x = x;
+    state->selection_presentation->caret_y = y;
+    state->selection_presentation->caret_height = height;
     state->needs_repaint = true;
 }
 
 void caret_project_visual_from_block(DocState* state, View* view,
                                      float x, float y, float height,
                                      float block_x, float block_y) {
-    if (!state || !state->caret) return;
+    if (!state || !state_store_ensure_selection_presentation(state)) return;
     caret_project_visual(state, x, y, height);
     float chain_x = 0;
     float chain_y = 0;
     projection_chain_offset(view, &chain_x, &chain_y);
-    state->caret->iframe_offset_x = block_x - chain_x;
-    state->caret->iframe_offset_y = block_y - chain_y;
+    state->selection_presentation->iframe_offset_x = block_x - chain_x;
+    state->selection_presentation->iframe_offset_y = block_y - chain_y;
 }
 
 void caret_project_visual_from_selection(DocState* state, float x, float y, float height) {
-    if (!state || !state->caret) return;
+    if (!state || !state_store_ensure_selection_presentation(state)) return;
     caret_project_visual(state, x, y, height);
-    if (state->selection) {
-        state->caret->iframe_offset_x = state->selection->iframe_offset_x;
-        state->caret->iframe_offset_y = state->selection->iframe_offset_y;
-    }
 }
 
 void selection_project_anchor_visual_from_caret(DocState* state, float x, float y, float height) {
-    if (!state || !state->selection) return;
-    state->selection->start_x = x;
-    state->selection->start_y = y;
-    state->selection->end_x = x;
-    state->selection->end_y = y + height;
-    if (state->caret) {
-        state->selection->iframe_offset_x = state->caret->iframe_offset_x;
-        state->selection->iframe_offset_y = state->caret->iframe_offset_y;
-    }
+    if (!state || !state_store_ensure_selection_presentation(state)) return;
+    state->selection_presentation->range_start_x = x;
+    state->selection_presentation->range_start_y = y;
+    state->selection_presentation->range_end_x = x;
+    state->selection_presentation->range_end_y = y + height;
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
 }
 
 void selection_project_focus_visual(DocState* state, float x, float y, float height) {
-    if (!state || !state->selection) return;
-    state->selection->end_x = x;
-    state->selection->end_y = y + height;
+    if (!state || !state_store_ensure_selection_presentation(state)) return;
+    state->selection_presentation->range_end_x = x;
+    state->selection_presentation->range_end_y = y + height;
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
 }
@@ -6682,10 +6349,8 @@ void selection_begin_non_pointer_extend(DocState* state, View* view, int offset)
     if (!selection_has(state)) {
         state_store_selection_set_view_offsets(state, view, offset, offset);
     }
-    if (state->selection) {
-        state->selection->is_selecting = true;
-    }
     state->editing.pointer_selecting = false;
+    state->editing.selection_extending = true;
     state->editing.drag_anchor_view = NULL;
     state->editing.drag_anchor_offset = 0;
     state->editing.drag_mode = EDITING_DRAG_CHAR;
@@ -6693,8 +6358,8 @@ void selection_begin_non_pointer_extend(DocState* state, View* view, int offset)
 
 void selection_finish_active_gesture(DocState* state) {
     if (!state) return;
-    if (state->selection) state->selection->is_selecting = false;
     state->editing.pointer_selecting = false;
+    state->editing.selection_extending = false;
     state->editing.drag_anchor_view = NULL;
     state->editing.drag_anchor_offset = 0;
     state->editing.drag_mode = EDITING_DRAG_CHAR;
@@ -6727,17 +6392,21 @@ bool selection_press_in_range_pending(DocState* state, View** out_view, int* out
 
 bool caret_prepare_selective_repaint(DocState* state) {
     if (!state || state->needs_reflow || state->dirty_tracker.full_repaint ||
-        dirty_has_regions(&state->dirty_tracker) || !state->caret || !state->caret->view) {
+        dirty_has_regions(&state->dirty_tracker) || !state->selection_presentation) {
         return false;
     }
+    View* caret_view = caret_get_view(state);
+    if (!caret_view) return false;
 
     float caret_w = 5.0f;
-    if (state->caret->prev_abs_x >= 0) {
+    SelectionPresentation* presentation = state->selection_presentation;
+    if (presentation->previous_caret_abs_x >= 0) {
         dirty_mark_rect(&state->dirty_tracker,
-            state->caret->prev_abs_x - 1, state->caret->prev_abs_y - 1,
-            caret_w + 2, state->caret->prev_abs_height + 2);
+            presentation->previous_caret_abs_x - 1,
+            presentation->previous_caret_abs_y - 1,
+            caret_w + 2, presentation->previous_caret_abs_height + 2);
     }
-    View* caret_parent = state->caret->view->parent;
+    View* caret_parent = caret_view->parent;
     if (caret_parent) {
         dirty_mark_element(state, caret_parent);
     }
@@ -6776,10 +6445,7 @@ bool caret_get_position(DocState* state, View** out_view, int* out_offset) {
         dom_boundary_to_projection(focus, out_view, out_offset);
         return out_view ? *out_view != NULL : true;
     }
-    if (!state || !state->caret || !state->caret->view) return false;
-    if (out_view) *out_view = state->caret->view;
-    if (out_offset) *out_offset = state->caret->char_offset;
-    return true;
+    return false;
 }
 
 bool caret_get_offset(DocState* state, int* out_offset) {
@@ -6791,9 +6457,7 @@ bool caret_get_offset(DocState* state, int* out_offset) {
         dom_boundary_to_projection(focus, NULL, out_offset);
         return true;
     }
-    if (!state || !state->caret) return false;
-    if (out_offset) *out_offset = state->caret->char_offset;
-    return true;
+    return false;
 }
 
 View* caret_get_view(DocState* state) {
@@ -6808,8 +6472,7 @@ View* caret_get_view(DocState* state) {
         dom_boundary_to_projection(focus, &view, NULL);
         return view;
     }
-    if (!state || !state->caret) return NULL;
-    return state->caret->view;
+    return NULL;
 }
 
 typedef struct CaretSnapshotFields {
@@ -6827,17 +6490,18 @@ typedef struct CaretSnapshotFields {
 
 static bool caret_read_snapshot_fields(DocState* state, CaretSnapshotFields* out) {
     if (out) memset(out, 0, sizeof(CaretSnapshotFields));
-    if (!state || !state->caret || !out) return false;
-    out->view = state->caret->view;
-    out->char_offset = state->caret->char_offset;
-    out->line = state->caret->line;
-    out->column = state->caret->column;
-    out->x = state->caret->x;
-    out->y = state->caret->y;
-    out->height = state->caret->height;
-    out->iframe_offset_x = state->caret->iframe_offset_x;
-    out->iframe_offset_y = state->caret->iframe_offset_y;
-    out->visible = state->caret->visible;
+    if (!state || !out || !caret_get_position(state, &out->view, &out->char_offset)) {
+        return false;
+    }
+    if (state->selection_presentation) {
+        SelectionPresentation* presentation = state->selection_presentation;
+        out->x = presentation->caret_x;
+        out->y = presentation->caret_y;
+        out->height = presentation->caret_height;
+        out->iframe_offset_x = presentation->iframe_offset_x;
+        out->iframe_offset_y = presentation->iframe_offset_y;
+        out->visible = presentation->caret_visible;
+    }
     return true;
 }
 
@@ -6910,50 +6574,64 @@ bool caret_get_debug_snapshot(DocState* state, View** out_view,
 }
 
 bool caret_has_projection(DocState* state) {
-    if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
-        return state->caret && state->caret->view != NULL;
-    }
-    if (state && state->dom_selection) {
-        DomBoundary focus = dom_selection_focus_boundary(state->dom_selection);
-        return state->dom_selection->range_count > 0 && focus.node != NULL;
-    }
-    return state && state->caret && state->caret->view != NULL;
+    return caret_get_view(state) != NULL;
 }
 
 bool caret_is_visible(DocState* state) {
-    return state && state->caret && state->caret->visible;
+    return state && state->selection_presentation &&
+        state->selection_presentation->caret_visible;
 }
 
 void caret_project_previous_visual_rect(DocState* state, float x, float y, float height) {
-    if (!state || !state->caret) return;
-    state->caret->prev_abs_x = x;
-    state->caret->prev_abs_y = y;
-    state->caret->prev_abs_height = height;
+    if (!state || !state_store_ensure_selection_presentation(state)) return;
+    state->selection_presentation->previous_caret_abs_x = x;
+    state->selection_presentation->previous_caret_abs_y = y;
+    state->selection_presentation->previous_caret_abs_height = height;
 }
 
 void caret_toggle_blink(DocState* state) {
-    if (!state || !state->caret) return;
+    if (!state || !state_store_ensure_selection_presentation(state)) return;
+    SelectionPresentation* presentation = state->selection_presentation;
 
-    // Guard invariant: caret visibility is only meaningful when projection
-    // has a concrete target view.
-    if (!state->caret->view) {
-        if (state->caret->visible) {
-            state->caret->visible = false;
+    if (!caret_get_view(state)) {
+        if (presentation->caret_visible) {
+            presentation->caret_visible = false;
             state->needs_repaint = true;
         }
-        state->caret->blink_time = 0;
+        presentation->caret_blink_time = 0;
         return;
     }
 
     // DISABLED for debugging - keep caret always visible
-    // state->caret->visible = !state->caret->visible;
-    state->caret->visible = true;  // always visible
+    // presentation->caret_visible = !presentation->caret_visible;
+    presentation->caret_visible = true;  // always visible
     state->needs_repaint = true;
 }
 
 // ============================================================================
 // Selection compatibility writes
 // ============================================================================
+
+typedef struct SelectionSnapshotFields {
+    View* view;
+    View* anchor_view;
+    View* focus_view;
+    int anchor_offset;
+    int focus_offset;
+    int anchor_line;
+    int focus_line;
+    float start_x;
+    float start_y;
+    float end_x;
+    float end_y;
+    float iframe_offset_x;
+    float iframe_offset_y;
+    bool collapsed;
+    bool selecting;
+} SelectionSnapshotFields;
+
+static bool selection_read_snapshot_fields(DocState* state,
+                                           SelectionSnapshotFields* out);
 
 void state_store_selection_start_pointer(DocState* state, View* view, int char_offset) {
     if (!state) return;
@@ -6969,8 +6647,8 @@ void state_store_selection_start_pointer(DocState* state, View* view, int char_o
     }
 
     DomSelection* selection = sync_ensure_selection(state);
-    if (!selection || !state->selection) {
-        log_error("selection_start: failed to ensure DomSelection / projection storage");
+    if (!selection) {
+        log_error("selection_start: failed to ensure DomSelection");
         return;
     }
 
@@ -6980,7 +6658,6 @@ void state_store_selection_start_pointer(DocState* state, View* view, int char_o
             log_debug("selection_start: text-control collapse rejected");
             return;
         }
-        if (state->selection) state->selection->is_selecting = true;
         state->editing.pointer_selecting = true;
         state->editing.drag_anchor_view = view;
         state->editing.drag_anchor_offset = char_offset;
@@ -7000,9 +6677,6 @@ void state_store_selection_start_pointer(DocState* state, View* view, int char_o
     if (!state_store_set_selection(state, &boundary, &boundary, &exc)) {
         log_debug("selection_start: collapse rejected: %s", exc ? exc : "?");
         return;
-    }
-    if (state->selection) {
-        state->selection->is_selecting = true;
     }
     state->editing.pointer_selecting = true;
     state->editing.drag_anchor_view = view;
@@ -7029,24 +6703,25 @@ void state_store_selection_extend_to_offset(DocState* state, int char_offset) {
     }
 
     DomSelection* selection = sync_ensure_selection(state);
-    if (!selection || !state->selection) return;
-
-    SelectionState* sel = state->selection;
-    bool was_selecting = sel->is_selecting;
-    View* focus_view = sel->focus_view ? sel->focus_view : sel->anchor_view;
-    if (!focus_view && state->caret) focus_view = state->caret->view;
+    if (!selection) return;
+    SelectionSnapshotFields snapshot = {};
+    selection_read_snapshot_fields(state, &snapshot);
+    bool was_selecting = state->editing.pointer_selecting;
+    View* focus_view = snapshot.focus_view ? snapshot.focus_view : snapshot.anchor_view;
+    if (!focus_view) focus_view = caret_get_view(state);
     if (selection_is_text_control_view(focus_view)) {
-        int anchor_offset = sel->anchor_view == focus_view ? sel->anchor_offset : sel->focus_offset;
+        int anchor_offset = snapshot.anchor_view == focus_view ?
+            snapshot.anchor_offset : snapshot.focus_offset;
         if (!text_control_set_selection_from_byte_offsets(state, focus_view,
                 anchor_offset, char_offset, "selection_extend")) {
             log_debug("selection_extend: text-control extend rejected");
             return;
         }
-        if (state->selection) state->selection->is_selecting = was_selecting;
+        state->editing.pointer_selecting = was_selecting;
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
         selection_log_transition(state, "extend_text_control_selection",
-            sel->anchor_view, sel->anchor_offset, focus_view, char_offset);
+            snapshot.anchor_view, snapshot.anchor_offset, focus_view, char_offset);
         log_debug("selection_extend: text-control focus=%d", char_offset);
         return;
     }
@@ -7058,15 +6733,14 @@ void state_store_selection_extend_to_offset(DocState* state, int char_offset) {
         log_debug("selection_extend: extend rejected: %s", exc ? exc : "?");
         return;
     }
-    if (state->selection) state->selection->is_selecting = was_selecting;
+    state->editing.pointer_selecting = was_selecting;
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
     selection_log_transition(state, "extend_to_boundary",
-        state->selection ? state->selection->anchor_view : NULL,
-        state->selection ? state->selection->anchor_offset : 0,
+        snapshot.anchor_view, snapshot.anchor_offset,
         focus_view, char_offset);
 
-    log_debug("selection_extend: focus=%d, collapsed=%d", char_offset, sel->is_collapsed);
+    log_debug("selection_extend: focus=%d, collapsed=%d", char_offset, snapshot.collapsed);
 }
 
 void state_store_selection_extend_to_view(DocState* state, View* view, int char_offset) {
@@ -7083,23 +6757,24 @@ void state_store_selection_extend_to_view(DocState* state, View* view, int char_
     }
 
     DomSelection* selection = sync_ensure_selection(state);
-    if (!selection || !state->selection) return;
-    bool was_selecting = state->selection->is_selecting;
+    if (!selection) return;
+    SelectionSnapshotFields snapshot = {};
+    selection_read_snapshot_fields(state, &snapshot);
+    bool was_selecting = state->editing.pointer_selecting;
 
     if (selection_is_text_control_view(view)) {
-        int anchor_offset = state->selection->anchor_view == view ?
-            state->selection->anchor_offset : state->selection->focus_offset;
+        int anchor_offset = snapshot.anchor_view == view ?
+            snapshot.anchor_offset : snapshot.focus_offset;
         if (!text_control_set_selection_from_byte_offsets(state, view,
                 anchor_offset, char_offset, "selection_extend_to_view")) {
             log_debug("selection_extend_to_view: text-control extend rejected");
             return;
         }
-        if (state->selection) state->selection->is_selecting = was_selecting;
+        state->editing.pointer_selecting = was_selecting;
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
         selection_log_transition(state, "extend_text_control_selection",
-            state->selection ? state->selection->anchor_view : NULL,
-            state->selection ? state->selection->anchor_offset : 0,
+            snapshot.anchor_view, snapshot.anchor_offset,
             view, char_offset);
         log_debug("selection_extend_to_view: text-control focus_view=%p, focus_offset=%d", view, char_offset);
         return;
@@ -7113,16 +6788,15 @@ void state_store_selection_extend_to_view(DocState* state, View* view, int char_
         log_debug("selection_extend_to_view: extend rejected: %s", exc ? exc : "?");
         return;
     }
-    if (state->selection) state->selection->is_selecting = was_selecting;
+    state->editing.pointer_selecting = was_selecting;
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
     selection_log_transition(state, "extend_to_boundary",
-        state->selection ? state->selection->anchor_view : NULL,
-        state->selection ? state->selection->anchor_offset : 0,
+        snapshot.anchor_view, snapshot.anchor_offset,
         view, char_offset);
 
     log_debug("selection_extend_to_view: focus_view=%p, focus_offset=%d, anchor_view=%p, collapsed=%d",
-        view, char_offset, state->selection->anchor_view, state->selection->is_collapsed);
+        view, char_offset, snapshot.anchor_view, snapshot.collapsed);
 }
 
 void state_store_selection_set_view_offsets(DocState* state, View* view, int anchor_offset, int focus_offset) {
@@ -7139,7 +6813,7 @@ void state_store_selection_set_view_offsets(DocState* state, View* view, int anc
     }
 
     DomSelection* selection = sync_ensure_selection(state);
-    if (!selection || !state->selection) return;
+    if (!selection) return;
 
     if (selection_is_text_control_view(view)) {
         if (!text_control_set_selection_from_byte_offsets(state, view,
@@ -7147,7 +6821,7 @@ void state_store_selection_set_view_offsets(DocState* state, View* view, int anc
             log_debug("selection_set: text-control set_base_and_extent rejected");
             return;
         }
-        if (state->selection) state->selection->is_selecting = false;
+        state->editing.pointer_selecting = false;
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
         selection_log_transition(state, "set_text_control_extent", view, anchor_offset, view, focus_offset);
@@ -7164,9 +6838,7 @@ void state_store_selection_set_view_offsets(DocState* state, View* view, int anc
         log_debug("selection_set: set_base_and_extent rejected: %s", exc ? exc : "?");
         return;
     }
-    if (state->selection) {
-        state->selection->is_selecting = false;
-    }
+    state->editing.pointer_selecting = false;
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
     selection_log_transition(state, "set_base_and_extent", view, anchor_offset, view, focus_offset);
@@ -7183,11 +6855,12 @@ void state_store_selection_select_all(DocState* state) {
     }
 
     DomSelection* selection = sync_ensure_selection(state);
-    if (!selection || !state->selection || !state->selection->view) return;
+    if (!selection) return;
+    SelectionSnapshotFields snapshot = {};
+    if (!selection_read_snapshot_fields(state, &snapshot) || !snapshot.view) return;
 
-    SelectionState* sel = state->selection;
-    if (selection_is_text_control_view(sel->view)) {
-        DomElement* elem = lam::dom_require_element(sel->view);
+    if (selection_is_text_control_view(snapshot.view)) {
+        DomElement* elem = lam::dom_require_element(snapshot.view);
         tc_ensure_init(elem);
         uint32_t len = 0;
         if (elem->form && elem->form->current_value) {
@@ -7200,16 +6873,17 @@ void state_store_selection_select_all(DocState* state) {
             log_debug("selection_select_all: text-control set_base_and_extent rejected");
             return;
         }
-        if (state->selection) state->selection->is_selecting = false;
+        state->editing.pointer_selecting = false;
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
         selection_log_transition(state, "select_text_control_all",
-            sel->anchor_view, sel->anchor_offset, sel->focus_view, sel->focus_offset);
+            snapshot.anchor_view, snapshot.anchor_offset,
+            snapshot.focus_view, snapshot.focus_offset);
         log_debug("selection_select_all: text-control len=%u", len);
         return;
     }
 
-    DomNode* node = static_cast<DomNode*>(sel->view);
+    DomNode* node = static_cast<DomNode*>(snapshot.view);
     const char* exc = NULL;
     DomBoundary anchor = { node, 0 };
     DomBoundary focus = { node, 0 };
@@ -7228,31 +6902,29 @@ void state_store_selection_select_all(DocState* state) {
         log_debug("selection_select_all: rejected: %s", exc ? exc : "?");
         return;
     }
-    if (state->selection) {
-        state->selection->is_selecting = false;
-    }
-    state_store_refresh_caret_projection(state);
+    state->editing.pointer_selecting = false;
+    selection_refresh_presentation(state);
 
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
+    SelectionSnapshotFields result = {};
+    selection_read_snapshot_fields(state, &result);
     selection_log_transition(state, "select_all",
-        state->selection ? state->selection->anchor_view : NULL,
-        state->selection ? state->selection->anchor_offset : 0,
-        state->selection ? state->selection->focus_view : NULL,
-        state->selection ? state->selection->focus_offset : 0);
+        result.anchor_view, result.anchor_offset,
+        result.focus_view, result.focus_offset);
 
     log_debug("selection_select_all");
 }
 
 static void state_store_finish_selection_change(DocState* state, const char* operation) {
-    if (state->selection) state->selection->is_selecting = false;
+    state->editing.pointer_selecting = false;
     state->selection_layout_dirty = true;
     state->needs_repaint = true;
+    SelectionSnapshotFields snapshot = {};
+    selection_read_snapshot_fields(state, &snapshot);
     selection_log_transition(state, operation,
-        state->selection ? state->selection->anchor_view : NULL,
-        state->selection ? state->selection->anchor_offset : 0,
-        state->selection ? state->selection->focus_view : NULL,
-        state->selection ? state->selection->focus_offset : 0);
+        snapshot.anchor_view, snapshot.anchor_offset,
+        snapshot.focus_view, snapshot.focus_offset);
 }
 
 void state_store_selection_collapse_to_edge(DocState* state, bool to_start) {
@@ -7266,23 +6938,25 @@ void state_store_selection_collapse_to_edge(DocState* state, bool to_start) {
     }
 
     DomSelection* selection = sync_ensure_selection(state);
-    if (!selection || !state->selection) return;
+    if (!selection) return;
+    SelectionSnapshotFields snapshot = {};
+    if (!selection_read_snapshot_fields(state, &snapshot)) return;
 
-    if (selection_is_text_control_view(state->selection->view)) {
-        SelectionState* sel = state->selection;
+    if (selection_is_text_control_view(snapshot.view)) {
         int pos = to_start ?
-            (sel->anchor_offset < sel->focus_offset ? sel->anchor_offset : sel->focus_offset) :
-            (sel->anchor_offset > sel->focus_offset ? sel->anchor_offset : sel->focus_offset);
-        if (!text_control_set_selection_from_byte_offsets(state, sel->view, pos, pos,
+            (snapshot.anchor_offset < snapshot.focus_offset ? snapshot.anchor_offset : snapshot.focus_offset) :
+            (snapshot.anchor_offset > snapshot.focus_offset ? snapshot.anchor_offset : snapshot.focus_offset);
+        if (!text_control_set_selection_from_byte_offsets(state, snapshot.view, pos, pos,
                 "selection_collapse")) {
             log_debug("selection_collapse: text-control collapse rejected");
             return;
         }
-        if (state->selection) state->selection->is_selecting = false;
+        state->editing.pointer_selecting = false;
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
         selection_log_transition(state, to_start ? "collapse_text_control_to_start" : "collapse_text_control_to_end",
-            sel->anchor_view, sel->anchor_offset, sel->focus_view, sel->focus_offset);
+            snapshot.anchor_view, snapshot.anchor_offset,
+            snapshot.focus_view, snapshot.focus_offset);
         log_debug("selection_collapse: text-control to_start=%d, pos=%d", to_start, pos);
         return;
     }
@@ -7312,15 +6986,15 @@ void state_store_selection_clear(DocState* state) {
     DomSelection* selection = sync_ensure_selection(state);
     if (!selection) return;
 
-    View* caret_view = state->caret ? state->caret->view : NULL;
-    int caret_offset = state->caret ? state->caret->char_offset : 0;
+    View* caret_view = NULL;
+    int caret_offset = 0;
+    caret_get_position(state, &caret_view, &caret_offset);
     if (selection_is_text_control_view(caret_view)) {
         if (!text_control_set_selection_from_byte_offsets(state, caret_view,
                 caret_offset, caret_offset, "selection_clear")) {
             log_debug("selection_clear: text-control collapse rejected");
             return;
         }
-        if (state->selection) state->selection->is_selecting = false;
         state->editing.pointer_selecting = false;
         state->editing.drag_anchor_view = NULL;
         state->editing.drag_anchor_offset = 0;
@@ -7343,8 +7017,7 @@ void state_store_selection_clear(DocState* state) {
     } else {
         state_store_set_selection(state, NULL, NULL, &exc);
     }
-    state_store_refresh_caret_projection(state);
-    if (state->selection) state->selection->is_selecting = false;
+    selection_refresh_presentation(state);
     state->editing.pointer_selecting = false;
     state->editing.drag_anchor_view = NULL;
     state->editing.drag_anchor_offset = 0;
@@ -7362,69 +7035,74 @@ bool selection_has(DocState* state) {
         return state->dom_selection->range_count > 0 &&
             !dom_selection_is_collapsed(state->dom_selection);
     }
-    if (!state || !state->selection) return false;
-    return !state->selection->is_collapsed;
+    return false;
 }
 
 bool selection_is_pointer_range_active(DocState* state) {
-    if (!state || !state->selection) return false;
-    if (state->dom_selection && state->dom_selection->range_count > 0 &&
-        dom_selection_is_collapsed(state->dom_selection)) {
-        return false;
+    if (!state || !state->editing.pointer_selecting) return false;
+    // An ordinary text press starts pointer tracking with a collapsed boundary;
+    // only a canonical non-collapsed range suppresses the ensuing click as a drag.
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+        return state->sel.start_u16 != state->sel.end_u16;
     }
-    return state->selection->is_selecting && !state->selection->is_collapsed;
+    return state->dom_selection && state->dom_selection->range_count > 0 &&
+        !dom_selection_is_collapsed(state->dom_selection);
 }
 
 bool selection_get_pointer_anchor(DocState* state, View** out_anchor_view,
                                   int* out_anchor_offset) {
     if (out_anchor_view) *out_anchor_view = NULL;
     if (out_anchor_offset) *out_anchor_offset = 0;
-    if (!state || !state->selection || !state->selection->is_selecting) return false;
-    if (out_anchor_view) *out_anchor_view = state->selection->anchor_view;
-    if (out_anchor_offset) *out_anchor_offset = state->selection->anchor_offset;
+    if (!state || !state->editing.pointer_selecting) return false;
+    SelectionSnapshotFields snapshot = {};
+    if (!selection_read_snapshot_fields(state, &snapshot) || !snapshot.anchor_view) return false;
+    if (out_anchor_view) *out_anchor_view = snapshot.anchor_view;
+    if (out_anchor_offset) *out_anchor_offset = snapshot.anchor_offset;
     return true;
 }
-
-typedef struct SelectionSnapshotFields {
-    View* view;
-    View* anchor_view;
-    View* focus_view;
-    int anchor_offset;
-    int focus_offset;
-    int anchor_line;
-    int focus_line;
-    float start_x;
-    float start_y;
-    float end_x;
-    float end_y;
-    float iframe_offset_x;
-    float iframe_offset_y;
-    bool collapsed;
-    bool selecting;
-} SelectionSnapshotFields;
 
 static bool selection_read_snapshot_fields(DocState* state, SelectionSnapshotFields* out) {
     if (out) {
         memset(out, 0, sizeof(SelectionSnapshotFields));
         out->collapsed = true;
     }
-    if (!state || !state->selection || !out) return false;
-    SelectionState* sel = state->selection;
-    out->view = sel->view;
-    out->anchor_view = sel->anchor_view;
-    out->focus_view = sel->focus_view;
-    out->anchor_offset = sel->anchor_offset;
-    out->focus_offset = sel->focus_offset;
-    out->anchor_line = sel->anchor_line;
-    out->focus_line = sel->focus_line;
-    out->start_x = sel->start_x;
-    out->start_y = sel->start_y;
-    out->end_x = sel->end_x;
-    out->end_y = sel->end_y;
-    out->iframe_offset_x = sel->iframe_offset_x;
-    out->iframe_offset_y = sel->iframe_offset_y;
-    out->collapsed = sel->is_collapsed;
-    out->selecting = sel->is_selecting;
+    if (!state || !out) return false;
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL && state->sel.control) {
+        DomElement* control = state->sel.control;
+        tc_ensure_init(control);
+        FormControlProp* form = control->form;
+        if (!form) return false;
+        uint32_t start_byte = text_control_u16_offset_to_byte(form, state->sel.start_u16);
+        uint32_t end_byte = text_control_u16_offset_to_byte(form, state->sel.end_u16);
+        int start_offset = static_cast<int>(start_byte); // INT_CAST_OK: selection snapshots expose byte offsets as int.
+        int end_offset = static_cast<int>(end_byte); // INT_CAST_OK: selection snapshots expose byte offsets as int.
+        bool backward = state->sel.direction == DOM_SEL_DIR_BACKWARD;
+        out->view = static_cast<View*>(control);
+        out->anchor_view = out->view;
+        out->focus_view = out->view;
+        out->anchor_offset = backward ? end_offset : start_offset;
+        out->focus_offset = backward ? start_offset : end_offset;
+        out->collapsed = state->sel.start_u16 == state->sel.end_u16;
+    } else if (state->dom_selection && state->dom_selection->range_count > 0) {
+        DomBoundary anchor = dom_selection_anchor_boundary(state->dom_selection);
+        DomBoundary focus = dom_selection_focus_boundary(state->dom_selection);
+        dom_boundary_to_projection(anchor, &out->anchor_view, &out->anchor_offset);
+        dom_boundary_to_projection(focus, &out->focus_view, &out->focus_offset);
+        out->view = out->focus_view;
+        out->collapsed = dom_selection_is_collapsed(state->dom_selection);
+    } else {
+        return false;
+    }
+    if (state->selection_presentation) {
+        SelectionPresentation* presentation = state->selection_presentation;
+        out->start_x = presentation->range_start_x;
+        out->start_y = presentation->range_start_y;
+        out->end_x = presentation->range_end_x;
+        out->end_y = presentation->range_end_y;
+        out->iframe_offset_x = presentation->iframe_offset_x;
+        out->iframe_offset_y = presentation->iframe_offset_y;
+    }
+    out->selecting = state->editing.pointer_selecting;
     return true;
 }
 
@@ -7504,10 +7182,9 @@ bool selection_get_anchor_range(DocState* state, View* anchor_view,
         selection_get_range(state, out_start, out_end);
         return true;
     }
-    if (!state || !state->selection || !anchor_view || state->selection->is_collapsed ||
-        state->selection->anchor_view != anchor_view) {
-        return false;
-    }
+    SelectionSnapshotFields snapshot = {};
+    if (!anchor_view || !selection_read_snapshot_fields(state, &snapshot) ||
+        snapshot.collapsed || snapshot.anchor_view != anchor_view) return false;
     selection_get_range(state, out_start, out_end);
     return true;
 }
@@ -7565,18 +7242,20 @@ bool selection_get_extent_views(DocState* state, View** out_anchor_view,
         return (!out_anchor_view || *out_anchor_view) &&
                (!out_focus_view || *out_focus_view);
     }
-    if (!state || !state->selection || state->selection->is_collapsed) return false;
-    if (out_anchor_view) *out_anchor_view = state->selection->anchor_view;
-    if (out_focus_view) *out_focus_view = state->selection->focus_view;
-    return state->selection->anchor_view && state->selection->focus_view;
+    SelectionSnapshotFields snapshot = {};
+    if (!selection_read_snapshot_fields(state, &snapshot) || snapshot.collapsed) return false;
+    if (out_anchor_view) *out_anchor_view = snapshot.anchor_view;
+    if (out_focus_view) *out_focus_view = snapshot.focus_view;
+    return snapshot.anchor_view && snapshot.focus_view;
 }
 
 bool selection_has_projection(DocState* state) {
-    return state && state->selection != NULL;
+    SelectionSnapshotFields snapshot = {};
+    return selection_read_snapshot_fields(state, &snapshot);
 }
 
 void selection_get_range(DocState* state, int* start, int* end) {
-    if (!state || !state->selection || !start || !end) return;
+    if (!state || !start || !end) return;
 
     if (state->sel.kind == EDIT_SEL_TEXT_CONTROL && state->sel.control) {
         DomElement* control = state->sel.control;
@@ -7608,14 +7287,6 @@ void selection_get_range(DocState* state, int* start, int* end) {
         return;
     }
 
-    SelectionState* sel = state->selection;
-    if (sel->anchor_offset <= sel->focus_offset) {
-        *start = sel->anchor_offset;
-        *end = sel->focus_offset;
-    } else {
-        *start = sel->focus_offset;
-        *end = sel->anchor_offset;
-    }
 }
 
 // ============================================================================
@@ -7745,10 +7416,10 @@ static void focus_sync_text_control_state(DocState* state, View* view) {
 
     if (tc_get_active_element(state)) tc_set_active_element(state, NULL);
     if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
-        state_store_refresh_caret_projection(state);
-    } else if (state->caret && selection_is_text_control_view(state->caret->view)) {
-        state->caret->visible = false;
-        state->caret->blink_time = 0;
+        selection_refresh_presentation(state);
+    } else if (state->selection_presentation) {
+        state->selection_presentation->caret_visible = false;
+        state->selection_presentation->caret_blink_time = 0;
         state->needs_repaint = true;
     }
 }
@@ -7849,7 +7520,7 @@ static void focus_clear_internal(DocState* state, bool preserve_selection) {
         state_store_caret_clear(state);
         state_store_selection_clear(state);
     } else if (preserve_text_control_selection) {
-        state_store_refresh_caret_projection(state);
+        selection_refresh_presentation(state);
     }
 
     state->needs_repaint = true;
@@ -7982,22 +7653,6 @@ bool focus_has_current(DocState* state) {
 View* focus_get_visible(DocState* state) {
     if (!state || !state->focus || !state->focus->focus_visible) return NULL;
     return state->focus->current;
-}
-
-bool focus_within(DocState* state, View* view) {
-    if (!state || !state->focus || !view) return false;
-
-    View* focused = state->focus->current;
-    if (!focused) return false;
-
-    // Check if focused element is view or descendant
-    View* node = focused;
-    while (node) {
-        if (node == view) return true;
-        node = static_cast<View*>(node->parent);
-    }
-
-    return false;
 }
 
 // ============================================================================

@@ -122,10 +122,10 @@ static void js_doc_runtime_exit(JsDocRuntimeScope* scope) {
 static int item_to_int(Item v) {
     TypeId t = get_type_id(v);
     if (t == LMD_TYPE_INT) return (int)it2i(v);
-    if (t == LMD_TYPE_FLOAT) {
-        double* d = (double*)(v.item & 0x00FFFFFFFFFFFFFF);
-        return d ? (int)*d : 0;
-    }
+    // Float payload representation is runtime-owned; manually masking the tag
+    // produced a non-pointer for JIT-boxed offsets and crashed Range methods.
+    if (t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT || t == LMD_TYPE_FLOAT64)
+        return (int)it2d(v);
     return 0;
 }
 

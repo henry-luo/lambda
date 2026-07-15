@@ -5,7 +5,7 @@ flowchart TB
         H --> RE["render_svg_element dispatch per tag"]
         RE --> PIR["append PaintIR / DisplayList ops (record)"]
         PIR --> RP["replay into RdtVector (render_svg_to_vec_via_display_list)"]
-        RP --> BK["ThorVG or CoreGraphics pixels"]
+        RP --> BK["ThorVG pixels"]
     end
 
     subgraph OUT["SVG OUT (render_svg.cpp) opposite direction"]

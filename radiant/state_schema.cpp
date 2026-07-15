@@ -638,7 +638,7 @@ extern const uint32_t RADIANT_INVARIANT_COUNT =
 
 static int sm_derive_selection_state(DocState* state) {
     if (!state) return SEL_EMPTY;
-    if (state->selection && state->selection->is_selecting) {
+    if (state->editing.pointer_selecting) {
         return SEL_POINTER_SELECTING;
     }
     if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {

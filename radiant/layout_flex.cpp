@@ -89,30 +89,6 @@ float get_item_flex_shrink(ViewElement* item) {
     return 1;  // default
 }
 
-// Get flex-basis value for item (form controls store in FormControlProp)
-float get_item_flex_basis(ViewElement* item) {
-    if (!item) return -1;  // auto
-    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
-        return item->form->flex_basis;
-    }
-    if (has_flex_item_prop(item)) {
-        return item->fi->flex_basis;
-    }
-    return -1;  // auto
-}
-
-// Check if flex-basis is percentage for item
-bool get_item_flex_basis_is_percent(ViewElement* item) {
-    if (!item) return false;
-    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
-        return item->form->flex_basis_is_percent;
-    }
-    if (has_flex_item_prop(item)) {
-        return item->fi->flex_basis_is_percent;
-    }
-    return false;
-}
-
 // CSS Flexbox §9.7: Get the effective flex base size for free space and growth calculations.
 // For border-box items, the flex base size cannot be less than padding+border on the main axis,
 // because the content-box size cannot be negative (CSS2 §10.2). The spec works in content-box

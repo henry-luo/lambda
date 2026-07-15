@@ -67,10 +67,3 @@ extern "C" Item pn_io_http_stop_mir(Item server) {
     RetItem ri = pn_io_http_stop(server);
     return ri_to_item(ri);
 }
-
-// Stub for webdriver command (excluded with serve module)
-int cmd_webdriver(int argc, char** argv) {
-    (void)argc; (void)argv;
-    log_error("http_module_stub: webdriver command not available in this build");
-    return 1;
-}

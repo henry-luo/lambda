@@ -263,21 +263,6 @@ void webview_layer_platform_set_html(WebViewHandle* handle, const char* html) {
     }
 }
 
-void webview_layer_platform_eval_js(WebViewHandle* handle, const char* js) {
-    if (!handle || !handle->wk_view || !js) return;
-    @autoreleasepool {
-        NSString* ns_js = [NSString stringWithUTF8String:js];
-        [handle->wk_view evaluateJavaScript:ns_js completionHandler:^(id _result, NSError* error) {
-            (void)_result;
-            if (error) {
-                log_error("webview layer eval_js error: %s", error.localizedDescription.UTF8String);
-            }
-            // JS execution may have changed content
-            if (handle) handle->dirty = true;
-        }];
-    }
-}
-
 void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float pixel_ratio) {
     if (!handle || !handle->wk_view) return;
     @autoreleasepool {

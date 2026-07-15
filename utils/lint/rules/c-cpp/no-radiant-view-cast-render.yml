@@ -30,4 +30,3 @@ files:
   - "radiant/{block_context,resolve_htm_style,grid_positioning,intrinsic_sizing,cmd_layout}.cpp"
   - "radiant/{window,webview_manager,ime_win}.cpp"
   - "radiant/ime_mac.mm"
-  - "radiant/webdriver/{webdriver_actions,webdriver_locator,webdriver_server}.cpp"

@@ -1278,12 +1278,6 @@ void rdt_picture_draw_dup(RdtVector* vec, RdtPicture* pic,
     rdt_picture_draw(vec, pic, opacity, transform);
 }
 
-bool rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out) {
-    if (!pic || !out || !pic->has_transform) return false;
-    *out = pic->transform;
-    return true;
-}
-
 void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
     if (!pic || !m) return;
     pic->transform = *m;
@@ -1305,10 +1299,6 @@ void rdt_engine_init(int threads) {
 
 void rdt_engine_term(void) {
     tvg_engine_term();
-}
-
-void rdt_font_load(const char* font_path) {
-    (void)font_path;
 }
 
 void rdt_set_font_context(FontContext* ctx) {

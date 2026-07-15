@@ -338,12 +338,6 @@ void webview_layer_platform_set_html(WebViewHandle* handle, const char* html) {
     log_debug("webview_layer_linux: loaded inline HTML (%zu bytes)", strlen(html));
 }
 
-void webview_layer_platform_eval_js(WebViewHandle* handle, const char* js) {
-    if (!handle || !handle->wk_view || !js) return;
-    webkit_web_view_run_javascript(handle->wk_view, js, nullptr, nullptr, nullptr);
-    handle->dirty = true;
-}
-
 void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float pixel_ratio) {
     if (!handle || !handle->offscreen_win) return;
     handle->width       = w;

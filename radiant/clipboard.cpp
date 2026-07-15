@@ -250,10 +250,6 @@ void clipboard_store_shutdown(void) {
     clipboard_backend_inmemory_shutdown();
 }
 
-void clipboard_store_set_backend(ClipboardBackend* backend) {
-    g_store.set_backend(backend);
-}
-
 void clipboard_store_clear(void) {
     g_store.clear();
 }

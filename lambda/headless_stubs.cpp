@@ -63,18 +63,6 @@ int cmd_layout(int argc, char** argv) {
     return 1;
 }
 
-int cmd_webdriver(int argc, char** argv) {
-    (void)argc; (void)argv;
-    fprintf(stderr, "Error: webdriver command not available in headless CLI build\n");
-    return 1;
-}
-
-int run_layout(const char* html_file) {
-    (void)html_file;
-    fprintf(stderr, "Error: layout command not available in headless CLI build\n");
-    return 1;
-}
-
 int render_html_to_svg(const char* html_file, const char* svg_file,
                        int viewport_width, int viewport_height, float scale) {
     (void)html_file; (void)svg_file; (void)viewport_width; (void)viewport_height; (void)scale;

@@ -508,7 +508,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                     bool has_unsized_fr_track = false;
 
                     for (int c = col_start; c < col_end; c++) {
-                        int track_size = grid->computed_columns[c].computed_size;
+                        int track_size = (int)(*grid->computed_columns)[c].base_size; // INT_CAST_OK: legacy intrinsic width accumulator
                         if (track_size > 0) {
                             span_width += track_size;
                             if (c < col_end - 1) {
@@ -637,7 +637,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
                     int col_end   = gi->computed_grid_column_end   - 1;
                     if (col_start >= 0 && col_end > col_start && col_end <= grid->computed_column_count) {
                         for (int c = col_start; c < col_end; c++) {
-                            track_width += grid->computed_columns[c].computed_size;
+                            track_width += (*grid->computed_columns)[c].base_size;
                             if (c < col_end - 1) track_width += grid->column_gap;
                         }
                     }

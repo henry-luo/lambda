@@ -173,7 +173,14 @@ fi
 UNUSED_RAW=""
 UNUSED_SCRIPT="$ROOT/utils/lint/dead-code/run_unused_function.sh"
 if (( ! STRUCTURAL_ONLY )) && [[ -x "$UNUSED_SCRIPT" ]]; then
-  UNUSED_RAW=$("$UNUSED_SCRIPT" 2>/dev/null || true)
+  if ! bash "$ROOT/utils/lint/dead-code/test_unused_function.sh"; then
+    echo "lint: unused-function fixture failed" >&2
+    exit 1
+  fi
+  if ! UNUSED_RAW=$("$UNUSED_SCRIPT"); then
+    echo "lint: unused-function backend failed" >&2
+    exit 1
+  fi
   if [[ -n "$RULE_FILTER" && -n "$UNUSED_RAW" ]]; then
     UNUSED_RAW=$(printf '%s\n' "$UNUSED_RAW" | jq -c "select(.ruleId | test(\"$RULE_FILTER\"))" 2>/dev/null || true)
   fi

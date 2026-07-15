@@ -255,7 +255,6 @@ struct EditingSelectionSnapshot {
     EditingSelectionKind kind;
     DomSelectionDirection direction;
     uint32_t mutation_seq;
-    uint32_t projection_seq;
     bool collapsed;
     uint32_t range_count;
     DomBoundary anchor;
@@ -301,7 +300,6 @@ static EditingSelectionSnapshot editing_dispatch_selection_snapshot(DocState* st
     snapshot.kind = EDIT_SEL_NONE;
     snapshot.direction = DOM_SEL_DIR_NONE;
     snapshot.mutation_seq = state ? state->selection_mutation_seq : 0;
-    snapshot.projection_seq = state ? state->selection_projection_seq : 0;
 
     if (!state) return snapshot;
     if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
@@ -600,7 +598,6 @@ static void editing_log_write_selection(JsonWriter* w,
         jw_kv_str(w, "direction",
                   editing_log_selection_direction_name(snapshot->direction));
         jw_kv_uint(w, "mutation_seq", snapshot->mutation_seq);
-        jw_kv_uint(w, "projection_seq", snapshot->projection_seq);
         jw_kv_bool(w, "collapsed", snapshot->collapsed);
         jw_kv_uint(w, "range_count", snapshot->range_count);
         if (snapshot->kind == EDIT_SEL_TEXT_CONTROL) {
@@ -643,7 +640,6 @@ static bool editing_selection_snapshot_changed(
     return before->kind != after->kind ||
         before->direction != after->direction ||
         before->mutation_seq != after->mutation_seq ||
-        before->projection_seq != after->projection_seq ||
         before->collapsed != after->collapsed ||
         before->range_count != after->range_count ||
         before->start_u16 != after->start_u16 ||

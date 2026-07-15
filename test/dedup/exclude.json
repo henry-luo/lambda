@@ -84,11 +84,6 @@
           "end": "static int sm_derive_selection_state("
         },
         {
-          "file": "radiant/webdriver/webdriver_errors.cpp",
-          "start": "const char* webdriver_error_name(",
-          "end": "int webdriver_error_http_status("
-        },
-        {
           "file": "radiant/layout_debug.cpp",
           "start": "static const char* category_name(",
           "end": "static const char* bucket_name("
@@ -251,19 +246,6 @@
           "file": "radiant/grid_positioning.cpp",
           "start": "void align_grid_items(",
           "end": "void align_grid_item("
-        }
-      ]
-    },
-    {
-      "id": "webdriver_route_guard_prologues",
-      "modules": ["radiant"],
-      "reason": "WebDriver routes must remain separate HTTP callbacks, and their repeated lines are only calls to the already-shared session or session-element validation helpers before unrelated command bodies.",
-      "allow_within_region": true,
-      "regions": [
-        {
-          "file": "radiant/webdriver/webdriver_server.cpp",
-          "start": "static void wd_handle_element_command(",
-          "end": "WebDriverServer* webdriver_server_create("
         }
       ]
     },

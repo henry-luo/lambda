@@ -510,11 +510,6 @@ CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* nam
     return NULL;
 }
 
-void keyframe_registry_destroy(KeyframeRegistry* registry) {
-    // pool-allocated, freed when pool is destroyed
-    (void)registry;
-}
-
 // ============================================================================
 // CSS Animation Tick
 // ============================================================================

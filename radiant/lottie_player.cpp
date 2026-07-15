@@ -71,10 +71,7 @@ void LottiePlayer::finish(AnimationInstance* anim) {
         mem_free(pixels);
         pixels = NULL;
     }
-    if (surface) {
-        surface->pixels = NULL;
-        image_surface_bump_generation(surface);
-    }
+    image_surface_detach_pixels(surface);
 
     mem_free(this);
     anim->state = NULL;

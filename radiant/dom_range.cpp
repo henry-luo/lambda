@@ -44,8 +44,8 @@ extern "C" __attribute__((weak)) void state_store_refresh_editing_selection_shad
     // weak fallback for test targets without state_store
 }
 
-extern "C" void state_store_refresh_caret_projection(struct DocState* state);
-extern "C" __attribute__((weak)) void state_store_refresh_caret_projection(
+extern "C" void selection_refresh_presentation(struct DocState* state);
+extern "C" __attribute__((weak)) void selection_refresh_presentation(
         struct DocState* /*state*/) {
     // weak fallback for test targets without state_store
 }
@@ -650,7 +650,7 @@ static void sync_anchor_focus(DomSelection* s, bool forward) {
     if (s->range_count == 0) {
         s->direction = DOM_SEL_DIR_NONE;
         notify_selection_changed(s);
-        if (s->state) state_store_refresh_caret_projection(s->state);
+        if (s->state) selection_refresh_presentation(s->state);
         return;
     }
     DomRange* r = s->ranges[0];
@@ -659,7 +659,7 @@ static void sync_anchor_focus(DomSelection* s, bool forward) {
     else s->direction = forward ? DOM_SEL_DIR_FORWARD : DOM_SEL_DIR_BACKWARD;
 
     notify_selection_changed(s);
-    if (s->state) state_store_refresh_caret_projection(s->state);
+    if (s->state) selection_refresh_presentation(s->state);
 }
 
 void dom_selection_add_range(DomSelection* s, DomRange* range) {
@@ -710,8 +710,6 @@ void dom_selection_remove_all_ranges(DomSelection* s) {
     sync_anchor_focus(s, /*forward=*/true);
 }
 
-void dom_selection_empty(DomSelection* s) { dom_selection_remove_all_ranges(s); }
-
 // Helper: ensure ranges[0] exists, creating a fresh one if not.
 static DomRange* ensure_primary_range(DomSelection* s) {
     if (s->range_count > 0) return s->ranges[0];
@@ -744,34 +742,6 @@ bool dom_selection_collapse(DomSelection* s, DomNode* node, uint32_t offset, con
     dom_range_invalidate_layout(r);
     sync_anchor_focus(s, /*forward=*/true);
     return true;
-}
-
-bool dom_selection_set_position(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception) {
-    return dom_selection_collapse(s, node, offset, out_exception);
-}
-
-void dom_selection_collapse_to_start(DomSelection* s, const char** out_exception) {
-    if (!s || s->range_count == 0) { set_exception(out_exception, "InvalidStateError"); return; }
-    // Per WHATWG: replace selection's range with a *new* range collapsed at
-    // the original range's start; do not mutate the user-visible old range.
-    DomBoundary start = s->ranges[0]->start;
-    dom_selection_remove_all_ranges(s);
-    DomRange* r = ensure_primary_range(s);
-    if (!r) return;
-    r->start = r->end = start;
-    dom_range_invalidate_layout(r);
-    sync_anchor_focus(s, true);
-}
-
-void dom_selection_collapse_to_end(DomSelection* s, const char** out_exception) {
-    if (!s || s->range_count == 0) { set_exception(out_exception, "InvalidStateError"); return; }
-    DomBoundary end = s->ranges[0]->end;
-    dom_selection_remove_all_ranges(s);
-    DomRange* r = ensure_primary_range(s);
-    if (!r) return;
-    r->start = r->end = end;
-    dom_range_invalidate_layout(r);
-    sync_anchor_focus(s, true);
 }
 
 bool dom_selection_extend(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception) {
@@ -1675,16 +1645,6 @@ bool dom_range_surround_contents(DomRange* r, DomNode* node, const char** out_ex
         r->layout_valid = false;
     }
     return true;
-}
-
-void dom_selection_delete_from_document(DomSelection* s) {
-    if (!s) return;
-    for (uint32_t i = 0; i < s->range_count; i++) {
-        if (s->ranges[i]) {
-            const char* exc = nullptr;
-            dom_range_delete_contents(s->ranges[i], &exc);
-        }
-    }
 }
 
 // ============================================================================

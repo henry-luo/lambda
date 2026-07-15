@@ -1,0 +1,10 @@
+# The exported-dead-function scan is C/C++ only. Keeping this configuration
+# separate prevents unrelated custom-language grammars from disabling the gate.
+languageGlobs:
+  cpp:
+    - "*.c"
+    - "*.h"
+    - "*.hpp"
+    - "*.mm"
+    - "*.cc"
+    - "*.cxx"

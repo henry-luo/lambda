@@ -215,7 +215,6 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
 void webview_layer_platform_destroy(WebViewHandle* handle);
 void webview_layer_platform_navigate(WebViewHandle* handle, const char* url);
 void webview_layer_platform_set_html(WebViewHandle* handle, const char* html);
-void webview_layer_platform_eval_js(WebViewHandle* handle, const char* js);
 void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float pixel_ratio);
 bool webview_layer_platform_snapshot(WebViewHandle* handle, struct ImageSurface* surface);
 bool webview_layer_platform_is_dirty(WebViewHandle* handle);
@@ -249,7 +248,6 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
 void reflow_html_doc(DomDocument* doc);
 void update_window_title(const char* title);
 void repaint_window(void);
-int run_layout(const char* html_file);
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                    const char* script_source);
 int view_lambda_script_source_in_window_with_events(const char* script_name,
@@ -257,8 +255,6 @@ int view_lambda_script_source_in_window_with_events(const char* script_name,
                                                     const char* event_file,
                                                     bool headless);
 int view_doc_in_window(const char* doc_file);
-int window_main(int argc, char* argv[]);
-
 int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void ui_context_cleanup(UiContext* uicon);

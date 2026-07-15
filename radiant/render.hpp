@@ -266,7 +266,6 @@ Pool*       rdt_picture_get_pool(RdtPicture* pic);
 const char* rdt_picture_get_source_path(RdtPicture* pic);
 void        rdt_picture_get_size(RdtPicture* pic, float* w, float* h);
 void        rdt_picture_set_size(RdtPicture* pic, float w, float h);
-bool        rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out);
 void        rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m);
 void        rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
                              uint8_t opacity, const RdtMatrix* transform);
@@ -280,7 +279,6 @@ void        rdt_picture_free(RdtPicture* pic);
 
 void rdt_engine_init(int threads);
 void rdt_engine_term(void);
-void rdt_font_load(const char* font_path);
 
 // Set the default FontContext used for SVG text rendering inside pictures
 // loaded from file/data via rdt_picture_load*.  Must be called once after
@@ -2260,23 +2258,8 @@ inline void radiant_retain_marker_text_content(MarkerProp* marker, lam::PoolPtr<
     field.set(text_content);
 }
 
-inline void radiant_retain_image_source_path(ImageSurface* surface, lam::PoolPtr<char> source_path) {
-    lam::PersistentFieldRef<char, lam::PoolDomain> field(surface->source_path);
-    field.set(source_path);
-}
-
 inline void radiant_take_image_source_path(ImageSurface* surface, lam::SessionPtr<char>& source_path) {
     surface->source_path = lam::detach_session_buffer(source_path);
-}
-
-inline void radiant_clear_image_source_path(ImageSurface* surface) {
-    surface->source_path = nullptr;
-}
-
-inline void radiant_retain_image_source_data(ImageSurface* surface, lam::PoolPtr<unsigned char> source_data, size_t len) {
-    lam::PersistentFieldRef<unsigned char, lam::PoolDomain> field(surface->source_data);
-    field.set(source_data);
-    surface->source_data_len = len;
 }
 
 inline void radiant_take_image_source_data(ImageSurface* surface, lam::SessionPtr<unsigned char>& source_data, size_t len) {
@@ -3201,12 +3184,6 @@ void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope);
 // ===== render_composite.hpp =====
 uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode);
 
-bool render_composite_copy_backdrop(ImageSurface* surface, uint32_t* backdrop,
-                                    int x0, int y0, int width, int height,
-                                    bool clear_surface);
-void render_composite_apply_blend(ImageSurface* surface, const uint32_t* backdrop,
-                                  int x0, int y0, int width, int height,
-                                  CssEnum blend_mode);
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,
                                          int x0, int y0, int width, int height);
 void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,

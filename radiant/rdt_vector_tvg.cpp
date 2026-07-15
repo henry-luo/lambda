@@ -175,6 +175,13 @@ static bool path_ensure_capacity(RdtPath* p) {
     return false;
 }
 
+static RdtPath::Entry* path_append_entry(RdtPath* path, RdtPath::Cmd command) {
+    if (!path_ensure_capacity(path)) return nullptr;
+    RdtPath::Entry* entry = &path->entries[path->count++];
+    entry->cmd = command;
+    return entry;
+}
+
 static uint64_t rdt_picture_data_hash(const char* data, int size, const char* mime_type) {
     uint64_t h = 1469598103934665603ULL;
     const unsigned char* bytes = (const unsigned char*)data;
@@ -1175,49 +1182,42 @@ RdtPath* rdt_path_new(void) {
 }
 
 void rdt_path_move_to(RdtPath* p, float x, float y) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_MOVE;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_MOVE);
+    if (!e) return;
     e->args[0] = x; e->args[1] = y;
 }
 
 void rdt_path_line_to(RdtPath* p, float x, float y) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_LINE;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_LINE);
+    if (!e) return;
     e->args[0] = x; e->args[1] = y;
 }
 
 void rdt_path_cubic_to(RdtPath* p, float cx1, float cy1,
                        float cx2, float cy2, float x, float y) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_CUBIC;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_CUBIC);
+    if (!e) return;
     e->args[0] = cx1; e->args[1] = cy1;
     e->args[2] = cx2; e->args[3] = cy2;
     e->args[4] = x; e->args[5] = y;
 }
 
 void rdt_path_close(RdtPath* p) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_CLOSE;
+    path_append_entry(p, RdtPath::CMD_CLOSE);
 }
 
 void rdt_path_add_rect(RdtPath* p, float x, float y, float w, float h,
                        float rx, float ry) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_RECT;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_RECT);
+    if (!e) return;
     e->args[0] = x; e->args[1] = y;
     e->args[2] = w; e->args[3] = h;
     e->args[4] = rx; e->args[5] = ry;
 }
 
 void rdt_path_add_circle(RdtPath* p, float cx, float cy, float rx, float ry) {
-    if (!path_ensure_capacity(p)) return;
-    RdtPath::Entry* e = &p->entries[p->count++];
-    e->cmd = RdtPath::CMD_CIRCLE;
+    RdtPath::Entry* e = path_append_entry(p, RdtPath::CMD_CIRCLE);
+    if (!e) return;
     e->args[0] = cx; e->args[1] = cy;
     e->args[2] = rx; e->args[3] = ry;
 }
@@ -2248,22 +2248,6 @@ RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
     return pic;
 }
 
-bool rdt_picture_get_transform(RdtPicture* pic, RdtMatrix* out) {
-    if (!pic || !out) return false;
-    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
-        if (!pic->has_transform) return false;
-        *out = pic->transform;
-        return true;
-    }
-    if (!pic->paint) return false;
-    Tvg_Matrix m;
-    if (tvg_paint_get_transform(pic->paint, &m) != TVG_RESULT_SUCCESS) return false;
-    out->e11 = m.e11; out->e12 = m.e12; out->e13 = m.e13;
-    out->e21 = m.e21; out->e22 = m.e22; out->e23 = m.e23;
-    out->e31 = m.e31; out->e32 = m.e32; out->e33 = m.e33;
-    return true;
-}
-
 void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
     if (!pic || !m) return;
     if (pic->kind == RdtPicture::KIND_SVG_DOM) {
@@ -2292,12 +2276,6 @@ void rdt_engine_term(void) {
     paint_cache_clear_all();
     picture_cache_clear_all();
     tvg_engine_term();
-}
-
-void rdt_font_load(const char* font_path) {
-    if (font_path) {
-        tvg_font_load(font_path);
-    }
 }
 
 void rdt_set_font_context(struct FontContext* ctx) {
