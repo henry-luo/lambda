@@ -135,6 +135,13 @@ void jm_opcode_hist_set_enabled(int enabled);
 void jm_opcode_hist_reset(void);
 void jm_opcode_hist_dump(MIR_context_t ctx, const char* label);
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
+void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
+    bool item_return, MIR_reg_t runtime_reg);
+void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name);
+int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value);
+void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var);
+void jm_root_live_scope_vars(JsMirTranspiler* mt);
+void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg);
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
 MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref);
 MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_reg_t value);

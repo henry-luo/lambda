@@ -8,6 +8,7 @@
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
+#include "../lib/side_stack.h"
 #include "../lib/utf.h"
 #include "../lib/str.h"
 // str.h included via view.hpp
@@ -31,6 +32,7 @@
 // only need the two-string builder for the paste/drop dispatch path.
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
+extern "C" Context* _lambda_rt;
 extern "C" void* js_dom_rich_history_capture_before(
     DocState* state,
     const EditingSurface* surface,
@@ -2038,13 +2040,21 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 Runtime* rt = doc ? doc->lambda_runtime : nullptr;
                                 EvalContext* saved_context = context;
                                 Context* saved_input_context = input_context;
+                                Context* saved_lambda_rt = _lambda_rt;
                                 if (rt && rt->heap) {
                                     handler_ctx.heap = rt->heap;
                                     handler_ctx.name_pool = rt->name_pool;
                                     handler_ctx.pool = rt->reuse_pool ?
                                         rt->reuse_pool : rt->heap->pool;
                                     handler_ctx.type_info = type_info;
+                                    // Retained handlers outlive Runner's stack context; bind a
+                                    // live side stack before generated code reads `_lambda_rt`.
+                                    if (!lambda_side_stack_bind((Context*)&handler_ctx)) {
+                                        log_error("lambda event handler: failed to bind side stack");
+                                        return true;
+                                    }
                                     context = &handler_ctx;
+                                    _lambda_rt = (Context*)&handler_ctx;
                                 }
                                 // Phase 5: Set ui_mode + arena so retransformed body functions
                                 // allocate fat DomElements/DomTexts on the result arena.
@@ -2136,6 +2146,7 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 // restore previous context
                                 context = saved_context;
                                 input_context = saved_input_context;
+                                _lambda_rt = saved_lambda_rt;
 
                                 return true;
                             }
@@ -4726,8 +4737,6 @@ typedef struct {
 // a later turn — a template literal in that handler would dereference a
 // dangling `_lambda_rt->pool`. The JS context scope below must point it at the
 // same handler_ctx it installs as `context`.
-extern "C" Context* _lambda_rt;
-
 static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
     s->tmp_type_list = nullptr;

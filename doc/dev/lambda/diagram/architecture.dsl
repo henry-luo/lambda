@@ -12,7 +12,7 @@ workspace "Lambda Runtime" "Core language runtime of Lambda Script" {
       core = container "Core runtime engine" "Compiles Lambda to MIR and executes it." "lambda/ (core)" {
         frontend = component "Front-end" "Tree-sitter parse, typed AST build, build-time type inference." "parse.c, build_ast.cpp, ast.hpp"
         c2mir = component "C transpiler (legacy)" "AST to C source text, then c2mir to MIR. ifdef-gated." "transpile.cpp, transpile-call.cpp, lambda-embed.h"
-        mirdirect = component "MIR Direct transpiler" "AST lowered straight to MIR IR; inline boxing; GC-root frames." "transpile-mir.cpp"
+        mirdirect = component "MIR Direct transpiler" "AST lowered straight to MIR IR; inline boxing; root/number side frames." "transpile-mir.cpp"
         jit = component "JIT integration" "Import resolution, MIR_link and MIR_gen, debug table." "mir.c"
         valuemodel = component "Value and type model" "Tagged Item, containers, shapes, static Type family." "lambda-data.hpp, lambda.h, lambda.hpp"
         memgc = component "Memory and GC" "Non-moving mark-sweep heap, nurseries, name and shape pools." "lib/gc, lambda-mem.cpp, name_pool, shape_pool"
@@ -44,12 +44,12 @@ workspace "Lambda Runtime" "Core language runtime of Lambda Script" {
     mirdirect -> jit "MIR module"
     c2mir -> jit "MIR module"
     mirdirect -> valuemodel "emits boxing of Items"
-    mirdirect -> memgc "emits GC root frames"
+    mirdirect -> memgc "emits execution side frames"
     jit -> builtins "resolves fn_* imports"
     builtins -> valuemodel "operates on Items"
     builtins -> numstr "numeric, string, vector ops"
     builtins -> errors "raises and propagates"
-    valuemodel -> memgc "heap and nursery allocation"
+    valuemodel -> memgc "heap and side-stack allocation"
     markapi -> valuemodel "constructs containers"
     proc -> builtins "IO and mutation builtins"
   }

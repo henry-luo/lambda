@@ -23,7 +23,7 @@
   }
   <html flags: ['hover', 'active'], scroll: {
       y: 72,
-      max_y: 3763.1435546875
+      max_y: 3759.84375
     }
     <body index: 2, flags: ['hover', 'active']
       <div index: 27, flags: ['hover', 'active']

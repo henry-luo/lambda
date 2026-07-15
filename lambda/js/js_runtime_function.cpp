@@ -3,10 +3,59 @@
  */
 #include "js_runtime_internal.hpp"
 #include "../../lib/memtrack.h"
+#include "../../lib/gc/gc_heap.h"
+
+extern __thread EvalContext* context;
+extern void heap_register_gc_root(uint64_t* slot);
 
 // =============================================================================
 // Function object wrappers
 // =============================================================================
+
+extern "C" JsFunction* js_alloc_gc_function_object(void) {
+    JsFunction* fn = (JsFunction*)heap_calloc(sizeof(JsFunction), LMD_TYPE_FUNC);
+    if (!fn) return NULL;
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
+    return fn;
+}
+
+extern "C" void js_function_root_item_if_needed(void* function, Item* slot) {
+    JsFunction* fn = (JsFunction*)function;
+    if (!fn || !slot) return;
+    if (context && context->heap && context->heap->gc &&
+        gc_is_managed(context->heap->gc, fn)) return;
+    heap_register_gc_root(&slot->item);
+}
+
+extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
+    JsFunction* fn = (JsFunction*)data;
+    if (!fn || fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return 0;
+
+    // A GC-owned function is the reachability owner for its closure env and
+    // bound argument vectors; tracing those edges replaces permanent root ranges.
+    if (fn->env) {
+        gc_mark_object_ptr(gc, fn->env);
+        for (int i = 0; i < fn->env_size; i++) gc_mark_item(gc, fn->env[i].item);
+    }
+    gc_mark_item(gc, fn->prototype.item);
+    gc_mark_item(gc, fn->bound_this.item);
+    if (fn->bound_args) {
+        gc_mark_object_ptr(gc, fn->bound_args);
+        for (int i = 0; i < fn->bound_argc; i++) gc_mark_item(gc, fn->bound_args[i].item);
+    }
+    gc_mark_object_ptr(gc, fn->name);
+    gc_mark_item(gc, fn->properties_map.item);
+    gc_mark_item(gc, fn->home_global.item);
+    gc_mark_object_ptr(gc, fn->source_text);
+    if (fn->with_env) {
+        gc_mark_object_ptr(gc, fn->with_env);
+        for (int i = 0; i < fn->with_env_depth; i++) gc_mark_item(gc, fn->with_env[i].item);
+    }
+    gc_mark_object_ptr(gc, fn->vm_stack_filename);
+    gc_mark_object_ptr(gc, fn->vm_stack_source);
+    return 1;
+}
 
 // Cache: func_ptr → JsFunction*  (ensures same MIR function → same wrapper → same .prototype)
 static const int JS_FUNC_CACHE_SIZE = 512;
@@ -137,6 +186,7 @@ static void js_function_capture_with_env(JsFunction* fn) {
     int depth = 0;
     Item* stack = js_with_capture_stack(&depth);
     if (stack && depth > 0) {
+        js_env_rehome_scalars(stack);
         fn->with_env = stack;
         fn->with_env_depth = depth;
     }
@@ -168,6 +218,7 @@ extern "C" void js_function_set_prototype(Item fn_item, Item proto) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     JsFunction* jsfn = (JsFunction*)fn_item.function;
     jsfn->prototype = proto;
+    js_function_root_item_if_needed(jsfn, &jsfn->prototype);
 }
 
 extern "C" Item js_new_function(void* func_ptr, int param_count) {
@@ -182,9 +233,12 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     JsFunction* cached = (has_with_env || suppress_cache) ? NULL : js_func_cache_lookup(func_ptr);
     if (cached) return (Item){.function = (Function*)cached};
 
-    // Pool-allocate: JS functions are module-lifetime objects that must not be
-    // GC-collected (they live in pool-allocated env arrays unreachable from GC roots).
-    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    // Only cache-addressable compiled wrappers are module-lifetime. A wrapper
+    // carrying `with` state or cache-suppressed identity must own traced edges.
+    JsFunction* fn = (has_with_env || suppress_cache)
+        ? js_alloc_gc_function_object()
+        : (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    if (!fn) return ItemError;
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
@@ -194,7 +248,7 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars; // bind to creating module's vars
     fn->home_global = js_get_global_this();
-    heap_register_gc_root(&fn->home_global.item);
+    js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
     if (!has_with_env && !suppress_cache) js_func_cache_insert(func_ptr, fn);
     return (Item){.function = (Function*)fn};
@@ -205,8 +259,10 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
         log_error("js_new_method_function: null func_ptr! param_count=%d", param_count);
         return ItemNull;
     }
-    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-    fn->type_id = LMD_TYPE_FUNC;
+    // Method wrappers are not in the func_ptr identity cache, so ordinary GC
+    // ownership avoids retaining every dynamically materialized method.
+    JsFunction* fn = js_alloc_gc_function_object();
+    if (!fn) return ItemError;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
     fn->formal_length = -1;
@@ -215,17 +271,15 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars;
     fn->home_global = js_get_global_this();
-    heap_register_gc_root(&fn->home_global.item);
+    js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
     return (Item){.function = (Function*)fn};
 }
 
 // Create a closure (function with captured environment)
 extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size) {
-    // Pool-allocate: closures stored in env arrays are unreachable from GC roots
-    // (env is pool-allocated, stack scan can't trace through pool to find them).
-    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-    fn->type_id = LMD_TYPE_FUNC;
+    JsFunction* fn = js_alloc_gc_function_object();
+    if (!fn) return ItemError;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
     fn->formal_length = -1; // -1 = use param_count for .length
@@ -234,7 +288,7 @@ extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int e
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars; // bind to creating module's vars
     fn->home_global = js_get_global_this();
-    heap_register_gc_root(&fn->home_global.item);
+    js_env_rehome_scalars(env);
     js_function_capture_with_env(fn);
     return (Item){.function = (Function*)fn};
 }
@@ -246,12 +300,47 @@ extern "C" void js_set_formal_length(Item fn_item, int length) {
     fn->formal_length = (int16_t)length;
 }
 
-// Allocate closure environment (array of Item on the pool)
-// Register as GC root range so the collector can trace objects held in env slots.
+// Allocate a traced raw Item environment. Its owning closure/function keeps the
+// allocation live; the GC header supplies the exact slot count to the tracer.
 extern "C" Item* js_alloc_env(int count) {
-    Item* env = (Item*)pool_calloc(js_input->pool, count * sizeof(Item));
-    heap_register_gc_root_range((uint64_t*)env, count);
-    return env;
+    if (count <= 0) return NULL;
+    return (Item*)heap_calloc_js_env((size_t)count * sizeof(Item));
+}
+
+static bool js_env_slot_is_side_number(Item item) {
+    if (!context || !context->side_number_base || !context->side_number_top) return false;
+    uint8_t tag = (uint8_t)(item.item >> 56);
+    if (item.item & ITEM_DBL_MASK) return false;
+
+    uintptr_t payload = item.item & ~ITEM_HIGH_BYTE_MASK;
+    if (tag == LMD_TYPE_INT64) {
+        if (item.is_inline_int64()) return false;
+    } else if (tag == LMD_TYPE_FLOAT || tag == LMD_TYPE_FLOAT64) {
+        if (payload <= 1) return false;
+    } else if (tag != LMD_TYPE_DTIME) {
+        return false;
+    }
+
+    uintptr_t base = (uintptr_t)context->side_number_base;
+    uintptr_t top = (uintptr_t)context->side_number_top;
+    return payload >= base && payload < top &&
+        (payload - base) % sizeof(uint64_t) == 0;
+}
+
+extern "C" void js_env_rehome_scalars(Item* env) {
+    if (!env || !context || !context->heap || !context->heap->gc ||
+            !gc_is_managed(context->heap->gc, env)) return;
+    gc_header_t* header = gc_get_header(env);
+    if (header->type_tag != GC_TYPE_JS_ENV || header->alloc_size == 0) return;
+    int64_t count = (int64_t)(header->alloc_size / (2 * sizeof(Item)));
+    // Generator environments mix boxed Items with raw state/spill words. Only
+    // tagged pointers into the active number stack are valid scalar Items;
+    // decoding raw words as Items can dereference small state values as pointers.
+    for (int64_t i = 0; i < count; i++) {
+        if (js_env_slot_is_side_number(env[i])) {
+            owned_item_slot_store(env, count, i, env[i]);
+        }
+    }
 }
 
 // v20: Mark a function as a generator (generator prototype has no constructor)

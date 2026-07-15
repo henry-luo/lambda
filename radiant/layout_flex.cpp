@@ -1502,11 +1502,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
 
         if (total_line_main > 0) {
+            // An indefinite column's used auto height comes from its laid-out
+            // items; the intrinsic pre-pass may overestimate replaced controls.
             float used_line_main = total_line_main;
-            if (flex_layout->main_axis_size > used_line_main &&
-                flex_layout->main_axis_size < 100000000.0f) {
-                used_line_main = flex_layout->main_axis_size;
-            }
             if (!has_explicit_height) {
                 log_debug("%s Phase 7: (Column) Updating main_axis_size from %.1f to %.1f (auto-height)", container->source_loc(),
                          flex_layout->main_axis_size, used_line_main);

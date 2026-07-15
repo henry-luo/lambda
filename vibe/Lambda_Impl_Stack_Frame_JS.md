@@ -1,8 +1,54 @@
 # Lambda Stack Frame — Implementation Plan, Phase 2 (JS)
 
-**Status:** draft v1 — starts after phase 1 stage 3 has soaked
+**Status:** IMPLEMENTED — J0–J4 complete; final gate snapshot below
 **Date:** 2026-07-15
 **Design:** `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20). **Phase 1:** `vibe/Lambda_Impl_Stack_Frame.md` (Lambda MIR-Direct + shared runtime). This plan brings the JS transpiler and JS runtime onto the same architecture.
+
+---
+
+## 0. Completion record (2026-07-15)
+
+All implementation stages in this document are complete. The implementation is
+default-on; there is no legacy JS root-frame mode to preserve behind
+`JS_SIDE_STACK_ROOTS`.
+
+- **J0 census:** `lambda/js/` has 159 `js_alloc_env` consumers. Generator and
+  async state are Item arrays owned by generator/async runtime records; promise
+  reactions are `JsFunction` closures. The remaining explicit JS root
+  registrations are session/module singletons, fixed-capacity queues/tables,
+  or C-helper temporary roots with paired unregister calls. No closure env is a
+  registered root range. The call-lowering census found 1,290 JS helper-call
+  emissions and 16 direct shared `fn_*` bridge emissions, so changing every JS
+  prototype to a two-result ABI would have been disproportionate churn.
+- **J1 precise roots:** every generated JS main/function/generator/async state
+  machine now has one checked side-stack prologue and one epilogue. Returns are
+  funneled through that epilogue; heap-capable locals and raw env/args pointers
+  receive static root slots, updated on assignment and before helper calls.
+- **J2 env ownership:** `js_alloc_env` allocates `GC_TYPE_JS_ENV`; the collector
+  traces its Item half precisely. Escaping closures and bound functions are
+  GC-owned `JsFunction` objects whose trace hook owns envs, bound arguments,
+  `with` captures, properties, prototypes, names, source metadata, and globals.
+  Generator maps trace their envs; the fixed async-context table roots suspended
+  env pointers without adding a range per environment. The old permanent env
+  root-range registration and captured-`with` root shim are gone.
+- **J3 number lifetime:** JS frames save and restore `side_number_top`. An Item
+  return is reduced to the shared scalar lane before restore and rebuilt in the
+  caller extent afterward; this gives the SF14 lifetime without prototype or
+  TLS-slot churn. JS envs allocate one raw scalar-tail slot per Item and re-home
+  captured/write-back/suspended wide values before epilogue restore. Thrown wide
+  scalars move to traced heap storage because `js_exception_value` has global
+  lifetime. Shared container copy-in/copy-out remains unchanged.
+- **J4 closure:** JS uses the shared OS5 reservations (16 MiB roots, 64 MiB
+  numbers). They are per-context virtual-address budgets, not per-language
+  committed allocations; splitting a smaller JS reservation would add no RSS
+  benefit because Lambda and JS share one context. `LAMBDA_MIR_LOG_FRAME_SLOTS`
+  now reports JS root counts, number-watermark use, and owned-env count.
+
+Permanent regression: `test/js/regression_side_stack_frame_gc.js` covers a
+precisely rooted object local plus out-of-band double return, closure capture and
+write-back, generator suspension, async suspension, forced GC, and exception
+escape. The debug executable is ASan-instrumented; a 2,000-closure forced-GC
+stress run completed without an ASan error.
 
 ---
 
@@ -21,7 +67,7 @@ After phase 1, JS code runs **correctly but on legacy footing**: its numbers hom
 3. **Frame-scoped numbers** — long-running JS (servers, the event loop) stops accumulating boxed numerics per run; each callback invocation reclaims at return.
 4. Retirement of the now-unused heap `JitGcRootFrame` machinery and completion of the two-transpiler symmetry the unified-AST effort assumes.
 
-**Scope note (small by design):** JS's wide-scalar traffic is only out-of-band doubles plus polyglot int64/DateTime — JS numbers are inline doubles (SF18) and BigInt is `integer`/decimal (OS1). And JS containers are Lambda containers, so **SF15/SF16 re-homing is already live for JS** the moment phase 1 stage 3 lands (the `fn_*`/container helpers are shared). Phase 2's re-homing surface is just: returns, env tails, and the exception slot.
+**Scope note (small by design):** JS's wide-scalar traffic is only out-of-band doubles plus polyglot int64/DateTime — JS numbers are inline doubles (SF18) and BigInt is `integer`/decimal (OS1). JS containers are Lambda containers, so SF15/SF16 re-homing reaches JS through the shared `fn_*`/container helpers — **except JS arrays**, whose props map still lives as a raw `Map*` in `extra` and collides with the tail-count meaning (SF15-J). That migration is its own prerequisite plan: `vibe/Lambda_Impl_Stack_Frame_JS2.md` — **J3d must not ship before its JP3 lands**. Phase 2's own re-homing surface is: returns, env tails, and the exception slot.
 
 **Out of scope (phase 3+):** broad C-helper migration to the RAII guard; conservative-scan retirement (needs that migration); js_args_stack unification into the side-stack family (works fine as-is; revisit only if profiling says so).
 
@@ -58,7 +104,7 @@ After phase 1, JS code runs **correctly but on legacy footing**: its numbers hom
 - **J3b. Env tails** (SF18): capture and write-back of wide scalars target the env's own tail. Per J0b, this also covers generator/async suspended state if it is env-resident.
 - **J3c. Exception slot**: a thrown wide scalar (rare — out-of-band double) re-homes into the base-frame extent when written to `js_exception_value` (globals-row treatment); alternatively wrap per the error=map rule. Pick during implementation; either is a one-liner at the throw helper.
 - **J3d. Frame number watermarks on** for JS frames; JS event-loop callbacks now reclaim numbers at every return.
-- Container copy-in/copy-out: **nothing to do** — shared helpers, live since phase 1 stage 3.
+- Container copy-in/copy-out: shared helpers, live since phase 1 stage 3 — **but J3d requires the JS-array `extra` migration (SF15-J) complete through JP3** (`vibe/Lambda_Impl_Stack_Frame_JS2.md`): until then a props-bearing JS array receiving a wide scalar corrupts/misreads its companion `Map*`.
 - Gate additions: **long-running event-loop soak** (server workload — steady-state RSS, numbers reclaimed per tick); node/js baselines; polyglot int64 round-trip tests through the J0c bridges.
 
 ### Stage J4 — Cleanups and closure

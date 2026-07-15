@@ -58,7 +58,7 @@ The set is organized in five parts. Read JS_01–JS_04 first for the engine; the
 |---|---|
 | [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md) | Entry points, `JsMirTranspiler`, the 14-step phase model, interpreter-vs-JIT selection, MIR import resolution, CLI/batch dispatch. |
 | [JS_02 — Parsing, AST & Front-End Validation](JS_02_Parsing_AST.md) | Tree-sitter integration, the `JsAstNode` model, lexical scope, the six-phase early-error validator, strict-mode detection. |
-| [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) | The tagged `Item`, JS↔`TypeId` mapping, undefined/null/TDZ/symbol/BigInt encodings, GC heap & nursery, the call-argument stack, module-variable storage, `JsRuntimeState`. |
+| [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) | The tagged `Item`, JS↔`TypeId` mapping, undefined/null/TDZ/symbol/BigInt encodings, GC ownership, execution side stacks, closure environments, call arguments, module-variable storage, `JsRuntimeState`. |
 | [JS_04 — MIR Lowering, Code Generation & Exceptions](JS_04_MIR_Lowering.md) | Boxed-Item-by-default emission with native fast paths, boxing/unboxing, condition `_raw` facades, constant folding, call emission, the exception model, `eval`/`Function`. |
 
 ### Part II — Language semantics

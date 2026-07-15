@@ -1,6 +1,6 @@
 # Lambda Runtime — The MIR Direct Transpiler & JIT
 
-> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the default code-generation backend: how the typed AST is lowered **directly to MIR IR** (no intermediate C text), how values are kept native or boxed under MIR's immutable-register constraint, the function calling convention and parameter-type inference, the thread-local JIT GC-root frame, and the `mir.c` JIT integration that links and generates native code. The legacy C-text backend is covered separately in [LR_06 — The C Transpiler](LR_06_C_Transpiler.md).
+> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the default code-generation backend: how the typed AST is lowered **directly to MIR IR** (no intermediate C text), how values are kept native or boxed under MIR's immutable-register constraint, the function calling convention and parameter-type inference, the root/number execution side frames, and the `mir.c` JIT integration that links and generates native code. The legacy C-text backend is covered separately in [LR_06 — The C Transpiler](LR_06_C_Transpiler.md).
 >
 > **Primary sources:** `lambda/transpile-mir.cpp` (the `MirTranspiler`, all node lowerings, boxing, rooting, inference), `lambda/mir.c` (import resolution, `jit_init`/`jit_gen_func`, BSS root registration, debug table), `lambda/transpile_shared.cpp` (naming/wrapper helpers shared with C2MIR), `lambda/lambda.h` (the runtime C-API the generated code calls).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names. This is the most workaround-dense area of the runtime; the Known Issues section is correspondingly long and is part of the design record, not an afterthought.
@@ -53,7 +53,7 @@ Unboxing is the mirror: `emit_unbox` (`:1114`) emits `it2i`/`it2d`/`it2b`/`it2s`
 
 ## 5. Functions, calls, and parameter inference
 
-A user function is built by `transpile_func_def` (`:10381`): it creates the MIR function, loads the per-module `consts`/`type_list`/`gc` handles from BSS into pinned registers (`:10592`), brackets the body with a JIT-root frame (§6), sets up the parameter scope, and handles closure environments (`env_reg`), methods (`self_reg`), proc multi-value returns, the native return type, and tail-call optimization.
+A user function is built by `transpile_func_def`: it creates the MIR function, loads the per-module `consts`/`type_list`/`gc` handles from BSS into pinned registers, brackets the body with a root/number side frame (§6), sets up the parameter scope, and handles closure environments (`env_reg`), methods (`self_reg`), proc multi-value returns, the native return type, and tail-call optimization.
 
 Calls split by kind. A direct call to a known local or imported function is a `MIR_new_call_insn` against that MIR func item; functions with typed parameters or a native return get a `_w`/`_b` wrapper, decided by `needs_fn_call_wrapper` (`transpile_shared.cpp:39`). Indirect and closure calls go through the runtime `fn_call0`..`fn_call3` family (`:7420`) — and only up to three arguments are supported (§Known Issues #3).
 
@@ -61,17 +61,19 @@ Calls split by kind. A direct call to a known local or imported function is a `M
 
 ---
 
-## 6. GC rooting: the thread-local JIT root frame
+## 6. Precise roots and scoped numbers: execution side stacks
 
 <img alt="JIT root-frame lifetime" src="diagram/d07_root_frame.svg" width="720">
 
-Because the collector is non-moving but the generated code allocates freely, every GC-managed local must be reachable from a root across any allocation that might trigger a collection. The mechanism is a **thread-local JIT root frame** — a runtime-side stack of `Item` slots — that each function brackets:
+Because generated code allocates freely, every live GC-managed local must be reachable across a collection, while wide scalar temporaries need fast storage that can be reclaimed at return. Every context therefore owns two separate stable virtual regions: a precise Item root stack and a raw 64-bit number stack. Every Lambda MIR-Direct and LambdaJS function saves both watermarks and restores them through one epilogue.
 
-- `emit_jit_root_frame_enter` (`:386`) and `emit_jit_root_frame_exit` (`:391`) save and restore the `jit_root_next` cursor around the body. They are emitted at *every* exit site — normal return, view/handler exits, `raise`, and TCO re-entry (sites enumerated at `:7813`–`:12366`).
-- A GC-managed local gets a slot when `should_gc_root_var` (`:372`) says so (true for pointer/heap types and `INT64`+). `create_gc_root_slot` (`:403`) reserves it, `store_gc_root_slot` (`:395`) writes the value, `update_gc_root_slot` (`:424`) re-stores on reassignment, and `root_gc_result_if_needed` (`:434`) roots a function's return value before it is handed back.
-- Module-level BSS globals cannot use the per-call frame, so they are registered as permanent GC roots *after* linking by `register_bss_gc_roots` (`mir.c:363`), which scans the linked module for the `_gvar_` symbol prefix and calls `heap_register_gc_root` on each.
+- Root-slot counts are lowering-time facts. The prologue calls `lambda_side_stack_ensure`, saves `side_root_top`/`side_number_top`, and bumps the root top once; rooted assignments are inline frame-relative stores.
+- Heap/pointer/ANY locals get root slots. Reassignment refreshes the slot, and helper-call boundaries publish all live values before the call. The collector scans only `[side_root_base, side_root_top)`.
+- `push_l`/`push_d`/`push_k` allocate raw scalar payloads from `[side_number_base, side_number_top)`. Returns carry a scalar lane across watermark restoration and are rebuilt in the caller extent; containers and closure envs own analogous scalar tails.
+- All generated returns branch to one epilogue, including error, generator/async suspension, handler, and TCO-controlled paths. Batch crash-recovery boundaries restore an outer side-stack snapshot because a signal `longjmp` bypasses normal generated epilogues.
+- Module-level BSS globals cannot use a per-call frame, so `register_bss_gc_roots` still registers them after linking.
 
-Keeping the root cursor thread-local (rather than threading a frame pointer through a register across calls) avoids clobbering and enables parallel per-module compilation, which relies on a thread-local import map (`mir.c:85`). The correctness of this scheme hinges on *honest local typing* — a heap Item parked in a register the transpiler believes is a packed scalar will not be rooted. That assumption is the root of the most serious known issue (§Known Issues #9), and the relationship to the collector is detailed in [LR_08](LR_08_Memory_and_GC.md).
+The two transpilers emit through `mir_emitter_shared.hpp`; the old heap `JitGcRootFrame` block/cache machinery has no users and is deleted. Static frame telemetry is available through `LAMBDA_MIR_LOG_FRAME_SLOTS`. Runtime details are in [LR_08](LR_08_Memory_and_GC.md).
 
 ---
 
@@ -118,7 +120,7 @@ The MIR Direct backend carries a large, deliberate set of workarounds. They clus
 6. **`get_effective_type` only narrows IDENTs to ANY** (`:2137`); it does not catch every post-mutation type change, leaving a stale-type boxing hazard for non-identifier expressions.
 7. **MATCH and vectorized-comparison results are forced boxed** (`:2077`, `:2200`) to prevent callers re-boxing an already-boxed value and then dereferencing it as a pointer.
 8. **Inference caps.** `NativeFuncInfo` stores at most 16 parameter types (`param_types[16]`/`param_mir[16]`, `:278`), `InferCacheEntry` likewise caps at 16 (`:301`), and `transpile_func_def` copies at most 32 parameter names (`param_name_copies[32]`, `:10580`) — all silent truncations past the cap. The MIR Direct inference engine is also entirely separate code from the C2MIR call-site inference, with no shared table.
-9. **GC-rooting use-after-free (BUG-001), latent.** JIT locals are not always rooted across an `array_end` → `array_num_new` → GC sequence. Mitigations are visible: a null-literal right-hand side is forced to an ANY-rooted slot (`transpile_let_stam`, `:3688`, because growing the root frame can itself allocate before the new heap value is registered), and a call returning NULL is forced to `ANY` (`get_effective_type`, `:2152`). `should_gc_root_var` (`:372`) blanket-roots `INT64`+, which the MEMORY index flags as *load-bearing but pessimistic* — it hangs the StackOverflow test — with honest local typing recorded as the real fix and deliberately deferred.
+9. **Precise-root correctness is type-driven.** BUG-001's heap-frame growth hole is closed by static side-stack slots and publish-before-call lowering. The remaining invariant is that any register carrying a heap-capable boxed value must retain a heap/ANY MIR type; the root predicate deliberately roots unknown/manual capture entries pessimistically.
 10. **Bitwise ops are special-cased before generic dispatch** (`:6560`) because `SysFuncInfo` has no native-argument-convention field: `band`/`bor`/`bxor` lower to a single MIR instruction, and `shl`/`shr` are guarded against out-of-range shift counts. (Note: the older runtime doc claims these go through `fn_band` calls; the current code lowers them inline.)
 11. **`uint8_t Bool` returns need masking.** Runtime functions returning a `uint8_t` bool leave garbage in the upper 56 bits of the MIR return register, so every bool box/unbox must `emit_uext8` (`:874`, `:1121`).
 12. **Out-of-bounds index semantics differ by type.** Integer index fast paths return `ITEM_NULL` on OOB, preserved by a runtime branch in `transpile_box_item` (`:8330`); float index fast paths return `0.0` in a `D` register and cannot branch against an int, so a float OOB read returns `0.0` rather than null (`:5670`).
@@ -134,7 +136,7 @@ Several cross-cutting gaps inherited from the runtime-design notes remain open: 
 
 | File | Responsibility (this doc) |
 |---|---|
-| `lambda/transpile-mir.cpp` | The `MirTranspiler`, all AST→MIR node lowerings, inline boxing/unboxing, `get_effective_type`, function/closure/method emission, parameter inference, JIT-root-frame emission, TCO. |
+| `lambda/transpile-mir.cpp` | The `MirTranspiler`, all AST→MIR node lowerings, inline boxing/unboxing, `get_effective_type`, function/closure/method emission, parameter inference, side-frame emission, TCO. |
 | `lambda/mir.c` | JIT integration: import-resolver hashmap, `jit_init`/`jit_gen_func`/`jit_cleanup`, symbol lookup, `register_bss_gc_roots`, `build_debug_info_table`, interpreter-mode switch. |
 | `lambda/transpile_shared.cpp` | Generated-identifier naming and call-wrapper helpers shared with the C2MIR backend. |
 | `lambda/lambda.h` | The runtime C-API surface (`fn_*`, `array_*`, `push_*`, `it2*`) that generated MIR code imports and calls. |
@@ -143,7 +145,7 @@ Several cross-cutting gaps inherited from the runtime-design notes remain open: 
 
 - [LR_06 — The C Transpiler](LR_06_C_Transpiler.md) — the legacy C-text backend this one replaced as default; shares naming helpers and the runtime function set.
 - [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md) — the tagged `Item` representation and boxing macros the lowering manipulates.
-- [LR_08 — Memory Management & Garbage Collection](LR_08_Memory_and_GC.md) — the non-moving collector and root API the JIT root frame feeds.
+- [LR_08 — Memory Management & Garbage Collection](LR_08_Memory_and_GC.md) — the non-moving collector and execution side-stack runtime the JIT feeds.
 - [LR_09 — Runtime Builtins & System Functions](LR_09_Runtime_Builtins.md) — the `sys_func_defs[]` table and runtime functions resolved by `mir.c`.
 - [LR_01 — Compilation Pipeline, CLI & REPL](LR_01_Compilation_Pipeline.md) — how `compile_script_as_mir_direct` and `run_script_mir` fit into the end-to-end run.
 - [LR_02 — Parsing & AST Construction](LR_02_Parsing_AST.md) — the typed AST and its (sometimes stale) `Type*` annotations that `get_effective_type` second-guesses.
