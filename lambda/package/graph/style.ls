@@ -57,6 +57,18 @@ fn valid_color(value) {
     functional_color_body(text, "hsl(") or functional_color_body(text, "hsla(")
 }
 
+pub fn safe_color(value) {
+  let text = trim(string(if (value != null) value else ""));
+  if (valid_color(text)) text else null
+}
+
+pub fn safe_font_family(value) {
+  let text = trim(string(if (value != null) value else ""));
+  if (len(text) > 0 and chars_are(text,
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_,", 0)) text
+  else null
+}
+
 fn valid_unsigned_decimal_at(text, i, dots, digits) {
   if (i >= len(text)) { if (digits > 0) true else false }
   else {

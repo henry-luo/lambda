@@ -17,10 +17,10 @@
     }, {
       id: "content-shapes-markers",
       valid: true,
-      nodes: 8,
-      edges: 7,
+      nodes: 9,
+      edges: 8,
       annotations: 0,
-      html: [8, 7, 0]
+      html: [9, 8, 0]
     }, {
       id: "html-interactions",
       valid: true,

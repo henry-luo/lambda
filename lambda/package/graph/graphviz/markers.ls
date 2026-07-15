@@ -48,6 +48,11 @@ pub fn canonical(raw) {
   }
 }
 
+pub fn supported(raw) {
+  if (raw == null or trim(string(raw)) == "") true
+  else arrow_components(lower(trim(string(raw))), 0, []).valid == true
+}
+
 fn direction(raw, directed) {
   let value = lower(string(if (raw == null) (if (directed) "forward" else "none") else raw));
   if (contains(["forward", "back", "both", "none"], value)) value

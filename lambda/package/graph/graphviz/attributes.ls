@@ -45,6 +45,20 @@ fn number_value(properties, name, scale = 1.0) {
   if (text == null) null else float(text) * scale
 }
 
+fn number_pair_result(x, y) => {x: x, y: y}
+
+fn number_pair(properties, name, scale = 1.0) {
+  let raw = value(properties, name);
+  if (raw == null) number_pair_result(null, null)
+  else {
+    let parts = split(string(raw), ",");
+    let first = number_text(parts[0]);
+    let second = if (len(parts) > 1) number_text(parts[1]) else first;
+    if (first == null or second == null) number_pair_result(null, null)
+    else number_pair_result(float(first) * scale, float(second) * scale)
+  }
+}
+
 fn bounded_integer(properties, name, low, high, fallback = null) {
   let numeric = number_value(properties, name);
   if (numeric == null) fallback else min([high, max([low, int(numeric)])])
@@ -96,6 +110,12 @@ fn style_attrs(properties) {
   ]
 }
 
+fn font_attrs(properties) => [
+  *attr("font-name", value(properties, "fontname")),
+  *attr("font-size", number_value(properties, "fontsize", 96.0 / 72.0)),
+  *attr("font-color", value(properties, "fontcolor"))
+]
+
 pub fn route_mode(raw) {
   if (raw == null) null
   else {
@@ -118,7 +138,10 @@ fn graph_attrs(properties) {
     *attr("route-mode", route_mode(value(properties, "splines"))),
     *attr("layout", value(properties, "layout")),
     *attr("fill", value(properties, "bgcolor")),
-    *label_attrs(properties)
+    *attr("gradient-angle", number_value(properties, "gradientangle")),
+    *label_attrs(properties),
+    *font_attrs(properties),
+    *style_attrs(properties)
   ])
 }
 
@@ -128,6 +151,7 @@ fn node_attrs(properties) {
     shapes.default_sides(raw_shape));
   let peripheries = bounded_integer(properties, "peripheries", 0, 10,
     shapes.default_peripheries(raw_shape));
+  let margin = number_pair(properties, "margin", 96.0);
   map([
     *label_attrs(properties),
     *label_attrs(properties, "xlabel", "external-label"),
@@ -143,11 +167,15 @@ fn node_attrs(properties) {
     *attr("width", number_value(properties, "width", 96.0)),
     *attr("height", number_value(properties, "height", 96.0)),
     *attr("fixed-size", bool_value(properties, "fixedsize")),
+    *attr("margin-x", margin.x),
+    *attr("margin-y", margin.y),
     *attr("fill", value(properties, "fillcolor")),
+    *attr("gradient-angle", number_value(properties, "gradientangle")),
     *attr("stroke", value(properties, "color")),
     *attr("stroke-width", number_value(properties, "penwidth", 96.0 / 72.0)),
     *attr("group", value(properties, "group")),
     *interaction_attrs(properties),
+    *font_attrs(properties),
     *style_attrs(properties)
   ])
 }
@@ -170,6 +198,7 @@ fn edge_attrs(properties) {
     *attr("head-cluster", value(properties, "lhead")),
     *attr("tail-cluster", value(properties, "ltail")),
     *interaction_attrs(properties),
+    *font_attrs(properties),
     *style_attrs(properties)
   ])
 }

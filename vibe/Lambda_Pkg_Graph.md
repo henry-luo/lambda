@@ -2098,9 +2098,9 @@ Lambda normalization size is tracked separately from native parser LOC:
 
 | Stage 3B module | Physical LOC |
 |---|---:|
-| `graphviz/attributes.ls` | 182 |
-| `graphviz/normalize.ls` | 549 |
-| total | 731 |
+| `graphviz/attributes.ls` | 211 |
+| `graphviz/normalize.ls` | 588 |
+| total | 799 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
@@ -2137,6 +2137,19 @@ The implemented Stage 3C surface is:
 - routed edge reconstruction retains `arrowsize`, and Graph Scene adaptation
   and comparison retain polygon parameters, regular/periphery metadata, and
   composed marker names;
+- Graphviz dimensions and interior `margin` values lower from inches to CSS
+  pixels. `fixedsize=true` becomes a definite border box, while `regular=true`
+  applies a square preferred ratio and equal authored minima. The retained
+  Radiant render fixture verifies that a `1in` by `0.5in` regular fixed node is
+  measured as `96px` by `96px` before custom layout;
+- safe two-color `fillcolor` gradients lower to CSS linear or radial gradients,
+  with `gradientangle` retained for linear paint. `fontname`, `fontsize`, and
+  `fontcolor` lower through allowlisted family/color syntax for graph, node,
+  edge-label, cluster-label, and annotation content; unsafe values fall back to
+  the active graph theme without entering CSS declarations;
+- unsupported arrow components preserve their raw marker for deterministic
+  fallback paint and emit the non-fatal
+  `graph.graphviz.unsupported-arrow` diagnostic;
 - `content_shapes_markers.ls` checks canonical labels/shapes/markers, selected
   semantic HTML attributes, pure layout propagation, and generated marker tags.
 - flat and recursively nested record fields lower to measured table content;
@@ -2165,18 +2178,17 @@ The new pure Stage 3C modules remain small:
 |---|---:|
 | `graphviz/labels.ls` | 35 |
 | `graphviz/shapes.ls` | 53 |
-| `graphviz/markers.ls` | 68 |
+| `graphviz/markers.ls` | 73 |
 | `graphviz/records.ls` | 83 |
 | shared `graph/polygon.ls` | 32 |
-| total | 271 |
+| total | 276 |
 
 Still outstanding in Stage 3C:
 
-- complete remaining specialized Graphviz shape families and fixed-size/margin
-  paint fidelity, including making `regular=true` square during Radiant's
-  pre-custom-layout sizing rather than changing only Dagre's virtual bounds;
-- complete safe gradient/font paint lowering and diagnose unsupported arrow
-  components instead of retaining them with only the fallback marker;
+- complete remaining specialized Graphviz shape families and
+  `fixedsize=shape` fidelity;
+- add weighted/multi-stop Graphviz color lists, colorscheme resolution, and
+  closer Graphviz font fallback matching;
 - expand normalized HTML expectations for remaining annotation and paint
   styles.
 

@@ -42,6 +42,15 @@ let polygon_layout = [for (node in result.nodes where node.id == "f") node][0]
 let polygon_html = [for (node in html_nodes where node["data-node-id"] == "f") node][0]
 let composed_html = [for (edge in html_edges
   where edge["data-from"] == "e" and edge["data-to"] == "f") edge][0]
+let styled = [for (node in nodes where node.id == "i") node][0]
+let styled_html = [for (node in html_nodes where node["data-node-id"] == "i") node][0]
+let unsafe_html = transform.to_html(<graph directed: true;
+  <node id: "unsafe", label: "Unsafe", 'graphviz-shape': "box",
+    fill: "red:blue;background:black", stroke: "red;border-width:99px",
+    'font-name': "Arial;color:red", 'font-color': "red;background:black",
+    style: "filled;background:black">
+>)
+let unsafe_node = direct_children(unsafe_html, "node")[0]
 let graph_scene = scene.from_svg(<svg;
   <g 'data-graph-role': "graph", 'data-x': 0, 'data-y': 0,
       'data-width': 160, 'data-height': 80, 'data-direction': "LR";
@@ -69,6 +78,8 @@ let scene_edge = model.edges(graph_scene)[0]
 
 {
   valid: normalized.valid,
+  diagnostics: [for (value in normalized.diagnostics)
+    [value.code, value.severity, value.path]],
   graph_label: graph.label,
   nodes: [for (node in nodes) [node.id, node.label, node.shape,
     node["shape-family"], node["graphviz-shape"], node["polygon-sides"],
@@ -83,6 +94,33 @@ let scene_edge = model.edges(graph_scene)[0]
     contains(string(node.style), "box-shadow:")]],
   html_edges: [for (edge in html_edges) [edge["data-from"], edge["data-to"],
     edge["data-marker-start"], edge["data-marker-end"], edge["data-arrow-size"]]],
+  styled: {
+    canonical: [styled.width, styled.height, styled["fixed-size"],
+      abs(styled["margin-x"] - 19.2) < 0.001,
+      abs(styled["margin-y"] - 9.6) < 0.001, styled.fill, styled["gradient-angle"],
+      styled["font-name"], styled["font-size"], styled["font-color"],
+      styled.stroke, abs(styled["stroke-width"] - 2.6666667) < 0.001],
+    html: [styled_html["data-width"], styled_html["data-height"],
+      styled_html["data-fixed-size"],
+      abs(styled_html["data-margin-x"] - 19.2) < 0.001,
+      abs(styled_html["data-margin-y"] - 9.6) < 0.001, styled_html["data-fill"],
+      styled_html["data-font-name"], styled_html["data-font-size"],
+      styled_html["data-font-color"], styled_html["data-color"], styled_html["data-stroke"],
+      styled_html["data-stroke-width"],
+      contains(string(styled_html.style), "padding:9.6px 19.2px"),
+      contains(string(styled_html.style), "aspect-ratio:1"),
+      contains(string(styled_html.style), "width:96px;height:96px"),
+      contains(string(styled_html.style), "radial-gradient(red,blue)"),
+      contains(string(styled_html.style), "font-family:Times New Roman"),
+      contains(string(styled_html.style), "font-size:24px")]
+  },
+  unsafe_fallback: [
+    not contains(string(unsafe_node.style), "background:black"),
+    not contains(string(unsafe_node.style), "border-width:99px"),
+    not contains(string(unsafe_node.style), "font-family:Arial"),
+    unsafe_node["data-fill"] == "#ffffff",
+    unsafe_node["data-stroke"] == "#64748b"
+  ],
   polygon_layout: [polygon_layout.width, polygon_layout.height],
   scene: [scene_polygon.shape, scene_polygon["shape-family"],
     scene_polygon["polygon-sides"], scene_polygon["polygon-orientation"],

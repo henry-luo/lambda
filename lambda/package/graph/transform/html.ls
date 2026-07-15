@@ -147,18 +147,91 @@ fn periphery_css(node, shape, palette) {
   else "box-shadow:" ++ periphery_shadows(count, 1, palette, []) ++ ";"
 }
 
+fn uses_fill(value) {
+  if (source_attr(value, "graphviz-shape", null) == null) true
+  else {
+    let styles = [for (item in split(lower(string(source_attr(value, "style", ""))), ","))
+      trim(item)];
+    let matched = [for (item in styles
+      where contains(["filled", "radial", "striped", "wedged"], item)) item];
+    (len(matched) > 0)
+  }
+}
+
 fn resolved_node_style(node, style_declarations) {
-  let source = if (node.style != null) string(node.style) else "";
-  graph_style.parse(source ++ ";" ++ style_declarations)
+  let fill = if (uses_fill(node)) graph_style.safe_color(source_attr(node, "fill", null))
+    else null;
+  let stroke = graph_style.safe_color(source_attr(node, "stroke", null));
+  let stroke_width = graph_style.unsigned_number_text(
+    source_attr(node, "stroke-width", null), false);
+  let direct =
+    (if (fill != null) "fill:" ++ fill ++ ";" else "") ++
+    (if (stroke != null) "stroke:" ++ stroke ++ ";" else "") ++
+    (if (stroke_width != null) "stroke-width:" ++ stroke_width ++ ";" else "");
+  // Graphviz style is a keyword list, not CSS declarations.
+  let source = if (source_attr(node, "graphviz-shape", null) != null) ""
+    else if (node.style != null) string(node.style) else "";
+  graph_style.parse(direct ++ source ++ ";" ++ style_declarations)
+}
+
+fn gradient_background(value, fallback) {
+  let raw = source_attr(value, "fill", null);
+  let parts = if (raw == null) [] else split(string(raw), ":");
+  let first = if (len(parts) == 2) graph_style.safe_color(parts[0]) else null;
+  let second = if (len(parts) == 2) graph_style.safe_color(parts[1]) else null;
+  if (not uses_fill(value) or first == null or second == null) fallback
+  else if (contains(lower(string(source_attr(value, "style", ""))), "radial"))
+    "radial-gradient(" ++ first ++ "," ++ second ++ ")"
+  else "linear-gradient(" ++ string(source_attr(value, "gradient-angle", 0)) ++
+    "deg," ++ first ++ "," ++ second ++ ")"
+}
+
+fn font_css(value, fallback_color) {
+  let family = graph_style.safe_font_family(source_attr(value, "font-name", null));
+  let size = graph_style.unsigned_number_text(source_attr(value, "font-size", null), false);
+  let color = graph_style.safe_color(source_attr(value, "font-color", null));
+  (if (family != null) "font-family:" ++ family ++ ";" else "") ++
+    (if (size != null and float(size) > 0.0)
+      "font-size:" ++ string(size) ++ "px;" else "") ++
+    "color:" ++ string(if (color != null) color else fallback_color) ++ ";"
+}
+
+fn dimension_rule(name, value) =>
+  if (value == null) "" else name ++ ":" ++ string(value) ++ "px;"
+
+fn node_sizing_css(node) {
+  let width = source_attr(node, "width", null);
+  let height = source_attr(node, "height", null);
+  let fixed = source_attr(node, "fixed-size", false) == true;
+  let regular = source_attr(node, "regular", false) == true;
+  let authored = [for (value in [width, height] where value != null) float(value)];
+  let square = if (len(authored) > 0) max(authored) else null;
+  let width_value = if (regular and square != null) square else width;
+  let height_value = if (regular and square != null) square else height;
+  (if (regular) "aspect-ratio:1;" else "") ++
+    dimension_rule(if (fixed) "width" else "min-width", width_value) ++
+    dimension_rule(if (fixed) "height" else "min-height", height_value)
+}
+
+fn node_padding_css(node) {
+  let x = source_attr(node, "margin-x", null);
+  let y = source_attr(node, "margin-y", null);
+  "padding:" ++ string(if (y != null) y else 10) ++ "px " ++
+    string(if (x != null) x else 14) ++ "px;"
 }
 
 fn node_style(node, parsed, palette) {
   let shape = string(source_attr(node, "shape", "box"));
-  "display:inline-block;box-sizing:border-box;padding:10px 14px;" ++
+  let background = gradient_background(node,
+    if (parsed.fill != null) parsed.fill else palette.node_background);
+  let effective = {*:palette,
+    node_background: if (parsed.fill != null) parsed.fill else palette.node_background,
+    node_border: if (parsed.stroke != null) parsed.stroke else palette.node_border};
+  "display:inline-block;box-sizing:border-box;" ++ node_padding_css(node) ++
+    node_sizing_css(node) ++
     "border:1px solid " ++ palette.node_border ++ ";" ++
-    "background:" ++ palette.node_background ++ ";" ++ shape_css(node, palette) ++
-    periphery_css(node, shape, palette) ++
-    "color:" ++ palette.node_text ++
+    "background:" ++ background ++ ";" ++ shape_css(node, effective) ++
+    periphery_css(node, shape, effective) ++ font_css(node, palette.node_text) ++
     ";white-space:" ++
     (if (graph_content.is_rich(label_format(node))) "normal" else "nowrap") ++
     ";" ++ graph_style.node_css(parsed)
@@ -191,6 +264,9 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
   let id = node_id(node, index);
   let content = node_content(node, id);
   let parsed_style = resolved_node_style(node, style_declarations);
+  let background = gradient_background(node,
+    if (parsed_style.fill != null) parsed_style.fill else palette.node_background);
+  let font_color = graph_style.safe_color(source_attr(node, "font-color", null));
   <node class: node_class(node, assigned_classes),
       'data-graph-role': "node", 'data-node-id': id,
       'data-subgraph-id': group,
@@ -203,13 +279,23 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
       'data-polygon-distortion': source_attr(node, "polygon-distortion", null),
       'data-regular': source_attr(node, "regular", null),
       'data-peripheries': source_attr(node, "peripheries", null),
+      'data-width': source_attr(node, "width", null),
+      'data-height': source_attr(node, "height", null),
+      'data-fixed-size': source_attr(node, "fixed-size", null),
+      'data-margin-x': source_attr(node, "margin-x", null),
+      'data-margin-y': source_attr(node, "margin-y", null),
+      'data-gradient-angle': source_attr(node, "gradient-angle", null),
+      'data-font-name': source_attr(node, "font-name", null),
+      'data-font-size': source_attr(node, "font-size", null),
+      'data-font-color': source_attr(node, "font-color", null),
       'data-label': label_source(node, id),
       'data-label-format': label_format(node),
       'data-style-declarations': style_declarations,
-      'data-fill': if (parsed_style.fill != null) parsed_style.fill else palette.node_background,
+      'data-fill': background,
       'data-stroke': if (parsed_style.stroke != null) parsed_style.stroke else palette.node_border,
       'data-stroke-width': if (parsed_style.stroke_width != null) parsed_style.stroke_width else 1,
-      'data-color': if (parsed_style.color != null) parsed_style.color else palette.node_text,
+      'data-color': if (parsed_style.color != null) parsed_style.color
+        else if (font_color != null) font_color else palette.node_text,
       'data-opacity': parsed_style.opacity,
       'data-dash-array': parsed_style.dash_array,
       'data-interaction-action': source_attr(interaction, "action", null),
@@ -261,6 +347,9 @@ fn html_edge(edge, index, group, graph_directed, assigned_classes,
       'data-arrow-end': bool_text(marker_end != "none", false),
       'data-marker-start': marker_start, 'data-marker-end': marker_end,
       'data-arrow-size': source_attr(edge, "arrow-size", null),
+      'data-font-name': source_attr(edge, "font-name", null),
+      'data-font-size': source_attr(edge, "font-size", null),
+      'data-font-color': source_attr(edge, "font-color", null),
       'data-style': string(source_attr(edge, "style", "solid")),
       'data-style-declarations': style_declarations,
       'data-interaction-action': source_attr(interaction, "action", null),
@@ -304,9 +393,12 @@ fn html_cluster_label(entry, index, palette) {
         'data-parent-cluster-id': entry.parent,
         'data-label': label,
         'data-label-format': format,
+        'data-font-name': source_attr(group, "font-name", null),
+        'data-font-size': source_attr(group, "font-size", null),
+        'data-font-color': source_attr(group, "font-color", null),
         'data-z': string(source_attr(group, "label-z", 0)),
         style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
-          "background:" ++ palette.graph_background ++ ";color:" ++ palette.node_text ++
+          "background:" ++ palette.graph_background ++ ";" ++ font_css(group, palette.node_text) ++
           ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
           ";pointer-events:none;";
       for (child in if (content != null) content else graph_content.lower(label, format)) child
@@ -323,9 +415,12 @@ fn html_edge_label(edge, index, group, palette) {
     <'edge-label' class: "graph-edge-label", 'data-graph-role': "edge-label",
         'data-edge-id': string(source_attr(edge, "id", "e" ++ string(index))),
         'data-subgraph-id': group, 'data-label': label, 'data-label-format': format,
+        'data-font-name': source_attr(edge, "font-name", null),
+        'data-font-size': source_attr(edge, "font-size", null),
+        'data-font-color': source_attr(edge, "font-color", null),
         'data-z': string(source_attr(edge, "label-z", 0)),
         style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
-          "background:" ++ palette.graph_background ++ ";color:" ++ palette.node_text ++
+          "background:" ++ palette.graph_background ++ ";" ++ font_css(edge, palette.node_text) ++
           ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
           ";pointer-events:none;";
       for (child in if (content != null) content else graph_content.lower(label, format)) child
@@ -342,9 +437,13 @@ fn html_annotation(annotation, owner_kind, owner_id, index, palette) {
         'data-owner-kind': owner_kind, 'data-owner-id': owner_id,
         'data-annotation-kind': string(source_attr(annotation, "kind", "external")),
         'data-label': label, 'data-label-format': format,
+        'data-font-name': source_attr(annotation, "font-name", null),
+        'data-font-size': source_attr(annotation, "font-size", null),
+        'data-font-color': source_attr(annotation, "font-color", null),
         'data-z': string(source_attr(annotation, "z", 0)),
         style: "display:inline-block;box-sizing:border-box;padding:2px 5px;" ++
-          "background:" ++ palette.graph_background ++ ";color:" ++ palette.node_text ++
+          "background:" ++ palette.graph_background ++ ";" ++
+          font_css(annotation, palette.node_text) ++
           ";white-space:" ++ (if (graph_content.is_rich(format)) "normal" else "nowrap") ++
           ";pointer-events:none;";
       for (child in graph_content.lower(label, format)) child
@@ -391,6 +490,9 @@ pub fn to_html(graph, opts = null) {
   let directed = graph_directed(graph);
   let theme = string(opt(opts, "theme", "light"));
   let palette = theme_defaults.palette(theme);
+  let graph_fill = graph_style.safe_color(source_attr(graph, "fill", null));
+  let graph_background = gradient_background(graph,
+    if (graph_fill != null) graph_fill else palette.graph_background);
   let title = if (graph is element and model.title(graph) != null) model.title(graph)
     else if (config.title != null) config.title else source_attr(graph, "title", null);
   let description = if (graph is element) model.description(graph)
@@ -436,6 +538,7 @@ pub fn to_html(graph, opts = null) {
       'data-curve': config.curve,
       'data-route-mode': route_mode,
       'data-use-splines': if (route_mode == "curved") "true" else "false",
-      style: "position:relative;background:" ++ palette.graph_background ++ ";";
+      style: "position:relative;background:" ++ graph_background ++ ";" ++
+        font_css(graph, palette.node_text);
     for child in children { child }>
 }

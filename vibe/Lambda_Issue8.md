@@ -288,3 +288,40 @@ dynamic indexing as absence and apply the declared fallback. Dynamic
 object/element/Velmt indexing should ideally use the same missing-member
 contract as maps, or expose a non-throwing attribute lookup primitive for
 optional metadata.
+
+## Explicit null Mark attributes fail optional schema type checks
+
+Graphviz annotations gained optional font attributes through a direct Mark
+constructor:
+
+```lambda
+<annotation 'font-name': optional(known, "font-name"),
+  'font-size': optional(known, "font-size")>
+```
+
+When the values were `null`, the attributes remained structurally present.
+Schema validation then reported that each optional attribute had the wrong
+type, even though dynamic reads returned `null`. Building a map containing only
+non-null fields and spreading it into the element avoided the errors.
+
+The distinction between an absent attribute and an explicitly null attribute
+is useful, but Mark formatting and ordinary dynamic reads make the two cases
+look identical. The element literal documentation and schema diagnostic should
+make this distinction clear, or the schema API should offer an explicit policy
+for treating null optional attributes as absent.
+
+## A comparison after a multiline comprehension is rejected
+
+This valid-looking final expression in a function block failed at `> 0`:
+
+```lambda
+len([for (item in styles where contains(allowed, item))
+  item]) > 0
+```
+
+Assigning the comprehension to `matched` was not sufficient; the final
+comparison also had to be parenthesized as `(len(matched) > 0)`. The diagnostic
+did identify the comparison, but did not explain why a comparison as a block's
+final expression required grouping here. The grammar should accept the
+expression consistently or suggest parentheses at the actual ambiguous
+boundary.

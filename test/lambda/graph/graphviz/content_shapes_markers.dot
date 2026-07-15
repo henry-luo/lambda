@@ -8,6 +8,10 @@ digraph Escapes {
   f [shape=polygon sides=5 orientation=18 skew=0.2 distortion=0.1 regular=true peripheries=2]
   g [shape=doubleoctagon]
   h [shape=note]
+  i [label="Styled" shape=polygon regular=true width=1 height=0.5 fixedsize=true
+    margin="0.2,0.1" style="filled,radial" fillcolor="red:blue" gradientangle=30
+    fontname="Times New Roman" fontsize=18 fontcolor="#123456"
+    color="#654321" penwidth=2]
   a -> b [label="\T to \H (\E) in \G / \L" arrowhead=diamond arrowtail=odot dir=both]
   b -> c [arrowhead=vee]
   c -> d [dir=back arrowtail=obox]
@@ -15,4 +19,5 @@ digraph Escapes {
   e -> f [arrowhead="odiamondnormal" arrowtail="lboxrbox" dir=both arrowsize=1.25]
   f -> g
   g -> h
+  h -> i [arrowhead=bogus]
 }
