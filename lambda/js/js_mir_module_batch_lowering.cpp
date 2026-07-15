@@ -5797,6 +5797,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     mt->in_main = true;
     mt->func_except_label = 0;  // reset for js_main
 
+    jm_begin_function_frame(mt, main_ret, true, MIR_reg(mt->ctx, "ctx", main_func));
     jm_push_scope(mt);
 
     // Initialize result register to undefined (JS completion value default)
@@ -5817,6 +5818,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     if (mt->module_fc.has_scope_env && mt->module_fc.scope_env_count > 0) {
         mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, mt->module_fc.scope_env_count));
+        jm_register_owned_env(mt, mt->scope_env_reg);
         mt->scope_env_slot_count = mt->module_fc.scope_env_count;
         mt->current_fc = &mt->module_fc;
         mt->module_scope_env_active = true;
@@ -7349,6 +7351,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     }
 
     jm_pop_scope(mt);
+    jm_finish_function_frame(mt, "js_main");
     MIR_finish_func(mt->ctx);
     MIR_finish_module(mt->ctx);
 

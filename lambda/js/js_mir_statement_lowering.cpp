@@ -3571,6 +3571,7 @@ void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
     if (switch_lexical_count > 0) {
         mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, switch_lexical_count));
+        jm_register_owned_env(mt, mt->scope_env_reg);
         mt->scope_env_slot_count = switch_lexical_count;
     }
     jm_init_switch_tdz(mt, (JsAstNode*)sw);

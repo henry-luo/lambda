@@ -70,6 +70,7 @@ static inline void* memmem(const void* haystack, size_t hlen, const void* needle
 // JsFunction layout shared by runtime translation units.
 struct JsFunction {
     TypeId type_id;  // Always LMD_TYPE_FUNC
+    uint32_t layout_magic; // distinguishes GC-owned JsFunction from Lambda Function layout
     void* func_ptr;  // Pointer to the compiled function
     int param_count; // Number of parameters (user-visible, not including env)
     Item* env;       // Closure environment (NULL for non-closures)
@@ -95,6 +96,10 @@ struct JsFunction {
     int64_t vm_stack_column_offset;
 };
 
+#define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu
+static_assert(offsetof(JsFunction, func_ptr) == 8,
+              "JsFunction prefix must preserve the compiled-function ABI");
+
 #define JS_FUNC_FLAG_GENERATOR 1
 #define JS_FUNC_FLAG_ARROW     2
 #define JS_FUNC_FLAG_TYPED_ARRAY_METHOD 4
@@ -107,6 +112,7 @@ struct JsFunction {
 #define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD
 
 extern "C" Item js_get_generator_shared_proto(bool is_async);
+extern "C" JsFunction* js_alloc_gc_function_object(void);
 
 // v22 / P8 + Js58.2: Maximum index/capacity gap considered for dense array
 // expansion before forcing sparse companion-map storage. Js58.2 restores the

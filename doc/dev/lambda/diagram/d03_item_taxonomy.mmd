@@ -13,9 +13,9 @@ classDiagram
     +NUM_SIZED i8..u32 f16 f32
   }
   class TaggedPointerScalar {
-    +INT64 nursery int64
-    +FLOAT nursery double
-    +DTIME nursery DateTime
+    +INT64 number-stack or owned int64
+    +FLOAT number-stack or owned double
+    +DTIME number-stack or owned DateTime
     +DECIMAL Decimal or BigInt
     +STRING SYMBOL BINARY
     +PATH ERROR

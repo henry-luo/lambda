@@ -226,6 +226,7 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_OBJECT_      LMD_TYPE_OBJECT
 #define LMD_TYPE_TYPE_        LMD_TYPE_TYPE
 #define LMD_TYPE_FUNC_        LMD_TYPE_FUNC
+#define GC_TYPE_JS_ENV_       GC_TYPE_JS_ENV
 #define LMD_TYPE_ANY_         LMD_TYPE_ANY
 #define LMD_TYPE_ERROR_       LMD_TYPE_ERROR
 #define LMD_TYPE_UNDEFINED_   LMD_TYPE_UNDEFINED
@@ -368,6 +369,7 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     gc->error_trace = NULL;
     gc->error_destroy = NULL;
     gc->js_native_trace = NULL;
+    gc->js_function_trace = NULL;
     gc->external_destroy = NULL;
     // Initialize bump-pointer allocator
     gc->bump_blocks = NULL;
@@ -928,6 +930,17 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     uint16_t tag = header->type_tag;
 
     switch (tag) {
+    case GC_TYPE_JS_ENV_: {
+        // JS environments are raw Item arrays. The GC header owns their exact
+        // byte length, so parent links and captured values can be traced
+        // without embedding a user-visible container header in slot zero.
+        uint64_t* items = (uint64_t*)obj;
+        // The second half is raw scalar-tail storage owned by the first-half
+        // Item slots; tracing it as Items would retain arbitrary bit patterns.
+        size_t count = header->alloc_size / (2 * sizeof(uint64_t));
+        for (size_t i = 0; i < count; i++) gc_mark_item(gc, items[i]);
+        break;
+    }
     // types with no outgoing Item pointers — nothing to trace
     case LMD_TYPE_INT64_:
     case LMD_TYPE_FLOAT_:
@@ -1186,6 +1199,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 
     case LMD_TYPE_FUNC_: {
+        if (gc->js_function_trace && gc->js_function_trace(obj, gc)) break;
         // Function: { type_id(1), arity(1), closure_field_count(1@2), padding(5),
         //             fn_type*(8@8), ptr*(8@16), closure_env*(8@24), name*(8@32) }
         uint8_t* p = (uint8_t*)obj;

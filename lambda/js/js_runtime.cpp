@@ -726,8 +726,8 @@ extern "C" Item js_proxy_revocable(Item target, Item handler) {
     JsProxyData* pd = js_get_proxy_data(proxy);
 
     // create a fresh revoke function — each call to Proxy.revocable needs its own
-    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-    fn->type_id = LMD_TYPE_FUNC;
+    JsFunction* fn = js_alloc_gc_function_object();
+    if (!fn) return ItemError;
     fn->func_ptr = NULL;
     fn->param_count = 0;
     fn->formal_length = 0;
@@ -735,7 +735,7 @@ extern "C" Item js_proxy_revocable(Item target, Item handler) {
     fn->name = heap_create_name("", 0);
     fn->prototype = ItemNull;
     // store proxy data pointer in env[0]
-    fn->env = (Item*)pool_calloc(js_input->pool, sizeof(Item));
+    fn->env = js_alloc_env(1);
     fn->env[0] = (Item){.item = (uint64_t)(uintptr_t)pd};
     fn->env_size = 1;
 
@@ -4591,7 +4591,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                     (fn->name && fn->name->len == 5 && strncmp(fn->name->chars, "Proxy", 5) == 0)) return make_js_undefined();
                 if (fn->prototype.item == ItemNull.item) {
                     fn->prototype = js_new_object();
-                    heap_register_gc_root(&fn->prototype.item);
+                    js_function_root_item_if_needed(fn, &fn->prototype);
                     // Stamp built-in constructor prototypes so type-specific
                     // builtin method resolution works without public markers.
                     if (fn->name) {
@@ -6427,7 +6427,7 @@ static Item js_property_set_function(Item object, Item key, Item value) {
         if (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) {
             if (fn->properties_map.item == 0) {
                 fn->properties_map = js_new_object();
-                heap_register_gc_root(&fn->properties_map.item);
+                js_function_root_item_if_needed(fn, &fn->properties_map);
             }
             js_property_set(fn->properties_map, key, value);
             return value;
@@ -6437,14 +6437,14 @@ static Item js_property_set_function(Item object, Item key, Item value) {
         // JsFunction is pool-allocated (invisible to GC), but fn->prototype points
         // to a GC-managed map. Without this, the prototype gets collected when no
         // live objects reference it via __proto__.
-        heap_register_gc_root(&fn->prototype.item);
+        js_function_root_item_if_needed(fn, &fn->prototype);
         // For non-MAP prototypes (null, undefined, number, etc.), also store in
         // properties_map so GET can distinguish "explicitly set to null" from
         // "never set" (both have fn->prototype.item == 0 for null).
         if (get_type_id(value) != LMD_TYPE_MAP) {
             if (fn->properties_map.item == 0) {
                 fn->properties_map = js_new_object();
-                heap_register_gc_root(&fn->properties_map.item);
+                js_function_root_item_if_needed(fn, &fn->properties_map);
             }
             js_property_set(fn->properties_map, key, value);
         } else {
@@ -6524,7 +6524,7 @@ static Item js_property_set_function(Item object, Item key, Item value) {
     }
     if (fn->properties_map.item == 0) {
         fn->properties_map = js_new_object();
-        heap_register_gc_root(&fn->properties_map.item);
+        js_function_root_item_if_needed(fn, &fn->properties_map);
     }
     if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
         // A2-T9 (post AT-4 Option B): consult shape-aware writability
@@ -6767,7 +6767,7 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
     JsFunction* fn = (JsFunction*)fn_item.function;
     if (fn->properties_map.item == 0) {
         fn->properties_map = js_new_object();
-        heap_register_gc_root(&fn->properties_map.item);
+        js_function_root_item_if_needed(fn, &fn->properties_map);
     }
     if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
         js_property_set(fn->properties_map, key, value);
@@ -13284,8 +13284,8 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
         return ItemNull;
     }
     JsFunction* orig = (JsFunction*)func_item.function;
-    JsFunction* bound = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-    bound->type_id = LMD_TYPE_FUNC;
+    JsFunction* bound = js_alloc_gc_function_object();
+    if (!bound) return ItemError;
     bound->func_ptr = orig->func_ptr;
     bound->param_count = orig->param_count;
     bound->formal_length = orig->formal_length; // preserve formal_length from original
@@ -13295,7 +13295,9 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->with_env_depth = orig->with_env_depth;
     bound->module_vars = orig->module_vars;
     bound->home_global = orig->home_global;
-    if (bound->home_global.item != 0) heap_register_gc_root(&bound->home_global.item);
+    if (bound->home_global.item != 0) {
+        js_function_root_item_if_needed(bound, &bound->home_global);
+    }
     bound->source_text = orig->source_text;
     bound->vm_stack_filename = orig->vm_stack_filename;
     bound->vm_stack_source = orig->vm_stack_source;
@@ -13333,7 +13335,7 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     int new_bound_argc = (bound_argc > 0 && bound_args) ? bound_argc : 0;
     int total_bound_argc = orig_bound_argc + new_bound_argc;
     if (total_bound_argc > 0) {
-        bound->bound_args = (Item*)pool_calloc(js_input->pool, total_bound_argc * sizeof(Item));
+        bound->bound_args = js_alloc_env(total_bound_argc);
         for (int i = 0; i < orig_bound_argc; i++) {
             bound->bound_args[i] = orig->bound_args[i];
         }
@@ -13341,6 +13343,7 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
             bound->bound_args[orig_bound_argc + i] = bound_args[i];
         }
         bound->bound_argc = total_bound_argc;
+        js_env_rehome_scalars(bound->bound_args);
     }
     {
         Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
@@ -13386,22 +13389,24 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
         bool own_ip = false;
         js_map_get_fast_ext(func_item.map, "__instance_proto__", 18, &own_ip);
         if (own_ip) {
-            JsFunction* bound = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
-            bound->type_id = LMD_TYPE_FUNC;
+            JsFunction* bound = js_alloc_gc_function_object();
+            if (!bound) return ItemError;
             bound->func_ptr = (void*)js_bound_class_construct_stub;
             bound->param_count = -1;
             bound->formal_length = 0;
             bound->env_size = 1;
-            bound->env = (Item*)pool_calloc(js_input->pool, sizeof(Item));
+            bound->env = js_alloc_env(1);
             bound->env[0] = func_item;
+            js_env_rehome_scalars(bound->env);
             bound->flags = JS_FUNC_FLAG_HAS_BOUND_THIS;
             bound->bound_this = bound_this;
             bound->name = heap_create_name("bound ", 6);
             Item bound_item = (Item){.function = (Function*)bound};
             if (bound_argc > 0 && bound_args) {
-                bound->bound_args = (Item*)pool_calloc(js_input->pool, bound_argc * sizeof(Item));
+                bound->bound_args = js_alloc_env(bound_argc);
                 for (int i = 0; i < bound_argc; i++) bound->bound_args[i] = bound_args[i];
                 bound->bound_argc = bound_argc;
+                js_env_rehome_scalars(bound->bound_args);
             }
             Item target_key = (Item){.item = s2it(heap_create_name(JS_BOUND_TARGET_KEY, JS_BOUND_TARGET_KEY_LEN))};
             js_func_init_property(bound_item, target_key, func_item);
@@ -27164,7 +27169,7 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
         JsFunction* fn = (JsFunction*)object.function;
         if (fn->properties_map.item == 0) {
             fn->properties_map = js_new_object();
-            heap_register_gc_root(&fn->properties_map.item);
+            js_function_root_item_if_needed(fn, &fn->properties_map);
         }
         Item key = js_get_proto_key();
         ScopedSkipAccessorDispatch _skip_guard;
@@ -27817,6 +27822,17 @@ struct JsGenerator {
 static JsGenerator js_generators[JS_MAX_GENERATORS];
 static int js_generator_count = 0;
 
+extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
+    if (!map || !gc) return;
+    bool found = false;
+    Item idx_item = js_map_get_fast_ext(map, "__gen_idx", 9, &found);
+    if (!found || get_type_id(idx_item) != LMD_TYPE_INT) return;
+    int64_t idx = it2i(idx_item);
+    if (idx < 0 || idx >= js_generator_count) return;
+    if (js_generators[idx].env) gc_mark_object_ptr(gc, js_generators[idx].env);
+    gc_mark_item(gc, js_generators[idx].delegate.item);
+}
+
 // Helper: create {value, done} iterator result object
 static Item js_make_iter_result(Item value, bool done) {
     Item result = js_new_object();
@@ -27966,6 +27982,7 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int
     JsGenerator* gen = &js_generators[idx];
     gen->type_id = LMD_TYPE_MAP;
     gen->state_fn = func_ptr;
+    js_env_rehome_scalars(env);
     gen->env = env;
     gen->env_size = env_size;
     gen->state = 0;
@@ -30996,15 +31013,23 @@ static int js_async_context_count = 0;
 static Item js_async_resolved_value;
 
 static void js_async_register_roots_once() {
-    static bool registered = false;
-    if (registered) return;
-    registered = true;
+    static gc_heap_t* registered_gc = NULL;
+    static uint64_t registered_epoch = UINT64_MAX;
+    gc_heap_t* active_gc = context && context->heap ? context->heap->gc : NULL;
+    uint64_t active_epoch = js_get_heap_epoch();
+    if (!active_gc ||
+            (registered_gc == active_gc && registered_epoch == active_epoch)) return;
+    registered_gc = active_gc;
+    registered_epoch = active_epoch;
 
-    extern void heap_register_gc_root_range(uint64_t* base, int count);
+    extern void heap_register_gc_root(uint64_t* slot);
     for (int i = 0; i < JS_MAX_ASYNC_CONTEXTS; i++) {
-        heap_register_gc_root_range((uint64_t*)&js_async_contexts[i].this_val, 1);
+        // A suspended state machine owns its raw GC env pointer after the
+        // generated wrapper returns, so the fixed context table must root it.
+        heap_register_gc_root((uint64_t*)&js_async_contexts[i].env);
+        heap_register_gc_root(&js_async_contexts[i].this_val.item);
     }
-    heap_register_gc_root_range((uint64_t*)&js_async_resolved_value, 1);
+    heap_register_gc_root(&js_async_resolved_value.item);
 }
 
 // Check if an awaited value requires suspension (pending promise)
@@ -31138,6 +31163,7 @@ extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_siz
     int idx = js_async_context_count++;
     JsAsyncContext* ctx = &js_async_contexts[idx];
     ctx->state_fn = fn_ptr;
+    js_env_rehome_scalars(env);
     ctx->env = env;
     ctx->env_size = (int)env_size;
     ctx->state = 0;

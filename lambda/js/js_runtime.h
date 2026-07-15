@@ -227,6 +227,7 @@ void js_set_formal_length(Item fn_item, int length);
 void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);
 Item* js_alloc_env(int count);
+void js_env_rehome_scalars(Item* env);
 // transient JIT call-argument stack (see js_runtime_function.cpp)
 Item* js_args_push(int count);
 int64_t js_args_save(void);
@@ -248,6 +249,7 @@ Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_apply_constructor(Item constructor, Item args_array);
 void js_set_internal_class_name(Item obj, Item class_name);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
+void js_function_root_item_if_needed(void* fn, Item* slot);
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_new_function_from_string(Item* args, int argc);
 Item js_builtin_eval(Item code_item, int64_t is_global_scope);

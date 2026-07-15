@@ -10,8 +10,9 @@ flowchart TB
     LO["Large objects (>256B)\nmalloc'd, sorted large_objects[] for ownership"]
   end
 
-  subgraph NUR["Numeric nursery (gc_nursery, malloc-backed 32KB blocks)"]
-    NN["boxed int64 / double / DateTime\npush_l / push_d / push_k\nNEVER collected -> lives to gc_nursery_destroy"]
+  subgraph SIDE["Execution side stacks (stable context reservations)"]
+    ROOT["root Item stack\nprecise live slice scanned by GC"]
+    NN["raw number stack\nint64 / double / DateTime\nwatermark restored at frame exit"]
   end
 
   subgraph POOL["Name & shape pools (arena/Pool-backed, ref-counted, hierarchical)"]
@@ -23,4 +24,5 @@ flowchart TB
 
   TAGS["tagged Item pointers"]
   TAGS -->|"stable: objects never move"| OZ
-  TAGS -->|"FLOAT/INT64/DTIME box"| NN
+  TAGS -->|"heap-capable locals publish"| ROOT
+  TAGS -->|"FLOAT/INT64/DTIME temporary"| NN

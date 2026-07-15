@@ -641,6 +641,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->tco_jumped = false;
         mt->func_except_label = 0;    // reset — native func needs its own exception label
 
+        jm_begin_function_frame(mt, native_ret_type, false, 0);
         jm_push_scope(mt);
 
         // Register parameters with their inferred native types
@@ -867,6 +868,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
         }
         jm_pop_scope(mt);
+        jm_finish_function_frame(mt, native_name);
         MIR_finish_func(mt->ctx);
 
         // Restore state
@@ -1021,6 +1023,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
         mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
+        jm_begin_function_frame(mt, sm_ret, true, 0);
         jm_push_scope(mt);
         mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -1031,6 +1034,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
         mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", sm_func);
         mt->gen_state_reg = MIR_reg(mt->ctx, "gen_state", sm_func);
+        jm_create_gc_root_slot(mt, mt->gen_env_reg);
+        jm_register_owned_env(mt, mt->gen_env_reg);
 
         // Create state labels
         for (int si = 0; si <= yield_count; si++) {
@@ -1358,6 +1363,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             int scope_env_slot = mt->gen_local_slot_count++;
             mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, scope_env_alloc_count));
+            jm_register_owned_env(mt, mt->scope_env_reg);
             mt->scope_env_slot_count = scope_env_alloc_count;
 
             // Store scope env pointer in gen_env so it persists across yields
@@ -1518,6 +1524,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
         }
         jm_pop_scope(mt);
+        jm_finish_function_frame(mt, sm_name);
         MIR_finish_func(mt->ctx);
 
         // Restore transpiler state
@@ -1637,11 +1644,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
             mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
+            jm_begin_function_frame(mt, sm_ret, true, 0);
             jm_push_scope(mt);
 
             mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
             mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", sm_func);
             mt->gen_state_reg = MIR_reg(mt->ctx, "gen_state", sm_func);
+            jm_create_gc_root_slot(mt, mt->gen_env_reg);
+            jm_register_owned_env(mt, mt->gen_env_reg);
 
             // Create state labels (one per await + one for initial entry)
             for (int si = 0; si <= await_count; si++) {
@@ -1861,6 +1871,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 int scope_env_slot = mt->gen_local_slot_count++;
                 mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, scope_env_alloc_count));
+                jm_register_owned_env(mt, mt->scope_env_reg);
                 mt->scope_env_slot_count = scope_env_alloc_count;
 
                 // Store scope env pointer in gen_env so it persists across awaits
@@ -2048,6 +2059,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
 
             jm_pop_scope(mt);
+            jm_finish_function_frame(mt, sm_name);
             MIR_finish_func(mt->ctx);
 
             // Restore transpiler state
@@ -2171,6 +2183,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->current_fc = fc;
     mt->func_except_label = 0;  // reset for this function
 
+    jm_begin_function_frame(mt, ret_type, true, 0);
+    if (has_captures) {
+        MIR_reg_t closure_env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);
+        jm_create_gc_root_slot(mt, closure_env_reg);
+        jm_register_owned_env(mt, closure_env_reg);
+    }
     jm_push_scope(mt);
     mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -2391,6 +2409,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Allocate env array for the generator's state machine
         MIR_reg_t gen_env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+        jm_register_owned_env(mt, gen_env);
         if (gen_active_iterator_slot >= 0) {
             MIR_reg_t null_iter = jm_emit_null(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -2528,6 +2547,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // Allocate env array for the async state machine
         MIR_reg_t async_env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+        jm_register_owned_env(mt, async_env);
         if (gen_active_iterator_slot >= 0) {
             MIR_reg_t null_iter = jm_emit_null(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -2787,6 +2807,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                             MIR_new_reg_op(mt->ctx, gp_env_reg),
                             MIR_new_reg_op(mt->ctx, env_reg)));
                         jm_emit_label(mt, wb_ok);
+                        jm_register_owned_env(mt, gp_env_reg);
                         entry.var.env_slot = gp_slot;
                         entry.var.env_reg = gp_env_reg;
                     } else {
@@ -3154,6 +3175,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             } else {
             mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, fc->scope_env_count));
+            jm_register_owned_env(mt, mt->scope_env_reg);
             mt->scope_env_slot_count = fc->scope_env_count;
 
             // v29: If this function has a parent env link, store parent env ptr in last slot
@@ -3607,6 +3629,7 @@ finish_boxed:
     mt->last_closure_env_reg = 0;
     mt->last_closure_capture_count = 0;
     jm_pop_scope(mt);
+    jm_finish_function_frame(mt, fc->name);
     MIR_finish_func(mt->ctx);
 
     // Restore state

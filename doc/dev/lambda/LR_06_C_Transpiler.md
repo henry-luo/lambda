@@ -94,7 +94,7 @@ The main boxing emitter is `transpile_box_item` (`:996`). It first **short-circu
 | Typed arrays | **full native** (`array_int_set`/`array_float_get`) | generic `Array*` only (no `array_int()` construction) |
 | Embed header | yes — `lambda-embed.h` prepended | no |
 | Param inference | `infer_proc_param_types_from_callsites` (call-site) | `infer_param_type` (evidence) — separate engine |
-| GC rooting | via runtime/embed model | thread-local JIT root frame ([LR_07 §6](LR_07_MIR_Transpiler_JIT.md)) |
+| GC rooting | via runtime/embed model | precise root side-stack ([LR_07 §6](LR_07_MIR_Transpiler_JIT.md)) |
 | Debug dump | `temp/_transpiled*.c` | `temp/mir_dump.txt` |
 | Selection | `--c2mir`, `#ifdef LAMBDA_C2MIR` (legacy) | **default** (`use_mir_direct`) |
 

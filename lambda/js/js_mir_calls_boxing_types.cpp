@@ -139,10 +139,22 @@ static MIR_reg_t jm_call_with_args(JsMirTranspiler* mt,
         log_error("[JS_MIR_CALL] unsupported return-call arity %d for %s", nargs, fn_name);
         return 0;
     }
+    jm_root_live_scope_vars(mt);
+    for (int i = 0; i < nargs; i++) {
+        if (arg_ops[i].mode == MIR_OP_REG &&
+                (arg_types[i] == MIR_T_I64 || arg_types[i] == MIR_T_P)) {
+            jm_create_gc_root_slot(mt, arg_ops[i].u.reg);
+        }
+    }
     jm_sync_emitter_from_compat(mt);
     MIR_reg_t res = em_call_with_args(&mt->em, fn_name, ret_type, nargs,
         arg_types, arg_ops, true);
     jm_sync_compat_from_emitter(mt);
+    if (res && (ret_type == MIR_T_I64 || ret_type == MIR_T_P)) {
+        // Helper results can remain live while later arguments are evaluated;
+        // root both boxed Items and raw env/args pointers at the call site.
+        jm_create_gc_root_slot(mt, res);
+    }
     return res;
 }
 
@@ -154,6 +166,13 @@ static void jm_call_void_with_args(JsMirTranspiler* mt,
     if (nargs < 0 || nargs > MIR_SHARED_MAX_CALL_ARGS) {
         log_error("[JS_MIR_CALL] unsupported void-call arity %d for %s", nargs, fn_name);
         return;
+    }
+    jm_root_live_scope_vars(mt);
+    for (int i = 0; i < nargs; i++) {
+        if (arg_ops[i].mode == MIR_OP_REG &&
+                (arg_types[i] == MIR_T_I64 || arg_types[i] == MIR_T_P)) {
+            jm_create_gc_root_slot(mt, arg_ops[i].u.reg);
+        }
     }
     jm_sync_emitter_from_compat(mt);
     em_call_void_with_args(&mt->em, fn_name, nargs, arg_types, arg_ops, true);

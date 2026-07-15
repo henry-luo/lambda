@@ -41,6 +41,16 @@
 #endif
 
 struct JsClassEntry;  // forward declaration for JsMirVarEntry.class_entry
+
+struct JsMirRootBinding {
+    MIR_reg_t reg;
+    int slot;
+};
+
+struct JsMirEnvBinding {
+    MIR_reg_t source_reg;
+    MIR_reg_t reg;
+};
 // ============================================================================
 
 // Module-scope constants: variables, functions, classes declared at top level.
@@ -450,6 +460,26 @@ struct JsMirTranspiler {
     int with_depth;                           // nesting depth of 'with' statements (for break/continue/return cleanup)
     bool destructure_assignment_mode;         // true for assignment-pattern destructuring targets
 
+    // JS side-stack frame state. Return instructions are funneled through one
+    // epilogue so every normal, exceptional, and suspension exit restores the
+    // precise-root watermark.
+    bool side_frame_active;
+    bool side_frame_item_return;
+    MIR_type_t side_frame_return_type;
+    MIR_reg_t side_frame_runtime;
+    MIR_reg_t side_root_frame_base;
+    MIR_reg_t side_number_frame_base;
+    MIR_label_t side_root_anchor;
+    MIR_label_t side_frame_return_label;
+    MIR_reg_t side_frame_return_reg;
+    int side_root_next;
+    JsMirRootBinding* side_root_bindings;
+    int side_root_binding_count;
+    int side_root_binding_capacity;
+    JsMirEnvBinding* side_env_bindings;
+    int side_env_binding_count;
+    int side_env_binding_capacity;
+
     // Js57 Track A: synthetic module-level scope env. Captures of top-level closures
     // (parent_index == -1) that reference block-lets at module scope land here. The
     // env is allocated at js_main entry and shared across all top-level child closures
@@ -523,5 +553,13 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
     if (mt->module_fc.captures) {
         mem_free(mt->module_fc.captures);
         mt->module_fc.captures = NULL;
+    }
+    if (mt->side_root_bindings) {
+        mem_free(mt->side_root_bindings);
+        mt->side_root_bindings = NULL;
+    }
+    if (mt->side_env_bindings) {
+        mem_free(mt->side_env_bindings);
+        mt->side_env_bindings = NULL;
     }
 }

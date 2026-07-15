@@ -1,8 +1,8 @@
 flowchart TD
   subgraph tower["Numeric promotion rank — widen toward higher"]
     INT["INT (int56, packed inline)"]
-    INT64["INT64 (tagged ptr, nursery)"]
-    FLOAT["FLOAT (tagged ptr double, nursery)"]
+    INT64["INT64 (tagged ptr, side stack or owned tail)"]
+    FLOAT["FLOAT (tagged ptr double, side stack or owned tail)"]
     DECIMAL["DECIMAL (heap mpd_t*, GC)"]
     INT --> INT64 --> FLOAT --> DECIMAL
   end
