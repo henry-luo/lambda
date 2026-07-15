@@ -504,6 +504,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline \
+	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
 
 # Help target - shows available commands
@@ -559,6 +560,8 @@ help:
 	@echo "  test-radiant-online - Run Radiant online URL smoke tests"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
+	@echo "  test-graph-mermaid   - Run Mermaid graph corpus and Lambda integration fixtures"
+	@echo "  test-graph-graphviz  - Run DOT parser and Graphviz package integration fixtures"
 	@echo "  test-pdf-render - Run PDF render visual gtest suite"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
@@ -1665,6 +1668,19 @@ test-graph-mermaid: build-graph-mermaid-test
 	@./test/test_graph_mermaid_gtest.exe
 	@echo "Running Mermaid graph package integration fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*mermaid*'
+
+build-graph-graphviz-test:
+	@echo "Building Graphviz graph semantic runner..."
+	@mkdir -p build/premake
+	@$(MAKE) generate-premake
+	@PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	@PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native lambda test_graph_parser_gtest test_lambda_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+
+test-graph-graphviz: build-graph-graphviz-test
+	@echo "Running native DOT parser coverage..."
+	@./test/test_graph_parser_gtest.exe --gtest_filter='GraphParserTest.ParserLocBudget:GraphParserTest.ParseDOTGraph:GraphParserTest.ParseComplexDOTGraph:GraphParserTest.ParseUndirectedGraph:GraphParserTest.ParseEmptyGraph'
+	@echo "Running manifest-driven Graphviz package fixtures..."
+	@./test/test_lambda_gtest.exe --gtest_filter='*graphviz*'
 
 test-validator: build
 	@echo "Running validator test suite..."

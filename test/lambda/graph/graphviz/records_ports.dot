@@ -1,0 +1,8 @@
+digraph Records {
+  rankdir=LR
+  a [shape=record, label="<west> Left|Middle|<east> Right"]
+  b [label="B"]
+  c [label="C"]
+  a:west -> b
+  a:east -> c
+}

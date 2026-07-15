@@ -2097,9 +2097,9 @@ Lambda normalization size is tracked separately from native parser LOC:
 
 | Stage 3B module | Physical LOC |
 |---|---:|
-| `graphviz/attributes.ls` | 121 |
-| `graphviz/normalize.ls` | 488 |
-| total | 609 |
+| `graphviz/attributes.ls` | 152 |
+| `graphviz/normalize.ls` | 536 |
+| total | 688 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
@@ -2122,6 +2122,19 @@ The first Stage 3C slice is implemented:
   crow, and empty markers reach generated SVG paint;
 - `content_shapes_markers.ls` checks canonical labels/shapes/markers, selected
   semantic HTML attributes, pure layout propagation, and generated marker tags.
+- flat record fields lower to measured table content, named fields lower to
+  canonical ports with distinct attachment offsets, and record edges route
+  through the existing shared port implementation;
+- Graphviz HTML-label delimiters are removed before fragment parsing; safe
+  table/row/cell and inline emphasis structure survives while script, style,
+  template, authored link, and unknown wrapper markup is stripped;
+- node and edge `URL`/`href`, `tooltip`, and `target` attributes lower to inert
+  canonical interactions and semantic HTML metadata without navigation or
+  callback execution;
+- node and edge `xlabel`, plus edge `headlabel` and `taillabel`, lower to
+  graph-level canonical annotations with explicit owner identities. Radiant
+  measures their text or safe HTML content and the shared collision-aware
+  placement path positions them beside nodes or at route center/head/tail.
 
 The new pure Stage 3C modules remain small:
 
@@ -2130,21 +2143,31 @@ The new pure Stage 3C modules remain small:
 | `graphviz/labels.ls` | 35 |
 | `graphviz/shapes.ls` | 28 |
 | `graphviz/markers.ls` | 25 |
-| total | 88 |
+| `graphviz/records.ls` | 55 |
+| total | 143 |
 
 Still outstanding in Stage 3C:
 
-- implement record labels, ports, and safe Graphviz HTML-like labels;
-- add generic measured annotations;
+- complete nested record groups, HTML table ports, and safe HTML cell
+  alignment/span attributes after the recursive-frame runtime issue recorded
+  in `vibe/Lambda_Issue8.md` is fixed;
 - complete specialized Graphviz shape families, polygon parameters,
   peripheries, and multi-component arrow composition;
-- lower safe styles, paint, links, and tooltips to semantic HTML;
-- expand normalized HTML expectations to records, tables, annotations, styles,
-  and interactions.
+- complete safe gradient/font/periphery paint lowering;
+- expand normalized HTML expectations to nested records, annotations, and
+  remaining styles.
 
-#### Stage 3D - Layered layout parity
+#### Stage 3D - Layered layout parity (in progress, 2026-07-15)
 
-- implement rank constraints, ordering/group hints, spacing, and edge weights;
+Canonical rank constraints are exposed as zero-size semantic HTML/Velmt
+children. The layered ranker enforces `rank=same|min|max|source|sink`, excludes
+edges with `constraint=false`, propagates same-rank promotion through
+successors so `minlen` remains valid, ignores self-loops and cycle back-edges
+during promotion relaxation, and uses edge weights in crossing-order
+barycenters. `rank_layout.ls` covers both direct layout and transformed
+metadata contracts; the Mermaid routing fixture protects self-loop geometry.
+
+- complete `ordering`, `newrank`, and stronger group ordering behavior;
 - complete compound cluster and port behavior;
 - implement declared line/polyline/orthogonal/curved route classes;
 - place all labels and annotations without incoherent overlap;
@@ -2153,10 +2176,17 @@ Still outstanding in Stage 3C:
 
 #### Stage 3E - Formatter, runner, and integration
 
+- `manifest.mark` and `suite.ls` now run the positive DOT corpus through parse,
+  normalize, schema validation, and semantic HTML in one retained runtime;
+- `make test-graph-graphviz` reuses the native DOT parser runner and generic
+  retained Lambda runner instead of cloning the Mermaid C++ harness;
+- `render.ls` verifies the existing `.dot`/`.gv` CLI bridge pipeline through
+  Radiant SVG and Graph Scene. The retained callback now switches both
+  `::context` and MIR's `_lambda_rt`, which is required by grouping helpers;
 - rewrite canonical and source-semantic DOT formatting;
 - extract and reuse the graph conformance runner infrastructure;
-- add `make test-graph-graphviz` and baseline discovery;
-- verify `.dot` and `.gv` CLI render/view paths through the Lambda package;
+- add scene-reference policies to the Graphviz manifest runner;
+- add explicit headless `.gv` view-command coverage;
 - document the supported attribute/engine matrix and remaining diagnostics.
 
 ### 19.15 Acceptance criteria

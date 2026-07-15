@@ -5,6 +5,7 @@ import diagnostic: lambda.package.graph.diagnostics
 import attributes: .attributes
 import labels: .labels
 import markers: .markers
+import records: .records
 
 let MAX_EXPANDED_EDGES = 100000
 
@@ -323,10 +324,24 @@ fn properties_element(properties) {
   >
 }
 
+fn interaction_element(target, known) {
+  if (known["interaction-action"] == null) null
+  else <interaction target: target, action: known["interaction-action"],
+    href: known.href, tooltip: known.tooltip, 'target-window': known["target-window"]>
+}
+
+fn annotation_element(kind, label, format, owner_kind, owner_id) =>
+  if (label == null) null
+  else <annotation kind: kind, label: label, 'label-format': format,
+    'owner-kind': owner_kind, 'owner-id': owner_id>
+
 fn node_element(entry, graph_id) {
   let known = attributes.canonical("node", entry.properties);
+  let label = labels.node(known.label, entry.id, graph_id);
+  let record = if (known["graphviz-shape"] == "record" or
+      known["graphviz-shape"] == "mrecord") records.lower(label) else null;
   <node id: entry.id, 'source-kind': entry.source_kind,
-    label: labels.node(known.label, entry.id, graph_id),
+    label: label,
     'label-format': known["label-format"], shape: known.shape,
     'shape-family': known["shape-family"], 'graphviz-shape': known["graphviz-shape"],
     width: known.width, height: known.height, 'fixed-size': known["fixed-size"],
@@ -335,6 +350,8 @@ fn node_element(entry, graph_id) {
     opacity: known.opacity, radius: known.radius,
     'source-start': entry.source["source-start"], 'source-end': entry.source["source-end"],
     'source-line': entry.source["source-line"], 'source-column': entry.source["source-column"];
+    if (record != null) { <content; record.content> }
+    if (record != null) { for (port in record.ports) port }
     let properties = properties_element(entry.properties)
     if (properties != null) { properties }
   >
@@ -423,6 +440,25 @@ fn semantic_diagnostics(source, state) => [
   *rank_diagnostics(state), *engine_diagnostics(source, state)
 ]
 
+fn node_annotations(entry, graph_id) {
+  let known = attributes.canonical("node", entry.properties);
+  let label = if (known["external-label"] != null)
+    labels.node(known["external-label"], entry.id, graph_id) else null;
+  [annotation_element("external", label, known["external-label-format"], "node", entry.id)]
+}
+
+fn edge_annotations(entry, graph_id) {
+  let known = attributes.canonical("edge", entry.properties);
+  [
+    annotation_element("external", labels.edge(known["external-label"], entry.from,
+      entry.to, entry.directed, graph_id), known["external-label-format"], "edge", entry.id),
+    annotation_element("head", labels.edge(known["head-label"], entry.from,
+      entry.to, entry.directed, graph_id), known["head-label-format"], "edge", entry.id),
+    annotation_element("tail", labels.edge(known["tail-label"], entry.from,
+      entry.to, entry.directed, graph_id), known["tail-label-format"], "edge", entry.id)
+  ]
+}
+
 fn cluster_element(scope, state, graph_id) {
   let known = attributes.canonical("cluster", scope.properties);
   <subgraph id: scope.id, role: scope.role, 'parent-scope': scope.parent_scope,
@@ -465,6 +501,18 @@ fn canonical_graph(source, state) {
     if (properties != null) { properties }
     let constraints = constraints_element(state.scopes)
     if (constraints != null) { constraints }
+    for (entry in state.nodes,
+      let interaction = interaction_element(entry.id,
+        attributes.canonical("node", entry.properties))
+      where interaction != null) interaction
+    for (entry in state.edges,
+      let interaction = interaction_element(entry.id,
+        attributes.canonical("edge", entry.properties))
+      where interaction != null) interaction
+    for (entry in state.nodes, annotation in node_annotations(entry, string(source.id))
+      where annotation != null) annotation
+    for (entry in state.edges, annotation in edge_annotations(entry, string(source.id))
+      where annotation != null) annotation
     for (entry in state.nodes where entry.owner == null) node_element(entry, string(source.id))
     for (scope in state.scopes
       where scope.role == "cluster" and scope.parent_owner == null)

@@ -110,6 +110,8 @@ fn normalize_edge(edge, nodes, index, directed) {
       dash_array: if (edge.dash_array != null) string(edge.dash_array) else null,
       min_length: max([1, int(if (edge.min_length != null) edge.min_length
         else if (edge["min-length"] != null) edge["min-length"] else 1)]),
+      weight: float(if (edge.weight != null) edge.weight else 1.0),
+      constraint: edge_bool(edge.constraint, true),
       z: if (edge.z != null) int(edge.z) else -1,
       index: index
     }
@@ -142,10 +144,21 @@ fn normalize_graph(input, opts) {
     where e != null) e];
   let clusters0 = if (input.clusters != null) input.clusters else [];
   let clusters = [for (i, cluster in clusters0) normalize_cluster(cluster, i)];
+  let constraints = if (input.constraints != null) [
+    for (constraint in input.constraints,
+      member in if (constraint.members != null) constraint.members else [constraint.member]
+      where member != null and member != "") {
+      kind: if (constraint.kind != null) string(constraint.kind) else "rank",
+      value: if (constraint.value != null) string(constraint.value) else "same",
+      scope: if (constraint.scope != null) string(constraint.scope) else "",
+      member: string(member)
+    }
+  ] else [];
   {
     nodes: nodes,
     edges: edges,
     clusters: clusters,
+    constraints: constraints,
     directed: directed,
     options: {
       algorithm: opt(opts, "algorithm", opt(input, "layout", "dagre")),
@@ -172,9 +185,73 @@ fn rank_of(id, edges, stack) {
   }
 }
 
-fn assign_ranks(nodes, edges) {
-  let result = [for (node in nodes) {*:node, rank: rank_of(node.id, edges, [])}];
-  result
+fn same_scopes(id, constraints) => [for (constraint in constraints
+  where constraint.kind == "rank" and constraint.value == "same" and
+    constraint.member == id) constraint.scope]
+
+fn same_rank_in_scopes(to, constraints, scopes) =>
+  len([for (constraint in constraints where constraint.kind == "rank" and
+    constraint.value == "same" and constraint.member == to and
+    contains(scopes, constraint.scope)) constraint]) > 0
+
+fn same_rank(from, to, constraints) =>
+  same_rank_in_scopes(to, constraints, same_scopes(from, constraints))
+
+fn has_rank_value(id, constraints, values) =>
+  len([for (constraint in constraints where constraint.kind == "rank" and
+    constraint.member == id and contains(values, constraint.value)) constraint]) > 0
+
+fn constrained_rank(node, ranked, constraints) {
+  let scopes = same_scopes(node.id, constraints);
+  let peers = [for (entry in ranked, constraint in constraints
+    where constraint.kind == "rank" and constraint.value == "same" and
+      constraint.member == entry.id and contains(scopes, constraint.scope)) entry.rank];
+  if (len(peers) > 0) max(peers) else node.rank
+}
+
+fn node_rank(nodes, id) =>
+  first_or([for (node in nodes where node.id == id) node.rank], 0)
+
+fn predecessor_rank(node, nodes, edges) {
+  let floors = [for (edge in edges where edge.to == node.id)
+    node_rank(nodes, edge.from) + edge.min_length];
+  if (len(floors) > 0) max([node.rank, *floors]) else node.rank
+}
+
+fn unify_same_ranks(nodes, constraints) => [
+  for (node in nodes) {*:node, rank: constrained_rank(node, nodes, constraints)}
+]
+
+fn relax_ranks(nodes, edges, constraints, remaining) {
+  if (remaining <= 0) nodes
+  else {
+    let propagated = [for (node in nodes)
+      {*:node, rank: predecessor_rank(node, nodes, edges)}];
+    relax_ranks(unify_same_ranks(propagated, constraints), edges, constraints,
+      remaining - 1)
+  }
+}
+
+fn boundary_ranks(nodes, constraints) {
+  let max_layer = max_rank(nodes);
+  [for (node in nodes) {*:node,
+    rank: if (has_rank_value(node.id, constraints, ["min", "source"])) 0
+      else if (has_rank_value(node.id, constraints, ["max", "sink"])) max_layer
+      else node.rank}]
+}
+
+fn assign_ranks(nodes, edges, constraints) {
+  let active = [for (edge in edges
+    where edge.constraint and not same_rank(edge.from, edge.to, constraints) and
+      not has_rank_value(edge.to, constraints, ["min", "source"]) and
+      not has_rank_value(edge.from, constraints, ["max", "sink"])) edge];
+  let ranked = [for (node in nodes) {*:node, rank: rank_of(node.id, active, [])}];
+  // Cycle back-edges and self-loops cannot constrain rank during promotion relaxation.
+  let forward = [for (edge in active
+    where node_rank(ranked, edge.from) < node_rank(ranked, edge.to)) edge];
+  // Same-rank promotion must be propagated to successors or minlen can collapse to zero.
+  boundary_ranks(relax_ranks(unify_same_ranks(ranked, constraints), forward,
+    constraints, len(nodes)), constraints)
 }
 
 fn max_rank(nodes) {
@@ -211,12 +288,14 @@ fn order_of(nodes, id) {
 }
 
 fn barycenter(node, edges, ordered_nodes, use_predecessors) {
-  let ids = if (use_predecessors)
-    [for (edge in incoming_edges(edges, node.id)) edge.from]
-  else
-    [for (edge in outgoing_edges(edges, node.id)) edge.to];
-  if (len(ids) == 0) float(node.order)
-  else sum([for (id in ids) float(order_of(ordered_nodes, id))]) / float(len(ids))
+  let related = if (use_predecessors) incoming_edges(edges, node.id)
+    else outgoing_edges(edges, node.id);
+  let weights = [for (edge in related) max([0.0, edge.weight])];
+  let total = sum(weights);
+  if (len(related) == 0 or total <= 0.0) float(node.order)
+  else sum([for (i, edge in related)
+    float(order_of(ordered_nodes, if (use_predecessors) edge.from else edge.to)) * weights[i]]) /
+    total
 }
 
 fn scored_group(members) {
@@ -934,7 +1013,7 @@ fn normalize_graph_geometry(nodes, edges, clusters) {
 
 pub fn layout(input, opts = null) {
   let graph = normalize_graph(input, opts);
-  let ranked = assign_ranks(graph.nodes, graph.edges);
+  let ranked = assign_ranks(graph.nodes, graph.edges, graph.constraints);
   let layers0 = create_layers(ranked);
   let layers = reduce_crossings(layers0, graph.edges, graph.options.max_iterations);
   let canonical_nodes = position_nodes(layers, graph.options, graph.clusters);

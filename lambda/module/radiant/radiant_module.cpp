@@ -46,6 +46,7 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 const JubeHostAPI* radiant_host_api = nullptr;
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
+extern "C" Context* _lambda_rt;
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -806,6 +807,7 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     EvalContext callback_context = {};
     EvalContext* saved_context = ::context;
     Context* saved_input_context = input_context;
+    Context* saved_lambda_rt = _lambda_rt;
     Runtime* runtime = (context->parent && context->parent->doc)
         ? context->parent->doc->lambda_runtime : nullptr;
     if (runtime && runtime->heap) {
@@ -825,6 +827,8 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
             input_context = nullptr;
         }
         ::context = &callback_context;
+        // MIR helpers read _lambda_rt directly; retained callbacks must switch it with context.
+        _lambda_rt = (Context*)&callback_context;
     }
 
     Item args[3];
@@ -838,6 +842,7 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         g_radiant_velmt_active_pass_id = previous_pass_id;
         ::context = saved_context;
         input_context = saved_input_context;
+        _lambda_rt = saved_lambda_rt;
         log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
         return false;
     }
@@ -845,6 +850,7 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     g_radiant_velmt_active_pass_id = previous_pass_id;
     ::context = saved_context;
     input_context = saved_input_context;
+    _lambda_rt = saved_lambda_rt;
     return ok;
 }
 

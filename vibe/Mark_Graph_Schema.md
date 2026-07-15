@@ -254,6 +254,20 @@ Metadata for authorship, versioning, provenance, etc.
 >
 ```
 
+Measured labels that are not primary node, edge, or cluster content are
+graph-level owner records. Keeping them beside interactions avoids embedding
+cross-object metadata inside measured node content:
+
+```mark
+<annotation owner-kind:"node" owner-id:"api" kind:"external"
+  label:"public endpoint" label-format:"text">
+<annotation owner-kind:"edge" owner-id:"calls" kind:"head"
+  label:"response" label-format:"text">
+```
+
+The initial layout contract recognizes `external`, `center`, `head`, and
+`tail`; adapters may preserve additional kinds for future placement policies.
+
 ---
 
 ## 4. Example

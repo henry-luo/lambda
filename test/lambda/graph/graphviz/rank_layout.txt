@@ -1,0 +1,7 @@
+{
+  valid: true,
+  layers: [[0, ["a", "m", "p", "r", "s", "u", "v", "x", "y"]], [1, ["b", "c"]], [2, ["d", "q", "t"]]],
+  ranks: [["a", 0], ["m", 0], ["p", 0], ["r", 0], ["s", 0], ["u", 0], ["v", 0], ["x", 0], ["y", 0], ["b", 1], ["c", 1], ["d", 2], ["q", 2], ["t", 2]],
+  constraints: [["same_rank", "same", "b"], ["same_rank", "same", "c"], ["min_rank", "min", "m"], ["max_rank", "max", "q"], ["source_rank", "source", "s"], ["sink_rank", "sink", "t"]],
+  edges: [["a", "b", "1", "true"], ["b", "c", "4", "true"], ["c", "d", "1", "true"], ["x", "y", "1", "false"], ["p", "m", "1", "true"], ["q", "r", "1", "true"], ["u", "s", "1", "true"], ["v", "t", "1", "true"]]
+}

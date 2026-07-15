@@ -35,7 +35,7 @@ fn graph_spec() => {
     attr("label-format", "text", false, ["text", "markdown", "html"])
   ],
   children: ["meta", "styles", "defs", "constraints", "node", "edge", "subgraph",
-    "style-rule", "class-assignment", "style-assignment", "interaction",
+    "style-rule", "class-assignment", "style-assignment", "interaction", "annotation",
     "edge-property", "front-matter", "init", "properties", "dot-attr-statement",
     "dot-assignment", "dot-edge-statement", "diagnostics", "diagnostic"],
   open_children: false, scalar_children: false
@@ -156,6 +156,14 @@ fn metadata_spec(value_tag) {
     {attrs: [*common_attrs(), attr("target", "text", true),
       attr("action", "text", true, ["link", "callback"]), attr("href", "text"),
       attr("callback", "text"), attr("tooltip", "text"), attr("target-window", "text")],
+      children: [], open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "annotation") {
+    {attrs: [*common_attrs(), attr("owner-kind", "text", true,
+        ["graph", "subgraph", "node", "edge"]), attr("owner-id", "text", true),
+      attr("kind", "text", true), attr("label", "text", true),
+      attr("label-format", "text", false, ["text", "markdown", "html"]),
+      attr("z", "integerish")],
       children: [], open_children: false, scalar_children: false}
   }
   else if (value_tag == "edge-property") {

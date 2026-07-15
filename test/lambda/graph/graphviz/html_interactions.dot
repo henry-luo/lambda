@@ -1,0 +1,6 @@
+digraph HtmlInteractions {
+  a [label=<<TABLE><TR><TD ALIGN="RIGHT"><B>Safe</B><SCRIPT>drop()</SCRIPT></TD><TD><I>Table</I></TD></TR></TABLE>>,
+     URL="https://example.com/a", tooltip="Open A", target="_blank"]
+  b [label="Plain"]
+  a -> b [href="https://example.com/edge", tooltip="Follow edge", target="details"]
+}

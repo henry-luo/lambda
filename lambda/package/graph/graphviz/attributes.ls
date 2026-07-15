@@ -9,6 +9,12 @@ pub fn last_entry(properties, name) {
   if (len(matches) > 0) matches[len(matches) - 1] else null
 }
 
+fn last_named_entry(properties, names) {
+  let matches = [for (entry in properties
+    where contains(names, lower(string(entry.name)))) entry];
+  if (len(matches) > 0) matches[len(matches) - 1] else null
+}
+
 pub fn value(properties, name, fallback = null) {
   let entry = last_entry(properties, name);
   if (entry != null) string(entry.value) else fallback
@@ -48,11 +54,30 @@ fn bool_value(properties, name) {
 
 fn attr(name, value) => if (value == null) [] else [name, value]
 
-fn label_attrs(properties) {
-  let entry = last_entry(properties, "label");
+fn label_attrs(properties, name = "label", target = "label") {
+  let entry = last_entry(properties, name);
   if (entry == null) { [] }
-  else { ["label", string(entry.value), "label-format",
-    if (entry.kind == "html") "html" else "text"] }
+  else {
+    let raw = string(entry.value);
+    // DOT HTML IDs retain their outer grammar delimiters; the fragment parser needs the payload.
+    let source = if (entry.kind == "html" and len(raw) >= 2 and
+        starts_with(raw, "<") and ends_with(raw, ">")) slice(raw, 1, len(raw) - 1)
+      else raw;
+    [target, source, target ++ "-format", if (entry.kind == "html") "html" else "text"]
+  }
+}
+
+fn interaction_attrs(properties) {
+  let link = last_named_entry(properties, ["url", "href"]);
+  let tooltip = last_entry(properties, "tooltip");
+  let target = last_entry(properties, "target");
+  let present = link != null or tooltip != null or target != null;
+  [
+    *attr("interaction-action", if (present) "link" else null),
+    *attr("href", if (link != null) string(link.value) else null),
+    *attr("tooltip", if (tooltip != null) string(tooltip.value) else null),
+    *attr("target-window", if (target != null) string(target.value) else null)
+  ]
 }
 
 fn style_attrs(properties) {
@@ -82,6 +107,7 @@ fn node_attrs(properties) {
   let raw_shape = value(properties, "shape");
   map([
     *label_attrs(properties),
+    *label_attrs(properties, "xlabel", "external-label"),
     *attr("shape", shapes.role(raw_shape)),
     *attr("shape-family", shapes.family(raw_shape)),
     *attr("graphviz-shape", shapes.source_name(raw_shape)),
@@ -92,6 +118,7 @@ fn node_attrs(properties) {
     *attr("stroke", value(properties, "color")),
     *attr("stroke-width", number_value(properties, "penwidth", 96.0 / 72.0)),
     *attr("group", value(properties, "group")),
+    *interaction_attrs(properties),
     *style_attrs(properties)
   ])
 }
@@ -99,6 +126,9 @@ fn node_attrs(properties) {
 fn edge_attrs(properties) {
   map([
     *label_attrs(properties),
+    *label_attrs(properties, "xlabel", "external-label"),
+    *label_attrs(properties, "headlabel", "head-label"),
+    *label_attrs(properties, "taillabel", "tail-label"),
     *attr("arrow-head", value(properties, "arrowhead")),
     *attr("arrow-tail", value(properties, "arrowtail")),
     *attr("arrow-direction", value(properties, "dir")),
@@ -109,6 +139,7 @@ fn edge_attrs(properties) {
     *attr("stroke-width", number_value(properties, "penwidth", 96.0 / 72.0)),
     *attr("head-cluster", value(properties, "lhead")),
     *attr("tail-cluster", value(properties, "ltail")),
+    *interaction_attrs(properties),
     *style_attrs(properties)
   ])
 }

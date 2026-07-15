@@ -123,3 +123,51 @@ The harness still reports every later script in a crashed sub-batch as a
 separate missing-result failure. It should preserve one process-crash diagnostic
 for the unexecuted entries instead of presenting them as unrelated missing
 scripts.
+
+## Recursive function parameters are overwritten after descent
+
+While sanitizing nested Graphviz HTML labels, a recursive function read element
+attributes after recursively processing its children. The attributes were
+present before recursion, but resolved as `null` afterward under MIR Direct:
+
+```lambda
+fn walk(value) {
+  let children = [for (child in value) walk(child)];
+  <td align: value.align; for (child in children) child>
+}
+```
+
+Capturing `value.align` in a local before the recursive calls did not help: the
+local was also overwritten, including when descent happened through a second
+helper and when the field was passed as another helper argument. This suggests
+recursive re-entry reuses or overwrites caller parameter and local slots instead
+of keeping each frame's bindings alive. The JIT should preserve function frames
+across recursion. Graph rich-label sanitization currently retains safe table
+structure but omits cell alignment and span attributes until this is fixed.
+
+## Resolved: retained custom layout did not switch the MIR runtime global
+
+The Graphviz render fixture initially produced an SVG while logging repeated
+`group_by_keys: invalid rows/keys/aliases/runtime` errors and missing node
+placements. The retained Radiant callback installed a temporary
+`EvalContext` in the thread-local `context`, but MIR-generated helpers obtain
+their pool through the separate `_lambda_rt` global. The callback therefore
+entered Lambda with two different runtime identities.
+
+The callback now saves, switches, and restores `_lambda_rt` together with
+`context` and `input_context`. `graphviz/render.ls` covers grouping inside the
+custom layout through final SVG and Graph Scene adaptation.
+
+## Incremental release rebuild can produce a runtime that returns null
+
+After `make test-lambda-baseline` rebuilt a marked release tree incrementally,
+the restored `lambda.exe` returned only `null` for ordinary scripts, including
+`test/lambda/expr.ls`, at MIR optimization levels 0, 1, and 2. The preserved
+debug executable and the previously packaged `release/lambda` both executed
+the same scripts correctly. Rebuilding through `make build` restored a working
+debug executable and allowed the baseline to proceed.
+
+This points to the incremental release/configuration path or a release-only
+runtime defect, not the graph package. The release gate should execute a small
+known script before backing up or restoring `lambda.exe`, and the optimized
+runtime still needs an isolated clean-build reproduction.
