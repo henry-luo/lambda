@@ -59,7 +59,15 @@ static bool form_control_has_specified_font(const ViewBlock* block) {
         style_tree_get_declaration(style, CSS_PROPERTY_FONT_VARIANT));
 }
 
-static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, FontProp* font) {
+static bool form_control_has_specified_line_height(const ViewBlock* block) {
+    StyleTree* style = block ? block->specified_style : nullptr;
+    return style && (
+        style_tree_get_declaration(style, CSS_PROPERTY_LINE_HEIGHT) ||
+        style_tree_get_declaration(style, CSS_PROPERTY_FONT));
+}
+
+static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
+                                 FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
 
     // Special fixed widths for date/time control types (Chrome UA intrinsic widths)
@@ -161,6 +169,14 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
         if (font && font->font_size > 0 && font->font_size != ua_font_size) {
             float css_normal_line_h = font->font_size * 1.15f;
             line_h = css_normal_line_h;
+        }
+        if (form_control_has_specified_line_height(block) &&
+            block->blk && block->blk->line_height && font) {
+            float resolved_line_h = layout_resolve_line_height_value(
+                lycon, block->blk->line_height, block, font->font_size);
+            // Native inputs reset inherited line-height, while an author line-height
+            // sets the auto-height content box; glyph bounds alone are too short.
+            if (resolved_line_h > 0.0f) line_h = resolved_line_h;
         }
         form->intrinsic_height = (line_h > default_content_h) ? line_h : default_content_h;
     }
@@ -489,7 +505,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     // Calculate intrinsic size based on control type
     switch (form->control_type) {
     case FORM_CONTROL_TEXT:
-        calc_text_input_size(lycon, form, font);
+        calc_text_input_size(lycon, block, form, font);
         break;
 
     case FORM_CONTROL_TEXTAREA:
