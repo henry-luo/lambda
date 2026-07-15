@@ -2210,14 +2210,14 @@ Item fn_binary(Item item) {
             log_debug("fn_binary: cannot convert null text to binary");
             return ItemError;
         }
-        String* bin = heap_binary_from_bytes(chars, len);
+        Binary* bin = heap_binary_from_bytes(chars, len);
         return bin ? (Item){.item = x2it(bin)} : ItemError;
     }
     if (type_id == LMD_TYPE_INT) {
         char buf[32];
         int len = snprintf(buf, sizeof(buf), "%lld", (long long)item.get_int56());
         if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
-        String* bin = heap_binary_from_bytes(buf, len);
+        Binary* bin = heap_binary_from_bytes(buf, len);
         return bin ? (Item){.item = x2it(bin)} : ItemError;
     }
     if (type_id == LMD_TYPE_INT64) {
@@ -2225,7 +2225,7 @@ Item fn_binary(Item item) {
         char buf[32];
         int len = snprintf(buf, sizeof(buf), "%" PRId64, val);
         if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
-        String* bin = heap_binary_from_bytes(buf, len);
+        Binary* bin = heap_binary_from_bytes(buf, len);
         return bin ? (Item){.item = x2it(bin)} : ItemError;
     }
     if (type_id == LMD_TYPE_FLOAT) {
@@ -2233,7 +2233,7 @@ Item fn_binary(Item item) {
         char buf[64];
         int len = snprintf(buf, sizeof(buf), "%.17g", val);
         if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
-        String* bin = heap_binary_from_bytes(buf, len);
+        Binary* bin = heap_binary_from_bytes(buf, len);
         return bin ? (Item){.item = x2it(bin)} : ItemError;
     }
     if (js_is_typed_array(item)) {

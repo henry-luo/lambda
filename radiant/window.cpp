@@ -25,6 +25,11 @@
 #include "../lambda/network/network_downloader.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/js/js_event_loop.h"
+#include "../lambda/js/js_dom.h"
+#include "../lambda/js/js_dom_observers.h"
+#include "../lambda/lambda.h"
+#include "../lambda/lambda-data.hpp"
+#include "../lambda/transpiler.hpp"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -34,6 +39,46 @@ extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
 extern "C" void js_dom_set_ui_context(void* ui_context);
 extern "C" void js_dom_set_host_driven_loop(bool enabled);
+extern __thread EvalContext* context;
+extern __thread Context* input_context;
+extern "C" Context* _lambda_rt;
+extern UiContext ui_context;
+
+static bool view_pump_js_event_loop(DomDocument* doc, int wait_ms) {
+    if (!doc || !doc->js_runtime_heap || !doc->js_runtime_name_pool) {
+        if (wait_ms >= 0) return js_event_loop_pump_wait(wait_ms);
+        js_event_loop_pump_nowait();
+        return true;
+    }
+
+    Heap* heap = (Heap*)doc->js_runtime_heap;
+    EvalContext pump_ctx = {};
+    pump_ctx.heap = heap;
+    pump_ctx.nursery = (gc_nursery_t*)doc->js_runtime_nursery;
+    pump_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
+    pump_ctx.type_list = (ArrayList*)doc->js_runtime_type_list;
+    pump_ctx.pool = doc->js_runtime_pool ? (Pool*)doc->js_runtime_pool : heap->pool;
+
+    EvalContext* saved_ctx = context;
+    Context* saved_input_ctx = input_context;
+    Context* saved_lambda_rt = _lambda_rt;
+    // Promise and timer callbacks allocate during the host pump just like event
+    // listeners do; use the retained document heap instead of the loader's
+    // already-restored context, which may be null or belong to another batch.
+    context = &pump_ctx;
+    input_context = nullptr;
+    _lambda_rt = (Context*)&pump_ctx;
+    js_dom_set_document(doc);
+    js_dom_observers_post_layout();
+    bool pumped = true;
+    if (wait_ms >= 0) pumped = js_event_loop_pump_wait(wait_ms);
+    else js_event_loop_pump_nowait();
+    radiant_reconcile_js_dom_mutations(&ui_context, doc);
+    context = saved_ctx;
+    input_context = saved_input_ctx;
+    _lambda_rt = saved_lambda_rt;
+    return pumped;
+}
 
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -84,8 +129,8 @@ static void network_wake_glfw(void* user_data) {
 static void view_cleanup_js_batch_state(void) {
     if (!script_runner_js_batch_cleanup_unsafe()) {
         js_event_loop_shutdown();
+        // js_batch_reset owns the DOM reset; repeating it releases Range wrappers twice.
         js_batch_reset();
-        js_dom_batch_reset();
         js_globals_batch_reset();
         script_runner_cleanup_heap();
     }
@@ -765,6 +810,9 @@ void render(GLFWwindow* window) {
         // reflow the document
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);
+            // Resize listeners must observe the new metrics and may mutate
+            // layout synchronously before this frame is presented.
+            radiant_dispatch_window_event(&ui_context, ui_context.document, "resize");
         }
         // new surface is blank — force full repaint (not selective)
         if (ui_context.document && ui_context.document->state) {
@@ -1177,11 +1225,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                 // so a self-rescheduling callback can't spin to the watchdog.
                 if (event_sim_assertion_retry_pending(sim_ctx)) {
                     int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
-                    if (js_event_loop_pump_wait(retry_wait_ms)) {
+                    if (view_pump_js_event_loop(ui_context.document, retry_wait_ms)) {
                         event_sim_wake_assertion_retry(sim_ctx);
                     }
                 } else {
-                    js_event_loop_pump_nowait();
+                    view_pump_js_event_loop(ui_context.document, -1);
                 }
                 // Advance time by event interval
                 SimEvent* ev = (sim_ctx->current_index > 0 && sim_ctx->current_index <= sim_ctx->events->length)

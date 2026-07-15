@@ -94,6 +94,7 @@ void timing_init_presets();
 typedef struct AnimationInstance AnimationInstance;
 typedef void (*AnimTickFn)(AnimationInstance* anim, float t);
 typedef void (*AnimFinishFn)(AnimationInstance* anim);
+typedef void (*AnimCancelFn)(AnimationInstance* anim);
 
 struct AnimationInstance {
     AnimationInstance* next;
@@ -117,6 +118,7 @@ struct AnimationInstance {
 
     AnimTickFn tick;
     AnimFinishFn on_finish;
+    AnimCancelFn on_cancel;
 
     float bounds[4];
     double pause_time;
@@ -139,6 +141,7 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
                               DirtyTracker* dirty_tracker);
 void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim);
+void animation_scheduler_cancel(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_remove_by_target(AnimationScheduler* scheduler, void* target);
 void animation_scheduler_remove_views(AnimationScheduler* scheduler);
 AnimationInstance* animation_instance_create(AnimationScheduler* scheduler);
@@ -2336,6 +2339,19 @@ typedef struct CssTransitionProp {
     TimingFunction timing;      // transition-timing-function
 } CssTransitionProp;
 
+bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
+                                   CssTransitionProp* transition,
+                                   CssPropertyId* property_buffer,
+                                   int property_capacity);
+bool css_transition_resolve_values(const CssValue* shorthand_value,
+                                   const CssValue* duration_value,
+                                   const CssValue* delay_value,
+                                   const CssValue* property_value,
+                                   const CssValue* timing_value,
+                                   CssTransitionProp* transition,
+                                   CssPropertyId* property_buffer,
+                                   int property_capacity);
+
 // ============================================================================
 // CSS Animation Runtime State (attached to AnimationInstance.state)
 // ============================================================================
@@ -2343,6 +2359,9 @@ typedef struct CssTransitionProp {
 typedef struct CssAnimState {
     CssKeyframes* keyframes;
     DomElement* element;
+    UiContext* ui_context;
+    bool event_started;
+    int event_iteration;
 } CssAnimState;
 
 // ============================================================================
@@ -2375,6 +2394,7 @@ typedef struct CssTransitionElemState {
 // Per-instance transition state (attached to AnimationInstance.state).
 typedef struct CssTransitionState {
     DomElement* element;
+    UiContext* ui_context;
     CssPropertyId property_id;
     CssAnimValueType value_type;
     union {

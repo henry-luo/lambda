@@ -212,7 +212,7 @@ static Item parse_binary(InputContext& ctx, const char **mark) {
         return ItemNull;
     }
 
-    String* binary = ctx.builder.createString(decoded->str, (size_t)decoded_len);
+    Binary* binary = ctx.builder.createBinary(decoded->str, (size_t)decoded_len);
     strbuf_free(decoded);
     return binary ? (Item){.item = x2it(binary)} : (Item){.item = ITEM_ERROR};
 }

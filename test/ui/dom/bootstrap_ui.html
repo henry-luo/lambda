@@ -1,0 +1,68 @@
+<!doctype html>
+<html><head><style>
+body { margin: 0; font: 16px sans-serif; }
+button, a { display: inline-block; margin: 4px; padding: 4px; }
+.dropdown, #outside, #collapse-trigger, .nav, #tooltip-trigger,
+#toast-trigger, #alert, #button-toggle, #carousel, #spy-nav, #spy { display: block; }
+.dropdown { min-height: 40px; }
+.modal, .dropdown-menu, .collapse, .tooltip, .toast { display: none; }
+.modal.show, .dropdown-menu.show, .collapse.show, .tooltip.show, .toast.show { display: block; }
+#collapse { width: 160px; }
+#collapse.show { height: 24px; }
+.modal { position: fixed; left: 30px; top: 30px; width: 220px; height: 100px; background: white; }
+.dropdown { position: relative; }
+.dropdown-menu { position: absolute; left: 0; top: 32px; }
+.collapsing { display: block; height: 0; overflow: hidden; transition: height 0.2s linear; }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+.tooltip { position: absolute; width: 80px; height: 24px; background: #222; color: white; }
+#spy { height: 80px; overflow: auto; }
+#spy section { height: 100px; }
+.carousel-item { display: none; width: 180px; height: 40px; }
+.carousel-item.active { display: block; }
+</style></head><body>
+<button id="modal-trigger">modal</button>
+<div id="modal" class="modal" tabindex="-1"><button id="modal-close">close</button><button id="modal-last">last</button></div>
+
+<div class="dropdown"><button id="dropdown-toggle" data-bs-toggle="dropdown">dropdown</button><div class="dropdown-menu"><button id="dropdown-item" class="dropdown-item">item</button></div></div>
+<button id="outside">outside</button>
+
+<button id="collapse-trigger">collapse</button><div id="collapse" class="collapse">collapse body</div>
+
+<div class="nav" role="tablist"><button id="tab1" class="nav-link active" aria-selected="true">one</button>
+<button id="tab2" class="nav-link" aria-selected="false" data-bs-target="#pane2">two</button></div>
+<div id="pane1" class="tab-pane active">pane one</div><div id="pane2" class="tab-pane">pane two</div>
+
+<button id="tooltip-trigger" title="tip">tooltip</button>
+<button id="toast-trigger">toast</button><div id="toast" class="toast">toast body</div>
+
+<div id="alert" class="alert show">alert <button id="alert-close">dismiss</button></div>
+<button id="button-toggle">toggle</button>
+
+<div id="carousel" class="carousel"><div class="carousel-inner"><div id="slide1" class="carousel-item active">slide one</div><div id="slide2" class="carousel-item">slide two</div></div></div>
+
+<nav id="spy-nav"><a id="nav-one" href="#section-one">one</a><a id="nav-two" href="#section-two">two</a></nav>
+<div id="spy"><section id="section-one">one</section><section id="section-two">two</section></div>
+
+<script src="../../js/popper_src_min.js"></script>
+<script src="../../js/bootstrap.min.js"></script>
+<script>
+var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('modal'), { backdrop: false });
+document.getElementById('modal-trigger').addEventListener('click', function () { modal.show(); });
+document.getElementById('modal-close').addEventListener('click', function () { modal.hide(); });
+var dropdown = bootstrap.Dropdown.getOrCreateInstance(document.getElementById('dropdown-toggle'), { display: 'static' });
+document.getElementById('outside').addEventListener('click', function () { dropdown.hide(); });
+var collapse = bootstrap.Collapse.getOrCreateInstance(document.getElementById('collapse'), { toggle: false });
+document.getElementById('collapse-trigger').addEventListener('click', function () { collapse.toggle(); });
+document.getElementById('tab2').addEventListener('click', function () { bootstrap.Tab.getOrCreateInstance(this).show(); });
+bootstrap.Tooltip.getOrCreateInstance(document.getElementById('tooltip-trigger'), { trigger: 'hover', animation: false });
+var toast = bootstrap.Toast.getOrCreateInstance(document.getElementById('toast'), { animation: false, autohide: true, delay: 5000 });
+document.getElementById('toast-trigger').addEventListener('click', function () {
+  toast.show();
+});
+bootstrap.ScrollSpy.getOrCreateInstance(document.getElementById('spy'), { target: '#spy-nav', smoothScroll: false });
+bootstrap.Carousel.getOrCreateInstance(document.getElementById('carousel'), { interval: false, touch: true });
+document.getElementById('alert-close').addEventListener('click', function () { bootstrap.Alert.getOrCreateInstance(document.getElementById('alert')).close(); });
+document.getElementById('button-toggle').addEventListener('click', function () { bootstrap.Button.getOrCreateInstance(this).toggle(); });
+</script>
+</body></html>

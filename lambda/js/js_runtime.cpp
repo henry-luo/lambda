@@ -35,6 +35,10 @@ extern "C" Item js_has_own_property(Item obj, Item key);
 extern "C" Item js_object_keys(Item object);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_property_set_strict(Item object, Item key, Item value);
+extern "C" void js_dom_event_handler_property_set(Item target,
+                                                    const char* property_name,
+                                                    int property_name_len,
+                                                    Item value);
 extern "C" Item js_symbol_well_known(Item name);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" int radiant_dom_cssom_method(Item obj, Item method_name, Item* args, int argc, Item* out);
@@ -105,6 +109,22 @@ static bool js_host_object_set_property(Item object, Item key, Item value, Item*
     const JubeTypeDef* type = js_host_object_type(object);
     return type && type->host_ops && type->host_ops->set_property &&
         type->host_ops->set_property(object, key, value, out);
+}
+
+static inline void js_note_event_handler_property_set(Item object,
+                                                       const char* name,
+                                                       int name_len,
+                                                       Item value) {
+    if (!name || name_len < 3 || name[0] != 'o' || name[1] != 'n') return;
+    js_dom_event_handler_property_set(object, name, name_len, value);
+}
+
+static inline void js_note_event_handler_property_set(Item object, Item key,
+                                                       Item value) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return;
+    String* name = it2s(key);
+    if (!name || name->len > 63) return;
+    js_note_event_handler_property_set(object, name->chars, (int)name->len, value);
 }
 
 static bool js_host_object_call_method(Item object,
@@ -2609,7 +2629,7 @@ extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
         return (Item){.item = ITEM_NULL};
     }
     JsTypedArray* rta = js_get_typed_array_ptr(result.map);
-    if (rta && rta->buffer && rta->buffer->detached) {
+    if (rta && rta->buffer && js_arraybuffer_detached(rta->buffer)) {
         js_throw_type_error("species constructor returned a detached TypedArray");
         return (Item){.item = ITEM_NULL};
     }
@@ -2696,7 +2716,7 @@ extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item bu
         return (Item){.item = ITEM_NULL};
     }
     JsTypedArray* rta = js_get_typed_array_ptr(result.map);
-    if (rta && rta->buffer && rta->buffer->detached) {
+    if (rta && rta->buffer && js_arraybuffer_detached(rta->buffer)) {
         js_throw_type_error("species constructor returned a detached TypedArray");
         return (Item){.item = ITEM_NULL};
     }
@@ -3028,7 +3048,7 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
         break;
     }
     case LMD_TYPE_BINARY: {
-        *(String**)field_ptr = value.get_safe_binary();
+        *(Binary**)field_ptr = value.get_safe_binary();
         break;
     }
     case LMD_TYPE_FUNC: case LMD_TYPE_DECIMAL: case LMD_TYPE_TYPE:
@@ -3310,21 +3330,21 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
             }
             if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                *out_result = (ta && ta->buffer && ta->buffer->detached)
+                *out_result = (ta && ta->buffer && js_arraybuffer_detached(ta->buffer))
                     ? (Item){.item = i2it(0)}
                     : (Item){.item = i2it(js_typed_array_length(object))};
                 return true;
             }
             if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                *out_result = (ta && ta->buffer && ta->buffer->detached)
+                *out_result = (ta && ta->buffer && js_arraybuffer_detached(ta->buffer))
                     ? (Item){.item = i2it(0)}
                     : (Item){.item = i2it(js_typed_array_byte_length(object))};
                 return true;
             }
             if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-                *out_result = (ta && ta->buffer && ta->buffer->detached)
+                *out_result = (ta && ta->buffer && js_arraybuffer_detached(ta->buffer))
                     ? (Item){.item = i2it(0)}
                     : (Item){.item = i2it(js_typed_array_byte_offset(object))};
                 return true;
@@ -3494,17 +3514,18 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
                 // the recorded byte_length after confirming the window still
                 // fits inside the buffer.
                 if (!dv || !dv->buffer) { *out_result = (Item){.item = ITEM_NULL}; return true; }
-                if (dv->buffer->detached || dv->buffer->byte_length < dv->byte_offset) {
+                int buffer_length = js_arraybuffer_length(dv->buffer);
+                if (js_arraybuffer_detached(dv->buffer) || buffer_length < dv->byte_offset) {
                     js_throw_type_error("DataView buffer is detached or out of bounds");
                     *out_result = ItemNull;
                     return true;
                 }
                 if (dv->length_tracking) {
-                    int avail = dv->buffer->byte_length - dv->byte_offset;
+                    int avail = buffer_length - dv->byte_offset;
                     *out_result = (Item){.item = i2it(avail > 0 ? avail : 0)};
                     return true;
                 }
-                if (dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length) {
+                if (buffer_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length) {
                     js_throw_type_error("DataView buffer is detached or out of bounds");
                     *out_result = ItemNull;
                     return true;
@@ -3514,10 +3535,11 @@ static bool js_try_exotic_property_get(Item object, Item key, Item* out_result) 
             }
             if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
                 if (!dv || !dv->buffer) { *out_result = (Item){.item = ITEM_NULL}; return true; }
-                if (dv->buffer->detached ||
-                    dv->buffer->byte_length < dv->byte_offset ||
+                int buffer_length = js_arraybuffer_length(dv->buffer);
+                if (js_arraybuffer_detached(dv->buffer) ||
+                    buffer_length < dv->byte_offset ||
                     (!dv->length_tracking &&
-                     dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length)) {
+                     buffer_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length)) {
                     js_throw_type_error("DataView buffer is detached or out of bounds");
                     *out_result = ItemNull;
                     return true;
@@ -3949,6 +3971,15 @@ extern "C" Item js_property_get(Item object, Item key) {
         extern Item js_get_window_event_global_value(void);
         if (js_is_window_event_global_property(object, key)) {
             return js_get_window_event_global_value();
+        }
+    }
+    {
+        extern int radiant_dom_window_get_property(Item object, Item key, Item* out);
+        Item window_value = ItemNull;
+        // Browser globals are live host state; stored preamble placeholders
+        // only make the names resolvable and must never shadow current metrics.
+        if (radiant_dom_window_get_property(object, key, &window_value)) {
+            return window_value;
         }
     }
     if (get_type_id(key) == LMD_TYPE_STRING) {
@@ -5713,7 +5744,7 @@ static bool js_array_companion_write_same_size_slot(ShapeEntry* entry, void* dat
         *(Symbol**)field_ptr = value.get_safe_symbol();
         break;
     case LMD_TYPE_BINARY:
-        *(String**)field_ptr = value.get_safe_binary();
+        *(Binary**)field_ptr = value.get_safe_binary();
         break;
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:
@@ -6605,6 +6636,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         Item out = ItemNull;
         if (js_host_object_set_property(object, key, value, &out)) {
             JS_PROPERTY_SET_BRANCH("top_jube_host_vmap");
+            js_note_event_handler_property_set(object, key, value);
             return out;
         }
     }
@@ -6634,7 +6666,13 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     if (type == LMD_TYPE_MAP) {
         JS_PROPERTY_SET_BRANCH("top_map");
-        return js_property_set_map(object, key, value);
+        Item result = js_property_set_map(object, key, value);
+        if (!js_exception_pending) {
+            // Event-handler properties occupy the EventTarget listener list;
+            // recording successful writes here also covers global `window.on*`.
+            js_note_event_handler_property_set(object, key, value);
+        }
+        return result;
     }
 
     // Function: setting .prototype on a function (constructor pattern)
@@ -7407,7 +7445,7 @@ static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
         *(Symbol**)field_ptr = value.get_safe_symbol();
         return true;
     case LMD_TYPE_BINARY:
-        *(String**)field_ptr = value.get_safe_binary();
+        *(Binary**)field_ptr = value.get_safe_binary();
         return true;
     case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:
@@ -7562,6 +7600,7 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
                 }
                 js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_MONO);
                 js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_HIT_MONO);
+                js_note_event_handler_property_set(object, name, name_len, value);
                 return value;
             }
         } else if (ic->state == JS_STORE_IC_POLY) {
@@ -7575,6 +7614,7 @@ extern "C" Item js_property_set_named_ic(Item object, const char* name,
                     }
                     js_exec_profile_count(JS_EXEC_PROF_STORE_IC_HIT_POLY);
                     js_profile_store_ic_site(ic->profile_label, JS_STORE_IC_SITE_HIT_POLY);
+                    js_note_event_handler_property_set(object, name, name_len, value);
                     return value;
                 }
             }
@@ -7892,7 +7932,7 @@ extern "C" int64_t js_get_length(Item object) {
 extern "C" Item js_get_length_item(Item object) {
     if (get_type_id(object) == LMD_TYPE_MAP && js_is_typed_array(object)) {
         JsTypedArray* ta = js_get_typed_array_ptr(object.map);
-        if (ta && ta->buffer && ta->buffer->detached) return js_make_number(0);
+        if (ta && ta->buffer && js_arraybuffer_detached(ta->buffer)) return js_make_number(0);
         return js_make_number((double)js_typed_array_length(object));
     }
     if (get_type_id(object) == LMD_TYPE_FUNC) {
@@ -10855,12 +10895,13 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             return ItemNull;
         }
         if (get_type_id(source) == LMD_TYPE_BINARY) {
-            String* bin = source.get_safe_binary();
-            int len = bin ? (int)bin->len : 0;
+            Binary* bin = source.get_safe_binary();
+            int len = bin ? (int)binary_length(bin) : 0;
+            const uint8_t* bytes = binary_data(bin);
             Item result = js_typed_array_create_with_constructor(this_val, len);
             if (js_exception_pending) return ItemNull;
             for (int i = 0; i < len; i++) {
-                Item val = (Item){.item = i2it((unsigned char)bin->chars[i])};
+                Item val = (Item){.item = i2it(bytes[i])};
                 if (has_mapfn) {
                     Item map_args[2] = {val, (Item){.item = i2it(i)}};
                     val = js_call_function(mapfn, map_this, map_args, 2);
@@ -12475,6 +12516,15 @@ extern "C" Item js_get_super_this_value(void) {
 static bool js_super_callee_is_constructor(Item callee);
 
 extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor) {
+    if (js_current_private_home_class.item != 0 &&
+        js_current_private_home_class.item != ItemNull.item &&
+        get_type_id(js_current_private_home_class) != LMD_TYPE_UNDEFINED) {
+        // super is lexical. An inherited constructor can run on a deeper
+        // subclass receiver, so deriving from receiver.constructor would call
+        // that inherited constructor again and recurse indefinitely.
+        Item lexical_super = js_get_prototype_of(js_current_private_home_class);
+        if (js_super_callee_is_constructor(lexical_super)) return lexical_super;
+    }
     TypeId receiver_type = get_type_id(receiver);
     if (receiver.item == 0 || receiver.item == ITEM_JS_UNDEFINED || receiver_type == LMD_TYPE_NULL ||
         receiver_type == LMD_TYPE_UNDEFINED) {
@@ -12611,6 +12661,15 @@ extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int 
         // Empty class with no constructor — no-op, this is already created
     }
     return this_val;
+}
+
+extern "C" Item js_super_apply_class(Item callee, Item this_val, Item args_array) {
+    int argc = js_array_length(args_array);
+    Item* args = argc > 0 ? LAMBDA_ALLOCA(argc, Item) : NULL;
+    for (int i = 0; i < argc; i++) {
+        args[i] = js_array_get(args_array, (Item){.item = i2it(i)});
+    }
+    return js_super_call_class(callee, this_val, args, argc);
 }
 
 // super() for native (built-in) parent constructors that ignore `this` and return a fresh
@@ -12844,17 +12903,17 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             if (len == 14 && strncmp(name, "get byteLength", 14) == 0) {
                 // Js54 P2: spec §25.3.4.1 throws on OOB (detached or shrunk
                 // past view start); for length-tracking views the live
-                // byteLength is buffer->byte_length - byte_offset, clamped at 0.
-                if (!dv->buffer || dv->buffer->detached ||
-                    dv->buffer->byte_length < dv->byte_offset) {
+                // byteLength is the live handle length minus byte_offset, clamped at 0.
+                if (!dv->buffer || js_arraybuffer_detached(dv->buffer) ||
+                    js_arraybuffer_length(dv->buffer) < dv->byte_offset) {
                     js_throw_type_error("DataView buffer is detached or out of bounds");
                     return ItemNull;
                 }
                 if (dv->length_tracking) {
-                    int avail = dv->buffer->byte_length - dv->byte_offset;
+                    int avail = js_arraybuffer_length(dv->buffer) - dv->byte_offset;
                     return (Item){.item = i2it(avail > 0 ? avail : 0)};
                 }
-                if (dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length) {
+                if (js_arraybuffer_length(dv->buffer) < (int64_t)dv->byte_offset + (int64_t)dv->byte_length) {
                     js_throw_type_error("DataView buffer is detached or out of bounds");
                     return ItemNull;
                 }
@@ -12863,10 +12922,10 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             if (len == 14 && strncmp(name, "get byteOffset", 14) == 0) {
                 // Js54 P2: spec §25.3.4.2 throws on OOB; otherwise returns the
                 // recorded byte_offset (does NOT track resize).
-                if (!dv->buffer || dv->buffer->detached ||
-                    dv->buffer->byte_length < dv->byte_offset ||
+                if (!dv->buffer || js_arraybuffer_detached(dv->buffer) ||
+                    js_arraybuffer_length(dv->buffer) < dv->byte_offset ||
                     (!dv->length_tracking &&
-                     dv->buffer->byte_length < (int64_t)dv->byte_offset + (int64_t)dv->byte_length)) {
+                     js_arraybuffer_length(dv->buffer) < (int64_t)dv->byte_offset + (int64_t)dv->byte_length)) {
                     js_throw_type_error("DataView buffer is detached or out of bounds");
                     return ItemNull;
                 }
@@ -18475,7 +18534,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (!js_dispatch_as_array_method) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 bool is_subarray_method = method->len == 8 && strncmp(method->chars, "subarray", 8) == 0;
-                if (!is_subarray_method && ta && ta->buffer && ta->buffer->detached) {
+                if (!is_subarray_method && ta && ta->buffer && js_arraybuffer_detached(ta->buffer)) {
                     return js_throw_type_error("Cannot perform %TypedArray%.prototype method on a detached ArrayBuffer");
                 }
             }
@@ -19192,7 +19251,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 7 && strncmp(method->chars, "reverse", 7) == 0) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 if (!js_dispatch_as_array_method && ta && ta->buffer) {
-                    if (ta->buffer->detached) {
+                    if (js_arraybuffer_detached(ta->buffer)) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.reverse on a detached ArrayBuffer");
                     }
                     if (js_typed_array_is_out_of_bounds_item(obj)) {
@@ -19213,7 +19272,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 // copyWithin(target, start, end?)
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
                 if (!js_dispatch_as_array_method && ta && ta->buffer) {
-                    if (ta->buffer->detached) {
+                    if (js_arraybuffer_detached(ta->buffer)) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on a detached ArrayBuffer");
                     }
                     if (js_typed_array_is_out_of_bounds_item(obj)) {
@@ -19261,7 +19320,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 }
 
                 if (!js_dispatch_as_array_method && ta && ta->buffer) {
-                    if (ta->buffer->detached) {
+                    if (js_arraybuffer_detached(ta->buffer)) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on a detached ArrayBuffer");
                     }
                     if (js_typed_array_is_out_of_bounds_item(obj)) {
@@ -19311,7 +19370,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
                 case JS_TYPED_FLOAT64: case JS_TYPED_BIGINT64: case JS_TYPED_BIGUINT64: elem_size = 8; break;
                 }
-                void* data = js_typed_array_current_data_ptr(obj);
+                void* data = js_typed_array_prepare_write_ptr(obj);
                 if (!data) {
                     if (!js_dispatch_as_array_method) {
                         return js_throw_type_error("Cannot perform %TypedArray%.prototype.copyWithin on a detached or out-of-bounds ArrayBuffer");
@@ -32851,10 +32910,11 @@ static bool js_vm_cached_data_bytes(Item value, const uint8_t** out_data, int* o
     }
     if (js_is_dataview(value)) {
         JsDataView* dv = js_get_dataview_ptr(value);
-        if (!dv || !dv->buffer || dv->buffer->detached) return false;
-        int len = dv->length_tracking ? dv->buffer->byte_length - dv->byte_offset : dv->byte_length;
+        if (!dv || !dv->buffer || js_arraybuffer_detached(dv->buffer)) return false;
+        int len = dv->length_tracking ?
+            js_arraybuffer_length(dv->buffer) - dv->byte_offset : dv->byte_length;
         if (len < 0) len = 0;
-        *out_data = (const uint8_t*)dv->buffer->data + dv->byte_offset;
+        *out_data = js_arraybuffer_data_const(dv->buffer) + dv->byte_offset;
         *out_len = len;
         return *out_data != NULL || len == 0;
     }
@@ -38705,7 +38765,7 @@ extern "C" Item js_text_encoder_encode(Item encoder, Item str) {
     if (!s || s->len == 0) return js_typed_array_new(JS_TYPED_UINT8, 0);
     int byte_len = js_text_encoder_utf8_len(s->chars, (int)s->len);
     Item result = js_typed_array_new(JS_TYPED_UINT8, byte_len);
-    uint8_t* data = (uint8_t*)js_typed_array_current_data_ptr(result);
+    uint8_t* data = (uint8_t*)js_typed_array_prepare_write_ptr(result);
     if (data && byte_len > 0) {
         js_text_encoder_write_utf8(s->chars, (int)s->len, data);
     }
@@ -38833,9 +38893,9 @@ extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(input);
         // ArrayBuffer is a BufferSource; treating it as empty dropped valid
         // TextDecoder input and made Uint8Array.buffer decode differently.
-        if (ab && !ab->detached) {
-            bytes = (uint8_t*)ab->data;
-            byte_len = ab->byte_length;
+        if (ab && !js_arraybuffer_detached(ab)) {
+            bytes = (uint8_t*)js_arraybuffer_data_const(ab);
+            byte_len = js_arraybuffer_length(ab);
         }
     } else if (tid == LMD_TYPE_ARRAY) {
         Array* arr = input.array;

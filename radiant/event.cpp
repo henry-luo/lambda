@@ -23,6 +23,8 @@
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
 #include "../lambda/js/js_dom_events.h" // js_dom_dispatch_event + native event factories
 #include "../lambda/js/js_runtime.h"   // js_new_object / js_property_set / js_array_new / js_array_push
+#include "../lambda/js/js_dom_platform.h"
+#include "../lambda/js/js_dom_observers.h"
 
 // CE-3 follow-up: DataTransfer factory from js_clipboard.cpp (no public
 // header — js_clipboard installs globals through js_dom_set_document). We
@@ -88,7 +90,9 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
 static WebViewHandle* focused_layer_webview_handle(View* focused) {
-    if (!focused || !focused->is_element()) return nullptr;
+    // A focused element can become display:none before script restores focus;
+    // only block views can carry an embedded layer during that interval.
+    if (!focused || !focused->is_element() || !focused->is_block()) return nullptr;
     ViewBlock* block = lam::view_require_block(focused);
     WebViewProp* webview = block->embed ? block->embed->webview : nullptr;
     return webview && webview->mode == WEBVIEW_MODE_LAYER ? webview->handle : nullptr;
@@ -512,8 +516,8 @@ static EditingControllerHooks editing_controller_hooks() {
     return hooks;
 }
 
-static void sync_viewport_scroll_state(EventContext* evcon) {
-    if (!evcon || !evcon->ui_context) return;
+static bool sync_viewport_scroll_state(EventContext* evcon) {
+    if (!evcon || !evcon->ui_context) return false;
 
     DomDocument* doc = evcon->target_document
         ? evcon->target_document
@@ -521,11 +525,11 @@ static void sync_viewport_scroll_state(EventContext* evcon) {
     DocState* state = (DocState*)doc->state;
     if (!state || !doc->view_tree || !doc->view_tree->root ||
         doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
-        return;
+        return false;
     }
 
     ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
-    if (!root_block->scroller || !root_block->scroller->pane) return;
+    if (!root_block->scroller || !root_block->scroller->pane) return false;
 
     float scroll_x = 0.0f, scroll_y = 0.0f;
     scroll_state_get_position_for_view(state, static_cast<View*>(root_block), root_block->scroller->pane,
@@ -533,7 +537,9 @@ static void sync_viewport_scroll_state(EventContext* evcon) {
 
     // Keep viewport scroll in the centralized state store and the document
     // reflow target so incremental relayout does not snap back to top.
+    bool changed = scroll_x != state->scroll_x || scroll_y != state->scroll_y;
     doc_state_sync_viewport_scroll(state, doc, scroll_x, scroll_y);
+    return changed;
 }
 
 static DocState* event_context_target_state(EventContext* evcon) {
@@ -4672,6 +4678,17 @@ static void post_html_handler_rebuild(EventContext* evcon,
     dom_js_mutation_reset_records(doc);
 }
 
+void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc) {
+    if (!uicon || !doc || doc->js_mutation_count == 0) return;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = doc;
+    auto now = std::chrono::high_resolution_clock::now();
+    // Timers, promises, and observer callbacks run outside native dispatch but
+    // their DOM changes require the identical recascade and retained relayout.
+    post_html_handler_rebuild(&evcon, now, now);
+}
+
 /**
  * §7 unification (U-0): walk a layout View up to the nearest DOM element node.
  * Layout views are themselves DomNode-derived, but text/anonymous views map
@@ -4782,6 +4799,52 @@ struct JsDispatchScope {
     }
 };
 
+void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type) {
+    if (!uicon || !doc || !type || !type[0]) return;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = doc;
+    JsDispatchScope dispatch_scope(&evcon);
+    if (!dispatch_scope.active) return;
+    // Native window notifications use the canonical global EventTarget, which
+    // is also the key used by window.addEventListener in the module bridge.
+    Item event_item = js_create_event(type, false, false);
+    js_dom_dispatch_event(js_get_global_this(), event_item);
+    if (strcmp(type, "resize") == 0) js_match_media_notify_resize();
+    if (strcmp(type, "resize") == 0 || strcmp(type, "scroll") == 0) {
+        js_dom_observers_post_layout();
+    }
+}
+
+void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
+                                const char* type, const char* detail_name,
+                                const char* detail_value, double elapsed_time) {
+    if (!uicon || !target || !target->doc || !type || !type[0]) return;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = target->doc;
+    JsCtxScope scope = {};
+    bool entered_scope = radiant_js_ctx_enter(&scope, &evcon);
+    // Batch DOM execution still owns the live JIT context but does not retain
+    // it on the document; CSS completion must dispatch through that active frame.
+    if (!entered_scope && (!context || js_dom_get_document() != target->doc)) return;
+
+    Item event_item = js_create_native_css_event(type, detail_name,
+        detail_value, elapsed_time);
+    js_dom_dispatch_event(js_dom_wrap_element(target), event_item);
+
+    // CSS events run inside the animation scheduler. Rebuilding immediately
+    // would invalidate its current View pointers; the mutation ledger requests
+    // the safe event-loop reflow after this scheduler tick completes.
+    if (entered_scope) {
+        context = scope.saved_ctx;
+        input_context = scope.saved_input_ctx;
+        _lambda_rt = scope.saved_lambda_rt;
+        if (scope.tmp_type_list) arraylist_free(scope.tmp_type_list);
+        scope.active = false;
+    }
+}
+
 typedef Item (*RadiantJsEventBuilder)(void* userdata);
 
 static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
@@ -4839,6 +4902,44 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
     };
     return radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
         &args, true, dispatched);
+}
+
+typedef struct {
+    const char* type;
+    int client_x;
+    int client_y;
+    int button;
+    int buttons;
+    bool ctrl;
+    bool shift;
+    bool alt;
+    bool meta;
+    const char* pointer_type;
+} PointerEventBuildArgs;
+
+static Item build_pointer_event_item(void* userdata) {
+    PointerEventBuildArgs* args = (PointerEventBuildArgs*)userdata;
+    return js_create_native_pointer_event(args->type, args->client_x, args->client_y,
+        args->button, args->buttons, args->ctrl, args->shift, args->alt,
+        args->meta, args->pointer_type, 1, true);
+}
+
+extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
+    const char* type, int client_x, int client_y, int button, int buttons,
+    int mods, const char* pointer_type)
+{
+    if (!uicon || !uicon->document || !target || !type) return false;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = uicon->document;
+    PointerEventBuildArgs args = {
+        type, client_x, client_y, button, buttons,
+        (mods & RDT_MOD_CTRL) != 0, (mods & RDT_MOD_SHIFT) != 0,
+        (mods & RDT_MOD_ALT) != 0, (mods & RDT_MOD_SUPER) != 0,
+        pointer_type ? pointer_type : "touch"
+    };
+    return radiant_dispatch_built_event(&evcon, target, build_pointer_event_item,
+        &args, true);
 }
 
 /**
@@ -6046,6 +6147,15 @@ bool is_view_focusable(View* view) {
     }
 
     return false;
+}
+
+bool is_view_programmatically_focusable(View* view) {
+    if (is_view_focusable(view)) return true;
+    if (!view || !view->is_element()) return false;
+    ViewElement* elem = lam::view_require_element(view);
+    // A negative tabindex excludes sequential focus only; HTMLElement.focus()
+    // must still accept the target so keyboard events reach modal-style widgets.
+    return elem->get_attribute("tabindex") != NULL;
 }
 
 static bool prepare_previous_focus_blur(EventContext* evcon,
@@ -8389,7 +8499,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 bool forward = !(key_event->mods & RDT_MOD_SHIFT);
                 DomDocument* focus_doc = evcon.target_document ? evcon.target_document : doc;
                 if (focus_doc && focus_doc->view_tree && focus_doc->view_tree->root) {
+                    View* previous_focus = focus_get(state);
                     focus_move(state, focus_doc->view_tree->root, forward);
+                    View* next_focus = focus_get(state);
+                    if (next_focus && next_focus != previous_focus) {
+                        // Sequential focus navigation must emit focusin so
+                        // script focus traps can redirect an escaped Tab.
+                        dispatch_focus_blur_observed(&evcon, previous_focus, next_focus);
+                        radiant_dispatch_focus_event(&evcon, next_focus,
+                                                     "focus", previous_focus);
+                        radiant_dispatch_focus_event(&evcon, next_focus,
+                                                     "focusin", previous_focus);
+                    }
                 }
             }
             evcon.need_repaint = true;
@@ -9360,7 +9481,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
     // Refresh viewport scroll snapshot after the event mutates scroll panes.
     // Reflow consumes `pending_viewport_scroll_*`, so keep it synchronized.
-    sync_viewport_scroll_state(&evcon);
+    if (event->type == RDT_EVENT_SCROLL) {
+        // Element scroll does not trigger layout, but geometry observers must
+        // resample after its scroll state changes just like viewport scrolling.
+        js_dom_observers_post_layout();
+    }
+    bool viewport_scrolled = sync_viewport_scroll_state(&evcon);
+    if (viewport_scrolled) {
+        // Wheel/default scrolling publishes the state snapshot before JS runs,
+        // so window.scrollX/Y are live inside the listener.
+        radiant_dispatch_window_event(uicon, event_context_target_document(&evcon), "scroll");
+    }
 
     bool target_doc_reflowed = process_event_target_document_reflow(&evcon);
     if (target_doc_reflowed) {

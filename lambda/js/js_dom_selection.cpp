@@ -1596,8 +1596,12 @@ extern "C" void js_dom_selection_reset(void) {
     DomRange* r = state->live_ranges;
     while (r) {
         DomRange* next = r->next;
-        r->host_wrapper = nullptr;
-        dom_range_release(r);  // pairs with retain in build_range_object
+        if (r->host_wrapper) {
+            // Native selection ranges also live in this list but have no JS retain;
+            // only a materialized wrapper pairs with build_range_object's retain.
+            r->host_wrapper = nullptr;
+            dom_range_release(r);
+        }
         r = next;
     }
     if (state->dom_selection) state->dom_selection->host_wrapper = nullptr;

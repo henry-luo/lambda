@@ -1,0 +1,9 @@
+{"name":"Bootstrap collapse completes its height transition","html":"test/ui/dom/bootstrap_ui.html","events":[
+  {"type":"click","target":{"selector":"#collapse-trigger"}},
+  {"type":"assert_class","target":{"selector":"#collapse"},"class":"collapsing"},
+  {"type":"wait","ms":250},
+  {"type":"assert_class","target":{"selector":"#collapse"},"class":"show"},
+  {"type":"assert_class","target":{"selector":"#collapse"},"class":"collapse"},
+  {"type":"assert_class","target":{"selector":"#collapse"},"class":"collapsing","present":false},
+  {"type":"assert_style","target":{"selector":"#collapse"},"property":"height","value":"24px"}
+]}

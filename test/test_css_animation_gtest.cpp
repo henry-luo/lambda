@@ -20,6 +20,11 @@ extern "C" {
 
 // Stubs for unresolved symbols in standalone test builds
 void dirty_mark_rect(DirtyTracker*, float, float, float, float) {}
+void radiant_dispatch_css_event(UiContext*, DomElement*, const char*,
+                                const char*, const char*, double) {
+    // The standalone interpolation tests have no JS event context; production
+    // links event.cpp, while this isolated target only verifies animation state.
+}
 
 // Helper: set up a stylesheet with one @keyframes rule on a doc
 static void setup_keyframes_sheet(DomDocument* doc, CssStylesheet* sheet,

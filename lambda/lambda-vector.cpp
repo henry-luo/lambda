@@ -2784,11 +2784,10 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
     int64_t new_len = end - start;
 
     if (type == LMD_TYPE_BINARY) {
-        String* bin = vec.get_safe_binary();
+        Binary* bin = vec.get_safe_binary();
         if (!bin) return ItemError;
-        // Tier-1 slices own their bytes; sharing storage is deferred until the
-        // PL5 refcounted binary representation can preserve lifetime safely.
-        String* result = heap_binary_from_bytes(bin->chars + start, new_len);
+        // Storage-backed Binary slices retain the root allocation and flatten offsets.
+        Binary* result = heap_binary_slice(bin, (size_t)start, (size_t)new_len);
         return result ? (Item){.item = x2it(result)} : ItemError;
     }
     if (type == LMD_TYPE_ARRAY_NUM) {
@@ -2872,7 +2871,6 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
     int64_t view_len = end - start;
 
     ArrayNumElemType etype = base->get_elem_type();
-    int elem_size = ELEM_TYPE_SIZE[etype >> 4];
 
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return ItemError;
@@ -2881,8 +2879,6 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
     view->is_ndim = 1;
     view->is_view = 1;
     view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
-    // pre-adjusted data pointer — element 0 of view is element `start` of base
-    view->data = (void*)((char*)base->data + start * (size_t)elem_size);
     view->length = view_len;
     view->capacity = view_len;
 
@@ -2893,14 +2889,11 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
     shape->ndim = 1;
     shape->is_c_contig = 1;
     shape->is_f_contig = 1;
-    shape->offset = start;
-    shape->base = (void*)base;
+    if (!array_num_init_derived_view(view, shape, base, start)) return ItemError;
     shape->data[0] = view_len;  // shape[0]
     shape->data[1] = 1;          // strides[0] in elements
     view->extra = (int64_t)(uintptr_t)shape;
 
-    // pin the base so its data buffer cannot be relocated by GC compaction
-    base->is_pinned = 1;
     return { .array_num = view };
 }
 
@@ -2980,7 +2973,6 @@ Item fn_reshape(Item vec, Item shape_item) {
     view->is_ndim = 1;
     view->is_view = 1;
     view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
-    view->data = base->data;            // alias entire data
     view->length = base->length;
     view->capacity = base->length;
 
@@ -2991,8 +2983,7 @@ Item fn_reshape(Item vec, Item shape_item) {
     shape->ndim = (uint8_t)st_len;
     shape->is_c_contig = 1;
     shape->is_f_contig = (st_len == 1) ? 1 : 0;
-    shape->offset = 0;
-    shape->base = (void*)base;
+    if (!array_num_init_derived_view(view, shape, base, 0)) return ItemError;
 
     // copy shape and compute C-contiguous strides
     int64_t* shp = array_num_shape_dims(shape);
@@ -3005,7 +2996,6 @@ Item fn_reshape(Item vec, Item shape_item) {
     }
     view->extra = (int64_t)(uintptr_t)shape;
 
-    base->is_pinned = 1;
     return { .array_num = view };
 }
 
@@ -3108,7 +3098,6 @@ Item fn_transpose(Item vec) {
     view->is_ndim = 1;
     view->is_view = 1;
     view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
-    view->data = base->data;
     view->length = base->length;
     view->capacity = base->length;
 
@@ -3116,8 +3105,7 @@ Item fn_transpose(Item vec) {
     ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     if (!s) return ItemError;
     s->ndim = (uint8_t)ndim;
-    s->offset = 0;
-    s->base = (void*)base;
+    if (!array_num_init_derived_view(view, s, base, 0)) return ItemError;
     int64_t* shp = array_num_shape_dims(s);
     int64_t* str = array_num_shape_strides(s);
     for (int i = 0; i < ndim; i++) {       // reverse axes
@@ -3127,7 +3115,6 @@ Item fn_transpose(Item vec) {
     s->is_c_contig = 0;
     s->is_f_contig = bs->is_c_contig;       // transpose of C-contig is F-contig
     view->extra = (int64_t)(uintptr_t)s;
-    base->is_pinned = 1;
     return { .array_num = view };
 }
 
@@ -3166,7 +3153,6 @@ Item fn_ravel(Item vec) {
     view->is_ndim = 1;
     view->is_view = 1;
     view->is_mutable_view = 1;  // writable through to base in procedural code (Scope 3)
-    view->data = base->data;
     view->length = base->length;
     view->capacity = base->length;
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
@@ -3175,12 +3161,10 @@ Item fn_ravel(Item vec) {
     s->ndim = 1;
     s->is_c_contig = 1;
     s->is_f_contig = 1;
-    s->offset = 0;
-    s->base = (void*)base;
+    if (!array_num_init_derived_view(view, s, base, 0)) return ItemError;
     array_num_shape_dims(s)[0] = base->length;
     array_num_shape_strides(s)[0] = 1;
     view->extra = (int64_t)(uintptr_t)s;
-    base->is_pinned = 1;
     return { .array_num = view };
 }
 

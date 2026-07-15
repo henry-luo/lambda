@@ -1,6 +1,6 @@
 # Lambda Stack Frame Design — Precise Rooting + Frame-Scoped Number Stack
 
-**Status:** v1 sketch + review refinements captured; open issues OS1–OS11 under discussion
+**Status:** design SETTLED — SF1–SF20 decided; all OS design questions resolved (OS1/OS2/OS3/OS4 closed); remaining opens are measurement-driven (OS5 profiles, OS7 staging) and verification items (concat rebase, env tracing, wait-temporaries, OS9/OS11)
 **Date:** 2026-07-15
 **Context:** A unified stack-frame architecture for Lambda and hosted languages (LambdaJS, future Jube guests) that addresses two runtime debts at once: (1) JIT GC rooting goes through heap-allocated shadow frames with a C call per rooted store, and (2) the numeric nursery is never collected — an unbounded leak by design. Successor-in-spirit to the G1 honest-rooting fix (`vibe/Lambda_Issue_GC_Root (fixed).md`); feeds the G2 host-API rooting clause (`vibe/Lambda_Semantics_Features.md` §1.8). Detailed current-state design lives in `doc/dev/lambda/LR_08_Memory_and_GC.md`.
 
@@ -146,7 +146,31 @@ With scalars out of GC, the rooting predicate tightens to "GC-managed pointer ty
 
 ## 4. Open issues (OS ledger — to tackle next)
 
-**OS1 — The escape re-homing table.** SF2 means a scalar's storage dies with its frame; every cross-frame flow of a boxed-scalar Item needs an explicit re-homing mechanism. Deliverable: a flow-by-flow table covering — reads out of containers (**copy-out** onto the current number stack — never return a pointer into container storage, else `let x = m.n; drop m` dangles), writes into containers (**copy-in**, see OS2), closure capture into envs, error payloads (`T^E` values crossing frames), varargs/spread, and the JS boundary (JS number ⇔ float is uniform per N1–N9, but int64/BigInt egress paths must re-home). The **return-value** row is RESOLVED — see SF14.
+**OS1 — The escape re-homing table.** RESOLVED — all rows closed (2026-07-15). SF2 means a scalar's storage dies with its frame; the complete flow-by-flow table:
+
+| Flow | Direction | Mechanism |
+|---|---|---|
+| argument passing (incl. varargs / spread-supplied args) | downward | **none needed** — SF19 downward safety |
+| return values | upward | SF14 multi-lane register returns |
+| container writes; rest-param array materialization | outliving | SF15 copy-in to the container's own tail |
+| container reads; spread source reads | inward | SF16 storage-class rule (immortal → reference; GC-heap → copy) |
+| closure capture + captured-var write-back | outliving | SF18 env tail region |
+| error payloads (`T^E` crossing frames) | upward | error is a **plain error** (GC object) or a **wrapped map** — wide scalars inside ride SF15 container storage, GC-managed with the map *(decided 2026-07-15)* |
+| JS BigInt egress | — | **not a wide scalar**: BigInt ⇔ `integer`/decimal per N1–N9, a GC heap object; no number-stack involvement *(decided 2026-07-15)* |
+| suspension (`wait`/yield in async `pn`) | outliving | SF20 async-frame tail; suspension = re-homing barrier |
+| module globals / REPL top-level bindings | outliving (beyond one exec) | single-run: exec base frame spans the run (imports included; results copied to the output pool at the boundary); **REPL: one persistent base watermark frame per session** — numbers accumulate per-session, strictly better than the per-process nursery *(added with nursery-retirement audit, 2026-07-15)* |
+
+**SF19 — Argument flows are downward-safe; varargs/spread need no new mechanism.** *(decided 2026-07-15)*
+Watermarks stack LIFO: a caller's number-stack region cannot pop while its callee runs, so every value the caller passes down — positional args, Lambda variadic args (`...` last-param marker, `grammar.js:566`; variadic sys-funcs; MIR vararg protos via `emit_vararg_call`, `transpile-mir.cpp:752`), JS rest/spread args, and the JS transient call-argument stack (`js_args_push`) — remains valid for the entire call. Zero re-homing on the way down. The two operations varargs/spread perform land on already-resolved rows: rest-param materialization is a container write (SF15 copy-in, sources still alive underneath), and spread reads are container reads (SF16). General principle: **only upward flows (returns) and outliving stores (containers, envs, suspension) re-home; downward flows never do.**
+
+**SF18 — Closure capture: the env is an SF15-style container with a statically-sized tail.** *(decided 2026-07-15)*
+Facts: envs are GC-heap arrays of 8-byte Item cells populated by boxing each capture at closure creation (`transpile-mir.cpp:2357`), and Lambda closures have **persistent mutable captured state** — assignments in a `pn` closure body re-box and write back to the env cell on every mutation (`transpile-mir.cpp:9244`). Today both paths produce immortal-nursery pointers; under SF2 they would dangle (frame's number stack dies, closure outlives it). Resolution — no new mechanism, envs join SF15:
+- **Env-owned tail region, statically sized.** `cap_count` is known at transpile time and envs never grow: reserve one 8-byte tail slot per potentially-wide capture (ANY / int64 / uint64 / DateTime / out-of-band double); narrow statically-typed captures reserve none. Capture and write-back write the payload into the capture's **own** tail slot and store the rebased tagged Item in the cell — in-place overwrite is safe because each capture owns its slot. Payload lifetime = env lifetime, GC-managed for free; SF15 invariant holds.
+- **Reads follow SF16 unchanged: copy out** (or direct unboxed load into a register when immediately consumed). No "safe within the call" reference carve-out: write-back creates aliasing — `let a = captured_x; captured_x = other` would mutate `a` behind its back through a tail-slot reference, a value-semantics violation. One uniform rule: GC-heap storage → copy.
+- **Concurrency already fenced at the language level**: K13 forbids mutable capture in `start` (negative test `start_mutable_capture.ls`).
+- **JS uses the same mechanism AND the same double-boxing model** *(user correction 2026-07-15)*: JS numbers share Lambda's inline-double encoding, and the **out-of-band residue (tiny/subnormal doubles failing `ITEM_DBL_MASK`) becomes a number-stack resident in JS exactly as in Lambda** — replacing today's `box_float_cold` GC-heap boxing. JS envs therefore reserve tail slots for number-typed captures too. Side effect: `box_float_cold` retires, closing the last path by which a plain double could touch the GC — SF2 becomes literally complete for doubles.
+- Verification item: env GC tracing today (bare `heap_calloc` Item array, conservative data-buffer fallback) — a tail region is harmless under conservative tracing (raw payloads at worst false-pin); if envs ever get precise tracing, the layout needs an explicit cell-count/tail split like containers' `extra`.
+Closes OS1's capture row and OS2's env half.
 
 **SF14 — Return values: multi-lane register returns, not number-stack round-trips.** *(decided 2026-07-15)*
 Two options were weighed: (1) callee pushes the scalar through the number stack (Lua-style claim-by-bump), vs. (2) a widened return carrying the scalar in a second lane. **Option 2 wins for JIT→JIT calls**, on verified MIR facts:
@@ -166,16 +190,28 @@ Note `ANY^E` with a possible wide scalar does **not** need `[item, scalar, error
 - **C helpers need no change**: helpers establish no watermark frame, so `push_l` inside a helper homes the value in the *calling JIT frame's* region — returned tagged pointers are caller-homed by construction (an SF6 property). Two-lane protocol is JIT→JIT only; the transpiler already distinguishes helper calls from Lambda-fn calls per call site.
 - Residuals: ANY-returning protos become 2-lane (non-scalar returns write a dummy lane-2 operand — MIR ret requires all results; typically move-eliminated); MIR interpreter handles `nres=2` (multi-results are core MIR; only `mir2c` lacks them); C2MIR keeps today's boxed single-Item returns (frozen path).
 
-**OS2 — The 56-bit problem: where does a wide scalar live inside a container?** RESOLVED for containers — see SF15/SF16. Lambda already implements the container-owned side region: wide scalars live in the **tail of the container's own `items` buffer** (growing down from `items[capacity-1]`), Item slots hold tagged pointers into that tail, and `extra` counts them (`lambda-eval.cpp:5628`, `lambda.h:702`). Remaining open: **closure envs** (same tail-region trick on the env allocation, or wide env slots — decide with the OS1 capture row).
+**OS2 — The 56-bit problem: where does a wide scalar live inside a container?** RESOLVED for containers — see SF15/SF16. Lambda already implements the container-owned side region: wide scalars live in the **tail of the container's own `items` buffer** (growing down from `items[capacity-1]`), Item slots hold tagged pointers into that tail, and `extra` counts them (`lambda-eval.cpp:5628`, `lambda.h:702`). The **closure-env half is RESOLVED too** — envs use the same tail-region mechanism, statically sized (SF18). OS2 fully closed.
 
 **SF15 — Unify the `extra` mechanism; JS arrays migrate off `extra`.** *(decided 2026-07-15)*
 `extra` is triply overloaded today: (1) Lambda generic Array/List/Element — wide-scalar tail count; (2) ArrayNum `is_ndim`/`is_view` — `ArrayNumShape*` (`lambda.h:718`); (3) JS arrays — companion props `Map*` (`MAP_KIND_ARRAY_PROPS`, `lambda.h:637`, `:747`). Unification: meaning (1) becomes canonical for generic containers. **ArrayNum's overload does not conflict** — it stores unboxed natives, never boxed wide-scalar Items, so the shape pointer stays. Only JS arrays truly collide (a JS array can need props *and*, under polyglot interop, wide scalars). JS migrates its props map to a new home — preferred: a **JsArray subtype** extending Array (base-first pattern as `ArrayMap`, `lambda.h:747`) so only JS arrays pay the +8 bytes; if a flat field instead, append at struct **end**. Blast radius of any layout change: GC per-type trace walks with hardcoded offsets (`gc_heap.c:929–1145`), plus both transpilers' emitted member offsets — append-only layout keeps them stable; full baselines gate.
 **Hard invariant** (new): *a container's wide-scalar Items point only into its own buffer* — enforced at every clone/concat/copy-in site. ⚠️ Verification item: the concat path (`lambda-eval.cpp:350`) memcpys Item slots without copying/rebasing tail payloads — result Items point into the source arrays' tails; if a source is collected while the result lives, they dangle. Latent today; fixed by the invariant.
 
 **SF16 — Reads of wide scalars out of containers: reference iff immortal storage, else copy.** *(decided 2026-07-15)*
-Two-path read: containers in **const-pool or input-arena storage** (non-GC, storage outlives any reader — same lifetime contract as input strings) return a tagged reference into the tail region, zero copy. Containers on the **GC heap copy out to the number stack** — *even if never mutated*: the discriminator is **storage class, not mutability**. An immutable GC container can be collected while a reference is outstanding (the wide-scalar Item is an interior pointer into the data buffer; precise tracing has no liveness edge from it to the container), and mutable containers additionally relocate their buffers on growth. Mechanism: an `is_immortal`-class container flag (16-bit `flags` field exists) set at construction by input parsers and the const-pool builder; one flag test per boxed-scalar read. JS impact minimal (JS numbers are inline doubles; wide-scalar reads are interop-only).
+Two-path read: containers in **const-pool or input-arena storage** (non-GC, storage outlives any reader — same lifetime contract as input strings) return a tagged reference into the tail region, zero copy. Containers on the **GC heap copy out to the number stack** — *even if never mutated*: the discriminator is **storage class, not mutability**. An immutable GC container can be collected while a reference is outstanding (the wide-scalar Item is an interior pointer into the data buffer; precise tracing has no liveness edge from it to the container), and mutable containers additionally relocate their buffers on growth. Mechanism: an `is_immortal`-class container flag (16-bit `flags` field exists) set at construction by input parsers and the const-pool builder; one flag test per boxed-scalar read. JS follows the same rules: JS numbers share Lambda's double-boxing (SF18), so JS wide-scalar reads = out-of-band doubles plus polyglot int64/DateTime.
 
-**OS3 — Async, generators, and suspended `pn` frames.** A suspended state machine has **no native stack frame** — its rooted locals and number slots cannot live on the side stacks across a suspension point. The `async_slot`/`async_store_var` machinery already gives async locals a heap home; the design must define the sync-home (side stacks) vs suspended-home (heap state machine) split, and the rule for values in flight at a `wait`/yield boundary. Interacts directly with `start` tasks (K11–K18) and the JS event loop. Likely rule: at suspension, live scalars/roots are copied into the state machine; on resume, re-established — i.e. suspension is itself an escape point in the OS1 table.
+**OS3 — Async, generators, and suspended `pn` frames.** RESOLVED — see SF20.
+
+**SF20 — Suspended frames: the async frame is one more tail-bearing container; suspension is a re-homing barrier.** *(decided 2026-07-15)*
+Facts (in-flight `start` implementation): an async `pn` gets a heap `LambdaAsyncFrame` (`concurrency.cpp:77`) — an `Item* slots` array GC-registered as a root range — allocated from the **plain C heap** (`mem_calloc`, `concurrency.cpp:980`), owned per-task as a linked list with a cursor that *reuses* frames across suspensions (one frame per async-call position). The transpiler **writes through**: every async-local write boxes into the frame (`async_store_var`, `transpile-mir.cpp:1448`); resume reloads all slots (`async_restore_vars`). Suspension is a normal return (SF17-consistent). Today `emit_box` produces immortal-nursery pointers so slots survive suspension; under SF2 they would point into a popped (or worse, another thread's) number-stack region.
+Resolution — same shape as SF15/SF18:
+- **Tail-bearing frame, statically sized**: `async_next_slot` is a compile-time counter; the frame's single `mem_calloc` block carries the Item slots plus one 8-byte tail entry per potentially-wide async local. `async_store_var` of a wide scalar writes the payload into the slot's own tail entry and stores the rebased Item; in-place overwrite safe (each slot owns its entry). Only the **Item region** is registered as a GC root range — the raw-payload tail is never scanned.
+- **Suspension-barrier invariant**: nothing reachable from a suspended state machine points into *any* thread's side stacks. This is what makes Stage-B cross-thread resume safe — and the shared malloc heap is what makes the frame readable from the resuming thread (thread-local side stacks never could be).
+- **Heap allocation is structurally required, not incidental**: task lifetimes are **not LIFO** (task A suspends, B suspends, A completes first) — a stack allocator needs reverse-order release; suspension/completion order is arbitrary. The unifying principle: **LIFO lifetimes → side stacks; non-LIFO lifetimes (containers, envs, async frames) → owned storage.** A per-task arena for frames/slots/tails (freed wholesale at task completion) is a legitimate later locality optimization — everything in it shares the task's lifetime.
+- **Restore follows SF16: copy out** (or direct native loads via `emit_unbox`). No reference-into-tail carve-out — write-through mutates tail entries in place; `let b = a` aliases would observe later mutations (same argument as SF18).
+- **Cleanup that falls out**: async-slotted vars currently get *both* an async slot and a side root slot (`update_gc_root_slot` does both) — redundant; the GC-registered frame is their root. Async vars skip root-slot allocation.
+- **Write-through vs. write-at-suspend** is an optimization, not correctness: write-through costs a C call per async-local write; persisting only suspension-point-live locals (which K2-R splitting identifies) is cheaper. Start with write-through; optimize with liveness later.
+- Adjacent, already covered: mailbox `send`/`receive` deep-copies per K13 (wide scalars land in message storage under container rules); generator `yield` values go upward via SF14 lanes; JS async state gets the same treatment incl. out-of-band doubles (SF18).
+- ⚠️ Verification item: **temporaries live across a mid-expression `wait`** (`a + wait(t) + b`) — confirm state-machine compilation spills them into async slots, not just named locals.
 
 **OS4 — Non-local unwinding.** RESOLVED — see SF17. Lambda's convention (no longjmp, no exceptions; every error incl. JS exceptions propagates as return values through normal epilogues) collapses the general problem; the residue is three verified longjmp sites plus a transpiler discipline.
 
@@ -189,9 +225,10 @@ Residual rules:
 - **Foreign unwinding never crosses JIT frames**: C++ exceptions from parsers/deps are contained at the module boundary (already de-facto fatal through MIR frames — no unwind tables; now stated as a rule).
 - **Between-scripts/REPL reset**: `runtime_reset_heap` resets both tops.
 
-**OS5 — Region sizing policy.** Mechanism now decided (SF12 separate regions, SF13 virtual reservation + demand paging + explicit checks); remaining opens: the actual per-thread budget constants (profile-driven per SF4), whether budgets differ for main isolate vs. worker tasks vs. Radiant page isolates (RC2; K15 workers already reserve 256 MB C stacks on the same virtual-cost-is-free philosophy), and the madvise/decommit cadence in the GC driver.
+**OS5 — Region sizing policy.** Mechanism now decided (SF12 separate regions, SF13 virtual reservation + demand paging + explicit checks); remaining opens: the actual budget constants (profile-driven per SF4 — instrument static slot counts once stage 1 runs, read the histogram off AWFY + baselines), the sizing ratio vs. the C stack (side stacks must be generous enough relative to the C stack that runaway recursion exhausts the C stack *first*, keeping the existing signal guard as the failure path per OS8), and the madvise/decommit cadence in the GC driver (e.g. decommit above the high-water mark of the last N GC cycles).
+One global config is **not** expected to suffice — this becomes a **profile matrix**, expanded incrementally along dimensions like fn vs. pn (known at transpile time; pure `fn` frames skew lighter), Lambda vs. JS (known per module; JS numbers are inline doubles, so its number-stack profile is structurally thinner), and script isolate vs. Radiant page isolate vs. worker task (known at isolate creation). Budgets live in the existing JS-threading stack-profile structure ("budget ≠ limit", JT ledger) — two more fields, not a parallel constant system. Each dimension attaches at an existing seam, so **none of this changes the overall design** — profiles are decided/expanded along the way.
 
-**OS6 — C2MIR scope.** The generated-C path can adopt the same TLS inline helpers with a small emitter change (it already routes all boxing through `push_*`). Decide: migrate it (cheap, removes R-I6 for generated code) or leave it conservative-only as a frozen path. Leaning migrate-the-boxing, keep rooting conservative (C2MIR is legacy; U21 keeps it mechanical-only).
+**OS6 — C2MIR scope.** CLOSED — **C2MIR is kept exactly as-is; no code is touched** *(decided 2026-07-15)*. It inherits the new boxing passively (it calls `push_l`/`push_k` by name; the shared implementations re-home into the exec base frame underneath — script-lifetime numbers, matching its current nursery behavior), and its rooting remains conservative-scan-only, as today. No watermark emission, no helper migration, no emitter change. If C2MIR is ever reopened in the future, that reopening means **upgrading its entire implementation to this design** (frames, watermarks, multi-lane returns, honest rooting) — it must follow the current design anyway; there is no half-step worth building.
 
 **OS7 — Migration order and acceptance gates.** Staged: (0) SF10 small-int64 inlining, independent; (1) side-stack **rooting** for MIR-Direct behind a flag, conservative scan still on — gates: full lambda+JS baselines, `RuntimeError_StackOverflow` fail-fast, deltablue, havlak+push BUG-001 repro, AWFY within noise on release; (2) number stack + `push_*` rehoming, nursery retired — gates add long-run memory ceiling test (the N-I1 leak becomes measurable and must be gone); (3) helper migration to the RAII guard, module by module; (4) conservative-scan retirement per module. Each stage lands alone and soaks, per the P0.2 precedent.
 
@@ -199,13 +236,29 @@ Residual rules:
 
 **OS9 — Scalar pointer-identity audit.** Confirm nothing depends on boxed-scalar pointer identity (map keys, caches, interning, `is`-style comparisons). The formal semantics mandates value equality for scalars, and copies-everywhere makes identity unobservable — but verify VMap host paths, JS object keys, and the ArrayNum `==` representation-sensitivity issue (task_38782787) don't hide an identity assumption.
 
-**OS10 — End-state of `gc_nursery` and the `push_*` vocabulary.** When stage 2 lands: delete the numeric nursery entirely (the *data* nursery in `gc_data_zone` is unrelated and stays); rename or re-document `push_l`/`push_d`/`push_k` so the API finally matches its mechanics (the current names are fossils of the pre-nursery num_stack — third naming era, get it right this time).
+**OS10 — End-state of `gc_nursery` and the `push_*` vocabulary.** Retirement **CONFIRMED by full-client audit (2026-07-15)** — every nursery client has a home: temporaries → number stack; container reads/writes → SF16/SF15; captures → SF18; async locals → SF20; returns → SF14; errors → wrapped map; args → SF19; module globals/REPL → base-frame row above. When stage 2 lands: delete the numeric nursery entirely (the *data* nursery in `gc_data_zone` is unrelated and stays); **`box_float_cold` retires too** — out-of-band doubles move to the number stack in both Lambda and JS (SF18), closing the last path by which a plain double touched the GC. **C2MIR and the MIR interpreter inherit retirement for free**: they call `push_l`/`push_k` by name and the shared implementations re-home underneath; C2MIR code (no watermark frames per OS6) boxes into the runner's exec base frame — script-lifetime numbers, exactly today's nursery behavior for that path, no regression. Rename or re-document `push_l`/`push_d`/`push_k` so the API finally matches its mechanics (the current names are fossils of the pre-nursery num_stack — third naming era, get it right this time).
 
 **OS11 — MIR-interpreter mode.** Runtime helpers are shared, so interp-executed MIR calls the same TLS primitives — but confirm the interpreter establishes frame watermarks identically for interpreted frames (U26 keeps the MIR interp; it must not become a rooting hole).
 
 ---
 
 ## 5. Summary
+
+### 5.1 The three stack-like mechanisms
+
+The Lambda/JS runtime, under this design, runs on three stack-like mechanisms with distinct lifetimes and owners:
+
+| # | Mechanism | Lifetime shape | Holds | GC's view |
+|---|---|---|---|---|
+| 1 | **Native C stack** | LIFO, per thread | execution frames, native locals, spilled registers | conservative scan during migration (SF9); eventually invisible |
+| 2 | **Side stacks** (per thread, watermarked): **GC root stack** + **number stack** | LIFO, tied to native frames — entry saves both watermarks, every exit restores them (SF6) | root stack: tagged Item bits, the precise root set; number stack: raw 8-byte scalar payloads (wide int64/uint64, DateTime, out-of-band doubles) | root stack scanned precisely as `[base, top)`; number stack **never scanned** (SF12) |
+| 3 | **Async stack frames** (`LambdaAsyncFrame`) | **non-LIFO**, task-shaped — heap-allocated, task-owned, reused across suspensions | suspended state: async locals as Item slots + wide-scalar tail (SF20) | Item region registered as root range; tail never scanned |
+
+The governing principle that assigns every value a home: **LIFO lifetimes live on the side stacks; non-LIFO lifetimes (containers, closure envs, async frames) own their scalars in tail regions of their own allocation.** Values cross between the tiers by copy — downward argument flows need none (SF19), upward returns ride register lanes (SF14), and every outliving store re-homes into the destination's own storage (SF15/SF16/SF18/SF20).
+
+The C stack and the side stacks grow and shrink in lockstep (every native frame reserves its statically-known side-stack slots at entry); the async frames deliberately do not — task suspension/completion order is arbitrary, which is exactly why they are heap-allocated and why suspension is a re-homing barrier (SF20).
+
+### 5.2 Before / after
 
 | | Today | This design |
 |---|---|---|
@@ -218,3 +271,31 @@ Residual rules:
 | Conservative scan | load-bearing | backstop → retired per-module (SF9) |
 
 Verdict from review: feasible, well-precedented (SpiderMonkey/OCaml chained roots; Lua watermarked value stack), and faster than the current machinery on every axis — *provided* OS1 (escape re-homing) and OS3 (suspended frames) are designed before any code lands, and OS4 (unwind contract) lands with stage 1.
+
+---
+
+## 6. Appendix — why not NaN-boxing (the int64 comparison)
+
+A natural question: would NaN-boxing — the value representation of JavaScriptCore, SpiderMonkey, and LuaJIT — have avoided the wide-scalar problem this design solves? **No: NaN-boxing makes it strictly worse**, and the comparison clarifies why Lambda's representation plus the side-stack architecture is the stronger combination.
+
+**The structural limit.** NaN-boxing hides non-double values in the IEEE 754 NaN payload space (~2⁵¹ free bit-patterns once arithmetic is canonicalized to one NaN). After the type tag, **48–51 payload bits** remain — the representation that makes *every double* inline structurally cannot make *any* full-width int64/uint64 inline; the two claims compete for the same bits.
+
+**What NaN-boxing runtimes actually do with int64:**
+- **JSC / SpiderMonkey**: the language dodges it — JS numbers are doubles, with an inline **int32** fast path; wider values lose precision into doubles (allowed above 2⁵³ by JS semantics). True 64-bit+ integers (**BigInt**) are **heap-allocated GC objects** — the same shape as Lambda's `integer` type decision (N1–N9), and correctly *not* a wide scalar here either.
+- **LuaJIT**: FFI `int64_t` values are **boxed cdata on the GC heap** — every int64 arithmetic result allocates (a known perf trap its sink optimizations fight).
+- **WASM engines**: sidestep via static typing — i64 lives unboxed in typed slots, boxed only at the JS boundary.
+
+The complete menu is: shrink to int32 inline, lose precision into doubles, box on the GC heap, or escape via static types. There is no inline-int64 option in the NaN space.
+
+**Head-to-head:**
+
+| | NaN-boxing | Lambda (high-byte tag + `ITEM_DBL_MASK`) |
+|---|---|---|
+| doubles inline | **all**, incl. tiny/subnormal | all except tiny/subnormal residue (out-of-band → number stack, SF18) |
+| inline integer width | 32 typical (≤51 theoretical) | **56 bits** (`int56`; SF10 small-int64) |
+| pointer payload | 48 bits (fragile under 5-level paging / high VA) | 56 bits |
+| wide int64/uint64 / DateTime home | **GC heap** (BigInt, cdata): alloc + trace + collect per value | **number stack / owned tails**: no GC involvement (SF2) |
+
+The trade is exactly one-dimensional: NaN-boxing's genuine advantage is the tiny-double residue (it has none; we have a rare out-of-band case). In exchange it gives up 8 bits of integer/pointer payload and — decisively — has **no non-GC home for wide scalars**: every NaN-boxing runtime pays heap allocation and collection for each boxed int64, the exact cost structure SF2 eliminates.
+
+The lesson cuts the other way from the question: were Lambda NaN-boxed, the side stacks would be *more* necessary, not less — SF10's inline fast path would shrink from 56 to ~48 bits, pushing more values onto the wide path. Wider inline range than any NaN-boxer, plus a frame-scoped value home for the residue that NaN-boxing runtimes lack (their equivalents *are* scalars-in-the-GC), is the stronger pair.

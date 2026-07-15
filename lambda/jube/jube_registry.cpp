@@ -42,6 +42,8 @@ extern "C" int js_check_exception(void);
 extern "C" bool js_is_truthy(Item value);
 extern "C" Item js_get_intrinsic_prototype_for_class(int class_id);
 extern "C" void* js_dom_get_document(void);
+extern "C" void* js_dom_get_ui_context(void);
+extern "C" bool js_dom_force_layout_for_geometry(void* doc);
 extern "C" Item js_get_document_object_value(void);
 extern "C" void* js_dom_get_or_create_doc_node(void* doc);
 extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc);
@@ -241,9 +243,19 @@ extern "C" Item js_selection_to_string(Item self);
 extern "C" Item js_selection_modify(Item self, Item alter, Item direction, Item granularity);
 extern "C" Item js_selection_force_direction(Item self, Item direction);
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
+extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* target,
+                                                void* parent, const char* attribute_name,
+                                                const char* old_value);
 
 static void jube_host_dom_notify_mutation(int kind, void* target, void* parent) {
     js_dom_notify_mutation((DomJsMutationKind)kind, target, parent);
+}
+
+static void jube_host_dom_notify_mutation_detail(int kind, void* target, void* parent,
+                                                  const char* attribute_name,
+                                                  const char* old_value) {
+    js_dom_notify_mutation_detail((DomJsMutationKind)kind, target, parent,
+                                  attribute_name, old_value);
 }
 
 static const JubeHostGcAPI jube_host_gc_api = {
@@ -420,6 +432,7 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_dom_append_variadic_bridge,
     js_dom_prepend_variadic_bridge,
     jube_host_dom_notify_mutation,
+    jube_host_dom_notify_mutation_detail,
     js_range_get_start_container,
     js_range_get_start_offset,
     js_range_get_end_container,
@@ -495,6 +508,8 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_cssom_rule_get_parent_rule,
     js_cssom_rule_decl_remove_property,
     js_cssom_decl_css_has,
+    js_dom_get_ui_context,
+    js_dom_force_layout_for_geometry,
 };
 
 static JubeHostAPI jube_host_api = {

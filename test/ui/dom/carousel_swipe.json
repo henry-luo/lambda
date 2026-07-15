@@ -1,0 +1,5 @@
+{"name":"Bootstrap carousel accepts a touch pointer swipe","html":"test/ui/dom/bootstrap_ui.html","events":[
+  {"type":"pointer_drag","target":{"selector":"#carousel"},"dx":-120,"dy":0,"pointerType":"touch","steps":5},
+  {"type":"wait","ms":80},
+  {"type":"assert_class","target":{"selector":"#slide2"},"class":"active"}
+]}

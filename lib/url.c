@@ -366,8 +366,10 @@ String* url_serialize_origin(const Url* url) {
     // For origin, prefer hostname + port over combined host
     if (url->hostname && url->hostname->len > 0) {
         total_size += 2 + url->hostname->len; // "//"
-        // For origin, always include port if it was explicitly specified
-        if (url->port && url->port->len > 0) {
+        // URL parsing normalizes a scheme's default port out of serialized
+        // host/origin even when the source spelling contained it.
+        if (url->port && url->port->len > 0 &&
+            url->port_number != url_default_port_for_scheme(url->scheme)) {
             total_size += 1 + url->port->len; // ":"
         }
     } else if (url->host && url->host->len > 0) {
@@ -401,8 +403,8 @@ String* url_serialize_origin(const Url* url) {
         str_copy(buffer + pos, total_size + 1 - pos, url->hostname->chars, url->hostname->len);
         pos += url->hostname->len;
 
-        // For origin, include port if it was explicitly specified
-        if (url->port && url->port->len > 0) {
+        if (url->port && url->port->len > 0 &&
+            url->port_number != url_default_port_for_scheme(url->scheme)) {
             buffer[pos++] = ':';
             str_copy(buffer + pos, total_size + 1 - pos, url->port->chars, url->port->len);
             pos += url->port->len;

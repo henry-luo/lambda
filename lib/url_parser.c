@@ -555,6 +555,32 @@ UrlError url_parse_into(const char* input, Url* url) {
         return URL_ERROR_MEMORY_ALLOCATION;
     }
 
+    // `host` and `origin` are derived URL records, not aliases of hostname.
+    // Keeping the parser's initial hostname-only host left HTMLAnchorElement
+    // and URL consumers without explicit non-default ports or any origin.
+    if (url->hostname && url->hostname->len > 0) {
+        char host_buf[512];
+        size_t host_len = url->hostname->len;
+        if (host_len < sizeof(host_buf)) {
+            memcpy(host_buf, url->hostname->chars, host_len);
+            if (url->port && url->port->len > 0 &&
+                url->port_number != url_default_port_for_scheme(url->scheme) &&
+                host_len + url->port->len + 1 < sizeof(host_buf)) {
+                host_buf[host_len++] = ':';
+                memcpy(host_buf + host_len, url->port->chars, url->port->len);
+                host_len += url->port->len;
+            }
+            host_buf[host_len] = '\0';
+            url_free_string(url->host);
+            url->host = url_create_string(host_buf);
+        }
+    }
+    String* serialized_origin = url_serialize_origin(url);
+    if (serialized_origin) {
+        url_free_string(url->origin);
+        url->origin = serialized_origin;
+    }
+
     // Mark as valid if we got this far
     url->is_valid = true;
 

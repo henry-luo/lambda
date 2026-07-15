@@ -1,0 +1,11 @@
+{
+  "name": "DOM geometry reads synchronously flush host-loop layout",
+  "html": "test/ui/dom/geometry_fresh.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#box"}, "width": 40, "height": 25, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#resize-box"}},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "135x55"},
+    {"type": "assert_rect", "target": {"selector": "#box"}, "width": 135, "height": 55, "tolerance": 1}
+  ]
+}

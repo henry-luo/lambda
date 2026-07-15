@@ -280,10 +280,11 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
             return item_to_ri(ItemError);
         }
 
-        size_t written = fwrite(bin->chars, 1, bin->len, f);
+        size_t bin_len = binary_length(bin);
+        size_t written = fwrite(binary_data(bin), 1, bin_len, f);
         fclose(f);
 
-        if (written != (size_t)bin->len) {
+        if (written != bin_len) {
             log_error("pn_output_internal: failed to write to file %s", write_path);
             if (atomic) file_delete(write_path);  // clean up temp file on error
             if (temp_path_buf) strbuf_free(temp_path_buf);
@@ -1030,11 +1031,13 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
 #endif
             }
         } else if (result_type == LMD_TYPE_BINARY) {
-            Binary* bin = (Binary*)it2s(fetch_result);
+            // Binary descriptors no longer share String's inline character layout.
+            Binary* bin = fetch_result.get_safe_binary();
             if (bin) {
-                wr = write_binary_file(dst_path, bin->chars, bin->len);
+                size_t bin_len = binary_length(bin);
+                wr = write_binary_file(dst_path, (const char*)binary_data(bin), bin_len);
 #ifndef NDEBUG
-                if (wr == 0) written = bin->len;
+                if (wr == 0) written = bin_len;
 #endif
             }
         }

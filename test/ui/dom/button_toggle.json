@@ -1,0 +1,5 @@
+{"name":"Bootstrap button toggles active state","html":"test/ui/dom/bootstrap_ui.html","events":[
+  {"type":"click","target":{"selector":"#button-toggle"}},
+  {"type":"assert_class","target":{"selector":"#button-toggle"},"class":"active"},
+  {"type":"assert_attr","target":{"selector":"#button-toggle"},"attribute":"aria-pressed","equals":"true"}
+]}

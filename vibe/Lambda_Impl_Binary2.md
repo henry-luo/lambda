@@ -1,6 +1,6 @@
 # Lambda Binary Phase 6 — Shared Byte-Storage Unification Implementation Plan
 
-> **Status:** Proposed; not implemented
+> **Status:** Complete — implementation Phases 0–6 and all applicable regression gates verified
 > **Plan date:** 2026-07-15
 > **Design authority:** [Lambda_Type_Binary.md](Lambda_Type_Binary.md) §11
 > **Predecessor:** [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md) — decoded-byte semantics and the safe copy bridge, implemented through Phase 5
@@ -298,6 +298,67 @@ paths either perform the same guard or call a shared resolving helper.
 - Every raw access has an owner and migration phase.
 - No generated file is scheduled for manual editing.
 
+### Implementation record (2026-07-15)
+
+Pre-change snapshot on `master` at `d1a1bcb03`:
+
+- `make build`: pass, zero errors/warnings.
+- `make test-lambda-baseline`: pass, Input `2105/2105`, Lambda Runtime
+  `1270/1270`, combined `3375/3375`.
+- `make test262-baseline`: pass, `40261/40261`, zero non-fully-passing,
+  zero failures, zero regressions, retry time `0.0s`.
+- The first Lambda gate attempt was blocked before tests because the sandbox
+  could not update `.git/modules/test/yaml/config`; the authorized rerun is the
+  recorded result above, not a product failure.
+
+Binary layout/access inventory:
+
+- Definition/allocation: `lambda/lambda.h`, `lambda/lambda.hpp`, and
+  `lambda/lambda-mem.cpp` expose Binary as `String` and allocate inline bytes.
+- Runtime producers/consumers: `lambda/build_ast.cpp`, `lambda/lambda-eval*.cpp`,
+  `lambda/lambda-data*.cpp`, `lambda/lambda-vector.cpp`,
+  `lambda/lambda-proc.cpp`, `lambda/input/input*.cpp`, `lambda/mark_builder.cpp`,
+  `lambda/mark_editor.cpp`, `lambda/print.cpp`, `lambda/emit_sexpr.cpp`,
+  formatter/validator code, and JS bridge code.
+- ABI/lowering: `lambda/transpile.cpp`, `lambda/transpile-call.cpp`,
+  `lambda/transpile-mir.cpp`, `lambda/transpile_shared.cpp`,
+  `lib/item_tagged.hpp`, and `lib/lambda_typed.hpp` currently group Binary with
+  `String*`, `it2s`, and string-shaped field slots.
+- GC currently treats Binary as pointer-free inline data. Phase 2 must add its
+  external storage edge to the new finalizer without changing the Item tag.
+- Compiler literals will remain pool-owned inline Binary payloads during the
+  first migration. Runtime-created non-empty Binary values become
+  storage-backed. This is the explicit constant-lifetime exception until a
+  script storage registry exists; all access remains behind the same Binary
+  API.
+
+JS/ArrayNum raw-access inventory:
+
+- Lifecycle and replacement are concentrated in `lambda/js/js_typed_array.cpp`
+  and context teardown in `lambda/lambda-mem.cpp`. Existing resize paths assign
+  a new `ab->data` without releasing the old allocation; detach/finalization do
+  release it.
+- Typed-array cached data is refreshed in
+  `js_typed_array_refresh_arraynum_view`; optimized indexed paths in
+  `js_mir_expression_lowering.cpp` and `js_mir_statement_lowering.cpp` call
+  `js_typed_array_current_data_ptr`. These are the generation-guard insertion
+  points.
+- Direct ArrayBuffer/DataView readers exist in `js_assert.cpp`,
+  `js_child_process.cpp`, `js_clipboard.cpp`, `js_crypto.cpp`, `js_runtime.cpp`,
+  `js_tls.cpp`, `js_util.cpp`, and `js_zlib.cpp`.
+- Direct writers/storage creators exist in `js_clipboard.cpp`, `js_crypto.cpp`,
+  `js_globals.cpp`, `js_stream.cpp`, and `js_typed_array.cpp`; accessor-based
+  mutable typed-array/Buffer/file/network writers additionally occur in
+  `js_buffer.cpp`, `js_fs.cpp`, `js_net.cpp`, `js_stream.cpp`, `js_tls.cpp`, and
+  `js_crypto.cpp`. Phase 4 must split the current unqualified data accessor into
+  const-resolution and prepare-write APIs and migrate every mutable call site.
+- ArrayNum external views originate in `lambda/lambda-data-runtime.cpp`; their
+  `ArrayNumShape::base` is traced by `lib/gc/gc_heap.c`, while `view->data` is a
+  replaceable raw cache. Backing-kind and generation metadata belong in that
+  descriptor rather than being inferred from `base`.
+
+No generated Lua or parser source is part of the edit plan.
+
 ---
 
 ## 5. Phase 1 — land `ByteStorage` and the finalization seam, unused
@@ -336,6 +397,26 @@ must be released during sweep, not merely at process/context shutdown.
 - Leak instrumentation shows no surviving storage after last owner release.
 - Runtime behavior is otherwise unchanged because no value uses the substrate.
 - `make build` and `make test-lambda-baseline` pass.
+
+### Implementation record (2026-07-15)
+
+- Added `lib/byte_storage.{h,c}` with checked borrowed spans, atomic
+  retain/release, owned and callback-wrapped allocations, explicit read-only /
+  shared-mutable / external flags, and last-release cleanup.
+- The allocation API accepts the caller's `MemCategory`; wrapped storage uses
+  the existing `MEM_CAT_CONTAINER` category for its descriptor. No allocation
+  is hidden under `MEM_CAT_UNKNOWN`.
+- Added a general external-payload destroy seam to `gc_heap_t`. Sweep and heap
+  teardown both invoke it; the sweep fix point documents why zone reclamation
+  is insufficient for refcounted bytes.
+- Added five ByteStorage tests (empty, nested spans, overflow/OOB, callback
+  ownership/read-only flags, and contended retain/release) plus the full
+  44-test GC suite, including mid-sweep and teardown callback delivery.
+  Focused result: `49/49` pass.
+- The seam remains unused by runtime values in this phase, so observable value
+  behavior is unchanged. Binary registration occurs with the Phase-2 header.
+- `make build` completed with zero errors/warnings, and
+  `make test-lambda-baseline` passed `3375/3375`.
 
 ---
 
@@ -416,6 +497,32 @@ not decoded Binary layout.
 - `make build`, focused tests, and `make test-lambda-baseline` pass.
 - Regenerate `lambda/lambda-embed.h` through the build target; never edit it.
 
+### Implementation record (2026-07-15)
+
+- Replaced the String alias with a dedicated accessor-backed `Binary` header.
+  Compiler constants and arena-built Mark values remain explicitly inline
+  because those owners have no individual external-payload finalizer; all
+  runtime-created non-empty binaries use retained `ByteStorage` spans.
+- Migrated compiler and MIR/C2MIR ABI lowering, shaped slots, formatters,
+  input/output, MarkBuilder/Editor, procedural/runtime operations, and the JS
+  copy bridge to `Binary*` plus `binary_data`/`binary_length`. `Item` character
+  access now dispatches Binary independently instead of assuming String layout.
+- Runtime finalization releases storage-backed Binary payloads during both GC
+  sweep and heap teardown. Allocation-failure descriptors remain safe for the
+  same finalizer.
+- `heap_binary_slice` flattens storage-backed nested slices to one root storage
+  offset without copying. Inline compiler/arena values perform the documented
+  one-time promotion copy at that ownership boundary; concatenation remains a
+  contiguous allocation.
+- Added descriptor-level tests for nested storage identity, embedded NULs,
+  full/empty/OOB slices, zero-copy allocation/copy counters, refcounts, and a
+  GC cycle where only the subview survives. New focused result: `3/3` pass;
+  existing binary bridge/round-trip/output coverage passes `6/6`.
+- The generated embedded header was refreshed by `make build`. The core CLI no
+  longer exposes `--c2mir`; the Jube C2MIR gate remains in the final ABI gate.
+- `make test-lambda-baseline` passed Input `2105/2105`, Lambda Runtime
+  `1273/1273`, combined `3378/3378`, with zero failures.
+
 ---
 
 ## 7. Phase 3 — move JsArrayBuffer onto `ByteBufferHandle`
@@ -471,6 +578,23 @@ survive a generation-changing buffer operation without refresh.
 - The old binary copy bridge still passes, proving no semantic broadening yet.
 - `make test-lambda-baseline` and the relevant Test262 baseline gate pass with
   zero regressions.
+
+### Implementation record (2026-07-15)
+
+- `JsArrayBuffer` now embeds `ByteBufferHandle`; allocation, resize, grow,
+  detach, transfer, fixed-length transfer, and finalization use the handle API.
+  Old storage is released only after a replacement is ready, and every
+  identity-preserving storage change advances the generation.
+- Every JS TypedArray is an `array_num_new_buffer_view`. Generic and MIR access
+  resolves the live handle; the MIR store path prepares writable storage and
+  typed-array pointer hoisting is disabled across storage-invalidating effects.
+- Fixed-source transfer and coercion-triggered resize regressions found during
+  the full Test262 gate were repaired at their root: fixed transfers no longer
+  inherit a stale maximum, and a value-coercion resize refreshes ArrayNum
+  geometry before the store.
+- Focused resize/detach/transfer, DataView, TypedArray bulk, Buffer, crypto, and
+  the five exposed Test262 regressions pass. The full final gates are recorded
+  in §15 after all phases.
 
 ---
 
@@ -555,6 +679,26 @@ Add a debug assertion in the raw mutable-data accessor: non-shared storage with
 - Focused JS/Node tests, `make test-lambda-baseline`, Test262 baseline, and
   `make node-baseline` pass with no storage-related regression.
 
+### Implementation record (2026-07-15)
+
+- Storage-backed Binary-to-Uint8Array/Buffer creates a fixed handle over the
+  exact retained span. Uint8Array, Uint8ClampedArray, Buffer, and DataView
+  convert back by retaining the current non-shared visible range. Inline
+  constants and SharedArrayBuffer views use the instrumented copy fallback.
+- `byte_buffer_prepare_write` is the sole non-shared mutable allocation gate.
+  It clones shared/read-only storage before mutation and leaves the old handle
+  completely unchanged on allocation failure. Debug builds assert that a
+  shared non-SAB allocation is never returned raw for writing.
+- The writer audit covers scalar/bulk TypedArray operations, DataView setters,
+  Buffer writes/fill/copy/swaps/encodings, crypto, zlib, TextEncoder,
+  structured clone, streams, fs, net, and MIR stores. All sibling JS views
+  resolve through the one handle after COW.
+- Descriptor tests prove storage identity before mutation, divergence after
+  COW, repeated unique writes without re-cloning, exact subview offsets, and
+  failure atomicity. The expanded bridge proves sibling TypedArray/DataView
+  coherence, non-zero offsets, Buffer isolation, and mandatory
+  SharedArrayBuffer snapshot copying.
+
 ---
 
 ## 9. Phase 5 — complete required ArrayNum substrate convergence
@@ -590,6 +734,23 @@ remaining ownership ambiguity and makes the shared layer reusable beyond JS.
   allocation alive; neither mechanism is substituted for the other.
 - No ArrayNum view contains an unowned pointer to replaceable storage.
 - `make test-lambda-baseline` and the relevant JS baseline gates pass.
+
+### Implementation record (2026-07-15)
+
+- `ArrayNumShape.backing_kind` now explicitly distinguishes GC-owned, GC-view,
+  stable borrowed external, buffer-handle, and retained-ByteStorage modes.
+  `base` remains the semantic GC edge; `backing` owns or locates external bytes.
+- `array_num_init_derived_view` flattens element offsets and propagates the
+  backing contract. GC views pin only their real GC data owner, handle-backed
+  views inherit handle/generation without pinning the wrapper, and retained
+  storage children take their own reference.
+- `array_num_new_storage_view` provides the checked FFI/mmap/cross-isolate
+  constructor, rejects mutable views over read-only storage, and releases its
+  retained reference in both mid-sweep and context teardown finalization.
+  Borrowed external views are documented as stable-pointer-only.
+- Existing byte-preserving copy/reverse/fill kernels remain the shared Lambda/JS
+  implementation. Focused storage tests pass `6/6`; `make test-lambda-baseline`
+  passes Input `2105/2105`, Lambda Runtime `1276/1276`, combined `3381/3381`.
 
 ---
 
@@ -631,6 +792,22 @@ atomic refcounting is universally cheaper.
   compaction/pinning metrics.
 - A representation change does not land on microbenchmark wins alone; Lambda,
   JS, document/image, and binary-stream workloads must show no material loss.
+
+### Allocation-policy decision (2026-07-15)
+
+- Measurements used a release build only. The Binary/JS interop+COW matrix ran
+  in `0.02s` warm (`0.34s` first cold import/cache run); representative N-D
+  image and linalg workloads each ran in `0.01s`. Descriptor counters also
+  prove that nested Binary slices allocate/copy no payload and eligible
+  handle sharing retains rather than copies.
+- No measured allocation, GC-pinning, or cross-runtime-copy bottleneck
+  justified another representation. Compiler/pool constants therefore remain
+  inline for owner-lifetime reasons, while runtime non-empty Binary stays
+  uniformly storage-backed; no arbitrary byte threshold is introduced.
+- Owned ArrayNum remains on the GC data-zone fast path. The explicit retained
+  storage view supplies FFI/mmap/cross-isolate reuse without charging every
+  local numeric array an atomic refcount. A future owned migration requires a
+  workload demonstrating the missing benefit and can reuse the landed tag.
 
 ---
 
@@ -677,6 +854,31 @@ make node-baseline
 Run `make test-jube`/the Jube C2MIR gate when the changed runtime ABI is compiled
 there. Regenerate `lambda/lambda-embed.h` through its Make target after
 `lambda.h` changes. Never update a baseline merely to hide a storage regression.
+
+### Final verification record (2026-07-15)
+
+- `make build`: passed with zero errors and zero warnings. The final ABI audit
+  also registered the dedicated `it2x` Binary unbox helper in the named JIT
+  import table; generated code no longer has to rely on the old String import.
+- `make test-lambda-baseline`: Input `2105/2105`, Lambda Runtime `1276/1276`,
+  combined `3381/3381`; the new Binary storage suite is `6/6`.
+- `make test262-baseline`: `40261/40261` fully passing, zero non-fully-passing,
+  zero failures, zero regressions, and `0.0s` retry time.
+- `make node-baseline`: `3528/3528` passing, zero failures, missing tests,
+  timeouts, crashes, or regressions. The runner's timing-only slow-list edit
+  was discarded rather than changing policy from one host timing sample.
+- `make build-jube`: passed after the final ABI/import change. Five Jube Binary
+  smokes (`binary_decode`, `binary_elements`, `binary_mark_roundtrip`,
+  `binary_js_bridge`, and procedural `proc_binary_output`) matched their
+  existing goldens exactly.
+- `make test-jube` was also attempted. Its current legacy C2MIR test is not an
+  available C2MIR gate: it passes `--c2mir` to `test-batch`, but the current CLI
+  ignores that flag in this mode and logs MIR Direct execution. The resulting
+  12 object/Radiant failures are the known unsupported/skipped MIR cases, while
+  all Binary cases pass. The remaining target failures are unrelated existing
+  Jube harness issues (Python shutdown memtrack output and an uninstantiated
+  Bash official parameter suite); the target's embedded Test262 and Node runs
+  pass. No baseline or storage workaround was added to conceal them.
 
 ---
 
@@ -748,21 +950,21 @@ type-specific shadow buffer or bypass COW as a workaround.
 
 ## 15. Completion checklist
 
-- [ ] Phase 0 raw-access and baseline inventory recorded
-- [ ] ByteStorage/span API implemented and unit-tested
-- [ ] Mid-GC and context-end external storage finalization implemented
-- [ ] Compiler constant storage ownership explicit
-- [ ] Binary has a dedicated accessor-backed representation
-- [ ] All binary producers/consumers migrated; no layout-dependent `String*`
-- [ ] Binary storage-backed slices are O(1)
-- [ ] JsArrayBuffer uses a stable ByteBufferHandle
-- [ ] ArrayNum buffer views are generation-aware and owner-safe
-- [ ] All mutable JS/Node write paths prepare writable storage
-- [ ] Eligible binary/typed-array/DataView conversions share storage
-- [ ] COW preserves Binary immutability and same-handle JS view coherence
-- [ ] Detach/resize/transfer/GC/failure paths release exactly once
-- [ ] SharedArrayBuffer conversion copies are explicit and tested
-- [ ] Existing Phase-1–5 behavior/goldens remain unchanged
-- [ ] Lambda, Test262, Node, and Jube/C2MIR gates pass as applicable
-- [ ] As-built runtime/ArrayNum/JS design docs updated
-- [ ] Optional small-inline/large-ArrayNum policy decided from release measurements
+- [x] Phase 0 raw-access and baseline inventory recorded
+- [x] ByteStorage/span API implemented and unit-tested
+- [x] Mid-GC and context-end external storage finalization implemented
+- [x] Compiler constant storage ownership explicit
+- [x] Binary has a dedicated accessor-backed representation
+- [x] All binary producers/consumers migrated; no layout-dependent `String*`
+- [x] Binary storage-backed slices are O(1)
+- [x] JsArrayBuffer uses a stable ByteBufferHandle
+- [x] ArrayNum buffer views are generation-aware and owner-safe
+- [x] All mutable JS/Node write paths prepare writable storage
+- [x] Eligible binary/typed-array/DataView conversions share storage
+- [x] COW preserves Binary immutability and same-handle JS view coherence
+- [x] Detach/resize/transfer/GC/failure paths release exactly once
+- [x] SharedArrayBuffer conversion copies are explicit and tested
+- [x] Existing Phase-1–5 behavior/goldens remain unchanged
+- [x] Lambda, Test262, and Node gates pass; Jube ABI build/Binary smokes pass and the legacy C2MIR gate limitation is recorded
+- [x] As-built runtime/ArrayNum/JS design docs updated
+- [x] Optional small-inline/large-ArrayNum policy decided from release measurements

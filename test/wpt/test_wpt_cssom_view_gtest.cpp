@@ -1,0 +1,5 @@
+#define WPT_RUNNER_DIR "ref/wpt/css/cssom-view"
+#define WPT_RUNNER_TEMP_PREFIX "wpt_cssom_view_"
+#define WPT_RUNNER_BASELINE_PATH "test/wpt/wpt_cssom_view_baseline.txt"
+#define WPT_RUNNER_UPDATE_ENV "WPT_CSSOM_VIEW_UPDATE_BASELINE"
+#include "test_wpt_dom_events_gtest.cpp"

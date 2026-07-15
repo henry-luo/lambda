@@ -586,6 +586,8 @@ typedef struct Object Object;
 typedef struct Function Function;
 typedef struct Decimal Decimal;
 typedef struct TypePattern TypePattern;
+typedef struct ByteStorage ByteStorage;
+typedef struct ByteBufferHandle ByteBufferHandle;
 
 /*
 * The C verion of Lambda Item and data structures are defined primarily for MIR JIT ciompiler
@@ -617,7 +619,22 @@ typedef struct Symbol {
     Target* ns;         // namespace target (NULL for unqualified symbols)
     char chars[];       // symbol name characters
 } Symbol;
-typedef String Binary;  // Binary is just a String
+enum BinaryFlags {
+    BINARY_FLAG_NONE = 0,
+    BINARY_FLAG_INLINE = 1u << 0,
+};
+
+// Binary is an immutable byte span. Runtime values retain storage; compiler
+// constants use inline_bytes so their lifetime remains owned by the script pool.
+typedef struct Binary {
+    uint32_t len;
+    uint8_t is_ascii;
+    uint8_t flags;
+    uint16_t reserved;
+    ByteStorage* storage;
+    size_t offset;
+    uint8_t inline_bytes[];
+} Binary;
 typedef struct LambdaSymbolKeyList SymbolKeyList;
 
 // MapKind: discriminates exotic Map sub-types so js_property_get can
@@ -787,13 +804,25 @@ LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, type_id) == 0,
 //   int64_t strides[ndim]    — stride per dimension, in *elements* (not bytes)
 // Allocated via pool/heap, freed in ArrayNum finalizer.
 // ============================================================================
+typedef enum ArrayNumBackingKind {
+    ARRAY_NUM_BACKING_GC_OWNED = 0,
+    ARRAY_NUM_BACKING_GC_VIEW = 1,
+    ARRAY_NUM_BACKING_EXTERNAL_BORROWED = 2,
+    ARRAY_NUM_BACKING_BUFFER_HANDLE = 3,
+    ARRAY_NUM_BACKING_BYTE_STORAGE = 4,
+} ArrayNumBackingKind;
+
 typedef struct ArrayNumShape {
     uint8_t  ndim;            // number of dimensions (1..32)
     uint8_t  is_c_contig:1;   // contiguous in row-major
     uint8_t  is_f_contig:1;   // contiguous in column-major
     uint8_t  reserved:6;
+    uint8_t  backing_kind;    // ArrayNumBackingKind; never infer backing from base
+    uint8_t  backing_padding[5];
     int64_t  offset;          // element offset within base->data (0 for owned)
     void*    base;            // Container* — non-NULL for views; NULL for owned N-D arrays
+    void*    backing;         // ByteBufferHandle*/ByteStorage* for tagged external modes
+    uint64_t resolved_generation; // last ByteBufferHandle generation cached in ArrayNum.data
     int64_t  data[];          // shape[ndim] followed by strides[ndim] — total 2*ndim entries
 } ArrayNumShape;
 
@@ -920,8 +949,16 @@ void heap_jit_gc_root_frame_exit();
 String* heap_create_name(const char* name);
 // String creation for runtime strings
 String* heap_strcpy(const char* src, int64_t len);
-String* heap_binary_from_bytes(const char* src, int64_t len);
-String* heap_binary_concat(String* left, String* right);
+const uint8_t* binary_data(const Binary* binary);
+uint32_t binary_length(const Binary* binary);
+bool binary_is_ascii(const Binary* binary);
+Binary* pool_binary_from_bytes(Pool* pool, const void* src, size_t len);
+Binary* heap_binary_from_bytes(const char* src, int64_t len);
+Binary* heap_binary_from_storage(ByteStorage* storage, size_t offset,
+    size_t length, bool is_ascii);
+Binary* heap_binary_slice(Binary* source, size_t offset, size_t length);
+Binary* heap_binary_copy(Binary* source);
+Binary* heap_binary_concat(Binary* left, Binary* right);
 // Symbol creation for runtime symbols
 Symbol* heap_create_symbol(const char* symbol, size_t len);
 #ifdef __cplusplus
@@ -1429,6 +1466,13 @@ extern "C" {
     ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length);
     ArrayNum* array_num_new_external_view(Container* base, void* data_base,
         ArrayNumElemType elem_type, int64_t byte_offset, int64_t length, bool mutable_view);
+    ArrayNum* array_num_new_buffer_view(Container* base, ByteBufferHandle* handle,
+        ArrayNumElemType elem_type, int64_t byte_offset, int64_t length, bool mutable_view);
+    ArrayNum* array_num_new_storage_view(ByteStorage* storage,
+        ArrayNumElemType elem_type, int64_t byte_offset, int64_t length, bool mutable_view);
+    bool array_num_init_derived_view(ArrayNum* view, ArrayNumShape* shape,
+        ArrayNum* source, int64_t relative_elem_offset);
+    void* array_num_resolve_data(ArrayNum* array, bool write);
     ArrayNum* array_int_new(int64_t length);
     ArrayNum* array_int64_new(int64_t length);
     ArrayNum* array_float_new(int64_t length);
@@ -1513,6 +1557,7 @@ extern "C" {
     #define const_x2it(index)    x2it(_const_pool[index])
 
     #define const_s(index)      ((String*)_const_pool[index])
+    #define const_x(index)      ((Binary*)_const_pool[index])
     #define const_c(index)      ((Decimal*)_const_pool[index])
     #define const_k(index)      (*(DateTime*)_const_pool[index])
 
@@ -1522,6 +1567,7 @@ extern "C" {
     bool it2b(Item item);
     int64_t it2i(Item item);
     String* it2s(Item item);
+    Binary* it2x(Item item);
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
     Item coerce_num_sized(Item value, int64_t num_type);
     Item coerce_uint64(Item value);

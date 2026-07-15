@@ -1,12 +1,18 @@
 # Gap Analysis: Bootstrap.js Support in Lambda JS
 
+**Status:** Complete — Bootstrap 5.3.3 library golden and 21-fixture native DOM UI suite green (2026-07-15).
+
+> The detailed gap analysis below is retained as implementation history. Every P0–P3 item targeted by `Radiant_Impl_DOM.md` is now implemented: native event constructors/dispatch, persistent expandos, fragments, fresh geometry, live transition timing/events, focus management, window metrics/scroll, IntersectionObserver, anchor URL fields, `matchMedia`, storage, and Carousel pointer input.
+
 ## Summary
 
 | Library | Version | Target | Status | Key Blockers |
 |---------|---------|--------|--------|-------------|
-| **Bootstrap** | 5.3.3 | JS components (no CSS) | ⚠️ **Blocked** | `new Event()` constructor, expando properties, `element.append()`, `getClientRects()`, CSS transition detection |
+| **Bootstrap** | 5.3.3 | JS components + Radiant CSS/layout | ✅ **Supported** | all 12 plugin probes and native UI acceptance fixtures pass |
 
-Bootstrap 5 dropped jQuery and uses vanilla DOM APIs directly. Its JS components (Modal, Dropdown, Tooltip, Collapse, Tab, Carousel, Offcanvas, ScrollSpy, Toast, Alert, Button, Popover) rely on a modern DOM API surface that goes beyond what Lambda JS currently implements.
+Bootstrap 5 dropped jQuery and uses vanilla DOM APIs directly. Its JS components (Modal, Dropdown, Tooltip, Collapse, Tab, Carousel, Offcanvas, ScrollSpy, Toast, Alert, Button, Popover) drove the modern DOM surface implemented by this work.
+
+The acceptance golden now boots exactly those 12 plugins and verifies class/ARIA state plus show/shown/hide/hidden (or component-equivalent) lifecycle events. The UI layer separately drives Modal focus trapping, Dropdown keyboard navigation, Collapse transitions, Tabs, Tooltip/Popper placement, ScrollSpy, Carousel swipe, Toast autohide, Alert, and Button through native input.
 
 ## Architecture Overview
 
@@ -319,6 +325,6 @@ this._targetLinks.set(decodeURI(anchor.hash), anchor)
 | **Underscore 1.13.7** | None | No DOM needed | ✅ 114/114 |
 | **Lodash 4.17.21** | None | No DOM needed | ✅ 35/35 |
 | **Moment.js 2.30** | None | No DOM needed | ✅ 131/131 |
-| **Bootstrap 5.3.3** | **None** | **8 P0/P1 gaps** | ⚠️ Blocked |
+| **Bootstrap 5.3.3** | **None** | Targeted DOM surface complete | ✅ 12 plugins + native UI suite pass |
 
-Bootstrap is the first library where DOM gaps (not JS language gaps) are the primary blocker. The Lambda JS engine's ES6+ support is now mature enough for Bootstrap's class-based architecture — the remaining work is purely in the DOM bridge layer (`js_dom.cpp`, `js_dom_events.cpp`, `js_globals.cpp`).
+Bootstrap was the first library where DOM gaps, rather than language syntax, were the primary blocker. Those gaps are now closed behind the Radiant DOM/runtime bridge and pinned by `dom_bootstrap`, `lib_popper` (79/79), and `test/ui/dom/`.

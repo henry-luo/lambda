@@ -1843,9 +1843,15 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(module_consts, &lookup);
             if (mc) continue;  // resolved via module_consts, no capture needed
         }
-        // module-shadowed function bindings are ordinary shared captures; only
-        // per-iteration lexical cells need force_env_capture to avoid aliasing.
-        bool force_env_capture = false;
+        // A parent-local binding shadows an IIFE-promoted module binding with
+        // the same minified name. Force the closure cell path or later lowering
+        // will incorrectly read/write the unrelated module const.
+        // Top-level functions see module lexicals in ancestor_func_locals too;
+        // treating those as function shadows creates a bogus mixed-loop parent
+        // link past the module env. Only nested functions can shadow a promoted
+        // module binding through an enclosing function activation.
+        bool force_env_capture = fc->parent_index >= 0 && ancestor_func_locals &&
+            jm_name_set_has(ancestor_func_locals, ref->name);
 
         // This is a capture
         {

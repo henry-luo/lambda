@@ -17,6 +17,8 @@
 #include "js_props.h"
 #include "js_runtime_state.hpp"
 #include "js_event_loop.h"
+#include "js_dom_platform.h"
+#include "js_dom_observers.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../mark_builder.hpp"
@@ -33,6 +35,7 @@
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/css_parser.hpp"
+#include "../input/css/css_engine.hpp"
 #include "../input/css/css_style_node.hpp"
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
@@ -45,6 +48,9 @@ extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" Item vmap_new(void);
 extern void free_document(DomDocument* doc);
 extern Item js_make_number(double d);
+extern __thread EvalContext* context;
+extern __thread Context* input_context;
+extern "C" Context* _lambda_rt;
 
 #include <cstring>
 #include <cctype>
@@ -387,7 +393,9 @@ static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
 // mutation shape for future incremental cascade/layout decisions.
 static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
                                           DomNode* target = nullptr,
-                                          DomNode* parent = nullptr) {
+                                          DomNode* parent = nullptr,
+                                          const char* attribute_name = nullptr,
+                                          const char* old_value = nullptr) {
     DomDocument* doc = js_dom_mutation_document(target, parent);
     if (!doc) return;
 
@@ -408,6 +416,7 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     js_dom_refresh_live_form_collections_for_mutation(target, parent, doc);
     js_dom_refresh_select_option_collections_for_mutation(target, parent, doc);
     js_dom_refresh_live_lookup_collections_for_mutation(target, parent, doc);
+    js_dom_observers_mutation_notify(kind, target, parent, attribute_name, old_value);
 
     DocState* st = doc->state;
     if (st) {
@@ -426,6 +435,13 @@ extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, voi
     js_dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent);
 }
 
+extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* target,
+                                                void* parent, const char* attribute_name,
+                                                const char* old_value) {
+    js_dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent,
+                           attribute_name, old_value);
+}
+
 static void js_dom_reset_mutation_records(DomDocument* doc) {
     if (!doc) return;
     doc->js_mutation_count = 0;
@@ -435,95 +451,72 @@ static void js_dom_reset_mutation_records(DomDocument* doc) {
     doc->js_mutation_record_overflow = 0;
 }
 
-static void js_dom_clear_view_pool_pointers(DomNode* node) {
-    for (DomNode* cur = node; cur; cur = cur->next_sibling) {
-        if (cur->is_element()) {
-            DomElement* elem = cur->as_element();
-            elem->font = nullptr;
-            elem->bound = nullptr;
-            elem->in_line = nullptr;
-            elem->blk = nullptr;
-            elem->scroller = nullptr;
-            elem->embed = nullptr;
-            elem->position = nullptr;
-            elem->transform = nullptr;
-            elem->filter = nullptr;
-            elem->backdrop_filter = nullptr;
-            elem->multicol = nullptr;
-            elem->pseudo = nullptr;
-            elem->vpath = nullptr;
-            elem->layout_cache = nullptr;
-            elem->view_type = RDT_VIEW_NONE;
-            elem->content_width = 0.0f;
-            elem->content_height = 0.0f;
-            elem->has_cached_intrinsic_widths = false;
-            elem->styles_resolved = false;
-            elem->float_prelaid = false;
-            elem->fi = nullptr;
-            elem->item_prop_type = DomElement::ITEM_PROP_NONE;
-            if (elem->first_child) {
-                js_dom_clear_view_pool_pointers(elem->first_child);
-            }
-        } else if (cur->is_text()) {
-            DomText* text = cur->as_text();
-            text->rect = nullptr;
-            text->font = nullptr;
-            text->view_type = RDT_VIEW_NONE;
-        }
-    }
-}
-
 static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
     if (!doc || !_js_current_ui_context) return false;
-    if (doc->view_tree && doc->view_tree->root &&
+    DocState* ds = doc->state ? (DocState*)doc->state : nullptr;
+    if (ds && ds->lifecycle == DOC_LIFECYCLE_COMMITTED &&
+        doc->view_tree && doc->view_tree->root &&
         doc->js_mutation_count == 0) {
         return true;
     }
 
-    // Host-driven mode: the Radiant window/event_sim loop owns reflow and holds
-    // live pointers into doc->view_tree (renderer, hovered view, event dispatch).
-    // Tearing the tree down and rebuilding it here — synchronously, mid geometry
-    // query — frees view state out from under those holders (observed as a
-    // use-after-free in a timer callback touching a freed DomNode). The host
-    // already reflows after each DOM mutation, so hand back the committed tree's
-    // geometry as-is. It may be a mutation behind, but that is the same guarantee
-    // the renderer paints and it never crashes; callers that need pixel-fresh
-    // geometry run after the host's next reflow. Before commit there is no tree
-    // to read yet, so report whether one exists without forcing one.
-    if (js_dom_is_host_driven_loop()) {
-        return doc->view_tree && doc->view_tree->root;
-    }
+    // Geometry reads after a mutation must observe same-thread layout. The old
+    // host-loop exception returned stale boxes because its workaround destroyed
+    // the live view pool; incremental layout preserves DOM ownership while
+    // satisfying the synchronous CSSOM View contract.
+    if (!ds) return doc->view_tree && doc->view_tree->root;
+    bool initial_layout = ds->lifecycle != DOC_LIFECYCLE_COMMITTED;
 
-    // Transient `lambda.exe js` session: no host reflow loop exists, so the
-    // geometry query must build/refresh the view tree itself. Only do this once
-    // the initial layout has committed — load-time inline scripts run inside the
-    // document loader (before @font-face processing and the first
-    // layout_html_doc() pass), and rebuilding from there re-enters an unfinished
-    // load and crashes.
-    DocState* ds = doc->state ? (DocState*)doc->state : nullptr;
-    if (!ds || ds->lifecycle != DOC_LIFECYCLE_COMMITTED) {
-        return doc->view_tree && doc->view_tree->root;
-    }
+    static __thread bool layout_flush_active = false;
+#ifndef NDEBUG
+    static __thread uint64_t layout_flush_count = 0;
+#endif
+    if (layout_flush_active) return doc->view_tree && doc->view_tree->root;
+    layout_flush_active = true;
 
-    if (doc->view_tree) {
-        view_pool_destroy(doc->view_tree);
-        mem_free(doc->view_tree);
-        doc->view_tree = nullptr;
-    }
-    if (doc->root) {
-        js_dom_clear_view_pool_pointers(static_cast<DomNode*>(doc->root));
-    }
-
+    EvalContext* saved_context = context;
+    Context* saved_input_context = input_context;
+    Context* saved_lambda_rt = _lambda_rt;
     DomDocument* saved_doc = _js_current_ui_context->document;
     _js_current_ui_context->document = doc;
-    layout_html_doc(_js_current_ui_context, doc, false);
+    // A parsed document may already own a provisional view tree while still
+    // lacking its first committed layout; geometry must commit that tree now.
+    layout_html_doc(_js_current_ui_context, doc,
+                    !initial_layout && doc->view_tree != nullptr);
     _js_current_ui_context->document = saved_doc;
+    // A synchronous geometry query runs inside the caller's JS frame. Preserve
+    // its allocation contexts across layout helpers so subsequent property
+    // keys cannot observe a loader/parser context (or a cleared one).
+    context = saved_context;
+    input_context = saved_input_context;
+    _lambda_rt = saved_lambda_rt;
     js_dom_reset_mutation_records(doc);
+    doc_state_clear_reflow(ds);
+    reflow_clear(ds);
+#ifndef NDEBUG
+    // release builds strip log_debug arguments, so keep its counter debug-only.
+    layout_flush_count++;
+    log_debug("dom-flush: synchronous geometry layout count=%llu",
+        (unsigned long long)layout_flush_count);
+#endif
+    layout_flush_active = false;
     return doc->view_tree && doc->view_tree->root;
 }
 
 extern "C" bool js_dom_force_layout_for_geometry(void* dom_doc) {
     return js_dom_ensure_layout_for_geometry((DomDocument*)dom_doc);
+}
+
+extern "C" bool js_dom_tick_headless_animation_frame(void) {
+    DomDocument* doc = _js_current_ui_context && _js_current_ui_context->document
+        ? _js_current_ui_context->document : _js_current_document;
+    DocState* state = doc && doc->state ? (DocState*)doc->state : nullptr;
+    AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
+    if (!scheduler || !scheduler->has_active_animations) return false;
+    // Batch documents have no native frame clock; advance the same scheduler
+    // deterministically so transition events cannot remain queued forever.
+    double now = scheduler->current_time + (1.0 / 60.0);
+    return animation_scheduler_tick(scheduler, now, &state->dirty_tracker);
 }
 
 // ----------------------------------------------------------------------------
@@ -1082,7 +1075,8 @@ static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
     text_node->text = s->chars;
     text_node->length = new_len;
     dom_text_replace_data(text_node, offset, count, repl_u16_len);
-    js_dom_mutation_notify();
+    js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
+                           text_node->parent, nullptr, old_text);
     log_debug("js_dom_replace_text_data: offset=%u count=%u replacement_u16=%u",
               offset, count, repl_u16_len);
     return true;
@@ -1136,6 +1130,9 @@ extern "C" void js_dom_batch_reset() {
     _js_current_document = nullptr;
     js_dom_events_reset();
     js_xhr_reset();
+    js_storage_reset();
+    js_match_media_reset();
+    js_dom_observers_reset();
     expando_reset();
     reset_foreign_document_cache();
     tc_reset_focus_state(state);
@@ -1147,10 +1144,25 @@ extern "C" void js_dom_shutdown() {
     reset_dom_wrapper_cache();
     js_dom_events_reset();
     js_xhr_reset();
+    js_storage_reset();
+    js_match_media_reset();
+    js_dom_observers_reset();
     expando_reset();
     reset_foreign_document_cache();
     _js_current_document = nullptr;
     _js_main_document = nullptr;
+}
+
+extern "C" bool js_dom_evaluate_media_query(const char* query) {
+    if (!query || !_js_current_document || !_js_current_ui_context) return false;
+    CssEngine* engine = (CssEngine*)_js_current_document->cached_css_engine;
+    if (!engine) return false;
+    // matchMedia and @media must share one evaluator and the same live
+    // viewport; otherwise JS and cascade disagree after a surface resize.
+    css_engine_set_viewport(engine,
+        (double)_js_current_ui_context->viewport_width,
+        (double)_js_current_ui_context->viewport_height);
+    return css_evaluate_media_query(engine, query);
 }
 
 // ============================================================================
@@ -1309,6 +1321,11 @@ static void js_dom_compile_event_attr_to_expando(DomElement* elem,
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
         js_property_set(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, fn);
+        // Inline handlers are compiled during wrapper construction; wrapping
+        // the same node here recursively re-enters initialization until the
+        // stack overflows, so register against its canonical native key.
+        js_dom_event_handler_property_set_for_node(elem, prop_name,
+                                                   (int)strlen(prop_name), fn);
     }
 }
 
@@ -1321,6 +1338,8 @@ static void js_dom_clear_event_attr_expando(DomElement* elem, const char* attr_n
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
     if (exp_map.item != ITEM_NULL) {
         js_property_set(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, ItemNull);
+        js_dom_event_handler_property_set_for_node(elem, prop_name,
+                                                   (int)strlen(prop_name), ItemNull);
     }
 }
 
@@ -1337,6 +1356,8 @@ extern "C" bool js_dom_set_event_handler_function(void* dom_elem,
     if (exp_map.item == ITEM_NULL) return false;
 
     js_property_set(exp_map, (Item){.item = s2it(heap_create_name(prop_name))}, fn);
+    js_dom_event_handler_property_set_for_node(elem, prop_name,
+                                               (int)strlen(prop_name), fn);
     return true;
 }
 
@@ -1529,6 +1550,7 @@ void js_dom_register_named_elements(DomElement* root) {
 static void js_dom_install_window_frames_global(void);
 static void js_dom_install_window_dialog_globals(void);
 static void js_dom_install_window_computed_style_global(void);
+static void js_dom_install_dom_parser_global(void);
 static DomDocument* js_document_proxy_doc_from_item(Item item);
 
 // ============================================================================
@@ -1549,6 +1571,10 @@ extern "C" void js_dom_set_document(void* dom_doc) {
     if (dom_doc) {
         js_doc_mark_has_browsing_context(dom_doc);
         DomDocument* doc = (DomDocument*)dom_doc;
+        // Batch-mode page scripts enter a fresh JS realm after document load;
+        // rebind XHR to the retained document URL instead of leaving relative
+        // requests with the reset batch's empty base.
+        js_xhr_set_base_url(doc->url ? url_get_href(doc->url) : nullptr);
         if (doc->pool) {
             css_property_system_init(doc->pool);
         }
@@ -1572,6 +1598,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         // F-5: install HTMLOptionElement Option() constructor.
         extern void js_dom_install_option_constructor(void);
         js_dom_install_option_constructor();
+        js_dom_install_dom_parser_global();
         js_dom_install_window_location_history_globals();
         Item global = js_get_global_this();
         js_property_set(global, js_string_key("__lambda_testdriver_key"),
@@ -1695,10 +1722,14 @@ extern "C" Item js_dom_get_prototype_value(Item obj) {
     const char* ctor_name = "Node";
     if (node && node->is_element()) {
         DomElement* elem = node->as_element();
-        // HTML DOM wrappers need HTMLElement as their immediate prototype so
-        // browser-library instanceof checks walk HTMLElement -> Element -> Node.
-        ctor_name = (elem && elem->tag_name && elem->tag_name[0] != '#')
-            ? "HTMLElement" : "Element";
+        if (elem && elem->tag_name && strcmp(elem->tag_name, "#document-fragment") == 0) {
+            ctor_name = elem->shadow_host ? "ShadowRoot" : "DocumentFragment";
+        } else {
+            // HTML DOM wrappers need HTMLElement as their immediate prototype so
+            // browser-library instanceof checks walk HTMLElement -> Element -> Node.
+            ctor_name = (elem && elem->tag_name && elem->tag_name[0] != '#')
+                ? "HTMLElement" : "Element";
+        }
     }
     Item global = js_get_global_this();
     Item ctor = js_property_get(global, js_string_key(ctor_name));
@@ -2831,6 +2862,45 @@ extern "C" Item js_create_foreign_html_doc(const char* title) {
     return wrap_foreign_doc(fd);
 }
 
+static Item js_dom_parser_constructor(void) {
+    // Native construction must retain the receiver carrying DOMParser's
+    // prototype; returning another object would discard parseFromString.
+    return make_js_undefined();
+}
+
+static Item js_dom_parser_parse_from_string(Item source_item, Item type_item) {
+    const char* source = fn_to_cstr(source_item);
+    const char* type = fn_to_cstr(type_item);
+    if (!source) source = "";
+    if (!type) type = "text/html";
+    if (strcasecmp(type, "text/html") != 0) {
+        // DOMParser's XML modes need XML well-formedness and parsererror
+        // nodes; never silently reinterpret those inputs as HTML.
+        return js_throw_type_error("DOMParser currently supports text/html");
+    }
+
+    Item parsed = js_create_foreign_html_doc("");
+    if (parsed.item == ITEM_NULL) return ItemNull;
+    Item body = js_property_get(parsed, js_string_key("body"));
+    if (body.item == ITEM_NULL || is_js_undefined(body)) return parsed;
+    // Reuse the element innerHTML path so detached parsed documents preserve
+    // the same node ownership and wrapper identity invariants as live DOM.
+    js_property_set(body, js_string_key("innerHTML"), source_item);
+    return parsed;
+}
+
+static void js_dom_install_dom_parser_global(void) {
+    Item global = js_get_global_this();
+    Item ctor = js_new_function((void*)js_dom_parser_constructor, 0);
+    js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("DOMParser"))});
+    Item proto = js_new_object();
+    js_property_set(proto, js_string_key("constructor"), ctor);
+    js_property_set(proto, js_string_key("parseFromString"),
+        js_new_function((void*)js_dom_parser_parse_from_string, 2));
+    js_property_set(ctor, js_string_key("prototype"), proto);
+    js_property_set(global, js_string_key("DOMParser"), ctor);
+}
+
 // iframe.contentDocument / contentWindow accessors.
 // Both currently return the same wrapped foreign HTML document. The foreign
 // doc is marked as having a browsing context so its defaultView/getSelection
@@ -3525,7 +3595,60 @@ static Item js_computed_style_resolve_property(DomElement* elem,
                                                int depth) {
     if (!elem || depth > 16) return js_css_string_item("");
 
+    if (pseudo_type == 0 && elem->doc &&
+        (prop_id == CSS_PROPERTY_TRANSITION_DURATION ||
+         prop_id == CSS_PROPERTY_TRANSITION_DELAY ||
+         prop_id == CSS_PROPERTY_TRANSITION_PROPERTY)) {
+        CssTransitionProp transition;
+        CssPropertyId properties[8];
+        CssDeclaration* shorthand = js_computed_style_find_decl(
+            elem, CSS_PROPERTY_TRANSITION, 0);
+        CssDeclaration* duration = js_computed_style_find_decl(
+            elem, CSS_PROPERTY_TRANSITION_DURATION, 0);
+        CssDeclaration* delay = js_computed_style_find_decl(
+            elem, CSS_PROPERTY_TRANSITION_DELAY, 0);
+        CssDeclaration* property = js_computed_style_find_decl(
+            elem, CSS_PROPERTY_TRANSITION_PROPERTY, 0);
+        CssDeclaration* timing = js_computed_style_find_decl(
+            elem, CSS_PROPERTY_TRANSITION_TIMING_FUNCTION, 0);
+        // On-demand stylesheet matches are not stored in specified_style; use
+        // their winning values so shorthand transition timing is not lost.
+        css_transition_resolve_values(
+            shorthand ? shorthand->value : nullptr,
+            duration ? duration->value : nullptr,
+            delay ? delay->value : nullptr,
+            property ? property->value : nullptr,
+            timing ? timing->value : nullptr,
+            &transition, properties, 8);
+        char value[128];
+        if (prop_id == CSS_PROPERTY_TRANSITION_DURATION ||
+            prop_id == CSS_PROPERTY_TRANSITION_DELAY) {
+            float seconds = prop_id == CSS_PROPERTY_TRANSITION_DURATION
+                ? transition.duration : transition.delay;
+            snprintf(value, sizeof(value), "%.6gs", (double)seconds);
+            return js_css_string_item(value);
+        }
+        if (transition.property_count < 0) return js_css_string_item("all");
+        if (transition.property_count == 0) return js_css_string_item("none");
+        StrBuf* names = strbuf_new_cap(64);
+        for (int i = 0; names && i < transition.property_count; i++) {
+            const CssProperty* property = css_property_get_by_id(transition.properties[i]);
+            if (!property || !property->name) continue;
+            if (names->length > 0) strbuf_append_str(names, ", ");
+            strbuf_append_str(names, property->name);
+        }
+        Item result = js_css_string_item(names && names->str ? names->str : "none");
+        if (names) strbuf_free(names);
+        return result;
+    }
+
     CssDeclaration* decl = js_computed_style_find_decl(elem, prop_id, pseudo_type);
+    if (!decl && pseudo_type == 0 &&
+        (prop_id == CSS_PROPERTY_OVERFLOW_X || prop_id == CSS_PROPERTY_OVERFLOW_Y)) {
+        // The computed longhands inherit a single-value overflow shorthand;
+        // Bootstrap uses overflowY to choose the ScrollSpy observer root.
+        decl = js_computed_style_find_decl(elem, CSS_PROPERTY_OVERFLOW, 0);
+    }
     if (!decl || !decl->value) {
         if (css_property_is_inherited(prop_id)) {
             return js_computed_style_inherited_value(elem, prop_id, depth);
@@ -4068,6 +4191,9 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
     }
 
     if (!elem) return (Item){.item = s2it(heap_create_name(""))};
+    // CSSOM declarations are live; a class/style mutation in the same task must
+    // be cascaded before Bootstrap reads transitionDuration from this wrapper.
+    if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
 
     const char* js_prop = fn_to_cstr(prop_name);
     if (!js_prop) return (Item){.item = s2it(heap_create_name(""))};
@@ -4810,7 +4936,7 @@ extern "C" void js_dom_focus_if_editing_host_for_selection(void* dom_node) {
     DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
     View* old_focus = state ? focus_get(state) : nullptr;
     js_document_active_element = elem;
-    focus_set(state, (View*)elem, false);
+    focus_set_programmatic(state, (View*)elem);
     if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
 }
 
@@ -4892,17 +5018,19 @@ static CssSelectorGroup* parse_css_selector_group(const char* sel_text, Pool* po
 
 static DomElement* js_dom_selector_group_find_first(SelectorMatcher* matcher,
                                                     CssSelectorGroup* group,
-                                                    DomElement* element) {
+                                                    DomElement* element,
+                                                    bool include_element) {
     if (!matcher || !group || !element) return nullptr;
 
-    if (selector_matcher_matches_group(matcher, group, element, nullptr)) {
+    if (include_element && selector_matcher_matches_group(matcher, group, element, nullptr)) {
         return element;
     }
 
     DomNode* child_node = element->first_child;
     while (child_node) {
         if (child_node->is_element()) {
-            DomElement* found = js_dom_selector_group_find_first(matcher, group, child_node->as_element());
+            DomElement* found = js_dom_selector_group_find_first(
+                matcher, group, child_node->as_element(), true);
             if (found) return found;
         }
         child_node = child_node->next_sibling;
@@ -4921,10 +5049,11 @@ static bool js_dom_selector_group_result_contains(ArrayList* results, DomElement
 static void js_dom_selector_group_collect_all(SelectorMatcher* matcher,
                                               CssSelectorGroup* group,
                                               DomElement* element,
-                                              ArrayList* results) {
+                                              ArrayList* results,
+                                              bool include_element) {
     if (!matcher || !group || !element || !results) return;
 
-    if (selector_matcher_matches_group(matcher, group, element, nullptr) &&
+    if (include_element && selector_matcher_matches_group(matcher, group, element, nullptr) &&
             !js_dom_selector_group_result_contains(results, element)) {
         arraylist_append(results, element);
     }
@@ -4932,7 +5061,8 @@ static void js_dom_selector_group_collect_all(SelectorMatcher* matcher,
     DomNode* child_node = element->first_child;
     while (child_node) {
         if (child_node->is_element()) {
-            js_dom_selector_group_collect_all(matcher, group, child_node->as_element(), results);
+            js_dom_selector_group_collect_all(
+                matcher, group, child_node->as_element(), results, true);
         }
         child_node = child_node->next_sibling;
     }
@@ -4968,6 +5098,30 @@ static bool js_dom_ascii_space(char ch) {
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f';
 }
 
+static bool js_dom_style_decl_name_matches(const char* seg, const char* end,
+                                           const char* prop_name,
+                                           const char** colon_out = nullptr) {
+    if (colon_out) *colon_out = nullptr;
+    if (!seg || !end || !prop_name || end < seg) return false;
+    const char* colon = nullptr;
+    for (const char* p = seg; p < end; p++) {
+        if (*p == ':') {
+            colon = p;
+            break;
+        }
+    }
+    if (!colon) return false;
+    const char* name_start = seg;
+    const char* name_end = colon;
+    while (name_start < name_end && js_dom_ascii_space(*name_start)) name_start++;
+    while (name_end > name_start && js_dom_ascii_space(name_end[-1])) name_end--;
+    size_t name_len = (size_t)(name_end - name_start);
+    bool matches = strlen(prop_name) == name_len &&
+        strncasecmp(name_start, prop_name, name_len) == 0;
+    if (matches && colon_out) *colon_out = colon;
+    return matches;
+}
+
 static bool js_dom_style_decl_value(const char* style_text,
                                     const char* prop_name,
                                     char* out,
@@ -4981,25 +5135,7 @@ static bool js_dom_style_decl_value(const char* style_text,
         if (!end) end = seg + strlen(seg);
 
         const char* colon = nullptr;
-        for (const char* p = seg; p < end; p++) {
-            if (*p == ':') {
-                colon = p;
-                break;
-            }
-        }
-        if (colon) {
-            const char* name_start = seg;
-            const char* name_end = colon;
-            while (name_start < name_end && js_dom_ascii_space(*name_start)) {
-                name_start++;
-            }
-            while (name_end > name_start && js_dom_ascii_space(name_end[-1])) {
-                name_end--;
-            }
-
-            size_t name_len = (size_t)(name_end - name_start);
-            if (strlen(prop_name) == name_len &&
-                strncasecmp(name_start, prop_name, name_len) == 0) {
+        if (js_dom_style_decl_name_matches(seg, end, prop_name, &colon)) {
                 const char* value_start = colon + 1;
                 const char* value_end = end;
                 while (value_start < value_end &&
@@ -5016,12 +5152,58 @@ static bool js_dom_style_decl_value(const char* style_text,
                 memcpy(out, value_start, value_len);
                 out[value_len] = '\0';
                 return true;
-            }
         }
 
         seg = *end ? end + 1 : end;
     }
     return false;
+}
+
+static bool js_dom_update_inline_style_attribute(DomElement* elem,
+                                                 const char* prop_name,
+                                                 const char* value,
+                                                 const char* priority) {
+    if (!elem || !prop_name || !value) return false;
+    const char* old_style = dom_element_get_inline_style(elem);
+    size_t old_len = old_style ? strlen(old_style) : 0;
+    StrBuf* updated = strbuf_new_cap((int)(old_len + strlen(prop_name) +
+                                           strlen(value) + 32));
+    if (!updated) return false;
+
+    const char* seg = old_style ? old_style : "";
+    while (*seg) {
+        const char* end = strchr(seg, ';');
+        if (!end) end = seg + strlen(seg);
+        if (!js_dom_style_decl_name_matches(seg, end, prop_name)) {
+            while (seg < end && js_dom_ascii_space(*seg)) seg++;
+            while (end > seg && js_dom_ascii_space(end[-1])) end--;
+            if (end > seg) {
+                if (updated->length > 0) strbuf_append_char(updated, ' ');
+                strbuf_append_str_n(updated, seg, (int)(end - seg));
+                strbuf_append_char(updated, ';');
+            }
+        }
+        seg = *end ? end + 1 : end;
+    }
+
+    if (value[0]) {
+        if (updated->length > 0) strbuf_append_char(updated, ' ');
+        strbuf_append_str(updated, prop_name);
+        strbuf_append_str(updated, ": ");
+        strbuf_append_str(updated, value);
+        if (priority && priority[0]) {
+            strbuf_append_str(updated, " !");
+            strbuf_append_str(updated, priority);
+        }
+        strbuf_append_char(updated, ';');
+    }
+
+    // The serialized attribute is the durable source for later recascade;
+    // updating only specified_style loses CSSOM writes on the next subtree pass.
+    bool applied = dom_element_set_attribute(elem, "style",
+        updated->str ? updated->str : "");
+    strbuf_free(updated);
+    return applied;
 }
 
 static float js_dom_parse_positive_css_dimension(const char* value) {
@@ -5801,7 +5983,8 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         }
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
-        DomElement* found = js_dom_selector_group_find_first(matcher, selector_group, root);
+        DomElement* found = js_dom_selector_group_find_first(
+            matcher, selector_group, root, true);
         return found ? js_dom_wrap_element(found) : ItemNull;
     }
 
@@ -5826,7 +6009,8 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         SelectorMatcher* matcher = selector_matcher_create(pool);
         ArrayList* results = arraylist_new(16);
         if (!results) return ItemNull;
-        js_dom_selector_group_collect_all(matcher, selector_group, root, results);
+        js_dom_selector_group_collect_all(
+            matcher, selector_group, root, results, true);
 
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         arr->type_id = LMD_TYPE_ARRAY;
@@ -6723,7 +6907,7 @@ extern "C" Item js_dom_text_control_select_bridge(void* dom_elem) {
     FormControlProp* f = elem->form;
     DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
     if (js_dom_is_script_focusable(elem)) {
-        focus_set(state, (View*)elem, false);
+        focus_set_programmatic(state, (View*)elem);
     }
     form_control_set_selection(state, (View*)elem, 0, f->current_value_u16_len, 0);
     return make_js_undefined();
@@ -6887,7 +7071,7 @@ extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus) {
         if (js_dom_is_script_focusable(elem)) {
             View* old_focus = state ? focus_get(state) : nullptr;
             js_document_active_element = elem;
-            focus_set(state, (View*)elem, false);
+            focus_set_programmatic(state, (View*)elem);
             js_dom_focus_set_selection_for_element(state, elem);
             if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
         }
@@ -8985,6 +9169,8 @@ static const char* _form_control_name_or_id(DomElement* e) {
 }
 
 extern "C" Item radiant_dom_get_property(Item elem_item, Item prop_name);
+extern "C" int radiant_dom_m4b_href_get(Item receiver, Item* out);
+extern "C" int radiant_dom_anchor_hash_get(Item receiver, Item* out);
 
 extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
     // Jube POC: keep the JS ABI stable while routing DOM policy through the
@@ -9182,6 +9368,17 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return ItemNull;
     }
 
+    if (_is_tag(elem, "a") || _is_tag(elem, "area")) {
+        if (strcmp(prop, "hash") == 0) {
+            Item result = ItemNull;
+            if (radiant_dom_anchor_hash_get(elem_item, &result)) return result;
+        }
+        if (strcmp(prop, "href") == 0) {
+            Item result = ItemNull;
+            if (radiant_dom_m4b_href_get(elem_item, &result)) return result;
+        }
+    }
+
     // tagName (uppercased per spec)
     if (strcmp(prop, "tagName") == 0) {
         return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
@@ -9366,12 +9563,14 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             if (js_dom_is_internal_attr(name)) continue;
             const char* value = dom_element_get_attribute(elem, name);
             Item pair = js_new_object();
-            js_property_set(pair,
-                (Item){.item = s2it(heap_create_name("name"))},
-                (Item){.item = s2it(heap_create_name(name))});
-            js_property_set(pair,
-                (Item){.item = s2it(heap_create_name("value"))},
-                (Item){.item = s2it(heap_create_name(value ? value : ""))});
+            Item name_item = (Item){.item = s2it(heap_create_name(name))};
+            Item value_item = (Item){.item = s2it(heap_create_name(value ? value : ""))};
+            // Attr exposes both legacy name/value and Node nodeName/nodeValue;
+            // sanitizers iterate the latter aliases from element.attributes.
+            js_property_set(pair, js_string_key("nodeName"), name_item);
+            js_property_set(pair, js_string_key("nodeValue"), value_item);
+            js_property_set(pair, js_string_key("name"), name_item);
+            js_property_set(pair, js_string_key("value"), value_item);
             js_array_push(arr_item, pair);
         }
         return arr_item;
@@ -11148,10 +11347,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
 
     // handle cssText special case: replace entire inline style
     if (strcmp(css_prop, "cssText") == 0) {
-        dom_element_remove_inline_styles(elem);
-        if (val_str[0]) {
-            dom_element_apply_inline_style(elem, val_str);
-        }
+        dom_element_set_attribute(elem, "style", val_str);
         js_dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
         log_debug("js_dom_set_style_property: set cssText='%.50s' on <%s>",
                   val_str, elem->tag_name ? elem->tag_name : "?");
@@ -11162,7 +11358,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     if (!val_str[0]) {
         CssPropertyId prop_id = css_property_id_from_name(css_prop);
         if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
-            style_tree_remove_property(elem->specified_style, prop_id);
+            js_dom_update_inline_style_attribute(elem, css_prop, "", nullptr);
             elem->styles_resolved = false;
             js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
                                    (DomNode*)elem, elem->parent);
@@ -11171,10 +11367,6 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
                   js_prop, css_prop, elem->tag_name ? elem->tag_name : "?");
         return value;
     }
-
-    // build a single-declaration inline style string: "property: value"
-    char style_decl[256];
-    snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
 
     // validate: reject values with invalid non-ASCII codepoints (CSS Syntax §4.2)
     for (size_t i = 0; val_str[i]; ) {
@@ -11192,7 +11384,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     }
 
     // apply as inline style (highest cascade priority)
-    dom_element_apply_inline_style(elem, style_decl);
+    js_dom_update_inline_style_attribute(elem, css_prop, val_str, nullptr);
     elem->styles_resolved = false;  // mark for re-cascading
     CssPropertyId prop_id = css_property_id_from_name(css_prop);
     js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
@@ -12707,6 +12899,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         const char* attr_val = js_dom_to_attr_cstr(args[1]);
         if (!attr_name || !attr_val) return ItemNull;
         if (js_dom_is_internal_attr(attr_name)) return ItemNull;
+        const char* old_value = dom_element_get_attribute(elem, attr_name);
         dom_element_set_attribute(elem, attr_name, attr_val);
         js_dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
         if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
@@ -12714,7 +12907,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
             if (sel && !dom_element_has_attribute(sel, "multiple")) _select_ask_for_reset(sel);
         }
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+                               elem->parent, attr_name, old_value);
         return ItemNull;
     }
 
@@ -12750,13 +12944,15 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (argc < 1) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
+        const char* old_value = dom_element_get_attribute(elem, attr_name);
         dom_element_remove_attribute(elem, attr_name);
         js_dom_clear_event_attr_expando(elem, attr_name);
         if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
             _select_ask_for_reset(elem);
         }
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
-        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+                               elem->parent, attr_name, old_value);
         return ItemNull;
     }
 
@@ -12783,7 +12979,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (!selector_group) return ItemNull;
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
-        DomElement* found = js_dom_selector_group_find_first(matcher, selector_group, elem);
+        DomElement* found = js_dom_selector_group_find_first(
+            matcher, selector_group, elem, false);
         return found ? js_dom_wrap_element(found) : ItemNull;
     }
 
@@ -12807,7 +13004,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         SelectorMatcher* matcher = selector_matcher_create(pool);
         ArrayList* results = arraylist_new(16);
         if (!results) return (Item){.array = arr};
-        js_dom_selector_group_collect_all(matcher, selector_group, elem, results);
+        js_dom_selector_group_collect_all(
+            matcher, selector_group, elem, results, false);
         for (int i = 0; i < results->length; i++) {
             array_push(arr, js_dom_wrap_element((DomElement*)results->data[i]));
         }
@@ -14072,18 +14270,15 @@ static Item js_dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
         return ItemNull;
     }
 
-    char style_decl[256];
+    const char* priority = nullptr;
     if (has_priority) {
-        const char* priority = fn_to_cstr(priority_arg);
-        if (priority && strcasecmp(priority, "important") == 0) {
-            snprintf(style_decl, sizeof(style_decl), "%s: %s !important", css_prop, val_str);
-        } else {
-            snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
+        const char* requested_priority = fn_to_cstr(priority_arg);
+        if (requested_priority && strcasecmp(requested_priority, "important") == 0) {
+            priority = "important";
         }
-    } else {
-        snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
     }
-    int applied = dom_element_apply_inline_style(elem, style_decl);
+    int applied = js_dom_update_inline_style_attribute(
+        elem, css_prop, val_str, priority) ? 1 : 0;
     elem->styles_resolved = false;
     if (applied) {
         CssPropertyId prop_id = css_property_id_from_name(css_prop);
@@ -14119,8 +14314,7 @@ static Item js_dom_style_remove_property_for_elem(DomElement* elem, Item prop_ar
             Item prop_item = (Item){.item = s2it(heap_create_name(css_prop))};
             old_val = js_dom_get_style_property(owner_item, prop_item);
         }
-        // remove the declaration from the style tree
-        style_tree_remove_property(elem->specified_style, prop_id);
+        js_dom_update_inline_style_attribute(elem, css_prop, "", nullptr);
         js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
                                (DomNode*)elem, elem->parent);
     }
@@ -14162,7 +14356,9 @@ static void _install_iface(Item global, const char* name) {
     Item key = (Item){.item = s2it(heap_create_name(name))};
     Item existing = js_property_get(global, key);
     if (get_type_id(existing) == LMD_TYPE_FUNC) return;
-    Item ctor = js_new_function((void*)_coll_illegal_constructor, 0);
+    // Interface constructors share one native illegal-constructor callback but
+    // must not share a cached JsFunction: each owns a distinct `.prototype`.
+    Item ctor = js_new_method_function((void*)_coll_illegal_constructor, 0);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name(name))});
     Item proto = js_new_object();
     js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
@@ -14191,7 +14387,7 @@ static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
 }
 
 static void _install_node_iface(Item global) {
-    Item ctor = js_new_function((void*)_coll_illegal_constructor, 0);
+    Item ctor = js_new_method_function((void*)_coll_illegal_constructor, 0);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("Node"))});
     Item proto = js_new_object();
     js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
@@ -14218,6 +14414,19 @@ extern "C" void js_dom_install_collection_globals(void) {
     _link_iface_proto(global, "Element", "Node");
     _install_iface(global, "HTMLElement");
     _link_iface_proto(global, "HTMLElement", "Element");
+    _install_iface(global, "DocumentFragment");
+    _link_iface_proto(global, "DocumentFragment", "Node");
+    _install_iface(global, "ShadowRoot");
+    _link_iface_proto(global, "ShadowRoot", "DocumentFragment");
+    Item element_proto = _iface_proto(global, "Element");
+    if (get_type_id(element_proto) == LMD_TYPE_MAP) {
+        // Bootstrap deliberately calls these WebIDL methods through
+        // Element.prototype.querySelector(All).call(element, selector).
+        js_property_set(element_proto, js_string_key("querySelector"),
+            js_new_function((void*)js_dom_query_selector_method, 1));
+        js_property_set(element_proto, js_string_key("querySelectorAll"),
+            js_new_function((void*)js_dom_query_selector_all_method, 1));
+    }
     _install_iface(global, "Range");
     _install_iface(global, "Selection");
     _install_iface(global, "HTMLCollection");

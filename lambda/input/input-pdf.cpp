@@ -322,18 +322,19 @@ static Item pdf_cs_op_record(MarkBuilder& builder, const char* op, size_t op_len
 }
 
 extern "C" Item pdf_parse_content_stream(Item bytes_item) {
-    String* bytes = bytes_item.get_safe_string();
-    if (!bytes) bytes = bytes_item.get_safe_binary();
-    if (!bytes) return ItemNull;
-    if (!bytes || !context || !context->pool) return ItemNull;
+    String* text = bytes_item.get_safe_string();
+    Binary* binary = bytes_item.get_safe_binary();
+    if (!text && !binary) return ItemNull;
+    if (!context || !context->pool) return ItemNull;
 
     Input* input = Input::create(context->pool, nullptr, nullptr);
     if (!input) return ItemNull;
     MarkBuilder builder(input);
     ArrayBuilder ops = builder.array();
     Array* stack = array_pooled(input->pool);
-    const char* p = bytes->chars;
-    const char* end = bytes->chars + bytes->len;
+    const char* p = text ? text->chars : (const char*)binary_data(binary);
+    size_t byte_length = text ? text->len : binary_length(binary);
+    const char* end = p + byte_length;
 
     while (p < end) {
         char c = *p;

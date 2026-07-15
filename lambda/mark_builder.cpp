@@ -150,6 +150,24 @@ String* MarkBuilder::createString(const char* str, size_t len) {
     return s;
 }
 
+Binary* MarkBuilder::createBinary(const void* bytes, size_t len) {
+    if ((!bytes && len != 0) || len > UINT32_MAX ||
+        len > SIZE_MAX - sizeof(Binary)) return nullptr;
+
+    // Arena objects have no individual finalizer, so their immutable byte
+    // payload must remain in the arena instead of retaining external storage.
+    Binary* binary = (Binary*)arena_alloc(arena_, sizeof(Binary) + len);
+    if (!binary) return nullptr;
+    binary->len = (uint32_t)len;
+    binary->is_ascii = (len == 0 || str_is_ascii((const char*)bytes, len)) ? 1 : 0;
+    binary->flags = BINARY_FLAG_INLINE;
+    binary->reserved = 0;
+    binary->storage = nullptr;
+    binary->offset = 0;
+    if (len != 0) memcpy(binary->inline_bytes, bytes, len);
+    return binary;
+}
+
 String* MarkBuilder::createStringFromBuf(StringBuf* sb) {
     if (!sb) return nullptr;
     return createString(sb->str->chars, sb->length);
@@ -829,10 +847,9 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         if (!str) return createNull();
         return createStringItem(str->chars, str->len);
     } else if constexpr (Tag == LMD_TYPE_BINARY) {
-        String* bin = typed.ptr();
+        Binary* bin = typed.ptr();
         if (!bin) return createNull();
-        // Binary data is stored like String but with different type_id
-        String* copied = createString(bin->chars, bin->len);
+        Binary* copied = createBinary(binary_data(bin), binary_length(bin));
         if (!copied) return createNull();
         return {.item = x2it(copied)};
     } else if constexpr (Tag == LMD_TYPE_DTIME) {

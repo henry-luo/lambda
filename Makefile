@@ -503,7 +503,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
 
@@ -1551,6 +1551,31 @@ editor-4c-view: build
 	echo "editor-4c-view: $$PASS/$$TOTAL passed"; \
 	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
+# Browser-library DOM fixtures run through the real Radiant input/event/layout loop.
+dom-ui: build dom-ui-run
+
+dom-ui-run:
+	@echo "Running DOM UI integration suite..."
+	@echo "=============================================================="
+	@PASS=0; FAIL=0; TOTAL=0; \
+	for json in test/ui/dom/*.json; do \
+		[ -f "$$json" ] || continue; \
+		name=$$(basename "$$json" .json); \
+		TOTAL=$$((TOTAL + 1)); \
+		page=$$(sed -n 's/.*"html"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$$json" | head -1); \
+		[ -n "$$page" ] || page="test/ui/dom/$$name.html"; \
+		if ./lambda.exe view "$$page" --event-file "$$json" --headless >/dev/null 2>&1; then \
+			PASS=$$((PASS + 1)); \
+			printf "  \033[32m✓\033[0m %s\n" "$$name"; \
+		else \
+			FAIL=$$((FAIL + 1)); \
+			printf "  \033[31m✗\033[0m %s\n" "$$name"; \
+		fi; \
+	done; \
+	echo "=============================================================="; \
+	echo "dom-ui: $$PASS/$$TOTAL passed"; \
+	if [ $$FAIL -gt 0 ]; then exit 1; fi
+
 # Stage 4C Milestone 3 — parity report: cross-check the Radiant Phase-A pass-set
 # against the vitest/jsdom oracle (the editor's own suite under Node). Runs
 # Phase A (via run-phase-a.mjs) AND a fresh vitest oracle, reconciles per group,
@@ -1647,6 +1672,7 @@ test-extended: build-test
 	@rm -rf temp/cache
 	@echo "Running EXTENDED test suites only..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --category=extended --parallel
+	@$(MAKE) dom-ui-run
 
 test-library: build
 	@echo "Running library test suite..."

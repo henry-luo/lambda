@@ -2,9 +2,9 @@
 
 ## Overview
 
-Gap analysis of the Lambda JS runtime (Radiant browser context) against the requirements for 100% jQuery 3.x library support. jQuery is structured into ~12 modules: Core, Selectors (Sizzle), DOM Manipulation, Traversal, CSS, Events, Effects/Animation, AJAX, Deferred/Callbacks, Dimensions, Offset, and Data. The runtime already supports **~75–80%** of what jQuery needs — selectors, DOM manipulation, traversal, CSS, attributes, data, and utilities all work. The remaining gaps are concentrated in 5 areas: **Events, Async Timers, AJAX, Layout Queries, and a few missing DOM/browser APIs**.
+Implementation history and acceptance notes for jQuery 3.x in the Radiant browser context. jQuery's Core, Selectors, DOM Manipulation, Traversal, CSS, Events, Effects, AJAX, Deferred, Dimensions, Offset, and Data paths now run through the native DOM/runtime stack.
 
-**Status:** Complete — All phases (A+B+C+D+E) implemented, builds clean
+**Status:** Complete — full jQuery 3.7.1 and effects goldens plus AJAX/delegation/effects UI fixtures pass (verified 2026-07-15)
 
 ---
 
@@ -22,7 +22,7 @@ Gap analysis of the Lambda JS runtime (Radiant browser context) against the requ
 | **Dimensions** (`.width()`, `.height()`, `.innerWidth()`) | ✅ Works | `getComputedStyle` ✅, `offsetWidth/Height` ✅ (from layout) |
 | **Offset** (`.offset()`, `.position()`, `.scrollTop()`) | ✅ Works | `getBoundingClientRect` ✅, `scrollTop/Left` ✅, `offsetParent` ✅ |
 | **Events** (`.on()`, `.off()`, `.trigger()`, `.click()`) | ✅ Implemented | `addEventListener` ✅, 3-phase bubbling ✅, `Event` creation ✅ |
-| **Effects / Animation** (`.animate()`, `.fadeIn()`, `.slideDown()`) | ⚠️ Partial | Timers work (libuv-backed), but no real-time frame stepping |
+| **Effects / Animation** (`.animate()`, `.fadeIn()`, `.slideDown()`) | ✅ Works | timers and rAF advance in batch/headless view loops |
 | **AJAX** (`$.ajax()`, `$.get()`, `$.getJSON()`) | ✅ Implemented | `XMLHttpRequest` native (synchronous `http_fetch`) |
 | **Deferred / Callbacks** (`$.Deferred`, `$.Callbacks`) | ✅ Works | Pure JS — `Promise`, closures, arrays. No external deps. |
 
@@ -374,10 +374,9 @@ These jQuery features require infrastructure beyond the Radiant headless context
 
 | Feature | Reason |
 |---|---|
-| Real user interaction (mouse, keyboard, touch) | Radiant is headless — no physical input |
+| OS-specific physical device quirks | Native/event-sim mouse, keyboard, wheel, focus, and pointer paths are covered; device-specific behavior is outside this library gate |
 | JSONP (`<script>` tag injection) | Requires dynamic `<script>` loading + callback |
 | `$.getScript()` remote loading | Requires async network + `eval` of remote code |
-| `.animate()` with real-time frame stepping | Needs Option B async timers (not Phase C sync drain) |
 | Cross-origin AJAX | No CORS infrastructure needed for local/test usage |
 | `$.Deferred` with async resolution | `$.Deferred` code loads fine; async resolution needs Phase C timers |
 | `:visible` / `:hidden` pseudo-selectors | jQuery-specific; needs layout pass + custom selector extension |

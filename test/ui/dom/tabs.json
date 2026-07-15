@@ -1,0 +1,6 @@
+{"name":"Bootstrap tab activates pane and ARIA state","html":"test/ui/dom/bootstrap_ui.html","events":[
+  {"type":"click","target":{"selector":"#tab2"}},
+  {"type":"assert_class","target":{"selector":"#tab2"},"class":"active"},
+  {"type":"assert_class","target":{"selector":"#pane2"},"class":"active"},
+  {"type":"assert_attr","target":{"selector":"#tab2"},"attribute":"aria-selected","equals":"true"}
+]}

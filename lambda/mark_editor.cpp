@@ -364,7 +364,7 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
         break;
     }
     case LMD_TYPE_BINARY: {
-        *(String**)field_ptr = value.get_safe_binary();
+        *(Binary**)field_ptr = value.get_safe_binary();
         break;
     }
     case LMD_TYPE_ARRAY:

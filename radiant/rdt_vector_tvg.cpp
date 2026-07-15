@@ -1549,7 +1549,14 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
 static void tvg_gradient_set_stops(Tvg_Gradient gradient,
                                    const RdtGradientStop* stops,
                                    int stop_count) {
-    Tvg_Color_Stop* tvg_stops = LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
+    size_t stops_size = (size_t)stop_count * sizeof(Tvg_Color_Stop);
+    // CSS gradients may contain more stops than the bounded scratch stack can
+    // hold; keep the fast stack path for normal gradients and spill large,
+    // valid stop arrays to render-owned heap storage instead of aborting.
+    bool heap_stops = stops_size > LAMBDA_ALLOCA_MAX_BYTES;
+    Tvg_Color_Stop* tvg_stops = heap_stops
+        ? (Tvg_Color_Stop*)mem_alloc(stops_size, MEM_CAT_RENDER)
+        : LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
     for (int index = 0; index < stop_count; index++) {
         tvg_stops[index].offset = stops[index].offset;
         tvg_stops[index].r = stops[index].r;
@@ -1558,6 +1565,7 @@ static void tvg_gradient_set_stops(Tvg_Gradient gradient,
         tvg_stops[index].a = stops[index].a;
     }
     tvg_gradient_set_color_stops(gradient, tvg_stops, stop_count);
+    if (heap_stops) mem_free(tvg_stops);
 }
 
 static void tvg_gradient_apply_transform(Tvg_Gradient gradient,

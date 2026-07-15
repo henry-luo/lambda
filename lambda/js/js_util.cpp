@@ -1538,14 +1538,15 @@ extern "C" Item js_util_inherits(Item ctor_item, Item super_item) {
 // =============================================================================
 
 static bool js_util_dataview_current_byte_length(JsDataView* view, int* out_length) {
-    if (!view || !view->buffer || view->buffer->detached) return false;
-    if (view->buffer->byte_length < view->byte_offset) return false;
+    if (!view || !view->buffer || js_arraybuffer_detached(view->buffer)) return false;
+    int buffer_length = js_arraybuffer_length(view->buffer);
+    if (buffer_length < view->byte_offset) return false;
     if (view->length_tracking) {
-        *out_length = view->buffer->byte_length - view->byte_offset;
+        *out_length = buffer_length - view->byte_offset;
         return true;
     }
     if (view->byte_length < 0 ||
-        view->buffer->byte_length < (int64_t)view->byte_offset + (int64_t)view->byte_length) {
+        buffer_length < (int64_t)view->byte_offset + (int64_t)view->byte_length) {
         return false;
     }
     *out_length = view->byte_length;
@@ -1562,9 +1563,11 @@ static bool js_util_dataview_bytes_equal(Item a, Item b) {
     }
     if (alen != blen) return false;
     if (alen == 0) return true;
-    if (!av->buffer->data || !bv->buffer->data) return false;
-    uint8_t* adata = (uint8_t*)av->buffer->data + av->byte_offset;
-    uint8_t* bdata = (uint8_t*)bv->buffer->data + bv->byte_offset;
+    const uint8_t* av_data = js_arraybuffer_data_const(av->buffer);
+    const uint8_t* bv_data = js_arraybuffer_data_const(bv->buffer);
+    if (!av_data || !bv_data) return false;
+    const uint8_t* adata = av_data + av->byte_offset;
+    const uint8_t* bdata = bv_data + bv->byte_offset;
     return memcmp(adata, bdata, alen) == 0;
 }
 
@@ -1599,12 +1602,17 @@ static bool js_util_arraybuffer_bytes_equal(Item a, Item b) {
     JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(a);
     JsArrayBuffer* bb = js_get_arraybuffer_ptr_item(b);
     if (!ab || !bb) return false;
-    if (ab->is_shared != bb->is_shared) return false;
-    if (ab->detached || bb->detached) return ab->detached && bb->detached;
-    if (ab->byte_length != bb->byte_length) return false;
-    if (ab->byte_length == 0) return true;
-    if (!ab->data || !bb->data) return false;
-    return memcmp(ab->data, bb->data, (size_t)ab->byte_length) == 0;
+    if (js_arraybuffer_shared(ab) != js_arraybuffer_shared(bb)) return false;
+    if (js_arraybuffer_detached(ab) || js_arraybuffer_detached(bb)) {
+        return js_arraybuffer_detached(ab) && js_arraybuffer_detached(bb);
+    }
+    int byte_length = js_arraybuffer_length(ab);
+    if (byte_length != js_arraybuffer_length(bb)) return false;
+    if (byte_length == 0) return true;
+    const uint8_t* adata = js_arraybuffer_data_const(ab);
+    const uint8_t* bdata = js_arraybuffer_data_const(bb);
+    if (!adata || !bdata) return false;
+    return memcmp(adata, bdata, (size_t)byte_length) == 0;
 }
 
 static bool js_util_url_href_equal(Item a, Item b) {

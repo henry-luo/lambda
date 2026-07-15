@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Radiant DOM UI smoke</title>
+  <style>
+    #toggle { width: 160px; height: 40px; }
+    #status.active { color: green; }
+  </style>
+</head>
+<body>
+  <button id="toggle" type="button">Toggle</button>
+  <p id="status">inactive</p>
+  <script>
+    document.getElementById('toggle').addEventListener('click', function () {
+      var status = document.getElementById('status');
+      status.classList.toggle('active');
+      status.textContent = status.classList.contains('active') ? 'active' : 'inactive';
+    });
+  </script>
+</body>
+</html>

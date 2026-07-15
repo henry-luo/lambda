@@ -52,6 +52,8 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
 RADIANT_C_API Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 RADIANT_C_API Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item);
+RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* out);
+RADIANT_C_API bool radiant_dom_ensure_layout(DomDocument* doc);
 RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* args,
                                            int argc, Item* out);
 

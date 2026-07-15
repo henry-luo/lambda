@@ -2,6 +2,7 @@
 #pragma once
 #include "lambda.h"
 #include "lambda-path.h"
+#include "../lib/byte_storage.h"
 
 // ============================================================================
 // Definitions moved from lambda.h to keep the JIT-embedded header slim.
@@ -192,10 +193,10 @@ typedef struct Item {
     inline Decimal* get_decimal() const { return (Decimal*)this->decimal_ptr; }
     inline String* get_string() const { return (String*)this->string_ptr; }
     inline Symbol* get_symbol() const { return (Symbol*)this->symbol_ptr; }
-    inline String* get_binary() const{ return (String*)this->binary_ptr; }
+    inline Binary* get_binary() const{ return (Binary*)this->binary_ptr; }
     inline String* get_safe_string() const { return type_id() == LMD_TYPE_STRING ? get_string() : nullptr; }
     inline Symbol* get_safe_symbol() const { return type_id() == LMD_TYPE_SYMBOL ? get_symbol() : nullptr; }
-    inline String* get_safe_binary() const { return type_id() == LMD_TYPE_BINARY ? get_binary() : nullptr; }
+    inline Binary* get_safe_binary() const { return type_id() == LMD_TYPE_BINARY ? get_binary() : nullptr; }
     inline Array* get_safe_array() const { return type_id() == LMD_TYPE_ARRAY ? array : nullptr; }
     inline Map* get_safe_map() const { return type_id() == LMD_TYPE_MAP ? map : nullptr; }
 
@@ -236,16 +237,21 @@ typedef struct Item {
         }
     }
 
-    // get chars/len for string-like types (STRING, SYMBOL, BINARY)
-    // Symbol has the same leading layout: len, then chars (with ns in between)
+    // get bytes/len for text and Binary values through their dedicated layouts
     inline const char* get_chars() const {
-        if (this->_type_id == LMD_TYPE_STRING || this->_type_id == LMD_TYPE_BINARY) {
+        if (this->_type_id == LMD_TYPE_BINARY) {
+            return (const char*)binary_data(get_binary());
+        }
+        if (this->_type_id == LMD_TYPE_STRING) {
             return ((String*)this->string_ptr)->chars;
         }
         return ((Symbol*)this->symbol_ptr)->chars;
     }
     inline uint32_t get_len() const {
-        if (this->_type_id == LMD_TYPE_STRING || this->_type_id == LMD_TYPE_BINARY) {
+        if (this->_type_id == LMD_TYPE_BINARY) {
+            return binary_length(get_binary());
+        }
+        if (this->_type_id == LMD_TYPE_STRING) {
             return ((String*)this->string_ptr)->len;
         }
         return ((Symbol*)this->symbol_ptr)->len;
@@ -419,11 +425,41 @@ static inline bool array_num_init_external_view(ArrayNum* view, ArrayNumShape* s
     shape->ndim = 1;
     shape->is_c_contig = 1;
     shape->is_f_contig = 1;
+    // Borrowed external views are valid only while gc_base keeps a stable,
+    // non-moving data pointer alive; replaceable storage requires a handle.
+    shape->backing_kind = ARRAY_NUM_BACKING_EXTERNAL_BORROWED;
     shape->offset = byte_offset / elem_size;
     shape->base = (void*)base;
     array_num_shape_dims(shape)[0] = length;
     array_num_shape_strides(shape)[0] = 1;
     view->extra = (int64_t)(uintptr_t)shape;
+    return true;
+}
+
+static inline bool array_num_init_storage_view(ArrayNum* view, ArrayNumShape* shape,
+        ByteStorage* storage, ArrayNumElemType elem_type,
+        int64_t byte_offset, int64_t length, bool mutable_view) {
+    if (!storage || byte_offset < 0 || length < 0 ||
+        (mutable_view && (storage->flags & BYTE_STORAGE_FLAG_READ_ONLY))) {
+        return false;
+    }
+    uint8_t elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
+    size_t offset = (size_t)byte_offset;
+    if (!elem_size || (offset % elem_size) != 0 || offset > storage->capacity ||
+        (size_t)length > (storage->capacity - offset) / elem_size) {
+        return false;
+    }
+    ByteStorage* retained = byte_storage_retain(storage);
+    if (!retained) return false;
+    if (!array_num_init_external_view(view, shape, NULL, storage->data,
+            elem_type, byte_offset, length, mutable_view)) {
+        byte_storage_release(retained);
+        return false;
+    }
+    // Retained storage, unlike a borrowed external pointer, remains stable even
+    // when the FFI/mmap owner that supplied it is otherwise unreachable.
+    shape->backing_kind = ARRAY_NUM_BACKING_BYTE_STORAGE;
+    shape->backing = retained;
     return true;
 }
 

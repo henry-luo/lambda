@@ -1,0 +1,10 @@
+var link = document.getElementById('link');
+console.log(link.protocol);
+console.log(link.host);
+console.log(link.hostname);
+console.log(link.pathname);
+console.log(link.search);
+console.log(link.hash);
+console.log(link.origin);
+console.log(link.href);
+console.log('ANCHOR_URL_DONE');

@@ -1,0 +1,2 @@
+sync:0
+resize:1:140x30

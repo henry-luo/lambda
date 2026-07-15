@@ -34,6 +34,20 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
 void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item);
 
 /**
+ * Record assignment to an EventTarget `on<type>` IDL property. Event handler
+ * attributes occupy a listener-list slot, so dispatch must merge them with
+ * addEventListener registrations in assignment order.
+ */
+void js_dom_event_handler_property_set(Item target, const char* property_name,
+                                       int property_name_len, Item value);
+
+/** Record an inline handler while a native DOM wrapper is being initialized. */
+void js_dom_event_handler_property_set_for_node(void* dom_node,
+                                                const char* property_name,
+                                                int property_name_len,
+                                                Item value);
+
+/**
  * dispatchEvent(elem, event) → bool
  * Dispatches event through capture → target → bubble phases.
  * @param elem_item   Target element
@@ -109,6 +123,8 @@ Item js_ctor_keyboard_event_fn(Item type, Item init);
 Item js_ctor_composition_event_fn(Item type, Item init);
 Item js_ctor_input_event_fn(Item type, Item init);
 Item js_ctor_pointer_event_fn(Item type, Item init);
+Item js_ctor_transition_event_fn(Item type, Item init);
+Item js_ctor_animation_event_fn(Item type, Item init);
 Item js_ctor_static_range_fn(Item init);
 
 // ============================================================================
@@ -123,6 +139,15 @@ Item js_create_native_mouse_event(const char* type,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
     int detail, Item related_target);
+
+Item js_create_native_pointer_event(const char* type,
+    int client_x, int client_y,
+    int button, int buttons,
+    bool ctrl, bool shift, bool alt, bool meta,
+    const char* pointer_type, int pointer_id, bool is_primary);
+
+Item js_create_native_css_event(const char* type, const char* detail_name,
+    const char* detail_value, double elapsed_time);
 
 Item js_create_native_keyboard_event(const char* type,
     const char* key, const char* code,

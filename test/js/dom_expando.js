@@ -1,0 +1,11 @@
+var item = document.getElementById('item');
+item.__jqueryData = {count: 7};
+var host = document.getElementById('host');
+host.removeChild(item);
+host.appendChild(item);
+var found = document.querySelector('#item');
+console.log(found === item);
+console.log(found.__jqueryData.count);
+found.__jqueryData.count++;
+console.log(document.getElementById('item').__jqueryData.count);
+console.log('EXPANDO_DONE');

@@ -24,6 +24,12 @@ bool is_view_focusable(View* view) {
     return false;
 }
 
+bool is_view_programmatically_focusable(View* view) {
+    // StateStore now validates programmatic focus through the event-owned
+    // predicate; this standalone target intentionally has no event subsystem.
+    return is_view_focusable(view);
+}
+
 void view_pool_release_detached_subtree(DomNode* root) {
     (void)root;
 }

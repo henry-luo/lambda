@@ -126,7 +126,7 @@ static void format_item_text_reader(TextContext& ctx, const ItemReader& item) {
             (void)str;
             format_scalar_value_reader(ctx_, item);
         }
-        void binary_value(const ItemReader& item, String* bin) override {
+        void binary_value(const ItemReader& item, Binary* bin) override {
             (void)item;
             format_binary_base64_string(ctx_.output(), bin);
         }

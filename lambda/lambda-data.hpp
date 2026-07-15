@@ -134,6 +134,7 @@ typedef struct TypedItem {
         Decimal* decimal;
         String* string;
         Symbol* symbol;
+        Binary* binary;
 
         // containers
         Container* container;
@@ -193,6 +194,10 @@ typedef struct TypeString : TypeConst {
 } TypeString;
 
 typedef TypeString TypeSymbol;
+
+typedef struct TypeBinaryConst : TypeConst {
+    Binary* binary;
+} TypeBinaryConst;
 
 typedef struct TypeArray : Type {
     Type* nested;  // nested item type for the array

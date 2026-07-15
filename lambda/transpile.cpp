@@ -79,7 +79,7 @@ static const TypeBoxInfo type_box_table[] = {
     // string-like types
     {LMD_TYPE_STRING,     "String*",   "it2s",     "s2it",    "const_s2it",  "NULL"},
     {LMD_TYPE_SYMBOL,     "Symbol*",   "it2s",     "y2it",    "const_y2it",  "NULL"},
-    {LMD_TYPE_BINARY,     "String*",   "it2s",     "x2it",    "const_x2it",  "NULL"},
+    {LMD_TYPE_BINARY,     "Binary*",   "it2x",     "x2it",    "const_x2it",  "NULL"},
     // containers: have unbox_fn, box uses (Item)(ptr) cast (box_fn=NULL)
     {LMD_TYPE_MAP,        "Map*",      "it2map",   NULL,      NULL,          "NULL"},
     {LMD_TYPE_ELEMENT,    "Element*",  "it2elmt",  NULL,      NULL,          "NULL"},
@@ -1373,9 +1373,13 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                             write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
                                 (AstImportNode*)ident_node->entry->import);
                             strbuf_append_char(tp->code_buf, ')');
-                        } else if (is_text_type_id(expected_tid) ||
-                                   expected_tid == LMD_TYPE_BINARY) {
+                        } else if (is_text_type_id(expected_tid)) {
                             strbuf_append_str(tp->code_buf, "it2s(");
+                            write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
+                                (AstImportNode*)ident_node->entry->import);
+                            strbuf_append_char(tp->code_buf, ')');
+                        } else if (expected_tid == LMD_TYPE_BINARY) {
+                            strbuf_append_str(tp->code_buf, "it2x(");
                             write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node,
                                 (AstImportNode*)ident_node->entry->import);
                             strbuf_append_char(tp->code_buf, ')');
@@ -1410,12 +1414,17 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     } else { // const
         log_debug("transpile_primary_expr: const");
         if (pri_node->type->is_literal) {  // literal
-            if (pri_node->type->type_id == LMD_TYPE_STRING || pri_node->type->type_id == LMD_TYPE_SYMBOL ||
-                pri_node->type->type_id == LMD_TYPE_BINARY) {
+            if (pri_node->type->type_id == LMD_TYPE_STRING || pri_node->type->type_id == LMD_TYPE_SYMBOL) {
                 // loads the const string without boxing
                 strbuf_append_str(tp->code_buf, "const_s(");
                 TypeString *str_type = (TypeString*)pri_node->type;
                 strbuf_append_int(tp->code_buf, str_type->const_index);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            else if (pri_node->type->type_id == LMD_TYPE_BINARY) {
+                strbuf_append_str(tp->code_buf, "const_x(");
+                TypeBinaryConst* binary_type = (TypeBinaryConst*)pri_node->type;
+                strbuf_append_int(tp->code_buf, binary_type->const_index);
                 strbuf_append_char(tp->code_buf, ')');
             }
             else if (pri_node->type->type_id == LMD_TYPE_DTIME) {
@@ -1979,8 +1988,9 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
     if (then_type && else_type && (then_type->type_id == else_type->type_id) && then_type->type_id != LMD_TYPE_ANY) {
         // Fast path (no boxing) is only safe for scalar types where the C representation
         // is guaranteed consistent (e.g., both sides produce int32_t, double, bool, etc.).
-        // For STRING/SYMBOL/BINARY/containers, different functions may return String* vs Item
-        // at the C level (e.g., fn_string() returns String* but fn_join2() returns Item),
+        // For pointer-backed scalars and containers, different functions may return a native
+        // scalar pointer vs Item at the C level (e.g., fn_string() returns String* but
+        // fn_join2() returns Item),
         // causing "incompatible types in cond-expression" errors in C2MIR.
         TypeId tid = then_type->type_id;
         if (is_native_numeric_or_bool_type_id(tid)) {
@@ -2159,7 +2169,8 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
             else if (var_tid == LMD_TYPE_INT) unbox_fn = "it2i(";
             else if (var_tid == LMD_TYPE_INT64) unbox_fn = "it2l(";
             else if (var_tid == LMD_TYPE_BOOL) unbox_fn = "it2b(";
-            else if (var_tid == LMD_TYPE_STRING || var_tid == LMD_TYPE_BINARY) unbox_fn = "it2s(";
+            else if (var_tid == LMD_TYPE_STRING) unbox_fn = "it2s(";
+            else if (var_tid == LMD_TYPE_BINARY) unbox_fn = "it2x(";
         }
         // Case 2: RHS is idiv — fn_idiv returns boxed Item
         // but AST type says INT, so we need to unbox for native scalar variable
@@ -6070,7 +6081,7 @@ static void write_c_field_type(StrBuf* buf, TypeId type_id) {
     case LMD_TYPE_DTIME:   strbuf_append_str(buf, "DateTime");  break;
     case LMD_TYPE_STRING:  strbuf_append_str(buf, "String*");   break;
     case LMD_TYPE_SYMBOL:  strbuf_append_str(buf, "Symbol*");   break;
-    case LMD_TYPE_BINARY:  strbuf_append_str(buf, "String*");   break;
+    case LMD_TYPE_BINARY:  strbuf_append_str(buf, "Binary*");   break;
     case LMD_TYPE_DECIMAL: strbuf_append_str(buf, "Decimal*");  break;
     default:               strbuf_append_str(buf, "void*");     break;  // all containers & pointer types
     }
@@ -6170,7 +6181,7 @@ static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* 
         strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
         break;
     case LMD_TYPE_BINARY:
-        strbuf_append_str(tp->code_buf, "x2it(*(char**)((char*)(");
+        strbuf_append_str(tp->code_buf, "x2it(*(Binary**)((char*)(");
         transpile_expr(tp, object);
         strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
         break;
@@ -7027,8 +7038,9 @@ void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node) {
         case LMD_TYPE_BOOL:
             box_prefix = "ri_ok(b2it("; box_suffix = "))"; break;
         case LMD_TYPE_STRING:
-        case LMD_TYPE_BINARY:
             box_prefix = "ri_ok(s2it("; box_suffix = "))"; break;
+        case LMD_TYPE_BINARY:
+            box_prefix = "ri_ok(x2it("; box_suffix = "))"; break;
         case LMD_TYPE_SYMBOL:
             box_prefix = "ri_ok(y2it("; box_suffix = "))"; break;
         case LMD_TYPE_DTIME:
@@ -7070,8 +7082,8 @@ void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node) {
             case LMD_TYPE_INT64:  unbox_fn = "it2l("; break;
             case LMD_TYPE_FLOAT:  unbox_fn = "it2d("; break;
             case LMD_TYPE_BOOL:   unbox_fn = "it2b("; break;
-            case LMD_TYPE_STRING:
-            case LMD_TYPE_BINARY: unbox_fn = "it2s("; break;
+            case LMD_TYPE_STRING: unbox_fn = "it2s("; break;
+            case LMD_TYPE_BINARY: unbox_fn = "it2x("; break;
             default: {
                 // container/pointer types: use safe type-checking unbox helpers
                 const char* container_fn = get_container_unbox_fn(param_type->type_id);

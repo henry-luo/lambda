@@ -368,6 +368,7 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     gc->error_trace = NULL;
     gc->error_destroy = NULL;
     gc->js_native_trace = NULL;
+    gc->external_destroy = NULL;
     // Initialize bump-pointer allocator
     gc->bump_blocks = NULL;
     gc->bump_cursor = NULL;
@@ -387,6 +388,16 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
 
 void gc_heap_destroy(gc_heap_t* gc) {
     if (!gc) return;
+
+    if (gc->external_destroy) {
+        gc_header_t* current = gc->all_objects;
+        while (current) {
+            if (!(current->gc_flags & GC_FLAG_FREED)) {
+                gc->external_destroy((void*)(current + 1), current->type_tag);
+            }
+            current = current->next;
+        }
+    }
 
     // unlink from the memory context if registered (before freeing the struct)
     if (gc->mem_node && g_gc_heap_node_release) {
@@ -940,8 +951,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         if (array_flags & 0x02) {  // Container.is_view in array_flags byte
             void* shape_ptr = (void*)(uintptr_t)(*(int64_t*)(p + 24));
             if (shape_ptr) {
-                // ArrayNumShape layout: { uint8_t ndim, 1-byte flag-byte, int64_t offset, void* base, ... }
-                // base lives at offset 16 within the shape struct (1 + 1 + pad to 8 + 8)
+                // ArrayNumShape explicitly tags the backing source; semantic base
+                // remains at offset 16 and is the only GC-traced descriptor pointer.
                 uint64_t base = *(uint64_t*)((uint8_t*)shape_ptr + 16);
                 gc_mark_possible_item(gc, base);
             }
@@ -1404,6 +1415,12 @@ static void gc_compact_data(gc_heap_t* gc) {
 static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
     void* obj = (void*)(header + 1);
     uint16_t tag = header->type_tag;
+
+    if (gc->external_destroy) {
+        // Refcounted bytes live outside the GC data zone, so dead owners must
+        // release them during sweep instead of deferring cleanup to teardown.
+        gc->external_destroy(obj, tag);
+    }
 
     if (tag == LMD_TYPE_DECIMAL_) {
         // Decimal: mpd_t is allocated by libmpdec (outside GC)

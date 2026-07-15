@@ -8,6 +8,13 @@
 
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) {
     if (!mt || !ce || !ce->name) return 0;
+    if (ce->inner_module_var_index >= 0) {
+        // Nested class bindings are not globals; dynamic constructor paths
+        // must recover their class identity from the definition-time slot.
+        return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+            MIR_T_I64,
+            MIR_new_int_op(mt->ctx, (int64_t)ce->inner_module_var_index));
+    }
     JsIdentifierNode identifier;
     memset(&identifier, 0, sizeof(identifier));
     identifier.node_type = JS_AST_NODE_IDENTIFIER;

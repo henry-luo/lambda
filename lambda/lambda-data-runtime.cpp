@@ -6,6 +6,7 @@
 #include "../lib/arraylist.hpp"
 #include "../lib/checked_math.hpp"
 #include "../lib/hashmap.h"
+#include "../lib/byte_storage.h"
 #include "input/css/dom_element.hpp"  // DomElement, dom_element_to_element, element_to_dom_element
 #include "input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
 #include <math.h>
@@ -28,6 +29,11 @@ extern "C" void path_load_metadata(Path* path);
 
 // External: interned ASCII char table (implemented in lambda-mem.cpp)
 extern "C" String* get_ascii_char_string(unsigned char ch);
+
+static_assert(offsetof(ArrayNumShape, base) == 16,
+    "ArrayNumShape.base offset is part of the C GC tracing ABI");
+static_assert(offsetof(ArrayNumShape, backing) == 24,
+    "ArrayNumShape.backing offset is part of the backing descriptor ABI");
 
 static uint8_t array_num_clamp_uint8_even(double value) {
     if (isnan(value) || value <= 0.0) return 0;
@@ -219,6 +225,161 @@ ArrayNum* array_num_new_external_view(Container* base, void* data_base,
     return view;
 }
 
+ArrayNum* array_num_new_buffer_view(Container* base, ByteBufferHandle* handle,
+        ArrayNumElemType elem_type, int64_t byte_offset, int64_t length,
+        bool mutable_view) {
+    if (!handle || byte_buffer_is_detached(handle) || byte_offset < 0 || length < 0) {
+        return NULL;
+    }
+    uint8_t elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
+    size_t payload_bytes;
+    size_t end_offset;
+    if (!elem_size || (byte_offset % elem_size) != 0 ||
+        !lam::checked_mul((size_t)length, (size_t)elem_size, &payload_bytes) ||
+        !lam::checked_add((size_t)byte_offset, payload_bytes, &end_offset) ||
+        end_offset > handle->byte_length) {
+        return NULL;
+    }
+    ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!view) return NULL;
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
+    ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!shape) return NULL;
+    void* data = (void*)byte_buffer_data_const(handle);
+    if (!array_num_init_external_view(view, shape, base, data, elem_type,
+            byte_offset, length, mutable_view)) {
+        return NULL;
+    }
+    shape->backing_kind = ARRAY_NUM_BACKING_BUFFER_HANDLE;
+    shape->backing = handle;
+    shape->resolved_generation = handle->generation;
+    return view;
+}
+
+ArrayNum* array_num_new_storage_view(ByteStorage* storage,
+        ArrayNumElemType elem_type, int64_t byte_offset, int64_t length,
+        bool mutable_view) {
+    ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    if (!view) return NULL;
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
+    ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    if (!shape) return NULL;
+    if (!array_num_init_storage_view(view, shape, storage, elem_type,
+            byte_offset, length, mutable_view)) return NULL;
+    return view;
+}
+
+bool array_num_init_derived_view(ArrayNum* view, ArrayNumShape* shape,
+        ArrayNum* source, int64_t relative_elem_offset) {
+    if (!view || !shape || !source || relative_elem_offset < 0) return false;
+    uint8_t elem_size = ELEM_TYPE_SIZE[source->get_elem_type() >> 4];
+    size_t relative_bytes;
+    if (!elem_size ||
+        !lam::checked_mul((size_t)relative_elem_offset, (size_t)elem_size,
+            &relative_bytes)) {
+        return false;
+    }
+    uint8_t* source_data = (uint8_t*)array_num_resolve_data(source, false);
+    if (!source_data && source->length > 0) return false;
+
+    int64_t source_offset = 0;
+    ArrayNumShape* source_shape = NULL;
+    if ((source->is_view || source->is_ndim) && source->extra) {
+        source_shape = (ArrayNumShape*)(uintptr_t)source->extra;
+        source_offset = source_shape->offset;
+    }
+    if (source_offset < 0 || relative_elem_offset > INT64_MAX - source_offset) {
+        return false;
+    }
+
+    shape->offset = source_offset + relative_elem_offset;
+    shape->backing_kind = ARRAY_NUM_BACKING_GC_VIEW;
+    shape->base = source;
+    if (source_shape) {
+        switch ((ArrayNumBackingKind)source_shape->backing_kind) {
+        case ARRAY_NUM_BACKING_BUFFER_HANDLE:
+            shape->backing_kind = ARRAY_NUM_BACKING_BUFFER_HANDLE;
+            shape->base = source_shape->base;
+            shape->backing = source_shape->backing;
+            shape->resolved_generation = source_shape->resolved_generation;
+            break;
+        case ARRAY_NUM_BACKING_BYTE_STORAGE:
+            shape->backing_kind = ARRAY_NUM_BACKING_BYTE_STORAGE;
+            shape->base = source_shape->base;
+            shape->backing = byte_storage_retain((ByteStorage*)source_shape->backing);
+            if (!shape->backing) return false;
+            break;
+        case ARRAY_NUM_BACKING_EXTERNAL_BORROWED:
+            shape->backing_kind = ARRAY_NUM_BACKING_EXTERNAL_BORROWED;
+            shape->base = source_shape->base;
+            break;
+        case ARRAY_NUM_BACKING_GC_VIEW:
+            shape->base = source_shape->base ? source_shape->base : source;
+            break;
+        case ARRAY_NUM_BACKING_GC_OWNED:
+            break;
+        }
+    }
+    view->data = source_data ? source_data + relative_bytes : NULL;
+    // Only GC-zone numeric storage needs compaction pinning. Handle/storage
+    // views refresh or retain their allocation and must not pin unrelated maps.
+    if (shape->backing_kind == ARRAY_NUM_BACKING_GC_VIEW && shape->base) {
+        ((Container*)shape->base)->is_pinned = 1;
+    }
+    return true;
+}
+
+void* array_num_resolve_data(ArrayNum* array, bool write) {
+    if (!array) return NULL;
+    if (!array->is_view || !array->extra) return array->data;
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)array->extra;
+    if (shape->backing_kind == ARRAY_NUM_BACKING_BYTE_STORAGE) {
+        ByteStorage* storage = (ByteStorage*)shape->backing;
+        uint8_t elem_size = ELEM_TYPE_SIZE[array->get_elem_type() >> 4];
+        size_t byte_offset;
+        size_t payload_bytes;
+        size_t end_offset;
+        if (!storage || (write && (storage->flags & BYTE_STORAGE_FLAG_READ_ONLY)) ||
+            !elem_size || shape->offset < 0 || array->length < 0 ||
+            !lam::checked_mul((size_t)shape->offset, (size_t)elem_size, &byte_offset) ||
+            !lam::checked_mul((size_t)array->length, (size_t)elem_size, &payload_bytes) ||
+            !lam::checked_add(byte_offset, payload_bytes, &end_offset) ||
+            end_offset > storage->capacity) {
+            array->data = NULL;
+            return NULL;
+        }
+        array->data = storage->data ? storage->data + byte_offset : NULL;
+        return array->data;
+    }
+    if (shape->backing_kind != ARRAY_NUM_BACKING_BUFFER_HANDLE) return array->data;
+    ByteBufferHandle* handle = (ByteBufferHandle*)shape->backing;
+    if (!handle || byte_buffer_is_detached(handle)) {
+        array->data = NULL;
+        shape->resolved_generation = handle ? handle->generation : 0;
+        return NULL;
+    }
+    uint8_t elem_size = ELEM_TYPE_SIZE[array->get_elem_type() >> 4];
+    size_t byte_offset;
+    size_t payload_bytes;
+    size_t end_offset;
+    if (!elem_size || shape->offset < 0 || array->length < 0 ||
+        !lam::checked_mul((size_t)shape->offset, (size_t)elem_size, &byte_offset) ||
+        !lam::checked_mul((size_t)array->length, (size_t)elem_size, &payload_bytes) ||
+        !lam::checked_add(byte_offset, payload_bytes, &end_offset) ||
+        end_offset > handle->byte_length) {
+        array->data = NULL;
+        shape->resolved_generation = handle->generation;
+        return NULL;
+    }
+    uint8_t* base = write ? byte_buffer_prepare_write(handle) :
+        (uint8_t*)byte_buffer_data_const(handle);
+    // ArrayNum caches handle-derived data, so every generation-changing
+    // resize/detach/transfer/COW must refresh this pointer before access.
+    array->data = base ? base + byte_offset : NULL;
+    shape->resolved_generation = handle->generation;
+    return array->data;
+}
+
 // Allocate an N-D ArrayNum: data buffer sized for `total` elements, plus a
 // shape side-table with C-contiguous strides computed from `dims[0..ndim-1]`.
 // Used by both the C transpiler and the MIR transpiler to materialize nested
@@ -253,6 +414,7 @@ ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim
 // computed a flat scalar offset via stride math.
 Item array_num_read_item(ArrayNum* array, int64_t offset) {
     if (!array || offset < 0) return ItemNull;
+    if (!array_num_resolve_data(array, false) && array->length > 0) return ItemNull;
     switch (array->get_elem_type()) {
         case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
         case ELEM_INT64:   return push_l(array->items[offset]);
@@ -279,6 +441,7 @@ Item array_num_read_item(ArrayNum* array, int64_t offset) {
 
 double array_num_read_double(ArrayNum* arr, int64_t offset) {
     if (!arr || offset < 0) return 0.0;
+    if (!array_num_resolve_data(arr, false) && arr->length > 0) return 0.0;
     switch (arr->get_elem_type()) {
     case ELEM_INT:
     case ELEM_INT64:
@@ -399,7 +562,6 @@ static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
     for (int i = 1; i < pshape->ndim; i++) row_len *= pdims[i];
 
     ArrayNumElemType etype = parent->get_elem_type();
-    int elem_size = ELEM_TYPE_SIZE[etype >> 4];
 
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return ItemNull;
@@ -409,7 +571,6 @@ static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
     view->is_view = 1;
     view->is_mutable_view = 1;  // leading-axis row view is writable through to base (Scope 3)
     int64_t base_elem_offset = row_idx * pstrs[0];
-    view->data = (void*)((char*)parent->data + base_elem_offset * (size_t)elem_size);
     view->length = row_len;
     view->capacity = row_len;
 
@@ -420,10 +581,9 @@ static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
     rshape->ndim = (uint8_t)new_ndim;
     rshape->is_c_contig = pshape->is_c_contig;  // inherits contig if parent was
     rshape->is_f_contig = 0;
-    rshape->offset = base_elem_offset;
-    // base ref: prefer the parent's own base (if it's itself a view), else the parent.
-    // This keeps the original data owner alive across nested views.
-    rshape->base = pshape->base ? pshape->base : (void*)parent;
+    if (!array_num_init_derived_view(view, rshape, parent, base_elem_offset)) {
+        return ItemNull;
+    }
     int64_t* rdims = array_num_shape_dims(rshape);
     int64_t* rstrs = array_num_shape_strides(rshape);
     for (int i = 0; i < new_ndim; i++) {
@@ -432,9 +592,6 @@ static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
     }
     view->extra = (int64_t)(uintptr_t)rshape;
 
-    // pin the actual data owner
-    Container* owner = (Container*)rshape->base;
-    if (owner) owner->is_pinned = 1;
     return { .array_num = view };
 }
 
@@ -590,6 +747,7 @@ void array_float_set(ArrayNum *arr, int64_t index, double value) {
         log_error("array_float_set: cannot mutate a read-only view; copy() first");
         return;
     }
+    if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
     arr->float_items[index] = value;
     // Update length if we're setting beyond current length
     if (index >= arr->length) {
@@ -605,6 +763,7 @@ void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
         log_error("array_int_set: cannot mutate a read-only view; copy() first");
         return;
     }
+    if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
     arr->items[index] = value;
     if (index >= arr->length) {
         arr->length = index + 1;
@@ -620,6 +779,7 @@ void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
         log_error("array_float_set_item: cannot mutate a read-only view; copy() first");
         return;
     }
+    if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
 
     double dval = 0.0;
     TypeId type_id = get_type_id(value);
@@ -699,6 +859,7 @@ void array_num_set_int64_value(ArrayNum *arr, int64_t index, int64_t value) {
         log_error("array_num_set_int64_value: cannot mutate a read-only view; copy() first");
         return;
     }
+    if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
     switch (arr->get_elem_type()) {
     case ELEM_INT:
     case ELEM_INT64:
@@ -749,6 +910,7 @@ void array_num_set_double_value(ArrayNum *arr, int64_t index, double value) {
         log_error("array_num_set_double_value: cannot mutate a read-only view; copy() first");
         return;
     }
+    if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
     switch (arr->get_elem_type()) {
     case ELEM_FLOAT64:
         arr->float_items[index] = value;
@@ -771,7 +933,7 @@ void array_num_set_double_value(ArrayNum *arr, int64_t index, double value) {
 static bool array_num_can_copy_bytes(ArrayNum *arr, int64_t index, int64_t count, bool write) {
     if (!arr || count < 0 || index < 0) return false;
     if (count == 0) return true;
-    if (!arr->data) return false;
+    if (!array_num_resolve_data(arr, write)) return false;
     if (index > arr->length || count > arr->length - index) return false;
     if (write && arr->is_view && !arr->is_mutable_view) return false;
     uint8_t elem_size = ELEM_TYPE_SIZE[arr->get_elem_type() >> 4];
@@ -871,6 +1033,7 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
         log_error("array_num_set_item: cannot mutate a read-only view; copy() first");
         return;
     }
+    if (!array_num_resolve_data(arr, true) && arr->capacity > 0) return;
     switch (arr->get_elem_type()) {
     case ELEM_INT:
         arr->items[index] = item_to_int_value(value);
@@ -2145,11 +2308,11 @@ Item item_at(Item data, int64_t index) {
         return {.item = s2it(ch_str)};
     }
     case LMD_TYPE_BINARY: {
-        String* bin = data.get_safe_binary();
-        if (!bin || index < 0 || (uint64_t)index >= (uint64_t)bin->len) return ItemNull;
+        Binary* bin = data.get_safe_binary();
+        if (!bin || index < 0 || (uint64_t)index >= binary_length(bin)) return ItemNull;
         // Binary indexing mirrors an ELEM_UINT8 view: return a sized u8 scalar,
         // not a narrowed plain int or a one-byte binary container.
-        return {.item = u8_to_item((unsigned char)bin->chars[index])};
+        return {.item = u8_to_item(binary_data(bin)[index])};
     }
     case LMD_TYPE_PATH: {
         // Lazy evaluation: resolve path content and delegate to it

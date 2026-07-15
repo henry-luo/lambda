@@ -414,7 +414,13 @@ static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode*
 static const char* jm_capture_scope_env_slot_key(JsFuncCollected* parent, JsFuncCollected* child,
         FnCapture* cap) {
     if (!cap) return "";
-    if (jm_parent_has_duplicate_lexical_slot_name(parent, cap->name)) {
+    // Loop-private captures share their ordinary slot name with loop writeback.
+    // Only class methods need a source-keyed forced capture to distinguish an
+    // IIFE lexical from its promoted same-named module binding; keying every
+    // forced capture disconnects ordinary closures from their parent writes.
+    bool needs_binding_key = jm_parent_has_duplicate_lexical_slot_name(parent, cap->name) ||
+        (cap->force_env_capture && child && child->is_class_method);
+    if (needs_binding_key) {
         if (!cap->scope_env_key[0] || strcmp(cap->scope_env_key, cap->name) == 0) {
             char derived_key[128];
             memset(derived_key, 0, sizeof(derived_key));
@@ -422,6 +428,8 @@ static const char* jm_capture_scope_env_slot_key(JsFuncCollected* parent, JsFunc
             JsAstNode* target = child && child->node ? (JsAstNode*)child->node : NULL;
             if (root && target &&
                 jm_find_enclosing_lexical_key_for_target(root, target, cap->name, derived_key)) {
+                // A function-local lexical can shadow an IIFE-promoted module binding;
+                // its source identity must survive scope-env layout, not just its name.
                 snprintf(cap->scope_env_key, sizeof(cap->scope_env_key), "%s", derived_key);
             }
         }
@@ -4530,10 +4538,33 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     JsNameSetEntry lookup;
                     memset(&lookup, 0, sizeof(lookup));
                     snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
-                    JsNameSetEntry* lce = (JsNameSetEntry*)hashmap_get(let_const_names, &lookup);
-                    if (lce) {
+                    int nearest_var_kind = 0;
+                    // Resolve the nearest function-scope lexical first. A
+                    // minified outer const and inner let commonly share a name;
+                    // merging all ancestors into one set lets the outer kind win.
+                    int capture_parent = fc->parent_index;
+                    while (capture_parent >= 0 && capture_parent < mt->func_count) {
+                        JsFuncCollected* parent_fc = &mt->func_entries[capture_parent];
+                        struct hashmap* direct_lexicals = hashmap_new(
+                            sizeof(JsNameSetEntry), 16, 0, 0,
+                            jm_name_hash, jm_name_cmp, NULL, NULL);
+                        if (parent_fc->node && parent_fc->node->body) {
+                            jm_collect_let_const_names(parent_fc->node->body, direct_lexicals);
+                        }
+                        JsNameSetEntry* direct =
+                            (JsNameSetEntry*)hashmap_get(direct_lexicals, &lookup);
+                        if (direct) nearest_var_kind = direct->var_kind;
+                        hashmap_free(direct_lexicals);
+                        if (nearest_var_kind != 0) break;
+                        capture_parent = parent_fc->parent_index;
+                    }
+                    JsNameSetEntry* lce = nearest_var_kind == 0 ?
+                        (JsNameSetEntry*)hashmap_get(let_const_names, &lookup) : NULL;
+                    int capture_var_kind = nearest_var_kind != 0 ?
+                        nearest_var_kind : (lce ? lce->var_kind : 0);
+                    if (capture_var_kind != 0) {
                         fc->captures[ci].is_let_const = true;
-                        fc->captures[ci].is_const = (lce->var_kind == JS_VAR_CONST);
+                        fc->captures[ci].is_const = (capture_var_kind == JS_VAR_CONST);
                     }
                 }
                 hashmap_free(let_const_names);

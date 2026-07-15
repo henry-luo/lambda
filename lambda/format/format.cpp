@@ -80,12 +80,13 @@ void format_number_compact(StringBuf* sb, Item item) {
     format_number_impl(sb, item, true);
 }
 
-void format_binary_base64_string(StringBuf* sb, String* bin) {
+void format_binary_base64_string(StringBuf* sb, Binary* bin) {
     if (!sb || !bin) return;
-    size_t encoded_len = base64_encoded_len(bin->len, BASE64_STD);
+    uint32_t length = binary_length(bin);
+    size_t encoded_len = base64_encoded_len(length, BASE64_STD);
     char* encoded = (char*)mem_alloc(encoded_len + 1, MEM_CAT_TEMP);
     if (!encoded) return;
-    base64_encode(bin->chars, bin->len, encoded, BASE64_STD);
+    base64_encode(binary_data(bin), length, encoded, BASE64_STD);
     stringbuf_append_str_n(sb, encoded, encoded_len);
     mem_free(encoded);
 }

@@ -14,10 +14,10 @@
 // Common function declarations
 void format_number(StringBuf* sb, Item item);
 void format_number_compact(StringBuf* sb, Item item);
-void format_binary_literal_stringbuf(StringBuf* sb, String* bin);
+void format_binary_literal_stringbuf(StringBuf* sb, Binary* bin);
 // Text formats without a native binary scalar share standard padded base64 egress.
 // Their parsers deliberately do not guess that ordinary strings are binary.
-void format_binary_base64_string(StringBuf* sb, String* bin);
+void format_binary_base64_string(StringBuf* sb, Binary* bin);
 
 // Format function declarations — all return String* (canonical public API)
 String* format_json(Pool* pool, const Item root_item);

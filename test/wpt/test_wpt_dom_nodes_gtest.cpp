@@ -1,0 +1,5 @@
+#define WPT_RUNNER_DIR "ref/wpt/dom/nodes"
+#define WPT_RUNNER_TEMP_PREFIX "wpt_dom_nodes_"
+#define WPT_RUNNER_BASELINE_PATH "test/wpt/wpt_dom_nodes_baseline.txt"
+#define WPT_RUNNER_UPDATE_ENV "WPT_DOM_NODES_UPDATE_BASELINE"
+#include "test_wpt_dom_events_gtest.cpp"

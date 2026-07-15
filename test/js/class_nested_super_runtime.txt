@@ -1,0 +1,7 @@
+static:true
+child>base:child:captured:captured
+child>base:child:captured:captured
+callback:child>base:child:captured:captured
+factory:child>base:child:captured:captured
+shadow:true:outer
+timer-factory:child>base:child:captured:captured

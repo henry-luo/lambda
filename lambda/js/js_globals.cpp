@@ -20,6 +20,8 @@
 #include "js_runtime_state.hpp"
 #include "js_builtin_catalog.hpp"
 #include "js_state_guards.h"
+#include "js_dom_platform.h"
+#include "js_dom_observers.h"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
@@ -39,6 +41,7 @@ extern "C" bool js_is_css_rule(Item item);
 extern "C" Item radiant_dom_window_add_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 extern "C" Item radiant_dom_window_dispatch_event(Item event_item);
+extern "C" Item js_xhr_new(void);
 extern "C" Item js_internal_binding(Item name);
 extern "C" void js_async_hooks_after_gc(void);
 extern "C" void js_note_array_prototype_push_tamper(Item object, Item key);
@@ -4444,11 +4447,14 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
     // ArrayBuffer: clone bytes, or clone as the transferred backing store.
     if (js_is_arraybuffer(value) && !js_is_sharedarraybuffer(value)) {
         JsArrayBuffer* ab = js_get_arraybuffer_ptr_item(value);
-        if (!ab || ab->detached) return value;
-        Item clone = js_arraybuffer_new(ab->byte_length);
+        if (!ab || js_arraybuffer_detached(ab)) return value;
+        int byte_length = js_arraybuffer_length(ab);
+        Item clone = js_arraybuffer_new(byte_length);
         JsArrayBuffer* cab = js_get_arraybuffer_ptr_item(clone);
-        if (cab && ab->data && cab->data && ab->byte_length > 0) {
-            memcpy(cab->data, ab->data, (size_t)ab->byte_length);
+        const uint8_t* source = js_arraybuffer_data_const(ab);
+        uint8_t* destination = js_arraybuffer_prepare_write(cab);
+        if (source && destination && byte_length > 0) {
+            memcpy(destination, source, (size_t)byte_length);
         }
         return clone;
     }
@@ -4474,7 +4480,7 @@ static Item structured_clone_transfer_impl(Item value, Item transfer_list, int d
         if (ta && src_data && byte_length > 0) {
             extern Item js_typed_array_new(int element_type, int length);
             Item clone = js_typed_array_new(ta->element_type, len);
-            void* dst_data = js_typed_array_current_data_ptr(clone);
+            void* dst_data = js_typed_array_prepare_write_ptr(clone);
             if (dst_data) memcpy(dst_data, src_data, (size_t)byte_length);
             return clone;
         }
@@ -12189,12 +12195,12 @@ extern "C" Item js_object_freeze(Item obj) {
     // indexed properties can't be redefined as {writable: false, configurable:
     // false} because the buffer can resize behind them. Applies even for
     // currently-zero-length TAs (the buffer could grow). Tracking buffer-
-    // backed TA detection via js_is_typed_array + ta->buffer->resizable.
+    // backed TA detection via js_is_typed_array + the buffer handle flags.
     extern bool js_is_typed_array(Item val);
     if (js_is_typed_array(obj)) {
         extern JsTypedArray* js_get_typed_array_ptr(Map* m);
         JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-        if (ta && ta->buffer && ta->buffer->resizable) {
+        if (ta && js_arraybuffer_resizable(ta->buffer)) {
             js_throw_type_error("Cannot freeze a TypedArray backed by a resizable ArrayBuffer");
             return obj;
         }
@@ -15877,6 +15883,31 @@ extern "C" Item js_get_global_this() {
                 js_new_function((void*)radiant_dom_window_dispatch_event, 1));
         }
 
+        // Browser documents need a real constructor value for feature
+        // detection; `new XMLHttpRequest` lowers to this same native factory.
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("XMLHttpRequest", 14))},
+            js_new_function((void*)js_xhr_new, 0));
+
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("localStorage", 12))},
+            js_storage_local_object());
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("sessionStorage", 14))},
+            js_storage_session_object());
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("matchMedia", 10))},
+            js_new_function((void*)js_match_media, 1));
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("MutationObserver", 16))},
+            js_new_function((void*)js_mutation_observer_new, 1));
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("ResizeObserver", 14))},
+            js_new_function((void*)js_resize_observer_new, 1));
+        js_property_set(js_global_this_obj,
+            (Item){.item = s2it(heap_create_name("IntersectionObserver", 20))},
+            js_new_function((void*)js_intersection_observer_new, 2));
+
         // Node.js: Buffer is a global
         extern Item js_get_buffer_namespace(void);
         js_property_set(js_global_this_obj,
@@ -17562,6 +17593,7 @@ static void js_proto_snapshot_bootstrap_constructors() {
         JS_CLASS_UI_EVENT, JS_CLASS_FOCUS_EVENT, JS_CLASS_MOUSE_EVENT,
         JS_CLASS_WHEEL_EVENT, JS_CLASS_KEYBOARD_EVENT, JS_CLASS_COMPOSITION_EVENT,
         JS_CLASS_INPUT_EVENT, JS_CLASS_POINTER_EVENT, JS_CLASS_STATIC_RANGE,
+        JS_CLASS_TRANSITION_EVENT, JS_CLASS_ANIMATION_EVENT,
         0
     };
     for (int i = 0; intrinsic_classes[i]; i++) {
@@ -17917,6 +17949,8 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_INPUT_EVENT) fn->func_ptr = (void*)js_ctor_input_event_fn;
     else if (ctor_id == JS_CTOR_POINTER_EVENT) fn->func_ptr = (void*)js_ctor_pointer_event_fn;
     else if (ctor_id == JS_CTOR_STATIC_RANGE) fn->func_ptr = (void*)js_ctor_static_range_fn;
+    else if (ctor_id == JS_CTOR_TRANSITION_EVENT) fn->func_ptr = (void*)js_ctor_transition_event_fn;
+    else if (ctor_id == JS_CTOR_ANIMATION_EVENT) fn->func_ptr = (void*)js_ctor_animation_event_fn;
     else if (ctor_id == JS_CTOR_PROMISE || ctor_id == JS_CTOR_MAP || ctor_id == JS_CTOR_SET ||
              ctor_id == JS_CTOR_WEAKMAP || ctor_id == JS_CTOR_WEAKSET ||
              ctor_id == JS_CTOR_WEAKREF || ctor_id == JS_CTOR_FINALIZATION_REGISTRY ||
@@ -18056,6 +18090,8 @@ static bool js_intrinsic_proto_ctor_name_for_class(JsClass cls, const char** out
         case JS_CLASS_INPUT_EVENT:           name = "InputEvent"; len = 10; break;
         case JS_CLASS_POINTER_EVENT:         name = "PointerEvent"; len = 12; break;
         case JS_CLASS_STATIC_RANGE:          name = "StaticRange"; len = 11; break;
+        case JS_CLASS_TRANSITION_EVENT:      name = "TransitionEvent"; len = 15; break;
+        case JS_CLASS_ANIMATION_EVENT:       name = "AnimationEvent"; len = 14; break;
         case JS_CLASS_TIMEOUT:               name = "Timeout"; len = 7; break;
         case JS_CLASS_IMMEDIATE:             name = "Immediate"; len = 9; break;
         default: break;
@@ -18637,27 +18673,26 @@ static bool js_web_stream_item_is_true(Item item) {
 static bool js_readable_stream_view_is_detached(Item view) {
     if (!js_is_typed_array(view)) return true;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    return !ta || !ta->buffer || ta->buffer->detached ||
+    return !ta || !ta->buffer || js_arraybuffer_detached(ta->buffer) ||
            js_typed_array_is_out_of_bounds_item(view);
 }
 
 static void js_readable_stream_detach_byob_view(Item view) {
     if (!js_is_typed_array(view)) return;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    if (!ta || !ta->buffer || ta->buffer->detached) return;
+    if (!ta || !ta->buffer || js_arraybuffer_detached(ta->buffer)) return;
     if (ta->buffer_item) {
         js_arraybuffer_detach((Item){.item = ta->buffer_item});
     } else {
-        ta->buffer->detached = true;
-        ta->buffer->byte_length = 0;
+        byte_buffer_detach(&ta->buffer->handle);
     }
 }
 
 static int js_readable_stream_view_buffer_length(Item view) {
     if (!js_is_typed_array(view)) return -1;
     JsTypedArray* ta = js_get_typed_array_ptr(view.map);
-    if (!ta || !ta->buffer || ta->buffer->detached) return -1;
-    return ta->buffer->byte_length;
+    if (!ta || !ta->buffer || js_arraybuffer_detached(ta->buffer)) return -1;
+    return js_arraybuffer_length(ta->buffer);
 }
 
 static Item js_readable_stream_byob_respond_with_new_view(Item env_item, Item view) {

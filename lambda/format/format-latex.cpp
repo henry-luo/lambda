@@ -26,7 +26,7 @@ static void format_latex_value(LaTeXContext& ctx, const ItemReader& value) {
             (void)item;
             write_latex_text(str);
         }
-        void binary_value(const ItemReader& item, String* bin) override {
+        void binary_value(const ItemReader& item, Binary* bin) override {
             (void)item;
             format_binary_base64_string(ctx_.output(), bin);
         }

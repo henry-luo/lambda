@@ -1,0 +1,8 @@
+{
+  "name": "Document readyState follows loading, interactive, and complete lifecycle",
+  "html": "test/ui/dom/readystate_lifecycle.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "initial:loading|state:interactive|dom:interactive|state:complete|load:complete|"}
+  ]
+}

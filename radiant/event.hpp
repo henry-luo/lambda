@@ -22,6 +22,17 @@
 #ifndef RADIANT_EVENT_CORE_ONLY
 struct RenderContext;
 typedef struct RenderContext RenderContext;
+struct UiContext;
+struct DomDocument;
+struct DomElement;
+void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
+void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc);
+void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
+    const char* type, const char* detail_name, const char* detail_value,
+    double elapsed_time);
+extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
+    const char* type, int client_x, int client_y, int button, int buttons,
+    int mods, const char* pointer_type);
 #endif
 
 // ===== event core =====
@@ -2772,6 +2783,12 @@ void selection_get_range(DocState* state, int* start, int* end);
 void focus_set(DocState* state, View* view, bool from_keyboard);
 
 /**
+ * Set focus from HTMLElement.focus(). Negative tabindex values remain
+ * programmatically focusable even though they are excluded from Tab order.
+ */
+void focus_set_programmatic(DocState* state, View* view);
+
+/**
  * Clear focus (blur current element)
  */
 void focus_clear(DocState* state);
@@ -3315,6 +3332,7 @@ typedef enum FocusTransitionKind {
 typedef struct FocusTransitionArgs {
     View* target;
     bool from_keyboard;
+    bool programmatic;
     View* root;
     bool forward;
 } FocusTransitionArgs;
