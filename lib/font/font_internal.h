@@ -399,6 +399,12 @@ void                scan_windows_registry_fonts(FontDatabase* db);
 int                 get_font_metrics_platform(const char* font_family, float font_size,
                                               float* out_ascent, float* out_descent,
                                               float* out_line_height);
+#ifdef __APPLE__
+int                 font_platform_get_metrics_from_ref(void* ct_font_ref,
+                                                       float* out_ascent,
+                                                       float* out_descent,
+                                                       float* out_line_height);
+#endif
 float               get_cjk_system_line_height(float font_size);
 // Find a system font that covers a given codepoint (macOS: CoreText, others: NULL)
 // Returns arena-allocated file path or NULL. Caller does NOT free.

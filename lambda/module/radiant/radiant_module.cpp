@@ -59,7 +59,9 @@ Item vmap_get_by_item(VMap* vm, Item key);
 
 #define RADIANT_CUSTOM_LAYOUT_MAX_REGISTRY 64
 #define RADIANT_CUSTOM_LAYOUT_NAME_CAP 64
-#define RADIANT_VELMT_CHILD_DEPTH 2
+// Rich graph ports may sit below nested table/tbody/tr wrappers; keep traversal
+// bounded while exposing enough laid-out ancestry for semantic attachment.
+#define RADIANT_VELMT_CHILD_DEPTH 32
 #define RADIANT_VELMT_MAGIC 0x56454c4d54ULL
 
 typedef struct RadiantCustomLayoutEntry {

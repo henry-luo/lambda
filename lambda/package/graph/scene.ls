@@ -153,6 +153,12 @@ fn scene_edge(edge, labels, nodes) {
   let last_point = if (len(points) > 0) points[len(points) - 1] else null;
   <edge id: id, 'from': string(attr(edge, "data-from", "")),
       'to': string(attr(edge, "data-to", "")),
+      'from-port': attr(edge, "data-from-port", null),
+      'to-port': attr(edge, "data-to-port", null),
+      'from-compass': attr(edge, "data-from-compass", null),
+      'to-compass': attr(edge, "data-to-compass", null),
+      'tail-cluster': attr(edge, "data-tail-cluster", null),
+      'head-cluster': attr(edge, "data-head-cluster", null),
       'from-side': endpoint_side(first_point, scene_node_by_id(nodes, from_id)),
       'to-side': endpoint_side(last_point, scene_node_by_id(nodes, to_id)),
       'marker-start': string(attr(edge, "data-marker-start", "none")),
@@ -311,14 +317,19 @@ fn point_mismatches(actual, expected, edge_id, tolerance) {
       expected_value, actual_value, edge_id)] }
 }
 
-fn edge_mismatches(actual_scene, expected, geometry_tolerance, route_tolerance) {
+fn edge_mismatches(actual_scene, expected, geometry_tolerance, route_tolerance,
+    compare_route) {
   let actual = child_by_id(actual_scene, "edge", attr(expected, "id", ""));
   [
     *entity_mismatches(actual_scene, expected, "edge",
       ["id", "from", "to", "from-side", "to-side", "marker-start", "marker-end",
-        "route-kind", "stroke", "dash-array", "arrow-size"],
+        "from-port", "to-port", "from-compass", "to-compass",
+        "tail-cluster", "head-cluster", "route-kind", "stroke", "dash-array",
+        "arrow-size"],
       ["stroke-width", "opacity"], geometry_tolerance),
-    *point_mismatches(actual, expected, attr(expected, "id", null), route_tolerance)
+    for (issue in if (compare_route)
+      point_mismatches(actual, expected, attr(expected, "id", null), route_tolerance)
+      else []) issue
   ]
 }
 
@@ -461,7 +472,8 @@ pub fn compare_scenes(actual, expected, policy = null) {
       ["id", "parent", "fill", "stroke"],
       ["x", "y", "width", "height", "stroke-width", "opacity"], geometry_tolerance)) issue,
     for (edge in expected_edges, issue in edge_mismatches(
-      actual, edge, geometry_tolerance, route_tolerance)) issue,
+      actual, edge, geometry_tolerance, route_tolerance,
+      policy_enabled(policy, "route-geometry", true))) issue,
     for (issue in if (relations and policy_enabled(policy, "node-non-overlap", true))
       node_overlap_mismatches(actual, geometry_tolerance) else []) issue,
     for (issue in if (relations and policy_enabled(policy, "cluster-containment", true))

@@ -1,0 +1,8 @@
+{
+  valid: true,
+  diagnostics: [["graph.graphviz.unsupported-colorscheme", "warning"]],
+  canonical: [["a", "#e41a1c", "#377eb8"], ["b", "#e41a1c;0.25:#377eb8;0.25:#4daf4a;0.5", null], ["c", "#984ea3;0.2:#ff7f00;0.8", null], ["d", "#e41a1c:#377eb8:#4daf4a", null], ["e", "red", null], ["f", null, null], ["g", null, null]],
+  edge: ["#ffff33", "#a65628"],
+  html: [["a", "#e41a1c", true], ["b", "linear-gradient(0deg,#e41a1c 0% 25%,#377eb8 25% 50%,#4daf4a 50% 100%)", true], ["c", "conic-gradient(#984ea3 0% 20%,#ff7f00 20% 100%)", true], ["d", "radial-gradient(#e41a1c,#377eb8,#4daf4a)", true], ["e", "red", true], ["f", "#ffffff", true], ["g", "#ffffff", true]],
+  font: ["Times-BoldItalic", true, true, true]
+}

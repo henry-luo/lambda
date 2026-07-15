@@ -1,6 +1,7 @@
 // Typed lowering for the first Graphviz attribute conformance slice.
 
 import shapes: .shapes
+import colors: .colors
 
 fn property_matches(entry, name) => lower(string(entry.name)) == name
 
@@ -71,6 +72,9 @@ fn bool_value(properties, name) {
   else null
 }
 
+fn fixed_shape(properties) =>
+  lower(trim(string(value(properties, "fixedsize", "")))) == "shape"
+
 fn attr(name, value) => if (value == null) [] else [name, value]
 
 fn label_attrs(properties, name = "label", target = "label") {
@@ -113,7 +117,8 @@ fn style_attrs(properties) {
 fn font_attrs(properties) => [
   *attr("font-name", value(properties, "fontname")),
   *attr("font-size", number_value(properties, "fontsize", 96.0 / 72.0)),
-  *attr("font-color", value(properties, "fontcolor"))
+  *attr("font-color", colors.resolve(value(properties, "fontcolor"),
+    value(properties, "colorscheme")))
 ]
 
 pub fn route_mode(raw) {
@@ -148,7 +153,8 @@ fn graph_attrs(properties) {
     *attr("new-rank", bool_value(properties, "newrank")),
     *attr("compound", bool_value(properties, "compound")),
     *attr("layout", value(properties, "layout")),
-    *attr("fill", value(properties, "bgcolor")),
+    *attr("fill", colors.resolve(value(properties, "bgcolor"),
+      value(properties, "colorscheme"))),
     *attr("gradient-angle", number_value(properties, "gradientangle")),
     *label_attrs(properties),
     *font_attrs(properties),
@@ -158,6 +164,10 @@ fn graph_attrs(properties) {
 
 fn node_attrs(properties) {
   let raw_shape = value(properties, "shape");
+  let fixed = bool_value(properties, "fixedsize");
+  let shape_fixed = fixed_shape(properties);
+  let width = number_value(properties, "width", 96.0);
+  let height = number_value(properties, "height", 96.0);
   let sides = bounded_integer(properties, "sides", 3, 64,
     shapes.default_sides(raw_shape));
   let peripheries = bounded_integer(properties, "peripheries", 0, 10,
@@ -175,14 +185,17 @@ fn node_attrs(properties) {
     *attr("polygon-distortion", number_value(properties, "distortion")),
     *attr("regular", bool_value(properties, "regular")),
     *attr("peripheries", peripheries),
-    *attr("width", number_value(properties, "width", 96.0)),
-    *attr("height", number_value(properties, "height", 96.0)),
-    *attr("fixed-size", bool_value(properties, "fixedsize")),
+    *attr("width", if (width != null) width else if (fixed or shape_fixed) 72.0 else null),
+    *attr("height", if (height != null) height else if (fixed or shape_fixed) 48.0 else null),
+    *attr("fixed-size", fixed),
+    *attr("fixed-shape", if (shape_fixed) true else null),
     *attr("margin-x", margin.x),
     *attr("margin-y", margin.y),
-    *attr("fill", value(properties, "fillcolor")),
+    *attr("fill", colors.resolve(value(properties, "fillcolor"),
+      value(properties, "colorscheme"))),
     *attr("gradient-angle", number_value(properties, "gradientangle")),
-    *attr("stroke", value(properties, "color")),
+    *attr("stroke", colors.resolve(value(properties, "color"),
+      value(properties, "colorscheme"))),
     *attr("stroke-width", number_value(properties, "penwidth", 96.0 / 72.0)),
     *attr("group", value(properties, "group")),
     *attr("ordering", ordering(value(properties, "ordering"))),
@@ -205,7 +218,8 @@ fn edge_attrs(properties) {
     *attr("min-length", number_value(properties, "minlen")),
     *attr("weight", number_value(properties, "weight")),
     *attr("constraint", bool_value(properties, "constraint")),
-    *attr("stroke", value(properties, "color")),
+    *attr("stroke", colors.resolve(value(properties, "color"),
+      value(properties, "colorscheme"))),
     *attr("stroke-width", number_value(properties, "penwidth", 96.0 / 72.0)),
     *attr("head-cluster", value(properties, "lhead")),
     *attr("tail-cluster", value(properties, "ltail")),

@@ -1,4 +1,4 @@
 Graphviz 15.1.0 (20260618.0150)
 source_sha256=4c44f9f6654d39638db7cdb6a088735117469015299298d82087b24dd4042b16
 arm64_sequoia_bottle_sha256=cb785019f4398ea3edd47004b5e03cbc29e3bad996d8b72f1c1af953a90854e5
-command=dot -Tdot_json test/lambda/graph/graphviz/reference_semantics.dot
+command=dot -Tjson test/lambda/graph/graphviz/reference_semantics.dot

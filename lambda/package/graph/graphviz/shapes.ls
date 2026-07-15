@@ -18,6 +18,22 @@ pub fn role(raw) {
   else if (shape == "folder") "notch-pent"
   else if (shape == "box3d") "subroutine"
   else if (shape == "component") "win-pane"
+  else if (shape == "underline") "underline"
+  else if (shape == "promoter" or shape == "rpromoter") "asymmetric"
+  else if (shape == "lpromoter") "asymmetric-left"
+  else if (shape == "cds" or shape == "rarrow") "tag-rect"
+  else if (shape == "larrow") "tag-rect-left"
+  else if (shape == "terminator") "lin-rect"
+  else if (shape == "utr") "box"
+  else if (shape == "primersite") "lean-r"
+  else if (contains(["restrictionsite", "noverhang", "proteasesite"], shape)) "notch-rect"
+  else if (shape == "fivepoverhang") "notch-rect"
+  else if (shape == "threepoverhang") "notch-rect-right"
+  else if (shape == "assembly") "hourglass"
+  else if (shape == "signature") "doc"
+  else if (shape == "insulator") "doublecircle"
+  else if (shape == "ribosite") "circle"
+  else if (shape == "rnastab" or shape == "proteinstab") "stadium"
   else if (shape == "plaintext" or shape == "plain" or shape == "none") "text"
   else if (shape == "record") "box"
   else if (shape == "mrecord") "rounded"
@@ -29,7 +45,9 @@ pub fn family(raw) {
   if (contains(["circle", "doublecircle", "ellipse"], shape)) "ellipse"
   else if (contains(["diamond", "tri", "flip-tri", "hexagon", "octagon",
       "trapezoid", "trapezoid-alt", "lean-r", "lean-l", "house", "invhouse",
-      "polygon", "pentagon", "septagon", "star"], shape))
+      "polygon", "pentagon", "septagon", "star", "asymmetric",
+      "asymmetric-left", "tag-rect", "tag-rect-left", "notch-rect",
+      "notch-rect-right", "hourglass"], shape))
     "polygon"
   else if (shape == "text") "text"
   else "box"

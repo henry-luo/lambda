@@ -545,6 +545,7 @@ static CssValue* css_parse_font_family_list(CssPropertyValueParser* parser,
                                             const CssToken* tokens,
                                             int token_count) {
     if (!parser || !tokens || token_count <= 0) return NULL;
+    if (!css_validate_font_family_tokens(tokens, token_count)) return NULL;
 
     CssValue* list = css_value_list_create(parser->pool);
     if (!list) return NULL;

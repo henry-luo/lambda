@@ -9,6 +9,60 @@ fn values(value, key) => if (value[key] != null) value[key] else []
 fn text(value, key, fallback = null) =>
   if (value[key] != null and value[key] != "") string(value[key]) else fallback
 
+fn numbers(raw) => [for (part in split(replace(trim(string(raw)), ",", " "), " ")
+  where part != "") float(part)]
+
+fn graph_height(value) {
+  let box = numbers(text(value, "bb", "0 0 0 0"));
+  if (len(box) >= 4) box[3] - box[1] else 0.0
+}
+
+fn css_point(x, y, height) =>
+  {x: float(x) * 96.0 / 72.0, y: (height - float(y)) * 96.0 / 72.0}
+
+fn box_geometry(raw, height) {
+  let value = numbers(raw);
+  if (len(value) < 4) null
+  else {
+    let top_left = css_point(value[0], value[3], height);
+    {x: top_left.x, y: top_left.y,
+      width: (value[2] - value[0]) * 96.0 / 72.0,
+      height: (value[3] - value[1]) * 96.0 / 72.0}
+  }
+}
+
+fn node_geometry(value, height) {
+  let position = numbers(text(value, "pos", ""));
+  if (len(position) < 2 or value.width == null or value.height == null) null
+  else {
+    let center = css_point(position[0], position[1], height);
+    let width = float(value.width) * 96.0;
+    let node_height = float(value.height) * 96.0;
+    {x: center.x - width / 2.0, y: center.y - node_height / 2.0,
+      width: width, height: node_height}
+  }
+}
+
+fn route_token(raw, height) {
+  let parts = split(string(raw), ",");
+  let tagged = len(parts) > 0 and (parts[0] == "e" or parts[0] == "s");
+  let offset = if (tagged) 1 else 0;
+  if (len(parts) < offset + 2) null
+  else {
+    tag: if (tagged) parts[0] else null,
+    point: css_point(float(parts[offset]), float(parts[offset + 1]), height)
+  }
+}
+
+fn route_points(raw, height) {
+  let tokens = [for (part in split(trim(string(raw)), " "),
+    let value = route_token(part, height) where value != null) value];
+  let regular = [for (value in tokens where value.tag == null) value.point];
+  let starts = [for (value in tokens where value.tag == "s") value.point];
+  let ends = [for (value in tokens where value.tag == "e") value.point];
+  [*starts, *regular, *ends]
+}
+
 fn object_by_gvid(objects, id) => first([
   for (value in objects where value["_gvid"] == id) value
 ])
@@ -57,53 +111,68 @@ fn marker(edge, directed, start) {
   else text(edge, if (start) "arrowtail" else "arrowhead", "normal")
 }
 
-fn graphviz_cluster(value, clusters, graph_name) {
+fn graphviz_cluster(value, clusters, graph_name, height, geometry) {
   let label = label_element(label_text(value.label, null, graph_name));
+  let box = if (geometry) box_geometry(text(value, "bb", ""), height) else null;
   <cluster id: string(value.name), parent: cluster_parent(clusters, value["_gvid"]),
       fill: value.fillcolor, stroke: value.color,
+      x: if (box != null) box.x else null, y: if (box != null) box.y else null,
+      width: if (box != null) box.width else null,
+      height: if (box != null) box.height else null,
       'stroke-width': stroke_width(value), 'dash-array': graphviz_style(value);
     if (label != null) { label }
   >
 }
 
-fn graphviz_node(value, clusters, graph_name) {
+fn graphviz_node(value, clusters, graph_name, height, geometry) {
   let id = string(value.name);
   let label = label_element(label_text(value.label, id, graph_name));
+  let box = if (geometry) node_geometry(value, height) else null;
   <node id: id, shape: text(value, "shape", "ellipse"),
       group: node_group(clusters, value["_gvid"]), fill: value.fillcolor,
       stroke: value.color, 'stroke-width': stroke_width(value),
+      x: if (box != null) box.x else null, y: if (box != null) box.y else null,
+      width: if (box != null) box.width else null,
+      height: if (box != null) box.height else null,
       'dash-array': graphviz_style(value);
     if (label != null) { label }
   >
 }
 
-fn graphviz_edge(value, index, objects, directed, graph_name) {
+fn graphviz_edge(value, index, objects, directed, graph_name, height, geometry, edge_ids) {
   let tail = object_by_gvid(objects, value.tail);
   let head = object_by_gvid(objects, value.head);
   let from = if (tail != null) string(tail.name) else "";
   let to = if (head != null) string(head.name) else "";
   let edge_name = from ++ (if (directed) "->" else "--") ++ to;
   let label = label_element(label_text(value.label, null, graph_name, edge_name));
-  <edge id: "edge-" ++ string(index), from: from, to: to,
+  <edge id: if (edge_ids != null and index < len(edge_ids)) edge_ids[index]
+      else "edge-" ++ string(index), from: from, to: to,
       'marker-start': marker(value, directed, true),
       'marker-end': marker(value, directed, false), stroke: value.color,
       'stroke-width': stroke_width(value), 'dash-array': graphviz_style(value);
     if (label != null) { label }
+    if (geometry and value.pos != null) {
+      <route; for (point in route_points(value.pos, height))
+        <point x: point.x, y: point.y>
+      >
+    }
   >
 }
 
-pub fn from_dot_json(value) {
+pub fn from_dot_json(value, geometry = false, edge_ids = null) {
   let objects = values(value, "objects");
   let count = if (value["_subgraph_cnt"] != null) int(value["_subgraph_cnt"]) else 0;
   let clusters = if (count > 0) slice(objects, 0, count) else [];
   let nodes = if (count < len(objects)) slice(objects, count, len(objects)) else [];
   let graph_name = text(value, "name", "");
   let directed = value.directed == true;
+  let height = graph_height(value);
   <'graph-scene' direction: direction(value);
-    for (entry in clusters) graphviz_cluster(entry, clusters, graph_name)
-    for (entry in nodes) graphviz_node(entry, clusters, graph_name)
+    for (entry in clusters) graphviz_cluster(entry, clusters, graph_name, height, geometry)
+    for (entry in nodes) graphviz_node(entry, clusters, graph_name, height, geometry)
     for (i, entry in values(value, "edges"))
-      graphviz_edge(entry, i, objects, directed, graph_name)
+      graphviz_edge(entry, i, objects, directed, graph_name, height, geometry, edge_ids)
   >
 }
 

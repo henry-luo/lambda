@@ -1,6 +1,6 @@
 {
   width: 100,
-  height: 95,
+  height: 140,
   placements: [{
       index: 0,
       x: 10,
@@ -8,6 +8,6 @@
     }, {
       index: 1,
       x: 0,
-      y: 45
+      y: 90
     }]
 }

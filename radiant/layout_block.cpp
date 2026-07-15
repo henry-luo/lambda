@@ -7478,15 +7478,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // inline-blocks with overflow != visible use bottom margin edge baseline.
         // Even though textarea may not have an explicit scroller, treat it as
         // replaced for baseline purposes.
-        // Select has no in-flow CSS line boxes (options are UA-rendered in a
-        // shadow/internal context), so it also uses bottom-margin-edge baseline
-        // per CSS 2.1 §10.8.1. This ensures correct baseline for mixed-height
-        // selects on the same line (e.g., dropdown h=19 + listbox h=70).
+        bool is_select_listbox = block->tag() == HTM_TAG_SELECT &&
+            (!block->form || block->form->multiple || block->form->select_size > 1);
         bool is_replaced = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
             block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
             (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
             block->tag() == HTM_TAG_TEXTAREA ||
-            block->tag() == HTM_TAG_SELECT);
+            is_select_listbox);
         bool is_broken_alt_image = block->tag() == HTM_TAG_IMG &&
             block->embed && block->embed->broken_alt_fallback;
         if (is_broken_alt_image) {
@@ -7495,25 +7493,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (is_replaced) {
             content_has_line_boxes = false;
         }
-        // Combo-box <select> baseline: Chrome (and other browsers) place the
-        // baseline at the internal text baseline rather than the bottom margin
-        // edge — this lets a SELECT visually sit on the same baseline as
-        // surrounding text and prevents the parent line box from accruing extra
-        // descent below the control. Only applies to single-line combo boxes
-        // (not multi/listbox, where row layout dominates).
-        if (block->tag() == HTM_TAG_SELECT && block->font && block->blk &&
-            !(block->form && (block->form->multiple || block->form->select_size > 1))) {
-            float pad_top = block->bound ? block->bound->padding.top : 0;
-            float bord_top = block->bound && block->bound->border ? block->bound->border->width.top : 0;
-            float ascender = block->font->ascender > 0 ? block->font->ascender
-                                                       : block->font->font_size * 0.8f;
-            float synth_baseline = pad_top + bord_top + ascender;
-            if (synth_baseline > 0 && synth_baseline < block->height) {
-                content_last_line_ascender = synth_baseline;
-                content_has_line_boxes = true;
-            }
-        }
-
         log_debug("%s inline-block content baseline: last_line_ascender=%.1f, has_line_boxes=%d, is_replaced=%d, block_height=%.1f", elmt->source_loc(),
             content_last_line_ascender, content_has_line_boxes, is_replaced, block->height);
 
@@ -7763,8 +7742,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         desc_contribution = item_height / 2.0f - x_height_half;
                     } else {
                         // For baseline, sub, super, length/percentage offsets
-                        asc_contribution = item_baseline + valign_offset;
-                        desc_contribution = item_height - item_baseline - valign_offset;
+                        float baseline_shift = vertical_align_baseline_shift(
+                            lycon, valign, valign_offset);
+                        asc_contribution = item_baseline + baseline_shift;
+                        desc_contribution = item_height - item_baseline - baseline_shift;
                     }
                     lycon->line.max_ascender = max(lycon->line.max_ascender, asc_contribution);
                     lycon->line.max_descender = max(lycon->line.max_descender, desc_contribution);

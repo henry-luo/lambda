@@ -1,7 +1,8 @@
 {
   valid: true,
-  canonical: [[["external", "external", "text"]], [["external", "<B>outside</B>", "html"], ["head", "head", "text"], ["tail", "tail", "text"]]],
-  html: [["node", "a", "external", "text"], ["edge", "dot-stmt-0-s0-e0", "external", "html"], ["edge", "dot-stmt-0-s0-e0", "head", "text"], ["edge", "dot-stmt-0-s0-e0", "tail", "text"]],
-  placements: [[2, [57, 47]], [3, [0, 0]], [4, [124, 12]], [5, [0, 47]], [6, [62, 62]], [7, [62, 32]]],
-  size: [174, 110]
+  canonical: [[["external", "external", "text", "Helvetica", 20, "#123456"]], [["external", "<B>outside</B>", "html", "Courier", 16, "purple"], ["head", "head", "text", "Courier", 16, "purple"], ["tail", "tail", "text", "Courier", 16, "purple"]]],
+  html: [["node", "a", "external", "text", "Helvetica", 20, "#123456", true, true, true], ["edge", "dot-stmt-0-s0-e0", "external", "html", "Courier", 16, "purple", true, true, true], ["edge", "dot-stmt-0-s0-e0", "head", "text", "Courier", 16, "purple", true, true, true], ["edge", "dot-stmt-0-s0-e0", "tail", "text", "Courier", 16, "purple", true, true, true]],
+  placements: [[2, [71, 67]], [3, [0, 0]], [4, [138, 12]], [5, [68, 45]], [6, [38, 80]], [7, [0, 32]]],
+  size: [188, 150],
+  clear: [true, true, true]
 }

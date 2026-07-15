@@ -4,9 +4,9 @@
   }, hover: "#country", dropdown: {
     owner: "#country",
     x: 114.4453125,
-    y: 220,
-    w: 138.84375,
-    h: 96
+    y: 218,
+    w: 125,
+    h: 92
   }, render: {
     dirty: true,
     repaint: true,

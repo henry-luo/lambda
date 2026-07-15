@@ -1164,22 +1164,60 @@ const char* css_join_font_family_values(LayoutContext* lycon, const CssValue* li
     return combined;
 }
 
+static const char* css_font_family_group_name(LayoutContext* lycon,
+                                              const CssValue* value) {
+    if (!value) return NULL;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        return css_join_font_family_values(
+            lycon, value, 0, (size_t)value->data.list.count);
+    }
+    return css_font_family_name_from_value(value);
+}
+
+static const char* css_join_font_family_groups(LayoutContext* lycon,
+                                               const CssValue* list,
+                                               size_t start, size_t end) {
+    if (!lycon || !lycon->doc || !lycon->doc->view_tree ||
+        !list || list->type != CSS_VALUE_TYPE_LIST) return NULL;
+    size_t count = (size_t)list->data.list.count;
+    if (end > count) end = count;
+    if (start >= end) return NULL;
+
+    size_t total_len = 0;
+    size_t part_count = 0;
+    for (size_t i = start; i < end; i++) {
+        const char* part = css_font_family_group_name(lycon, list->data.list.values[i]);
+        if (!part || !*part) continue;
+        total_len += strlen(part);
+        part_count++;
+    }
+    if (part_count == 0) return NULL;
+    total_len += (part_count - 1) * 2;
+
+    char* combined = (char*)pool_alloc(lycon->doc->view_tree->pool, total_len + 1);
+    if (!combined) return NULL;
+    combined[0] = '\0';
+    size_t pos = 0;
+    bool first = true;
+    for (size_t i = start; i < end; i++) {
+        const char* part = css_font_family_group_name(lycon, list->data.list.values[i]);
+        if (!part || !*part) continue;
+        if (!first) pos = str_cat(combined, pos, total_len + 1, ", ", 2);
+        pos = str_cat(combined, pos, total_len + 1, part, strlen(part));
+        first = false;
+    }
+    return combined;
+}
+
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value,
                                    bool require_loadable_face_source) {
     if (!value) return NULL;
     if (value->type != CSS_VALUE_TYPE_LIST) return css_font_family_name_from_value(value);
-
-    const char* fallback = NULL;
-    for (int i = 0; i < value->data.list.count; i++) {
-        CssValue* item = value->data.list.values[i];
-        const char* family = css_font_family_name_from_value(item);
-        if (!family) continue;
-        fallback = family;
-        if (css_font_family_is_available(lycon, family, require_loadable_face_source)) {
-            return family;
-        }
-    }
-    return fallback;
+    (void)require_loadable_face_source;
+    // Glyph fallback happens per character, so computed style must retain the
+    // authored family order instead of collapsing it to the first loadable face.
+    return css_join_font_family_groups(
+        lycon, value, 0, (size_t)value->data.list.count);
 }
 
 const char* css_select_font_shorthand_family(LayoutContext* lycon,
@@ -1187,38 +1225,56 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              const CssValue* main_group,
                                              size_t family_start_index,
                                              bool require_loadable_face_source) {
-    const char* selected = NULL;
-    const char* fallback = NULL;
+    (void)require_loadable_face_source;
+    const char* first = main_group && main_group->type == CSS_VALUE_TYPE_LIST
+        ? css_join_font_family_values(
+            lycon, main_group, family_start_index, main_group->data.list.count)
+        : NULL;
+    // A flat shorthand list also contains size and line-height tokens; only a
+    // nested outer list represents additional comma-separated family groups.
+    if (shorthand_value == main_group) return first;
+    if (!shorthand_value || shorthand_value->type != CSS_VALUE_TYPE_LIST ||
+        shorthand_value->data.list.count < 2) return first;
 
-    if (main_group && main_group->type == CSS_VALUE_TYPE_LIST) {
-        selected = css_join_font_family_values(
-            lycon, main_group, family_start_index, main_group->data.list.count);
-        fallback = selected;
-        if (selected) return selected;
+    size_t total_len = first ? strlen(first) : 0;
+    size_t part_count = first ? 1 : 0;
+    size_t shorthand_count = (size_t)shorthand_value->data.list.count;
+    for (size_t i = 1; i < shorthand_count; i++) {
+        const char* part = css_font_family_group_name(
+            lycon, shorthand_value->data.list.values[i]);
+        if (!part || !*part) continue;
+        total_len += strlen(part);
+        part_count++;
     }
-
-    if (shorthand_value && shorthand_value->type == CSS_VALUE_TYPE_LIST &&
-        shorthand_value->data.list.count >= 2 &&
-        shorthand_value->data.list.values[0] &&
-        shorthand_value->data.list.values[0]->type == CSS_VALUE_TYPE_LIST) {
-        size_t shorthand_count = (size_t)shorthand_value->data.list.count;
+    if (part_count == 0) return NULL;
+    if (part_count == 1) {
+        if (first) return first;
         for (size_t i = 1; i < shorthand_count; i++) {
-            const CssValue* item = shorthand_value->data.list.values[i];
-            const char* family = NULL;
-            if (item && item->type == CSS_VALUE_TYPE_LIST) {
-                family = css_join_font_family_values(lycon, item, 0, item->data.list.count);
-            } else {
-                family = css_font_family_name_from_value(item);
-            }
-            if (!family) continue;
-            fallback = family;
-            if (css_font_family_is_available(lycon, family, require_loadable_face_source)) {
-                return family;
-            }
+            const char* part = css_font_family_group_name(
+                lycon, shorthand_value->data.list.values[i]);
+            if (part && *part) return part;
         }
     }
+    total_len += (part_count - 1) * 2;
 
-    return fallback;
+    char* combined = (char*)pool_alloc(lycon->doc->view_tree->pool, total_len + 1);
+    if (!combined) return first;
+    combined[0] = '\0';
+    size_t pos = 0;
+    bool has_part = false;
+    if (first) {
+        pos = str_cat(combined, pos, total_len + 1, first, strlen(first));
+        has_part = true;
+    }
+    for (size_t i = 1; i < shorthand_count; i++) {
+        const char* part = css_font_family_group_name(
+            lycon, shorthand_value->data.list.values[i]);
+        if (!part || !*part) continue;
+        if (has_part) pos = str_cat(combined, pos, total_len + 1, ", ", 2);
+        pos = str_cat(combined, pos, total_len + 1, part, strlen(part));
+        has_part = true;
+    }
+    return combined;
 }
 
 /**

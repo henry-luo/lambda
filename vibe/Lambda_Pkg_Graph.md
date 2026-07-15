@@ -11,8 +11,12 @@ cascade, final-SVG graph metadata, Graph Scene adaptation/comparison, in-process
 Radiant scene rendering, relational scene validation, and the pinned semantic
 corpus runner are implemented. Section 18.12 records the current boundary;
 additional graph-oriented Mermaid families remain a subsequent phase.
-Stage 3, proposed in Section 19, adds source-faithful Graphviz DOT support on
-the same canonical Graph IR and retained Radiant layout path.
+Stage 3 Graphviz support is implemented: source-faithful DOT parsing, pure
+normalization, canonical Graph IR, rich measured content, layered layout and
+routing, semantic HTML/Radiant rendering, DOT formatting, and the pinned
+manifest-driven conformance suite all use the retained Radiant layout path.
+Section 19.16 records the deliberately deferred non-layered engines and exact
+backend-parity work.
 
 ## 1. Summary
 
@@ -2089,24 +2093,24 @@ The pure Lambda semantic implementation is complete:
 
 The implementation is covered by `canonical.ls`, `semantics.ls`, and
 `reference_semantics.ls` under `test/lambda/graph/graphviz`. The last fixture
-adapts checked-in Graphviz `dot_json` into Graph Scene Mark and compares it with
-the canonical Lambda graph. The generator version, command, and binary hashes
-are pinned beside the reference. Graphviz is not installed or invoked by
-ordinary tests.
+adapts checked-in Graphviz `json` into Graph Scene Mark and compares canonical
+semantics plus selected tolerant geometry with Lambda's final rendered scene.
+The generator version, command, and binary hashes are pinned beside the
+reference. Graphviz is not installed or invoked by ordinary tests.
 
 Lambda normalization size is tracked separately from native parser LOC:
 
 | Stage 3B module | Physical LOC |
 |---|---:|
-| `graphviz/attributes.ls` | 223 |
-| `graphviz/normalize.ls` | 622 |
-| total | 845 |
+| `graphviz/attributes.ls` | 237 |
+| `graphviz/normalize.ls` | 660 |
+| total | 897 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
 attribute families are added.
 
-#### Stage 3C - Content, shapes, markers, and HTML (in progress, 2026-07-15)
+#### Stage 3C - Content, shapes, markers, and HTML (implemented 2026-07-15)
 
 The implemented Stage 3C surface is:
 
@@ -2142,11 +2146,25 @@ The implemented Stage 3C surface is:
   applies a square preferred ratio and equal authored minima. The retained
   Radiant render fixture verifies that a `1in` by `0.5in` regular fixed node is
   measured as `96px` by `96px` before custom layout;
-- safe two-color `fillcolor` gradients lower to CSS linear or radial gradients,
-  with `gradientangle` retained for linear paint. `fontname`, `fontsize`, and
-  `fontcolor` lower through allowlisted family/color syntax for graph, node,
-  edge-label, cluster-label, and annotation content; unsafe values fall back to
-  the active graph theme without entering CSS declarations;
+- `fixedsize=shape` uses a fixed, centered inner shape and a naturally measured
+  outer content box. Layout spacing and collision use the outer box, while a
+  reserved internal port record carries shape ratios to edge clipping. This
+  preserves the authored shape boundary even when a long label expands the
+  node, without adding unstable fields to retained-JIT node records;
+- the remaining Graphviz specialized/biological names (`promoter`, `cds`,
+  `terminator`, overhang/site/stability shapes, directional arrows, and related
+  forms) lower to reusable box, ellipse, and polygon geometry roles. The raw
+  Graphviz name remains canonical provenance;
+- safe color lists lower to ordinary multi-stop linear/radial gradients and to
+  weighted hard-stop `striped`/`wedged` paint. Qualified SVG/X11 names and the
+  compact embedded `accent8`, `dark28`, `paired12`, `set19`, `set28`, and
+  `set312` palettes resolve before canonicalization. This bounded table is an
+  intentional package/binary-size choice; unsupported schemes fall back to the
+  theme and emit `graph.graphviz.unsupported-colorscheme`;
+- `fontname`, `fontsize`, and `fontcolor` lower through allowlisted syntax for
+  graph, node, edge-label, cluster-label, and annotation content. PostScript
+  Times, Helvetica, and Courier family names receive browser/Radiant fallback
+  stacks and bold/italic variants; unsafe values never enter CSS declarations;
 - unsupported arrow components preserve their raw marker for deterministic
   fallback paint and emit the non-fatal
   `graph.graphviz.unsupported-arrow` diagnostic;
@@ -2171,28 +2189,21 @@ The implemented Stage 3C surface is:
   graph-level canonical annotations with explicit owner identities. Radiant
   measures their text or safe HTML content and the shared collision-aware
   placement path positions them beside nodes or at route center/head/tail.
+  Normalized HTML tests cover their font metadata and generated CSS.
 
 The new pure Stage 3C modules remain small:
 
 | Stage 3C module | Physical LOC |
 |---|---:|
 | `graphviz/labels.ls` | 35 |
-| `graphviz/shapes.ls` | 53 |
+| `graphviz/shapes.ls` | 71 |
 | `graphviz/markers.ls` | 73 |
 | `graphviz/records.ls` | 83 |
+| `graphviz/colors.ls` | 121 |
 | shared `graph/polygon.ls` | 32 |
-| total | 276 |
+| total | 415 |
 
-Still outstanding in Stage 3C:
-
-- complete remaining specialized Graphviz shape families and
-  `fixedsize=shape` fidelity;
-- add weighted/multi-stop Graphviz color lists, colorscheme resolution, and
-  closer Graphviz font fallback matching;
-- expand normalized HTML expectations for remaining annotation and paint
-  styles.
-
-#### Stage 3D - Layered layout parity (in progress, 2026-07-15)
+#### Stage 3D - Layered layout parity (implemented 2026-07-15)
 
 Canonical rank constraints are exposed as zero-size semantic HTML/Velmt
 children. The layered ranker enforces `rank=same|min|max|source|sink`, excludes
@@ -2228,15 +2239,55 @@ route endpoint and clips to that cluster's border; outer nested boundaries
 remain in the route. Unknown cluster references produce
 `graph.graphviz.unresolved-compound-cluster`.
 
-- implement the rank-policy difference for `newrank` and strengthen authored
-  group alignment inside nested structural clusters;
-- validate `lhead`/`ltail` endpoint membership and finish compass/table-port
-  attachment fidelity;
-- place all labels and annotations without incoherent overlap;
-- compare Graph Scene semantics and tolerant geometry against pinned Graphviz
-  JSON references.
+Compound validation now follows nested cluster ownership and reports
+`graph.graphviz.compound-endpoint-outside-cluster` when an `lhead` target or
+`ltail` source is outside the named cluster. DOT's ambiguous one-token endpoint
+suffix is resolved only after record and HTML content have generated their
+actual ports: a matching name remains a port, otherwise
+`n|ne|e|se|s|sw|w|nw|c|_` becomes a compass point. Compass attachment is
+retained through canonical IR, semantic HTML, Velmt adaptation,
+parallel/self-loop routing, generated SVG, and Graph Scene Mark.
+`records_ports.ls` covers named-port precedence and north and diagonal compass
+geometry; `ordering_groups.ls` covers nested valid membership, unknown
+clusters, and outside-cluster diagnostics.
 
-#### Stage 3E - Formatter, runner, and integration
+The ranker now distinguishes Graphviz's recursive default from `newrank=true`.
+The default excludes rank sets whose members span structural clusters, while
+`newrank=true` applies those sets in the single global rank space. Crossing
+reduction groups nodes by their complete outer-to-inner cluster ancestry and
+then by authored DOT `group`, keeping nested clusters and inner alignment groups
+contiguous without conflating the two concepts. `ordering_groups.ls` covers the
+cross-cluster rank-policy difference and nested grouping order.
+
+Record and safe HTML-table ports now use measured Radiant cell geometry. The
+Velmt adapter walks the already-laid-out node subtree, accumulates each port
+cell's local border box, and retains normalized horizontal and vertical cell
+centers. Routing chooses the measured axis after resolving the endpoint side,
+while direct non-Radiant callers retain canonical source-order offsets as a
+fallback. Velmt descendant exposure remains lazy and bounded, with enough depth
+for nested table wrappers. `records_ports.ls` covers the pure adapter and
+`render.ls` verifies the retained Radiant render path.
+
+Labels and annotations are placed against a shared occupied-geometry set that
+contains node boxes, cluster labels, other routed edge segment boxes, and labels
+already placed in source order. Candidate positions expand through bounded
+rings around the owner or route anchor. When a dense graph exhausts those
+candidates, a deterministic position beyond the occupied right boundary
+guarantees a non-overlapping result instead of accepting the first collision.
+`annotations.ls` checks pairwise label separation and separation from nodes and
+edge routes.
+
+The pinned `dot -Tjson` adapter converts Graphviz's bottom-left point geometry
+to top-left CSS pixels and emits node, cluster, and edge-route Graph Scene Mark.
+`reference_semantics.ls` renders the same source through the retained Radiant
+callback and compares exact semantics, relational geometry, and explicitly
+tolerant absolute geometry. Exact route control-point equality is disabled for
+this reference because Graphviz splines and Radiant routes are different valid
+representations; endpoint relations remain checked. The comparison also
+protects direct canonical edge paint attributes through HTML and Velmt
+adaptation.
+
+#### Stage 3E - Formatter, runner, and integration (implemented 2026-07-15)
 
 - `manifest.mark` and `suite.ls` now run the positive DOT corpus through parse,
   normalize, schema validation, and semantic HTML in one retained runtime;
@@ -2245,11 +2296,69 @@ remain in the route. Unknown cluster references produce
 - `render.ls` verifies the existing `.dot`/`.gv` CLI bridge pipeline through
   Radiant SVG and Graph Scene. The retained callback now switches both
   `::context` and MIR's `_lambda_rt`, which is required by grouping helpers;
-- rewrite canonical and source-semantic DOT formatting;
-- extract and reuse the graph conformance runner infrastructure;
-- add scene-reference policies to the Graphviz manifest runner;
-- add explicit headless `.gv` view-command coverage;
-- document the supported attribute/engine matrix and remaining diagnostics.
+- Graphviz reference paths and comparison policies now live in `manifest.mark`;
+  `suite.ls` evaluates them through the same retained runtime and reports
+  structured scene diagnostics;
+- `test-graph-graphviz` runs `view.gv` through `lambda.exe view --headless`,
+  covering `.gv` extension dispatch and the in-memory view bridge without a
+  window;
+- the native DOT formatter now selects source or canonical mode from `ir-stage`.
+  Source mode walks declarations, repeated attribute lists, endpoint chains,
+  assignments, and recursive subgraphs in source order. Canonical mode emits
+  explicit topology and retained Graphviz properties while omitting inherited
+  subgraph properties that DOT reparsing reconstructs from the parent;
+- `formatter.ls` verifies source formatter idempotence and semantic canonical
+  round trips, including quoted, numeric, and HTML IDs plus Graphviz backslash
+  label escapes;
+- `lambda.package.graph.conformance` now owns manifest discovery, comparison
+  policy defaults, retained installation, render/compare execution, and final
+  scene sanity checks. Mermaid and Graphviz retain only their format-specific
+  source/reference adapters.
+
+The implemented engine matrix is:
+
+| DOT `layout` value | Status | Behavior |
+|---|---|---|
+| absent or `dot` | supported | Lambda layered layout, routing, and measured content |
+| `neato`, `fdp`, `sfdp` | deferred | `graph.graphviz.unsupported-engine` |
+| `twopi`, `circo` | deferred | `graph.graphviz.unsupported-engine` |
+| `osage`, `patchwork`, other values | deferred | `graph.graphviz.unsupported-engine` |
+
+The implemented attribute matrix is:
+
+| Area | Supported Stage 3 surface | Partial or deferred surface |
+|---|---|---|
+| graph structure | strict graphs, directed/undirected operators, temporal defaults, assignments, endpoint sets, recursive scopes and visual `cluster*` subgraphs | non-DOT layout-engine semantics |
+| ranking/order | `rankdir`, `nodesep`, `ranksep`, `rank=same|min|max|source|sink`, `minlen`, `weight`, `constraint`, `ordering`, node `group`, `newrank` | exact Graphviz crossing choices |
+| routing | `splines=false|none|line|polyline|ortho|orthogonal|spline|curved|true`, parallel edges, self-loops, compass points, record/HTML ports, `compound`, `lhead`, `ltail` | Graphviz spline control-point parity |
+| content | plain substitutions, multiline labels, flat/nested records, safe measured HTML tables/inline content, `xlabel`, `headlabel`, `taillabel` | full Graphviz HTML grammar and backend-specific text metrics |
+| node geometry | ellipse/box/rounded/diamond/circle, shared triangle/polygon/trapezium/house and specialized biological families, polygon parameters, `regular`, peripheries, inch dimensions, `fixedsize=true|shape` | backend-exact curves for specialized Graphviz silhouettes |
+| markers | up to four normal/open/circle/diamond/box/tee/vee/crow components, inversion, side modifiers, `dir`, `arrowsize` | unknown components use deterministic fallback paint |
+| paint/fonts | color/stroke/fill, width/dash/opacity, weighted and multi-stop linear/radial/striped/wedged paint, qualified SVG/X11 colors, six compact embedded qualitative palettes, allowlisted fonts with Times/Helvetica/Courier fallback | the full ColorBrewer table and backend-identical font metrics are intentionally not embedded |
+| interaction | inert `URL`/`href`, `tooltip`, and `target` metadata | script/callback execution |
+| formatter | source-semantic and canonical DOT with semantic round trips | comments and original whitespace |
+
+Arbitrary unknown Graphviz properties remain in canonical `<property>`
+provenance even when they have no layout or paint effect. Known rejected values
+produce these stable semantic diagnostics:
+
+| Diagnostic | Condition |
+|---|---|
+| `graph.graphviz.edge-operator` | `--` in a digraph or `->` in an undirected graph |
+| `graph.graphviz.expansion-limit` | endpoint products exceed 100,000 edges |
+| `graph.graphviz.invalid-compass` | unsupported compass point |
+| `graph.graphviz.unsupported-colorscheme` | a non-embedded Graphviz colorscheme is requested |
+| `graph.graphviz.invalid-rank` | unsupported rank constraint value |
+| `graph.graphviz.unsupported-engine` | any layout engine other than `dot` |
+| `graph.graphviz.invalid-ordering` | ordering other than `in` or `out` |
+| `graph.graphviz.unresolved-compound-cluster` | unknown `lhead`/`ltail` cluster |
+| `graph.graphviz.compound-endpoint-outside-cluster` | compound endpoint is outside its named cluster |
+| `graph.graphviz.unsupported-arrow` | unsupported arrow composition; warning with fallback paint |
+| `graph.graphviz.invalid-splines` | unsupported spline mode |
+
+Parser recovery diagnostics and the shared `graph.edge.unresolved-port`
+normalization diagnostic remain additional source-spanned errors rather than
+silent fallbacks.
 
 ### 19.15 Acceptance criteria
 
@@ -2296,6 +2405,8 @@ The following work is explicitly outside the initial Stage 3 acceptance gate:
 - unrestricted external images, URLs, scripts, or callbacks;
 - byte-identical DOT formatting and comment preservation;
 - pixel-identical output across Graphviz and Radiant font backends.
+- embedding every ColorBrewer palette variant; the compact Stage 3 table can
+  expand later behind an explicit package-size budget.
 
 These features can be added behind explicit engine or capability contracts.
 They must not weaken the source-faithful DOT parser, canonical Graph IR, or

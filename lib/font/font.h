@@ -286,6 +286,9 @@ float font_handle_get_physical_size_px(FontHandle* handle);
 // get the x-height to em-size ratio (for CSS 'ex' unit resolution)
 float font_get_x_height_ratio(FontHandle* handle);
 
+// get the uppercase scale that matches synthesized small caps to lowercase height
+float font_get_small_caps_scale(FontHandle* handle);
+
 // ============================================================================
 // Line Height Computation — Chrome-compatible algorithm
 // ============================================================================

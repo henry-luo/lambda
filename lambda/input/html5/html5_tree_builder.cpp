@@ -545,6 +545,7 @@ static void html5_process_in_after_head_mode(Html5Parser* parser, Html5Token* to
 static void html5_process_in_after_after_body_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_table_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_table_body_mode(Html5Parser* parser, Html5Token* token);
+static void html5_process_in_select_in_table_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_row_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_cell_mode(Html5Parser* parser, Html5Token* token);
 static void html5_process_in_caption_mode(Html5Parser* parser, Html5Token* token);
@@ -609,6 +610,9 @@ void html5_process_token(Html5Parser* parser, Html5Token* token) {
             break;
         case HTML5_MODE_IN_SELECT:
             html5_process_in_select_mode(parser, token);
+            break;
+        case HTML5_MODE_IN_SELECT_IN_TABLE:
+            html5_process_in_select_in_table_mode(parser, token);
             break;
         case HTML5_MODE_IN_FRAMESET:
             html5_process_in_frameset_mode(parser, token);
@@ -1673,8 +1677,14 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             html5_reconstruct_active_formatting_elements(parser);
             html5_insert_html_element(parser, token);
             parser->frameset_ok = false;
-            // Switch to IN_SELECT mode
-            parser->mode = HTML5_MODE_IN_SELECT;
+            // Table-context selects must leave select mode before table structure resumes.
+            bool in_table_context = parser->mode == HTML5_MODE_IN_TABLE ||
+                parser->mode == HTML5_MODE_IN_CAPTION ||
+                parser->mode == HTML5_MODE_IN_TABLE_BODY ||
+                parser->mode == HTML5_MODE_IN_ROW ||
+                parser->mode == HTML5_MODE_IN_CELL;
+            parser->mode = in_table_context ? HTML5_MODE_IN_SELECT_IN_TABLE
+                                            : HTML5_MODE_IN_SELECT;
             return;
         }
 
@@ -2853,6 +2863,34 @@ static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token)
         html5_process_in_body_mode(parser, token);
         return;
     }
+}
+
+// ===== IN SELECT IN TABLE MODE =====
+// Table-structure tokens close the select, reset the insertion mode, and are reprocessed.
+static void html5_process_in_select_in_table_mode(Html5Parser* parser, Html5Token* token) {
+    bool is_table_token = false;
+    if (token->type == HTML5_TOKEN_START_TAG || token->type == HTML5_TOKEN_END_TAG) {
+        const char* tag = token->tag_name ? token->tag_name->chars : nullptr;
+        is_table_token = tag && (
+            strcmp(tag, "caption") == 0 || strcmp(tag, "table") == 0 ||
+            strcmp(tag, "tbody") == 0 || strcmp(tag, "tfoot") == 0 ||
+            strcmp(tag, "thead") == 0 || strcmp(tag, "tr") == 0 ||
+            strcmp(tag, "td") == 0 || strcmp(tag, "th") == 0);
+    }
+    if (!is_table_token) {
+        html5_process_in_select_mode(parser, token);
+        return;
+    }
+
+    log_error("html5: table token in select-in-table mode; closing select");
+    if (!html5_has_element_in_select_scope(parser, "select")) return;
+    while (parser->open_elements->length > 0) {
+        Element* popped = html5_pop_element(parser);
+        const char* popped_tag = ((TypeElmt*)popped->type)->name.str;
+        if (strcmp(popped_tag, "select") == 0) break;
+    }
+    html5_reset_insertion_mode(parser);
+    html5_process_token(parser, token);
 }
 
 // helper: close the current cell (td/th)

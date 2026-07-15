@@ -4,8 +4,10 @@
   source_order: ["c", "b", "a"],
   incoming_order: ["left", "right"],
   group_order: ["middle", "lane1", "lane2"],
+  new_rank_policy: [0, 1, 1, 1],
+  nested_groups: ["left", "right", "middle", "lane1", "lane2", "outside"],
   compound_route: ["cluster_source", "cluster_target", true, true],
   nodes: [["lane1", "lane", null], ["lane2", "lane", null], ["group_root", null, "in"], ["override", null, "in"]],
   html: ["out", true, true, ["cluster_source", "cluster_target"], ["lane1", "lane", null], ["lane2", "lane", null], ["group_root", null, "in"], ["override", null, "in"]],
-  invalid: [false, [["graph.graphviz.invalid-ordering", "graph.ordering"], ["graph.graphviz.invalid-ordering", "node:a.ordering"], ["graph.graphviz.unresolved-compound-cluster", "edge:dot-stmt-0-s0-e0.lhead"]]]
+  invalid: [false, [["graph.graphviz.invalid-ordering", "graph.ordering"], ["graph.graphviz.invalid-ordering", "node:a.ordering"], ["graph.graphviz.unresolved-compound-cluster", "edge:dot-stmt-0-s0-e0.lhead"], ["graph.graphviz.compound-endpoint-outside-cluster", "edge:dot-stmt-1-s0-e0.lhead"]]]
 }

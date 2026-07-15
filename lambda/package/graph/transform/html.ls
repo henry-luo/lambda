@@ -6,6 +6,7 @@ import model: lambda.package.graph.model
 import graph_style: lambda.package.graph.style
 import mermaid_config: lambda.package.graph.mermaid.config
 import polygon: lambda.package.graph.polygon
+import graphviz_colors: lambda.package.graph.graphviz.colors
 
 fn opt(opts, key, fallback) {
   if (opts != null and opts[key] != null) opts[key] else fallback
@@ -88,6 +89,8 @@ fn shape_css(node, palette) {
     "clip-path:polygon(0 0,100% 0,80% 100%,20% 100%);"
   else if (shape == "asymmetric")
     "clip-path:polygon(0 0,85% 0,100% 50%,85% 100%,0 100%,15% 50%);"
+  else if (shape == "asymmetric-left")
+    "clip-path:polygon(15% 0,100% 0,85% 50%,100% 100%,15% 100%,0 50%);"
   else if (shape == "lean-r")
     "clip-path:polygon(15% 0,100% 0,85% 100%,0 100%);"
   else if (shape == "lean-l" or shape == "sl-rect")
@@ -102,10 +105,14 @@ fn shape_css(node, palette) {
     "clip-path:polygon(42% 0,100% 0,62% 42%,88% 42%,30% 100%,43% 58%,12% 58%);"
   else if (shape == "notch-rect" or shape == "card")
     "clip-path:polygon(12% 0,100% 0,100% 100%,0 100%,0 12%);"
+  else if (shape == "notch-rect-right")
+    "clip-path:polygon(0 0,88% 0,100% 12%,100% 100%,0 100%);"
   else if (shape == "notch-pent")
     "clip-path:polygon(12% 0,100% 0,100% 80%,50% 100%,0 80%,0 12%);"
   else if (shape == "tag-rect" or shape == "tag-doc")
     "clip-path:polygon(0 0,85% 0,100% 50%,85% 100%,0 100%);"
+  else if (shape == "tag-rect-left")
+    "clip-path:polygon(15% 0,100% 0,100% 100%,15% 100%,0 50%);"
   else if (shape == "bang")
     "clip-path:polygon(18% 0,82% 0,100% 18%,86% 50%,100% 82%,82% 100%,18% 100%,0 82%,14% 50%,0 18%);"
   else if (shape == "cloud") "border-radius:45% 55% 48% 52% / 55% 45% 55% 45%;"
@@ -123,6 +130,8 @@ fn shape_css(node, palette) {
     "box-shadow:inset 0 1px 0 " ++ palette.node_border ++
       ",inset 1px 0 0 " ++ palette.node_border ++ ";"
   else if (shape == "lin-rect") "border-width:3px 1px;"
+  else if (shape == "underline")
+    "border-width:0 0 1px;border-radius:0;background:transparent;"
   else if (shape == "lin-cyl") "border-radius:50% / 12px;border-width:3px 1px;"
   else if (shape == "text") "border-color:transparent;background:transparent;"
   else if (shape == "subroutine")
@@ -174,23 +183,34 @@ fn resolved_node_style(node, style_declarations) {
   graph_style.parse(direct ++ source ++ ";" ++ style_declarations)
 }
 
+fn resolved_edge_style(edge, style_declarations) {
+  let stroke = graph_style.safe_color(source_attr(edge, "stroke", null));
+  let stroke_width = graph_style.unsigned_number_text(
+    source_attr(edge, "stroke-width", null), false);
+  let opacity = graph_style.unsigned_number_text(source_attr(edge, "opacity", null), true);
+  let dash = source_attr(edge, "stroke-dasharray", null);
+  let direct =
+    (if (stroke != null) "stroke:" ++ stroke ++ ";" else "") ++
+    (if (stroke_width != null) "stroke-width:" ++ stroke_width ++ ";" else "") ++
+    (if (opacity != null) "opacity:" ++ opacity ++ ";" else "") ++
+    (if (dash != null) "stroke-dasharray:" ++ string(dash) ++ ";" else "");
+  graph_style.parse(direct ++ style_declarations)
+}
+
 fn gradient_background(value, fallback) {
   let raw = source_attr(value, "fill", null);
-  let parts = if (raw == null) [] else split(string(raw), ":");
-  let first = if (len(parts) == 2) graph_style.safe_color(parts[0]) else null;
-  let second = if (len(parts) == 2) graph_style.safe_color(parts[1]) else null;
-  if (not uses_fill(value) or first == null or second == null) fallback
-  else if (contains(lower(string(source_attr(value, "style", ""))), "radial"))
-    "radial-gradient(" ++ first ++ "," ++ second ++ ")"
-  else "linear-gradient(" ++ string(source_attr(value, "gradient-angle", 0)) ++
-    "deg," ++ first ++ "," ++ second ++ ")"
+  if (not uses_fill(value)) fallback
+  else graphviz_colors.background(raw, source_attr(value, "style", ""),
+    source_attr(value, "gradient-angle", 0), fallback)
 }
 
 fn font_css(value, fallback_color) {
-  let family = graph_style.safe_font_family(source_attr(value, "font-name", null));
+  let source_family = source_attr(value, "font-name", null);
+  let family = graph_style.font_family_stack(source_family);
   let size = graph_style.unsigned_number_text(source_attr(value, "font-size", null), false);
   let color = graph_style.safe_color(source_attr(value, "font-color", null));
   (if (family != null) "font-family:" ++ family ++ ";" else "") ++
+    graph_style.font_variant_css(source_family) ++
     (if (size != null and float(size) > 0.0)
       "font-size:" ++ string(size) ++ "px;" else "") ++
     "color:" ++ string(if (color != null) color else fallback_color) ++ ";"
@@ -237,6 +257,27 @@ fn node_style(node, parsed, palette) {
     ";" ++ graph_style.node_css(parsed)
 }
 
+fn fixed_shape_style(node, parsed, palette) {
+  let shape = string(source_attr(node, "shape", "box"));
+  let background = gradient_background(node,
+    if (parsed.fill != null) parsed.fill else palette.node_background);
+  let effective = {*:palette,
+    node_background: if (parsed.fill != null) parsed.fill else palette.node_background,
+    node_border: if (parsed.stroke != null) parsed.stroke else palette.node_border};
+  "display:block;box-sizing:border-box;grid-area:1/1;width:" ++
+    string(source_attr(node, "width", 0)) ++ "px;height:" ++
+    string(source_attr(node, "height", 0)) ++ "px;border:1px solid " ++
+    palette.node_border ++ ";background:" ++ background ++ ";" ++
+    shape_css(node, effective) ++ periphery_css(node, shape, effective) ++
+    graph_style.node_css(parsed)
+}
+
+fn fixed_shape_content(content, node) =>
+  <content style: "display:block;box-sizing:border-box;grid-area:1/1;z-index:1;" ++
+      node_padding_css(node);
+    for (child in content) child
+  >
+
 fn html_port(entry, index) {
   let port = entry.value;
   <port 'data-node-id': entry.node,
@@ -267,6 +308,7 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
   let background = gradient_background(node,
     if (parsed_style.fill != null) parsed_style.fill else palette.node_background);
   let font_color = graph_style.safe_color(source_attr(node, "font-color", null));
+  let fixed_shape = source_attr(node, "fixed-shape", false) == true;
   <node class: node_class(node, assigned_classes),
       'data-graph-role': "node", 'data-node-id': id,
       'data-subgraph-id': group,
@@ -284,6 +326,9 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
       'data-width': source_attr(node, "width", null),
       'data-height': source_attr(node, "height", null),
       'data-fixed-size': source_attr(node, "fixed-size", null),
+      'data-fixed-shape': source_attr(node, "fixed-shape", null),
+      'data-shape-width': if (fixed_shape) source_attr(node, "width", null) else null,
+      'data-shape-height': if (fixed_shape) source_attr(node, "height", null) else null,
       'data-margin-x': source_attr(node, "margin-x", null),
       'data-margin-y': source_attr(node, "margin-y", null),
       'data-gradient-angle': source_attr(node, "gradient-angle", null),
@@ -306,8 +351,16 @@ fn html_node(node, index, group, assigned_classes, style_declarations, interacti
       'data-tooltip': source_attr(interaction, "tooltip", null),
       'data-link-target': source_attr(interaction, "target-window", null),
       'data-z': string(source_attr(node, "z", 0)),
-      style: node_style(node, parsed_style, palette);
-    for (child in content) child
+      style: if (fixed_shape)
+        "display:inline-grid;box-sizing:border-box;align-items:center;justify-items:center;" ++
+          font_css(node, palette.node_text) ++ ";white-space:" ++
+          (if (graph_content.is_rich(label_format(node))) "normal" else "nowrap") ++ ";"
+        else node_style(node, parsed_style, palette);
+    if (fixed_shape) {
+      <'node-shape' style: fixed_shape_style(node, parsed_style, palette)>
+      fixed_shape_content(content, node)
+    }
+    else { for (child in content) child }
   >
 }
 
@@ -334,6 +387,7 @@ fn html_edge(edge, index, group, graph_directed, assigned_classes,
   let marker_start = marker_text(source_attr(edge, "arrow-tail", source_attr(edge, "marker-start", null)),
     source_attr(edge, "arrow-start", source_attr(edge, "arrow_start", false)));
   let explicit_end = source_attr(edge, "arrow-end", source_attr(edge, "arrow_end", null));
+  let parsed_style = resolved_edge_style(edge, style_declarations);
   let marker_end = marker_text(source_attr(edge, "arrow-head", source_attr(edge, "marker-end", null)),
     if (explicit_end != null) explicit_end else directed == "true");
   <edge class: edge_class(assigned_classes), 'data-edge-id': id,
@@ -341,6 +395,8 @@ fn html_edge(edge, index, group, graph_directed, assigned_classes,
       'data-to': string(source_attr(edge, "to", source_attr(edge, "to_id", ""))),
       'data-from-port': source_attr(edge, "from-port", source_attr(edge, "from_port", null)),
       'data-to-port': source_attr(edge, "to-port", source_attr(edge, "to_port", null)),
+      'data-from-compass': source_attr(edge, "from-compass", source_attr(edge, "from_compass", null)),
+      'data-to-compass': source_attr(edge, "to-compass", source_attr(edge, "to_compass", null)),
       'data-tail-cluster': source_attr(edge, "tail-cluster", null),
       'data-head-cluster': source_attr(edge, "head-cluster", null),
       'data-subgraph-id': group,
@@ -356,6 +412,10 @@ fn html_edge(edge, index, group, graph_directed, assigned_classes,
       'data-font-color': source_attr(edge, "font-color", null),
       'data-style': string(source_attr(edge, "style", "solid")),
       'data-style-declarations': style_declarations,
+      'data-stroke': parsed_style.stroke,
+      'data-stroke-width': parsed_style.stroke_width,
+      'data-opacity': parsed_style.opacity,
+      'data-dash-array': parsed_style.dash_array,
       'data-interaction-action': source_attr(interaction, "action", null),
       'data-href': source_attr(interaction, "href", null),
       'data-callback': source_attr(interaction, "callback", null),

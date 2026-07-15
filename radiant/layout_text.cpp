@@ -455,35 +455,66 @@ CssEnum get_text_transform_from_node(DomNode* node) {
  * @param len byte length of text segment
  * @return number of justification opportunities
  */
-int count_justify_opportunities(const char* str, int len) {
+static int count_justify_opportunities_impl(const char* str, int len,
+                                            bool collapse_spaces,
+                                            bool collapse_newlines,
+                                            bool trim_trailing_space) {
     if (!str || len <= 0) return 0;
 
     int count = 0;
     const char* end = str + len;
     bool prev_was_id = false;
+    bool in_collapsible_space = false;
+    bool ends_in_collapsible_space = false;
 
     while (str < end) {
         uint32_t cp;
         int bytes = str_utf8_decode(str, (size_t)(end - str), &cp);
         if (bytes <= 0) { str++; prev_was_id = false; continue; }
 
-        if (cp == ' ') {
+        bool ascii_space = cp <= 0x7F && is_space((char)cp);
+        if (collapse_spaces && ascii_space) {
+            bool preserved_newline = !collapse_newlines && (cp == '\n' || cp == '\r');
+            if (preserved_newline) {
+                // pre-line removes spaces adjacent to its preserved segment break.
+                if (in_collapsible_space && count > 0) count--;
+                in_collapsible_space = false;
+                ends_in_collapsible_space = false;
+            } else {
+                // CSS white-space collapsing creates one rendered word separator per run.
+                if (!in_collapsible_space) count++;
+                in_collapsible_space = true;
+                ends_in_collapsible_space = true;
+            }
+            prev_was_id = false;
+        } else if (cp == ' ') {
             count++;
+            in_collapsible_space = false;
+            ends_in_collapsible_space = false;
             prev_was_id = false;
         } else if (has_id_line_break_class(cp)) {
             // CJK inter-character gap: opportunity between two adjacent ID-class chars
             if (prev_was_id) {
                 count++;
             }
+            in_collapsible_space = false;
+            ends_in_collapsible_space = false;
             prev_was_id = true;
         } else {
+            in_collapsible_space = false;
+            ends_in_collapsible_space = false;
             prev_was_id = false;
         }
 
         str += bytes;
     }
 
+    if (trim_trailing_space && ends_in_collapsible_space && count > 0) count--;
     return count;
+}
+
+int count_justify_opportunities(const char* str, int len) {
+    return count_justify_opportunities_impl(str, len, false, false, false);
 }
 
 static inline CssEnum get_text_spacing_trim(LayoutContext* lycon, DomNode* text_node) {
@@ -1009,6 +1040,15 @@ static float measure_current_glyph_advance(LayoutContext* lycon, uint32_t codepo
     return lycon->font.current_font_size;
 }
 
+static float text_kerning_adjustment(LayoutContext* lycon, uint32_t previous,
+                                     uint32_t current) {
+    if (!lycon || !lycon->font.style || !lycon->font.style->has_kerning ||
+        !lycon->font.font_handle || !previous || !current) {
+        return 0.0f;
+    }
+    return font_get_kerning(lycon->font.font_handle, previous, current);
+}
+
 static inline bool is_simple_latin_shaping_byte(unsigned char ch) {
     return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
 }
@@ -1272,6 +1312,43 @@ CssEnum get_white_space_value(DomNode* node) {
         current = current->parent;
     }
     return CSS_VALUE_NORMAL;  // default
+}
+
+int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
+                                         bool trim_trailing_space,
+                                         bool* out_suppressed) {
+    if (out_suppressed) *out_suppressed = false;
+    if (!text || !rect) return 0;
+    const char* text_data = (const char*)text->text_data();
+    if (!text_data) return 0;
+
+    for (DomNode* node = static_cast<DomNode*>(text)->parent; node; node = node->parent) {
+        DomElement* element = node->as_element();
+        if (!element || !element->specified_style) continue;
+        CssDeclaration* declaration = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_TEXT_JUSTIFY);
+        if (!declaration || !declaration->value ||
+            declaration->value->type != CSS_VALUE_TYPE_KEYWORD) {
+            continue;
+        }
+        CssEnum value = declaration->value->data.keyword;
+        if (value == CSS_VALUE_INHERIT || value == CSS_VALUE_UNSET) continue;
+        // text-justify:none suppresses opportunities in this inline subtree.
+        if (value == CSS_VALUE_NONE) {
+            if (out_suppressed) *out_suppressed = true;
+            return 0;
+        }
+        break;
+    }
+
+    CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
+    bool collapse_spaces = ws_collapse_spaces(white_space);
+    bool collapse_newlines = ws_collapse_newlines(white_space);
+    // justification operates on rendered separators, after white-space collapsing.
+    return count_justify_opportunities_impl(
+        text_data + rect->start_index, rect->length,
+        collapse_spaces, collapse_newlines,
+        collapse_spaces && trim_trailing_space);
 }
 
 // ============================================================================
@@ -2266,11 +2343,13 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
             str += char_bytes;
             continue;
         } else if (unicode_space_em > 0.0f) {
-            float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+            float sc_scale = is_small_caps_lower ?
+                font_get_small_caps_scale(lycon->font.font_handle) : 1.0f;
             char_width = unicode_space_em * lycon->font.current_font_size * sc_scale;
         } else {
             GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
-            float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+            float sc_scale = is_small_caps_lower ?
+                font_get_small_caps_scale(lycon->font.font_handle) : 1.0f;
             char_width = (ginfo.id != 0) ? ginfo.advance_x * sc_scale
                                          : lycon->font.current_font_size * sc_scale;
         }
@@ -2292,6 +2371,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     bool trim_cjk_spacing = should_apply_text_spacing_trim(lycon, text_node);
     bool is_word_start = true;  // First character is always word start
     bool has_break_opportunity = false;  // track if hyphen/break found before overflow
+    uint32_t prev_codepoint = lycon->line.prev_codepoint;
 
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
@@ -2305,7 +2385,10 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
                                                 trim_cjk_spacing, false, false,
                                                 &shaped_bytes, &shaped_width,
                                                 &first_cp, &last_cp)) {
-                text_width += shaped_width;
+                // line-fit lookahead must mirror layout kerning or exact fit-content lines falsely wrap.
+                text_width += text_kerning_adjustment(
+                    lycon, prev_codepoint, first_cp) + shaped_width;
+                prev_codepoint = last_cp;
                 is_word_start = false;
                 str += shaped_bytes;
 
@@ -2367,16 +2450,24 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             // Other zero-width chars (BOM, ZWJ, ZWNJ, combining marks): skip with no width
             str += char_bytes;
             continue;
-        } else if (unicode_space_em > 0.0f) {
+        }
+
+        text_width += text_kerning_adjustment(lycon, prev_codepoint, codepoint);
+        if (unicode_space_em > 0.0f) {
             // Use Unicode-specified width (fraction of em)
-            float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+            float sc_scale = is_small_caps_lower ?
+                font_get_small_caps_scale(lycon->font.font_handle) : 1.0f;
             text_width += unicode_space_em * lycon->font.current_font_size * sc_scale;
         } else {
-            text_width += measure_current_glyph_advance(lycon, codepoint, trim_cjk_spacing) * (is_small_caps_lower ? 0.7f : 1.0f);
+            float sc_scale = is_small_caps_lower ?
+                font_get_small_caps_scale(lycon->font.font_handle) : 1.0f;
+            text_width += measure_current_glyph_advance(
+                lycon, codepoint, trim_cjk_spacing) * sc_scale;
         }
         // CSS 2.1 §16.4: letter-spacing is added after every character
         // Browsers include trailing letter-spacing in text width (getBoundingClientRect)
         text_width += lycon->font.style->letter_spacing;
+        prev_codepoint = codepoint;
         str += char_bytes;
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
@@ -2534,17 +2625,18 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
                 }
             }
         }
-        // CSS 2.1 §10.8.1: vertical-align offset shifts the inline box position,
-        // which affects the line box height. A positive offset raises the box,
-        // increasing the effective ascender and decreasing the effective descender.
-        float va_offset = lycon->line.vertical_align_offset;
-        if (va_offset != 0) {
-            ascender += va_offset;
-            descender -= va_offset;
-            css_baseline_ascender += va_offset;
+        // A raised or lowered baseline changes both sides of the line-box contribution.
+        float baseline_shift = vertical_align_baseline_shift(
+            lycon, lycon->line.vertical_align,
+            lycon->line.vertical_align_offset);
+        if (baseline_shift != 0.0f) {
+            ascender += baseline_shift;
+            descender -= baseline_shift;
+            css_baseline_ascender += baseline_shift;
         }
         log_debug("output_text BEFORE: prev_max_asc=%.1f prev_max_desc=%.1f new_asc=%.1f new_desc=%.1f va_off=%.1f va=%d",
-            lycon->line.max_ascender, lycon->line.max_descender, ascender, descender, va_offset, lycon->line.vertical_align);
+            lycon->line.max_ascender, lycon->line.max_descender, ascender, descender,
+            baseline_shift, lycon->line.vertical_align);
         // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
         // in the first-pass baseline-relative line box height calculation.
         // Their inline box height is tracked separately and used in a second pass
@@ -3245,7 +3337,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 continue;  // Skip to next character without adding width
             } else if (unicode_space_em > 0.0f) {
                 // Use Unicode-specified width (fraction of em)
-                float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+                float sc_scale = is_small_caps_lower ?
+                    font_get_small_caps_scale(lycon->font.font_handle) : 1.0f;
                 wd = unicode_space_em * lycon->font.current_font_size * sc_scale;
             } else {
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
@@ -3280,11 +3373,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 if (zwj_preceded && is_emoji_for_zwj(codepoint)) {
                     wd = 0;
                 }
-                // CSS Fonts 3: small-caps lowercase chars rendered at ~0.7x font size
-                // font_load_glyph returns advance at the handle's fixed size;
-                // scale proportionally since backend layout metrics are linear
+                // synthetic small caps use the face's x-height/cap-height ratio.
                 if (is_small_caps_lower) {
-                    wd *= 0.7f;
+                    wd *= font_get_small_caps_scale(lycon->font.font_handle);
                 }
                 // Track fallback font metrics for line-height computation.
                 // For line-height: normal, browser engines blend fallback font
@@ -3386,7 +3477,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     if (extra_glyph && trim_cjk_spacing) {
                         extra_wd += font_get_halt_adjustment(lycon->font.font_handle, extra_cp) * 0.5f;
                     }
-                    if (is_small_caps_lower) extra_wd *= 0.7f;
+                    if (is_small_caps_lower) {
+                        extra_wd *= font_get_small_caps_scale(lycon->font.font_handle);
+                    }
                     extra_wd += lycon->font.style->letter_spacing;
                     wd += extra_wd;
                 }
@@ -3396,7 +3489,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         if (lycon->font.style->has_kerning) {
             if (lycon->line.prev_codepoint) {
                 uint32_t kerning_codepoint = shaped_latin_run ? shaped_latin_first_codepoint : codepoint;
-                float kerning_css = font_get_kerning(lycon->font.font_handle, lycon->line.prev_codepoint, kerning_codepoint);
+                float kerning_css = text_kerning_adjustment(
+                    lycon, lycon->line.prev_codepoint, kerning_codepoint);
                 if (kerning_css != 0.0f) {
                     if (str == text_start + rect->start_index) {
                         rect->x += kerning_css;
