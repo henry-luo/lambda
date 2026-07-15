@@ -55,6 +55,8 @@ void parse_graph(Input* input, const char* graph_string, const char* flavor) {
         parse_graph_mermaid(input, graph_string);
     } else if (strcmp(flavor, "d2") == 0) {
         parse_graph_d2(input, graph_string);
+    } else if (strcmp(flavor, "structurizr") == 0 || strcmp(flavor, "c4") == 0) {
+        parse_graph_structurizr(input, graph_string);
     } else {
         log_debug("Unknown graph flavor: %s\n", flavor);
         // Default to DOT parser

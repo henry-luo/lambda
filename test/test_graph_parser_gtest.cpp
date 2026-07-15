@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-graph.h"
 #include "../lib/arraylist.h"
@@ -69,18 +70,21 @@ static size_t source_line_count(const char* path) {
 TEST_F(GraphParserTest, ParserLocBudget) {
     size_t dot = source_line_count("lambda/input/input-graph-dot.cpp");
     size_t mermaid = source_line_count("lambda/input/input-graph-mermaid.cpp");
+    size_t structurizr = source_line_count("lambda/input/input-graph-structurizr.cpp");
     size_t shared = source_line_count("lambda/input/input-graph.cpp");
     size_t header = source_line_count("lambda/input/input-graph.h");
 
     ASSERT_GT(dot, 0u);
     ASSERT_GT(mermaid, 0u);
+    ASSERT_GT(structurizr, 0u);
     ASSERT_GT(shared, 0u);
     ASSERT_GT(header, 0u);
     EXPECT_LE(dot, 471u);
     EXPECT_LE(mermaid, 1534u);
-    EXPECT_LE(shared, 247u);
-    EXPECT_LE(header, 105u);
-    EXPECT_LE(dot + mermaid + shared + header, 2357u);
+    EXPECT_LE(structurizr, 800u);
+    EXPECT_LE(shared, 249u);
+    EXPECT_LE(header, 106u);
+    EXPECT_LE(dot + mermaid + structurizr + shared + header, 3160u);
 }
 
 // Test DOT graph parsing
@@ -133,6 +137,80 @@ TEST_F(GraphParserTest, ParseMermaidGraph) {
     // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
+}
+
+TEST_F(GraphParserTest, ParseStructurizrWorkspace) {
+    const char* source =
+        "workspace \"Shop\" {\n"
+        "  !identifiers hierarchical\n"
+        "  model {\n"
+        "    user = person \"Customer\"\n"
+        "    shop = softwareSystem \"Shop\" {\n"
+        "      web = container \"Web\" \"UI\" \"Lambda\"\n"
+        "    }\n"
+        "    user -> shop.web \"Uses\" \"HTTPS\"\n"
+        "  }\n"
+        "  views { systemContext shop \"Context\" { include * } }\n"
+        "}\n";
+    String* type = create_lambda_string("graph");
+    String* flavor = create_lambda_string("structurizr");
+    Input* input = input_from_source(source, NULL, type, flavor);
+
+    ASSERT_NE(input, nullptr);
+    ASSERT_EQ(input->root.type_id(), LMD_TYPE_ELEMENT);
+    ElementReader workspace(input->root);
+    ASSERT_TRUE(workspace.hasTag("workspace"));
+    EXPECT_STREQ(workspace.get_attr_string("flavor"), "structurizr");
+    EXPECT_STREQ(workspace.get_attr_string("ir-stage"), "source");
+    EXPECT_LT(workspace.get_attr("source-start").asInt(),
+              workspace.get_attr("source-end").asInt());
+
+    ElementReader model = workspace.findChildElement("model");
+    ASSERT_TRUE(model.isValid());
+    int64_t declarations = 0;
+    int64_t relationships = 0;
+    bool found_nested_container = false;
+    ElementReader child;
+    auto model_children = model.childElements();
+    while (model_children.next(&child)) {
+        if (child.hasTag("declaration")) {
+            declarations++;
+            ElementReader nested = child.findChildElement("declaration");
+            const char* identifier = nested.isValid()
+                ? nested.get_attr_string("identifier") : nullptr;
+            // recovered declarations may omit identifiers, so keep the fixture assertion null-safe.
+            if (identifier && strcmp(identifier, "web") == 0) {
+                found_nested_container = true;
+            }
+        } else if (child.hasTag("relationship")) {
+            relationships++;
+            EXPECT_STREQ(child.get_attr_string("from"), "user");
+            EXPECT_STREQ(child.get_attr_string("to"), "shop.web");
+        }
+    }
+    EXPECT_EQ(declarations, 2);
+    EXPECT_EQ(relationships, 1);
+    EXPECT_TRUE(found_nested_container);
+    EXPECT_TRUE(workspace.findChildElement("views").isValid());
+
+    free_lambda_string(type);
+    free_lambda_string(flavor);
+}
+
+TEST_F(GraphParserTest, RecoverStructurizrWorkspaceRoot) {
+    String* type = create_lambda_string("graph");
+    String* flavor = create_lambda_string("c4");
+    Input* input = input_from_source("model { a = person \"A\" }", NULL, type, flavor);
+
+    ASSERT_NE(input, nullptr);
+    ASSERT_EQ(input->root.type_id(), LMD_TYPE_ELEMENT);
+    ElementReader workspace(input->root);
+    EXPECT_TRUE(workspace.hasTag("workspace"));
+    EXPECT_TRUE(workspace.findChildElement("model").isValid());
+    EXPECT_TRUE(workspace.findChildElement("diagnostics").isValid());
+
+    free_lambda_string(type);
+    free_lambda_string(flavor);
 }
 
 // Test complex DOT graph with attributes
