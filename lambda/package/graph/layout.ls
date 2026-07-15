@@ -72,6 +72,8 @@ fn semantic_edges(children) {
     to: string(attr_or(child, "data-to", "")),
     from_port: attr_or(child, "data-from-port", null),
     to_port: attr_or(child, "data-to-port", null),
+    tail_cluster: attr_or(child, "data-tail-cluster", null),
+    head_cluster: attr_or(child, "data-head-cluster", null),
     directed: attr_or(child, "data-directed", "true") != "false",
     arrow_start: attr_or(child, "data-arrow-start", "false") == "true",
     arrow_end: attr_or(child, "data-arrow-end", attr_or(child, "data-directed", "true")) == "true",
@@ -366,6 +368,9 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
       polygon_distortion: attr_or(entry.child, "data-polygon-distortion", null),
       regular: bool_attr(entry.child, "data-regular"),
       peripheries: attr_or(entry.child, "data-peripheries", null),
+      // DOT group is an ordering hint; structural subgraph membership still owns cluster geometry.
+      order_group: attr_or(entry.child, "data-order-group", null),
+      ordering: attr_or(entry.child, "data-ordering", null),
       group: attr_or(entry.child, "data-subgraph-id", null),
       ports: ports_for(ports, child_id(entry.child, entry.order)),
       z: child_z(entry.child, 0)
@@ -378,6 +383,9 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
     rank_sep: rank_sep,
     edge_sep: edge_sep,
     route_mode: route_mode,
+    ordering: graph_option(parent, opts, "ordering", "data-ordering", null),
+    new_rank: graph_option(parent, opts, "new_rank", "data-new-rank", false),
+    compound: graph_option(parent, opts, "compound", "data-compound", false),
     use_splines: route_mode == "curved"
   };
   let result = compute(graph_input, opts);

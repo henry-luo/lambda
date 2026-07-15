@@ -129,6 +129,14 @@ pub fn route_mode(raw) {
   }
 }
 
+pub fn ordering(raw) {
+  if (raw == null) null
+  else {
+    let value = lower(trim(string(raw)));
+    if (value == "in" or value == "out") value else null
+  }
+}
+
 fn graph_attrs(properties) {
   let rankdir = upper(string(value(properties, "rankdir", "")));
   map([
@@ -136,6 +144,9 @@ fn graph_attrs(properties) {
     *attr("node-sep", number_value(properties, "nodesep", 96.0)),
     *attr("rank-sep", number_value(properties, "ranksep", 96.0)),
     *attr("route-mode", route_mode(value(properties, "splines"))),
+    *attr("ordering", ordering(value(properties, "ordering"))),
+    *attr("new-rank", bool_value(properties, "newrank")),
+    *attr("compound", bool_value(properties, "compound")),
     *attr("layout", value(properties, "layout")),
     *attr("fill", value(properties, "bgcolor")),
     *attr("gradient-angle", number_value(properties, "gradientangle")),
@@ -174,6 +185,7 @@ fn node_attrs(properties) {
     *attr("stroke", value(properties, "color")),
     *attr("stroke-width", number_value(properties, "penwidth", 96.0 / 72.0)),
     *attr("group", value(properties, "group")),
+    *attr("ordering", ordering(value(properties, "ordering"))),
     *interaction_attrs(properties),
     *font_attrs(properties),
     *style_attrs(properties)

@@ -1,0 +1,28 @@
+digraph OrderingGroups {
+  graph [ordering=out, newrank=true, compound=true]
+
+  a
+  b
+  c
+  root -> c
+  root -> b
+  root -> a
+
+  lane1 [group=lane]
+  middle
+  lane2 [group=lane]
+  group_root [ordering=in]
+  group_root -> lane1
+  group_root -> middle
+  group_root -> lane2
+
+  right
+  left
+  override [ordering=in]
+  left -> override
+  right -> override
+
+  subgraph cluster_source { source_node }
+  subgraph cluster_target { target_node }
+  source_node -> target_node [ltail=cluster_source, lhead=cluster_target]
+}

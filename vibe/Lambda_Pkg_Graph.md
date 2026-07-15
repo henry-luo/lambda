@@ -2098,9 +2098,9 @@ Lambda normalization size is tracked separately from native parser LOC:
 
 | Stage 3B module | Physical LOC |
 |---|---:|
-| `graphviz/attributes.ls` | 211 |
-| `graphviz/normalize.ls` | 588 |
-| total | 799 |
+| `graphviz/attributes.ls` | 223 |
+| `graphviz/normalize.ls` | 622 |
+| total | 845 |
 
 These modules do not change the 2,357-line native parser ceiling in Section
 19.3.5. Their LOC is recorded to keep the pure semantic layer compact as later
@@ -2212,8 +2212,26 @@ direct `line` segments, emits waypoint paths for `polyline` and `orthogonal`,
 and produces deterministic quadratic/cubic paths for `curved`. The retained
 `route_classes.ls` fixture covers aliases, diagnostics, routing, and SVG paint.
 
-- complete `ordering`, `newrank`, and stronger group ordering behavior;
-- complete compound cluster and port behavior;
+Graph and node `ordering=in|out` now lower into canonical IR and semantic HTML.
+After barycentric crossing reduction, the layered engine reapplies each
+authored incoming or outgoing edge sequence, so optimization cannot reverse a
+declared order. DOT node `group` is carried separately from structural cluster
+membership and forms stable ordering blocks for top-level nodes. Invalid
+ordering values produce `graph.graphviz.invalid-ordering`. The
+`ordering_groups.ls` fixture covers graph defaults, node overrides, group
+blocks, and the retained layout metadata contract.
+
+Graph `compound` and `newrank` values now survive canonical IR, semantic HTML,
+Velmt adaptation, and layout options. Edge `lhead` and `ltail` values likewise
+reach the router. With `compound=true`, an explicit tail or head cluster is the
+route endpoint and clips to that cluster's border; outer nested boundaries
+remain in the route. Unknown cluster references produce
+`graph.graphviz.unresolved-compound-cluster`.
+
+- implement the rank-policy difference for `newrank` and strengthen authored
+  group alignment inside nested structural clusters;
+- validate `lhead`/`ltail` endpoint membership and finish compass/table-port
+  attachment fidelity;
 - place all labels and annotations without incoherent overlap;
 - compare Graph Scene semantics and tolerant geometry against pinned Graphviz
   JSON references.

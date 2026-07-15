@@ -371,7 +371,8 @@ fn node_element(entry, graph_id) {
     'gradient-angle': optional(known, "gradient-angle"),
     'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
     'font-color': optional(known, "font-color"),
-    group: known.group, style: known.style, 'stroke-dasharray': known["stroke-dasharray"],
+    group: known.group, ordering: known.ordering,
+    style: known.style, 'stroke-dasharray': known["stroke-dasharray"],
     opacity: known.opacity, radius: known.radius,
     'source-start': entry.source["source-start"], 'source-end': entry.source["source-end"],
     'source-line': entry.source["source-line"], 'source-column': entry.source["source-column"];
@@ -463,11 +464,42 @@ fn engine_diagnostic(source, layout) =>
 fn engine_diagnostics(source, state) =>
   engine_diagnostic(source, attributes.value(state.graph_properties, "layout"))
 
+fn ordering_diagnostic(entry, context) =>
+  if (entry == null or attributes.ordering(entry.value) != null) []
+  else [diagnostic.for_value(
+    "graph.graphviz.invalid-ordering", "error",
+    "Unsupported DOT ordering mode '" ++ entry.value ++ "'",
+    context, entry.source)]
+
+fn ordering_diagnostics(state) => [
+  *ordering_diagnostic(attributes.last_entry(state.graph_properties, "ordering"),
+    "graph.ordering"),
+  for (node in state.nodes,
+    value in ordering_diagnostic(attributes.last_entry(node.properties, "ordering"),
+      "node:" ++ node.id ++ ".ordering")) value
+]
+
+fn cluster_exists(scopes, id) => len([
+  for (scope in scopes where scope.role == "cluster" and scope.id == id) scope
+]) > 0
+
+fn compound_reference_diagnostics(state) => [
+  for (edge in state.edges, name in ["lhead", "ltail"],
+    let entry = attributes.last_entry(edge.properties, name)
+    where entry != null and not cluster_exists(state.scopes, string(entry.value)))
+    diagnostic.for_value(
+      "graph.graphviz.unresolved-compound-cluster", "error",
+      "DOT " ++ name ++ " references unknown cluster '" ++ string(entry.value) ++ "'",
+      "edge:" ++ edge.id ++ "." ++ name, entry.source)
+]
+
 fn semantic_diagnostics(source, state) {
   let splines = attributes.value(state.graph_properties, "splines");
   let supported_route = splines == null or attributes.route_mode(splines) != null;
   [
     *rank_diagnostics(state), *engine_diagnostics(source, state),
+    *ordering_diagnostics(state),
+    *compound_reference_diagnostics(state),
     for (edge in state.edges, name in ["arrowhead", "arrowtail"],
       let entry = attributes.last_entry(edge.properties, name)
       where entry != null and not markers.supported(entry.value))
@@ -541,7 +573,9 @@ fn canonical_graph(source, state) {
     layout: if (known.layout != null) known.layout else "dot",
     directed: source.directed, strict: source.strict, 'ir-stage': "canonical",
     direction: known.direction, 'node-sep': known["node-sep"],
-    'rank-sep': known["rank-sep"], 'route-mode': known["route-mode"], fill: known.fill,
+    'rank-sep': known["rank-sep"], 'route-mode': known["route-mode"],
+    ordering: known.ordering, 'new-rank': known["new-rank"], compound: known.compound,
+    fill: known.fill,
     style: known.style, 'gradient-angle': optional(known, "gradient-angle"),
     'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
     'font-color': optional(known, "font-color"),

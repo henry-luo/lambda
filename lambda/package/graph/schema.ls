@@ -34,6 +34,8 @@ fn graph_spec() => {
     attr("layout", "text"), attr("status", "text"),
     attr("rank-sep", "number"), attr("node-sep", "number"),
     attr("edge-sep", "number"),
+    attr("ordering", "text", false, ["in", "out"]),
+    attr("new-rank", "boolish"), attr("compound", "boolish"),
     attr("route-mode", "text", false,
       ["none", "line", "polyline", "orthogonal", "curved"]),
     attr("fill", "text"), attr("label", "text"),
@@ -68,6 +70,7 @@ fn node_spec() => {
     attr("margin-y", "number"), attr("gradient-angle", "number"),
     attr("font-name", "text"), attr("font-size", "number"),
     attr("font-color", "text"), attr("group", "text"), attr("radius", "number"),
+    attr("ordering", "text", false, ["in", "out"]),
     attr("style", "text"), attr("stroke-dasharray", "text")
   ],
   children: ["label", "content", "port", "properties"],

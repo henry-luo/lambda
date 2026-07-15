@@ -1,5 +1,5 @@
 {
-  cases: 8,
+  cases: 9,
   results: [{
       id: "canonical",
       valid: true,
@@ -42,6 +42,13 @@
       edges: 8,
       annotations: 0,
       html: [14, 8, 0]
+    }, {
+      id: "ordering-groups",
+      valid: true,
+      nodes: 13,
+      edges: 9,
+      annotations: 0,
+      html: [13, 9, 0]
     }, {
       id: "annotations",
       valid: true,

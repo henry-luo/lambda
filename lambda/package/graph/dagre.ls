@@ -61,6 +61,9 @@ fn normalize_node(node, index) {
     width: wd,
     height: hg,
     group: if (node.group != null and node.group != "") string(node.group) else null,
+    order_group: if (node.order_group != null and node.order_group != "")
+      string(node.order_group) else null,
+    ordering: normalize_ordering(node.ordering),
     ports: if (node.ports != null) node.ports else [],
     index: if (node.index != null) int(node.index) else index,
     rank: 0,
@@ -108,6 +111,10 @@ fn normalize_edge(edge, nodes, index, directed) {
         else if (edge["from-port"] != null) string(edge["from-port"]) else null,
       to_port: if (edge.to_port != null) string(edge.to_port)
         else if (edge["to-port"] != null) string(edge["to-port"]) else null,
+      tail_cluster: if (edge.tail_cluster != null) string(edge.tail_cluster)
+        else if (edge["tail-cluster"] != null) string(edge["tail-cluster"]) else null,
+      head_cluster: if (edge.head_cluster != null) string(edge.head_cluster)
+        else if (edge["head-cluster"] != null) string(edge["head-cluster"]) else null,
       label: if (edge.label != null) string(edge.label) else null,
       directed: if (edge.directed != null) edge.directed else directed,
       arrow_start: marker_start != "none",
@@ -155,6 +162,11 @@ fn normalize_route_mode(raw, use_splines) {
   else "orthogonal"
 }
 
+fn normalize_ordering(raw) {
+  let value = lower(string(if (raw == null) "" else raw));
+  if (value == "in" or value == "out") value else null
+}
+
 fn normalize_graph(input, opts) {
   let nodes0 = if (input.nodes != null) input.nodes else [];
   let nodes = [for (i, node in nodes0) normalize_node(node, i)];
@@ -190,6 +202,9 @@ fn normalize_graph(input, opts) {
       edge_sep: float(opt(opts, "edge_sep", opt(input, "edge_sep", 10.0))),
       route_mode: normalize_route_mode(
         opt(opts, "route_mode", opt(input, "route_mode", null)), use_splines),
+      ordering: normalize_ordering(opt(opts, "ordering", opt(input, "ordering", null))),
+      new_rank: edge_bool(opt(opts, "new_rank", opt(input, "new_rank", false)), false),
+      compound: edge_bool(opt(opts, "compound", opt(input, "compound", false)), false),
       use_splines: use_splines,
       max_iterations: int(opt(opts, "max_iterations", opt(input, "max_iterations", 8)))
     }
@@ -283,7 +298,9 @@ fn max_rank(nodes) {
 }
 
 fn node_group_key(node) =>
-  if (node.group != null) "group:" ++ string(node.group) else "node:" ++ node.id
+  if (node.group != null) "cluster:" ++ string(node.group)
+  else if (node.order_group != null) "order:" ++ string(node.order_group)
+  else "node:" ++ node.id
 
 fn layer_with_order(rank, nodes) {
   let layer_nodes = [for (node in nodes where node.rank == rank) node];
@@ -367,6 +384,45 @@ fn reduce_crossings_once(layers, edges) {
 fn reduce_crossings(layers, edges, max_iterations) {
   if (max_iterations <= 0 or len(layers) < 2) layers
   else reduce_crossings(reduce_crossings_once(layers, edges), edges, max_iterations - 1)
+}
+
+fn ordering_mode(node, fallback) =>
+  if (node.ordering != null) node.ordering else fallback
+
+fn ordering_sequences(nodes, edges, fallback) => [
+  for (node in nodes,
+    let mode = ordering_mode(node, fallback),
+    let ids = unique(if (mode == "out")
+      [for (edge in edges where edge.from == node.id) edge.to]
+      else if (mode == "in") [for (edge in edges where edge.to == node.id) edge.from]
+      else [])
+    where len(ids) > 1) ids
+]
+
+fn marked_before(nodes, ids, limit) => len([
+  for (i, node in nodes where i < limit and contains(ids, node.id)) node
+])
+
+fn apply_order_sequence(nodes, ids) {
+  let present = [for (id in ids where has_id(nodes, id)) id];
+  let members = [for (id in present, node in nodes where node.id == id) node];
+  if (len(members) < 2) nodes
+  else [for (i, node in nodes)
+    if (contains(present, node.id)) members[marked_before(nodes, present, i)] else node]
+}
+
+fn apply_order_sequences(nodes, sequences, i) {
+  if (i >= len(sequences)) nodes
+  else apply_order_sequences(apply_order_sequence(nodes, sequences[i]), sequences, i + 1)
+}
+
+fn enforce_ordering(layers, nodes, edges, fallback) {
+  let sequences = ordering_sequences(nodes, edges, fallback);
+  [for (layer in layers,
+    let ordered = apply_order_sequences(layer.nodes, sequences, 0)) {
+    rank: layer.rank,
+    nodes: [for (i, node in ordered) {*:node, order: i}]
+  }]
 }
 
 fn cluster_padding(clusters, id) {
@@ -863,11 +919,18 @@ fn cluster_boundary(cluster, source_x, source_y, target_x, target_y) {
   clip_polygon(source_x, source_y, target_x, target_y, vertices)
 }
 
-fn compound_crossings(from_node, to_node, clusters) {
+fn chain_outside_endpoint(chain, endpoint_id) {
+  let matches = [for (i, cluster in chain where cluster.id == endpoint_id) i];
+  if (len(matches) == 0) chain
+  else [for (i, cluster in chain where i > matches[0]) cluster]
+}
+
+fn compound_crossings(from_node, to_node, clusters, tail_cluster, head_cluster) {
   let from_chain = cluster_chain(from_node.group, clusters, []);
   let to_chain = cluster_chain(to_node.group, clusters, []);
-  let source = exclusive_clusters(from_chain, to_chain);
-  let target = reverse_items(exclusive_clusters(to_chain, from_chain));
+  let source = exclusive_clusters(chain_outside_endpoint(from_chain, tail_cluster), to_chain);
+  let target = reverse_items(exclusive_clusters(
+    chain_outside_endpoint(to_chain, head_cluster), from_chain));
   {
     source: [for (cluster in source)
       cluster_boundary(cluster, from_node.x, from_node.y, to_node.x, to_node.y)],
@@ -967,12 +1030,21 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
   let to_node = find_node(nodes, edge.to);
   if (from_node == null or to_node == null) null
   else {
-    let start = clip_node(from_node, to_node.x, to_node.y, edge.from_port);
-    let finish = clip_node(to_node, from_node.x, from_node.y, edge.to_port);
+    let explicit_tail = if (opts.compound) find_cluster(clusters, edge.tail_cluster) else null;
+    let explicit_head = if (opts.compound) find_cluster(clusters, edge.head_cluster) else null;
+    // Explicit compound endpoints clip to cluster bounds, not the enclosed node bounds.
+    let start = if (explicit_tail != null)
+      cluster_boundary(explicit_tail, from_node.x, from_node.y, to_node.x, to_node.y)
+      else clip_node(from_node, to_node.x, to_node.y, edge.from_port);
+    let finish = if (explicit_head != null)
+      cluster_boundary(explicit_head, to_node.x, to_node.y, from_node.x, from_node.y)
+      else clip_node(to_node, from_node.x, from_node.y, edge.to_port);
     let vertical_first = not (opts.direction == "LR" or opts.direction == "RL");
     let parallel = parallel_info(edge, edges);
     let lane_offset = (float(parallel.index) - float(parallel.count - 1) / 2.0) * opts.edge_sep;
-    let crossings = compound_crossings(from_node, to_node, clusters);
+    let crossings = compound_crossings(from_node, to_node, clusters,
+      if (explicit_tail != null) explicit_tail.id else null,
+      if (explicit_head != null) explicit_head.id else null);
     let central_start = if (len(crossings.source) > 0)
       crossings.source[len(crossings.source) - 1] else start;
     let central_finish = if (len(crossings.target) > 0) crossings.target[0] else finish;
@@ -981,6 +1053,8 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
     let compound_points = [start, *crossings.source,
       *lane_points,
       *crossings.target, finish];
+    let has_compound = explicit_tail != null or explicit_head != null or
+      len(crossings.source) > 0 or len(crossings.target) > 0;
     let obstacles = routing_obstacles(nodes, clusters, from_node, to_node,
       max([4.0, opts.edge_sep / 2.0]));
     let base_points = if (opts.route_mode == "none") []
@@ -988,7 +1062,7 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       self_loop_points(from_node, opts.edge_sep, parallel.index,
         edge.from_port, edge.to_port)
       else if (opts.route_mode == "line") [start, finish]
-      else if (len(crossings.source) > 0 or len(crossings.target) > 0)
+      else if (has_compound)
         if (opts.route_mode == "orthogonal")
           orthogonal_waypoints(compound_points, vertical_first)
         else simplify_route(compound_points)
@@ -1004,6 +1078,8 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       to: edge.to,
       from_port: edge.from_port,
       to_port: edge.to_port,
+      tail_cluster: edge.tail_cluster,
+      head_cluster: edge.head_cluster,
       points: if (edge.from == edge.to or opts.route_mode == "line" or
           opts.route_mode == "none") base_points
         else avoid_route_segments(base_points, obstacles, vertical_first,
@@ -1070,7 +1146,9 @@ pub fn layout(input, opts = null) {
   let graph = normalize_graph(input, opts);
   let ranked = assign_ranks(graph.nodes, graph.edges, graph.constraints);
   let layers0 = create_layers(ranked);
-  let layers = reduce_crossings(layers0, graph.edges, graph.options.max_iterations);
+  let crossed = reduce_crossings(layers0, graph.edges, graph.options.max_iterations);
+  // Crossing reduction may reverse Graphviz's authored in/out edge sequence.
+  let layers = enforce_ordering(crossed, ranked, graph.edges, graph.options.ordering);
   let canonical_nodes = position_nodes(layers, graph.options, graph.clusters);
   let routed_nodes = orient_nodes(canonical_nodes, graph.options.direction);
   let routed_clusters = compute_clusters(graph.clusters, routed_nodes);
@@ -1095,6 +1173,9 @@ pub fn layout(input, opts = null) {
       y: node.y - node.height / 2.0
     }],
     algorithm: graph.options.algorithm,
-    direction: graph.options.direction
+    direction: graph.options.direction,
+    ordering: graph.options.ordering,
+    new_rank: graph.options.new_rank,
+    compound: graph.options.compound
   }
 }
