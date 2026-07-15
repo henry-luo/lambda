@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <style>
+    #box { width: 40px; height: 40px; opacity: 0; transition: opacity 0.05s linear; }
+    #box.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <button id="toggle">show</button>
+  <div id="box"></div>
+  <div id="marker">pending</div>
+  <script>
+    var box = document.getElementById('box');
+    box.addEventListener('transitionend', function (event) {
+      document.getElementById('marker').textContent =
+        event.propertyName + ':' + (event.elapsedTime > 0);
+    });
+    document.getElementById('toggle').addEventListener('click', function () {
+      box.classList.add('show');
+    });
+  </script>
+</body>
+</html>

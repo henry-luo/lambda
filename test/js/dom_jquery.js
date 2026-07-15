@@ -59,6 +59,27 @@ target.dispatchEvent({ type: "oncetest" });
 target.dispatchEvent({ type: "oncetest" });
 console.log(onceCount);
 
+// Event-handler IDL properties share the EventTarget listener list. Replacing
+// an active handler keeps its slot; clearing and re-adding appends a new slot.
+var orderedTarget = new EventTarget();
+var orderedCalls = [];
+orderedTarget.addEventListener("ordered", function() { orderedCalls.push("first"); });
+orderedTarget.onordered = function() { orderedCalls.push("handler"); };
+orderedTarget.addEventListener("ordered", function() { orderedCalls.push("last"); });
+orderedTarget.dispatchEvent(new Event("ordered"));
+console.log(orderedCalls.join(","));
+
+orderedCalls = [];
+orderedTarget.onordered = function() { orderedCalls.push("replacement"); };
+orderedTarget.dispatchEvent(new Event("ordered"));
+console.log(orderedCalls.join(","));
+
+orderedCalls = [];
+orderedTarget.onordered = null;
+orderedTarget.onordered = function() { orderedCalls.push("readded"); };
+orderedTarget.dispatchEvent(new Event("ordered"));
+console.log(orderedCalls.join(","));
+
 // === Phase C: Timer Queue ===
 
 // setTimeout should execute callback

@@ -1,0 +1,18 @@
+var fragment = document.createDocumentFragment();
+var first = document.createElement('span');
+first.className = 'piece';
+first.textContent = 'one';
+var second = document.createElement('span');
+second.className = 'piece';
+second.textContent = 'two';
+fragment.append(first, second);
+console.log(fragment.nodeType);
+console.log(fragment.firstChild === first);
+console.log(fragment.children.length);
+console.log(fragment.querySelectorAll('.piece').length);
+var clone = fragment.cloneNode(true);
+console.log(clone.textContent);
+document.getElementById('host').appendChild(fragment);
+console.log(fragment.childNodes.length);
+console.log(document.querySelectorAll('#host .piece').length);
+console.log('FRAGMENT_DONE');

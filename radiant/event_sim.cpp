@@ -955,6 +955,45 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_
     return true;
 }
 
+static bool resolve_drag_positions(SimEvent* ev, DomDocument* doc,
+                                   int* start_x, int* start_y,
+                                   int* end_x, int* end_y) {
+    *start_x = ev->x;
+    *start_y = ev->y;
+    if ((ev->target_selector || ev->target_text) &&
+        !resolve_target(ev, doc, start_x, start_y)) {
+        return false;
+    }
+    *end_x = ev->to_x;
+    *end_y = ev->to_y;
+    if (ev->has_drag_delta) {
+        *end_x = *start_x + ev->drag_dx;
+        *end_y = *start_y + ev->drag_dy;
+    }
+    if (ev->to_target_selector && doc) {
+        View* elem = find_element_by_selector(doc, ev->to_target_selector);
+        if (!elem) {
+            log_error("event_sim: to_target selector '%s' not found", ev->to_target_selector);
+            return false;
+        }
+        float x = 0.0f, y = 0.0f;
+        get_element_center_abs(elem, &x, &y);
+        *end_x = (int)x; // INT_CAST_OK: native input coordinates are integral pixels
+        *end_y = (int)y; // INT_CAST_OK: native input coordinates are integral pixels
+        return true;
+    }
+    if (ev->to_target_text && doc) {
+        float x = 0.0f, y = 0.0f;
+        if (!find_text_position(doc, ev->to_target_text, &x, &y)) {
+            log_error("event_sim: to_target text '%s' not found", ev->to_target_text);
+            return false;
+        }
+        *end_x = (int)x; // INT_CAST_OK: native input coordinates are integral pixels
+        *end_y = (int)y; // INT_CAST_OK: native input coordinates are integral pixels
+    }
+    return true;
+}
+
 // Resolve a target to a View* element (for assertions and actions that need the element)
 static View* resolve_target_element(SimEvent* ev, DomDocument* doc) {
     if (ev->target_selector && doc) {
@@ -1072,6 +1111,7 @@ static void sim_event_free_owned_fields(SimEvent* ev) {
     if (ev->target_selector) mem_free(ev->target_selector);
     if (ev->to_target_selector) mem_free(ev->to_target_selector);
     if (ev->to_target_text) mem_free(ev->to_target_text);
+    if (ev->pointer_type) mem_free(ev->pointer_type);
     if (ev->input_text) mem_free(ev->input_text);
     if (ev->assert_contains) mem_free(ev->assert_contains);
     if (ev->assert_equals) mem_free(ev->assert_equals);
@@ -1162,6 +1202,25 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
             ev->drag_dx = reader.get("dx").asInt32();
             ev->drag_dy = reader.get("dy").asInt32();
         }
+        parse_target(reader, ev);
+        parse_to_target(reader, ev, false);
+    }
+    else if (strcmp(type_str, "pointer_drag") == 0) {
+        ev->type = SIM_EVENT_POINTER_DRAG;
+        ev->x = reader.get("from_x").asInt32();
+        ev->y = reader.get("from_y").asInt32();
+        ev->to_x = reader.get("to_x").asInt32();
+        ev->to_y = reader.get("to_y").asInt32();
+        ev->button = reader.get("button").asInt32();
+        if (reader.has("dx") || reader.has("dy")) {
+            ev->has_drag_delta = true;
+            ev->drag_dx = reader.get("dx").asInt32();
+            ev->drag_dy = reader.get("dy").asInt32();
+        }
+        const char* pointer_type = reader.get("pointerType").cstring();
+        ev->pointer_type = mem_strdup(pointer_type ? pointer_type : "touch", MEM_CAT_LAYOUT);
+        int steps = reader.get("steps").asInt32();
+        ev->drag_steps = steps > 0 ? steps : 5;
         parse_target(reader, ev);
         parse_to_target(reader, ev, false);
     }
@@ -1260,6 +1319,7 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "scroll") == 0) {
         ev->type = SIM_EVENT_SCROLL;
+        parse_target(reader, ev);
         ev->x = reader.get("x").asInt32();
         ev->y = reader.get("y").asInt32();
         {
@@ -1437,6 +1497,18 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         ev->type = SIM_EVENT_ASSERT_TEXT;
         parse_assertion_strings(reader, ev, true);
     }
+    else if (strcmp(type_str, "assert_class") == 0) {
+        ev->type = SIM_EVENT_ASSERT_CLASS;
+        parse_target(reader, ev);
+        const char* class_name = reader.get("class").cstring();
+        if (!class_name) class_name = reader.get("name").cstring();
+        if (class_name) ev->assert_equals = mem_strdup(class_name, MEM_CAT_LAYOUT);
+        ev->expected_state_value = !reader.has("present") || reader.get("present").asBool();
+        if (!class_name || (!ev->target_selector && !ev->target_text)) {
+            log_error("event_sim: assert_class requires target and class");
+            return parse_sim_event_fail(ev);
+        }
+    }
     else if (strcmp(type_str, "assert_value") == 0) {
         ev->type = SIM_EVENT_ASSERT_VALUE;
         parse_assertion_strings(reader, ev, true);
@@ -1556,10 +1628,11 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         const char* tag = reader.get("expected_tag").cstring();
         if (tag) ev->expected_at_tag = mem_strdup(tag, MEM_CAT_LAYOUT);
     }
-    else if (strcmp(type_str, "assert_attribute") == 0) {
+    else if (strcmp(type_str, "assert_attribute") == 0 || strcmp(type_str, "assert_attr") == 0) {
         ev->type = SIM_EVENT_ASSERT_ATTRIBUTE;
         parse_target(reader, ev);
         const char* attr = reader.get("attribute").cstring();
+        if (!attr) attr = reader.get("name").cstring();
         if (attr) ev->attribute_name = mem_strdup(attr, MEM_CAT_LAYOUT);
         const char* eq = reader.get("equals").cstring();
         if (eq) ev->assert_equals = mem_strdup(eq, MEM_CAT_LAYOUT);
@@ -1570,6 +1643,10 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         // Useful for asserting a mark was toggled off, a style was cleared, etc.
         const char* ncont = reader.get("not_contains").cstring();
         if (ncont) ev->assert_not_contains = mem_strdup(ncont, MEM_CAT_LAYOUT);
+        if (reader.has("present")) {
+            ev->has_expected_attribute_presence = true;
+            ev->expected_attribute_present = reader.get("present").asBool();
+        }
         if (!ev->target_selector && !ev->target_text) {
             log_error("event_sim: assert_attribute missing 'target'");
             return parse_sim_event_fail(ev);
@@ -3580,41 +3657,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_MOUSE_DRAG: {
-            // Resolve start position from target selector/text or raw from_x/from_y
-            int drag_x = ev->x, drag_y = ev->y;
-            if (ev->target_selector || ev->target_text) {
-                if (!resolve_target(ev, uicon->document, &drag_x, &drag_y)) break;
-            }
-            // Resolve end position: relative delta from the resolved start,
-            // else to_target, else raw to_x/to_y.
-            int drag_to_x = ev->to_x, drag_to_y = ev->to_y;
-            if (ev->has_drag_delta) {
-                drag_to_x = drag_x + ev->drag_dx;
-                drag_to_y = drag_y + ev->drag_dy;
-            }
-            if (ev->to_target_selector && uicon->document) {
-                View* to_elem = find_element_by_selector(uicon->document, ev->to_target_selector);
-                if (to_elem) {
-                    float fx, fy;
-                    get_element_center_abs(to_elem, &fx, &fy);
-                    drag_to_x = (int)fx;
-                    drag_to_y = (int)fy;
-                    log_info("event_sim: resolved to_target selector '%s' to (%d, %d)", ev->to_target_selector, drag_to_x, drag_to_y);
-                } else {
-                    log_error("event_sim: to_target selector '%s' not found", ev->to_target_selector);
-                    break;
-                }
-            } else if (ev->to_target_text && uicon->document) {
-                float fx, fy;
-                if (find_text_position(uicon->document, ev->to_target_text, &fx, &fy)) {
-                    drag_to_x = (int)fx;
-                    drag_to_y = (int)fy;
-                    log_info("event_sim: resolved to_target text '%s' to (%d, %d)", ev->to_target_text, drag_to_x, drag_to_y);
-                } else {
-                    log_error("event_sim: to_target text '%s' not found", ev->to_target_text);
-                    break;
-                }
-            }
+            int drag_x = 0, drag_y = 0, drag_to_x = 0, drag_to_y = 0;
+            if (!resolve_drag_positions(ev, uicon->document,
+                                        &drag_x, &drag_y, &drag_to_x, &drag_to_y)) break;
             log_info("event_sim: mouse_drag from (%d, %d) to (%d, %d)", drag_x, drag_y, drag_to_x, drag_to_y);
             sim_mouse_button(uicon, drag_x, drag_y, ev->button, ev->mods, true);
             for (int step = 1; step <= 5; step++) {
@@ -3623,6 +3668,33 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 sim_mouse_move(uicon, px, py);
             }
             sim_mouse_button(uicon, drag_to_x, drag_to_y, ev->button, ev->mods, false);
+            break;
+        }
+
+        case SIM_EVENT_POINTER_DRAG: {
+            int drag_x = 0, drag_y = 0, drag_to_x = 0, drag_to_y = 0;
+            if (!resolve_drag_positions(ev, uicon->document,
+                                        &drag_x, &drag_y, &drag_to_x, &drag_to_y)) break;
+            View* target = resolve_target_element(ev, uicon->document);
+            if (!target) {
+                log_error("event_sim: pointer_drag requires a resolvable target element");
+                ctx->fail_count++;
+                break;
+            }
+            const char* pointer_type = ev->pointer_type ? ev->pointer_type : "touch";
+            log_info("event_sim: pointer_drag pointerType=%s from (%d, %d) to (%d, %d)",
+                     pointer_type, drag_x, drag_y, drag_to_x, drag_to_y);
+            radiant_dispatch_event_sim_pointer(uicon, target, "pointerdown",
+                drag_x, drag_y, ev->button, 1, ev->mods, pointer_type);
+            int steps = ev->drag_steps > 0 ? ev->drag_steps : 5;
+            for (int step = 1; step <= steps; step++) {
+                int x = drag_x + (drag_to_x - drag_x) * step / steps;
+                int y = drag_y + (drag_to_y - drag_y) * step / steps;
+                radiant_dispatch_event_sim_pointer(uicon, target, "pointermove",
+                    x, y, ev->button, 1, ev->mods, pointer_type);
+            }
+            radiant_dispatch_event_sim_pointer(uicon, target, "pointerup",
+                drag_to_x, drag_to_y, ev->button, 0, ev->mods, pointer_type);
             break;
         }
 
@@ -3786,8 +3858,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
 
         case SIM_EVENT_SCROLL:
-            log_info("event_sim: scroll at (%d, %d) offset=(%.2f, %.2f)", ev->x, ev->y, ev->scroll_dx, ev->scroll_dy);
-            sim_scroll(uicon, ev->x, ev->y, ev->scroll_dx, ev->scroll_dy);
+            {
+                int scroll_x = ev->x;
+                int scroll_y = ev->y;
+                // A selector-addressed wheel event targets that element's box;
+                // raw coordinates remain available for pointer-position tests.
+                if (ev->target_selector || ev->target_text) {
+                    resolve_target(ev, uicon->document, &scroll_x, &scroll_y);
+                }
+                log_info("event_sim: scroll at (%d, %d) offset=(%.2f, %.2f)",
+                         scroll_x, scroll_y, ev->scroll_dx, ev->scroll_dy);
+                sim_scroll(uicon, scroll_x, scroll_y, ev->scroll_dx, ev->scroll_dy);
+            }
             // Re-render after scroll to update surface pixels
             force_render_surface(uicon);
             break;
@@ -4032,6 +4114,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             extern void reflow_html_doc(DomDocument* doc);
             if (uicon->document) {
                 reflow_html_doc(uicon->document);
+                // Synthetic resize follows the native browser-visible turn
+                // after viewport metrics and the initial reflow are current.
+                radiant_dispatch_window_event(uicon, uicon->document, "resize");
             }
             // Re-render after resize to update surface pixels
             force_render_surface(uicon);
@@ -4408,6 +4493,25 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
+        case SIM_EVENT_ASSERT_CLASS: {
+            View* elem = resolve_assert_element(ctx, uicon, ev, "assert_class");
+            if (!elem) break;
+            DomElement* dom_elem = lam::dom_require_element(elem);
+            bool present = dom_elem && dom_element_has_class(dom_elem, ev->assert_equals);
+            if (present == ev->expected_state_value) {
+                log_info("event_sim: assert_class PASS class='%s' present=%s",
+                         ev->assert_equals, present ? "true" : "false");
+                ctx->pass_count++;
+            } else {
+                log_error("event_sim: assert_class FAIL class='%s' expected present=%s, got %s",
+                          ev->assert_equals,
+                          ev->expected_state_value ? "true" : "false",
+                          present ? "true" : "false");
+                ctx->fail_count++;
+            }
+            break;
+        }
+
         case SIM_EVENT_ASSERT_VISIBLE: {
             DomDocument* doc = uicon->document;
             View* elem = resolve_target_element(ev, doc);
@@ -4416,7 +4520,17 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            bool is_visible = (elem->width > 0 && elem->height > 0);
+            bool has_display_box = true;
+            for (View* current = elem; current; current = current->parent) {
+                DomElement* current_elem = current->as_element();
+                if (current_elem && current_elem->display.outer == CSS_VALUE_NONE) {
+                    has_display_box = false;
+                    break;
+                }
+            }
+            // Retained views keep their last geometry after display:none so
+            // visibility assertions must also honor the live display chain.
+            bool is_visible = has_display_box && elem->width > 0 && elem->height > 0;
             if (is_visible != ev->expected_visible) {
                 log_error("event_sim: assert_visible FAIL - expected %s, element has size %.1fx%.1f",
                          ev->expected_visible ? "visible" : "hidden", elem->width, elem->height);
@@ -4917,7 +5031,19 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             const char* actual = dom_element_get_attribute(dom_elem, ev->attribute_name);
-            if (ev->assert_equals) {
+            if (ev->has_expected_attribute_presence) {
+                bool present = actual != nullptr;
+                if (present == ev->expected_attribute_present) {
+                    log_info("event_sim: assert_attribute PASS '%s' present=%s on '%s'",
+                        ev->attribute_name, present ? "true" : "false", ev->target_selector);
+                    ctx->pass_count++;
+                } else {
+                    log_error("event_sim: assert_attribute FAIL '%s' expected present=%s on '%s'",
+                        ev->attribute_name, ev->expected_attribute_present ? "true" : "false",
+                        ev->target_selector);
+                    ctx->fail_count++;
+                }
+            } else if (ev->assert_equals) {
                 if (actual && strcmp(actual, ev->assert_equals) == 0) {
                     log_info("event_sim: assert_attribute PASS '%s'='%s' on '%s'",
                         ev->attribute_name, ev->assert_equals, ev->target_selector);

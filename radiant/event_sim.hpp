@@ -89,6 +89,7 @@ enum SimEventType {
     SIM_EVENT_MOUSE_DOWN,
     SIM_EVENT_MOUSE_UP,
     SIM_EVENT_MOUSE_DRAG,
+    SIM_EVENT_POINTER_DRAG,
     SIM_EVENT_KEY_PRESS,
     SIM_EVENT_KEY_DOWN,
     SIM_EVENT_KEY_UP,
@@ -123,6 +124,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_PASSWORD_REVEAL, // verify password reveal timer state
     SIM_EVENT_ASSERT_TARGET,
     SIM_EVENT_ASSERT_TEXT,     // verify element text content
+    SIM_EVENT_ASSERT_CLASS,    // verify an exact class token is present/absent
     SIM_EVENT_ASSERT_VALUE,    // verify form field value
     SIM_EVENT_ASSERT_CHECKED,  // verify checkbox/radio state
     SIM_EVENT_ASSERT_VISIBLE,  // verify element visibility
@@ -191,6 +193,7 @@ struct SimEvent {
     bool has_target_offset;      // true when offset_x/offset_y were specified
     char* to_target_selector;    // for mouse_drag: destination CSS selector
     char* to_target_text;        // for mouse_drag: destination text target
+    char* pointer_type;           // for pointer_drag: PointerEvent.pointerType
     char* input_text;            // for type action: text to type
     bool clear_first;            // for type action: select-all + delete before typing
     char* assert_contains;       // for assert_text: substring match
@@ -239,6 +242,8 @@ struct SimEvent {
     char* frame_selector;        // CSS selector for iframe element (NULL = switch to main)
     // drag_and_drop / assert_attribute fields
     char* attribute_name;        // HTML attribute name (for assert_attribute)
+    bool has_expected_attribute_presence;
+    bool expected_attribute_present;
     int drag_steps;              // number of intermediate mouse_move steps (default 5)
     // editing_text_drag_drop range fields. Offsets are UTF-8 byte offsets,
     // matching form-control and contenteditable selection internals.

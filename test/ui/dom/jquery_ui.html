@@ -1,0 +1,11 @@
+<!doctype html><html><head><style>#fx { display:none; width:40px; height:20px; }</style></head><body>
+<button id="ajax">ajax</button><button id="delegate-add">delegate</button><button id="fx-start">fx</button>
+<div id="result">empty</div><div id="delegated"></div><div id="fx">effect</div>
+<script>globalThis.__JQUERY_LIBRARY_ONLY__ = true;</script>
+<script src="../../js/dom_jquery_lib.js"></script>
+<script>
+$('#ajax').on('click', function () { $.get('jquery_payload.html', function (text) { $('#result').append(text); }); });
+$('#delegated').on('click', '.dynamic', function () { $('#result').text('delegated'); });
+$('#delegate-add').on('click', function () { $('#delegated').append('<button class="dynamic">dynamic</button>'); });
+$('#fx-start').on('click', function () { $('#fx').fadeIn(20, function () { $('#result').text('fx-done'); }); });
+</script></body></html>

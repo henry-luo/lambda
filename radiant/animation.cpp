@@ -236,6 +236,12 @@ void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance
     pool_free(scheduler->pool, anim);
 }
 
+void animation_scheduler_cancel(AnimationScheduler* scheduler, AnimationInstance* anim) {
+    if (!scheduler || !anim) return;
+    if (anim->on_cancel) anim->on_cancel(anim);
+    animation_scheduler_remove(scheduler, anim);
+}
+
 void animation_scheduler_remove_by_target(AnimationScheduler* scheduler, void* target) {
     if (!scheduler || !target) return;
 
@@ -243,7 +249,7 @@ void animation_scheduler_remove_by_target(AnimationScheduler* scheduler, void* t
     while (anim) {
         AnimationInstance* next = anim->next;
         if (anim->target == target) {
-            animation_scheduler_remove(scheduler, anim);
+            animation_scheduler_cancel(scheduler, anim);
         }
         anim = next;
     }
@@ -258,7 +264,9 @@ void animation_scheduler_remove_views(AnimationScheduler* scheduler) {
         // CSS animations/transitions hold a View* target in the (now-freed) view pool;
         // GIF/Lottie target surfaces in the image cache and must be left running.
         if (anim->type == ANIM_CSS_ANIMATION || anim->type == ANIM_CSS_TRANSITION) {
-            animation_scheduler_remove(scheduler, anim);
+            // Relayout invalidates live animation views before their natural end;
+            // cancellation callbacks preserve the DOM event lifecycle.
+            animation_scheduler_cancel(scheduler, anim);
         }
         anim = next;
     }

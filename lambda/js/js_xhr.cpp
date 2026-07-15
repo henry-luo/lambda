@@ -15,6 +15,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/url.h"
+#include "../../lib/file.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -59,6 +60,7 @@ struct XhrState {
 static XhrState _xhr_pool[MAX_XHR];
 static int _xhr_count = 0;
 static char* _xhr_base_url = nullptr;
+static XhrState* xhr_state_from_this();
 
 // ============================================================================
 // Helpers
@@ -74,6 +76,23 @@ static void xhr_set_int(Item obj, const char* key, int value) {
     Item k = (Item){.item = s2it(heap_create_name(key))};
     Item v = (Item){.item = i2it(value)};
     js_property_set(obj, k, v);
+}
+
+static Item js_xhr_get_status(void) {
+    XhrState* xhr = xhr_state_from_this();
+    return xhr ? (Item){.item = i2it((int64_t)xhr->status)} : (Item){.item = i2it(0)};
+}
+
+static void xhr_define_status_accessor(Item obj) {
+    Item descriptor = js_new_object();
+    js_property_set(descriptor, (Item){.item = s2it(heap_create_name("get"))},
+        js_new_function((void*)js_xhr_get_status, 0));
+    js_property_set(descriptor, (Item){.item = s2it(heap_create_name("enumerable"))},
+        (Item){.item = ITEM_TRUE});
+    js_property_set(descriptor, (Item){.item = s2it(heap_create_name("configurable"))},
+        (Item){.item = ITEM_TRUE});
+    js_object_define_property(obj,
+        (Item){.item = s2it(heap_create_name("status"))}, descriptor);
 }
 
 static Item xhr_get_prop(Item obj, const char* key) {
@@ -227,6 +246,40 @@ static const char* status_text_for_code(long code) {
     }
 }
 
+static void xhr_complete_response(XhrState* xhr, long status,
+                                  const char* data, size_t size) {
+    if (!xhr) return;
+    xhr->status = status;
+    xhr->status_text = xhr_mem_strdup(status_text_for_code(status));
+    if (data && size > 0) {
+        xhr->response_text = (char*)mem_calloc(1, size + 1, MEM_CAT_JS_RUNTIME);
+        memcpy(xhr->response_text, data, size);
+        xhr->response_size = size;
+    }
+
+    xhr->ready_state = 2;
+    xhr_fire_readystatechange(xhr);
+    xhr->ready_state = 3;
+    xhr_fire_readystatechange(xhr);
+    xhr->ready_state = 4;
+    xhr_set_int(xhr->js_object, "status", (int)xhr->status);
+    xhr_set_str(xhr->js_object, "statusText", xhr->status_text);
+    xhr_set_str(xhr->js_object, "responseText", xhr->response_text ? xhr->response_text : "");
+    xhr_set_str(xhr->js_object, "response", xhr->response_text ? xhr->response_text : "");
+    xhr_fire_readystatechange(xhr);
+
+    const char* completion_handler = status >= 200 && status < 600
+        ? "onload" : "onerror";
+    Item completion = xhr_get_prop(xhr->js_object, completion_handler);
+    if (get_type_id(completion) == LMD_TYPE_FUNC) {
+        js_call_function(completion, xhr->js_object, nullptr, 0);
+    }
+    Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
+    if (get_type_id(onloadend) == LMD_TYPE_FUNC) {
+        js_call_function(onloadend, xhr->js_object, nullptr, 0);
+    }
+}
+
 // ============================================================================
 // Constructor
 // ============================================================================
@@ -250,7 +303,9 @@ extern "C" Item js_xhr_new(void) {
 
     // initial properties
     xhr_set_int(obj, "readyState", 0);
-    xhr_set_int(obj, "status", 0);
+    // Status is native state. A data-slot update can be bypassed by compiled
+    // fixed-shape reads, so expose one stable accessor for every ready state.
+    xhr_define_status_accessor(obj);
     xhr_set_str(obj, "statusText", "");
     xhr_set_str(obj, "responseText", "");
     xhr_set_str(obj, "response", "");
@@ -431,6 +486,22 @@ extern "C" Item js_xhr_send(Item body_arg) {
         js_call_function(loadstart_cb, xhr->js_object, nullptr, 0);
     }
 
+    if (xhr->url && strncmp(xhr->url, "file:", 5) == 0) {
+        const char* path = xhr->url + 5;
+        if (path[0] == '/' && path[1] == '/') path += 2;
+        size_t file_size = 0;
+        char* file_data = read_binary_file(path, &file_size);
+        if (file_data) {
+            // Browser-page file XHR shares fetch's local-resource semantics;
+            // routing file:// through the HTTP client always produced status 0.
+            xhr_complete_response(xhr, 200, file_data, file_size);
+            // read_binary_file uses the tracked allocator, so its buffer must
+            // return through mem_free rather than the platform C allocator.
+            mem_free(file_data);
+            return make_js_undef();
+        }
+    }
+
     // Perform HTTP request (synchronous)
     FetchResponse* resp = http_fetch(xhr->url, &config);
 
@@ -440,51 +511,10 @@ extern "C" Item js_xhr_send(Item body_arg) {
     }
 
     if (resp) {
-        xhr->status = resp->status_code;
-        xhr->status_text = xhr_mem_strdup(status_text_for_code(resp->status_code));
-        if (resp->data && resp->size > 0) {
-            xhr->response_text = (char*)mem_calloc(1, resp->size + 1, MEM_CAT_JS_RUNTIME);
-            memcpy(xhr->response_text, resp->data, resp->size);
-            xhr->response_size = resp->size;
-        }
         // store response headers for getResponseHeader/getAllResponseHeaders
         xhr->resp_headers = resp->response_headers;
         xhr->resp_header_count = resp->response_header_count;
-
-        // HEADERS_RECEIVED (readyState 2)
-        xhr->ready_state = 2;
-        xhr_fire_readystatechange(xhr);
-
-        // LOADING (readyState 3)
-        xhr->ready_state = 3;
-        xhr_fire_readystatechange(xhr);
-
-        // DONE (readyState 4)
-        xhr->ready_state = 4;
-        xhr_set_int(xhr->js_object, "status", (int)xhr->status);
-        xhr_set_str(xhr->js_object, "statusText", xhr->status_text);
-        xhr_set_str(xhr->js_object, "responseText", xhr->response_text ? xhr->response_text : "");
-        xhr_set_str(xhr->js_object, "response", xhr->response_text ? xhr->response_text : "");
-        xhr_fire_readystatechange(xhr);
-
-        // fire onload or onerror
-        if (xhr->status >= 200 && xhr->status < 600) {
-            Item onload = xhr_get_prop(xhr->js_object, "onload");
-            if (get_type_id(onload) == LMD_TYPE_FUNC) {
-                js_call_function(onload, xhr->js_object, nullptr, 0);
-            }
-        } else {
-            Item onerror = xhr_get_prop(xhr->js_object, "onerror");
-            if (get_type_id(onerror) == LMD_TYPE_FUNC) {
-                js_call_function(onerror, xhr->js_object, nullptr, 0);
-            }
-        }
-
-        // fire onloadend
-        Item onloadend = xhr_get_prop(xhr->js_object, "onloadend");
-        if (get_type_id(onloadend) == LMD_TYPE_FUNC) {
-            js_call_function(onloadend, xhr->js_object, nullptr, 0);
-        }
+        xhr_complete_response(xhr, resp->status_code, resp->data, resp->size);
 
         // Don't free response yet — headers may be queried later.
         // We copy data above, so we can free the response body and struct

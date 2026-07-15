@@ -1,0 +1,13 @@
+alert:true:close.bs.alert,closed.bs.alert
+button:true:true
+collapse:true:true:show.bs.collapse,shown.bs.collapse,hide.bs.collapse,hidden.bs.collapse
+dropdown:true:false:show.bs.dropdown,shown.bs.dropdown,hide.bs.dropdown,hidden.bs.dropdown
+modal:true:true:show.bs.modal,shown.bs.modal,hide.bs.modal,hidden.bs.modal
+offcanvas:true:true:show.bs.offcanvas,shown.bs.offcanvas,hide.bs.offcanvas,hidden.bs.offcanvas
+tab:true:true:show.bs.tab,shown.bs.tab
+tooltip:true:show.bs.tooltip,shown.bs.tooltip,hide.bs.tooltip,hidden.bs.tooltip
+popover:true:show.bs.popover,shown.bs.popover,hide.bs.popover,hidden.bs.popover
+toast:true:true:show.bs.toast,shown.bs.toast,hide.bs.toast,hidden.bs.toast
+scrollspy:true
+carousel:true:slide.bs.carousel,slid.bs.carousel
+plugins:12

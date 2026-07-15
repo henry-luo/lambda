@@ -9,6 +9,9 @@ true
 true
 false
 1
+first,handler,last
+first,replacement,last
+first,last,readded
 number
 number
 number

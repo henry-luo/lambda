@@ -139,6 +139,8 @@ enum JsClass : uint8_t {
     JS_CLASS_TRANSFORM,
     JS_CLASS_PASS_THROUGH,
     JS_CLASS_IMMEDIATE,
+    JS_CLASS_TRANSITION_EVENT,
+    JS_CLASS_ANIMATION_EVENT,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -284,6 +286,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "KeyboardEvent", 13)) return JS_CLASS_KEYBOARD_EVENT;
             break;
         case 14:
+            if (!strncmp(nm, "AnimationEvent", 14)) return JS_CLASS_ANIMATION_EVENT;
             if (!strncmp(nm, "AggregateError", 14)) return JS_CLASS_AGGREGATE_ERROR;
             if (!strncmp(nm, "ReadableStream", 14)) return JS_CLASS_READABLE_STREAM;
             if (!strncmp(nm, "WritableStream", 14)) return JS_CLASS_WRITABLE_STREAM;
@@ -293,6 +296,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "ClipboardEvent", 14)) return JS_CLASS_CLIPBOARD_EVENT;
             break;
         case 15:
+            if (!strncmp(nm, "TransitionEvent", 15)) return JS_CLASS_TRANSITION_EVENT;
             if (!strncmp(nm, "URLSearchParams", 15)) return JS_CLASS_URL_SEARCH_PARAMS;
             if (!strncmp(nm, "AbortController", 15)) return JS_CLASS_ABORT_CONTROLLER;
             if (!strncmp(nm, "OffscreenCanvas", 15)) return JS_CLASS_OFFSCREEN_CANVAS;
@@ -453,6 +457,10 @@ static inline bool js_class_is_event_like(JsClass cls) {
         case JS_CLASS_INPUT_EVENT:
         case JS_CLASS_POINTER_EVENT:
         case JS_CLASS_CLIPBOARD_EVENT:
+        // CSS event constructors are Event subclasses even though they do not
+        // inherit from UIEvent in the DOM interface hierarchy.
+        case JS_CLASS_TRANSITION_EVENT:
+        case JS_CLASS_ANIMATION_EVENT:
             return true;
         default:
             return false;

@@ -13,6 +13,7 @@
 #include "js_dom_selection.h"
 #include "js_runtime.h"
 #include "js_class.h"
+#include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../jube/jube_registry.h"
@@ -34,6 +35,7 @@
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
 // js_dom.h, declared here under extern "C" to avoid header coupling).
 extern "C" Item js_get_this();
+extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern Item js_array_new(int length);
 extern Item js_array_push(Item array, Item value);
 extern Item js_get_document_object_value();
@@ -371,8 +373,9 @@ extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter
 
 struct EventListener {
     char*   type;       // event type string (owned copy)
-    Item    callback;   // JS function OR object with handleEvent method
-    Item    signal;     // AbortSignal (or ItemNull); if signal aborts, listener is removed
+    uint64_t* callback_root; // stable GC root for function/object callback
+    uint64_t* signal_root;   // stable GC root for AbortSignal, when present
+    uint64_t order;     // registration order shared with on<type> handlers
     bool    capture;    // capture phase listener
     bool    once;       // remove after first invocation
     bool    passive;    // passive listener (cannot preventDefault)
@@ -391,6 +394,7 @@ struct EventListenerSnapshot {
     char* type;
     Item callback;
     Item signal;
+    uint64_t order;
     bool capture;
     bool once;
     bool passive;
@@ -407,9 +411,43 @@ static NodeListenerEntry* _entries = nullptr;
 static int _entry_count = 0;
 static int _entry_capacity = 0;
 
+// HTML event-handler attributes are listener-list entries even though their
+// callable value lives in the target property. Keep their stable slot order
+// separately so replacing an active `onclick` does not move it, while clearing
+// and re-adding it appends a new slot as required by the HTML event model.
+struct EventHandlerSlot {
+    void* key;
+    char* type;
+    uint64_t order;
+    bool active;
+};
+
+static EventHandlerSlot* _handler_slots = nullptr;
+static int _handler_slot_count = 0;
+static int _handler_slot_capacity = 0;
+static uint64_t _event_registration_order = 0;
+
 // sentinel pointers for non-element targets
 static int _window_sentinel = 0;
 static int _document_sentinel = 0;
+
+static Item event_listener_root_item(uint64_t* root) {
+    return root ? (Item){.item = *root} : ItemNull;
+}
+
+static void event_listener_release_roots(EventListener* listener) {
+    if (!listener) return;
+    if (listener->callback_root) {
+        heap_unregister_gc_root(listener->callback_root);
+        mem_free(listener->callback_root);
+        listener->callback_root = nullptr;
+    }
+    if (listener->signal_root) {
+        heap_unregister_gc_root(listener->signal_root);
+        mem_free(listener->signal_root);
+        listener->signal_root = nullptr;
+    }
+}
 
 static bool js_dom_event_is_document_target(Item target) {
     if (get_type_id(target) == LMD_TYPE_VMAP && target.vmap && target.vmap->host_type) {
@@ -488,6 +526,104 @@ static NodeListeners* find_listeners(void* key) {
     return nullptr;
 }
 
+static EventHandlerSlot* find_handler_slot(void* key, const char* type) {
+    if (!key || !type) return nullptr;
+    for (int i = 0; i < _handler_slot_count; i++) {
+        EventHandlerSlot* slot = &_handler_slots[i];
+        if (slot->key == key && slot->type && strcmp(slot->type, type) == 0) {
+            return slot;
+        }
+    }
+    return nullptr;
+}
+
+static EventHandlerSlot* get_or_create_handler_slot(void* key, const char* type) {
+    EventHandlerSlot* existing = find_handler_slot(key, type);
+    if (existing) return existing;
+    if (!key || !type) return nullptr;
+
+    if (_handler_slot_count >= _handler_slot_capacity) {
+        int new_capacity = _handler_slot_capacity == 0 ? 16 : _handler_slot_capacity * 2;
+        EventHandlerSlot* next = (EventHandlerSlot*)mem_calloc(
+            new_capacity, sizeof(EventHandlerSlot), MEM_CAT_JS_RUNTIME);
+        if (!next) return nullptr;
+        if (_handler_slots && _handler_slot_count > 0) {
+            memcpy(next, _handler_slots,
+                   (size_t)_handler_slot_count * sizeof(EventHandlerSlot));
+            mem_free(_handler_slots);
+        }
+        _handler_slots = next;
+        _handler_slot_capacity = new_capacity;
+    }
+
+    size_t type_len = strlen(type);
+    char* type_copy = (char*)mem_calloc(1, type_len + 1, MEM_CAT_JS_RUNTIME);
+    if (!type_copy) return nullptr;
+    memcpy(type_copy, type, type_len);
+
+    EventHandlerSlot* slot = &_handler_slots[_handler_slot_count++];
+    slot->key = key;
+    slot->type = type_copy;
+    slot->order = 0;
+    slot->active = false;
+    return slot;
+}
+
+static bool event_handler_target_supported(Item target) {
+    Item global = js_get_global_this();
+    if (target.item != 0 && target.item == global.item) return true;
+    if (js_dom_event_is_document_target(target)) return true;
+    if (js_dom_unwrap_element(target)) return true;
+    return get_type_id(target) == LMD_TYPE_MAP &&
+           js_class_id(target) == JS_CLASS_EVENT_TARGET;
+}
+
+static void event_handler_property_set_for_key(void* key,
+                                                const char* property_name,
+                                                int property_name_len,
+                                                Item value) {
+    if (!property_name || property_name_len < 3 || property_name[0] != 'o' ||
+        property_name[1] != 'n' || !key) {
+        return;
+    }
+
+    char stack_type[64];
+    int type_len = property_name_len - 2;
+    if (type_len <= 0 || type_len >= (int)sizeof(stack_type)) return;
+    memcpy(stack_type, property_name + 2, (size_t)type_len);
+    stack_type[type_len] = '\0';
+
+    EventHandlerSlot* slot = find_handler_slot(key, stack_type);
+    bool callable = get_type_id(value) == LMD_TYPE_FUNC;
+    if (!callable) {
+        if (slot) slot->active = false;
+        return;
+    }
+    if (!slot) slot = get_or_create_handler_slot(key, stack_type);
+    if (!slot) return;
+    if (!slot->active) {
+        // Clearing an event-handler attribute removes its listener-list slot;
+        // a later callable assignment must therefore append after live listeners.
+        slot->order = ++_event_registration_order;
+        slot->active = true;
+    }
+}
+
+extern "C" void js_dom_event_handler_property_set(Item target,
+                                                    const char* property_name,
+                                                    int property_name_len,
+                                                    Item value) {
+    if (!event_handler_target_supported(target)) return;
+    event_handler_property_set_for_key(get_event_target_key(target), property_name,
+                                       property_name_len, value);
+}
+
+extern "C" void js_dom_event_handler_property_set_for_node(
+        void* dom_node, const char* property_name, int property_name_len, Item value) {
+    event_handler_property_set_for_key(dom_node, property_name,
+                                       property_name_len, value);
+}
+
 static void nl_push(NodeListeners* nl, EventListener listener) {
     if (nl->count >= nl->capacity) {
         int new_cap = nl->capacity == 0 ? 8 : nl->capacity * 2;
@@ -509,7 +645,7 @@ static EventListener* nl_find_snapshot_listener(NodeListeners* nl,
         EventListener* el = &nl->items[i];
         if (el->removed) continue;
         if (el->type == snap->type &&
-            el->callback.item == snap->callback.item &&
+            event_listener_root_item(el->callback_root).item == snap->callback.item &&
             el->capture == snap->capture) {
             return el;
         }
@@ -665,7 +801,7 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
         EventListener* el = &nl->items[i];
         if (el->removed) continue;
         if (strcmp(el->type, type) == 0 && el->capture == capture &&
-            el->callback.item == cb_item.item) {
+            event_listener_root_item(el->callback_root).item == cb_item.item) {
             log_debug("js_dom_add_event_listener: duplicate listener for '%s', skipping", type);
             return;
         }
@@ -678,8 +814,20 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
 
     EventListener listener = {};
     listener.type = type_copy;
-    listener.callback = cb_item;
-    listener.signal = signal;
+    // Listener storage lives outside the traced heap and can outlive the
+    // registration turn. Stable root slots keep callbacks alive and receive
+    // forwarding-pointer updates when a later event triggers collection.
+    listener.callback_root = heap_gc_root_slot_new(cb_item.item);
+    listener.signal_root = signal.item != 0 && get_type_id(signal) != LMD_TYPE_NULL
+        ? heap_gc_root_slot_new(signal.item) : nullptr;
+    if (!listener.callback_root ||
+        (signal.item != 0 && get_type_id(signal) != LMD_TYPE_NULL && !listener.signal_root)) {
+        event_listener_release_roots(&listener);
+        mem_free(type_copy);
+        log_error("js_dom_add_event_listener: failed to root '%s' listener", type);
+        return;
+    }
+    listener.order = ++_event_registration_order;
     listener.capture = capture;
     listener.once = once;
     listener.passive = passive;
@@ -719,7 +867,7 @@ void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, 
         EventListener* el = &nl->items[i];
         if (el->removed) continue;
         if (strcmp(el->type, type) == 0 && el->capture == capture &&
-            el->callback.item == cb_item.item) {
+            event_listener_root_item(el->callback_root).item == cb_item.item) {
             // tombstone — actual storage is reclaimed at next opportunity.
             // This protects in-flight dispatch loops walking the array.
             el->removed = true;
@@ -736,6 +884,7 @@ static void nl_compact(NodeListeners* nl) {
     for (int r = 0; r < nl->count; r++) {
         if (nl->items[r].removed) {
             if (nl->items[r].type) mem_free(nl->items[r].type);
+            event_listener_release_roots(&nl->items[r]);
             continue;
         }
         if (w != r) nl->items[w] = nl->items[r];
@@ -1518,6 +1667,30 @@ extern "C" Item js_ctor_pointer_event_fn(Item type_arg, Item init_arg) {
     return ev;
 }
 
+extern "C" Item js_ctor_transition_event_fn(Item type_arg, Item init_arg) {
+    Item ev = js_create_event_init(fn_to_cstr(type_arg),
+        init_bool(init_arg, "bubbles", false),
+        init_bool(init_arg, "cancelable", false),
+        init_bool(init_arg, "composed", false));
+    event_set_str(ev, "propertyName", init_str(init_arg, "propertyName", ""));
+    event_set_double(ev, "elapsedTime", init_double(init_arg, "elapsedTime", 0.0));
+    event_set_str(ev, "pseudoElement", init_str(init_arg, "pseudoElement", ""));
+    stamp_class(ev, "TransitionEvent");
+    return ev;
+}
+
+extern "C" Item js_ctor_animation_event_fn(Item type_arg, Item init_arg) {
+    Item ev = js_create_event_init(fn_to_cstr(type_arg),
+        init_bool(init_arg, "bubbles", false),
+        init_bool(init_arg, "cancelable", false),
+        init_bool(init_arg, "composed", false));
+    event_set_str(ev, "animationName", init_str(init_arg, "animationName", ""));
+    event_set_double(ev, "elapsedTime", init_double(init_arg, "elapsedTime", 0.0));
+    event_set_str(ev, "pseudoElement", init_str(init_arg, "pseudoElement", ""));
+    stamp_class(ev, "AnimationEvent");
+    return ev;
+}
+
 // Build a synthetic click MouseEvent (composed=true, bubbles=true, cancelable=true)
 // for `HTMLElement.prototype.click()`. Per spec, all coordinate / button fields
 // default to 0; modifiers all false; detail = 1.
@@ -1569,6 +1742,55 @@ extern "C" Item js_create_native_mouse_event(const char* type,
     }
     Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
     Item ev = js_ctor_mouse_event_fn(type_str, init);
+    event_set_bool(ev, "isTrusted", true);
+    return ev;
+}
+
+extern "C" Item js_create_native_pointer_event(const char* type,
+    int client_x, int client_y,
+    int button, int buttons,
+    bool ctrl, bool shift, bool alt, bool meta,
+    const char* pointer_type, int pointer_id, bool is_primary)
+{
+    Item init = js_new_object();
+    event_set_bool(init, "bubbles", true);
+    event_set_bool(init, "cancelable", true);
+    event_set_bool(init, "composed", true);
+    event_set_int(init, "clientX", client_x);
+    event_set_int(init, "clientY", client_y);
+    event_set_int(init, "screenX", client_x);
+    event_set_int(init, "screenY", client_y);
+    event_set_int(init, "pageX", client_x);
+    event_set_int(init, "pageY", client_y);
+    event_set_int(init, "button", button);
+    event_set_int(init, "buttons", buttons);
+    stamp_modifier_init(init, ctrl, shift, alt, meta);
+    event_set_int(init, "pointerId", pointer_id);
+    event_set_double(init, "width", 1.0);
+    event_set_double(init, "height", 1.0);
+    event_set_double(init, "pressure", buttons ? 0.5 : 0.0);
+    event_set_str(init, "pointerType", pointer_type ? pointer_type : "mouse");
+    event_set_bool(init, "isPrimary", is_primary);
+    Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item ev = js_ctor_pointer_event_fn(type_str, init);
+    event_set_bool(ev, "isTrusted", true);
+    return ev;
+}
+
+extern "C" Item js_create_native_css_event(const char* type,
+    const char* detail_name, const char* detail_value, double elapsed_time)
+{
+    Item init = js_new_object();
+    event_set_bool(init, "bubbles", true);
+    event_set_bool(init, "cancelable", false);
+    event_set_str(init, detail_name ? detail_name : "propertyName",
+                  detail_value ? detail_value : "");
+    event_set_double(init, "elapsedTime", elapsed_time);
+    event_set_str(init, "pseudoElement", "");
+    Item type_item = (Item){.item = s2it(heap_create_name(type ? type : ""))};
+    Item ev = detail_name && strcmp(detail_name, "animationName") == 0
+        ? js_ctor_animation_event_fn(type_item, init)
+        : js_ctor_transition_event_fn(type_item, init);
     event_set_bool(ev, "isTrusted", true);
     return ev;
 }
@@ -1748,7 +1970,7 @@ extern "C" void js_restore_window_event_for_legacy(Item prev) {
 // ============================================================================
 
 // build propagation path from target to root
-static int build_path(Item target, void** path, int max_path) {
+static int build_path(Item target, void** path, bool* path_is_dom, int max_path) {
     int count = 0;
     void* key = get_event_target_key(target);
 
@@ -1756,12 +1978,12 @@ static int build_path(Item target, void** path, int max_path) {
     // addEventListener(), so dispatchEvent() finds listeners registered on
     // document/window even when the JS object is a proxy/wrapper.
     if (key == (void*)&_document_sentinel) {
-        if (count < max_path) path[count++] = (void*)&_document_sentinel;
-        if (count < max_path) path[count++] = (void*)&_window_sentinel;
+        if (count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_document_sentinel; }
+        if (count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_window_sentinel; }
         return count;
     }
     if (key == (void*)&_window_sentinel) {
-        if (count < max_path) path[count++] = (void*)&_window_sentinel;
+        if (count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_window_sentinel; }
         return count;
     }
 
@@ -1769,6 +1991,7 @@ static int build_path(Item target, void** path, int max_path) {
     void* node_ptr = js_dom_unwrap_element(target);
     if (!node_ptr) {
         // plain JS-object EventTarget
+        path_is_dom[count] = false;
         path[count++] = key;
         return count;
     }
@@ -1778,19 +2001,20 @@ static int build_path(Item target, void** path, int max_path) {
     // walk from target up to root
     DomNode* current = node;
     while (current && count < max_path) {
+        path_is_dom[count] = true;
         path[count++] = (void*)current;
         current = current->parent;
     }
 
     // add document and window sentinels at the end (root of propagation)
-    if (count < max_path) path[count++] = (void*)&_document_sentinel;
-    if (count < max_path) path[count++] = (void*)&_window_sentinel;
+    if (count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_document_sentinel; }
+    if (count < max_path) { path_is_dom[count] = false; path[count++] = (void*)&_window_sentinel; }
 
     return count;
 }
 
 // wrap a path key back into an Item for currentTarget
-static Item wrap_path_key(void* key) {
+static Item wrap_path_key(void* key, bool key_is_dom) {
     if (key == (void*)&_window_sentinel) {
         // window currentTarget is globalThis (the window object).
         return js_get_global_this();
@@ -1798,27 +2022,66 @@ static Item wrap_path_key(void* key) {
     if (key == (void*)&_document_sentinel) {
         return js_get_document_object_value();
     }
-    // Try DOM node first
-    Item dom = js_dom_wrap_element(key);
-    if (dom.item != 0 && get_type_id(dom) != LMD_TYPE_NULL) return dom;
     // Plain JS-object EventTarget: key is a container pointer (Map/Object/VMap).
-    // Container types store the TypeId at offset 0, so a raw container pointer
-    // round-trips as an untagged Item that get_type_id reads from *key.
-    if (key) {
+    // Test this before treating the key as a DomNode: js_dom_wrap_element
+    // dereferences its input as a node, and generic EventTarget maps are not
+    // layout nodes despite sharing this listener-key path.
+    if (key && !key_is_dom) {
         Item it; it.item = 0; it.container = (Container*)key;
         TypeId tid = get_type_id(it);
         if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_OBJECT || tid == LMD_TYPE_VMAP) {
             return it;
         }
     }
+    Item dom = js_dom_wrap_element(key);
+    if (dom.item != 0 && get_type_id(dom) != LMD_TYPE_NULL) return dom;
     return ItemNull;
+}
+
+static Item event_target_get_idl_handler(Item target, const char* type) {
+    if (target.item == 0 || !type) return ItemNull;
+    TypeId target_type = get_type_id(target);
+    if (target_type != LMD_TYPE_MAP && target_type != LMD_TYPE_OBJECT &&
+        target_type != LMD_TYPE_ELEMENT && target_type != LMD_TYPE_VMAP) {
+        return ItemNull;
+    }
+    char on_name[64];
+    int written = snprintf(on_name, sizeof(on_name), "on%s", type);
+    if (written < 3 || written >= (int)sizeof(on_name)) return ItemNull;
+    Item handler = js_property_get(
+        target, (Item){.item = s2it(heap_create_name(on_name))});
+    return get_type_id(handler) == LMD_TYPE_FUNC ? handler : ItemNull;
+}
+
+static void fire_idl_handler(Item target, const char* type, Item event) {
+    Item handler = event_target_get_idl_handler(target, type);
+    if (get_type_id(handler) != LMD_TYPE_FUNC) return;
+
+    Item args[1] = { event };
+    Item result = js_call_function(handler, target, args, 1);
+    if (js_check_exception()) {
+        // Event callback exceptions are reported but never abort dispatch.
+        Item err = js_clear_exception();
+        log_event_exception_detail("event handler", type, err);
+        report_exception_to_window_onerror(err, type);
+        return;
+    }
+    if (get_type_id(result) == LMD_TYPE_BOOL && !it2b(result)) {
+        Item cancelable = js_property_get(
+            event, (Item){.item = s2it(heap_create_name("cancelable"))});
+        if (js_is_truthy(cancelable) && !event_flag_get(event, "__in_passive")) {
+            event_set_bool(event, "__default_prevented", true);
+            event_set_bool(event, "defaultPrevented", true);
+            event_set_bool(event, "returnValue", false);
+        }
+    }
 }
 
 // fire listeners on a specific node for a given phase. `reported_phase`, if
 // non-zero, overrides the eventPhase value visible to listeners (used at the
 // target node so capture-then-bubble sub-passes both report AT_TARGET).
 static void fire_listeners(void* key, const char* type, Item event, int phase,
-                           int reported_phase = 0) {
+                           bool key_is_dom, int reported_phase = 0) {
     NodeListeners* nl = find_listeners(key);
     bool has_listeners = (nl && nl->count > 0);
     // Check for an `on<type>` IDL handler on the target. We fire it during
@@ -1826,67 +2089,35 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
     Item on_handler = ItemNull;
     Item target_item = ItemNull;
     if (phase != 1) {
-        target_item = wrap_path_key(key);
-        TypeId tt = get_type_id(target_item);
-        if (tt == LMD_TYPE_MAP || tt == LMD_TYPE_ELEMENT ||
-                (tt == LMD_TYPE_VMAP && js_dom_unwrap_element(target_item))) {
-            // Phase 6 DOM nodes arrive here as branded VMaps; excluding them
-            // skips IDL/inline handlers such as onclick during UI dispatch.
-            char on_name[64];
-            snprintf(on_name, sizeof(on_name), "on%s", type);
-            Item on_key = (Item){.item = s2it(heap_create_name(on_name))};
-            Item h = js_property_get(target_item, on_key);
-            if (get_type_id(h) == LMD_TYPE_FUNC) on_handler = h;
-        }
+        target_item = wrap_path_key(key, key_is_dom);
+        // DOM nodes and documents are branded VMaps; IDL handlers must be
+        // queried through their host-property bridge as well as plain maps.
+        on_handler = event_target_get_idl_handler(target_item, type);
     }
     bool has_on = (get_type_id(on_handler) == LMD_TYPE_FUNC);
     if (!has_listeners && !has_on) return;
+
+    EventHandlerSlot* handler_slot = has_on ? find_handler_slot(key, type) : nullptr;
+    uint64_t handler_order = handler_slot && handler_slot->active
+        ? handler_slot->order : 0;
 
     // set eventPhase (use reported_phase if specified; otherwise raw phase)
     event_set_int(event, "eventPhase", reported_phase ? reported_phase : phase);
 
     // set currentTarget
     Item ct_key = (Item){.item = s2it(heap_create_name("currentTarget"))};
-    js_property_set(event, ct_key, wrap_path_key(key));
-
-    // Forward declarations (defined elsewhere).
-    extern int js_check_exception(void);
-    extern Item js_clear_exception(void);
+    js_property_set(event, ct_key, wrap_path_key(key, key_is_dom));
 
     // Check stop-immediate flag against per-event slot.
     #define _STOP_IMM event_flag_get(event, "__stop_imm")
 
-    // Fire on<type> IDL handler first (per HTML spec ordering when the IDL
-    // handler was set first).
-    if (has_on && !_STOP_IMM) {
-        Item args[1] = { event };
-        Item on_result = js_call_function(on_handler, target_item, args, 1);
-        if (js_check_exception()) {
-            // Report and swallow — dispatch must continue.
-            Item err = js_clear_exception();
-            log_event_exception_detail("event handler", type, err);
-            report_exception_to_window_onerror(err, type);
-        }
-        if (!js_check_exception() && get_type_id(on_result) == LMD_TYPE_BOOL && !it2b(on_result)) {
-            Item cancelable = js_property_get(event, (Item){.item = s2it(heap_create_name("cancelable"))});
-            if (js_is_truthy(cancelable) && !event_flag_get(event, "__in_passive")) {
-                event_set_bool(event, "__default_prevented", true);
-                event_set_bool(event, "defaultPrevented", true);
-                event_set_bool(event, "returnValue", false);
-            }
-        }
-    }
-
-    // IDL handlers and page callbacks can add listeners on new targets, which
-    // may reallocate the global listener-entry table that owns `nl`.
-    nl = find_listeners(key);
-    if (!nl) return;
-
     // Build a value snapshot: addEventListener() can grow and reallocate the
     // listener array during dispatch, so snapshots must not point into it.
-    EventListenerSnapshot* snap = (EventListenerSnapshot*)alloca(sizeof(EventListenerSnapshot) * nl->count);
+    EventListenerSnapshot* snap = nl && nl->count > 0
+        ? (EventListenerSnapshot*)alloca(sizeof(EventListenerSnapshot) * nl->count)
+        : nullptr;
     int snap_count = 0;
-    for (int i = 0; i < nl->count; i++) {
+    for (int i = 0; nl && i < nl->count; i++) {
         EventListener* el = &nl->items[i];
         if (el->removed) continue;
         if (strcmp(el->type, type) != 0) continue;
@@ -1895,21 +2126,36 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         if (phase == 1 && !el->capture) continue;
         if (phase == 3 && el->capture) continue;
         // signal — if its AbortSignal aborted, treat as removed
-        if (signal_is_aborted(el->signal)) { el->removed = true; continue; }
+        Item listener_signal = event_listener_root_item(el->signal_root);
+        if (signal_is_aborted(listener_signal)) { el->removed = true; continue; }
         EventListenerSnapshot* dst = &snap[snap_count++];
         dst->type = el->type;
-        dst->callback = el->callback;
-        dst->signal = el->signal;
+        dst->callback = event_listener_root_item(el->callback_root);
+        dst->signal = listener_signal;
+        dst->order = el->order;
         dst->capture = el->capture;
         dst->once = el->once;
         dst->passive = el->passive;
         dst->has_passive = el->has_passive;
     }
 
-    // dispatch loop over snapshot
+    // An `on<type>` property is a listener-list slot, not a separate phase.
+    // Merge its slot with the addEventListener snapshot so assignment order is
+    // preserved even when the handler sits between two registered listeners.
+    bool handler_fired = false;
     for (int i = 0; i < snap_count; i++) {
-        if (_STOP_IMM) break;
         EventListenerSnapshot* el = &snap[i];
+        if (has_on && !handler_fired && handler_order <= el->order) {
+            EventHandlerSlot* live_handler = find_handler_slot(key, type);
+            if (!_STOP_IMM &&
+                ((!handler_slot && handler_order == 0) ||
+                 (live_handler && live_handler->active &&
+                  live_handler->order == handler_order))) {
+                fire_idl_handler(target_item, type, event);
+            }
+            handler_fired = true;
+        }
+        if (_STOP_IMM) break;
         NodeListeners* live_nl = find_listeners(key);
         EventListener* live = nl_find_snapshot_listener(live_nl, el);
         // re-check tombstone in case a prior listener removed this one
@@ -1918,7 +2164,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 
         // Resolve callback — function or {handleEvent}
         Item callback = el->callback;
-        Item this_for_call = wrap_path_key(key);
+        Item this_for_call = wrap_path_key(key, key_is_dom);
         TypeId ct = get_type_id(callback);
         if (ct != LMD_TYPE_FUNC) {
             // EventListener WebIDL: if value is an object, call handleEvent on it
@@ -1950,6 +2196,14 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 
         // restore previous passive context
         event_set_bool(event, "__in_passive", was_passive);
+    }
+
+    if (has_on && !handler_fired && !_STOP_IMM) {
+        EventHandlerSlot* live_handler = find_handler_slot(key, type);
+        if ((!handler_slot && handler_order == 0) ||
+            (live_handler && live_handler->active && live_handler->order == handler_order)) {
+            fire_idl_handler(target_item, type, event);
+        }
     }
 
     #undef _STOP_IMM
@@ -2076,7 +2330,11 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 
     // build propagation path (target → ... → document → window)
     void* path[128];
-    int path_len = build_path(elem_item, path, 128);
+    bool path_is_dom[128] = {};
+    // DOM node ids can numerically equal Lambda TypeIds, so carry origin
+    // metadata with each path entry instead of reinterpreting a DomNode pointer
+    // as a generic EventTarget container during bubbling.
+    int path_len = build_path(elem_item, path, path_is_dom, 128);
 
     if (path_len == 0) {
         event_set_bool(event_item, "__dispatch_flag", false);
@@ -2100,23 +2358,23 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // Phase 1: Capture — from root down to target (exclusive)
     for (int i = path_len - 1; i > 0; i--) {
         if (_STOP_PROP) break;
-        fire_listeners(path[i], type, event_item, 1);  // CAPTURING_PHASE
+        fire_listeners(path[i], type, event_item, 1, path_is_dom[i]);  // CAPTURING_PHASE
     }
 
     // Phase 2: Target — per spec, capture-listeners run first then bubble
     // listeners, both reported with eventPhase = AT_TARGET (2).
     if (!_STOP_PROP) {
-        fire_listeners(path[0], type, event_item, 1, 2);
+        fire_listeners(path[0], type, event_item, 1, path_is_dom[0], 2);
     }
     if (!_STOP_PROP) {
-        fire_listeners(path[0], type, event_item, 3, 2);
+        fire_listeners(path[0], type, event_item, 3, path_is_dom[0], 2);
     }
 
     // Phase 3: Bubble — from target parent up to root
     if (bubbles) {
         for (int i = 1; i < path_len; i++) {
             if (_STOP_PROP) break;
-            fire_listeners(path[i], type, event_item, 3);  // BUBBLING_PHASE
+            fire_listeners(path[i], type, event_item, 3, path_is_dom[i]);  // BUBBLING_PHASE
         }
     }
 
@@ -2259,6 +2517,7 @@ void js_dom_events_reset(void) {
         NodeListeners* nl = &_entries[i].listeners;
         for (int j = 0; j < nl->count; j++) {
             if (nl->items[j].type) mem_free(nl->items[j].type);
+            event_listener_release_roots(&nl->items[j]);
         }
         if (nl->items) mem_free(nl->items);
     }
@@ -2268,6 +2527,16 @@ void js_dom_events_reset(void) {
     }
     _entry_count = 0;
     _entry_capacity = 0;
+    for (int i = 0; i < _handler_slot_count; i++) {
+        if (_handler_slots[i].type) mem_free(_handler_slots[i].type);
+    }
+    if (_handler_slots) {
+        mem_free(_handler_slots);
+        _handler_slots = nullptr;
+    }
+    _handler_slot_count = 0;
+    _handler_slot_capacity = 0;
+    _event_registration_order = 0;
     _stop_propagation = false;
     _stop_immediate = false;
     _default_prevented = false;

@@ -167,6 +167,13 @@ const char radiant_dom_interface_decl[] =
     "    cols: int,\n"
     "    src: string,\n"
     "    href: string,\n"
+    "    protocol: string,\n"
+    "    host: string,\n"
+    "    hostname: string,\n"
+    "    pathname: string,\n"
+    "    search: string,\n"
+    "    hash: string,\n"
+    "    origin: string,\n"
     "    alt: string,\n"
     "    name: string,\n"
     "    placeholder: string,\n"
@@ -341,6 +348,7 @@ const char radiant_dom_interface_decl[] =
     "    normalize: fn() any,\n"
     "    adopt_node: fn(a0: any) any,\n"
     "    append_child: fn(a0: any) any,\n"
+    "    contains: fn(a0: any) any,\n"
     "    add_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
     "    remove_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
     "    dispatch_event: fn(a0: any) any\n"
@@ -843,6 +851,7 @@ extern "C" int radiant_dom_guard_option(Item receiver);
 extern "C" int radiant_dom_guard_img(Item receiver);
 extern "C" int radiant_dom_guard_srct(Item receiver);
 extern "C" int radiant_dom_guard_hreft(Item receiver);
+extern "C" int radiant_dom_guard_anchor(Item receiver);
 extern "C" int radiant_dom_guard_namet(Item receiver);
 extern "C" int radiant_dom_guard_lblout(Item receiver);
 extern "C" int radiant_dom_m4b_disabled_get(Item r, Item* out);
@@ -889,6 +898,13 @@ extern "C" int radiant_dom_m4b_src_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_src_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_href_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_href_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_anchor_protocol_get(Item r, Item* out);
+extern "C" int radiant_dom_anchor_host_get(Item r, Item* out);
+extern "C" int radiant_dom_anchor_hostname_get(Item r, Item* out);
+extern "C" int radiant_dom_anchor_pathname_get(Item r, Item* out);
+extern "C" int radiant_dom_anchor_search_get(Item r, Item* out);
+extern "C" int radiant_dom_anchor_hash_get(Item r, Item* out);
+extern "C" int radiant_dom_anchor_origin_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_alt_get(Item r, Item* out);
 extern "C" int radiant_dom_m4b_alt_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_name_get(Item r, Item* out);
@@ -1120,6 +1136,20 @@ static const JubeMemberBind radiant_dom_node_members[] = {
      JUBE_MEMBER_NON_ENUMERABLE},
     {"href", NULL, NULL, radiant_dom_guard_hreft, radiant_dom_m4b_href_get, radiant_dom_m4b_href_set, NULL, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
+    {"protocol", NULL, NULL, radiant_dom_guard_anchor, radiant_dom_anchor_protocol_get, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"host", NULL, NULL, radiant_dom_guard_anchor, radiant_dom_anchor_host_get, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"hostname", NULL, NULL, radiant_dom_guard_anchor, radiant_dom_anchor_hostname_get, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"pathname", NULL, NULL, radiant_dom_guard_anchor, radiant_dom_anchor_pathname_get, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"search", NULL, NULL, radiant_dom_guard_anchor, radiant_dom_anchor_search_get, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"hash", NULL, NULL, radiant_dom_guard_anchor, radiant_dom_anchor_hash_get, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"origin", NULL, NULL, radiant_dom_guard_anchor, radiant_dom_anchor_origin_get, NULL, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
     {"alt", NULL, NULL, radiant_dom_guard_img, radiant_dom_m4b_alt_get, radiant_dom_m4b_alt_set, NULL, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
     {"name", NULL, NULL, radiant_dom_guard_namet, radiant_dom_m4b_name_get, radiant_dom_m4b_name_set, NULL, NULL,
@@ -1343,6 +1373,7 @@ RADIANT_DOC_CALL_FN(radiant_doc_call_import_node, "importNode")
 RADIANT_DOC_CALL_FN(radiant_doc_call_normalize, "normalize")
 RADIANT_DOC_CALL_FN(radiant_doc_call_adopt_node, "adoptNode")
 RADIANT_DOC_CALL_FN(radiant_doc_call_append_child, "appendChild")
+RADIANT_DOC_CALL_FN(radiant_doc_call_contains, "contains")
 RADIANT_DOC_CALL_FN(radiant_doc_call_add_event_listener, "addEventListener")
 RADIANT_DOC_CALL_FN(radiant_doc_call_remove_event_listener, "removeEventListener")
 RADIANT_DOC_CALL_FN(radiant_doc_call_dispatch_event, "dispatchEvent")
@@ -1420,6 +1451,7 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("normalize", NULL, radiant_doc_call_normalize),
     DOC_METHOD("adopt_node", "adoptNode", radiant_doc_call_adopt_node),
     DOC_METHOD("append_child", "appendChild", radiant_doc_call_append_child),
+    DOC_METHOD("contains", NULL, radiant_doc_call_contains),
     DOC_METHOD("add_event_listener", "addEventListener", radiant_doc_call_add_event_listener),
     DOC_METHOD("remove_event_listener", "removeEventListener", radiant_doc_call_remove_event_listener),
     DOC_METHOD("dispatch_event", "dispatchEvent", radiant_doc_call_dispatch_event),

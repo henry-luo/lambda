@@ -1884,6 +1884,11 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
             make_str("Lambda/Headless (Macintosh)"));
         js_property_set(navigator, make_str("vendor"), make_str(""));
         js_property_set(navigator, make_str("language"), make_str("en-US"));
+        // Radiant exposes PointerEvent input in both interactive and headless
+        // hosts, so feature detection must advertise at least one touch-capable
+        // pointer; otherwise libraries never register their pointer handlers.
+        js_property_set(navigator, make_str("maxTouchPoints"),
+            (Item){.item = i2it(1)});
         js_property_set(global_this, make_str("navigator"), navigator);
     }
 }

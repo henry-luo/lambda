@@ -1,0 +1,4 @@
+{"name":"Bootstrap alert dismiss removes the node","html":"test/ui/dom/bootstrap_ui.html","events":[
+  {"type":"click","target":{"selector":"#alert-close"}},
+  {"type":"assert_count","target":{"selector":"#alert"},"count":0}
+]}

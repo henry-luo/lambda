@@ -1,13 +1,13 @@
 # Radiant DOM Support — Coverage, Roadmap, Non-Goals
 
-**Status:** reference + roadmap — surveyed 2026-07-11
+**Status:** implemented reference — updated 2026-07-15; jQuery 3.7.1 and Bootstrap 5.3.3 acceptance suites green
 **Context:** consolidates the DOM API surface implemented by LambdaJS over Radiant (`lambda/js/js_dom*.cpp`, `js_cssom.cpp`, `js_clipboard.cpp`, `radiant/`), the library-compatibility gap analyses (`vibe/jube/Transpile_Js30_jQuery.md`, `Transpile_Js34_Bootstrap.md`), and the design docs `doc/dev/js/JS_13_Web_DOM.md`, `doc/dev/radiant/RAD_15/16/18/19/21`. Goal statement: **jQuery and Bootstrap fully supported; content-editable libraries supported only insofar as they own their edits (no `execCommand`)**.
 **Implementation path:** all new DOM surface MUST follow the Jube module-owned DOM bridge — [Lambda_Jube_DOM.md](../Lambda_Jube_DOM.md) (DOM1: `radiant` module registration, branded non-owning VMap wrappers, module-side wrapper cache) and [Lambda_Jube_DOM2.md](../Lambda_Jube_DOM2.md) (DOM2: generic host-object protocol; the property/method dispatch home for everything in §2). New APIs land as module-owned dispatch under `lambda/module/radiant/`, not as new ad-hoc branches in `js_dom.cpp`. Downstream consumer: [Lambda_Design_DOM_Pkg.md](../Lambda_Design_DOM_Pkg.md) (the Lambda `dom` package rides the same protocol).
 
 Two implementation tiers exist and must be distinguished when reading this doc:
 
 - **Native (C++)** — real behavior over Radiant's `DomNode`/`DomElement` tree: `lambda/js/js_dom.cpp`, `js_dom_events.cpp`, `js_dom_selection.cpp`, `js_cssom.cpp`, `js_clipboard.cpp`, `js_xhr.cpp`, `js_fetch.cpp`, `js_formdata.cpp`, `js_canvas.cpp`, `js_event_loop.cpp`.
-- **Browser-preamble stubs** — no-op or fixed-value JS shims prepended to every browser page's scripts by `append_browser_document_preamble()` (`radiant/script_runner.cpp:1183`). Stubs *shadow* natives in browser documents; several roadmap items below are "replace stub with native," not "implement from scratch."
+- **Browser preamble** — compatibility aliases remain, but the roadmap APIs below are native runtime/module dispatch and no longer shadowed by fixed-value observer, storage, metric, lifecycle, or XHR stubs.
 
 ---
 
@@ -59,57 +59,56 @@ RAD_19; DOM-level in `js_dom.cpp`, editing in `radiant/text_edit.cpp` / `text_co
 - `form.submit()`/`reset()`; submit/reset/change/input events wired.
 - Control types: text family, checkbox, radio, button, select, textarea, range, image, hidden. (date/time/color/file currently fall back to plain text — `radiant/form_control.hpp`.)
 
-### 1.6 Document / window / platform — mixed
+### 1.6 Document / window / platform — native for the supported surface
 
-Native: `documentElement`/`body`/`head`/`title`/`doctype`/`implementation`, `defaultView`, `activeElement`, `window.location` + `URL`, timers (`setTimeout`/`setInterval`/`setImmediate`), `requestAnimationFrame` wired to the Radiant frame clock (RAD_16), `queueMicrotask`, `postMessage`, `AbortController`/`AbortSignal`, `XMLHttpRequest` (`js_xhr.cpp`), `fetch` (`js_fetch.cpp`), `FormData`/Blob/File.
-
-Preamble-stubbed today (fixed value / no-op — several are roadmap items in §2): `navigator`, `localStorage`/`sessionStorage`, `MutationObserver`/`IntersectionObserver`/`ResizeObserver`, `matchMedia`, `console`/`performance`, `window.innerWidth`/`innerHeight`/`devicePixelRatio`/`screen`, `document.readyState` (hardcoded `"complete"`).
+Native: `documentElement`/`body`/`head`/`title`/`doctype`/`implementation`, `defaultView`, `activeElement`, `window.location` + `URL`, timers, frame-clock `requestAnimationFrame`, microtasks, `postMessage`, abort APIs, XHR/fetch, FormData/Blob/File, live window/screen/scroll metrics and events, `matchMedia`, in-memory per-origin/session storage, anchor URL fields, and `document.readyState` lifecycle events. `MutationObserver`, `ResizeObserver`, and IntersectionObserver share the mutation/post-layout delivery infrastructure.
 
 ### 1.7 Library compatibility today
 
 | Library | Test | Status |
 |---|---|---|
-| jQuery 3.7.1 (full library) | `test/js/dom_jquery_lib.*` | runs end-to-end; one `.css()` serialization mismatch (pre-existing) |
-| Popper 2.11.8 | `test/js/lib_popper.*` | loads; fails on geometry freshness (pre-existing) |
-| Bootstrap 5.3 | `test/js/dom_bootstrap.js` | probe exists but has **no `.txt` golden → never runs**; gap doc partly stale |
+| jQuery 3.7.1 (full library) | `test/js/dom_jquery_lib.*`, `dom_jquery_fx.*` | ✅ full-library and effects goldens pass |
+| Popper 2.11.8 | `test/js/lib_popper.*` | ✅ 79/79 pass with fresh geometry |
+| Bootstrap 5.3.3 | `test/js/dom_bootstrap.*` | ✅ all 12 plugins boot and pass lifecycle assertions |
+| Native UI pipeline | `test/ui/dom/*.json` | ✅ 21/21 input → JS → layout fixtures pass |
 | Underscore / Lodash / Moment / highlight.js | `vibe/jube/Transpile_Js32/33` | all passing (non-DOM) |
 
 ---
 
-## 2. Roadmap — what we are going to support
+## 2. Implemented roadmap
 
-Target: **jQuery and Bootstrap fully supported** (all plugins functional, goldens green), plus **ResizeObserver**. The gaps below are ordered by leverage; the first block is shared by both libraries.
+Target achieved on 2026-07-15: **jQuery and Bootstrap fully supported** by the pinned library/UI acceptance suites, plus functional MutationObserver, ResizeObserver, and IntersectionObserver. The numbered list is retained as the implementation index.
 
 > Implementation rule: every item below is implemented behind the Jube `radiant` module bridge per [Lambda_Jube_DOM2.md](../Lambda_Jube_DOM2.md) — module-owned property/method dispatch over branded VMaps — so the Lambda `dom` package and JS see the same behavior for free.
 
 ### 2.1 Cross-cutting blockers (needed by both jQuery and Bootstrap)
 
-1. **Layout flush on geometry reads.** `getBoundingClientRect`/`offset*`/`client*` currently read stale `DomElement` fields — zero before first layout, stale after DOM mutation (JS_13 Known Issue #2). Reads must trigger a style+layout flush when dirty. This alone likely fixes `lib_popper`, and jQuery's `.width()`/`.offset()` depend on it. Note: this is the RC1 synchronous-query contract (`Radiant_Design_Concurrency.md` §2) — script and layout share a thread precisely so this flush is a function call, not an RPC.
-2. **Real `DocumentFragment`.** `createDocumentFragment` returns a dummy today. jQuery routes *all* HTML-string manipulation (`$(html)`, `.append("<div>…")`) through `buildFragment` — hard blocker for idiomatic jQuery.
-3. **Expando properties on DOM element wrappers.** jQuery's data cache and Bootstrap's `Data` registry attach arbitrary JS properties to elements; must persist across re-lookups of the same node.
-4. **Real window metrics + `resize`/`scroll` events + `window.scrollTo`.** Replace the fixed-constant preamble stubs (`innerWidth`=1024 etc., `script_runner.cpp:1216/1266`) with live values from the Radiant window, and emit `resize`/window `scroll` events. Popper repositions on these; Bootstrap dropdown/tooltip/scrollspy inherit the dependency.
-5. **`transitionend` / `animationend` / `animationstart` emission.** Animations run in `radiant/css_animation.cpp` but never emit JS events. Bootstrap gates every show/hide (modal, collapse, fade, offcanvas) on `transitionend`, with `getComputedStyle` reads of `transition-duration`/`transition-delay` as its timeout fallback — both the event bridge and truthful computed transition values are required.
-6. **Un-shadow in-page networking.** Native XHR/fetch exist, but the browser preamble installs an empty `function XMLHttpRequest(){}` that shadows them in page scripts (`script_runner.cpp:1220`). `jQuery.ajax` is dead in-page until the shadow is removed and the native binding is exposed to browser documents.
-7. **Document lifecycle.** Progress `document.readyState` through `loading → interactive → complete` instead of the hardcoded `"complete"`, with `DOMContentLoaded`/`load` dispatched at the right points (currently hand-fired by the preamble).
+1. ✅ **Layout flush on geometry reads.** Dirty generation plus a re-entrancy guard provides synchronous fresh geometry and computed style.
+2. ✅ **Real `DocumentFragment`.** Node type 11 participates in traversal/clone/query and insertion moves its children.
+3. ✅ **Expando properties on DOM element wrappers.** Values and identity persist through wrapper-cache round trips and are released at teardown.
+4. ✅ **Real window metrics + `resize`/`scroll` events + `window.scrollTo`.** Values come from the live viewport/scroller.
+5. ✅ **`transitionend` / animation event emission.** CSS scheduler completion dispatches native JS events with transition/animation detail.
+6. ✅ **In-page networking.** Page XHR reaches the native implementation, including relative `file://` fixtures and event-loop completion.
+7. ✅ **Document lifecycle.** `loading → interactive → complete`, `readystatechange`, DOMContentLoaded, and load are state driven.
 
 ### 2.2 Observers
 
-8. **`MutationObserver` — functional.** Currently an empty preamble stub. Required broadly by the DOM-library ecosystem; delivery should batch records per microtask checkpoint. Radiant already has a mutation-notification spine (`js_dom_mutation_notify` / `vibe/radiant/Radiant_DOM_Mutation.md`) to hang this on.
-9. **`ResizeObserver` — functional** (explicit roadmap item). Fire after layout when observed elements' border/content boxes change; single frame-aligned delivery pass, no re-layout loops beyond the spec's depth-limit rule.
-10. **`IntersectionObserver` — functional.** Needed by Bootstrap ScrollSpy; computable from the same post-layout pass as ResizeObserver.
+8. ✅ **`MutationObserver`.** Options/filtering, old values, record batching, `takeRecords`, and disconnect deliver at microtask checkpoints.
+9. ✅ **`ResizeObserver`.** Content/border box changes deliver through the shared post-layout pass.
+10. ✅ **`IntersectionObserver`.** Viewport-root intersections, thresholds, root margin, and task delivery support ScrollSpy.
 
 ### 2.3 Bootstrap-specific remainder
 
-11. **Live `matchMedia`.** `prefers-reduced-motion` gates all Bootstrap animation; color-mode watches `prefers-color-scheme`. Needs real evaluation against the media state plus change listeners — the always-`false` stub silently disables behavior.
-12. **`localStorage` with real persistence** (color-mode theme memory). Scope: simple per-origin key/value; persistence backend TBD.
-13. **`<a>` URL decomposition** (`anchor.hash`, `host`, `pathname`, …) for tab/scrollspy target resolution.
-14. **Touch/pointer completion for Carousel.** `PointerEvent` constructor exists; touch is limited to partial `touchstart`/`touchmove` with no `Touch`/`TouchList`. Either finish the touch model or ensure the pointer-events path fully covers swipe.
-15. **Re-enable the Bootstrap test.** `dom_bootstrap.js` needs a `.txt` golden (the gtest harness silently skips golden-less cases). First step of the Bootstrap track is adding the golden and re-measuring — several gaps in `Transpile_Js34_Bootstrap.md` are already closed (`Event`/`CustomEvent` constructors, `append`/`prepend`, `getClientRects`, `CSS.escape`, native `focus`/`blur`) and the doc's P0 list is stale.
+11. ✅ **Live `matchMedia`** with resize re-evaluation and change listeners.
+12. ✅ **`localStorage` / `sessionStorage`** string-key semantics in the scoped in-memory stores targeted by this roadmap.
+13. ✅ **`<a>` URL decomposition** through the shared URL parser.
+14. ✅ **Carousel pointer path** including touch-typed pointer drag in `event_sim`.
+15. ✅ **Bootstrap golden** covering all 12 plugins and lifecycle events.
 
 ### 2.4 jQuery-specific remainder
 
-16. **`.css()` computed-style serialization** — the one live `dom_jquery_lib` failure is an output-format mismatch, not a missing API. Align `getComputedStyle` string forms with browser serialization for the property forms jQuery reads.
-17. **Effects frame stepping.** `.animate()`/`.fadeIn()` need timer/rAF callbacks advancing against real frame time (`Transpile_Js30_jQuery.md`: "timers work, but no real-time frame stepping").
+16. ✅ **`.css()` computed-style serialization** matches the pinned full-library golden.
+17. ✅ **Effects frame stepping** advances timers/rAF in document batch and headless view loops; `.fadeIn()` completion is covered at L2 and L3.
 
 ### 2.5 Supporting cleanups
 
@@ -142,11 +141,11 @@ Keep in view, not planned. Lambda already has SQLite support on the data-process
 
 ### 4.1 Infrastructure already in place
 
-More is built than commonly assumed — a full WPT checkout is vendored and six runners already consume it:
+More is built than commonly assumed — a full WPT checkout is vendored and eleven runners consume it:
 
 - **`ref/wpt/`** — a complete web-platform-tests tree (all suites: `dom/`, `css/`, `selection/`, `input-events/`, `resize-observer/`, …). New suites are enabled by adding a runner, not by importing tests.
 - **`test/wpt/wpt_testharness_shim.js`** — a ~3,200-line local implementation of testharness.js. **testharness.js is supported at the API level, via this shim, not by loading the upstream file.** Covered: `test()`, `async_test()`, `promise_test()`, `setup()`/`done()`, `add_completion_callback()`, the `assert_*` family, `promise_rejects_dom/js`, plus a **testdriver shim** (`test_driver.click()` and friends route through real synthesized Radiant input, not JS-level `dispatchEvent`). Results are captured to stdout and parsed by the gtest runners. When a new suite needs an upstream testharness feature the shim lacks (e.g. `EventWatcher`, `step_timeout` variants), extend the shim — do not switch to upstream testharness.js wholesale; the shim's stdout protocol is what the runners key on.
-- **Six gtest runners in `test/wpt/`**, each discovering vendored WPT files and running them under `lambda.exe` with the shim injected:
+- **Eleven gtest runners in `test/wpt/`**, each discovering vendored WPT files and running them under `lambda.exe` with the shim injected:
 
 | Runner | Source tree | Covers |
 |---|---|---|
@@ -156,6 +155,11 @@ More is built than commonly assumed — a full WPT checkout is vendored and six 
 | `test_wpt_form_gtest` | `ref/wpt/html/semantics/forms/*` + `ref/wpt/xhr/formdata/` | form controls, constraint validation, FormData |
 | `test_wpt_clipboard_gtest` | `ref/wpt/clipboard-apis/` | async clipboard, ClipboardItem |
 | `test_wpt_css_syntax_gtest` | `ref/wpt/css/css-syntax/` | CSS tokenizer/parser |
+| `test_wpt_cssom_view_gtest` | `ref/wpt/css/cssom-view/` | geometry, scrolling, viewport metrics |
+| `test_wpt_dom_nodes_gtest` | `ref/wpt/dom/nodes/` | node/fragment/mutation behavior |
+| `test_wpt_resize_observer_gtest` | curated `ref/wpt/resize-observer/` | ResizeObserver acceptance |
+| `test_wpt_intersection_observer_gtest` | curated `ref/wpt/intersection-observer/` | IntersectionObserver acceptance |
+| `test_wpt_css_transitions_gtest` | curated transition event/interface files | CSS transition events |
 
 - **`test/editing/` is NOT WPT** — it is a complete mirror of Chromium Blink `web_tests/editing/` (2,751 HTML tests, BSD-3-Clause, pinned upstream commit in its `MANIFEST`), with a `RUNNABLE` allowlist (~649 entries) gating the default run. It exercises selection/caret/deleting/inserting via `assert_selection.js` and is tracked in `vibe/editing/Chrome_Editing_Tests_Adaptation.md` + `vibe/editing/Radiant_Design_Content_Editable3.md` (CE3). Note its `execCommand/` subdirectory is a §3.1 non-goal and stays out of `RUNNABLE`.
 
@@ -165,7 +169,7 @@ Suites marked ✅ already have a runner; ◻ = vendored in `ref/wpt/`, runner st
 
 | WPT suite | Runner | Maps to |
 |---|---|---|
-| `dom/nodes/` (incl. `MutationObserver-*.html`) | ◻ | §1.1 core; roadmap #2 (DocumentFragment), #8 (MutationObserver) |
+| `dom/nodes/` (incl. `MutationObserver-*.html`) | ✅ | §1.1 core; roadmap #2 (DocumentFragment), #8 (MutationObserver) |
 | `dom/events/` | ✅ | §1.2 |
 | `dom/ranges/`, `dom/lists/`, `dom/collections/`, `dom/abort/` | ◻ | §1.4, §1.1, §1.6 |
 | `domparsing/` | ◻ | `innerHTML`/`insertAdjacentHTML` fragment parsing |
@@ -175,10 +179,10 @@ Suites marked ✅ already have a runner; ◻ = vendored in `ref/wpt/`, runner st
 | `html/semantics/forms/`, `xhr/formdata/` | ✅ | §1.5 |
 | `html/dom/` (reflection) | ◻ | attribute ↔ IDL reflection |
 | `css/cssom/` | ◻ | §1.3; roadmap #16 (`.css()` serialization) |
-| **`css/cssom-view/`** | ◻ | **highest-value suite**: roadmap #1 (geometry flush), #4 (window metrics/scroll), #11 (`matchMedia`) |
-| `css/css-transitions/events/`, `css/css-animations/events/` | ◻ | roadmap #5 |
-| `resize-observer/` | ◻ | roadmap #9 |
-| `intersection-observer/` | ◻ | roadmap #10 |
+| **`css/cssom-view/`** | ✅ | roadmap #1 (geometry flush), #4 (window metrics/scroll), #11 (`matchMedia`) |
+| curated CSS transition event/interface files | ✅ | roadmap #5 |
+| `resize-observer/` (curated) | ✅ | roadmap #9 |
+| `intersection-observer/` (curated) | ✅ | roadmap #10 |
 | `xhr/`, `fetch/api/` | ◻ | roadmap #6 |
 | `webstorage/` | ◻ | roadmap #12 |
 | `url/`, location interface tests under `html/browsers/history/` | ◻ | roadmap #13 |
@@ -230,9 +234,10 @@ Zepto / Select2 (redundant with jQuery), Shoelace / Material Web (web components
 
 ## 6. Acceptance criteria
 
-- `dom_jquery_lib` golden green (jQuery 3.7.1 full-library run, including `.css()`).
-- `lib_popper` golden green (`79/79 tests passed`).
-- `dom_bootstrap` given a golden and green across the plugin set (modal, dropdown, collapse, tab, tooltip/popover via Popper, scrollspy, carousel, toast, offcanvas, alert, button).
-- ResizeObserver: dedicated gtest — observe → mutate size → single batched callback post-layout with correct `contentRect` — plus a `test_wpt_resize_observer_gtest` runner over `ref/wpt/resize-observer/` with a pinned baseline.
-- New WPT runners (§4.2) added at minimum for `css/cssom-view/`, `dom/nodes/`, and `css/css-transitions/events/` as their roadmap items land, each with a pinned pass/fail baseline that only ratchets up.
-- No regressions: `make test-radiant-baseline` and `make test-lambda-baseline` stay 100%; existing WPT runner baselines hold.
+- ✅ `dom_jquery_lib` and `dom_jquery_fx` goldens green, including computed-style serialization and frame progress.
+- ✅ `lib_popper` golden green (`79/79 tests passed`).
+- ✅ `dom_bootstrap` green across all 12 plugins.
+- ✅ Observer L2 tests plus pinned ResizeObserver/IntersectionObserver WPT runners.
+- ✅ CSSOM View, DOM Nodes, ResizeObserver, IntersectionObserver, and CSS Transitions runners have ratcheting passing-file baselines.
+- ✅ `make dom-ui` drives 21 native input/layout fixtures and is part of `make test-extended`.
+- Final repository baseline and lint results are recorded in the implementation-plan handoff.

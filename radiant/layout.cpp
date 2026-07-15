@@ -19,6 +19,7 @@ extern "C" {
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/js/js_dom_observers.h"
 
 using namespace std::chrono;
 
@@ -2467,6 +2468,16 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             }
             break;
         case CSS_VALUE_NONE:
+            // A retained element can become display:none after previously
+            // generating a box; publish the no-box state before skipping it.
+            elem->display = display;
+            elem->view_type = RDT_VIEW_NONE;
+            elem->x = 0.0f;
+            elem->y = 0.0f;
+            elem->width = 0.0f;
+            elem->height = 0.0f;
+            elem->content_width = 0.0f;
+            elem->content_height = 0.0f;
             log_debug("%s skipping element of display: none", node->source_loc());
             break;
         case CSS_VALUE_CONTENTS: {
@@ -3219,6 +3230,9 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (doc->view_tree && uicon->window) {
         webview_manager_sync_layout(uicon, doc->view_tree);
     }
+    // Geometry observers sample only after the final box tree exists, so one
+    // layout turn produces a single coalesced observer delivery.
+    js_dom_observers_post_layout();
 
     // Serialization is handled by the caller (cmd_layout.cpp layout_single_file).
     // print_view_tree is NOT called here to avoid redundant file I/O.

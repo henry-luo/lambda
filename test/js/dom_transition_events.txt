@@ -1,0 +1,8 @@
+transitionend
+opacity
+0.25
+::before
+true
+true
+pulse:0.5
+true

@@ -167,7 +167,7 @@ false
 true
 true
 false
-/docs
+file:/docs
 hero.png
 Hero
 true
@@ -312,7 +312,7 @@ aa
 checked-value
 checked-value
 /next
-/next
+file:/next
 9
 9
 6

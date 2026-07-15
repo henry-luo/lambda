@@ -1,0 +1,15 @@
+{"name":"Bootstrap modal opens and closes from native input","html":"test/ui/dom/bootstrap_ui.html","events":[
+  {"type":"click","target":{"selector":"#modal-trigger"}},
+  {"type":"assert_class","target":{"selector":"#modal"},"class":"show"},
+  {"type":"assert_visible","target":{"selector":"#modal"},"visible":true},
+  {"type":"assert_focus","target":{"selector":"#modal"}},
+  {"type":"key_press","key":"Tab"},
+  {"type":"assert_focus","target":{"selector":"#modal-close"}},
+  {"type":"key_press","key":"Tab"},
+  {"type":"assert_focus","target":{"selector":"#modal-last"}},
+  {"type":"key_press","key":"Tab"},
+  {"type":"assert_focus","target":{"selector":"#modal-close"}},
+  {"type":"key_press","key":"Escape"},
+  {"type":"wait","ms":30},
+  {"type":"assert_class","target":{"selector":"#modal"},"class":"show","present":false}
+]}

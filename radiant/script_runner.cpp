@@ -1184,7 +1184,9 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "var window = globalThis;\n"
         "var jQuery = undefined;\n"
         "var $ = undefined;\n"
-        "var navigator = {userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0', platform: 'MacIntel', language: 'en-US', languages: ['en-US', 'en']};\n"
+        // PointerEvent is installed natively; advertise the matching touch
+        // capability so libraries select their pointer branch in headless UI.
+        "var navigator = {userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0', platform: 'MacIntel', language: 'en-US', languages: ['en-US', 'en'], maxTouchPoints: 1};\n"
         "navigator.sendBeacon = navigator.sendBeacon || function(){ return false; };\n"
         "window.navigator = navigator;\n"
         "window.document = document;\n"
@@ -1199,33 +1201,18 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "window.clearInterval = clearInterval;\n"
         "window.requestAnimationFrame = requestAnimationFrame;\n"
         "window.cancelAnimationFrame = cancelAnimationFrame;\n"
-        "var localStorage = {getItem: function(k){return null;}, setItem: function(k,v){}, removeItem: function(k){}, clear: function(){}, length: 0};\n"
-        "var sessionStorage = {getItem: function(k){return null;}, setItem: function(k,v){}, removeItem: function(k){}, clear: function(){}, length: 0};\n"
-        "window.localStorage = localStorage;\n"
-        "window.sessionStorage = sessionStorage;\n"
-        "function MutationObserver(cb) { this.observe = function(){}; this.disconnect = function(){}; this.takeRecords = function(){ return []; }; }\n"
-        "function IntersectionObserver(cb, opts) { this.observe = function(){}; this.unobserve = function(){}; this.disconnect = function(){}; }\n"
-        "function ResizeObserver(cb) { this.observe = function(){}; this.unobserve = function(){}; this.disconnect = function(){}; }\n"
-        "window.MutationObserver = MutationObserver;\n"
-        "window.IntersectionObserver = IntersectionObserver;\n"
-        "window.ResizeObserver = ResizeObserver;\n"
         "var console = {log: function(){}, warn: function(){}, error: function(){}, info: function(){}, debug: function(){}, dir: function(){}, table: function(){}};\n"
         "var performance = {now: function(){ return 0; }, mark: function(){}, measure: function(){}, getEntries: function(){ return []; }, getEntriesByName: function(){ return []; }, getEntriesByType: function(t){ return t === 'navigation' ? [{type: 'navigate', transferSize: 1, deliveryType: ''}] : []; }, timing: {}};\n"
-        "var screen = {width: 1920, height: 1080, availWidth: 1920, availHeight: 1080, colorDepth: 24, pixelDepth: 24};\n"
+        "var screen = undefined;\n"
         "window.console = console;\n"
         "window.performance = performance;\n"
         "window.screen = screen;\n"
-        "function XMLHttpRequest() {}\n"
         "function WebSocket(url) { this.send = function(){}; this.close = function(){}; this.addEventListener = function(){}; this.readyState = 3; }\n"
         "function Worker(url) { this.postMessage = function(){}; this.terminate = function(){}; this.addEventListener = function(){}; }\n"
-        "window.XMLHttpRequest = XMLHttpRequest;\n"
         "window.WebSocket = WebSocket;\n"
         "window.Worker = Worker;\n"
-        "window.addEventListener = function(type, fn, opts) { document.addEventListener(type, fn, opts); };\n"
-        "window.removeEventListener = function(type, fn, opts) { document.removeEventListener(type, fn, opts); };\n"
-        "window.dispatchEvent = function(ev) { return document.dispatchEvent(ev); };\n"
+        "// Keep native window EventTarget methods: aliasing them to document splits listener storage from native window dispatch.\n"
         "// getComputedStyle is installed natively; wrapping it here recurses through global lookup.\n"
-        "window.matchMedia = function(q) { return {matches: false, media: q, addEventListener: function(){}, removeEventListener: function(){}}; };\n"
         "window.scrollTo = function(x, y) {\n"
         "  if (typeof x === 'object' && x !== null) {\n"
         "    y = x.top;\n"
@@ -1247,6 +1234,7 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "    document.body.scrollLeft = x;\n"
         "    document.body.scrollTop = y;\n"
         "  }\n"
+        "  window.dispatchEvent(new Event('scroll'));\n"
         "};\n"
         "// browser pages use window.scroll as an alias for scrollTo; keep the\n"
         "// global callable present so unsupported timing only queues scroll state.\n"
@@ -1261,15 +1249,15 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "  if (typeof y !== 'number' || y !== y) y = 0;\n"
         "  window.scrollTo(window.pageXOffset + x, window.pageYOffset + y);\n"
         "};\n"
-        "window.innerWidth = 1024;\n"
-        "window.innerHeight = 768;\n"
-        "window.outerWidth = 1024;\n"
-        "window.outerHeight = 768;\n"
-        "window.devicePixelRatio = 1;\n"
-        "window.pageXOffset = 0;\n"
-        "window.pageYOffset = 0;\n"
-        "window.scrollX = 0;\n"
-        "window.scrollY = 0;\n"
+        "window.innerWidth = undefined;\n"
+        "window.innerHeight = undefined;\n"
+        "window.outerWidth = undefined;\n"
+        "window.outerHeight = undefined;\n"
+        "window.devicePixelRatio = undefined;\n"
+        "window.pageXOffset = undefined;\n"
+        "window.pageYOffset = undefined;\n"
+        "window.scrollX = undefined;\n"
+        "window.scrollY = undefined;\n"
         "document.defaultView = window;\n"
     );
 }
@@ -1590,13 +1578,17 @@ static const char LIFECYCLE_INTERACTIVE_SOURCE[] =
     "}\n";
 static const char LIFECYCLE_DOM_CONTENT_LOADED_SOURCE[] =
     "if (document && document.dispatchEvent && typeof Event === 'function') {\n"
-    "  document.dispatchEvent(new Event('DOMContentLoaded'));\n"
+    // DOMContentLoaded is observable through Window because the browser event
+    // bubbles from Document; the default Event constructor flag is false.
+    "  document.dispatchEvent(new Event('DOMContentLoaded', { bubbles: true }));\n"
     "}\n";
 static const char LIFECYCLE_WINDOW_LOAD_SOURCE[] =
     "if (window && window.dispatchEvent && typeof Event === 'function') {\n"
     "  window.dispatchEvent(new Event('load'));\n"
-    "}\n"
-    "if (window.onload) { window.onload(); }\n";
+    // EventTarget dispatch invokes the window `onload` event-handler property
+    // after registered listeners; calling it again here duplicated the handler
+    // and placed the first invocation before addEventListener callbacks.
+    "}\n";
 
 static const char LIFECYCLE_INTERACTIVE_FILENAME[] =
     "<document-readystatechange-interactive>";
@@ -1951,6 +1943,9 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
 #endif
     Item result;
     JsLifecycleCacheUnits lifecycle_units = {};
+    // Parser-blocking classic scripts execute while the document is loading;
+    // the previous post-DOM scheduler entered interactive before user code.
+    script_runner_set_ready_state(runtime, "loading");
     preamble_buf = strbuf_new_cap(4096);
     append_browser_document_preamble(preamble_buf);
 #ifndef NDEBUG
@@ -2050,6 +2045,12 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (timing) timing->scheduler_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
+    if (!execute_script_task_queue(runtime, queues.post_dom, preamble, "post-dom", collection)) {
+        any_error = true;
+    }
+    if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
+
+    phase_start_us = timing ? time_now_us() : 0;
     script_runner_set_ready_state(runtime, "interactive");
     if (!execute_lifecycle_snippet(
         runtime, preamble, lifecycle_units.interactive,
@@ -2059,9 +2060,6 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (timing) timing->interactive_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
-    if (!execute_script_task_queue(runtime, queues.post_dom, preamble, "post-dom", collection)) {
-        any_error = true;
-    }
     if (!execute_script_task_queue(runtime, queues.defer, preamble, "defer", collection)) {
         any_error = true;
     }

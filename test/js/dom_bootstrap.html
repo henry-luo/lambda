@@ -1,7 +1,25 @@
-<!DOCTYPE html>
-<html>
-<head><title>Test</title></head>
-<body>
-  <div id="container"></div>
-</body>
-</html>
+<!doctype html>
+<html><head><style>
+body { margin: 0; }
+.modal, .offcanvas, .toast, .tooltip, .popover, .dropdown-menu, .collapse { display: none; }
+.modal.show, .offcanvas.show, .toast.show, .tooltip.show, .popover.show,
+.dropdown-menu.show, .collapse.show { display: block; }
+#spy { height: 120px; overflow: auto; }
+#spy section { height: 100px; }
+</style></head><body>
+<div id="alert" class="alert show"><button data-bs-dismiss="alert">close</button></div>
+<button id="button" data-bs-toggle="button">button</button>
+<button data-bs-toggle="collapse" data-bs-target="#collapse">collapse</button>
+<div id="collapse" class="collapse">content</div>
+<div class="dropdown"><button id="dropdown-toggle" data-bs-toggle="dropdown">dropdown</button><div class="dropdown-menu"><button class="dropdown-item">item</button></div></div>
+<div id="modal" class="modal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">modal</div></div></div>
+<div id="offcanvas" class="offcanvas" tabindex="-1">offcanvas</div>
+<ul class="nav"><li class="nav-item"><button id="tab1" class="nav-link active" data-bs-toggle="tab" data-bs-target="#pane1">one</button></li><li class="nav-item"><button id="tab2" class="nav-link" data-bs-toggle="tab" data-bs-target="#pane2">two</button></li></ul>
+<div id="pane1" class="tab-pane active show">one</div><div id="pane2" class="tab-pane">two</div>
+<button id="tooltip" title="tip">tooltip</button>
+<button id="popover" title="head" data-bs-content="body">popover</button>
+<div id="toast" class="toast"><div class="toast-body">toast</div></div>
+<nav id="spy-nav"><a href="#section-one">one</a><a href="#section-two">two</a></nav>
+<div id="spy"><section id="section-one">one</section><section id="section-two">two</section></div>
+<div id="carousel" class="carousel"><div class="carousel-inner"><div id="slide1" class="carousel-item active">one</div><div id="slide2" class="carousel-item">two</div></div></div>
+</body></html>

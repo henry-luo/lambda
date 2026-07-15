@@ -33,6 +33,7 @@
 
 // Declared in event.cpp
 extern bool is_view_focusable(View* view);
+extern bool is_view_programmatically_focusable(View* view);
 
 static void focus_sync_text_control_state(DocState* state, View* view);
 
@@ -7424,12 +7425,23 @@ static void focus_sync_text_control_state(DocState* state, View* view) {
     }
 }
 
-void focus_set(DocState* state, View* view, bool from_keyboard) {
+static bool focus_accepts_target(View* view, bool programmatic) {
+    if (!view) return true;
+    return programmatic ? is_view_programmatically_focusable(view)
+                        : is_view_focusable(view);
+}
+
+static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
+                               bool programmatic) {
     if (!state) return;
-    if (view && !is_view_focusable(view)) return;
+    if (!focus_accepts_target(view, programmatic)) return;
 
     if (state->transition_depth == 0) {
-        FocusTransitionArgs args = { .target = view, .from_keyboard = from_keyboard };
+        FocusTransitionArgs args = {
+            .target = view,
+            .from_keyboard = from_keyboard,
+            .programmatic = programmatic,
+        };
         focus_transition(state, FOCUS_TRANSITION_FOCUS_ELEMENT, &args);
         return;
     }
@@ -7487,6 +7499,14 @@ void focus_set(DocState* state, View* view, bool from_keyboard) {
         old_focus, view, from_keyboard, focus->focus_visible);
 
     log_debug("focus_set: view=%p, from_keyboard=%d", view, from_keyboard);
+}
+
+void focus_set(DocState* state, View* view, bool from_keyboard) {
+    focus_set_internal(state, view, from_keyboard, false);
+}
+
+void focus_set_programmatic(DocState* state, View* view) {
+    focus_set_internal(state, view, false, true);
 }
 
 static void focus_clear_internal(DocState* state, bool preserve_selection) {
