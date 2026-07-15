@@ -34,7 +34,8 @@ fn graph_spec() => {
   ],
   children: ["meta", "styles", "defs", "constraints", "node", "edge", "subgraph",
     "style-rule", "class-assignment", "style-assignment", "interaction",
-    "edge-property", "front-matter", "init", "diagnostics", "diagnostic"],
+    "edge-property", "front-matter", "init", "dot-attr-statement",
+    "dot-assignment", "dot-edge-statement", "diagnostics", "diagnostic"],
   open_children: false, scalar_children: false
 }
 
@@ -50,7 +51,7 @@ fn node_spec() => {
     attr("stroke", "text"), attr("stroke-width", "number"),
     attr("opacity", "number"), attr("class", "text"), attr("z", "integerish")
   ],
-  children: ["label", "content", "port"],
+  children: ["label", "content", "port", "properties"],
   open_children: true, scalar_children: true
 }
 
@@ -91,6 +92,7 @@ fn subgraph_spec() => {
   ],
   children: ["label", "content", "node", "edge", "subgraph", "style-rule",
     "class-assignment", "style-assignment", "interaction", "edge-property",
+    "dot-attr-statement", "dot-assignment", "dot-edge-statement",
     "diagnostics", "diagnostic"],
   open_children: false, scalar_children: false
 }
@@ -158,6 +160,41 @@ fn metadata_spec(value_tag) {
   else { null }
 }
 
+fn dot_source_spec(value_tag) {
+  if (value_tag == "dot-attr-statement") {
+    {attrs: [*common_attrs(), attr("target-kind", "text", true,
+      ["graph", "node", "edge"])], children: ["properties"],
+      open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "dot-assignment") {
+    {attrs: [*common_attrs(), attr("name", "text", true), attr("value", "text", true),
+      attr("name-source-kind", "text"), attr("value-source-kind", "text")], children: [],
+      open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "dot-edge-statement") {
+    {attrs: [*common_attrs(), attr("id", "text", true)],
+      children: ["dot-endpoint", "properties"], open_children: false,
+      scalar_children: false}
+  }
+  else if (value_tag == "dot-endpoint") {
+    {attrs: [*common_attrs(), attr("kind", "text", true, ["node", "subgraph"]),
+      attr("id", "text"), attr("source-kind", "text"), attr("port", "text"),
+      attr("compass", "text"), attr("operator", "text", false, ["->", "--"])],
+      children: ["subgraph"], open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "properties") {
+    {attrs: [*common_attrs(), attr("namespace", "text", true),
+      attr("source-list-index", "int")], children: ["property"],
+      open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "property") {
+    {attrs: [*common_attrs(), attr("name", "text", true), attr("value", "text", true),
+      attr("name-source-kind", "text"), attr("value-source-kind", "text")], children: [],
+      open_children: false, scalar_children: false}
+  }
+  else { null }
+}
+
 fn spec_for(value_tag) {
   if (value_tag == "graph") graph_spec()
   else if (value_tag == "node") node_spec()
@@ -165,6 +202,7 @@ fn spec_for(value_tag) {
   else if (value_tag == "subgraph") subgraph_spec()
   else if (value_tag == "label") label_spec()
   else if (value_tag == "port") port_spec()
+  else if (dot_source_spec(value_tag) != null) dot_source_spec(value_tag)
   else if (value_tag == "content" or value_tag == "meta" or value_tag == "defs" or
       value_tag == "constraints") {
     {attrs: common_attrs(), children: [], open_children: true, scalar_children: true}

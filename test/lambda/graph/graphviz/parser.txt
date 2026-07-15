@@ -1,0 +1,20 @@
+{
+  header: ["Graph", false, true, "source", "quoted"],
+  order: ["dot-attr-statement", "dot-attr-statement", "dot-attr-statement", "dot-edge-statement", "node", "node", "node", "dot-assignment", "subgraph"],
+  defaults: [["graph", [[["rankdir", "LR", "bare", true]], [["label", "<<B>Dense</B>>", "html", true]]]], ["node", [[["shape", "box", "bare", true], ["color", "blue", "bare", true]]]], ["edge", [[]]]],
+  nodes: [["-1.5", "numeric", null, null, [[["label", "numeric", "quoted", true]]]], ["quoted node", "quoted", null, null, [[["label", "continued line\N", "quoted", true]]]], ["ported", "bare", "record field", "w", []]],
+  edge: {
+    id: "dot-stmt-0",
+    endpoints: [["node", "a", "out", "e", null], ["subgraph", "dot-anonymous-0", null, null, "--"], ["subgraph", "cluster_x", null, null, "--"]],
+    properties: [[["label", "go\l", "quoted", true]], [["weight", "2", "numeric", true]]]
+  },
+  assignment: [["rank", "same"]],
+  schema_codes: [],
+  recovery_codes: ["dot.endpoint", "dot.attribute-value"],
+  recovered_statements: ["dot-edge-statement", "node", "dot-edge-statement", "diagnostics"],
+  ids: [["abc", "bare", null, null], ["_abc", "bare", null, null], ["a_b_c", "bare", null, null], ["a0b1c2", "bare", null, null], ["unicode_图", "bare", null, null], ["12", "numeric", null, null], ["12.", "numeric", null, null], ["12.345", "numeric", null, null], [".345", "numeric", null, null], ["-12", "numeric", null, null], ["-12.", "numeric", null, null], ["-12.345", "numeric", null, null], ["-.345", "numeric", null, null], ["string literal", "quoted", null, null], ["multi
+line", "quoted", null, null], ["concatenated", "quoted", null, null], ["multilinesconcatenated", "quoted", null, null], ["<>", "html", null, null], ["<abc>", "html", null, null], ["<<arbitrary>nested<tags<<>>>>", "html", null, null], ["<multi<
+  >lines>", "html", null, null], ["port_a", "bare", "n", null], ["port_b", "bare", "n", "w"], ["port_c", "bare", "record field", null], ["port_d", "bare", "1", "<a>"]],
+  ids_parser_codes: [],
+  ids_schema_codes: []
+}

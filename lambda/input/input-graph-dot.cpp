@@ -2,545 +2,470 @@
 #include "../../lib/str.h"
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
-#include "input-utils.hpp"
 #include "source_tracker.hpp"
 #include <string.h>
 
 using namespace lambda;
 
-// Forward declarations for internal functions
-static void skip_whitespace_and_comments(SourceTracker& tracker);
-static String* parse_identifier(InputContext& ctx);
-static String* parse_quoted_string(InputContext& ctx);
-static String* parse_attribute_value(InputContext& ctx);
-static void parse_attribute_list(InputContext& ctx, Element* element);
-static bool dot_statement_is_edge(SourceTracker& tracker);
-static bool dot_statement_is_assignment(SourceTracker& tracker);
-static bool dot_statement_is_default_attributes(SourceTracker& tracker);
-static bool parse_dot_attribute_assignment(InputContext& ctx, Element* element);
-static bool parse_dot_default_attributes(InputContext& ctx, Element* graph);
-static const int DOT_MAX_DEPTH = 256;
+static const size_t DOT_MAX_DEPTH = 256;
+static const size_t DOT_MAX_CHAIN = 4096;
+static const size_t DOT_MAX_TOKEN = 1024 * 1024;
 
-static Element* parse_node_statement(InputContext& ctx);
-static Element* parse_edge_statement(InputContext& ctx);
-static void parse_subgraph(InputContext& ctx, Element* graph, int depth = 0);
+struct DotId {
+    String* value;
+    const char* kind;
+    SourceLocation start;
+    SourceLocation end;
+};
 
-// skip whitespace, // line comments, /* */ block comments, and # line comments
-static void skip_whitespace_and_comments(SourceTracker& tracker) {
-    skip_wsc(tracker, "//", "#", true);
-}
+struct DotSubgraph {
+    Element* element;
+    String* id;
+};
 
-// read DOT identifier: [A-Za-z_][A-Za-z0-9_]*  (whitespace skipped first)
-static String* parse_identifier(InputContext& ctx) {
-    skip_whitespace_and_comments(ctx.tracker);
-    return read_graph_identifier(ctx, nullptr, true);
-}
+struct DotPort {
+    String* id;
+    String* compass;
+};
 
-// parse a double-quoted string, using the shared escape handler
-static String* parse_quoted_string(InputContext& ctx) {
-    skip_whitespace_and_comments(ctx.tracker);
-    return parse_shared_quoted_string(ctx);
-}
+struct DotParser {
+    InputContext& ctx;
+    SourceTracker& src;
+    size_t statement_index;
+    size_t anonymous_index;
 
-// Parse attribute value (identifier or quoted string)
-static String* parse_attribute_value(InputContext& ctx) {
-    SourceTracker& tracker = ctx.tracker;
+    DotParser(InputContext& context)
+        : ctx(context), src(context.tracker), statement_index(0), anonymous_index(0) {}
 
-    skip_whitespace_and_comments(tracker);
+    void skip() { skip_wsc(src, "//", "#", true); }
 
-    if (!tracker.atEnd() && tracker.current() == '"') {
-        return parse_quoted_string(ctx);
-    } else {
-        return parse_identifier(ctx);
-    }
-}
-
-static const char* dot_skip_ascii_space(const char* pos) {
-    while (*pos && (*pos == ' ' || *pos == '\t' || *pos == '\n' || *pos == '\r')) {
-        pos++;
-    }
-    return pos;
-}
-
-static const char* dot_skip_statement_id(const char* pos) {
-    if (*pos == '"') {
-        pos++;
-        while (*pos && *pos != '"') {
-            if (*pos == '\\' && pos[1]) pos++;
-            pos++;
-        }
-        if (*pos == '"') pos++;
-        return pos;
-    }
-    if (!(str_char_is_alpha(*pos) || *pos == '_')) {
-        return pos;
-    }
-    while (*pos && (str_char_is_alnum(*pos) || *pos == '_')) {
-        pos++;
-    }
-    return pos;
-}
-
-static bool dot_statement_is_edge(SourceTracker& tracker) {
-    const char* lookahead_pos = dot_skip_statement_id(tracker.rest());
-    lookahead_pos = dot_skip_ascii_space(lookahead_pos);
-    return *lookahead_pos == '-' && (lookahead_pos[1] == '>' || lookahead_pos[1] == '-');
-}
-
-static bool dot_statement_is_assignment(SourceTracker& tracker) {
-    const char* lookahead_pos = dot_skip_statement_id(tracker.rest());
-    lookahead_pos = dot_skip_ascii_space(lookahead_pos);
-    return *lookahead_pos == '=';
-}
-
-static bool dot_statement_is_default_attributes(SourceTracker& tracker) {
-    const char* start = tracker.rest();
-    const char* after_id = dot_skip_statement_id(start);
-    size_t id_len = (size_t)(after_id - start);
-    if (id_len != 4 && id_len != 5) return false;
-    bool is_default_scope =
-        (id_len == 4 && (strncmp(start, "node", 4) == 0 || strncmp(start, "edge", 4) == 0)) ||
-        (id_len == 5 && strncmp(start, "graph", 5) == 0);
-    if (!is_default_scope) return false;
-    after_id = dot_skip_ascii_space(after_id);
-    return *after_id == '[';
-}
-
-static bool parse_dot_attribute_assignment(InputContext& ctx, Element* element) {
-    String* attr_name = parse_identifier(ctx);
-    if (!attr_name) {
-        attr_name = parse_quoted_string(ctx);
-    }
-    if (!attr_name) {
-        ctx.addError(ctx.tracker.location(), "Expected graph attribute name");
-        return false;
+    static bool id_start(char c) {
+        return str_char_is_alpha(c) || c == '_' || (unsigned char)c >= 0x80;
     }
 
-    skip_whitespace_and_comments(ctx.tracker);
-    if (ctx.tracker.atEnd() || ctx.tracker.current() != '=') {
-        ctx.addError(ctx.tracker.location(), "Expected '=' after graph attribute name");
-        return false;
-    }
-    ctx.tracker.advance();
-
-    String* attr_value = parse_attribute_value(ctx);
-    if (!attr_value) {
-        ctx.addError(ctx.tracker.location(), "Expected graph attribute value");
-        return false;
-    }
-    add_graph_attribute(ctx.input(), element, attr_name->chars, attr_value->chars);
-    return true;
-}
-
-static bool parse_dot_default_attributes(InputContext& ctx, Element* graph) {
-    String* scope = parse_identifier(ctx);
-    if (!scope) {
-        ctx.addError(ctx.tracker.location(), "Expected DOT default attribute scope");
-        return false;
+    static bool id_char(char c) {
+        return id_start(c) || str_char_is_digit(c);
     }
 
-    MarkBuilder builder(ctx.input());
-    ElementBuilder defaults = builder.element("defaults");
-    defaults.attr("scope", scope->chars);
-    Element* defaults_el = defaults.final().element;
-
-    // DOT default-attribute statements are not nodes; representing them
-    // separately avoids corrupting the pooled node element shape.
-    parse_attribute_list(ctx, defaults_el);
-    add_node_to_graph(ctx.input(), graph, defaults_el);
-    return true;
-}
-
-// Parse attribute list [attr1=value1, attr2=value2, ...]
-static void parse_attribute_list(InputContext& ctx, Element* element) {
-    SourceTracker& tracker = ctx.tracker;
-
-    skip_whitespace_and_comments(tracker);
-
-    if (tracker.atEnd() || tracker.current() != '[') {
-        return;
+    bool at_keyword(const char* word) {
+        skip();
+        size_t length = strlen(word);
+        return src.remaining() >= length && str_ieq_const(src.rest(), length, word) &&
+            !id_char(src.peek(length));
     }
 
-    tracker.advance(); // skip [
-
-    while (!tracker.atEnd() && tracker.current() != ']') {
-        skip_whitespace_and_comments(tracker);
-
-        if (tracker.current() == ']') break;
-
-        // parse attribute name
-        String* attr_name = parse_identifier(ctx);
-        if (!attr_name) {
-            ctx.addError(tracker.location(), "Expected attribute name");
-            break;
-        }
-
-        skip_whitespace_and_comments(tracker);
-
-        // expect =
-        if (tracker.atEnd() || tracker.current() != '=') {
-            ctx.addError(tracker.location(), "Expected '=' after attribute name");
-            break;
-        }
-        tracker.advance();
-
-        skip_whitespace_and_comments(tracker);
-
-        // parse attribute value
-        String* attr_value = parse_attribute_value(ctx);
-        if (!attr_value) {
-            ctx.addError(tracker.location(), "Expected attribute value");
-            break;
-        }
-
-        // add attribute to element
-        add_graph_attribute(ctx.input(), element, attr_name->chars, attr_value->chars);
-
-        skip_whitespace_and_comments(tracker);
-
-        // skip comma if present
-        if (!tracker.atEnd() && tracker.current() == ',') {
-            tracker.advance();
-        }
+    bool keyword(const char* word) {
+        if (!at_keyword(word)) return false;
+        src.advance(strlen(word));
+        return true;
     }
 
-    if (!tracker.atEnd() && tracker.current() == ']') {
-        tracker.advance(); // skip ]
-    } else {
-        ctx.addError(tracker.location(), "Expected ']' to close attribute list");
-    }
-}
-
-// Parse node statement: node_id [attributes]
-static Element* parse_node_statement(InputContext& ctx) {
-    SourceTracker& tracker = ctx.tracker;
-
-    skip_whitespace_and_comments(tracker);
-
-    // parse node ID
-    String* node_id = parse_identifier(ctx);
-    if (!node_id) {
-        node_id = parse_quoted_string(ctx);
-    }
-    if (!node_id) {
-        ctx.addError(tracker.location(), "Expected node identifier");
-        return nullptr;
+    bool take(char c) {
+        skip();
+        if (src.atEnd() || src.current() != c) return false;
+        src.advance();
+        return true;
     }
 
-    // create node element
-    Element* node = create_node_element(ctx.input(), node_id->chars, node_id->chars);
-
-    // parse optional attributes
-    parse_attribute_list(ctx, node);
-
-    return node;
-}
-
-// Parse edge statement: node1 -> node2 [attributes] or node1 -- node2 [attributes]
-static Element* parse_edge_statement(InputContext& ctx) {
-    SourceTracker& tracker = ctx.tracker;
-
-    skip_whitespace_and_comments(tracker);
-
-    // parse from node
-    String* from_id = parse_identifier(ctx);
-    if (!from_id) {
-        from_id = parse_quoted_string(ctx);
-    }
-    if (!from_id) {
-        ctx.addError(tracker.location(), "Expected source node identifier for edge");
-        return nullptr;
+    void error(const SourceLocation& location, const char* code, const char* message) {
+        ctx.addErrorCode(location, code, "%s", message);
     }
 
-    skip_whitespace_and_comments(tracker);
-
-    // parse edge operator (-> or --)
-    bool is_directed = false;
-    if (tracker.atEnd() || tracker.current() != '-') {
-        ctx.addError(tracker.location(), "Expected edge operator (-> or --)");
-        return nullptr;
+    String* generated_id(const char* prefix, size_t value) {
+        stringbuf_reset(ctx.sb);
+        stringbuf_append_str(ctx.sb, prefix);
+        stringbuf_append_format(ctx.sb, "%zu", value);
+        return ctx.builder.createString(ctx.sb->str->chars, ctx.sb->length);
     }
 
-    tracker.advance(); // skip first -
+    DotId id() {
+        skip();
+        DotId result = {nullptr, nullptr, src.location(), src.location()};
+        if (src.atEnd()) return result;
+        const char* start = src.rest();
+        char current = src.current();
 
-    if (tracker.atEnd()) {
-        ctx.addError(tracker.location(), "Incomplete edge operator");
-        return nullptr;
-    }
-
-    char next = tracker.current();
-    if (next == '>') {
-        tracker.advance();
-        is_directed = true;
-    } else if (next == '-') {
-        tracker.advance();
-        is_directed = false;
-    } else {
-        ctx.addError(tracker.location(), "Invalid edge operator, expected -> or --");
-        return nullptr;
-    }
-
-    skip_whitespace_and_comments(tracker);
-
-    // parse to node
-    String* to_id = parse_identifier(ctx);
-    if (!to_id) {
-        to_id = parse_quoted_string(ctx);
-    }
-    if (!to_id) {
-        ctx.addError(tracker.location(), "Expected target node identifier for edge");
-        return nullptr;
-    }
-
-    // create edge element
-    Element* edge = create_edge_element(ctx.input(), from_id->chars, to_id->chars, nullptr);
-
-    // add direction attribute with CSS-aligned naming
-    add_graph_attribute(ctx.input(), edge, "direction", is_directed ? "forward" : "none");
-
-    // parse optional attributes
-    parse_attribute_list(ctx, edge);
-
-    return edge;
-}
-
-// Parse subgraph or cluster
-static void parse_subgraph(InputContext& ctx, Element* graph, int depth) {
-    SourceTracker& tracker = ctx.tracker;
-
-    if (depth >= DOT_MAX_DEPTH) {
-        ctx.addError(tracker.location(), "Maximum DOT subgraph nesting depth (%d) exceeded", DOT_MAX_DEPTH);
-        return;
-    }
-
-    skip_whitespace_and_comments(tracker);
-
-    // look for "subgraph" or "cluster"
-    if (tracker.match("subgraph")) {
-        tracker.advance(8);
-    } else if (tracker.match("cluster")) {
-        tracker.advance(7);
-    } else {
-        return;
-    }
-
-    skip_whitespace_and_comments(tracker);
-
-    // parse optional subgraph name
-    String* subgraph_id = parse_identifier(ctx);
-    if (!subgraph_id) {
-        subgraph_id = parse_quoted_string(ctx);
-    }
-
-    // default ID if none provided
-    if (!subgraph_id) {
-        subgraph_id = ctx.builder.createString("subgraph");
-    }
-
-    skip_whitespace_and_comments(tracker);
-
-    // expect {
-    if (tracker.atEnd() || tracker.current() != '{') {
-        ctx.addError(tracker.location(), "Expected '{' to start subgraph body");
-        return;
-    }
-    tracker.advance();
-
-    // create cluster element
-    Element* cluster = create_cluster_element(ctx.input(), subgraph_id->chars, subgraph_id->chars);
-
-    // parse statements within subgraph
-    while (!tracker.atEnd() && tracker.current() != '}') {
-        skip_whitespace_and_comments(tracker);
-
-        if (tracker.current() == '}') {
-            break;
-        }
-
-        // DOT lookahead must not consume parser state; consuming the first id
-        // here made subgraph nodes restart at the following ';' or '=' token.
-        SourceLocation checkpoint = tracker.location();
-
-        if (dot_statement_is_default_attributes(tracker)) {
-            parse_dot_default_attributes(ctx, cluster);
-        } else if (dot_statement_is_assignment(tracker)) {
-            parse_dot_attribute_assignment(ctx, cluster);
+        if (current == '"') {
+            stringbuf_reset(ctx.sb);
+            do {
+                src.advance();
+                while (!src.atEnd() && src.current() != '"') {
+                    if (src.current() != '\\') {
+                        stringbuf_append_char(ctx.sb, src.current());
+                        src.advance();
+                        continue;
+                    }
+                    src.advance();
+                    if (src.atEnd()) break;
+                    if (src.current() == '\n' || src.current() == '\r') {
+                        char newline = src.current();
+                        src.advance();
+                        if (newline == '\r' && src.current() == '\n') src.advance();
+                    } else if (src.current() == '"') {
+                        stringbuf_append_char(ctx.sb, '"');
+                        src.advance();
+                    } else {
+                        // Graphviz label escapes are interpreted after parsing.
+                        stringbuf_append_char(ctx.sb, '\\');
+                        stringbuf_append_char(ctx.sb, src.current());
+                        src.advance();
+                    }
+                }
+                if (src.atEnd()) {
+                    error(result.start, "dot.unterminated-string", "Unterminated quoted DOT ID");
+                    return result;
+                }
+                src.advance();
+                skip();
+                if (src.current() != '+') break;
+                src.advance();
+                skip();
+                if (src.current() != '"') {
+                    error(src.location(), "dot.string-concat", "Expected quoted ID after '+'");
+                    break;
+                }
+            } while (!src.atEnd());
+            result.value = ctx.builder.createString(ctx.sb->str->chars, ctx.sb->length);
+            result.kind = "quoted";
+        } else if (current == '<') {
+            size_t depth = 0;
+            char quote = 0;
+            do {
+                current = src.current();
+                if (quote) {
+                    if (current == quote) quote = 0;
+                } else if (current == '"' || current == '\'') {
+                    quote = current;
+                } else if (current == '<') {
+                    depth++;
+                } else if (current == '>') {
+                    depth--;
+                }
+                src.advance();
+            } while (!src.atEnd() && depth > 0 && src.offset() - result.start.offset <= DOT_MAX_TOKEN);
+            if (depth > 0) {
+                error(result.start, "dot.unterminated-html-id", "Unterminated HTML-like DOT ID");
+                return result;
+            }
+            result.value = ctx.builder.createString(start, src.rest() - start);
+            result.kind = "html";
         } else {
-            bool is_edge = dot_statement_is_edge(tracker);
-            if (is_edge) {
-                // this is an edge statement
-                Element* edge = parse_edge_statement(ctx);
-                if (edge) {
-                    add_edge_to_graph(ctx.input(), cluster, edge);
+            // DOT permits -.digits; recognizing only '-' followed by a digit
+            // split the remaining source into malformed statements.
+            bool numeric = str_char_is_digit(current) ||
+                (current == '.' && str_char_is_digit(src.peek(1))) ||
+                (current == '-' && (str_char_is_digit(src.peek(1)) ||
+                    (src.peek(1) == '.' && str_char_is_digit(src.peek(2)))));
+            if (numeric) {
+                if (current == '-') src.advance();
+                while (str_char_is_digit(src.current())) src.advance();
+                if (src.current() == '.') {
+                    src.advance();
+                    while (str_char_is_digit(src.current())) src.advance();
                 }
+                result.kind = "numeric";
+            } else if (id_start(current)) {
+                do src.advance(); while (!src.atEnd() && id_char(src.current()));
+                result.kind = "bare";
             } else {
-                // this is a node statement
-                Element* node = parse_node_statement(ctx);
-                if (node) {
-                    add_node_to_graph(ctx.input(), cluster, node);
+                return result;
+            }
+            result.value = ctx.builder.createString(start, src.rest() - start);
+        }
+        result.end = src.location();
+        if (result.end.offset - result.start.offset > DOT_MAX_TOKEN) {
+            error(result.start, "dot.token-limit", "DOT ID exceeds the parser token limit");
+            result.value = nullptr;
+        }
+        return result;
+    }
+
+    DotPort port() {
+        DotPort result = {nullptr, nullptr};
+        if (!take(':')) return result;
+        DotId first = id();
+        if (!first.value) {
+            error(src.location(), "dot.port", "Expected port ID after ':'");
+            return result;
+        }
+        result.id = first.value;
+        if (take(':')) {
+            DotId compass = id();
+            if (compass.value) result.compass = compass.value;
+            else error(src.location(), "dot.compass", "Expected compass point after ':'");
+        }
+        return result;
+    }
+
+    static void add_port(ElementBuilder& endpoint, DotPort value) {
+        if (value.id) endpoint.attr("port", value.id->chars);
+        if (value.compass) endpoint.attr("compass", value.compass->chars);
+    }
+
+    Element* endpoint(DotId node) {
+        ElementBuilder value = ctx.builder.element("dot-endpoint");
+        value.attr("kind", "node").attr("id", node.value->chars)
+            .attr("source-kind", node.kind);
+        add_port(value, port());
+        Element* result = value.final().element;
+        graph_set_source_span(ctx, result, node.start, src.location());
+        return result;
+    }
+
+    Element* endpoint(DotSubgraph subgraph, const SourceLocation& start) {
+        ElementBuilder value = ctx.builder.element("dot-endpoint");
+        value.attr("kind", "subgraph");
+        if (subgraph.id) value.attr("id", subgraph.id->chars);
+        Element* result = value.final().element;
+        add_node_to_graph(ctx.input(), result, subgraph.element);
+        graph_set_source_span(ctx, result, start, src.location());
+        return result;
+    }
+
+    bool edge_op(String** spelling = nullptr) {
+        skip();
+        if (!(src.match("->") || src.match("--"))) return false;
+        if (spelling) *spelling = ctx.builder.createString(src.rest(), 2);
+        src.advance(2);
+        return true;
+    }
+
+    void attr_lists(Element* owner) {
+        size_t list_index = 0;
+        while (true) {
+            skip();
+            if (src.current() != '[') return;
+            SourceLocation list_start = src.location();
+            src.advance();
+            Element* properties = ctx.builder.element("properties")
+                .attr("namespace", "graphviz")
+                .attr("source-list-index", (int64_t)list_index++)
+                .final().element;
+            while (!src.atEnd()) {
+                skip();
+                if (take(']')) break;
+                SourceLocation property_start = src.location();
+                DotId name = id();
+                if (!name.value) {
+                    error(property_start, "dot.attribute-name", "Expected DOT attribute name");
+                    recover(']');
+                    take(']');
+                    break;
                 }
+                if (!take('=')) {
+                    error(src.location(), "dot.attribute-equals", "Expected '=' after DOT attribute name");
+                    recover(']');
+                    take(']');
+                    break;
+                }
+                DotId value = id();
+                if (!value.value) {
+                    error(src.location(), "dot.attribute-value", "Expected DOT attribute value");
+                    recover(']');
+                    take(']');
+                    break;
+                }
+                Element* property = ctx.builder.element("property")
+                    .attr("name", name.value->chars).attr("value", value.value->chars)
+                    .attr("name-source-kind", name.kind).attr("value-source-kind", value.kind)
+                    .final().element;
+                graph_set_source_span(ctx, property, property_start, value.end);
+                add_node_to_graph(ctx.input(), properties, property);
+                skip();
+                if (src.current() == ',' || src.current() == ';') src.advance();
+            }
+            graph_set_source_span(ctx, properties, list_start, src.location());
+            add_node_to_graph(ctx.input(), owner, properties);
+        }
+    }
+
+    void recover(char close = '}') {
+        while (!src.atEnd() && src.current() != ';' && src.current() != close) src.advance();
+    }
+
+    DotSubgraph subgraph(size_t depth) {
+        SourceLocation start = src.location();
+        bool named_form = keyword("subgraph");
+        DotId name = {nullptr, nullptr, src.location(), src.location()};
+        skip();
+        if (named_form && src.current() != '{') name = id();
+        if (!take('{')) {
+            error(src.location(), "dot.subgraph-open", "Expected '{' to start DOT subgraph");
+            return {nullptr, nullptr};
+        }
+        if (depth >= DOT_MAX_DEPTH) {
+            error(start, "dot.depth-limit", "DOT subgraph nesting limit exceeded");
+            recover('}');
+        }
+        String* stable_id = name.value ? name.value : generated_id("dot-anonymous-", anonymous_index++);
+        ElementBuilder builder = ctx.builder.element("subgraph");
+        builder.attr("id", stable_id->chars).attr("role", "scope")
+            .attr("source-kind", name.value ? name.kind : "anonymous");
+        Element* result = builder.final().element;
+        if (depth < DOT_MAX_DEPTH) statements(result, depth + 1);
+        if (!take('}')) error(src.location(), "dot.subgraph-close", "Expected '}' to close DOT subgraph");
+        graph_set_source_span(ctx, result, start, src.location());
+        return {result, stable_id};
+    }
+
+    Element* next_endpoint(size_t depth) {
+        skip();
+        SourceLocation start = src.location();
+        if (at_keyword("subgraph") || src.current() == '{') {
+            DotSubgraph group = subgraph(depth);
+            return group.element ? endpoint(group, start) : nullptr;
+        }
+        DotId node = id();
+        if (!node.value) {
+            error(start, "dot.endpoint", "Expected node or subgraph edge endpoint");
+            return nullptr;
+        }
+        return endpoint(node);
+    }
+
+    void edge(Element* parent, Element* first, const SourceLocation& start, size_t depth) {
+        Element* statement = ctx.builder.element("dot-edge-statement")
+            .attr("id", generated_id("dot-stmt-", statement_index++)->chars)
+            .final().element;
+        add_node_to_graph(ctx.input(), statement, first);
+        size_t count = 1;
+        String* op = nullptr;
+        while (edge_op(&op)) {
+            Element* next = next_endpoint(depth);
+            if (!next) break;
+            add_graph_attribute(ctx.input(), next, "operator", op->chars);
+            add_node_to_graph(ctx.input(), statement, next);
+            if (++count > DOT_MAX_CHAIN) {
+                error(start, "dot.chain-limit", "DOT edge chain limit exceeded");
+                break;
             }
         }
+        attr_lists(statement);
+        graph_set_source_span(ctx, statement, start, src.location());
+        add_node_to_graph(ctx.input(), parent, statement);
+    }
 
-        skip_whitespace_and_comments(tracker);
-
-        // skip optional semicolon
-        if (!tracker.atEnd() && tracker.current() == ';') {
-            tracker.advance();
+    void statement(Element* parent, size_t depth) {
+        skip();
+        SourceLocation start = src.location();
+        if (at_keyword("subgraph") || src.current() == '{') {
+            DotSubgraph group = subgraph(depth);
+            if (!group.element) return;
+            skip();
+            if (src.match("->") || src.match("--")) edge(parent, endpoint(group, start), start, depth);
+            else add_node_to_graph(ctx.input(), parent, group.element);
+            return;
         }
 
-        // prevent infinite loop
-        if (tracker.location().offset == checkpoint.offset) {
-            tracker.advance();
-            if (ctx.shouldStopParsing()) break;
+        DotId first = id();
+        if (!first.value) {
+            error(start, "dot.statement", "Expected DOT statement");
+            recover();
+            return;
+        }
+        skip();
+        bool scope = first.kind && strcmp(first.kind, "bare") == 0 &&
+            (str_ieq_const(first.value->chars, first.value->len, "graph") ||
+             str_ieq_const(first.value->chars, first.value->len, "node") ||
+             str_ieq_const(first.value->chars, first.value->len, "edge"));
+        if (scope && src.current() == '[') {
+            const char* target = str_ieq_const(first.value->chars, first.value->len, "graph")
+                ? "graph" : (str_ieq_const(first.value->chars, first.value->len, "node")
+                    ? "node" : "edge");
+            Element* attrs = ctx.builder.element("dot-attr-statement")
+                .attr("target-kind", target).final().element;
+            attr_lists(attrs);
+            graph_set_source_span(ctx, attrs, start, src.location());
+            add_node_to_graph(ctx.input(), parent, attrs);
+            return;
+        }
+        if (take('=')) {
+            DotId value = id();
+            if (!value.value) error(src.location(), "dot.assignment-value", "Expected DOT assignment value");
+            ElementBuilder assignment = ctx.builder.element("dot-assignment");
+            assignment.attr("name", first.value->chars).attr("name-source-kind", first.kind);
+            if (value.value) assignment.attr("value", value.value->chars)
+                .attr("value-source-kind", value.kind);
+            Element* result = assignment.final().element;
+            graph_set_source_span(ctx, result, start, src.location());
+            add_node_to_graph(ctx.input(), parent, result);
+            return;
+        }
+        ElementBuilder endpoint_builder = ctx.builder.element("dot-endpoint");
+        endpoint_builder.attr("kind", "node").attr("id", first.value->chars)
+            .attr("source-kind", first.kind);
+        DotPort node_port = port();
+        add_port(endpoint_builder, node_port);
+        Element* first_endpoint = endpoint_builder.final().element;
+        graph_set_source_span(ctx, first_endpoint, first.start, src.location());
+        skip();
+        if (src.match("->") || src.match("--")) {
+            edge(parent, first_endpoint, start, depth);
+            return;
+        }
+        ElementBuilder node_builder = ctx.builder.element("node");
+        node_builder.attr("id", first.value->chars).attr("source-kind", first.kind);
+        add_port(node_builder, node_port);
+        Element* node = node_builder.final().element;
+        attr_lists(node);
+        graph_set_source_span(ctx, node, start, src.location());
+        add_node_to_graph(ctx.input(), parent, node);
+    }
+
+    void statements(Element* parent, size_t depth) {
+        while (!src.atEnd()) {
+            skip();
+            while (src.current() == ';') { src.advance(); skip(); }
+            if (src.atEnd() || src.current() == '}') return;
+            size_t before = src.offset();
+            statement(parent, depth);
+            skip();
+            if (src.current() == ';') src.advance();
+            if (src.offset() == before) {
+                // Recovery must always consume input or malformed statements loop forever.
+                error(src.location(), "dot.no-progress", "Could not advance past DOT statement");
+                src.advance();
+            }
+            if (ctx.shouldStopParsing()) return;
         }
     }
 
-    if (!tracker.atEnd() && tracker.current() == '}') {
-        tracker.advance(); // skip }
-    } else {
-        ctx.addError(tracker.location(), "Expected '}' to close subgraph");
+    Element* graph() {
+        skip();
+        SourceLocation start = src.location();
+        bool strict = keyword("strict");
+        bool directed;
+        if (keyword("digraph")) directed = true;
+        else if (keyword("graph")) directed = false;
+        else {
+            error(src.location(), "dot.graph-kind", "Expected 'graph' or 'digraph'");
+            directed = true;
+        }
+        skip();
+        DotId name = {nullptr, nullptr, src.location(), src.location()};
+        if (src.current() != '{') name = id();
+        ElementBuilder builder = ctx.builder.element("graph");
+        builder.attr("type", directed ? "directed" : "undirected")
+            .attr("layout", "dot").attr("flavor", "dot").attr("version", "1")
+            .attr("ir-stage", "source").attr("directed", directed).attr("strict", strict);
+        if (name.value) builder.attr("id", name.value->chars).attr("source-kind", name.kind);
+        Element* result = builder.final().element;
+        if (!take('{')) error(src.location(), "dot.graph-open", "Expected '{' to start DOT graph");
+        else statements(result, 0);
+        if (!take('}')) error(src.location(), "dot.graph-close", "Expected '}' to close DOT graph");
+        graph_set_source_span(ctx, result, start, src.location());
+        graph_append_diagnostics(ctx, result, "dot.syntax");
+        return result;
     }
+};
 
-    // add cluster to graph
-    add_cluster_to_graph(ctx.input(), graph, cluster);
-}
-
-// Main DOT parser function
 void parse_graph_dot(Input* input, const char* dot_string) {
     if (!dot_string || !*dot_string) {
         input->root = {.item = ITEM_NULL};
         return;
     }
     InputContext ctx(input, dot_string);
-    SourceTracker& tracker = ctx.tracker;
-
-    skip_whitespace_and_comments(tracker);
-
-    // parse graph type (strict? (di)graph name? { ... })
-    bool is_strict = false;
-    bool is_directed = false;
-    String* graph_name = nullptr;
-
-    // check for "strict"
-    if (tracker.match("strict") && !tracker.atEnd() &&
-        (tracker.peek(6) == ' ' || tracker.peek(6) == '\t' || tracker.peek(6) == '\n')) {
-        is_strict = true;
-        tracker.advance(6);
-        skip_whitespace_and_comments(tracker);
-    }
-
-    // check for "digraph" or "graph"
-    if (tracker.match("digraph") && !tracker.atEnd() &&
-        (tracker.peek(7) == ' ' || tracker.peek(7) == '\t' || tracker.peek(7) == '\n' ||
-         tracker.peek(7) == '{')) {
-        is_directed = true;
-        tracker.advance(7);
-    } else if (tracker.match("graph") && !tracker.atEnd() &&
-               (tracker.peek(5) == ' ' || tracker.peek(5) == '\t' || tracker.peek(5) == '\n' ||
-                tracker.peek(5) == '{')) {
-        is_directed = false;
-        tracker.advance(5);
-    } else {
-        ctx.addError(tracker.location(), "Expected 'graph' or 'digraph' keyword");
-
-        return;
-    }
-
-    skip_whitespace_and_comments(tracker);
-
-    // parse optional graph name
-    graph_name = parse_identifier(ctx);
-    if (!graph_name) {
-        graph_name = parse_quoted_string(ctx);
-    }
-
-    skip_whitespace_and_comments(tracker);
-
-    // expect {
-    if (tracker.atEnd() || tracker.current() != '{') {
-        ctx.addError(tracker.location(), "Expected '{' to start graph body");
-
-        return;
-    }
-    tracker.advance();
-
-    // create main graph element
-    Element* graph = create_graph_element(input,
-        is_directed ? "directed" : "undirected",
-        "dot",
-        "dot");
-
-    // add graph attributes with CSS-aligned naming
-    if (graph_name) {
-        add_graph_attribute(input, graph, "name", graph_name->chars);
-    }
-    if (is_strict) {
-        add_graph_attribute(input, graph, "strict", "true");
-    }
-    // add the directed attribute as a boolean
-    add_graph_attribute(input, graph, "directed", is_directed ? "true" : "false");
-
-    // parse graph statements
-    while (!tracker.atEnd() && tracker.current() != '}') {
-        skip_whitespace_and_comments(tracker);
-
-        if (tracker.current() == '}') {
-            break;
-        }
-
-        // check for subgraph
-        if (tracker.match("subgraph") || tracker.match("cluster")) {
-            parse_subgraph(ctx, graph);
-            continue;
-        }
-
-        // try to parse node or edge statement
-        SourceLocation checkpoint = tracker.location();
-
-        if (dot_statement_is_default_attributes(tracker)) {
-            parse_dot_default_attributes(ctx, graph);
-        } else if (dot_statement_is_assignment(tracker)) {
-            parse_dot_attribute_assignment(ctx, graph);
-        } else if (dot_statement_is_edge(tracker)) {
-            // this is an edge statement
-            Element* edge = parse_edge_statement(ctx);
-            if (edge) {
-                add_edge_to_graph(input, graph, edge);
-            }
-        } else {
-            // this is a node statement
-            Element* node = parse_node_statement(ctx);
-            if (node) {
-                add_node_to_graph(input, graph, node);
-            }
-        }
-
-        skip_whitespace_and_comments(tracker);
-
-
-        // skip optional semicolon
-        if (!tracker.atEnd() && tracker.current() == ';') {
-            tracker.advance();
-        }
-
-        // prevent infinite loop
-        if (tracker.location().offset == checkpoint.offset) {
-            tracker.advance();
-            if (ctx.shouldStopParsing()) break;
-        }
-    }
-
-    if (!tracker.atEnd() && tracker.current() == '}') {
-        tracker.advance(); // skip }
-    } else {
-        ctx.addError(tracker.location(), "Expected '}' to close graph");
-    }
-
-    // set result
-    input->root = {.element = graph};
-
-    if (ctx.hasErrors()) {
-        ctx.logErrors();
-    }
+    DotParser parser(ctx);
+    input->root = {.element = parser.graph()};
+    if (ctx.hasErrors()) ctx.logErrors();
 }

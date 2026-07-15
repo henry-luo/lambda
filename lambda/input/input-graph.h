@@ -63,6 +63,13 @@ static inline String* read_graph_identifier(lambda::InputContext& ctx,
     return ctx.builder.createString(start, len);
 }
 
+void graph_set_source_span(lambda::InputContext& ctx, Element* element,
+                           const lambda::SourceLocation& start,
+                           const lambda::SourceLocation& end,
+                           bool preserve_existing = false);
+void graph_append_diagnostics(lambda::InputContext& ctx, Element* graph,
+                              const char* default_code);
+
 extern "C" {
 #endif
 

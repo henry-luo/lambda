@@ -48,3 +48,22 @@ to be missing its body and gives no indication that parser state or recovery
 around the preceding expression may be involved. The parser should accept the
 block form consistently, or report the token that left the preceding function
 expression incomplete.
+
+## Comprehension binding named `list` resolves incorrectly
+
+While adding the Graphviz source-Mark parser fixture, a nested comprehension
+using `for (list in values)` produced empty nested results even though `list`
+was an element with children. The equivalent code worked after renaming the
+binding to `group`:
+
+```lambda
+// unexpectedly empty inner arrays, with no diagnostic
+[for (list in property_lists) [for (entry in model.element_children(list)) entry]]
+
+// expected result
+[for (group in property_lists) [for (entry in model.element_children(group)) entry]]
+```
+
+`list` appears to collide with a built-in/type name during nested expression
+resolution. The compiler should either treat the lexical binding normally or
+reject the reserved name with a clear diagnostic.
