@@ -2581,7 +2581,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
     if (block->font && block->font->font_size > 0) {
-        strbuf_append_format(buf, "\"size\": %.2f,\n", block->font->font_size);
+        // computed font sizes retain fractional CSS-unit precision across display types.
+        strbuf_append_format(buf, "\"size\": %g,\n", block->font->font_size);
     } else {
         // CSS default font-size is 16px (medium)
         strbuf_append_str(buf, "\"size\": 16,\n");

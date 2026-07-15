@@ -15,7 +15,7 @@
   }
   <html flags: ['hover', 'focus-within'], scroll: {
       y: 2280.265625,
-      max_y: 4318.765625
+      max_y: 4315.4658203125
     }
     <body index: 2, flags: ['hover', 'focus-within']
       <div index: 23, flags: ['hover', 'focus-within']

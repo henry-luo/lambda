@@ -2726,22 +2726,33 @@ static void recompute_inline_descendant_bounds(View* view, FontHandle* fallback_
 // width. During initial layout, these children stretched to the full available width
 // (before the parent shrank). This function corrects their widths and repositions
 struct DeferredInlineLineRun {
+    int line_number;
     float y;
     float min_x;
     float max_x;
     bool used;
 };
 
-static int find_deferred_line_run(DeferredInlineLineRun* runs, int* run_count, float y) {
+static bool deferred_line_run_matches(const DeferredInlineLineRun* run,
+                                      int line_number, float y) {
     const float y_tolerance = 1.0f;
+    if (line_number >= 0 || run->line_number >= 0) {
+        return line_number >= 0 && run->line_number == line_number;
+    }
+    return fabsf(run->y - y) <= y_tolerance;
+}
+
+static int find_deferred_line_run(DeferredInlineLineRun* runs, int* run_count,
+                                  int line_number, float y) {
     for (int i = 0; i < *run_count; i++) {
-        if (fabsf(runs[i].y - y) <= y_tolerance) {
+        if (deferred_line_run_matches(&runs[i], line_number, y)) {
             return i;
         }
     }
     const int max_runs = 256;
     if (*run_count >= max_runs) return -1;
     int index = *run_count;
+    runs[index].line_number = line_number;
     runs[index].y = y;
     runs[index].min_x = FLT_MAX;
     runs[index].max_x = -FLT_MAX;
@@ -2751,12 +2762,30 @@ static int find_deferred_line_run(DeferredInlineLineRun* runs, int* run_count, f
 }
 
 static void add_deferred_line_extent(DeferredInlineLineRun* runs, int* run_count,
-                                     float y, float min_x, float max_x) {
+                                     int line_number, float y,
+                                     float min_x, float max_x) {
     if (max_x <= min_x) return;
-    int index = find_deferred_line_run(runs, run_count, y);
+    int index = find_deferred_line_run(runs, run_count, line_number, y);
     if (index < 0) return;
     if (min_x < runs[index].min_x) runs[index].min_x = min_x;
     if (max_x > runs[index].max_x) runs[index].max_x = max_x;
+}
+
+static int first_deferred_inline_line_number(View* child) {
+    while (child) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            if (text->rect) return text->rect->line_number;
+        } else if (child->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(child);
+            int line_number = first_deferred_inline_line_number(span->first_child);
+            if (line_number >= 0) return line_number;
+        } else if (child->view_type == RDT_VIEW_INLINE_BLOCK) {
+            return child->inline_line_number;
+        }
+        child = child->next();
+    }
+    return -1;
 }
 
 static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun* runs,
@@ -2765,7 +2794,8 @@ static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                add_deferred_line_extent(runs, run_count, rect->y, rect->x,
+                add_deferred_line_extent(runs, run_count, rect->line_number,
+                                         rect->y, rect->x,
                                          rect->x + rect->width);
             }
         } else if (child->view_type == RDT_VIEW_INLINE) {
@@ -2773,7 +2803,8 @@ static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun
             if (span->width > 0.0f && span->height > 0.0f) {
                 // Deferred shrink-to-fit alignment must include inline border boxes;
                 // otherwise trailing padding is treated as free space and centered into.
-                add_deferred_line_extent(runs, run_count, span->y, span->x,
+                int line_number = first_deferred_inline_line_number(span->first_child);
+                add_deferred_line_extent(runs, run_count, line_number, span->y, span->x,
                                          span->x + span->width);
             }
             if (span->first_child) {
@@ -2782,46 +2813,53 @@ static void collect_deferred_inline_line_runs(View* child, DeferredInlineLineRun
         } else if (child->view_type == RDT_VIEW_INLINE_BLOCK ||
                    child->view_type == RDT_VIEW_BLOCK ||
                    child->view_type == RDT_VIEW_LIST_ITEM) {
-            add_deferred_line_extent(runs, run_count, child->y, child->x,
+            int line_number = child->view_type == RDT_VIEW_INLINE_BLOCK
+                ? child->inline_line_number : -1;
+            add_deferred_line_extent(runs, run_count, line_number, child->y, child->x,
                                      child->x + child->width);
         }
         child = child->next();
     }
 }
 
-static bool view_has_deferred_line_content(View* child, float line_y) {
-    const float y_tolerance = 1.0f;
+static bool view_has_deferred_line_content(View* child,
+                                           const DeferredInlineLineRun* run) {
     while (child) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                if (fabsf(rect->y - line_y) <= y_tolerance && rect->width > 0.0f) {
+                if (deferred_line_run_matches(run, rect->line_number, rect->y) &&
+                    rect->width > 0.0f) {
                     return true;
                 }
             }
         } else if (child->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(child);
-            if (span->first_child && view_has_deferred_line_content(span->first_child, line_y)) {
+            if (span->first_child &&
+                view_has_deferred_line_content(span->first_child, run)) {
                 return true;
             }
         } else if (child->view_type == RDT_VIEW_INLINE_BLOCK ||
                    child->view_type == RDT_VIEW_BLOCK ||
                    child->view_type == RDT_VIEW_LIST_ITEM) {
-            if (fabsf(child->y - line_y) <= y_tolerance) return true;
+            int line_number = child->view_type == RDT_VIEW_INLINE_BLOCK
+                ? child->inline_line_number : -1;
+            if (deferred_line_run_matches(run, line_number, child->y)) return true;
         }
         child = child->next();
     }
     return false;
 }
 
-static void shift_deferred_inline_line(View* child, float line_y, float shift) {
-    const float y_tolerance = 1.0f;
+static void shift_deferred_inline_line(View* child,
+                                       const DeferredInlineLineRun* run,
+                                       float shift) {
     while (child) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             bool shifted_rect = false;
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                if (fabsf(rect->y - line_y) <= y_tolerance) {
+                if (deferred_line_run_matches(run, rect->line_number, rect->y)) {
                     rect->x += shift;
                     shifted_rect = true;
                 }
@@ -2831,14 +2869,17 @@ static void shift_deferred_inline_line(View* child, float line_y, float shift) {
             }
         } else if (child->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(child);
-            if (span->first_child && view_has_deferred_line_content(span->first_child, line_y)) {
+            if (span->first_child &&
+                view_has_deferred_line_content(span->first_child, run)) {
                 span->x += shift;
-                shift_deferred_inline_line(span->first_child, line_y, shift);
+                shift_deferred_inline_line(span->first_child, run, shift);
             }
         } else if (child->view_type == RDT_VIEW_INLINE_BLOCK ||
                    child->view_type == RDT_VIEW_BLOCK ||
                    child->view_type == RDT_VIEW_LIST_ITEM) {
-            if (fabsf(child->y - line_y) <= y_tolerance) {
+            int line_number = child->view_type == RDT_VIEW_INLINE_BLOCK
+                ? child->inline_line_number : -1;
+            if (deferred_line_run_matches(run, line_number, child->y)) {
                 child->x += shift;
             }
         }
@@ -2869,7 +2910,9 @@ static void align_deferred_inline_line_runs(ViewElement* parent, float final_con
         }
         float shift = target_x - runs[i].min_x;
         if (fabsf(shift) > 0.5f) {
-            shift_deferred_inline_line(parent->first_placed_child(), runs[i].y, shift);
+            // Baseline-aligned atomics and text have different visual tops but
+            // share one CSS line, so deferred alignment follows line identity.
+            shift_deferred_inline_line(parent->first_placed_child(), &runs[i], shift);
         }
     }
 }
@@ -7653,6 +7696,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             } else {
                 block->x = lycon->line.advance_x;
             }
+            // Shrink-to-fit alignment must group atomic inlines with text from
+            // the same CSS line even when baseline alignment gives different y values.
+            block->inline_line_number = lycon->block.line_number;
             // Determine vertical-align: use explicit value or default to baseline
             bool has_explicit_valign = (block->in_line && block->in_line->vertical_align);
             bool is_inline_table = (display.inner == CSS_VALUE_TABLE);

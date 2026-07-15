@@ -16,12 +16,6 @@ fn children(value, wanted) => [
 
 fn first(values) => if (len(values) > 0) values[0] else null
 
-fn optional(value, key) {
-  let found = value[key];
-  // typed attribute maps omit absent keys; dynamic lookup errors mean absence here.
-  if (found is error) null else found
-}
-
 fn statement_id(value) {
   if (value.id != null) string(value.id)
   else "dot@" ++ string(if (value["source-start"] != null) value["source-start"] else 0)
@@ -342,9 +336,9 @@ fn annotation_element(kind, label, format, owner_kind, owner_id, known) {
   // Runtime map spreads become element children, so optional fonts stay explicit attributes.
   else <annotation kind: kind, label: label, 'label-format': format,
     'owner-kind': owner_kind, 'owner-id': owner_id,
-    'font-name': optional(known, "font-name"),
-    'font-size': optional(known, "font-size"),
-    'font-color': optional(known, "font-color")>
+    'font-name': model.optional(known, "font-name"),
+    'font-size': model.optional(known, "font-size"),
+    'font-color': model.optional(known, "font-color")>
 }
 
 fn node_element(entry, graph_id) {
@@ -362,12 +356,14 @@ fn node_element(entry, graph_id) {
     'polygon-distortion': known["polygon-distortion"],
     regular: known.regular, peripheries: known.peripheries,
     width: known.width, height: known.height, 'fixed-size': known["fixed-size"],
-    'fixed-shape': optional(known, "fixed-shape"),
-    'margin-x': optional(known, "margin-x"), 'margin-y': optional(known, "margin-y"),
+    'fixed-shape': model.optional(known, "fixed-shape"),
+    'margin-x': model.optional(known, "margin-x"),
+    'margin-y': model.optional(known, "margin-y"),
     fill: known.fill, stroke: known.stroke, 'stroke-width': known["stroke-width"],
-    'gradient-angle': optional(known, "gradient-angle"),
-    'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
-    'font-color': optional(known, "font-color"),
+    'gradient-angle': model.optional(known, "gradient-angle"),
+    'font-name': model.optional(known, "font-name"),
+    'font-size': model.optional(known, "font-size"),
+    'font-color': model.optional(known, "font-color"),
     group: known.group, ordering: known.ordering,
     style: known.style, 'stroke-dasharray': known["stroke-dasharray"],
     opacity: known.opacity, radius: known.radius,
@@ -391,8 +387,9 @@ fn edge_element(entry, graph_id) {
     'arrow-tail': markers.tail(known["arrow-tail"], known["arrow-direction"], entry.directed),
     'arrow-direction': known["arrow-direction"],
     'arrow-size': known["arrow-size"],
-    'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
-    'font-color': optional(known, "font-color"),
+    'font-name': model.optional(known, "font-name"),
+    'font-size': model.optional(known, "font-size"),
+    'font-color': model.optional(known, "font-color"),
     'min-length': known["min-length"], weight: known.weight,
     constraint: known.constraint, stroke: known.stroke,
     'stroke-width': known["stroke-width"], style: known.style,
@@ -580,9 +577,10 @@ fn cluster_element(scope, state, graph_id) {
   <subgraph id: scope.id, role: scope.role, 'parent-scope': scope.parent_scope,
     label: labels.graph(known.label, graph_id), 'label-format': known["label-format"],
     direction: known.direction, fill: known.fill, style: known.style,
-    'gradient-angle': optional(known, "gradient-angle"),
-    'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
-    'font-color': optional(known, "font-color"),
+    'gradient-angle': model.optional(known, "gradient-angle"),
+    'font-name': model.optional(known, "font-name"),
+    'font-size': model.optional(known, "font-size"),
+    'font-color': model.optional(known, "font-color"),
     'source-start': scope.source["source-start"], 'source-end': scope.source["source-end"],
     'source-line': scope.source["source-line"], 'source-column': scope.source["source-column"];
     let properties = properties_element(scope.properties)
@@ -614,9 +612,10 @@ fn canonical_graph(source, state) {
     'rank-sep': known["rank-sep"], 'route-mode': known["route-mode"],
     ordering: known.ordering, 'new-rank': known["new-rank"], compound: known.compound,
     fill: known.fill,
-    style: known.style, 'gradient-angle': optional(known, "gradient-angle"),
-    'font-name': optional(known, "font-name"), 'font-size': optional(known, "font-size"),
-    'font-color': optional(known, "font-color"),
+    style: known.style, 'gradient-angle': model.optional(known, "gradient-angle"),
+    'font-name': model.optional(known, "font-name"),
+    'font-size': model.optional(known, "font-size"),
+    'font-color': model.optional(known, "font-color"),
     label: labels.graph(known.label, string(source.id)),
     'label-format': known["label-format"],
     'source-start': source["source-start"], 'source-end': source["source-end"],

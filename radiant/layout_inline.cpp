@@ -546,9 +546,8 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     }
 
     // Initialize bounds with first non-nil child.
-    // CSS 2.1 §8.3: For inline-block children, the span's bounding box must include
-    // the inline-block's margin box (margin.left/right), since those margins are part
-    // of the inline flow and contribute to the containing inline span's width.
+    // CSS 2.1 §8.3: inline-level child margins are part of the inline flow and
+    // contribute to the containing inline span's fragment bounds.
     // child->x is the border-box position (margin already added to the x coordinate),
     // so the outer-left = child->x - margin.left, outer-right = child->x + width + margin.right.
     auto get_child_relative_offset = [](View* c, float* offset_x, float* offset_y) {
@@ -589,19 +588,30 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         return right;
     };
 
-    auto get_child_outer_left = [&get_child_static_x](View* c) -> float {
-        float left = get_child_static_x(c);
-        if (ViewBlock* vb = lam::view_as_block<RDT_VIEW_INLINE_BLOCK>(c)) {
-            if (vb->bound) return left - vb->bound->margin.left;
+    auto get_child_inline_margin = [](View* c, bool inline_start) -> float {
+        if (ViewBlock* block = lam::view_as_block<RDT_VIEW_INLINE_BLOCK>(c)) {
+            if (block->bound) {
+                return inline_start ? block->bound->margin.left
+                                    : block->bound->margin.right;
+            }
+        } else if (ViewSpan* child_span = lam::view_as<RDT_VIEW_INLINE>(c)) {
+            if (child_span->bound) {
+                return inline_start ? child_span->bound->margin.left
+                                    : child_span->bound->margin.right;
+            }
         }
-        return left;
+        return 0.0f;
     };
-    auto get_child_outer_right = [&get_child_static_right](View* c) -> float {
+
+    auto get_child_outer_left = [&get_child_static_x,
+                                 &get_child_inline_margin](View* c) -> float {
+        float left = get_child_static_x(c);
+        return left - get_child_inline_margin(c, true);
+    };
+    auto get_child_outer_right = [&get_child_static_right,
+                                  &get_child_inline_margin](View* c) -> float {
         float right = get_child_static_right(c);
-        if (ViewBlock* vb = lam::view_as_block<RDT_VIEW_INLINE_BLOCK>(c)) {
-            if (vb->bound) return right + vb->bound->margin.right;
-        }
-        return right;
+        return right + get_child_inline_margin(c, false);
     };
 
     // CSS 2.1 §10.6.1: For inline non-replaced elements, vertical borders/padding

@@ -26,6 +26,7 @@
 #include <time.h>
 #include <errno.h>
 #include <ctype.h>
+#include <limits.h>
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -49,7 +50,6 @@
 #define FONT_CACHE_VERSION      1
 #define MAX_FONT_FAMILY_NAME    256
 #define MAX_FONT_FILE_PATH      1024
-#define MAX_TTC_FONTS           4
 #define FONT_MATCH_SCORE_THRESHOLD 0.1f
 
 // TTF/OTF table tags (big-endian values after conversion)
@@ -513,7 +513,19 @@ static bool parse_ttc_font_metadata(const char* file_path, FontDatabase* db, Are
         return false;
     }
 
-    int num_to_parse = ttc.num_fonts < MAX_TTC_FONTS ? (int)ttc.num_fonts : MAX_TTC_FONTS;
+    struct stat file_stat;
+    if (stat(file_path, &file_stat) != 0 ||
+        file_stat.st_size < (off_t)sizeof(TTC_Header) ||
+        ttc.num_fonts == 0 || ttc.num_fonts > INT_MAX ||
+        (uint64_t)ttc.num_fonts >
+            ((uint64_t)file_stat.st_size - sizeof(TTC_Header)) / sizeof(uint32_t)) {
+        fclose(file);
+        return false;
+    }
+
+    // a TTC offset table describes every selectable face; truncating it makes
+    // valid CSS weights silently fall back to whichever early face was indexed.
+    int num_to_parse = (int)ttc.num_fonts;
 
     for (int i = 0; i < num_to_parse; i++) {
         uint32_t offset;
