@@ -666,3 +666,12 @@ float font_get_x_height_ratio(FontHandle* handle) {
 
     return 0.5f; // fallback
 }
+
+float font_get_small_caps_scale(FontHandle* handle) {
+    const FontMetrics* metrics = font_get_metrics(handle);
+    if (metrics && metrics->x_height > 0 && metrics->cap_height > 0) {
+        float scale = metrics->x_height / metrics->cap_height;
+        if (scale > 0.0f && scale < 1.0f) return scale;
+    }
+    return 0.7f;
+}

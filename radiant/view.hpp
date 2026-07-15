@@ -1991,6 +1991,10 @@ namespace FormDefaults {
     constexpr float SELECT_NATIVE_ARROW_AREA = 20.0f; // themed arrow button and text gap
     constexpr float SELECT_BORDER = 1.0f;
     constexpr float OPTION_PADDING_H = 2.0f;
+    constexpr float BASE_SELECT_PADDING_H = 8.0f;
+    constexpr float BASE_SELECT_PADDING_V = 4.0f;
+    constexpr float BASE_SELECT_GAP = 8.0f;
+    constexpr float BASE_SELECT_ICON_WIDTH = 10.0f;
     // Options inside an <optgroup> are indented in the dropdown popup on macOS Chrome.
     // The indent contributes to the intrinsic select width for each optgroup option.
     constexpr float OPTGROUP_OPTION_INDENT = 17.0f;
@@ -2073,6 +2077,7 @@ struct FormControlProp {
     uint8_t multiple : 1;       // For select
     uint8_t dropdown_open : 1;  // For select: dropdown is currently open
     uint8_t appearance_none : 1; // CSS appearance: none — suppress UA-rendered chrome (arrow, etc.)
+    uint8_t appearance_base_select : 1; // CSS UI 4 base appearance for customizable select
 
     // Select dropdown properties
     int selected_index;         // Index of currently selected option (0-based, -1 if none)

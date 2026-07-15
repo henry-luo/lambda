@@ -417,6 +417,20 @@ char* font_platform_find_fallback(const char* font_name) {
 
 #ifdef __APPLE__
 
+int font_platform_get_metrics_from_ref(void* ct_font_ref,
+                                       float* out_ascent, float* out_descent,
+                                       float* out_line_height) {
+    if (!ct_font_ref) return 0;
+    CTFontRef font = (CTFontRef)ct_font_ref;
+    float ascent = roundf((float)CTFontGetAscent(font));
+    float descent = roundf((float)CTFontGetDescent(font));
+    float leading = roundf((float)CTFontGetLeading(font));
+    if (out_ascent) *out_ascent = ascent;
+    if (out_descent) *out_descent = descent;
+    if (out_line_height) *out_line_height = ascent + descent + leading;
+    return 1;
+}
+
 /**
  * get_font_metrics_platform - Get font metrics using CoreText (macOS)
  *

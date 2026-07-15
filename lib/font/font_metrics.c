@@ -524,19 +524,23 @@ void font_get_content_area_split(FontHandle* handle, float* out_ascender, float*
     if (out_descender) *out_descender = 0;
     if (!handle) return;
 
+    const FontMetrics* m = font_get_metrics(handle);
+    if (m && m->use_typo_metrics &&
+        (m->typo_ascender > 0.0f || m->typo_descender > 0.0f)) {
+        // USE_TYPO_METRICS defines the CSS inline content area; hhea remains the
+        // text DOMRect extent and must not be mixed into the half-leading split.
+        if (out_ascender) *out_ascender = m->typo_ascender;
+        if (out_descender) *out_descender = m->typo_descender;
+        return;
+    }
+
     float cell_height = font_get_cell_height(handle);
     float ascender = font_get_rendering_ascender(handle);
 
     if (cell_height <= 0.0f || ascender <= 0.0f) {
-        const FontMetrics* m = font_get_metrics(handle);
         if (!m) return;
-        if (m->use_typo_metrics && (m->typo_ascender > 0.0f || m->typo_descender > 0.0f)) {
-            ascender = m->typo_ascender;
-            cell_height = m->typo_ascender + m->typo_descender;
-        } else {
-            ascender = m->hhea_ascender;
-            cell_height = m->hhea_ascender - m->hhea_descender;
-        }
+        ascender = m->hhea_ascender;
+        cell_height = m->hhea_ascender - m->hhea_descender;
     }
 
     if (ascender > cell_height) ascender = cell_height;
@@ -565,9 +569,21 @@ float font_get_rendering_ascender(FontHandle* handle) {
     if (handle->cached_rendering_ascender_ready)
         return handle->cached_rendering_ascender;
 
-    const char* family = font_metrics_family(handle);
     float ascent, descent, lh;
     float result;
+#ifdef __APPLE__
+    if (handle->is_document_font && handle->ct_raster_ref &&
+        font_platform_get_metrics_from_ref(handle->ct_raster_ref,
+                                           &ascent, &descent, &lh)) {
+        // A document font may not be registered under its CSS alias; query the
+        // data-backed CoreText face so baseline placement cannot silently use a substitute.
+        result = ascent;
+        handle->cached_rendering_ascender = result;
+        handle->cached_rendering_ascender_ready = true;
+        return result;
+    }
+#endif
+    const char* family = font_metrics_family(handle);
     if (get_font_metrics_platform(family, handle->size_px, &ascent, &descent, &lh)) {
         result = ascent;
     } else {

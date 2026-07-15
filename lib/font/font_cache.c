@@ -469,18 +469,22 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
 
 FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyleDesc* style,
                                         uint32_t codepoint) {
-    // first try the primary font
-    FontHandle* handle = font_resolve(ctx, style);
-    if (handle && font_has_codepoint(handle, codepoint)) {
-        return handle;
-    }
+    if (!ctx || !style) return NULL;
 
-    // primary font doesn't have this codepoint, try codepoint-specific fallback
-    FontHandle* fallback = font_find_codepoint_fallback(ctx, style, codepoint);
-    if (fallback) {
+    // CSS Fonts matches the requested character against each authored family;
+    // choosing the first loadable face alone incorrectly turns a missing glyph
+    // into a global fallback before later families are considered.
+    const char* cursor = style->family;
+    char family[256];
+    while (font_family_list_next(&cursor, family, sizeof(family))) {
+        FontStyleDesc candidate = *style;
+        candidate.family = family;
+        FontHandle* handle = font_resolve(ctx, &candidate);
+        if (handle && font_has_codepoint(handle, codepoint)) return handle;
         if (handle) font_handle_release(handle);
-        return fallback;
     }
 
-    return handle; // best we can do
+    // No authored family covers the character; continue through the UA fallback chain.
+    FontHandle* fallback = font_find_codepoint_fallback(ctx, style, codepoint);
+    return fallback;
 }

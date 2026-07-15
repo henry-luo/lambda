@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "view.hpp"
+#include "event.hpp"
 #include "../lib/log.h"
 #include <string.h>
 #include <math.h>
@@ -270,11 +271,9 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
     const char* text = form_button_label_text(block, form);
 
     if (text && *text && font && font->font_size > 0) {
-        // Use backend font measurement for accurate button text width.
-        // font backend measurement can overestimate proportional font width by ~12.5% vs Chrome UA
-        // (likely due to hinting/kerning differences), so apply a correction factor.
+        // author font metrics already define the button label's intrinsic content width.
         TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, text, (int)strlen(text)); // INT_CAST_OK: string length
-        form->intrinsic_width = tw.max_content * 0.875f;
+        form->intrinsic_width = tw.max_content;
     } else {
         // Empty button: content width is 0 (border/padding added by layout)
         form->intrinsic_width = 0;
@@ -320,11 +319,24 @@ float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arro
  */
 static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
     float max_text_width = 0;
+    float selected_text_width = 0;
     // CSS `appearance: none` removes the UA chrome; treat option text as min-content
     // (longest unbreakable word) so the SELECT collapses toward author intent — matches
     // Chrome where appearance-less <select> with `width: 100%` shrinks rather than
     // expanding to the longest option's max-content width.
     bool use_min_content = form && form->appearance_none;
+    DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
+    // Selection lives in ViewState; the form property is not an authoritative state cache.
+    int selected_index = form_control_get_selected_index(state, (View*)block);
+
+    int option_index = 0;
+    for (DomElement* option = dom_select_next_option(block, nullptr); option;
+         option = dom_select_next_option(block, option), option_index++) {
+        float width = measure_direct_text_children_intrinsic_width(
+            lycon, option, use_min_content, CSS_VALUE_NONE);
+        if (width > max_text_width) max_text_width = width;
+        if (option_index == selected_index) selected_text_width = width;
+    }
 
     // Iterate through children to find longest option text
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
@@ -333,9 +345,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         uintptr_t ctag = child_elem->tag();
 
         if (ctag == HTM_TAG_OPTION) {
-            float width = measure_direct_text_children_intrinsic_width(
-                lycon, child_elem, use_min_content, CSS_VALUE_NONE);
-            if (width > max_text_width) max_text_width = width;
+            // direct options were measured above together with nested optgroup options
         } else if (ctag == HTM_TAG_OPTGROUP) {
             // Measure optgroup label — shown as a header row in the dropdown (no indent)
             const char* label_attr = child_elem->get_attribute("label");
@@ -399,7 +409,15 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         // In that case we must NOT add UA arrow overhead, otherwise the
         // border-box ends up wider than what the author intended.
         bool has_ua_arrow = !form->appearance_none;
-        form->intrinsic_width = layout_select_combo_intrinsic_width(max_text_width, has_ua_arrow);
+        if (form->appearance_base_select) {
+            // The base select button is an inline flex row: selected label,
+            // UA gap, picker icon, padding, and border all contribute intrinsically.
+            form->intrinsic_width = selected_text_width + FormDefaults::BASE_SELECT_GAP +
+                FormDefaults::BASE_SELECT_ICON_WIDTH +
+                2.0f * (FormDefaults::BASE_SELECT_PADDING_H + FormDefaults::SELECT_BORDER);
+        } else {
+            form->intrinsic_width = layout_select_combo_intrinsic_width(max_text_width, has_ua_arrow);
+        }
         // Add author-CSS horizontal padding + border so border-box width includes
         // text + arrow without the renderer overrunning the arrow area. (UA defaults
         // for padding=0 and border=1px are already accounted for in the overhead.)
@@ -413,7 +431,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                 border_h = border_h > 2.0f ? border_h - 2.0f : 0.0f;
             }
         }
-        form->intrinsic_width += pad_h + border_h;
+        if (!form->appearance_base_select) form->intrinsic_width += pad_h + border_h;
 
         // Combo-box border-box height = content (font normal line-height)
         // + actual CSS padding + border. The UA default of 19px (font 13.3333,
@@ -575,16 +593,18 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     if (block->content_height < 0) block->content_height = 0;
 
     // Set internal text baseline for inline-block baseline alignment.
-    // Form controls with text (input, textarea, button) have a virtual internal
+    // Form controls with text have a virtual internal
     // baseline where their text content would sit. Without this, the parent's
     // inline layout treats them as replaced elements (baseline at bottom margin edge),
     // which causes the line box to be taller than expected.
-    // SELECT uses bottom-margin-edge baseline per CSS 2.1 §10.8.1 (no in-flow CSS
-    // line boxes), consistent with replaced elements. This ensures correct vertical
-    // alignment when selects of different heights appear on the same line.
+    // Single-line selects expose the baseline of their internal selected-value button;
+    // listbox selects have no such single internal line and keep the replaced baseline.
+    bool is_single_line_select = form->control_type == FORM_CONTROL_SELECT &&
+        !form->multiple && form->select_size <= 1;
     if (form->control_type == FORM_CONTROL_TEXT ||
         form->control_type == FORM_CONTROL_TEXTAREA ||
-        form->control_type == FORM_CONTROL_BUTTON) {
+        form->control_type == FORM_CONTROL_BUTTON ||
+        is_single_line_select) {
         float border_top = (block->bound && block->bound->border) ? block->bound->border->width.top : 0;
         float pad_top = block->bound ? block->bound->padding.top : 0;
         // Use the font ascender from font metrics (hhea_ascender).

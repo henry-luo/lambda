@@ -582,6 +582,35 @@ int css_tokenizer_tokenize(CssTokenizer* tokenizer,
 
 // Token navigation helpers
 int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_count);
+static inline bool css_validate_font_family_tokens(const CssToken* tokens, int token_count) {
+    if (!tokens || token_count <= 0) return false;
+
+    bool expect_family = true;
+    bool quoted_family = false;
+    for (int i = 0; i < token_count; i++) {
+        CssTokenType type = tokens[i].type;
+        if (type == CSS_TOKEN_WHITESPACE || type == CSS_TOKEN_COMMENT) continue;
+
+        if (expect_family) {
+            if (type != CSS_TOKEN_STRING && type != CSS_TOKEN_IDENT) return false;
+            expect_family = false;
+            quoted_family = type == CSS_TOKEN_STRING;
+            continue;
+        }
+
+        if (type == CSS_TOKEN_COMMA) {
+            expect_family = true;
+            quoted_family = false;
+            continue;
+        }
+
+        // quoted family names cannot absorb an adjacent identifier as another family.
+        if (!quoted_family && type == CSS_TOKEN_IDENT) continue;
+        return false;
+    }
+
+    return !expect_family;
+}
 
 // Selector parsing
 CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool);

@@ -103,22 +103,15 @@ static bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start
     return border > 0.0f || padding > 0.0f;
 }
 
+static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span);
+
 static bool span_has_direct_visible_text(ViewSpan* span) {
     for (View* child = span ? span->first_child : nullptr; child; child = child->next()) {
-        if (child->view_type == RDT_VIEW_TEXT && child->width > 0.0f && child->height > 0.0f) {
+        if (child->view_type == RDT_VIEW_TEXT &&
+            child->width > 0.0f && child->height > 0.0f &&
+            !text_is_all_collapsible_space(
+                layout_inline_as_text(static_cast<DomNode*>(child)), span)) {
             return true;
-        }
-    }
-    return false;
-}
-
-static bool view_has_visible_content(View* view) {
-    if (!view || view->view_type == RDT_VIEW_NONE) return false;
-    if (view->width > 0.0f || view->height > 0.0f) return true;
-    if (view->view_type == RDT_VIEW_INLINE) {
-        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
-        for (View* child = span->first_child; child; child = child->next()) {
-            if (view_has_visible_content(child)) return true;
         }
     }
     return false;
@@ -139,6 +132,23 @@ static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span) {
         }
     }
     return true;
+}
+
+static bool view_has_non_trailing_line_content(View* view, ViewSpan* span) {
+    if (!view || view->view_type == RDT_VIEW_NONE) return false;
+    if (view->view_type == RDT_VIEW_TEXT) {
+        return (view->width > 0.0f || view->height > 0.0f) &&
+            !text_is_all_collapsible_space(
+                layout_inline_as_text(static_cast<DomNode*>(view)), span);
+    }
+    if (view->view_type == RDT_VIEW_INLINE) {
+        ViewSpan* child_span = lam::view_require<RDT_VIEW_INLINE>(view);
+        for (View* child = child_span->first_child; child; child = child->next()) {
+            if (view_has_non_trailing_line_content(child, span)) return true;
+        }
+        return false;
+    }
+    return view->width > 0.0f || view->height > 0.0f;
 }
 
 static bool text_has_non_whitespace_content(DomText* text) {
@@ -185,17 +195,28 @@ static bool view_is_collapsed_whitespace_text(View* view, ViewSpan* span) {
     return text_is_all_collapsible_space(text, span);
 }
 
-static bool inline_text_view_has_multiple_line_fragments(View* view) {
-    if (!view || view->view_type != RDT_VIEW_TEXT) return false;
-    ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
-    TextRect* first = text->rect;
-    if (!first) return false;
-    for (TextRect* rect = first->next; rect; rect = rect->next) {
-        if (rect->line_number != first->line_number || rect->y != first->y) {
-            return true;
+static void inline_text_line_range(View* view, bool* found,
+                                   int* first_line, int* last_line) {
+    if (!view) return;
+    if (view->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (!*found) {
+                *found = true;
+                *first_line = rect->line_number;
+                *last_line = rect->line_number;
+            } else {
+                if (rect->line_number < *first_line) *first_line = rect->line_number;
+                if (rect->line_number > *last_line) *last_line = rect->line_number;
+            }
         }
+        return;
     }
-    return false;
+    if (view->view_type != RDT_VIEW_INLINE) return;
+    ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+    for (View* child = span->first_child; child; child = child->next()) {
+        inline_text_line_range(child, found, first_line, last_line);
+    }
 }
 
 static View* inline_span_first_line_fragment_child(ViewSpan* span) {
@@ -210,14 +231,19 @@ static View* inline_span_first_line_fragment_child(ViewSpan* span) {
 bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
     View* first = inline_span_first_line_fragment_child(span);
     if (!first) return false;
-    if (inline_text_view_has_multiple_line_fragments(first)) return true;
+
+    bool found_text_line = false;
+    int first_line = 0;
+    int last_line = 0;
+    inline_text_line_range(static_cast<View*>(span), &found_text_line,
+                           &first_line, &last_line);
+    // Vertical-align changes child y without changing its recorded line identity.
+    if (found_text_line) return first_line != last_line;
 
     float first_y = first->y;
     for (View* child = first->next(); child; child = child->next()) {
         if (child->view_type == RDT_VIEW_NONE || is_out_of_flow_child(child)) continue;
-        if (child->y != first_y || inline_text_view_has_multiple_line_fragments(child)) {
-            return true;
-        }
+        if (child->y != first_y) return true;
     }
     return false;
 }
@@ -305,10 +331,12 @@ static void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewS
         descender += half_leading;
     }
     if (ascender > 0.0f || descender > 0.0f) {
-        float va_offset = lycon->line.vertical_align_offset;
-        if (va_offset != 0.0f) {
-            ascender += va_offset;
-            descender -= va_offset;
+        float baseline_shift = vertical_align_baseline_shift(
+            lycon, lycon->line.vertical_align,
+            lycon->line.vertical_align_offset);
+        if (baseline_shift != 0.0f) {
+            ascender += baseline_shift;
+            descender -= baseline_shift;
         }
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
         lycon->line.max_descender = max(lycon->line.max_descender, descender);
@@ -730,8 +758,12 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // Truncating 2.72 → 2 loses 0.7px per side, making inline code elements too short.
     float parent_border_top_y = content_min_y - roundf(border_top) - roundf(pad_top);
     float parent_border_bottom_y = content_max_y + roundf(border_bottom) + roundf(pad_bottom);
-    float final_min_y = min(visual_min_y, parent_border_top_y);
-    float final_max_y = max(visual_max_y, parent_border_bottom_y);
+    // Only block-in-inline fragmentation promotes recorded descendant fragments
+    // into the ancestor's own split border-box union.
+    float final_min_y = span->has_split_inline_fragment_union
+        ? min(visual_min_y, parent_border_top_y) : parent_border_top_y;
+    float final_max_y = span->has_split_inline_fragment_union
+        ? max(visual_max_y, parent_border_bottom_y) : parent_border_bottom_y;
     if (span->has_split_inline_fragment_union && !span_has_direct_visible_text(span)) {
         if (span->split_inline_fragment_min_x < min_x) min_x = span->split_inline_fragment_min_x;
         if (span->split_inline_fragment_max_x > max_x) max_x = span->split_inline_fragment_max_x;
@@ -854,6 +886,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     bool had_block_child = false;
     bool visible_inline_after_last_block = false;
     bool visible_inline_before_first_block = false;
+    bool visible_inline_in_sequence = false;
     bool had_block_child_before = false;  // tracks if a block was laid out before the current one
     DomElement* last_block_child_elem = nullptr;  // last block child for bottom margin collapse
 
@@ -904,6 +937,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
 
             // Found block/table-internal child - end current inline sequence if active
             if (in_inline_sequence) {
+                bool sequence_has_start_edge = start_edge_pending_active;
                 if (start_edge_pending_active &&
                     lycon->line.inline_start_edge_pending > start_edge_pending_base) {
                     lycon->line.inline_start_edge_pending = start_edge_pending_base;
@@ -912,7 +946,8 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                     lycon->line.advance_x = saved_line.advance_x;
                 }
                 start_edge_pending_active = false;
-                if (!lycon->line.is_line_start) {
+                if (!lycon->line.is_line_start &&
+                    (visible_inline_in_sequence || sequence_has_start_edge)) {
                     span_record_current_split_line_fragment(lycon, span, span_line_height);
                     log_debug("%s block-in-inline: calling line_break before block, advance_x=%.1f, max_width=%.1f", inline_elem->source_loc(),
                              lycon->line.advance_x, lycon->block.max_width);
@@ -921,6 +956,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                              lycon->line.advance_x, lycon->block.max_width);
                 }
                 in_inline_sequence = false;
+                visible_inline_in_sequence = false;
             }
 
             // Layout block child (it breaks out of inline context)
@@ -1010,6 +1046,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             if (!in_inline_sequence) {
                 // Start new anonymous inline box sequence
                 in_inline_sequence = true;
+                visible_inline_in_sequence = false;
 
                 // Restore inline formatting context for this anonymous box
                 // This ensures the inline's font, colors, etc. apply
@@ -1037,10 +1074,13 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             log_debug("%s block-in-inline: laying out inline/text child %s at advance_y=%f", inline_elem->source_loc(),
                      child->node_name(), lycon->block.advance_y);
             layout_flow_node(lycon, child);
-            if (!had_block_child && view_has_visible_content(static_cast<View*>(child))) {
+            bool child_has_line_content = view_has_non_trailing_line_content(
+                static_cast<View*>(child), span);
+            if (child_has_line_content) visible_inline_in_sequence = true;
+            if (!had_block_child && child_has_line_content) {
                 visible_inline_before_first_block = true;
             }
-            if (had_block_child && view_has_visible_content(static_cast<View*>(child))) {
+            if (had_block_child && child_has_line_content) {
                 visible_inline_after_last_block = true;
             }
         }
@@ -1048,7 +1088,8 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         child = child->next_sibling;
     }
 
-    if (in_inline_sequence && !lycon->line.is_line_start) {
+    if (in_inline_sequence && !lycon->line.is_line_start &&
+        (visible_inline_in_sequence || start_edge_pending_active)) {
         span_record_current_split_line_fragment(lycon, span, span_line_height);
     }
 
@@ -1280,6 +1321,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
     CssEnum pa_line_align = lycon->line.vertical_align;
     float pa_valign_offset = lycon->line.vertical_align_offset;
+    float saved_parent_ascender = lycon->line.parent_font_ascender;
+    float saved_parent_descender = lycon->line.parent_font_descender;
+    float saved_parent_font_size = lycon->line.parent_font_size;
+    struct FontHandle* saved_parent_font_handle = lycon->line.parent_font_handle;
     lycon->elmt = elmt;
 
     if (lycon->line.is_line_start) {
@@ -1380,6 +1425,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
+    if (pa_font.style) {
+        // Vertical-align keywords use the containing inline's font metrics.
+        lycon->line.parent_font_ascender = pa_font.style->ascender;
+        lycon->line.parent_font_descender = pa_font.style->descender;
+        lycon->line.parent_font_size = pa_font.style->font_size;
+        lycon->line.parent_font_handle = pa_font.font_handle;
+    }
     if (span->font) {
         setup_font(lycon->ui_context, &lycon->font,  span->font);
     }
@@ -1817,6 +1869,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 asc_contribution = span->content_height - lycon->line.parent_font_descender;
                 desc_contribution = lycon->line.parent_font_descender;
             }
+            float baseline_shift = vertical_align_baseline_shift(
+                lycon, valign, span->in_line->vertical_align_offset);
+            // Placement and line metrics must use the same UA-defined super/sub shift.
+            asc_contribution += baseline_shift;
+            desc_contribution -= baseline_shift;
         }
         if (asc_contribution > 0.0f) {
             lycon->line.max_ascender = max(lycon->line.max_ascender, asc_contribution);
@@ -1871,25 +1928,17 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
             float expected_height = content_area + bt + pt_val + pb_val + bb;
             if (!span_is_multi_line && span->height > expected_height) {
-                // CSS 2.1 §10.6.1: For inline non-replaced elements, the inline box
-                // height = content_area + own border + own padding. Children's borders
-                // don't increase this. However, getBoundingClientRect reflects the
-                // visual extent: if a child inline span's border expands beyond this
-                // span's own border box, the bbox should encompass the child.
-                // Check if any child inline span overflows the expected_height.
-                bool child_overflows = false;
-                View* ch = span->first_placed_child();
-                while (ch) {
-                    if (lam::view_as<RDT_VIEW_INLINE>(ch) && ch->height > expected_height) {
-                        child_overflows = true;
-                        break;
-                    }
-                    ch = ch->next_sibling;
-                }
-                if (!child_overflows) {
-                    span->height = expected_height;
-                    log_debug("%s inline span height capped to content area: %.0f (area=%.1f)", elmt->source_loc(), expected_height, content_area);
-                }
+                // Descendant decorations may overflow, but cannot enlarge an ancestor's inline border box.
+                float span_asc = span->font ? span->font->ascender :
+                    (lycon->font.style ? lycon->font.style->ascender : 0.0f);
+                float span_desc = span->font ? span->font->descender :
+                    (lycon->font.style ? lycon->font.style->descender : 0.0f);
+                float baseline_pos = line_baseline_position(lycon, nullptr);
+                span->y = layout_inline_font_box_y(
+                    lycon, span, span_resolved_line_height,
+                    span_asc, span_desc, baseline_pos, bt, pt_val);
+                span->height = expected_height;
+                log_debug("%s inline span height capped to content area: %.0f (area=%.1f)", elmt->source_loc(), expected_height, content_area);
             }
             // CSS 2.1 §10.8.1: For empty inline elements with inline decorations
             // and negative half-leading (line-height < font content area), position
@@ -1943,6 +1992,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
     lycon->line.vertical_align_offset = pa_valign_offset;
+    lycon->line.parent_font_ascender = saved_parent_ascender;
+    lycon->line.parent_font_descender = saved_parent_descender;
+    lycon->line.parent_font_size = saved_parent_font_size;
+    lycon->line.parent_font_handle = saved_parent_font_handle;
     lycon->block.line_height = pa_line_height;
     lycon->block.line_height_is_normal = pa_line_height_is_normal;
     if (pushed_counter_scope) {

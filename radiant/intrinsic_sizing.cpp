@@ -974,7 +974,9 @@ static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const 
             LoadedGlyph* glyph = font_load_glyph(lycon->font.font_handle, &sd, cp, false);
             float advance = glyph ? (glyph->advance_x / pixel_ratio)
                                   : (lycon->font.style ? lycon->font.style->font_size * 0.5f : 8.0f);
-            if (is_small_caps_lower) advance *= 0.7f;
+            if (is_small_caps_lower) {
+                advance *= font_get_small_caps_scale(lycon->font.font_handle);
+            }
             if (lycon->font.style) advance += lycon->font.style->letter_spacing;
             width += advance;
         }
@@ -1019,7 +1021,9 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
         ? lycon->ui_context->pixel_ratio : 1.0f;
     float advance = glyph->advance_x / pixel_ratio + kerning;
-    if (small_caps_lower) advance *= 0.7f;
+    if (small_caps_lower) {
+        advance *= font_get_small_caps_scale(lycon->font.font_handle);
+    }
     if (lycon->font.style) advance += lycon->font.style->letter_spacing;
     return advance;
 }
@@ -1553,7 +1557,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
                     kerning = font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint);
                 }
                 GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
-                float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+                float sc_scale = is_small_caps_lower ?
+                    font_get_small_caps_scale(lycon->font.font_handle) : 1.0f;
                 advance = (ginfo.id != 0) ? ginfo.advance_x * sc_scale + kerning : 11.0f;
             } else {
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
@@ -1561,7 +1566,9 @@ float compute_text_height_at_width(LayoutContext* lycon,
                 if (glyph) {
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                     advance = glyph->advance_x / pixel_ratio;
-                    if (is_small_caps_lower) advance *= 0.7f;
+                    if (is_small_caps_lower) {
+                        advance *= font_get_small_caps_scale(lycon->font.font_handle);
+                    }
                 } else {
                     advance = 11.0f;
                 }
@@ -1685,6 +1692,22 @@ static bool is_inline_level_element(DomElement* element) {
     return false;
 }
 
+static bool intrinsic_element_is_replaced(DomElement* element) {
+    if (!element) return false;
+
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    uintptr_t tag = element->tag();
+    // HTML object/audio elements are replaced only when they expose external content.
+    return view->display.inner == RDT_DISPLAY_REPLACED ||
+        tag == HTM_TAG_IMG || tag == HTM_TAG_VIDEO || tag == HTM_TAG_IFRAME ||
+        tag == HTM_TAG_HR || tag == HTM_TAG_SVG || tag == HTM_TAG_CANVAS ||
+        (tag == HTM_TAG_OBJECT && element->get_attribute("data")) ||
+        (tag == HTM_TAG_AUDIO && element->has_attribute("controls")) ||
+        tag == HTM_TAG_EMBED || tag == HTM_TAG_INPUT || tag == HTM_TAG_SELECT ||
+        tag == HTM_TAG_TEXTAREA || tag == HTM_TAG_METER || tag == HTM_TAG_PROGRESS ||
+        (view->item_prop_type == DomElement::ITEM_PROP_FORM && view->form);
+}
+
 static bool intrinsic_white_space_collapses_space_advance(CssEnum white_space) {
     return !intrinsic_white_space_preserves_space_advance(white_space);
 }
@@ -1721,6 +1744,8 @@ static bool intrinsic_node_has_inline_boundary_content(DomNode* node) {
     // before them must survive max-content sizing just like before text.
     if (node_is_table_cell_like(node) || element->display.inner == CSS_VALUE_TABLE) return true;
     if (!is_inline_level_element(element)) return false;
+    // Replaced boxes are atomic inline content even though they have no DOM children.
+    if (intrinsic_element_is_replaced(element)) return true;
     for (int pseudo = 1; pseudo <= 2; pseudo++) {
         bool has_content = pseudo == 1 ? dom_element_has_before_content(element)
                                        : dom_element_has_after_content(element);
@@ -2722,25 +2747,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // padding/border section at the bottom so padding+border are correctly included.
     bool replaced_intrinsic_set = false;
     ViewBlock* view_block_replaced = lam::unsafe_view_block_element_storage(element);
-    // Check both resolved display.inner AND element tag for replaced element detection,
-    // since display.inner may not yet be resolved during early intrinsic sizing passes.
-    // Form controls (input, select, textarea) are detected by tag as well, because
-    // their FormControlProp may not be allocated yet during early intrinsic sizing.
+    // Detection also uses HTML tag semantics because early intrinsic passes may
+    // run before display and form-control state are fully resolved.
     uintptr_t replaced_tag = element->tag();
-    // HTML §4.8.7: <object> is replaced only when it has a data attribute
-    // HTML §4.8.9: <audio> is replaced only when it has a controls attribute
-    bool is_replaced_element = (view_block_replaced->display.inner == RDT_DISPLAY_REPLACED) ||
-        (replaced_tag == HTM_TAG_IMG || replaced_tag == HTM_TAG_VIDEO ||
-         replaced_tag == HTM_TAG_IFRAME || replaced_tag == HTM_TAG_HR ||
-         replaced_tag == HTM_TAG_SVG || replaced_tag == HTM_TAG_CANVAS ||
-         (replaced_tag == HTM_TAG_OBJECT && element->get_attribute("data")) ||
-         (replaced_tag == HTM_TAG_AUDIO && element->has_attribute("controls")) ||
-         replaced_tag == HTM_TAG_EMBED ||
-         replaced_tag == HTM_TAG_INPUT || replaced_tag == HTM_TAG_SELECT ||
-         replaced_tag == HTM_TAG_TEXTAREA || replaced_tag == HTM_TAG_METER ||
-         replaced_tag == HTM_TAG_PROGRESS) ||
-        (view_block_replaced->item_prop_type == DomElement::ITEM_PROP_FORM &&
-         view_block_replaced->form);
+    bool is_replaced_element = intrinsic_element_is_replaced(element);
     if (is_replaced_element) {
         float replaced_width = -1;
 
@@ -2860,8 +2870,17 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // the bottom of this function adds horizontal padding+border again — for
         // form controls sourced from form->intrinsic_width we therefore mark the
         // value as "already includes pad+border" and skip the bottom addition.
+        bool input_button_has_native_label = view_block_replaced->form &&
+            view_block_replaced->form->control_type == FORM_CONTROL_BUTTON &&
+            replaced_tag == HTM_TAG_INPUT &&
+            form_button_label_text(view_block_replaced,
+                                   view_block_replaced->form);
+        bool has_measurable_form_control = view_block_replaced->form &&
+            (view_block_replaced->form->intrinsic_width > 0 ||
+             input_button_has_native_label);
+        // Input buttons have no DOM text child, so their native label must be measured centrally.
         if (replaced_width < 0 && view_block_replaced->item_prop_type == DomElement::ITEM_PROP_FORM
-            && view_block_replaced->form && view_block_replaced->form->intrinsic_width > 0) {
+            && has_measurable_form_control) {
             IntrinsicSize form_size = layout_measure_form_control(lycon, view_block_replaced,
                                                                   lycon->available_space);
             replaced_width = form_size.max_width;
