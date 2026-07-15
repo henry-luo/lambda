@@ -82,6 +82,7 @@ struct DomNode {
     ViewType view_type;
     // view always has x, y, wd, hg;  otherwise, it is a property group
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
+    int inline_line_number;     // block-local line containing an atomic inline; -1 for other boxes
     ViewState* view_state_ref;  // weak pointer to canonical per-view state owned by DocState
 
     // source line number in the original HTML file (0 = not tracked)
@@ -177,7 +178,8 @@ protected:
     // Constructor (only callable by derived classes)
     DomNode(DomNodeType type) : id(0), node_type(type), parent(nullptr),
         next_sibling(nullptr), prev_sibling(nullptr), view_type(RDT_VIEW_NONE),
-        x(0), y(0), width(0), height(0), view_state_ref(nullptr), source_line(0),
+        x(0), y(0), width(0), height(0), inline_line_number(-1),
+        view_state_ref(nullptr), source_line(0),
         layout_dirty(false), layout_height_contribution(0) {}
 };
 
