@@ -6,8 +6,16 @@ import diagnostic: lambda.package.graph.diagnostics
 import implied: lambda.package.graph.structurizr.implied
 import schema: lambda.package.graph.structurizr.schema
 
+fn resolved_include(value) => graph_model.tag(value) == "statement" and
+  string(graph_model.optional(value, "keyword")) == "!include"
+
+fn expanded_children(value) => [
+  for (child in graph_model.element_children(value),
+    expanded in if (resolved_include(child)) expanded_children(child) else [child]) expanded
+]
+
 fn children(value, wanted = null) => [
-  for (child in graph_model.element_children(value)
+  for (child in expanded_children(value)
     where wanted == null or graph_model.tag(child) == wanted) child
 ]
 
@@ -120,10 +128,15 @@ fn is_c4_declaration(value, definitions) =>
 fn declared_identifier(value, parent_identifier, hierarchical) {
   let local = graph_model.optional(value, "identifier");
   let stable = if (local != null) string(local)
-    else string(value.keyword) ++ "@" ++ string(value["source-start"]);
+    else string(value.keyword) ++ "@" ++ source_identity(value);
   if (hierarchical and parent_identifier != null and local != null)
     parent_identifier ++ "." ++ stable
   else stable
+}
+
+fn source_identity(value) {
+  let file = graph_model.optional(value, "source-file");
+  (if (file == null) "" else string(file) ++ ":") ++ string(value["source-start"])
 }
 
 fn declaration_tags(value, kind, definition) {
@@ -201,7 +214,7 @@ fn append_relation(state, value, parent_identifier, definitions) {
   let to = if (string(value.to) == "this") parent_identifier else string(value.to);
   let id = if (graph_model.optional(value, "identifier") != null)
     string(value.identifier)
-    else "relationship@" ++ string(value["source-start"]);
+    else "relationship@" ++ source_identity(value);
   let definition = archetype.find(definitions,
     graph_model.optional(value, "archetype"), "relationship");
   let explicit = {description: arg(value, 0), technology: arg(value, 1), metadata: null,
@@ -320,7 +333,7 @@ fn interaction(value, elements, relationships, key, sequence, parallel_group) {
   let sequence_label = if (authored_order != null) string(authored_order)
     else string(sequence);
   {
-    id: key ++ "@" ++ string(value["source-start"]),
+    id: key ++ "@" ++ source_identity(value),
     source: source, destination: destination,
     relationship_ref: relationship_ref(relationships, source, destination),
     description: arg(value, 0), technology: arg(value, 1),
@@ -343,7 +356,7 @@ fn interaction_by_ref(value, relationships, key, sequence, parallel_group) {
     let relation = matches[0];
     let description_index = if (authored_order != null) 1 else 0;
     {
-      id: key ++ "@" ++ string(value["source-start"]),
+      id: key ++ "@" ++ source_identity(value),
       source: relation.from, destination: relation.to, relationship_ref: relation.id,
       description: arg(value, description_index, relation.description),
       technology: relation.technology,
@@ -374,7 +387,7 @@ fn interaction_values_at(values, index, elements, relationships, key, state,
     }
     else if (tag == "parallel") {
       let group_id = if (parallel_group != null) parallel_group
-        else key ++ ":parallel@" ++ string(value["source-start"]);
+        else key ++ ":parallel@" ++ source_identity(value);
       let block_order = if (forced_order != null) forced_order else state.next_order;
       let nested = interaction_values_at(children(value), 0, elements, relationships,
         key, state, block_order, group_id);
@@ -394,7 +407,7 @@ fn dynamic_interactions(value, elements, relationships, key) =>
 fn view_value(value, elements, relationships) {
   let view_key = if (value.kind == "systemLandscape" or value.kind == "custom")
     arg(value, 0, string(value.kind)) else if (value.kind == "filtered")
-    arg(value, 3, "filtered@" ++ string(value["source-start"]))
+    arg(value, 3, "filtered@" ++ source_identity(value))
     else if (value.kind == "deployment")
     arg(value, 2, string(value.kind)) else arg(value, 1, string(value.kind));
   {
@@ -574,7 +587,9 @@ fn c4_workspace(name, description, mode, elements, relationships, views, styles,
           'source-start': term.source["source-start"],
           'source-end': term.source["source-end"]>
     >
-    for (value in children(source, "diagnostics")) value
+    <diagnostics;
+      for (value in graph_model.diagnostics(source)) value
+    >
   >
 
 pub fn normalize(source) {

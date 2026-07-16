@@ -18,6 +18,19 @@ enum StructurizrContext {
     SZ_ARCHETYPES, SZ_VIEWS, SZ_VIEW, SZ_STYLES, SZ_STYLE, SZ_GENERIC
 };
 
+static StructurizrContext structurizr_context_named(const char* name) {
+    if (!name || strcmp(name, "workspace") == 0) return SZ_WORKSPACE;
+    if (strcmp(name, "model") == 0) return SZ_MODEL;
+    if (strcmp(name, "element") == 0) return SZ_ELEMENT;
+    if (strcmp(name, "deployment") == 0) return SZ_DEPLOYMENT;
+    if (strcmp(name, "archetypes") == 0) return SZ_ARCHETYPES;
+    if (strcmp(name, "views") == 0) return SZ_VIEWS;
+    if (strcmp(name, "view") == 0) return SZ_VIEW;
+    if (strcmp(name, "styles") == 0) return SZ_STYLES;
+    if (strcmp(name, "style") == 0) return SZ_STYLE;
+    return SZ_GENERIC;
+}
+
 struct StructurizrToken {
     String* value;
     const char* kind;
@@ -401,5 +414,16 @@ void parse_graph_structurizr(Input* input, const char* structurizr_string) {
     InputContext ctx(input, structurizr_string);
     StructurizrParser parser(ctx);
     input->root = {.element = parser.workspace()};
+    if (ctx.hasErrors()) ctx.logErrors();
+}
+
+void parse_graph_structurizr_fragment(Input* input, Element* owner,
+                                      const char* structurizr_string,
+                                      const char* context_name) {
+    if (!input || !owner || !structurizr_string || !*structurizr_string) return;
+    InputContext ctx(input, structurizr_string);
+    StructurizrParser parser(ctx);
+    parser.statements(owner, structurizr_context_named(context_name), 0);
+    graph_append_diagnostics(ctx, owner, "structurizr.syntax");
     if (ctx.hasErrors()) ctx.logErrors();
 }

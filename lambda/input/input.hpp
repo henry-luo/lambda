@@ -169,6 +169,7 @@ void parse_graph(Input* input, const char* graph_string, const char* flavor);
 void parse_graph_dot(Input* input, const char* dot_string);
 void parse_graph_mermaid(Input* input, const char* mermaid_string);
 void parse_graph_structurizr(Input* input, const char* structurizr_string);
+void resolve_graph_structurizr_local_includes(Input* input, const char* root_path);
 const char* input_detect_structurizr_flavor(const char* pathname,
                                             const char* source,
                                             size_t source_len);

@@ -453,3 +453,18 @@ if-statement`. The equivalent `if (done) { -1 } else { recurse(...) }` compiles,
 although both forms are ordinary value-producing branches elsewhere. The error
 should explain when `if` is parsed as a statement, or the expression form should
 be accepted consistently inside function blocks.
+
+## One-line Mark child comprehensions fail at the closing delimiter
+
+The valid multiline constructor:
+
+```lambda
+<diagnostics;
+  for (value in values) value
+>
+```
+
+was rejected when written as `<diagnostics; for (value in values) value>` with
+`Expected 'identifier'` at the closing `>`, followed by a second missing-`>`
+diagnostic at end of file. Whitespace should not change this constructor's
+grammar, or the diagnostic should identify the required line break explicitly.

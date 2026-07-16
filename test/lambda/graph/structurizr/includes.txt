@@ -1,0 +1,11 @@
+{
+  errors: [null, null, null],
+  resolved: [5, true, 5, true],
+  elements: [["user", "person", null], ["shop", "software-system", null], ["web", "container", "shop"]],
+  relationships: [["user", "web", "Uses"]],
+  views: ["Containers"],
+  graph: ["web", "user"],
+  diagnostics: [],
+  cycle: [2, "structurizr.include-cycle"],
+  policy: [0, "structurizr.include-policy", "structurizr.include-policy", "structurizr.include-missing"]
+}

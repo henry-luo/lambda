@@ -901,13 +901,47 @@ void run_assertions() {
     assert(-1.0/0.0 == -INFINITY);
 }
 
+static StrBuf* exec_convert_lambda_html(const char* script_source, const char* temp_prefix) {
+    if (!script_source || !temp_prefix) return NULL;
+    char* script_path = file_temp_path(temp_prefix, ".ls");
+    if (!script_path) return NULL;
+    write_text_file(script_path, script_source);
+
+    Runtime runtime;
+    runtime_init(&runtime);
+    runtime.current_dir = const_cast<char*>("./");
+    runtime.import_base_dir = "./";
+    Input* result = run_script_mir(&runtime, nullptr, script_path, false);
+    StrBuf* output = NULL;
+    if (result && get_type_id(result->root) != LMD_TYPE_NULL &&
+        get_type_id(result->root) != LMD_TYPE_ERROR) {
+        output = strbuf_new_cap(8192);
+        if (get_type_id(result->root) == LMD_TYPE_ELEMENT) {
+            String* html = format_html(result->pool, result->root);
+            if (html) strbuf_append_str(output, html->chars);
+            else {
+                strbuf_free(output);
+                output = NULL;
+            }
+        } else {
+            print_root_item(output, result->root);
+        }
+    }
+    runtime_cleanup(&runtime);
+    // Generated package scripts are invocation-scoped; retaining them makes
+    // repeated conversions accumulate stale executable inputs in ./temp.
+    file_delete(script_path);
+    mem_free(script_path);
+    return output;
+}
+
 // Convert command implementation
 int exec_convert(int argc, char* argv[]) {
     log_debug("exec_convert called with %d arguments", argc);
 
     if (argc < 2) {
         printf("Error: convert command requires input file\n");
-        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output> [--full-document] [--font-option default|katex]\n");
+        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output> [--view-key <key>] [--full-document] [--font-option default|katex]\n");
         printf("Use 'lambda convert --help' for more information\n");
         return 1;
     }
@@ -920,6 +954,7 @@ int exec_convert(int argc, char* argv[]) {
     bool full_document = false;      // For LaTeX to HTML: generate complete HTML with CSS
     const char* pipeline = NULL;     // Pipeline selection: "legacy" or "unified"
     const char* font_option = NULL;  // LaTeX math fonts: default or katex
+    const char* graph_view_key = NULL; // Structurizr view key for graph-to-HTML conversion
 
     // Skip "convert" and parse remaining arguments
     for (int i = 1; i < argc; i++) {
@@ -946,6 +981,18 @@ int exec_convert(int argc, char* argv[]) {
             }
         } else if (strcmp(argv[i], "--full-document") == 0) {
             full_document = true;
+        } else if (strcmp(argv[i], "--view-key") == 0) {
+            if (i + 1 < argc) graph_view_key = argv[++i];
+            else {
+                printf("Error: --view-key requires a Structurizr view key\n");
+                return 1;
+            }
+        } else if (strncmp(argv[i], "--view-key=", 11) == 0) {
+            graph_view_key = argv[i] + 11;
+            if (!*graph_view_key) {
+                printf("Error: --view-key requires a Structurizr view key\n");
+                return 1;
+            }
         } else if (strcmp(argv[i], "--font-option") == 0) {
             if (i + 1 < argc) {
                 font_option = argv[++i];
@@ -1123,6 +1170,9 @@ int exec_convert(int argc, char* argv[]) {
             // Also check the actual input type used
             is_latex_input = true;
         }
+        bool is_graph_input = graph_bridge_path_is_graph(input_file) ||
+            (from_format && (strcmp(from_format, "graph") == 0 ||
+                strncmp(from_format, "graph:", 6) == 0));
 
         // Step 2: Format the parsed data to the target format
         printf("Converting to format: %s\n", to_format);
@@ -1155,7 +1205,19 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_xml(input->pool, input->root);
         } else if (strcmp(to_format, "html") == 0) {
             // Check if input is LaTeX and route to Lambda package converter
-            if (is_latex_input) {
+            if (is_graph_input) {
+                printf("Using Lambda graph package pipeline\n");
+                char* script_source = build_graph_to_html_bridge_script(
+                    input_file, nullptr, graph_view_key, "convert");
+                if (script_source) {
+                    full_doc_output = exec_convert_lambda_html(
+                        script_source, "convert_graph_bridge");
+                    mem_free(script_source);
+                }
+                if (!full_doc_output) {
+                    printf("Error: Lambda graph package - HTML conversion failed\n");
+                }
+            } else if (is_latex_input) {
                 printf("Using Lambda LaTeX package pipeline\n");
 
                 // Build a Lambda script that imports the LaTeX package
@@ -1176,32 +1238,16 @@ int exec_convert(int argc, char* argv[]) {
                     "latex.render_to_html(ast%s)\n",
                     input_file, standalone_opt);
 
-                // Run the script using the Lambda runtime
-                Runtime lambda_runtime;
-                runtime_init(&lambda_runtime);
-                lambda_runtime.current_dir = const_cast<char*>("./");
-                lambda_runtime.import_base_dir = "./";  // resolve imports from project root, not temp/
-
-                // Write the script to a temporary file, then execute it
-                const char* tmp_script_path = "temp/_convert_latex_tmp.ls";
-                write_text_file(tmp_script_path, script_buf);
-                Input* script_result = run_script_mir(&lambda_runtime, nullptr, (char*)tmp_script_path, false);
-                if (script_result && get_type_id(script_result->root) != LMD_TYPE_NULL
-                    && get_type_id(script_result->root) != LMD_TYPE_ERROR) {
-                    full_doc_output = strbuf_new_cap(8192);
-                    print_root_item(full_doc_output, script_result->root);
-                } else {
+                full_doc_output = exec_convert_lambda_html(
+                    script_buf, "convert_latex_bridge");
+                if (!full_doc_output) {
                     printf("Error: Lambda LaTeX package - HTML rendering failed\n");
-                    if (script_result && get_type_id(script_result->root) == LMD_TYPE_ERROR) {
-                        LambdaError* last_error = get_persistent_last_error();
-                        if (last_error) {
-                            err_print(last_error);
-                            clear_persistent_last_error();
-                        }
+                    LambdaError* last_error = get_persistent_last_error();
+                    if (last_error) {
+                        err_print(last_error);
+                        clear_persistent_last_error();
                     }
                 }
-
-                runtime_cleanup(&lambda_runtime);
             } else {
                 // Use regular HTML formatter
                 formatted_output = format_html(input->pool, input->root);
@@ -2815,12 +2861,13 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Format Converter v1.0\n\n");
-            printf("Usage: %s convert <input> [-f <from>] -t <to> -o <output> [--full-document] [--font-option default|katex]\n", argv[0]);
+            printf("Usage: %s convert <input> [-f <from>] -t <to> -o <output> [--view-key <key>] [--full-document] [--font-option default|katex]\n", argv[0]);
             printf("\nOptions:\n");
             printf("  -f <from>            Input format (auto-detect if omitted)\n");
             printf("  -t <to>              Output format (required)\n");
             printf("  -o <output>          Output file path (required)\n");
             printf("  --full-document      For LaTeX to HTML, generate complete HTML with CSS\n");
+            printf("  --view-key <key>     Structurizr view key (default: first declared view)\n");
             printf("  --font-option <opt>  LaTeX math fonts: default or katex\n");
             printf("  -h, --help           Show this help message\n");
             printf("Supported Formats:\n");

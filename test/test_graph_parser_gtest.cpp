@@ -71,20 +71,24 @@ TEST_F(GraphParserTest, ParserLocBudget) {
     size_t dot = source_line_count("lambda/input/input-graph-dot.cpp");
     size_t mermaid = source_line_count("lambda/input/input-graph-mermaid.cpp");
     size_t structurizr = source_line_count("lambda/input/input-graph-structurizr.cpp");
+    size_t structurizr_resolver = source_line_count(
+        "lambda/input/input-graph-structurizr-resolver.cpp");
     size_t shared = source_line_count("lambda/input/input-graph.cpp");
     size_t header = source_line_count("lambda/input/input-graph.h");
 
     ASSERT_GT(dot, 0u);
     ASSERT_GT(mermaid, 0u);
     ASSERT_GT(structurizr, 0u);
+    ASSERT_GT(structurizr_resolver, 0u);
     ASSERT_GT(shared, 0u);
     ASSERT_GT(header, 0u);
     EXPECT_LE(dot, 471u);
     EXPECT_LE(mermaid, 1534u);
     EXPECT_LE(structurizr, 800u);
+    EXPECT_LE(structurizr_resolver, 400u);
     EXPECT_LE(shared, 249u);
-    EXPECT_LE(header, 106u);
-    EXPECT_LE(dot + mermaid + structurizr + shared + header, 3160u);
+    EXPECT_LE(header, 109u);
+    EXPECT_LE(dot + mermaid + structurizr + structurizr_resolver + shared + header, 3563u);
 }
 
 // Test DOT graph parsing
