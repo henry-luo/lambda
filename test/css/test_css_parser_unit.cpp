@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 #include "helpers/css_test_helpers.hpp"
+#include "lambda/input/css/css_font_face.hpp"
+#include "lambda/network/font_resource_faces.h"
 
 extern "C" {
 #include "lambda/input/css/css_parser.hpp"
@@ -765,6 +767,53 @@ TEST_F(CssParserUnitTest, Error_EmptyInput) {
     auto selector = parser.ParseSelector("");
 
     EXPECT_EQ(selector, nullptr);
+}
+
+TEST_F(CssParserUnitTest, FontFace_NumericWeightPreservesDistinctFace) {
+    CssFontFaceDescriptor* light = css_parse_font_face_content(
+        "{ font-family: 'Web Font'; src: url(light.woff2); font-weight: 300; }", nullptr);
+    CssFontFaceDescriptor* regular = css_parse_font_face_content(
+        "{ font-family: 'Web Font'; src: url(regular.woff2); font-weight: 400; }", nullptr);
+
+    ASSERT_NE(light, nullptr);
+    ASSERT_NE(regular, nullptr);
+    EXPECT_EQ(light->font_weight, (CssEnum)300);
+    EXPECT_EQ(regular->font_weight, (CssEnum)400);
+
+    css_font_face_descriptor_free(light);
+    css_font_face_descriptor_free(regular);
+}
+
+typedef struct FontResourceWeightSet {
+    bool has_regular;
+    bool has_bold;
+} FontResourceWeightSet;
+
+static void collect_font_resource_weight(const CssFontFaceDescriptor* descriptor,
+                                         void* user_data) {
+    FontResourceWeightSet* weights = (FontResourceWeightSet*)user_data;
+    if (descriptor->font_weight == (CssEnum)400) weights->has_regular = true;
+    if (descriptor->font_weight == (CssEnum)700) weights->has_bold = true;
+}
+
+TEST_F(CssParserUnitTest, FontResourceFaceList_SharedUrlRetainsDistinctWeights) {
+    CssFontFaceDescriptor regular = {};
+    regular.family_name = (char*)"Variable Web Font";
+    regular.font_weight = (CssEnum)400;
+    CssFontFaceDescriptor bold = regular;
+    bold.font_weight = (CssEnum)700;
+
+    FontResourceFaceList* faces = nullptr;
+    EXPECT_TRUE(font_resource_face_list_add_unique(&faces, &regular));
+    EXPECT_TRUE(font_resource_face_list_add_unique(&faces, &bold));
+    EXPECT_FALSE(font_resource_face_list_add_unique(&faces, &bold));
+    EXPECT_EQ(font_resource_face_list_count(faces), 2);
+
+    FontResourceWeightSet weights = {};
+    font_resource_face_list_for_each(faces, collect_font_resource_weight, &weights);
+    EXPECT_TRUE(weights.has_regular);
+    EXPECT_TRUE(weights.has_bold);
+    font_resource_face_list_destroy(faces);
 }
 
 // =============================================================================

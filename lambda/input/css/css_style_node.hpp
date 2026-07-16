@@ -195,7 +195,7 @@ int css_specificity_compare(CssSpecificity a, CssSpecificity b);
  * @param b Second declaration
  * @return -1 if a loses to b, 0 if equal, 1 if a wins over b
  */
-int css_declaration_cascade_compare(CssDeclaration* a, CssDeclaration* b);
+int css_declaration_cascade_compare(const CssDeclaration* a, const CssDeclaration* b);
 
 /**
  * Resolve CSS cascade for a property

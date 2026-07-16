@@ -73,10 +73,11 @@ void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
     // for variable fonts (e.g., SFNS.ttf for -apple-system), set the 'wght'
     // variation axis so the rasterizer produces glyphs at the requested
     // weight.  Without this, raw-buffer-loaded variable fonts always render
-    // at their default instance (typically Regular/400), even though
+    // at their default instance, even though
     // ct_font_ref (used for advances) was created with a weight trait.
-    // Non-variable fonts silently ignore the axis.
-    if ((int)weight != FONT_WEIGHT_NORMAL && weight > 0) {
+    // A variable font's default may be Thin/100, so CSS normal/400 must also
+    // set the axis; non-variable fonts silently ignore the attribute.
+    if (weight > 0) {
         FourCharCode wght_tag = 'wght';
         CFNumberRef axis_id = CFNumberCreate(NULL, kCFNumberIntType, &wght_tag);
         float w = (float)(int)weight;

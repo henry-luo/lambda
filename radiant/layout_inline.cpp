@@ -188,6 +188,37 @@ static bool has_following_inline_content(DomNode* node) {
     return false;
 }
 
+static bool has_following_in_flow_content(DomNode* node) {
+    DomNode* current = node;
+    while (current) {
+        for (DomNode* sibling = current->next_sibling; sibling;
+             sibling = sibling->next_sibling) {
+            if (sibling->is_text()) {
+                if (text_has_non_whitespace_content(layout_inline_as_text(sibling))) {
+                    return true;
+                }
+                continue;
+            }
+            if (!sibling->is_element()) continue;
+
+            DomElement* elem = layout_inline_as_element(sibling);
+            DisplayValue display = resolve_display_value(elem);
+            InlineOutOfFlowKind kind = inline_out_of_flow_kind(elem);
+            if (display.outer != CSS_VALUE_NONE && !kind.floated && !kind.positioned) {
+                return true;
+            }
+        }
+
+        DomNode* parent = current->parent;
+        if (!parent || !parent->is_element() ||
+            parent->view_type != RDT_VIEW_INLINE) {
+            break;
+        }
+        current = parent;
+    }
+    return false;
+}
+
 static bool view_is_collapsed_whitespace_text(View* view, ViewSpan* span) {
     if (!view || view->view_type != RDT_VIEW_TEXT) return false;
     if (view->width > 0.0f) return false;
@@ -976,19 +1007,6 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             float saved_max_width = lycon->block.max_width;
             log_debug("%s block-in-inline: laying out block child %s", inline_elem->source_loc(), child->node_name());
             layout_block(lycon, child, child_display);
-            View* block_fragment = static_cast<View*>(child);
-            if (block_fragment->width > 0.0f || block_fragment->height > 0.0f) {
-                float relative_x = 0.0f, relative_y = 0.0f;
-                if (ViewBlock* fragment_block = lam::view_as_block(block_fragment)) {
-                    layout_relative_position_offset(fragment_block, &relative_x, &relative_y);
-                }
-                // Relative positioning moves the child visually but leaves the
-                // split ancestor's client rect at the normal-flow fragment.
-                span_record_split_inline_fragment(
-                    span, lycon->line.left, lycon->line.right,
-                    block_fragment->y - relative_y,
-                    block_fragment->y - relative_y + block_fragment->height);
-            }
             visible_inline_after_last_block = false;
             lycon->block.max_width = saved_max_width; // Restore inline content width
             lycon->line.inline_start_edge_pending = 0.0f;
@@ -1047,6 +1065,20 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                         // Bottom margin collapse: check done after loop (need to know if it's the last block)
                     }
                 }
+            }
+
+            View* block_fragment = static_cast<View*>(child);
+            if (block_fragment->width > 0.0f || block_fragment->height > 0.0f) {
+                float relative_x = 0.0f, relative_y = 0.0f;
+                if (ViewBlock* fragment_block = lam::view_as_block(block_fragment)) {
+                    layout_relative_position_offset(fragment_block, &relative_x, &relative_y);
+                }
+                // margin collapse finalizes normal-flow coordinates before the split
+                // ancestor records its fragment; relative offsets remain visual-only.
+                span_record_split_inline_fragment(
+                    span, lycon->line.left, lycon->line.right,
+                    block_fragment->y - relative_y,
+                    block_fragment->y - relative_y + block_fragment->height);
             }
             had_block_child_before = true;
             if (child->is_element()) last_block_child_elem = layout_inline_as_element(child);
@@ -1107,6 +1139,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
     // After all children are processed, if the last block child has a bottom
     // margin and the container has no bottom border/padding, collapse it.
     if (last_block_child_elem && !visible_inline_after_last_block &&
+        !has_following_in_flow_content(inline_elem) &&
         (!in_inline_sequence || lycon->line.is_line_start)) {
         ViewBlock* last_blk = layout_inline_as_block_view(last_block_child_elem);
         DomNode* container_node = inline_elem->parent;
@@ -1124,6 +1157,8 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                 bool cont_auto_height = !container->blk || container->blk->given_height < 0;
                 if (cont_bb == 0 && cont_pb == 0 && inline_bb == 0 && inline_pb == 0 &&
                     cont_auto_height && last_blk->bound->margin.bottom != 0) {
+                    // the split block can reach the container edge only when no later
+                    // in-flow sibling makes its margin a sibling margin instead.
                     float child_mb = last_blk->bound->margin.bottom;
                     float cont_mb = container->bound ? container->bound->margin.bottom : 0;
                     float collapsed = (child_mb >= 0 && cont_mb >= 0) ?

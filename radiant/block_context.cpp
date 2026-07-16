@@ -117,6 +117,18 @@ void block_context_reset_floats(BlockContext* ctx) {
     ctx->lowest_float_bottom = 0;
 }
 
+void block_context_recompute_lowest_float_bottom(BlockContext* ctx) {
+    if (!ctx) return;
+    float lowest_bottom = 0.0f;
+    for (FloatBox* floating = ctx->left_floats; floating; floating = floating->next) {
+        lowest_bottom = max(lowest_bottom, floating->margin_box_bottom);
+    }
+    for (FloatBox* floating = ctx->right_floats; floating; floating = floating->next) {
+        lowest_bottom = max(lowest_bottom, floating->margin_box_bottom);
+    }
+    ctx->lowest_float_bottom = lowest_bottom;
+}
+
 // ============================================================================
 // BFC Detection
 // ============================================================================

@@ -296,6 +296,22 @@ static const char* font_metrics_family(FontHandle* handle) {
     return handle->metric_family_name ? handle->metric_family_name : handle->family_name;
 }
 
+static int font_get_handle_platform_metrics(FontHandle* handle,
+                                            float* out_ascent,
+                                            float* out_descent,
+                                            float* out_line_height) {
+    if (!handle) return 0;
+#ifdef __APPLE__
+    if (handle->is_document_font && handle->ct_raster_ref) {
+        // document-family aliases may resolve to a substitute; measure the data-backed face.
+        return font_platform_get_metrics_from_ref(handle->ct_raster_ref,
+            out_ascent, out_descent, out_line_height);
+    }
+#endif
+    return get_font_metrics_platform(font_metrics_family(handle), handle->size_px,
+        out_ascent, out_descent, out_line_height);
+}
+
 /**
  * Calculate normal CSS line-height following Chrome/Blink exactly.
  *
@@ -320,7 +336,7 @@ float font_calc_normal_line_height(FontHandle* handle) {
 
     // 1. try platform-specific metrics first (CoreText on macOS)
     float ascent, descent, line_height;
-    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
+    if (font_get_handle_platform_metrics(handle, &ascent, &descent, &line_height)) {
         if (font_metrics_trace_enabled()) {
             log_debug("font_calc_normal_line_height (platform): %.2f for %s@%.1f",
                       line_height, family, font_size);
@@ -427,7 +443,7 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
 
     // 2. Platform-specific metrics (CoreText on macOS) for non-USE_TYPO_METRICS fonts
     float ascent, descent, line_height;
-    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
+    if (font_get_handle_platform_metrics(handle, &ascent, &descent, &line_height)) {
         float leading = line_height - (ascent + descent);
         float half_leading = leading / 2.0f;
         *out_ascender = ascent + half_leading;
@@ -571,20 +587,7 @@ float font_get_rendering_ascender(FontHandle* handle) {
 
     float ascent, descent, lh;
     float result;
-#ifdef __APPLE__
-    if (handle->is_document_font && handle->ct_raster_ref &&
-        font_platform_get_metrics_from_ref(handle->ct_raster_ref,
-                                           &ascent, &descent, &lh)) {
-        // A document font may not be registered under its CSS alias; query the
-        // data-backed CoreText face so baseline placement cannot silently use a substitute.
-        result = ascent;
-        handle->cached_rendering_ascender = result;
-        handle->cached_rendering_ascender_ready = true;
-        return result;
-    }
-#endif
-    const char* family = font_metrics_family(handle);
-    if (get_font_metrics_platform(family, handle->size_px, &ascent, &descent, &lh)) {
+    if (font_get_handle_platform_metrics(handle, &ascent, &descent, &lh)) {
         result = ascent;
     } else {
         const FontMetrics* m = font_get_metrics(handle);
