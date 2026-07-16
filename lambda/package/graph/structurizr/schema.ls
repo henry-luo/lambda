@@ -34,14 +34,49 @@ fn source_block_diagnostics(source, wanted) => [
       "source." ++ wanted ++ "[" ++ string(i) ++ "]", value)
 ]
 
-fn source_child_diagnostics(source) => [
-  for (i, value in children(source), let tag = graph_model.tag(value)
-    where not contains([
-      "argument", "statement", "model", "views", "properties", "diagnostics"
-    ], tag))
-    diagnostic.for_value("structurizr.invalid-context", "error",
-      "Structurizr '" ++ tag ++ "' is not valid directly under workspace",
-      "source." ++ tag ++ "[" ++ string(i) ++ "]", value)
+fn source_child_allowed(context, tag) {
+  if (contains(["argument", "diagnostics"], tag)) true
+  else if (context == "workspace") contains([
+    "statement", "model", "views", "properties"
+  ], tag)
+  else if (context == "model") contains([
+    "statement", "declaration", "relationship", "properties", "archetypes"
+  ], tag)
+  else if (context == "declaration") contains([
+    "statement", "declaration", "relationship", "properties", "perspectives"
+  ], tag)
+  else if (context == "views") contains([
+    "statement", "view", "styles", "properties"
+  ], tag)
+  else if (context == "view" or context == "parallel") contains([
+    "statement", "relationship", "include", "exclude", "auto-layout", "animation", "parallel"
+  ], tag)
+  else if (context == "styles") tag == "style-rule"
+  else if (context == "archetypes") tag == "archetype"
+  else true
+}
+
+fn resolved_include(value) => graph_model.tag(value) == "statement" and
+  string(graph_model.optional(value, "keyword")) == "!include"
+
+fn source_child_diagnostics(child, context, path, index) {
+  let tag = graph_model.tag(child);
+  let child_path = path ++ "." ++ tag ++ "[" ++ string(index) ++ "]";
+  if (resolved_include(child)) {
+    nested_source_diagnostics(child, context, child_path)
+  } else if (not source_child_allowed(context, tag)) { [
+      diagnostic.for_value("structurizr.invalid-context", "error",
+        "Structurizr '" ++ tag ++ "' is not valid under '" ++ context ++ "'",
+        child_path, child),
+      *nested_source_diagnostics(child, tag, child_path)
+    ] } else {
+    nested_source_diagnostics(child, tag, child_path)
+  }
+}
+
+fn nested_source_diagnostics(value, context, path) => [
+  for (i, child in children(value),
+    problem in source_child_diagnostics(child, context, path, i)) problem
 ]
 
 pub fn validate_source(source) {
@@ -52,7 +87,7 @@ pub fn validate_source(source) {
   ] } else { [
     *source_block_diagnostics(source, "model"),
     *source_block_diagnostics(source, "views"),
-    *source_child_diagnostics(source)
+    *nested_source_diagnostics(source, "workspace", "source")
   ] }
 }
 

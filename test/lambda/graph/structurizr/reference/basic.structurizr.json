@@ -1,0 +1,190 @@
+{
+  "configuration" : { },
+  "description" : "C4 workspace",
+  "documentation" : { },
+  "id" : 0,
+  "model" : {
+    "deploymentNodes" : [ {
+      "containerInstances" : [ {
+        "containerId" : "3",
+        "deploymentGroups" : [ "Default" ],
+        "environment" : "Development",
+        "id" : "9",
+        "instanceId" : 1,
+        "properties" : {
+          "structurizr.dsl.identifier" : "development.laptop.webInstance"
+        },
+        "relationships" : [ {
+          "description" : "Reads from and writes to",
+          "destinationId" : "10",
+          "id" : "11",
+          "linkedRelationshipId" : "7",
+          "sourceId" : "9",
+          "technology" : "SQL"
+        } ],
+        "tags" : "Container Instance"
+      }, {
+        "containerId" : "4",
+        "deploymentGroups" : [ "Default" ],
+        "environment" : "Development",
+        "id" : "10",
+        "instanceId" : 1,
+        "properties" : {
+          "structurizr.dsl.identifier" : "development.laptop.dbInstance"
+        },
+        "tags" : "Container Instance"
+      } ],
+      "environment" : "Development",
+      "id" : "8",
+      "instances" : "1",
+      "name" : "Developer laptop",
+      "properties" : {
+        "structurizr.dsl.identifier" : "development.laptop"
+      },
+      "tags" : "Element,Deployment Node"
+    } ],
+    "people" : [ {
+      "description" : "Shops online",
+      "id" : "1",
+      "name" : "Customer",
+      "properties" : {
+        "structurizr.dsl.identifier" : "user"
+      },
+      "relationships" : [ {
+        "description" : "Uses",
+        "destinationId" : "2",
+        "id" : "5",
+        "sourceId" : "1",
+        "tags" : "Relationship"
+      }, {
+        "description" : "Uses",
+        "destinationId" : "3",
+        "id" : "6",
+        "sourceId" : "1",
+        "tags" : "Relationship",
+        "technology" : "HTTPS"
+      } ],
+      "tags" : "Element,Person"
+    } ],
+    "softwareSystems" : [ {
+      "containers" : [ {
+        "description" : "Serves the storefront",
+        "documentation" : { },
+        "id" : "3",
+        "name" : "Web application",
+        "properties" : {
+          "structurizr.dsl.identifier" : "shop.web"
+        },
+        "relationships" : [ {
+          "description" : "Reads from and writes to",
+          "destinationId" : "4",
+          "id" : "7",
+          "sourceId" : "3",
+          "tags" : "Relationship",
+          "technology" : "SQL"
+        } ],
+        "tags" : "Element,Container",
+        "technology" : "Lambda"
+      }, {
+        "description" : "Stores orders",
+        "documentation" : { },
+        "id" : "4",
+        "name" : "Database",
+        "properties" : {
+          "structurizr.dsl.identifier" : "shop.db"
+        },
+        "tags" : "Element,Container,Database",
+        "technology" : "SQLite"
+      } ],
+      "description" : "Sells books",
+      "documentation" : { },
+      "id" : "2",
+      "name" : "Online shop",
+      "properties" : {
+        "structurizr.dsl.identifier" : "shop"
+      },
+      "tags" : "Element,Software System"
+    } ]
+  },
+  "name" : "Online shop",
+  "properties" : {
+    "structurizr.inspection.error" : "9",
+    "structurizr.dsl" : "d29ya3NwYWNlICJPbmxpbmUgc2hvcCIgIkM0IHdvcmtzcGFjZSIgewogICFpZGVudGlmaWVycyBoaWVyYXJjaGljYWwKICBtb2RlbCB7CiAgICB1c2VyID0gcGVyc29uICJDdXN0b21lciIgIlNob3BzIG9ubGluZSIKICAgIHNob3AgPSBzb2Z0d2FyZVN5c3RlbSAiT25saW5lIHNob3AiICJTZWxscyBib29rcyIgewogICAgICB3ZWIgPSBjb250YWluZXIgIldlYiBhcHBsaWNhdGlvbiIgIlNlcnZlcyB0aGUgc3RvcmVmcm9udCIgIkxhbWJkYSIKICAgICAgZGIgPSBjb250YWluZXIgIkRhdGFiYXNlIiAiU3RvcmVzIG9yZGVycyIgIlNRTGl0ZSIgewogICAgICAgIHRhZ3MgIkRhdGFiYXNlIgogICAgICB9CiAgICB9CiAgICB1c2VyIC0+IHNob3AgIlVzZXMiCiAgICB1c2VyIC0+IHNob3Aud2ViICJVc2VzIiAiSFRUUFMiCiAgICBzaG9wLndlYiAtPiBzaG9wLmRiICJSZWFkcyBmcm9tIGFuZCB3cml0ZXMgdG8iICJTUUwiCiAgICBkZXZlbG9wbWVudCA9IGRlcGxveW1lbnRFbnZpcm9ubWVudCAiRGV2ZWxvcG1lbnQiIHsKICAgICAgbGFwdG9wID0gZGVwbG95bWVudE5vZGUgIkRldmVsb3BlciBsYXB0b3AiIHsKICAgICAgICB3ZWJJbnN0YW5jZSA9IGNvbnRhaW5lckluc3RhbmNlIHNob3Aud2ViCiAgICAgICAgZGJJbnN0YW5jZSA9IGNvbnRhaW5lckluc3RhbmNlIHNob3AuZGIKICAgICAgfQogICAgfQogIH0KICB2aWV3cyB7CiAgICBzeXN0ZW1Db250ZXh0IHNob3AgIkNvbnRleHQiIHsKICAgICAgaW5jbHVkZSAqCiAgICAgIGF1dG9MYXlvdXQgbHIgMTIwIDgwCiAgICB9CiAgICBjb250YWluZXIgc2hvcCAiQ29udGFpbmVycyIgewogICAgICBpbmNsdWRlIGVsZW1lbnQudHlwZT09Y29udGFpbmVyCiAgICAgIGF1dG9MYXlvdXQgbHIKICAgIH0KICAgIHN0eWxlcyB7CiAgICAgIGVsZW1lbnQgIlNvZnR3YXJlIFN5c3RlbSIgewogICAgICAgIGJhY2tncm91bmQgIzExNjhiZAogICAgICAgIGNvbG9yICNmZmZmZmYKICAgICAgfQogICAgICByZWxhdGlvbnNoaXAgIlJlbGF0aW9uc2hpcCIgewogICAgICAgIHJvdXRpbmcgT3J0aG9nb25hbAogICAgICB9CiAgICB9CiAgfQp9",
+    "structurizr.inspection.info" : "0",
+    "structurizr.inspection.ignore" : "0",
+    "structurizr.inspection.warning" : "0"
+  },
+  "views" : {
+    "configuration" : {
+      "branding" : { },
+      "styles" : {
+        "elements" : [ {
+          "background" : "#1168bd",
+          "color" : "#ffffff",
+          "tag" : "Software System"
+        } ],
+        "relationships" : [ {
+          "routing" : "Orthogonal",
+          "tag" : "Relationship"
+        } ]
+      },
+      "terminology" : { }
+    },
+    "containerViews" : [ {
+      "automaticLayout" : {
+        "applied" : false,
+        "edgeSeparation" : 0,
+        "implementation" : "Graphviz",
+        "nodeSeparation" : 300,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 300,
+        "vertices" : false
+      },
+      "elements" : [ {
+        "id" : "3",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "4",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalSoftwareSystemBoundariesVisible" : false,
+      "key" : "Containers",
+      "name" : "Container View: Online shop",
+      "order" : 2,
+      "relationships" : [ {
+        "id" : "7"
+      } ],
+      "softwareSystemId" : "2"
+    } ],
+    "systemContextViews" : [ {
+      "automaticLayout" : {
+        "applied" : false,
+        "edgeSeparation" : 0,
+        "implementation" : "Graphviz",
+        "nodeSeparation" : 80,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 120,
+        "vertices" : false
+      },
+      "elements" : [ {
+        "id" : "1",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "enterpriseBoundaryVisible" : true,
+      "key" : "Context",
+      "name" : "System Context View: Online shop",
+      "order" : 1,
+      "relationships" : [ {
+        "id" : "5"
+      } ],
+      "softwareSystemId" : "2"
+    } ]
+  }
+}

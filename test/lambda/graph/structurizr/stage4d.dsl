@@ -22,7 +22,7 @@ workspace "Order platform" {
           databaseInstance = containerInstance store.database blue
           auditInstance = containerInstance store.audit blue
         }
-        gateway -> apiInstance "Forwards requests" "HTTPS"
+        gateway -> production.region.application.apiInstance "Forwards requests" "HTTPS"
       }
     }
   }
