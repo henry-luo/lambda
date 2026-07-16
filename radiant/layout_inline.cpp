@@ -264,6 +264,32 @@ static View* inline_span_first_line_fragment_child(ViewSpan* span) {
     return first;
 }
 
+static bool inline_fragment_union_extends_child_bounds(ViewSpan* span) {
+    if (!span || !span->has_inline_fragment_union) return false;
+    bool found_child = false;
+    float min_y = 0.0f;
+    float max_y = 0.0f;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_NONE || is_out_of_flow_child(child) ||
+            view_is_collapsed_whitespace_text(child, span)) {
+            continue;
+        }
+        float child_min_y = child->y;
+        float child_max_y = child->y + child->height;
+        if (!found_child) {
+            found_child = true;
+            min_y = child_min_y;
+            max_y = child_max_y;
+        } else {
+            if (child_min_y < min_y) min_y = child_min_y;
+            if (child_max_y > max_y) max_y = child_max_y;
+        }
+    }
+    return found_child &&
+        (span->inline_fragment_min_y < min_y ||
+         span->inline_fragment_max_y > max_y);
+}
+
 bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
     View* first = inline_span_first_line_fragment_child(span);
     if (!first) return false;
@@ -273,6 +299,9 @@ bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
     int last_line = 0;
     inline_text_line_range(static_cast<View*>(span), span, &found_text_line,
                            &first_line, &last_line);
+    // a rendered soft hyphen is an inline fragment without a TextRect; its
+    // separate vertical extent still makes the element a multi-line inline.
+    if (inline_fragment_union_extends_child_bounds(span)) return true;
     // Vertical-align changes child y without changing its recorded line identity.
     if (found_text_line) return first_line != last_line;
 
@@ -1995,8 +2024,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 pb_val = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
             }
             float expected_height = content_area + bt + pt_val + pb_val + bb;
-            if (!span_is_multi_line && span->height > expected_height) {
-                // Descendant decorations may overflow, but cannot enlarge an ancestor's inline border box.
+            if (!span_is_multi_line &&
+                roundf(span->height) > roundf(expected_height)) {
+                // subpixel raster/content metrics can describe the same CSS-pixel
+                // box; re-anchoring it after a preserved newline moves it a line.
                 float span_asc = span->font ? span->font->ascender :
                     (lycon->font.style ? lycon->font.style->ascender : 0.0f);
                 float span_desc = span->font ? span->font->descender :
