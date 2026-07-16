@@ -757,26 +757,35 @@ extern "C" int lambda_scheduler_run_ready(LambdaScheduler* scheduler) {
     return ran;
 }
 
+typedef struct LambdaDrainWatchdogState {
+    bool fired;
+    bool grace_turn;
+} LambdaDrainWatchdogState;
+
+static void scheduler_drain_watchdog_cb(uv_timer_t* timer) {
+    LambdaDrainWatchdogState* state = timer
+        ? (LambdaDrainWatchdogState*)timer->data : NULL;
+    if (!state) return;
+    if (!state->grace_turn) {
+        // After process descheduling, an earlier awaited timer and this
+        // watchdog can be overdue in the same timer phase. Give the loop one
+        // full checkpoint turn so that Promise can resume its Lambda task.
+        state->grace_turn = true;
+        uv_timer_start(timer, scheduler_drain_watchdog_cb, 0, 0);
+        return;
+    }
+    state->fired = true;
+}
+
 extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
     if (!scheduler) return 0;
     uv_loop_t* loop = lambda_uv_loop();
-    bool watchdog_fired = false;
+    LambdaDrainWatchdogState watchdog_state = {false, false};
     uv_timer_t watchdog;
+    bool watchdog_initialized = false;
     bool watchdog_started = false;
-    if (loop && uv_timer_init(loop, &watchdog) == 0) {
-        watchdog.data = &watchdog_fired;
-        if (uv_timer_start(&watchdog, [](uv_timer_t* timer) {
-                bool* fired = (bool*)timer->data;
-                if (fired) *fired = true;
-                uv_stop(timer->loop);
-            }, 5000, 0) == 0) {
-            watchdog_started = true;
-        } else {
-            uv_close((uv_handle_t*)&watchdog, NULL);
-        }
-    }
     int ran = 0;
-    while (scheduler->live_count > 0 && !watchdog_fired) {
+    while (scheduler->live_count > 0 && !watchdog_state.fired) {
         int step = lambda_scheduler_run_ready(scheduler);
         ran += step;
         if (scheduler->live_count == 0) break;
@@ -785,11 +794,26 @@ extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
         // macrotask batch has had a chance to start its I/O/timer wait.
         if (scheduler->run_head) continue;
         if (!loop) break;
+        if (!watchdog_initialized && uv_timer_init(loop, &watchdog) == 0) {
+            watchdog.data = &watchdog_state;
+            watchdog_initialized = true;
+        }
+        if (watchdog_initialized && (!watchdog_started || step > 0)) {
+            // The watchdog measures an idle wait, not task execution. Lazy JS
+            // compilation can run inside a task poll and exceed wall time under
+            // parallel load before its awaited timer has even been armed.
+            watchdog_state.fired = false;
+            watchdog_state.grace_turn = false;
+            if (uv_timer_start(&watchdog,
+                    scheduler_drain_watchdog_cb, 5000, 0) == 0) {
+                watchdog_started = true;
+            }
+        }
         uv_run(loop, UV_RUN_ONCE);
         if (step == 0 && !uv_loop_alive(loop) && !scheduler->run_head) break;
     }
-    if (watchdog_started) {
-        uv_timer_stop(&watchdog);
+    if (watchdog_initialized) {
+        if (watchdog_started) uv_timer_stop(&watchdog);
         if (!uv_is_closing((uv_handle_t*)&watchdog)) {
             uv_close((uv_handle_t*)&watchdog, NULL);
         }
@@ -797,7 +821,7 @@ extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
     }
     if (scheduler->live_count > 0) {
         log_error("concurrency scheduler: drain stopped with %d live task(s)%s",
-            scheduler->live_count, watchdog_fired ? " after watchdog timeout" : " without runnable work");
+            scheduler->live_count, watchdog_state.fired ? " after watchdog timeout" : " without runnable work");
         return -1;
     }
     return ran;

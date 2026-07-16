@@ -959,10 +959,12 @@ static std::atomic<int> g_node_progress_passed{0};
 static std::atomic<int> g_node_progress_failed{0};
 static std::atomic<int> g_node_progress_timed_out{0};
 static std::atomic<int> g_node_progress_crashed{0};
+static std::atomic<int> g_node_progress_gate_failures{0};
 static bool g_node_socket_preflight_failed = false;
 static std::string g_node_socket_preflight_message;
 
 static const char* node_result_status(const NodeTestResult& r);
+static void ensure_temp_dir();
 
 static bool node_test_requires_serial(const NodeOfficialParam& t) {
     load_serial_list();
@@ -1045,9 +1047,59 @@ static bool run_node_socket_preflight(std::string& message) {
 #endif
 }
 
+static void node_write_failure_output_entry(FILE* f,
+        const NodeOfficialParam& t, const NodeTestResult& r) {
+    if (!f) return;
+    fprintf(f, "===== %s exit=%d timed_out=%s elapsed=%.3fms =====\n",
+            t.filename.c_str(), r.exit_code, r.timed_out ? "yes" : "no", r.elapsed_ms);
+    fprintf(f, "raw_status=%d\n", r.raw_status);
+    fprintf(f, "module=%s ordinal=%zu node_common_port=%u test_thread_id=%u\n",
+            t.module.c_str(), t.ordinal, r.node_common_port, r.test_thread_id);
+    fprintf(f, "cwd=%s\n", r.cwd.c_str());
+    fprintf(f, "timeout_cmd=%s\n", r.timeout_cmd.c_str());
+    fprintf(f, "node_flags=%s\n", r.node_flags.empty() ? "(none)" : r.node_flags.c_str());
+    fprintf(f, "child_PATH=%s\n", r.child_path.c_str());
+    fprintf(f, "command=%s\n", r.command.c_str());
+    fprintf(f, "--- output ---\n");
+    fprintf(f, "%s\n", r.output.c_str());
+}
+
+static void node_reset_live_failure_files() {
+    ensure_temp_dir();
+    FILE* crashers = fopen(CRASHER_FILE, "w");
+    if (crashers) fclose(crashers);
+    FILE* failures = fopen(FAILURE_OUTPUT_FILE, "w");
+    if (failures) fclose(failures);
+}
+
+static void node_report_timeout_regression_immediately(
+        const NodeOfficialParam& t, const NodeTestResult& result,
+        int gate_failures) {
+    // Suite execution precedes GTest case evaluation, so persist the timeout
+    // now or an interrupted run loses the regression and leaves stale files.
+    fprintf(stderr,
+            "[node-official] GATE_FAILURE timeout-regression %s gate_failures=%d\n",
+            t.filename.c_str(), gate_failures);
+    FILE* crashers = fopen(CRASHER_FILE, "a");
+    if (crashers) {
+        fprintf(crashers, "TIMEOUT\t%s\n", t.filename.c_str());
+        fclose(crashers);
+    }
+    FILE* failures = fopen(FAILURE_OUTPUT_FILE, "a");
+    if (failures) {
+        node_write_failure_output_entry(failures, t, result);
+        fclose(failures);
+    }
+    fflush(stderr);
+}
+
 static void node_progress_note_result(const NodeOfficialParam& t,
                                       const NodeTestResult& result) {
     int completed = ++g_node_progress_completed;
+    bool gate_failure = !result.passed &&
+        (g_baseline_passing.empty() ||
+         g_baseline_passing.find(t.filename) != g_baseline_passing.end());
+    if (gate_failure) ++g_node_progress_gate_failures;
     if (result.passed) {
         ++g_node_progress_passed;
     } else if (result.timed_out) {
@@ -1064,13 +1116,17 @@ static void node_progress_note_result(const NodeOfficialParam& t,
     if (!print_progress) return;
 
     std::lock_guard<std::mutex> progress_lock(g_node_progress_mutex);
+    int gate_failures = g_node_progress_gate_failures.load();
     fprintf(stderr,
-            "[node-official] progress %d/%d pass=%d fail=%d timeout=%d crash=%d\n",
+            "[node-official] progress %d/%d pass=%d fail=%d timeout=%d crash=%d gate_failures=%d\n",
             completed, g_node_progress_total.load(),
             g_node_progress_passed.load(),
             g_node_progress_failed.load(),
             g_node_progress_timed_out.load(),
-            g_node_progress_crashed.load());
+            g_node_progress_crashed.load(), gate_failures);
+    if (result.timed_out && gate_failure) {
+        node_report_timeout_regression_immediately(t, result, gate_failures);
+    }
     if (print_detail) {
         const char* status = node_result_status(result);
         fprintf(stderr,
@@ -1096,6 +1152,8 @@ static void execute_one_test(const NodeOfficialParam& t) {
 static void execute_all_tests(const std::vector<NodeOfficialParam>& tests) {
     if (tests.empty()) return;
 
+    node_reset_live_failure_files();
+
     std::vector<NodeOfficialParam> parallel_tests;
     std::vector<NodeOfficialParam> serial_tests;
     for (const auto& t : tests) {
@@ -1114,6 +1172,7 @@ static void execute_all_tests(const std::vector<NodeOfficialParam>& tests) {
     g_node_progress_failed = 0;
     g_node_progress_timed_out = 0;
     g_node_progress_crashed = 0;
+    g_node_progress_gate_failures = 0;
 
     for (const auto& t : serial_tests) {
         execute_one_test(t);
@@ -1337,18 +1396,7 @@ static void write_failure_outputs(const std::vector<NodeOfficialParam>& tests) {
         if (it == g_test_results.end()) continue;
         const auto& r = it->second;
         if (r.passed) continue;
-        fprintf(f, "===== %s exit=%d timed_out=%s elapsed=%.3fms =====\n",
-                t.filename.c_str(), r.exit_code, r.timed_out ? "yes" : "no", r.elapsed_ms);
-        fprintf(f, "raw_status=%d\n", r.raw_status);
-        fprintf(f, "module=%s ordinal=%zu node_common_port=%u test_thread_id=%u\n",
-                t.module.c_str(), t.ordinal, r.node_common_port, r.test_thread_id);
-        fprintf(f, "cwd=%s\n", r.cwd.c_str());
-        fprintf(f, "timeout_cmd=%s\n", r.timeout_cmd.c_str());
-        fprintf(f, "node_flags=%s\n", r.node_flags.empty() ? "(none)" : r.node_flags.c_str());
-        fprintf(f, "child_PATH=%s\n", r.child_path.c_str());
-        fprintf(f, "command=%s\n", r.command.c_str());
-        fprintf(f, "--- output ---\n");
-        fprintf(f, "%s\n", r.output.c_str());
+        node_write_failure_output_entry(f, t, r);
     }
     fclose(f);
 }
@@ -1578,6 +1626,9 @@ public:
                 }
             }
         }
+        size_t gate_failures = !g_baseline_passing.empty()
+            ? regressions.size()
+            : (size_t)(failed + missing + timed_out);
 
         // print summary
         printf("\n");
@@ -1590,6 +1641,9 @@ public:
         printf("║  Missing:         %5d                          ║\n", missing);
         printf("║  Timed out:       %5d                          ║\n", timed_out);
         printf("║  Crashed:         %5d                          ║\n", crashed);
+        // `Failed` is the legacy non-timeout bucket; gate failures is the
+        // actionable total and must include timeout regressions.
+        printf("║  Gate failures:   %5zu                          ║\n", gate_failures);
         printf("║  Runtime:         %5.1fs                         ║\n", g_node_run_wall_secs);
         if (g_baseline_only) {
             printf("║  Baseline-only:   %5s                          ║\n", "yes");

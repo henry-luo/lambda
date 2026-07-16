@@ -1,0 +1,13 @@
+{
+  terminology: [["person", "Actor"], ["software-system", "Service"], ["relationship", "Flow"], ["metadata", "curly"]],
+  elements: [["api", "Service", "Platform/Payments"], ["worker", "Service", "Platform/Payments"], ["user", "Actor", null]],
+  canonical_groups: [["group@106", null, null], ["group@131", null, "Platform"]],
+  expression: ["api", "user"],
+  groups: [["group:Platform", "Platform", null], ["group:Platform/Payments", "Payments", "group:Platform"]],
+  nodes: [["api", "hexagon", "Hexagon"], ["worker", "hexagon", "Hexagon"], ["user", "person", null]],
+  edges: [["curved", "curved", "dotted"], ["direct", "line", "solid"]],
+  selected: ["api", "user"],
+  html: [["api", "hexagon", "stroke-dasharray:2 3;opacity:0.8"], ["worker", "hexagon", "stroke-dasharray:2 3;opacity:0.8"], ["user", "person", ""], ["curved", "curved", "2 3"], ["direct", "line", null]],
+  routed: [["line", "line", false], ["curve", "curved", true]],
+  diagnostics: []
+}

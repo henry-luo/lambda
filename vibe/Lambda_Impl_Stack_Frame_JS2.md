@@ -1,8 +1,56 @@
 # Lambda Stack Frame — Implementation Plan, JS Container `extra` Migration (SF15-J)
 
-**Status:** draft v1
+**Status:** **IMPLEMENTED**
 **Date:** 2026-07-15
 **Design:** `vibe/Lambda_Design_Stack_Frame.md` SF15/SF15-J (reserved props tail slot; JsArray subtype rejected). Companion to phase 2 (`vibe/Lambda_Impl_Stack_Frame_JS.md`): this plan is a **prerequisite for stage J3d** (JS number watermarks on) and independent of J1/J2 (rooting) — it can run before or in parallel with them.
+
+---
+
+## 0. Implementation record (2026-07-15)
+
+All JP0–JP4 code and permanent-regression work is complete. The required
+Lambda and test262 baselines are green on the final candidate.
+
+- **JP0 — census and provenance:** the checked inventory is
+  `vibe/Lambda_Impl_Stack_Frame_JS2_Inventory.md`. It classifies every original
+  JS `extra` consumer, the remaining `ArrayNumShape*` overload, both array-item
+  allocator paths, sparse-map ownership, tracing, and compaction.
+- **JP1 — access boundary:** all companion reads, writes, and presence tests use
+  `js_array_has_props`, `js_array_props`, and `js_array_set_props`. Indexed
+  walkers use `container_dense_capacity`; physical capacity is no longer an
+  observable indexed range when a counted tail exists.
+- **JP2 — representation and GC:** `CONTAINER_FLAG_JS_PROPS` gates a tagged Map
+  Item at `items[capacity - 1]`; `extra` uniformly counts the complete tail.
+  `expand_list` and `js_array_install_runtime_items` share
+  `list_relocate_owned_tail`, while GC marks the Map slot precisely and never
+  interprets `extra` as a possible pointer. Sparse growth stamps newly exposed
+  dense storage as holes.
+- **JP3 — ownership:** arbitrary JS stores use the shared owned-scalar path;
+  slice/concat/`Array.from` clone boundaries re-home wide payloads. Permanent
+  tests cover props-first and wide-first ordering, forced GC, growth, sparse
+  indices, clone/concat, and a Lambda-held array that JS promotes in place.
+- **JP4 — closure:** SF15-J, the JS value model, Lambda GC documentation, and
+  the parent JS implementation record describe the live representation. The
+  old raw-pointer wording and conservative trace rule are removed.
+
+### 0.1 Final verification snapshot (2026-07-16)
+
+- `make test-lambda-baseline`: **3419/3419 passed**, 0 failed (2105/2105
+  input-parser tests and 1314/1314 Lambda runtime tests, including 332/332 JS
+  transpiler tests).
+- `make test262-baseline`: **40261/40261 fully passed**, 0 failed, 0
+  non-fully-passing, 0 regressions; 2628 skipped by the maintained baseline.
+- Focused permanent regressions passed in release and forced-GC/ASan runs:
+  `regression_js_array_props_tail.js`, `js_array_props_tail_bridge.ls`, and the
+  unchanged `proc_stack_frame` golden. The complete ASan JS gtest run passed
+  **332/332**.
+- `make editor-4c-js`: **1931/1931 passed** (the non-UI editor Phase A gate).
+- The full Node suite and editor-view UI suite are intentionally **not closure
+  gates for this run**, per user direction because of their runtime. Node was
+  stopped at 2400/3528 with 2400 passed and no failure/timeout/crash. The
+  editor-view run was stopped after exposing two pre-existing UI failures
+  (`color-picker` and `image-resize`); no claim of a green editor-view gate is
+  made here. The broader DOM UI gate was likewise skipped.
 
 ---
 
@@ -40,11 +88,16 @@ Phase 2's scope note claims "JS containers are Lambda containers, so SF15/SF16 r
 ```c
 #define CONTAINER_FLAG_JS_PROPS (1u << 6)  // items[capacity-1] holds tagged props-Map Item
 
-static inline bool  js_array_has_props(const Array* arr);         // flag test
-static inline Map*  js_array_props(const Array* arr);             // flag-gated read; NULL if unset
-static inline int64_t container_tail_reserved(const Array* arr);  // 1 if flag set else 0 — the ONLY place the +1 lives
+bool  js_array_has_props(const Array* arr);                        // flag test
+Map*  js_array_props(const Array* arr);                            // flag-gated read; NULL if unset
+int64_t container_tail_reserved(const Array* arr);                 // 1 if flag set else 0 — the ONLY place the +1 lives
+int64_t container_dense_capacity(const Array* arr);                // capacity - counted tail
 void js_array_set_props(Array* arr, Map* props);                  // ensure slot (promote if needed), store tagged Item, set flag
 ```
+
+These accessors are out-of-line because `lambda.h` is included at points where
+`Array` and `Map` are still incomplete public types. The representation remains
+centralized; call sites do not inspect the props slot.
 
 `js_array_set_props` is the promotion choke point: if no slot is free (`length + extra + 1 > capacity` after accounting), grow via the array's own growth path, then write `items[capacity-1] = {.map = props}` tagged `LMD_TYPE_MAP`, `extra += 1`, set flag.
 
@@ -83,7 +136,7 @@ void js_array_set_props(Array* arr, Map* props);                  // ensure slot
 
 ### Stage JP4 — Docs and closure
 
-- Update `doc/dev/js/JS_03` (value model — array/props representation) and `doc/dev/lambda/LR_08` (trace walk — precise props slot); design-doc SF15-J status → implemented; memory-index sync.
+- Update `doc/dev/js/JS_03` (value model — array/props representation) and `doc/dev/lambda/LR_08` (trace walk — precise props slot); design-doc SF15-J status → implemented; synchronize the checked-in parent implementation record and inventory.
 
 ---
 

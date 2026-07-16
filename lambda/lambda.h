@@ -651,7 +651,7 @@ enum MapKind {
     MAP_KIND_RESERVED_8  = 8,  // retired document proxy map carrier
     MAP_KIND_PROXY       = 9,  // ES6 Proxy object
     MAP_KIND_RESERVED_10 = 10, // retired foreign-document map carrier
-    MAP_KIND_ARRAY_PROPS = 11, // array `extra` companion map: stores literal
+    MAP_KIND_ARRAY_PROPS = 11, // array reserved-tail companion map: stores literal
                                // legacy markers (__get_N/__set_N/__nw_N/...)
                                // — bypasses Phase 4 accessor-marker intercept.
     MAP_KIND_CSS_NAMESPACE = 12, // CSS namespace object; ordinary shape-backed
@@ -661,6 +661,7 @@ enum MapKind {
 };
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
+#define CONTAINER_FLAG_JS_PROPS (1u << 6)
 
 static inline bool map_kind_is_array_props(uint8_t map_kind) {
     return map_kind == MAP_KIND_ARRAY_PROPS || map_kind == MAP_KIND_ARRAY_SPARSE;
@@ -719,7 +720,7 @@ LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, type_id) == 0,
         //---------------------
         Item* items;  // pointer to items
         int64_t length;  // number of items
-        int64_t extra;   // count of extra items stored at the end of the list
+        int64_t extra;   // count of reserved tail items (wide scalars plus optional JS props slot)
         int64_t capacity;  // allocated capacity
     };
 
@@ -764,7 +765,7 @@ LAMBDA_STATIC_ASSERT(__builtin_offsetof(Container, type_id) == 0,
     };
 
     struct SparseArrayMap {
-        struct Map base;              // must remain first; arr->extra is cast to Map*
+        struct Map base;              // must remain first; array props slot points to base
         struct hashmap* sparse_indices; // numeric sparse array data entries
         int64_t sparse_version;       // increments on numeric sparse mutations
     };
@@ -849,6 +850,13 @@ extern "C" {
 void array_set(Array* arr, int64_t index, Item item);
 void array_copy_owned_items(Array* destination, int64_t destination_index,
                             const Item* source, int64_t count);
+bool js_array_has_props(const Array* arr);
+Map* js_array_props(const Array* arr);
+int64_t container_tail_reserved(const Array* arr);
+int64_t container_dense_capacity(const Array* arr);
+void js_array_set_props(Array* arr, Map* props);
+void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
+                              Item* new_items, int64_t new_capacity);
 void owned_item_slot_store(Item* storage, int64_t item_count,
                            int64_t index, Item item);
 Item owned_item_slot_read(Item* storage, int64_t item_count,

@@ -11,6 +11,7 @@
 #include "../../lib/log.h"  // add logging support
 #include "../../lib/memtrack.h"
 #include "../../lib/file.h"
+#include "../../lib/str.h"
 #include <limits.h>
 #include <new>
 #include <stdlib.h>
@@ -911,6 +912,49 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"mdx", parse_mdx_input},
 };
 
+const char* input_detect_structurizr_flavor(const char* pathname,
+                                            const char* source,
+                                            size_t source_len) {
+    if (!pathname || !source) return NULL;
+    size_t path_len = strlen(pathname);
+    if (str_iends_with_const(pathname, path_len, ".structurizr")) return "structurizr";
+    if (!str_iends_with_const(pathname, path_len, ".dsl")) return NULL;
+
+    const char* cursor = source;
+    const char* end = source + source_len;
+    if ((size_t)(end - cursor) >= 3 &&
+            (unsigned char)cursor[0] == 0xEF &&
+            (unsigned char)cursor[1] == 0xBB &&
+            (unsigned char)cursor[2] == 0xBF) {
+        cursor += 3;
+    }
+    while (cursor < end) {
+        if (input_is_whitespace_char(*cursor)) {
+            cursor++;
+        } else if ((size_t)(end - cursor) >= 2 && cursor[0] == '/' && cursor[1] == '/') {
+            cursor += 2;
+            while (cursor < end && *cursor != '\n' && *cursor != '\r') cursor++;
+        } else if (*cursor == '#') {
+            while (cursor < end && *cursor != '\n' && *cursor != '\r') cursor++;
+        } else if ((size_t)(end - cursor) >= 2 && cursor[0] == '/' && cursor[1] == '*') {
+            cursor += 2;
+            while ((size_t)(end - cursor) >= 2 &&
+                    !(cursor[0] == '*' && cursor[1] == '/')) cursor++;
+            if ((size_t)(end - cursor) < 2) return NULL;
+            cursor += 2;
+        } else {
+            break;
+        }
+    }
+    static const char keyword[] = "workspace";
+    size_t keyword_len = sizeof(keyword) - 1;
+    if ((size_t)(end - cursor) < keyword_len ||
+            memcmp(cursor, keyword, keyword_len) != 0) return NULL;
+    const char* after = cursor + keyword_len;
+    return after == end || input_is_whitespace_char(*after) || *after == '{'
+        ? "structurizr" : NULL;
+}
+
 static bool markup_flavor_to_format(const char* flavor, MarkupFormat* format) {
     for (size_t i = 0; i < sizeof(MARKUP_FLAVOR_MAPPINGS) / sizeof(MARKUP_FLAVOR_MAPPINGS[0]); i++) {
         if (strcmp(flavor, MARKUP_FLAVOR_MAPPINGS[i].flavor) == 0) {
@@ -972,12 +1016,19 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
               flavor ? flavor->chars : "null",
               source_len);
     const char* effective_type = NULL;
+    const char* detected_graph_flavor = NULL;
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
+        // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
+        const char* pathname = abs_url && abs_url->pathname
+            ? abs_url->pathname->chars : "";
+        detected_graph_flavor = input_detect_structurizr_flavor(
+            pathname, source, source_len);
+        if (detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type
-        MimeDetector* detector = mime_detector_init();
-        if (detector) {
-            const char* detected_mime = detect_mime_type(detector, abs_url->pathname ? abs_url->pathname->chars : "", source, source_len);
+        MimeDetector* detector = effective_type ? NULL : mime_detector_init();
+        if (!effective_type && detector) {
+            const char* detected_mime = detect_mime_type(detector, pathname, source, source_len);
             if (detected_mime) {
                 effective_type = mime_to_parser_type(detected_mime);
                 log_debug("Auto-detected MIME type: %s -> parser type: %s\n", detected_mime, effective_type);
@@ -986,7 +1037,7 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
                 log_debug("MIME detection failed, defaulting to text\n");
             }
             mime_detector_destroy(detector);
-        } else {
+        } else if (!effective_type) {
             effective_type = "text";
             log_debug("Failed to initialize MIME detector, defaulting to text\n");
         }
@@ -1055,7 +1106,8 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
             parse_math(input, source, math_flavor);
         }
         else if (strcmp(effective_type, "graph") == 0) {
-            const char* graph_flavor = (flavor) ? flavor->chars : "dot";
+            const char* graph_flavor = flavor ? flavor->chars
+                : (detected_graph_flavor ? detected_graph_flavor : "dot");
             parse_graph(input, source, graph_flavor);
         }
         else {

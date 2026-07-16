@@ -1,0 +1,11 @@
+{
+  elements: [["user", "person", null, null, null, ["Element", "Person"], []], ["shop", "software-system", null, null, null, ["Element", "Software System"], []], ["web", "container", "spring", "Explicit description", "Spring Boot", ["Element", "Container", "spring", "Application", "application", "Backend", "Public"], [["owner", "team-web"]]]],
+  relationships: [["relationship@837", "user", "web", "secure", "Calls", "HTTPS", false, null, ["Relationship", "secure", "Synchronous", "sync", "Encrypted"], [["protocol", "TLS"]]], ["implied:relationship@837:user:shop", "user", "shop", "secure", "Calls", "HTTPS", true, "relationship@837", ["Relationship", "secure", "Synchronous", "sync", "Encrypted"], [["protocol", "TLS"]]]],
+  projection: {
+    nodes: ["user", "shop"],
+    edges: [["implied:relationship@837:user:shop", "user", "shop", "Calls"]]
+  },
+  diagnostics: [],
+  disabled_relationships: [["user", "web", false]],
+  invalid_diagnostics: [["structurizr.unknown-archetype", "archetype:missing"], ["structurizr.archetype-cycle", "archetype:first"], ["structurizr.archetype-cycle", "archetype:second"], ["structurizr.unknown-archetype", "element-archetype:absent"], ["structurizr.unknown-archetype", "relationship-archetype:absentRelation"], ["structurizr.unsafe-directive", "source.!impliedRelationships"]]
+}

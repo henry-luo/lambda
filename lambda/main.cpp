@@ -2947,6 +2947,7 @@ int main(int argc, char *argv[]) {
             printf("  .mmd           Mermaid diagrams (rendered via graph layout)\n");
             printf("  .d2            D2 diagrams (rendered via graph layout)\n");
             printf("  .dot, .gv      GraphViz DOT files (rendered via graph layout)\n");
+            printf("  .dsl, .structurizr  Structurizr DSL workspaces (rendered as C4)\n");
             printf("\nSupported Output Formats:\n");
             printf("  .svg    Scalable Vector Graphics (SVG)\n");
             printf("  .pdf    Portable Document Format (PDF)\n");
@@ -2962,6 +2963,7 @@ int main(int argc, char *argv[]) {
             printf("  --theme <name>           Color theme for graph diagrams (default: zinc-dark)\n");
             printf("                           Dark: tokyo-night, nord, dracula, catppuccin-mocha, one-dark, github-dark\n");
             printf("                           Light: github-light, solarized-light, catppuccin-latte, zinc-light\n");
+            printf("  --view-key <key>         Structurizr view key (default: first declared view)\n");
             printf("  -h, --help               Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s render index.html -o output.svg        # Auto-size to content\n", argv[0]);
@@ -2986,6 +2988,7 @@ int main(int argc, char *argv[]) {
         float render_scale = 1.0f;  // Default user zoom scale
         float pixel_ratio = 1.0f;  // Default device pixel ratio (use 2.0 for Retina)
         const char* theme_name = NULL;  // Graph theme name
+        const char* graph_view_key = NULL;
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -3053,6 +3056,13 @@ int main(int argc, char *argv[]) {
                     printf("                  zinc-dark, zinc-light, dark, light\n");
                     return lambda_main_finish(1);
                 }
+            } else if (strcmp(argv[i], "--view-key") == 0) {
+                if (i + 1 < argc) {
+                    graph_view_key = argv[++i];
+                } else {
+                    printf("Error: --view-key requires a Structurizr view key\n");
+                    return lambda_main_finish(1);
+                }
             } else if (argv[i][0] != '-') {
                 // This should be the HTML input file
                 if (html_file == NULL) {
@@ -3089,17 +3099,8 @@ int main(int argc, char *argv[]) {
             return lambda_main_finish(1);
         }
 
-        // Detect if input is a graph format (Mermaid, D2, DOT)
         const char* input_ext = file_path_ext(html_file);
-        bool is_graph_input = false;
-        if (input_ext) {
-            if (strcmp(input_ext, ".mmd") == 0 ||
-                strcmp(input_ext, ".d2") == 0 ||
-                strcmp(input_ext, ".dot") == 0 ||
-                strcmp(input_ext, ".gv") == 0) {
-                is_graph_input = true;
-            }
-        }
+        bool is_graph_input = graph_bridge_path_is_graph(html_file);
 
         log_debug("Rendering input '%s' to output '%s' with viewport %dx%d, scale=%.2f, pixel_ratio=%.2f",
                   html_file, output_file, viewport_width, viewport_height, render_scale, pixel_ratio);
@@ -3107,7 +3108,7 @@ int main(int argc, char *argv[]) {
         char* render_package_temp_input = nullptr;
         if (is_graph_input) {
             char* graph_bridge_source = build_graph_to_html_bridge_script(
-                html_file, theme_name, "render");
+                html_file, theme_name, graph_view_key, "render");
             render_package_temp_input = file_temp_path("render_graph_bridge", ".ls");
             if (!graph_bridge_source || !render_package_temp_input) {
                 printf("Error: Failed to prepare graph render bridge for '%s'\n", html_file);
@@ -3288,6 +3289,7 @@ int main(int argc, char *argv[]) {
             printf("  .mmd       Mermaid diagram (graph layout)\n");
             printf("  .d2        D2 diagram (graph layout)\n");
             printf("  .dot/.gv   Graphviz DOT diagram (graph layout)\n");
+            printf("  .dsl/.structurizr  Structurizr DSL workspace (C4 graph layout)\n");
             printf("  .png       Portable Network Graphics\n");
             printf("  .jpg/.jpeg JPEG Image\n");
             printf("  .gif       Graphics Interchange Format\n");
@@ -3298,6 +3300,7 @@ int main(int argc, char *argv[]) {
             printf("  .csv       Comma-separated values (source view)\n");
             printf("\nOptions:\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
+            printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # View default HTML (test/html/index.html)\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
@@ -3325,6 +3328,7 @@ int main(int argc, char *argv[]) {
         bool headless = false;
         bool event_log = false;
         bool state_dump = false;
+        const char* graph_view_key = NULL;
         const char* font_dirs[16];
         int font_dir_count = 0;
 
@@ -3337,6 +3341,13 @@ int main(int argc, char *argv[]) {
                 event_log = true;
             } else if (strcmp(argv[i], "--state-dump") == 0) {
                 state_dump = true;
+            } else if (strcmp(argv[i], "--view-key") == 0) {
+                if (i + 1 < argc) {
+                    graph_view_key = argv[++i];
+                } else {
+                    printf("Error: --view-key requires a Structurizr view key\n");
+                    return lambda_main_finish(1);
+                }
             } else if (strcmp(argv[i], "--font-dir") == 0 && i + 1 < argc) {
                 if (font_dir_count < 16) {
                     font_dirs[font_dir_count++] = argv[++i];
@@ -3430,13 +3441,11 @@ int main(int argc, char *argv[]) {
         int exit_code;
 
         // Check if this is a graph file that needs conversion
-        bool is_graph_file = ext && (strcmp(ext, ".mmd") == 0 ||
-                                      strcmp(ext, ".d2") == 0 ||
-                                      strcmp(ext, ".dot") == 0 ||
-                                      strcmp(ext, ".gv") == 0);
+        bool is_graph_file = graph_bridge_path_is_graph(filename);
 
         if (is_graph_file) {
-            char* graph_bridge_source = build_graph_to_html_bridge_script(filename, nullptr, "view");
+            char* graph_bridge_source = build_graph_to_html_bridge_script(
+                filename, nullptr, graph_view_key, "view");
             if (!graph_bridge_source) {
                 printf("Error: Failed to prepare graph view bridge for '%s'\n", filename);
                 return lambda_main_finish(1);

@@ -5,6 +5,9 @@ fn empty_style() => {
   stroke: null,
   stroke_width: null,
   color: null,
+  font_size: null,
+  width: null,
+  height: null,
   opacity: null,
   dash_array: null
 }
@@ -146,6 +149,13 @@ fn apply_declaration(state, property, value) {
     let value = safe_width(text);
     if (value != null) { {*:state, stroke_width: value} } else state
   }
+  else if (key == "font-size" or key == "width" or key == "height") {
+    let value = safe_width(text);
+    if (value == null or value <= 0.0) state
+    else if (key == "font-size") {*:state, font_size: value}
+    else if (key == "width") {*:state, width: value}
+    else {*:state, height: value}
+  }
   else if (key == "opacity") {
     let value = safe_opacity(text);
     if (value != null) { {*:state, opacity: value} } else state
@@ -173,4 +183,7 @@ pub fn node_css(parsed) =>
   (if (parsed.stroke != null) "border-color:" ++ parsed.stroke ++ ";" else "") ++
   (if (parsed.stroke_width != null) "border-width:" ++ string(parsed.stroke_width) ++ "px;" else "") ++
   (if (parsed.color != null) "color:" ++ parsed.color ++ ";" else "") ++
+  (if (parsed.font_size != null) "font-size:" ++ string(parsed.font_size) ++ "px;" else "") ++
+  (if (parsed.width != null) "width:" ++ string(parsed.width) ++ "px;" else "") ++
+  (if (parsed.height != null) "height:" ++ string(parsed.height) ++ "px;" else "") ++
   (if (parsed.opacity != null) "opacity:" ++ string(parsed.opacity) ++ ";" else "")

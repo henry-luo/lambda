@@ -1,0 +1,12 @@
+wide-first-identity:true
+wide-first-props:true
+wide-first-values:true
+wide-first-growth:true
+props-first-props:true
+props-first-values:true
+props-first-growth:true
+sparse-props:true
+sparse-values:true
+clone-values:true
+concat-values:true
+array-from-values:true

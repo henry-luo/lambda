@@ -71,6 +71,30 @@ JS needs `undefined` distinct from `null`; Lambda already separates them at the 
 - **Dense array hole sentinel** — `JS_DELETED_SENTINEL_VAL = 0x7E00DEAD00DEAD00` (`js_runtime.h:26`) uses the unused tag `0x7E` and marks empty dense `Array::items` slots. Ordinary object/FUNC/ARRAY companion-map delete state is `JSPD_DELETED` on `ShapeEntry`, not this raw `Item`. `js_own_shape_slot_status` still treats retained raw holes as deleted when reading shaped storage defensively; the deletion *mechanics* live in [JS_06](JS_06_Objects_Properties_Prototypes.md).
 - **Iterator done** — `JS_ITER_DONE_SENTINEL = 0x7F00DEAD00000000` (`js_runtime.h:31`) uses the unused tag `0x7F` so it cannot collide with any real value; see [JS_08 — Iterators & Generators](JS_08_Iterators_Generators.md).
 
+### 5.1 Array companion properties and the owned tail
+
+JS arrays are the shared Lambda `Array` layout; there is no larger JS-only
+header. Indexed values occupy the low `items[]` slots. Wide scalar payloads
+(out-of-band doubles and polyglot int64/DateTime values) occupy counted slots
+growing down from the high end, and their logical Items point back into that
+same buffer.
+
+Named properties and sparse-index metadata live in a companion `Map`. When an
+array first needs that companion, `js_array_set_props` preserves the Array
+header identity, grows only the items buffer if necessary, and reserves
+`items[capacity - 1]` for the Map Item. `CONTAINER_FLAG_JS_PROPS` gates that
+interpretation and the slot counts in `extra`; scalar payloads therefore begin
+at `capacity - 2` when props exist. `extra` has one meaning for every generic
+Array: total reserved tail slots. `js_array_has_props` / `js_array_props` are the
+only companion read boundary, while dense scans stop at `capacity - extra`.
+
+Both `expand_list` and the JS runtime-buffer replacement path relocate the
+whole counted tail and rebase embedded scalar pointers. Attaching a property to
+a Lambda-born array consequently preserves identity across the language
+boundary, and importing a Lambda wide scalar into a props-bearing JS array
+re-homes the scalar instead of retaining a pointer into its source frame or
+container.
+
 ---
 
 ## 6. Memory model: GC heap, side stacks, pool
@@ -79,7 +103,7 @@ JS needs `undefined` distinct from `null`; Lambda already separates them at the 
 
 LambdaJS allocates from the `EvalContext`'s three regions, all shared with Lambda script.
 
-- **GC heap** (`gc_heap_t`) — a **dual-zone non-moving mark-and-sweep** collector (`lib/gc/gc_heap.c:4`). The *object zone* is a size-class free-list allocator for object structs (`Map`, `List`, `String`, `Decimal`, `JsAccessorPair`, …); the *data zone* is a bump-pointer allocator for variable-size buffers such as `Map.data` (`gc_heap.h:96`). JS objects are created via `heap_calloc` (`lambda-mem.cpp:381`), which zeroes the struct (so a fresh map is `MAP_KIND_PLAIN` and a fresh `ShapeEntry` is a default data property for free) and sets `Container::is_heap` for heap-vs-arena discrimination. The JIT hot path uses `heap_calloc_class` (`:395`) with a pre-computed size class and a bump-pointer fast path. **Non-moving** is the load-bearing property: a pointer handed to JIT code, stored in a traced environment, or sitting in the arg stack stays valid across a collection — object structs are never relocated, only swept.
+- **GC heap** (`gc_heap_t`) — a **dual-zone non-moving mark-and-sweep** collector (`lib/gc/gc_heap.c:4`). The *object zone* is a size-class free-list allocator for object structs (`Map`, `List`, `String`, `Decimal`, `JsAccessorPair`, …); the *data zone* is a bump-pointer allocator for variable-size buffers such as `Map.data` (`gc_heap.h:96`). JS objects are created via `heap_calloc` (`lambda-mem.cpp:381`), which zeroes the struct (so a fresh map is `MAP_KIND_PLAIN` and a fresh `ShapeEntry` is a default data property for free) and sets `Container::is_heap` for heap-vs-arena discrimination. The JIT hot path uses `heap_calloc_class` (`:395`) with a pre-computed size class and a bump-pointer fast path. **Non-moving headers** are the load-bearing property: a pointer handed to JIT code, stored in a traced environment, or sitting in the arg stack stays valid across a collection. Object structs never relocate; variable data buffers can move and their owner pointers/interior scalar references are rewritten.
 - **Execution side stacks** — each context reserves stable root and number regions. Generated JS saves both watermarks at function entry. Heap-capable register values are published to the precise root region; wide scalar temporaries use the raw number region. The single epilogue restores both, rebuilding an escaping Item in its caller's extent. The collector scans only `[side_root_base, side_root_top)` and never interprets raw number slots as Items.
 - **Module-lifetime pool** (`js_input->pool`, a `mempool`) — cache-addressable compiled wrappers returned by the cached `js_new_function` path remain module-lifetime because the function cache embeds them. Uncached method/`with` wrappers, escaping closures, bound functions, and other dynamically created wrappers are ordinary GC objects.
 

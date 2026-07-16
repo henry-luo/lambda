@@ -519,17 +519,25 @@ inline void run_sub_batch(
     long long current_start_us = 0;
 
     while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        if (buffer[0] == '\x01') {
-            if (strncmp(buffer + 1, "BATCH_START ", 12) == 0) {
-                current_script = std::string(buffer + 13);
+        // A failed script may leave stdout without a newline. In that case the
+        // control marker shares the output line and must still close the result.
+        char* control = strchr(buffer, '\x01');
+        bool is_start = control && strncmp(control + 1, "BATCH_START ", 12) == 0;
+        bool is_end = control && strncmp(control + 1, "BATCH_END ", 10) == 0;
+        if (is_start || is_end) {
+            if (in_script && control > buffer) {
+                current_output.append(buffer, (size_t)(control - buffer));
+            }
+            if (is_start) {
+                current_script = std::string(control + 13);
                 while (!current_script.empty() &&
                        (current_script.back() == '\n' || current_script.back() == '\r'))
                     current_script.pop_back();
                 current_output.clear();
                 in_script = true;
                 current_start_us = lambda_test_now_us();
-            } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
-                int status = atoi(buffer + 11);
+            } else {
+                int status = atoi(control + 11);
                 long long elapsed_us = current_start_us > 0 ? lambda_test_now_us() - current_start_us : 0;
                 results[current_script] = {current_output, status, elapsed_us};
                 size_t done = completed_scripts.fetch_add(1, std::memory_order_relaxed) + 1;

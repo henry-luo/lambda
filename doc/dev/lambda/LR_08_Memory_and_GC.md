@@ -54,6 +54,16 @@ Variable-size GC data and numeric temporaries use separate regions with differen
 
 **The data nursery** is part of the GC data zone (`gc_data_zone_t`, `lib/gc/gc_data_zone.c`). It holds variable-size buffers — array `items[]`, map `data`, closure environments. It **is collected**: on each cycle, `gc_compact_data` (`gc_heap.c:1217`) copies the buffers of surviving objects from the nursery into the `tenured_data` zone and rewrites each owning object's data pointer to the new location (embedded inline numerics inside `items[]` are rebased by `gc_fixup_embedded_pointers`, `gc_heap.c:1187`); then `gc_data_zone_reset` (`gc_heap.c:1689`) resets the nursery wholesale. This is what makes the collector "moving for data": the buffers move, but the objects that own them do not.
 
+**Generic Array tail tracing is precise.** `Array::extra` counts reserved high
+tail slots. Logical Items occupy `[0, min(length, capacity - extra))`; raw
+wide-scalar payload words occupy the counted tail and are never traced as
+Items. A JS array with `CONTAINER_FLAG_JS_PROPS` stores its companion Map Item
+at `items[capacity - 1]`, which the Array trace marks explicitly behind that
+flag. The old conservative `gc_mark_possible_item(extra)` probe is gone:
+`extra` is never a pointer. During data compaction the whole buffer is copied,
+logical Items pointing into scalar payload slots are rebased, and the props Map
+Item simply moves with the tail because its pointee is outside the buffer.
+
 **The numeric-temporary region** is the raw number execution side-stack. `push_l`/`push_d`/`push_k` reserve one 64-bit payload slot after a checked `side_number_top` bump; generated functions save and restore that watermark. The region is a separate stable virtual reservation from the Item root stack so raw double/int64 bits are never scanned as possible pointers. An escaping return is converted to a scalar lane before restore and rebuilt afterward in the caller extent. Container and JS-env stores copy wide payloads into storage-owned scalar tails; reads from movable/collectible storage copy them back to the current number frame. Long-running callbacks therefore reclaim scalar temporaries at every return.
 
 The boxing entry points that feed this region — `push_l`/`push_d`/`push_k` and the `push_*_safe` guards that undo JIT double-boxing — are described from the value-model side in [LR_03](LR_03_Value_and_Type_Model.md) §3.

@@ -322,17 +322,17 @@ Physical LOC is an acceptance metric, not an informal preference.
 | shared graph-parser helper growth | <= 100 | 150 |
 | parser-specific native tests | tracked separately | no production padding |
 
-Current implementation measurement (2026-07-15):
+Current implementation measurement (2026-07-16):
 
 | Unit | Physical LOC | Budget result |
 |---|---:|---|
-| `input-graph-structurizr.cpp` | 341 | passes the 800-line target |
+| `input-graph-structurizr.cpp` | 405 | passes the 800-line target |
 | `input-graph.cpp` growth | 2 | dispatch only |
 | `input-graph.h` growth | 1 | parser declaration only |
 
 `GraphParserTest.ParserLocBudget` enforces the parser and aggregate graph-parser
-ceilings. Release object, executable, and compressed-artifact measurements are
-still required before Stage 4E closes.
+ceilings. The complete tracked DOT, Mermaid, Structurizr, shared-parser, and
+header set is 2,765 physical lines, below its 3,160-line aggregate ceiling.
 
 The threshold is not met by compressing multiple statements onto one line or
 removing useful root-cause comments. Crossing it requires a design review of
@@ -346,6 +346,23 @@ Release builds record the before/after sizes of:
 - shared graph parser objects;
 - stripped `lambda.exe`;
 - compressed distribution artifact, when available.
+
+The 2026-07-16 arm64 macOS release measurement used the production `-O3`
+ThinLTO build produced by `make release`:
+
+| Release unit | Size | Interpretation |
+|---|---:|---|
+| Structurizr parser LLVM ThinLTO object | 37,856 B | direct native parser and Mark construction unit |
+| shared graph parser LLVM ThinLTO object | 19,072 B | shared DOT/Mermaid/Structurizr infrastructure |
+| Radiant graph bridge LLVM ThinLTO object | 9,920 B | all graph-source CLI bridge integration |
+| stripped `lambda.exe` | 17,403,864 B | complete current executable |
+| gzip-9 executable proxy | 6,660,929 B | reproducible compressed-artifact measurement |
+
+The Stage 3 checkpoint recorded a 17,261,336-byte executable, making the current
+whole-tree executable 142,528 bytes larger. That delta is deliberately not
+attributed entirely to Structurizr: it spans all repository changes since the
+Stage 3 checkpoint. The parser object is the direct implementation-size measure;
+the executable and gzip rows are release guardrails for future Graph2 changes.
 
 ## 7. Structurizr Semantic Normalization
 
@@ -458,15 +475,21 @@ after inclusion in source order according to Structurizr semantics.
 
 ### 8.2 Restricted expression evaluator
 
-View expressions are parsed into a small Mark expression AST. They are not
-evaluated as Lambda source. The initial allowlist covers the official element
-and relationship predicates needed by the corpus, including type, tag, parent,
-scope, source, destination, and relationship properties. Boolean composition
-is added only with explicit grammar and tests.
+View expressions are evaluated by the small pure
+`structurizr/expressions.ls` module; they are never evaluated as Lambda source.
+To keep the package and parser small, the current implementation recognizes the
+restricted grammar directly instead of building a second general-purpose AST.
+It supports identifiers, `*`, afferent/efferent coupling, element type, parent,
+group, tag, technology, and property predicates, relationship tag/property/
+source/destination and endpoint predicates, plus `&&` and `||`. Results retain
+model source order.
 
-Unknown predicates produce `structurizr.unsupported-expression`; malformed
-expressions produce `structurizr.invalid-expression`. Neither falls back to
-including everything.
+Unknown element predicates select nothing and unknown relationship predicates
+do not match. Canonical validation distinguishes malformed syntax with
+`structurizr.invalid-expression` errors from valid but unsupported predicates
+with `structurizr.unsupported-expression` warnings. Diagnostics retain the
+authored include/exclude source span. Parenthesized expressions remain follow-up
+work; no invalid or unsupported expression may fall back to including everything.
 
 ### 8.3 Dynamic views
 
@@ -557,10 +580,16 @@ Default roles include:
 - `c4-software-system-boundary`;
 - `c4-container-boundary`.
 
-Structurizr element and relationship styles lower through the existing safe
-style layer. Unsupported shapes, icons, fonts, or paint values preserve their
-source property and produce deterministic warnings. External icons are not
-fetched during transform or render.
+Structurizr element and relationship styles lower to canonical Graph IR style
+assignments and then pass through the existing safe style parser. The current
+allowlist includes background, text/line color, stroke, stroke width or
+thickness, node font size, node width/height, percent opacity, solid/dashed/
+dotted borders and relationships, the documented element shapes, and direct/
+orthogonal/curved per-relationship routing. Shape and routing values become
+geometry attributes rather than executable CSS. Unsupported icons, fonts, or
+paint values remain canonical workspace properties and produce deterministic
+`structurizr.unsupported-style` warnings. External icons are not fetched during
+transform or render.
 
 ## 10. Layout Mapping
 
@@ -677,40 +706,75 @@ than cloned.
 make test-graph-structurizr
 ```
 
-The current target runs native parser/LOC tests and Lambda semantic fixtures.
-Stage 4E extends the same target with retained end-to-end Radiant scene tests
-and one headless `.dsl` CLI test.
+The current target runs native parser/LOC tests, Lambda semantic fixtures,
+retained end-to-end Radiant scene tests, and a headless selected-view `.dsl`
+CLI test.
 
 ## 13. Implementation Stages
 
 ### 13.1 Current checkpoint
 
-The first executable slice is implemented and covered by
+The current executable slices are implemented and covered by
 `make test-graph-structurizr`:
 
-- explicit `structurizr` and `c4` flavor dispatch to a 341-line manual parser;
+- explicit `structurizr` and `c4` flavor dispatch to a 405-line manual parser;
 - source-ordered workspace/model/views Mark with spans, recovery, resource
-  limits, inert generic statements, and preserved style color tokens;
+  limits, inert generic statements, preserved style color tokens, dynamic
+  order prefixes, and anonymous parallel blocks;
 - pure normalization of hierarchical IDs, core C4 elements, relationships,
-  deployment declarations/instances, tags, static view metadata, and styles;
-- system-context and container projection, with shared landscape/component
-  selection paths, C4 rich node content, software-system boundaries, and
-  canonical graph edges;
+  deployment declarations/instances, tags, properties, perspectives, static
+  view metadata, and styles;
+- landscape, system-context, container, component, filtered, and custom
+  projection through one static-view path, including ordinary/reluctant
+  wildcard behavior, include/exclude expressions, C4 rich node content,
+  boundaries, and canonical graph edges;
+- canonical default and authored element/relationship tags, custom-element
+  metadata, tag-filtered base views, and safe node/relationship style
+  assignments that survive `to_html()`;
+- canonical model, element, and relationship properties, compact and expanded
+  perspectives, property-based element/relationship expressions, and Graph IR
+  metadata propagation;
+- group declarations separated from C4 containment, canonical group membership,
+  `element.group` expressions, and visual group boundaries in static Graph IR;
+- scoped relationship normalization for both source and destination `this`
+  references, including hierarchical forward references;
+- dynamic interaction normalization with resolved endpoints, static
+  relationship references from endpoint or relationship-identifier syntax,
+  stable sequence labels, and parallel-group IDs;
+- deployment projection with nested deployment-node boundaries, distinct
+  infrastructure and model instances, direct deployment relationships,
+  inherited deployment-group-aware logical relationship lifting, health checks,
+  and rich instance content inherited from the logical model;
 - selected-view `to_html()` through the existing graph transform;
-- native parser/LOC tests and Lambda source, canonical, and projection fixtures.
+- native parser/LOC tests and Lambda source, canonical, static expression,
+  expression-diagnostic, source-contract, filtered/custom/style, dynamic,
+  deployment, and HTML fixtures.
 
-This checkpoint is partial Stage 4A through Stage 4C, not full Structurizr
-support. Conservative `.dsl` auto-detection, canonical schemas and diagnostics,
-archetypes/implied relationships, complete expression and style semantics,
-filtered/custom fixtures, dynamic/deployment projection, includes, CLI view
-selection, reference adaptation, scene coverage, and release size measurement
-remain outstanding.
+This checkpoint is partial Stage 4A through Stage 4D, not full Structurizr
+support. Conservative `.dsl` auto-detection is implemented: `.structurizr` is
+unambiguous, while `.dsl` is selected only when its first significant token is
+the boundary-safe `workspace` keyword. Initial canonical semantic validation now
+reports duplicate identities/view keys, illegal containment and relationships,
+unresolved instance/deployment-group references, invalid view scopes, and styles
+that cannot be lowered safely. Initial source-contract validation rejects wrong
+roots, duplicate model/view blocks, and misplaced structured workspace children;
+expression validation now reports malformed and unsupported rules without
+changing fail-closed projection. Declarative element/relationship archetypes
+and default-on Boolean implied relationships now normalize with stable
+provenance; custom Java strategies remain inert and diagnosed. Parenthesized
+view expressions, nested group boundaries, terminology, style-driven shape and
+per-edge routing, and deployment include/exclude filtering are also implemented.
+Deeper source-context validation, remaining semantic diagnostics, includes, and
+reference adaptation remain outstanding.
 
 ### Stage 4A - Manual parser and source contract
 
-Status: **partially implemented**. Explicit flavor dispatch and the manual
-source contract are present; `.dsl` auto-detection and the release size ledger
-remain outstanding.
+Status: **substantially implemented**. Explicit flavor dispatch, conservative
+`.structurizr`/`.dsl` auto-detection, the manual source contract, parser limits,
+recovery diagnostics, named archetype relationship operators, and enforced LOC
+budgets are present. The manual Structurizr parser is currently 405 lines and
+the tracked graph-parser set is 2,765 lines. The release object, stripped
+executable, and compressed-artifact size ledger is recorded in Section 6.5.
 
 - add flavor and conservative `.dsl` dispatch;
 - extract only proven shared graph lexical helpers;
@@ -722,11 +786,18 @@ remain outstanding.
 
 ### Stage 4B - Canonical C4 workspace
 
-Status: **partially implemented**. Core hierarchy, hierarchical identifiers,
-relationships, tags, deployment declarations, and logical instance references
-normalize deterministically. Schemas, full diagnostics, properties,
-perspectives, archetypes, implied relationships, and complete `this` resolution
-remain outstanding.
+Status: **substantially implemented**. Core hierarchy, hierarchical identifiers,
+relationships, tags, properties, both perspective forms, group membership,
+deployment declarations, and logical instance references normalize deterministically.
+The initial source contract and canonical semantic validator attach source-aware
+structured diagnostics for workspace structure, identity, containment,
+references, relationship legality, view scope, expressions, and safe style
+lowering. Pure declarative archetype inheritance supports defaults and explicit
+overrides for elements and relationships, including cycle/kind/base diagnostics.
+Boolean implied relationships default on, stop at shared ancestors, suppress
+existing endpoint pairs, retain source provenance, and can be disabled. Deeper
+nested source-context validation and the remaining diagnostic codes remain
+outstanding.
 
 - add source and canonical schemas;
 - resolve flat/hierarchical identifiers and `this`;
@@ -738,10 +809,14 @@ remain outstanding.
 
 ### Stage 4C - Static views and C4 HTML
 
-Status: **partially implemented**. Context/container projection and HTML output
-are covered. Landscape/component share the projection implementation but need
-dedicated fixtures; filtered/custom views, full expression semantics, style
-cascade, terminology, and retained scene/render coverage remain outstanding.
+Status: **implemented for the Stage 4 scope**. All six static view kinds, selected-view
+HTML, filtered/custom semantics, reluctant wildcard, the pure expression
+allowlist including precedence-aware parenthesized/property/group predicates,
+nested group boundaries, terminology, safe style cascade, documented shape
+mapping, and per-edge direct/orthogonal/curved routing have dedicated canonical,
+HTML, geometry, retained SVG, and Graph Scene fixtures. The retained test renders
+twice through one installed custom-layout callback and checks deterministic nested
+cluster geometry, shape metadata, and per-edge routing.
 
 - implement landscape, context, container, component, filtered, and custom
   projection;
@@ -752,7 +827,14 @@ cascade, terminology, and retained scene/render coverage remain outstanding.
 
 ### Stage 4D - Dynamic and deployment views
 
-Status: **not started beyond source/canonical declaration preservation**.
+Status: **substantially implemented**. Ordered endpoint interactions, explicit
+order prefixes, anonymous parallel blocks, nested deployment boundaries,
+distinct instances, infrastructure relationships, and group-aware logical
+relationship lifting are normalized and projected through HTML. Relationship-
+identifier shorthand, deployment-group inheritance from nodes, instance
+multiplicity, and health checks have dedicated canonical and Graph IR coverage.
+Deployment scope plus include/exclude filtering retains required ancestor
+boundaries and removes relationships whose endpoints leave the projection.
 
 - preserve ordered and parallel dynamic relationship instances;
 - render dynamic collaboration diagrams with stable ordinals;
@@ -763,14 +845,18 @@ Status: **not started beyond source/canonical declaration preservation**.
 
 ### Stage 4E - Includes, CLI, and conformance
 
-Status: **not started**, except for the initial dedicated native/Lambda test
-target.
+Status: **partially implemented**. The dedicated native/Lambda target now runs
+manifest-style package fixtures, retained scene coverage, and a headless `.dsl`
+selected-view smoke test. `view` and `render` accept `--view-key`; omitting it
+selects the first declared view. `.dsl` routing reuses the input parser's
+boundary-safe `workspace` detector, while `.structurizr` remains unambiguous.
 
 - add policy-controlled local includes with cycle and resource limits;
-- add view selection to `view`, `render`, and conversion commands;
+- add view selection to conversion commands (`view` and `render` are complete);
 - add Structurizr JSON reference adaptation and pinned corpus provenance;
-- add manifest-driven native, retained-runtime, scene, and headless tests;
-- document the final parser LOC and release-binary size outcome.
+- extend the native, retained-runtime, scene, and headless tests into the final
+  reference corpus manifest;
+- maintain the parser LOC and release-binary size ledger recorded in Section 6.5.
 
 ## 14. Acceptance Criteria
 

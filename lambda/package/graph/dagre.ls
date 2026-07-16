@@ -132,6 +132,9 @@ fn normalize_edge(edge, nodes, index, directed) {
       stroke_width: if (edge.stroke_width != null) float(edge.stroke_width) else null,
       opacity: if (edge.opacity != null) float(edge.opacity) else null,
       dash_array: if (edge.dash_array != null) string(edge.dash_array) else null,
+      route_mode: if (edge.route_mode != null) normalize_route_mode(edge.route_mode, false)
+        else if (edge["route-mode"] != null) normalize_route_mode(edge["route-mode"], false)
+        else null,
       min_length: max([1, int(if (edge.min_length != null) edge.min_length
         else if (edge["min-length"] != null) edge["min-length"] else 1)]),
       weight: float(if (edge.weight != null) edge.weight else 1.0),
@@ -1120,6 +1123,7 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
   let to_node = find_node(nodes, edge.to);
   if (from_node == null or to_node == null) null
   else {
+    let route_mode = if (edge.route_mode != null) edge.route_mode else opts.route_mode;
     let explicit_tail = if (opts.compound) find_cluster(clusters, edge.tail_cluster) else null;
     let explicit_head = if (opts.compound) find_cluster(clusters, edge.head_cluster) else null;
     // Explicit compound endpoints clip to cluster bounds, not the enclosed node bounds.
@@ -1147,19 +1151,19 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       len(crossings.source) > 0 or len(crossings.target) > 0;
     let obstacles = routing_obstacles(nodes, clusters, from_node, to_node,
       max([4.0, opts.edge_sep / 2.0]));
-    let base_points = if (opts.route_mode == "none") []
+    let base_points = if (route_mode == "none") []
       else if (edge.from == edge.to)
       self_loop_points(from_node, opts.edge_sep, parallel.index,
         edge.from_port, edge.to_port, edge.from_compass, edge.to_compass)
-      else if (opts.route_mode == "line") [start, finish]
+      else if (route_mode == "line") [start, finish]
       else if (has_compound)
-        if (opts.route_mode == "orthogonal")
+        if (route_mode == "orthogonal")
           orthogonal_waypoints(compound_points, vertical_first)
         else simplify_route(compound_points)
       else if (parallel.count > 1)
         parallel_route_points(from_node, to_node, lane_offset, vertical_first,
           edge.from_port, edge.to_port, edge.from_compass, edge.to_compass)
-      else if (opts.route_mode == "orthogonal")
+      else if (route_mode == "orthogonal")
         orthogonal_points([start, finish], vertical_first)
       else [start, finish];
     {
@@ -1172,10 +1176,10 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       to_compass: edge.to_compass,
       tail_cluster: edge.tail_cluster,
       head_cluster: edge.head_cluster,
-      points: if (edge.from == edge.to or opts.route_mode == "line" or
-          opts.route_mode == "none") base_points
+      points: if (edge.from == edge.to or route_mode == "line" or
+          route_mode == "none") base_points
         else avoid_route_segments(base_points, obstacles, vertical_first,
-          max([4.0, opts.edge_sep / 2.0]), opts.route_mode == "orthogonal"),
+          max([4.0, opts.edge_sep / 2.0]), route_mode == "orthogonal"),
       directed: edge.directed,
       arrow_start: edge.arrow_start,
       arrow_end: edge.arrow_end,
@@ -1191,8 +1195,8 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
       min_length: edge.min_length,
       z: edge.z,
       index: edge.index,
-      route_mode: opts.route_mode,
-      is_bezier: opts.route_mode == "curved"
+      route_mode: route_mode,
+      is_bezier: route_mode == "curved"
     }
   }
 }

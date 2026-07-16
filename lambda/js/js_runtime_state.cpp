@@ -1317,14 +1317,16 @@ extern "C" Item js_build_arguments_object() {
 
     Item arr = js_array_new(argc);
     for (int i = 0; i < argc; i++) {
-        arr.array->items[i] = args ? args[i] : ItemNull;
+        // Arguments creation defines own indexed data properties directly;
+        // inherited numeric setters must not intercept parameter materialization.
+        js_array_define_dense_element_direct(arr, i, args ? args[i] : ItemNull);
     }
     // Mark as Arguments object via is_content flag (used by iterator to snapshot length)
     arr.array->is_content = 1;
     // Mark as Arguments object via Symbol.toStringTag on companion map
     Item companion = js_new_object();
     companion.map->map_kind = MAP_KIND_ARRAY_PROPS;
-    arr.array->extra = (int64_t)(uintptr_t)companion.map;
+    js_array_set_props(arr.array, companion.map);
 
     Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
     Item length_desc = js_new_object();

@@ -422,7 +422,7 @@ struct Range : Container {
 struct List : Container {
     Item* items;
     int64_t length;
-    int64_t extra;  // count of extra items stored at the end of the list
+    int64_t extra;  // count of reserved tail items (wide scalars plus optional JS props slot)
     int64_t capacity;
 
     ConstItem get(int index) const;

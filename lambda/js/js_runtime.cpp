@@ -279,10 +279,48 @@ extern "C" void js_array_runtime_items_cleanup_all(void) {
 
 static void js_array_install_runtime_items(Array* arr, Item* items, int64_t capacity) {
     if (!arr) return;
-    if (arr->items) js_array_runtime_items_release(arr->items);
+    Item* old_items = arr->items;
+    int64_t old_capacity = arr->capacity;
+    if (old_items && items && capacity >= arr->extra) {
+        list_relocate_owned_tail((List*)arr, old_items, old_capacity, items, capacity);
+    }
+    if (old_items) js_array_runtime_items_release(old_items);
     arr->items = items;
     arr->capacity = capacity;
     js_array_runtime_items_register(arr, items);
+}
+
+static inline int64_t js_array_dense_capacity(const Array* arr) {
+    return container_dense_capacity(arr);
+}
+
+static int64_t js_array_dense_required(const Array* arr) {
+    int64_t dense_capacity = js_array_dense_capacity(arr);
+    if (!arr || !arr->items || dense_capacity <= 0) return 0;
+    if (arr->length <= dense_capacity) return arr->length;
+    // Sparse arrays carry a spec length beyond their physical prefix. Promotion
+    // stamps unused dense storage as holes, so the highest non-hole slot is the
+    // exact boundary growth must preserve without treating capacity as length.
+    for (int64_t i = dense_capacity - 1; i >= 0; i--) {
+        if (arr->items[i].item != JS_DELETED_SENTINEL_VAL) return i + 1;
+    }
+    return 0;
+}
+
+static void js_array_store_owned(Array* arr, int64_t index, Item value) {
+    if (!arr || index < 0) return;
+    int64_t dense_required = js_array_dense_required(arr);
+    if (dense_required < index + 1) dense_required = index + 1;
+    while (!arr->items || dense_required + arr->extra + 2 > arr->capacity) {
+        int64_t old_capacity = arr->capacity;
+        heap_register_gc_root(&value.item);
+        expand_list((List*)arr);
+        heap_unregister_gc_root(&value.item);
+        if (arr->capacity <= old_capacity) return;
+    }
+    // Imported wide scalars may point into another container's tail. Re-home
+    // them through the shared owned store before the source can move or die.
+    array_set(arr, index, value);
 }
 
 // =============================================================================
@@ -4220,8 +4258,8 @@ extern "C" Item js_property_get(Item object, Item key) {
             String* str_key = it2s(key);
             // Check for "length" property
             if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
-                if (object.array->is_content == 1 && object.array->extra != 0) {
-                    Item pm_item = (Item){.map = (Map*)(uintptr_t)object.array->extra};
+                if (object.array->is_content == 1 && js_array_has_props(object.array)) {
+                    Item pm_item = (Item){.map = js_array_props(object.array)};
                     Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
                     Item own_value = ItemNull;
                     JsOwnGetStatus own_status = js_ordinary_get_own(pm_item, length_key, object, &own_value);
@@ -4234,8 +4272,8 @@ extern "C" Item js_property_get(Item object, Item key) {
             int64_t string_index = -1;
             if (!js_array_parse_index_name(str_key->chars, (int)str_key->len, &string_index)) {
                 // v25: check companion map for custom properties first
-                if (object.array->extra != 0) {
-                    Map* pm = (Map*)(uintptr_t)object.array->extra;
+                if (js_array_has_props(object.array)) {
+                    Map* pm = js_array_props(object.array);
                     Item pm_item = (Item){.map = pm};
                     Item pm_val = ItemNull;
                     JsOwnGetStatus pm_status = js_ordinary_get_own(pm_item, key, object, &pm_val);
@@ -4311,7 +4349,7 @@ extern "C" Item js_property_get(Item object, Item key) {
                     if (builtin.item != ItemNull.item) return builtin;
                 }
                 // Walk custom prototype chain if array has custom __proto__
-                if (object.array->extra != 0) {
+                if (js_array_has_props(object.array)) {
                     Item custom_proto = js_array_get_custom_proto(object);
                     if (custom_proto.item != ItemNull.item) {
                         return js_property_get(custom_proto, key);
@@ -4360,8 +4398,8 @@ extern "C" Item js_property_get(Item object, Item key) {
         double idx_d = js_get_number(key);
         int64_t idx = (idx_d == idx_d) ? (int64_t)idx_d : -1;
         // check for accessor on companion map — must check even when idx >= length
-        if (idx_d == idx_d && idx >= 0 && object.array->extra != 0) {
-            Map* props = (Map*)(uintptr_t)object.array->extra;
+        if (idx_d == idx_d && idx >= 0 && js_array_has_props(object.array)) {
+            Map* props = js_array_props(object.array);
             // Phase 5D: IS_ACCESSOR shape-flag dispatch under the digit-string
             // name. js_define_accessor_partial stores a JsAccessorPair* under
             // "<idx>" when defineProperty installs an accessor on an array index.
@@ -4383,12 +4421,14 @@ extern "C" Item js_property_get(Item object, Item key) {
             // through JsAccessorPair under the digit-string name with
             // IS_ACCESSOR shape flag, which the probe above already finds.
             if (status == JS_SHAPE_SLOT_DATA) {
-                bool dense_present = idx < object.array->length && idx < object.array->capacity &&
+                bool dense_present = idx < object.array->length &&
+                    idx < js_array_dense_capacity(object.array) &&
                     object.array->items[idx].item != JS_DELETED_SENTINEL_VAL;
                 if (!dense_present) return slot_val;
             }
         }
-        if (idx_d == idx_d && idx >= 0 && idx < object.array->length && idx < object.array->capacity) {
+        if (idx_d == idx_d && idx >= 0 && idx < object.array->length &&
+                idx < js_array_dense_capacity(object.array)) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype chain
             if (object.array->items[idx].item != JS_DELETED_SENTINEL_VAL) {
                 return object.array->items[idx];
@@ -4402,10 +4442,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 if (js_array_sparse_get(object.array, idx, &sparse_val)) return sparse_val;
             }
             // Arguments overflow: numeric index stored in companion map
-            if (idx_d == idx_d && idx >= 0 && object.array->is_content == 1 && object.array->extra != 0) {
+            if (idx_d == idx_d && idx >= 0 && object.array->is_content == 1 && js_array_has_props(object.array)) {
                 char idx_buf[32];
                 snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
-                Map* pm = (Map*)(uintptr_t)object.array->extra;
+                Map* pm = js_array_props(object.array);
                 Item pm_item = (Item){.map = pm};
                 Item pm_val = ItemNull;
                 JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, (int)strlen(idx_buf), &pm_val, NULL);
@@ -5252,7 +5292,7 @@ static SparseArrayMap* js_array_sparse_from_map(Map* map) {
 
 static SparseArrayMap* js_array_ensure_sparse_map(Array* arr) {
     if (!arr) return NULL;
-    Map* existing = arr->extra != 0 ? (Map*)(uintptr_t)arr->extra : NULL;
+    Map* existing = js_array_props(arr);
     if (existing && existing->map_kind == MAP_KIND_ARRAY_SPARSE) {
         return (SparseArrayMap*)existing;
     }
@@ -5269,7 +5309,7 @@ static SparseArrayMap* js_array_ensure_sparse_map(Array* arr) {
     base->map_kind = MAP_KIND_ARRAY_SPARSE;
     sm->sparse_indices = NULL;
     sm->sparse_version = 1;
-    arr->extra = (int64_t)(uintptr_t)sm;
+    js_array_set_props(arr, (Map*)sm);
     return sm;
 }
 
@@ -5295,8 +5335,8 @@ static bool js_array_sparse_get_from_map(Map* map, int64_t index, Item* out_valu
 }
 
 static bool js_array_sparse_get(Array* arr, int64_t index, Item* out_value) {
-    if (!arr || arr->extra == 0) return false;
-    return js_array_sparse_get_from_map((Map*)(uintptr_t)arr->extra, index, out_value);
+    if (!js_array_has_props(arr)) return false;
+    return js_array_sparse_get_from_map(js_array_props(arr), index, out_value);
 }
 
 static bool js_array_sparse_set(Item array_item, int64_t index, Item value) {
@@ -5313,8 +5353,8 @@ static bool js_array_sparse_set(Item array_item, int64_t index, Item value) {
 }
 
 static bool js_array_sparse_delete(Array* arr, int64_t index) {
-    if (!arr || arr->extra == 0 || index < 0) return false;
-    SparseArrayMap* sm = js_array_sparse_from_map((Map*)(uintptr_t)arr->extra);
+    if (!js_array_has_props(arr) || index < 0) return false;
+    SparseArrayMap* sm = js_array_sparse_from_map(js_array_props(arr));
     if (!sm || !sm->sparse_indices) return false;
     JsArraySparseHashEntry probe;
     probe.index = index;
@@ -5356,10 +5396,10 @@ extern "C" Item js_array_sparse_get_index(Item array, int64_t index) {
 }
 
 extern "C" int64_t js_array_sparse_collect_indices(Item array, int64_t start, int64_t end, int64_t* indices, int64_t cap) {
-    if (get_type_id(array) != LMD_TYPE_ARRAY || !array.array || array.array->extra == 0) return 0;
+    if (get_type_id(array) != LMD_TYPE_ARRAY || !js_array_has_props(array.array)) return 0;
     if (start < 0) start = 0;
     if (end < start) return 0;
-    SparseArrayMap* sm = js_array_sparse_from_map((Map*)(uintptr_t)array.array->extra);
+    SparseArrayMap* sm = js_array_sparse_from_map(js_array_props(array.array));
     if (!sm || !sm->sparse_indices) return 0;
 
     int64_t count = 0;
@@ -5381,7 +5421,7 @@ extern "C" int64_t js_array_sparse_collect_indices(Item array, int64_t start, in
 }
 
 static inline bool js_array_dense_present(Array* arr, int64_t index) {
-    return arr && index >= 0 && index < arr->length && index < arr->capacity &&
+    return arr && index >= 0 && index < arr->length && index < js_array_dense_capacity(arr) &&
         arr->items[index].item != JS_DELETED_SENTINEL_VAL;
 }
 
@@ -5392,16 +5432,18 @@ static const int64_t JS_ARRAY_SPARSE_PROMOTE_MIN_COUNT = 4096;
 static const int64_t JS_ARRAY_SPARSE_PROMOTE_MIN_DEN = 4;
 
 static void js_array_stamp_dense_tail_holes(Array* arr) {
-    if (!arr || !arr->items || arr->length >= arr->capacity) return;
+    int64_t dense_capacity = js_array_dense_capacity(arr);
+    if (!arr || !arr->items || arr->length >= dense_capacity) return;
     Item hole = lam::hole_sentinel_item();
-    for (int64_t i = arr->length; i < arr->capacity; i++) {
+    for (int64_t i = arr->length; i < dense_capacity; i++) {
         arr->items[i] = hole;
     }
 }
 
 static int64_t js_array_count_dense_present(Array* arr) {
     if (!arr || !arr->items || arr->length <= 0 || arr->capacity <= 0) return 0;
-    int64_t limit = arr->length < arr->capacity ? arr->length : arr->capacity;
+    int64_t dense_capacity = js_array_dense_capacity(arr);
+    int64_t limit = arr->length < dense_capacity ? arr->length : dense_capacity;
     int64_t count = 0;
     for (int64_t i = 0; i < limit; i++) {
         if (arr->items[i].item != JS_DELETED_SENTINEL_VAL) count++;
@@ -5421,7 +5463,8 @@ static bool js_array_projected_density_is_sparse(Array* arr, int64_t projected_l
 static bool js_array_should_store_sparse_for_index(Array* arr, int64_t index) {
     if (!arr || index < 0) return false;
     int64_t length_gap = index >= arr->length ? index - arr->length : 0;
-    int64_t capacity_gap = index >= arr->capacity ? index - arr->capacity : 0;
+    int64_t dense_capacity = js_array_dense_capacity(arr);
+    int64_t capacity_gap = index >= dense_capacity ? index - dense_capacity : 0;
     if (length_gap > SPARSE_GAP_MAX || capacity_gap > SPARSE_GAP_MAX) return true;
     if (length_gap <= JS_ARRAY_DENSE_GAP_ALWAYS_OK &&
         capacity_gap <= JS_ARRAY_DENSE_GAP_ALWAYS_OK) return false;
@@ -5433,7 +5476,8 @@ static bool js_array_should_store_sparse_for_index(Array* arr, int64_t index) {
 static bool js_array_should_keep_length_sparse(Array* arr, int64_t new_length) {
     if (!arr || new_length <= arr->length) return false;
     int64_t length_gap = new_length - arr->length;
-    int64_t capacity_gap = new_length > arr->capacity ? new_length - arr->capacity : 0;
+    int64_t dense_capacity = js_array_dense_capacity(arr);
+    int64_t capacity_gap = new_length > dense_capacity ? new_length - dense_capacity : 0;
     if (length_gap > SPARSE_GAP_MAX || capacity_gap > SPARSE_GAP_MAX) return true;
     if (length_gap <= JS_ARRAY_DENSE_GAP_ALWAYS_OK &&
         capacity_gap <= JS_ARRAY_DENSE_GAP_ALWAYS_OK) return false;
@@ -5464,8 +5508,8 @@ static bool js_array_should_promote_sparse_dense(Array* arr, SparseArrayMap* sm)
 static void js_array_try_promote_sparse_dense(Item array_item) {
     if (get_type_id(array_item) != LMD_TYPE_ARRAY) return;
     Array* arr = array_item.array;
-    if (!arr || arr->extra == 0) return;
-    SparseArrayMap* sm = js_array_sparse_from_map((Map*)(uintptr_t)arr->extra);
+    if (!js_array_has_props(arr)) return;
+    SparseArrayMap* sm = js_array_sparse_from_map(js_array_props(arr));
     if (!js_array_should_promote_sparse_dense(arr, sm)) return;
 
     int64_t new_cap = arr->length + 4;
@@ -5476,18 +5520,18 @@ static void js_array_try_promote_sparse_dense(Item array_item) {
     }
 
     if (arr->items && arr->capacity > 0) {
-        int64_t copy_len = arr->length < arr->capacity ? arr->length : arr->capacity;
+        int64_t dense_capacity = js_array_dense_capacity(arr);
+        int64_t copy_len = arr->length < dense_capacity ? arr->length : dense_capacity;
         memcpy(new_items, arr->items, copy_len * sizeof(Item));
     }
 
+    js_array_install_runtime_items(arr, new_items, new_cap);
     size_t iter = 0;
     void* item = NULL;
     while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
         JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
-        new_items[entry->index] = entry->value;
+        js_array_store_owned(arr, entry->index, entry->value);
     }
-
-    js_array_install_runtime_items(arr, new_items, new_cap);
     hashmap_free(sm->sparse_indices);
     sm->sparse_indices = NULL;
     sm->sparse_version++;
@@ -5574,8 +5618,8 @@ static Item js_array_numeric_key_to_property_key(Item key) {
 }
 
 static void js_array_delete_sparse_indices_from(lam::GcPtr<Array> arr, int64_t new_len) {
-    if (!arr || arr->extra == 0) return;
-    Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (!js_array_has_props(arr.get())) return;
+    Map* pm = js_array_props(arr.get());
     SparseArrayMap* sm = js_array_sparse_from_map(pm);
     if (sm && sm->sparse_indices) {
         size_t iter = 0;
@@ -5639,8 +5683,8 @@ static bool js_func_has_own_property_map_key(Item object, const char* name, int 
 }
 
 static bool js_array_companion_has_numeric_slot(Array* arr, int64_t index) {
-    if (!arr || arr->extra == 0 || index < 0) return false;
-    Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (!js_array_has_props(arr) || index < 0) return false;
+    Map* pm = js_array_props(arr);
     if (!pm || !map_kind_is_array_props(pm->map_kind)) return false;
     TypeMap* tm = (TypeMap*)pm->type;
     if (!tm || !tm->has_array_index_shape) return false;
@@ -5653,8 +5697,8 @@ static bool js_array_companion_has_numeric_slot(Array* arr, int64_t index) {
 }
 
 static bool js_array_companion_has_array_index_shape(Array* arr) {
-    if (!arr || arr->extra == 0) return false;
-    Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (!js_array_has_props(arr)) return false;
+    Map* pm = js_array_props(arr);
     if (!pm || !map_kind_is_array_props(pm->map_kind)) return false;
     TypeMap* tm = (TypeMap*)pm->type;
     return tm && tm->has_array_index_shape;
@@ -5668,7 +5712,7 @@ static inline bool js_array_fast_own_dense_get(Item object, int64_t index, Item*
     if (get_type_id(object) != LMD_TYPE_ARRAY || !out) return false;
     Array* arr = object.array;
     if (!arr || arr->is_content == 1) return false;
-    if (index < 0 || index >= arr->length || index >= arr->capacity) return false;
+    if (index < 0 || index >= arr->length || index >= js_array_dense_capacity(arr)) return false;
     Item value = arr->items[index];
     if (value.item == JS_DELETED_SENTINEL_VAL) return false;
     if (js_array_companion_has_numeric_slot(arr, index)) return false;
@@ -5686,13 +5730,13 @@ static inline bool js_array_fast_own_dense_set(Item object, int64_t index, Item 
     assert (get_type_id(object) == LMD_TYPE_ARRAY && index >= 0);
     Array* arr = object.array;
     if (arr->is_content == 1) return false;
-    if (index >= arr->length || index >= arr->capacity) return false;
+    if (index >= arr->length || index >= js_array_dense_capacity(arr)) return false;
     if (arr->items[index].item == JS_DELETED_SENTINEL_VAL) return false;
-    if (arr->extra) {
+    if (js_array_has_props(arr)) {
         if (js_array_companion_has_numeric_slot(arr, index)) return false;
         js_array_sparse_delete(arr, index);
     }
-    arr->items[index] = value;
+    js_array_store_owned(arr, index, value);
     return true;
 }
 
@@ -5768,8 +5812,8 @@ static bool js_array_companion_try_write_existing_data(Item object, const char* 
         int name_len, Item value) {
     if (get_type_id(object) != LMD_TYPE_ARRAY || !name || name_len <= 0) return false;
     Array* arr = object.array;
-    if (!arr || arr->extra == 0) return false;
-    Map* pm = (Map*)(uintptr_t)arr->extra;
+    if (!js_array_has_props(arr)) return false;
+    Map* pm = js_array_props(arr);
     if (!pm || !map_kind_is_array_props(pm->map_kind) || !pm->data) return false;
 
     Item pm_item = (Item){.map = pm};
@@ -5839,11 +5883,13 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                     }
                     // Extend: ensure capacity and fill with undefined.
                     // Use direct realloc to avoid GC-triggering array_push loops.
-                    if (new_len + 4 > arr->capacity) {
-                        int64_t new_cap = new_len + 4;
+                    if (new_len + arr->extra + 4 > arr->capacity) {
+                        int64_t new_cap = new_len + arr->extra + 4;
                         Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
                         if (arr->items && arr->length > 0) {
-                            memcpy(new_items, arr->items, arr->length * sizeof(Item));
+                            int64_t dense_copy = arr->length < js_array_dense_capacity(arr) ?
+                                arr->length : js_array_dense_capacity(arr);
+                            memcpy(new_items, arr->items, dense_copy * sizeof(Item));
                         }
                         js_array_install_runtime_items(arr, new_items, new_cap);
                     }
@@ -5862,7 +5908,7 @@ static Item js_property_set_array(Item object, Item key, Item value) {
             return value;
         }
     }
-    // v25: non-numeric string keys on arrays → store in companion map (arr->extra)
+    // v25: non-numeric string keys on arrays → store in the companion map.
     if (get_type_id(key) == LMD_TYPE_STRING) {
         String* sk = it2s(key);
         if (sk && sk->len > 0) {
@@ -5874,8 +5920,8 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                 // setter on Array.prototype (e.g. test262's `groups` probe)
                 // would intercept writes to the array's own data property.
                 bool own_data_prop = false;
-                if (object.array->extra != 0) {
-                    Map* pm0 = (Map*)(uintptr_t)object.array->extra;
+                if (js_array_has_props(object.array)) {
+                    Map* pm0 = js_array_props(object.array);
                     Item pm0_item = (Item){.map = pm0};
                     ShapeEntry* se0 = js_find_shape_entry(pm0_item, sk->chars, (int)sk->len);
                     if (se0 && !jspd_is_accessor(se0)) own_data_prop = true;
@@ -5906,12 +5952,12 @@ static Item js_property_set_array(Item object, Item key, Item value) {
                     JS_PROPERTY_SET_BRANCH("array_named_inplace");
                     return value;
                 }
-                if (arr->extra == 0) {
+                if (!js_array_has_props(arr)) {
                     Item obj = js_new_object();
                     obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-                    arr->extra = (int64_t)(uintptr_t)obj.map;
+                    js_array_set_props(arr, obj.map);
                 }
-                pm = (Map*)(uintptr_t)arr->extra;
+                pm = js_array_props(arr);
                 Item map_item = (Item){.map = pm};
                 JS_PROPERTY_SET_BRANCH("array_named_companion_generic");
                 js_property_set(map_item, key, value);
@@ -5952,7 +5998,7 @@ static Item js_property_set_array(Item object, Item key, Item value) {
     if (companion_has_index_shape) {
         int idx = (int)js_get_number(key);
         if (idx >= 0) {
-            Map* props = (Map*)(uintptr_t)object.array->extra;
+            Map* props = js_array_props(object.array);
             // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", idx);
@@ -5994,12 +6040,12 @@ static Item js_property_set_array(Item object, Item key, Item value) {
         if (idx_d == idx_d && idx >= 0 && idx >= object.array->length) {
             Array* arr = object.array;
             Map* pm;
-            if (arr->extra == 0) {
+            if (!js_array_has_props(arr)) {
                 Item obj = js_new_object();
                 obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-                arr->extra = (int64_t)(uintptr_t)obj.map;
+                js_array_set_props(arr, obj.map);
             }
-            pm = (Map*)(uintptr_t)arr->extra;
+            pm = js_array_props(arr);
             Item map_item = (Item){.map = pm};
             char idx_buf[32];
             snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
@@ -7170,9 +7216,9 @@ static inline Map* js_named_ic_receiver_map(Item object, const char* name, int n
     if (type == LMD_TYPE_ARRAY && js_array_named_ic_enabled() &&
             js_named_ic_array_name_allowed(name, name_len)) {
         Array* arr = object.array;
-        if (!arr || arr->extra == 0) return NULL;
+        if (!js_array_has_props(arr)) return NULL;
         if (out_receiver_kind) *out_receiver_kind = JS_NAMED_IC_RECEIVER_ARRAY_PROPS;
-        return (Map*)(uintptr_t)arr->extra;
+        return js_array_props(arr);
     }
     return NULL;
 }
@@ -7986,21 +8032,14 @@ extern "C" Item js_get_length_item(Item object) {
 // Array Functions
 // =============================================================================
 
-// Direct array item push that bypasses Lambda's array_set compound-scalar embedding.
-// Lambda's array_set uses arr->extra to count floats/int64s stored at buffer end,
-// but JS uses arr->extra for companion property maps. Direct store avoids this conflict.
+// Direct JS array push shares Lambda's owned-scalar tail representation.
 extern "C" void js_array_push_item_direct(Array* arr, Item value) {
-    if (arr->length + 2 > arr->capacity) {
+    if (arr->length + arr->extra + 2 > arr->capacity) {
         JS_PROPERTY_SET_BRANCH("array_push_direct_expand");
         // expand_list may trigger GC before the new element is stored, so root the incoming value.
         heap_register_gc_root(&value.item);
-        // Save/restore extra: JS uses arr->extra as a companion-map pointer,
-        // but expand_list interprets it as an extra-item count at buffer end.
-        int64_t saved_extra = arr->extra;
-        arr->extra = 0;
         int64_t old_capacity = arr->capacity;
         expand_list((List*)arr);
-        arr->extra = saved_extra;
         heap_unregister_gc_root(&value.item);
         // P8: expand_list copies the old buffer and leaves new slots at the
         // tail uninitialized (heap_data_alloc returns zero-init memory, which
@@ -8012,12 +8051,14 @@ extern "C" void js_array_push_item_direct(Array* arr, Item value) {
         if (arr->items && arr->capacity > old_capacity) {
             JS_PROPERTY_SET_BRANCH("array_push_expand_stamp_holes");
             Item hole = lam::hole_sentinel_item();
-            for (int64_t i = old_capacity; i < arr->capacity; i++) {
+            // Relocation leaves the former tail payloads in their old positions;
+            // only the new high tail is owned, so clear every non-logical slot.
+            for (int64_t i = arr->length; i < arr->capacity - arr->extra; i++) {
                 arr->items[i] = hole;
             }
         }
     }
-    arr->items[arr->length] = value;
+    array_set(arr, arr->length, value);
     arr->length++;
 }
 
@@ -8083,10 +8124,10 @@ extern "C" Item js_create_arguments() {
 }
 
 extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value) {
-    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || arguments.array->extra == 0) {
+    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || !js_array_has_props(arguments.array)) {
         return current_value;
     }
-    Item companion = {.map = (Map*)(uintptr_t)arguments.array->extra};
+    Item companion = {.map = js_array_props(arguments.array)};
     char marker_key[64];
     snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
     bool marker_found = false;
@@ -8108,10 +8149,10 @@ extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item curr
 }
 
 extern "C" Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value) {
-    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || arguments.array->extra == 0) {
+    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || !js_array_has_props(arguments.array)) {
         return js_property_set(arguments, (Item){.item = i2it(index)}, value);
     }
-    Item companion = {.map = (Map*)(uintptr_t)arguments.array->extra};
+    Item companion = {.map = js_array_props(arguments.array)};
     char marker_key[64];
     snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
     bool marker_found = false;
@@ -8169,8 +8210,8 @@ extern "C" Item js_array_get(Item array, Item index) {
     // not numeric indices. Route to companion map lookup.
     if (get_type_id(index) == LMD_TYPE_BOOL) {
         Array* arr = array.array;
-        if (arr->extra == 0) return make_js_undefined();
-        Map* pm = (Map*)(uintptr_t)arr->extra;
+        if (!js_array_has_props(arr)) return make_js_undefined();
+        Map* pm = js_array_props(arr);
         const char* s = it2b(index) ? "true" : "false";
         int sl = it2b(index) ? 4 : 5;
         bool found = false;
@@ -8195,10 +8236,10 @@ extern "C" Item js_array_get(Item array, Item index) {
     int64_t idx = (idx_d == idx_d) ? (int64_t)idx_d : -1;
     Array* arr = array.array;
 
-    if (idx >= 0 && arr->extra != 0) {
+    if (idx >= 0 && js_array_has_props(arr)) {
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
-        Map* props = (Map*)(uintptr_t)arr->extra;
+        Map* props = js_array_props(arr);
         // check for accessor (getter) on companion map
         // AT-3: IS_ACCESSOR shape-flag dispatch under digit-string name
         // (post-AT-1 the intercept routes accessor writes here).
@@ -8223,7 +8264,7 @@ extern "C" Item js_array_get(Item array, Item index) {
         if (js_array_sparse_get(arr, idx, &sparse_val)) return sparse_val;
     }
 
-    if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
+    if (idx >= 0 && idx < arr->length && idx < js_array_dense_capacity(arr)) {
         // return undefined for holes (deleted sentinel)
         if (arr->items[idx].item == JS_DELETED_SENTINEL_VAL)
             return make_js_undefined();
@@ -8260,7 +8301,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
         // check for accessor (getter) on companion map — must check even when idx >= length
         bool companion_has_index_shape = js_array_companion_has_array_index_shape(arr);
         if (index >= 0 && companion_has_index_shape) {
-            Map* props = (Map*)(uintptr_t)arr->extra;
+            Map* props = js_array_props(arr);
             // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
@@ -8279,7 +8320,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
         if (index >= 0 && companion_has_index_shape) {
             char idx_buf[32];
             int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
-            Map* props = (Map*)(uintptr_t)arr->extra;
+            Map* props = js_array_props(arr);
             Item pm_item = (Item){.map = props};
             Item sparse_val = ItemNull;
             JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, &sparse_val, NULL);
@@ -8292,7 +8333,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             Item sparse_val = ItemNull;
             if (js_array_sparse_get(arr, index, &sparse_val)) return sparse_val;
         }
-        if (index >= 0 && index < arr->length && index < arr->capacity) {
+        if (index >= 0 && index < arr->length && index < js_array_dense_capacity(arr)) {
             // v25: check for deleted sentinel (array hole) — fall through to prototype chain
             if (arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
                 return arr->items[index];
@@ -8303,7 +8344,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
             if (index >= 0 && arr->is_content == 1 && companion_has_index_shape) {
                 char idx_buf[32];
                 snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
-                Map* pm = (Map*)(uintptr_t)arr->extra;
+                Map* pm = js_array_props(arr);
                 Item pm_item = (Item){.map = pm};
                 Item pm_val = ItemNull;
                 JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, (int)strlen(idx_buf), &pm_val, NULL);
@@ -8369,7 +8410,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     // check companion map for accessor/non-writable markers — must check even when idx >= length
     bool companion_has_index_shape = js_array_companion_has_array_index_shape(arr);
     if (companion_has_index_shape && index >= 0) {
-        Map* pm = (Map*)(uintptr_t)arr->extra;
+        Map* pm = js_array_props(arr);
         // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
@@ -8408,12 +8449,12 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
     if (arr->is_content == 1 && index >= 0 && index >= arr->length) {
         Map* pm;
-        if (arr->extra == 0) {
+        if (!js_array_has_props(arr)) {
             Item obj = js_new_object();
             obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-            arr->extra = (int64_t)(uintptr_t)obj.map;
+            js_array_set_props(arr, obj.map);
         }
-        pm = (Map*)(uintptr_t)arr->extra;
+        pm = js_array_props(arr);
         Item map_item = (Item){.map = pm};
         char idx_buf[32];
         snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)index);
@@ -8428,11 +8469,11 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
         char idx_buf2[32];
         int idx_len2 = snprintf(idx_buf2, sizeof(idx_buf2), "%lld", (long long)index);
         bool own_index_present = false;
-        if (index < arr->length && index < arr->capacity &&
+        if (index < arr->length && index < js_array_dense_capacity(arr) &&
             arr->items[index].item != JS_DELETED_SENTINEL_VAL) {
             own_index_present = true;
         } else if (companion_has_index_shape) {
-            Map* pm = (Map*)(uintptr_t)arr->extra;
+            Map* pm = js_array_props(arr);
             Item pm_item = (Item){.map = pm};
             JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf2, idx_len2, NULL, NULL);
             own_index_present = status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR;
@@ -8464,19 +8505,20 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
             }
         }
     }
-    if (index >= 0 && index < arr->length && index < arr->capacity) {
+    int64_t dense_capacity = js_array_dense_capacity(arr);
+    if (index >= 0 && index < arr->length && index < dense_capacity) {
         js_array_sparse_delete(arr, index);
-        arr->items[index] = value;
+        js_array_store_owned(arr, index, value);
     } else if (index >= 0) {
         if (!js_is_extensible(array)) return value;
-        if (index >= arr->capacity) {
-            int64_t capacity_gap = index - arr->capacity;
+        if (index >= dense_capacity) {
+            int64_t capacity_gap = index - dense_capacity;
             if (index < arr->length || capacity_gap > SPARSE_GAP_MAX) {
                 js_array_store_sparse_property(array, index, value, index <= 0xFFFFFFFELL);
                 return value;
             }
         }
-        if (index < arr->length && index >= arr->capacity) {
+        if (index < arr->length && index >= dense_capacity) {
             js_array_store_sparse_property(array, index, value, false);
             return value;
         }
@@ -8500,7 +8542,7 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
             if (index == arr->length) {
                 js_array_push_item_direct(arr, value);
             } else {
-                arr->items[index] = value;
+                js_array_store_owned(arr, index, value);
             }
         }
     }
@@ -8512,10 +8554,10 @@ extern "C" int64_t js_array_set_append_or_dense_int_fast(Item array, int64_t ind
     Array* arr = array.array;
     if (arr->is_content == 1) return 0;
 
-    if (index < arr->length && index < arr->capacity &&
+    if (index < arr->length && index < js_array_dense_capacity(arr) &&
             arr->items[index].item != JS_DELETED_SENTINEL_VAL &&
             !js_array_companion_has_numeric_slot(arr, index)) {
-        arr->items[index] = value;
+        js_array_store_owned(arr, index, value);
         return 1;
     }
 
@@ -8541,8 +8583,8 @@ extern "C" int64_t js_array_set_append_or_dense_item_fast(Item array, Item index
 extern "C" Item js_array_define_dense_element_direct(Item array, int64_t index, Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY || index < 0) return value;
     Array* arr = array.array;
-    if (index < arr->length && index < arr->capacity) {
-        arr->items[index] = value;
+    if (index < arr->length && index < js_array_dense_capacity(arr)) {
+        js_array_store_owned(arr, index, value);
         return value;
     }
     Item index_item = (Item){.item = i2it((int)index)};
@@ -8560,12 +8602,12 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     if (itid == LMD_TYPE_BOOL) {
         JS_PROPERTY_SET_BRANCH("array_set_bool_to_companion");
         Array* arr = array.array;
-        if (arr->extra == 0) {
+        if (!js_array_has_props(arr)) {
             Item obj = js_new_object();
             obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-            arr->extra = (int64_t)(uintptr_t)obj.map;
+            js_array_set_props(arr, obj.map);
         }
-        Map* pm = (Map*)(uintptr_t)arr->extra;
+        Map* pm = js_array_props(arr);
         Item map_item = (Item){.map = pm};
         const char* s = it2b(index) ? "true" : "false";
         int sl = it2b(index) ? 4 : 5;
@@ -8587,12 +8629,12 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         Item prop_key = (itid == LMD_TYPE_STRING) ? index : js_array_numeric_key_to_property_key(index);
         JS_PROPERTY_SET_BRANCH("array_set_non_index_to_companion");
         Array* arr = array.array;
-        if (arr->extra == 0) {
+        if (!js_array_has_props(arr)) {
             Item obj = js_new_object();
             obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-            arr->extra = (int64_t)(uintptr_t)obj.map;
+            js_array_set_props(arr, obj.map);
         }
-        Item map_item = (Item){.map = (Map*)(uintptr_t)arr->extra};
+        Item map_item = (Item){.map = js_array_props(arr)};
         // Non-index array keys live in the companion map; re-entering the
         // array setter here recurses through the same exotic setter path.
         js_property_set(map_item, prop_key, value);
@@ -8630,7 +8672,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     bool companion_has_index_shape = js_array_companion_has_array_index_shape(arr);
     if (companion_has_index_shape && idx >= 0 && idx < arr->length) {
         JS_PROPERTY_SET_BRANCH("array_set_companion_probe");
-        Map* pm = (Map*)(uintptr_t)arr->extra;
+        Map* pm = js_array_props(arr);
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
         Item pm_item = (Item){.map = pm};
@@ -8651,12 +8693,12 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
     // Arguments exotic object: numeric index beyond length goes to companion map (no length extension)
     if (arr->is_content == 1 && idx >= 0 && idx >= arr->length) {
         Map* pm;
-        if (arr->extra == 0) {
+        if (!js_array_has_props(arr)) {
             Item obj = js_new_object();
             obj.map->map_kind = MAP_KIND_ARRAY_PROPS;
-            arr->extra = (int64_t)(uintptr_t)obj.map;
+            js_array_set_props(arr, obj.map);
         }
-        pm = (Map*)(uintptr_t)arr->extra;
+        pm = js_array_props(arr);
         Item map_item = (Item){.map = pm};
         char idx_buf[32];
         snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
@@ -8666,21 +8708,22 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         return value;
     }
 
-    if (idx >= 0 && idx < arr->length && idx < arr->capacity) {
+    int64_t dense_capacity = js_array_dense_capacity(arr);
+    if (idx >= 0 && idx < arr->length && idx < dense_capacity) {
         JS_PROPERTY_SET_BRANCH("array_set_dense_write");
         js_array_sparse_delete(arr, idx);
-        arr->items[idx] = value;
+        js_array_store_owned(arr, idx, value);
     } else if (idx >= 0) {
         if (!js_is_extensible(array)) return value;
-        if (idx >= arr->capacity) {
-            int64_t capacity_gap = idx - arr->capacity;
+        if (idx >= dense_capacity) {
+            int64_t capacity_gap = idx - dense_capacity;
             if (idx < arr->length || capacity_gap > SPARSE_GAP_MAX) {
                 JS_PROPERTY_SET_BRANCH("array_set_sparse_capacity_gap");
                 js_array_store_sparse_property(array, idx, value, idx <= 0xFFFFFFFELL);
                 return value;
             }
         }
-        if (idx < arr->length && idx >= arr->capacity) {
+        if (idx < arr->length && idx >= dense_capacity) {
             JS_PROPERTY_SET_BRANCH("array_set_sparse_beyond_capacity");
             js_array_store_sparse_property(array, idx, value, false);
             return value;
@@ -8706,7 +8749,7 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
             if (idx == arr->length) {
                 js_array_push_item_direct(arr, value);
             } else {
-                arr->items[idx] = value;
+                js_array_store_owned(arr, idx, value);
             }
         }
     }
@@ -9209,10 +9252,10 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 
 static bool js_runtime_is_arguments_exotic(Item value) {
     if (get_type_id(value) != LMD_TYPE_ARRAY || !value.array ||
-        value.array->is_content != 1 || value.array->extra == 0) {
+        value.array->is_content != 1 || !js_array_has_props(value.array)) {
         return false;
     }
-    Map* props = (Map*)(uintptr_t)value.array->extra;
+    Map* props = js_array_props(value.array);
     bool found = false;
     Item tag = js_map_get_fast_ext(props, "__sym_4", 7, &found);
     if (!found || get_type_id(tag) != LMD_TYPE_STRING) return false;
@@ -9221,7 +9264,7 @@ static bool js_runtime_is_arguments_exotic(Item value) {
 }
 
 static Item js_arguments_companion_item(Item arguments) {
-    return (Item){.map = (Map*)(uintptr_t)arguments.array->extra};
+    return (Item){.map = js_array_props(arguments.array)};
 }
 extern "C" Item js_create_data_property(Item obj, Item name, Item value);
 extern "C" Item js_object_define_properties(Item obj, Item props);
@@ -9449,8 +9492,8 @@ static Item js_array_like_to_array(Item obj) {
                 }
             }
         }
-        if (i < arr->capacity) {
-            arr->items[i] = val;
+        if (i < js_array_dense_capacity(arr)) {
+            js_array_store_owned(arr, i, val);
             if (i >= arr->length) arr->length = i + 1;
         } else {
             js_array_push_item_direct(arr, val);
@@ -9964,10 +10007,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 // "length" is always non-enumerable for arrays
                 if (ks && ks->len == 6 && strncmp(ks->chars, "length", 6) == 0)
                     return (Item){.item = ITEM_FALSE};
-                if (ks && property_object.array->extra != 0) {
+                if (ks && js_array_has_props(property_object.array)) {
                     ShapeEntry* se = js_find_shape_entry(property_object,
                         ks->chars, (int)ks->len);
-                    Map* pm = (Map*)(uintptr_t)property_object.array->extra;
+                    Map* pm = js_array_props(property_object.array);
                     if (!js_props_query_enumerable(pm, se, ks->chars, (int)ks->len))
                         return (Item){.item = ITEM_FALSE};
                 }
@@ -10791,7 +10834,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                 Item elem = js_typed_array_get(tarr_item, (Item){.item = i2it(idx)});
                 if (elem.item == ITEM_NULL) elem = make_js_undefined();
                 pair.array->items[0] = (Item){.item = i2it(idx)};
-                pair.array->items[1] = elem;
+                js_array_store_owned(pair.array, 1, elem);
                 val = pair;
             }
             Item result = js_new_object();
@@ -10826,7 +10869,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             Item elem = js_property_get(arr_item, js_array_index_key(idx));
             if (js_check_exception()) return ItemNull;
             pair.array->items[0] = (Item){.item = i2it(idx)};
-            pair.array->items[1] = elem;
+            js_array_store_owned(pair.array, 1, elem);
             val = pair;
         }
         // return {value: val, done: false}
@@ -11285,14 +11328,14 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (arg_count == 1) return js_string_fromCodePoint(arg0);
         // multiple args — build array and pass
         Item arr = js_array_new(arg_count);
-        for (int i = 0; i < arg_count; i++) arr.array->items[i] = args[i];
+        for (int i = 0; i < arg_count; i++) js_array_store_owned(arr.array, i, args[i]);
         return js_string_fromCodePoint_array(arr);
     }
     case JS_BUILTIN_STRING_FROM_CHAR_CODE: {
         if (arg_count == 0) return (Item){.item = s2it(heap_create_name("", 0))};
         if (arg_count == 1) return js_string_fromCharCode(arg0);
         Item arr = js_array_new(arg_count);
-        for (int i = 0; i < arg_count; i++) arr.array->items[i] = args[i];
+        for (int i = 0; i < arg_count; i++) js_array_store_owned(arr.array, i, args[i]);
         return js_string_fromCharCode_array(arr);
     }
 
@@ -22725,8 +22768,8 @@ extern "C" void js_throw_reference_error(Item message) {
 // helper: read array element, checking for accessor properties (getters via defineProperty)
 static inline Item js_array_element(Item arr_item, int64_t idx) {
     Array* arr = arr_item.array;
-    if (arr->extra != 0) {
-        Map* props = (Map*)(uintptr_t)arr->extra;
+    if (js_array_has_props(arr)) {
+        Map* props = js_array_props(arr);
         // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
@@ -22757,7 +22800,7 @@ static inline Item js_array_element(Item arr_item, int64_t idx) {
     // Js58 P0: also bound by `capacity` — for sparse arrays `length` is the
     // spec length (can be 20K) but `capacity` is the dense buffer size (can
     // be 6). Reading `arr->items[idx]` with idx >= capacity is OOB.
-    if (idx < 0 || idx >= arr->length || idx >= arr->capacity) {
+    if (idx < 0 || idx >= arr->length || idx >= js_array_dense_capacity(arr)) {
         return make_js_undefined();
     }
     // v25: check for deleted sentinel (array hole) — return undefined
@@ -22785,7 +22828,7 @@ static void js_create_data_property_or_throw(Item object, int64_t index, Item va
     if (type == LMD_TYPE_ARRAY) {
         // for arrays, direct index write
         Array* arr = object.array;
-        if (index >= arr->length || index >= arr->capacity) {
+        if (index >= arr->length || index >= js_array_dense_capacity(arr)) {
             // extend array
             Item key = (Item){.item = i2it(index)};
             js_array_set(object, key, value);
@@ -22804,8 +22847,8 @@ static void js_create_data_property_or_throw(Item object, int64_t index, Item va
             // non-configurable, the {writable:true, enumerable:true,
             // configurable:true} redefine must throw if any attribute would
             // change.
-            if (arr->extra != 0) {
-                Map* props = (Map*)(uintptr_t)arr->extra;
+            if (js_array_has_props(arr)) {
+                Map* props = js_array_props(arr);
                 char buf[24];
                 snprintf(buf, sizeof(buf), "%lld", (long long)index);
                 int blen = (int)strlen(buf);
@@ -22827,7 +22870,7 @@ static void js_create_data_property_or_throw(Item object, int64_t index, Item va
                     return;
                 }
             }
-            arr->items[index] = value;
+            js_array_store_owned(arr, index, value);
         }
     } else if (type == LMD_TYPE_MAP) {
         char buf[24];
@@ -22903,11 +22946,13 @@ static Item js_array_species_create(Item original_array, int64_t length) {
                 if (length > 2147483643LL) {
                     return result;
                 }
-                if (a->capacity < (int)length) {
-                    int cap = (int)length + 4;
+                if (js_array_dense_capacity(a) < (int)length) {
+                    int cap = (int)length + (int)a->extra + 4;
                     Item* new_items = (Item*)mem_alloc(cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
                     if (a->items && a->length > 0) {
-                        memcpy(new_items, a->items, a->length * sizeof(Item));
+                        int64_t dense_copy = a->length < js_array_dense_capacity(a) ?
+                            a->length : js_array_dense_capacity(a);
+                        memcpy(new_items, a->items, dense_copy * sizeof(Item));
                     }
                     js_array_install_runtime_items(a, new_items, cap);
                 }
@@ -22962,15 +23007,15 @@ static bool js_proto_chain_has_numeric_keys(Item arr) {
 // then walks the prototype chain only if check_proto is true.
 // When present=true, *out receives the value (from prototype if needed).
 static bool js_array_has_element(Item arr, lam::GcPtr<Array> a, int64_t idx, Item* out, bool check_proto) {
-    if (idx >= 0 && idx < a->length && idx < a->capacity &&
+    if (idx >= 0 && idx < a->length && idx < js_array_dense_capacity(a.get()) &&
         a->items[idx].item != JS_DELETED_SENTINEL_VAL) {
         // Own element — fast path
         *out = js_array_element(arr, idx);
         return true;
     }
     // Check own accessor markers on companion map
-    if (a->extra != 0) {
-        Map* props = (Map*)(uintptr_t)a->extra;
+    if (js_array_has_props(a.get())) {
+        Map* props = js_array_props(a.get());
         // Phase 5D: IS_ACCESSOR shape-flag dispatch under digit-string name.
         char idx_buf[32];
         int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%lld", (long long)idx);
@@ -23062,7 +23107,7 @@ static void js_array_sparse_key_cursor_free(JsArraySparseKeyCursor* cursor) {
 
 static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, lam::GcPtr<Array> a) {
     if (!cursor) return false;
-    Map* props = (a && a->extra != 0) ? (Map*)(uintptr_t)a->extra : NULL;
+    Map* props = js_array_props(a.get());
     TypeMap* tm = (props && props->type) ? (TypeMap*)props->type : NULL;
     ShapeEntry* shape = tm ? tm->shape : NULL;
     int64_t type_length = tm ? tm->length : 0;
@@ -23121,7 +23166,7 @@ static bool js_array_sparse_key_cursor_rebuild(JsArraySparseKeyCursor* cursor, l
 
 static bool js_array_sparse_key_cursor_refresh(JsArraySparseKeyCursor* cursor, lam::GcPtr<Array> a) {
     if (!cursor) return false;
-    Map* props = (a && a->extra != 0) ? (Map*)(uintptr_t)a->extra : NULL;
+    Map* props = js_array_props(a.get());
     TypeMap* tm = (props && props->type) ? (TypeMap*)props->type : NULL;
     ShapeEntry* shape = tm ? tm->shape : NULL;
     int64_t type_length = tm ? tm->length : 0;
@@ -23179,7 +23224,7 @@ static bool js_array_find_next_own_element(Item arr, lam::GcPtr<Array> a, int64_
     if (start < 0) start = 0;
     if (start >= len) return false;
 
-    int64_t dense_limit = a->capacity;
+    int64_t dense_limit = js_array_dense_capacity(a.get());
     if (dense_limit > len) dense_limit = len;
     if (dense_limit > a->length) dense_limit = a->length;
     int64_t best_dense = -1;
@@ -23191,8 +23236,8 @@ static bool js_array_find_next_own_element(Item arr, lam::GcPtr<Array> a, int64_
     }
 
     int64_t best_extra = -1;
-    if (a->extra != 0) {
-        Map* props = (Map*)(uintptr_t)a->extra;
+    if (js_array_has_props(a.get())) {
+        Map* props = js_array_props(a.get());
         if (props && props->type) {
             TypeMap* tm = (TypeMap*)props->type;
             for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
@@ -23234,7 +23279,7 @@ static bool js_array_find_next_own_element_cached(Item arr, lam::GcPtr<Array> a,
     if (start < 0) start = 0;
     if (start >= len) return false;
 
-    int64_t dense_limit = a->capacity;
+    int64_t dense_limit = js_array_dense_capacity(a.get());
     if (dense_limit > len) dense_limit = len;
     if (dense_limit > a->length) dense_limit = a->length;
     int64_t best_dense = -1;
@@ -23246,7 +23291,7 @@ static bool js_array_find_next_own_element_cached(Item arr, lam::GcPtr<Array> a,
     }
 
     int64_t best_extra = -1;
-    if (a->extra != 0) {
+    if (js_array_has_props(a.get())) {
         if (!js_array_sparse_key_cursor_refresh(cursor, a)) {
             return js_array_find_next_own_element(arr, a, start, len, out_index, out_elem);
         }
@@ -23270,8 +23315,8 @@ static bool js_array_find_next_own_element_cached(Item arr, lam::GcPtr<Array> a,
 }
 
 static bool js_array_has_numeric_own_accessors(lam::GcPtr<Array> a) {
-    if (!a || a->extra == 0) return false;
-    Map* props = (Map*)(uintptr_t)a->extra;
+    if (!js_array_has_props(a.get())) return false;
+    Map* props = js_array_props(a.get());
     if (!props || !props->type) return false;
     TypeMap* tm = (TypeMap*)props->type;
     for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
@@ -23290,7 +23335,8 @@ static bool js_array_find_prev_own_element(Item arr, lam::GcPtr<Array> a, int64_
     if (start < 0) return false;
 
     int64_t dense_start = start;
-    if (dense_start >= a->capacity) dense_start = a->capacity - 1;
+    int64_t dense_capacity = js_array_dense_capacity(a.get());
+    if (dense_start >= dense_capacity) dense_start = dense_capacity - 1;
     if (dense_start >= a->length) dense_start = a->length - 1;
     int64_t best_dense = -1;
     for (int64_t i = dense_start; i >= 0; i--) {
@@ -23301,8 +23347,8 @@ static bool js_array_find_prev_own_element(Item arr, lam::GcPtr<Array> a, int64_
     }
 
     int64_t best_extra = -1;
-    if (a->extra != 0) {
-        Map* props = (Map*)(uintptr_t)a->extra;
+    if (js_array_has_props(a.get())) {
+        Map* props = js_array_props(a.get());
         if (props && props->type) {
             TypeMap* tm = (TypeMap*)props->type;
             for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
@@ -23345,7 +23391,8 @@ static bool js_array_find_prev_own_element_cached(Item arr, lam::GcPtr<Array> a,
     if (start < 0) return false;
 
     int64_t dense_start = start;
-    if (dense_start >= a->capacity) dense_start = a->capacity - 1;
+    int64_t dense_capacity = js_array_dense_capacity(a.get());
+    if (dense_start >= dense_capacity) dense_start = dense_capacity - 1;
     if (dense_start >= a->length) dense_start = a->length - 1;
     int64_t best_dense = -1;
     for (int64_t i = dense_start; i >= 0; i--) {
@@ -23356,7 +23403,7 @@ static bool js_array_find_prev_own_element_cached(Item arr, lam::GcPtr<Array> a,
     }
 
     int64_t best_extra = -1;
-    if (a->extra != 0) {
+    if (js_array_has_props(a.get())) {
         if (!js_array_sparse_key_cursor_refresh(cursor, a)) {
             return js_array_find_prev_own_element(arr, a, start, out_index, out_elem);
         }
@@ -23383,11 +23430,12 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
     if (get_type_id(arr) != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
     Array* array = arr.array;
     if (array->length == 0) return (Item){.item = i2it(-1)};
-    int64_t dense_limit = array->capacity < array->length ? array->capacity : array->length;
+    int64_t dense_capacity = js_array_dense_capacity(array);
+    int64_t dense_limit = dense_capacity < array->length ? dense_capacity : array->length;
     Item search_val = (Item){.item = i2it((int)search)};
     bool check_proto = false;
     bool checked_proto = false;
-    if (array->extra != 0 && !js_array_has_numeric_own_accessors(lam::gc_borrow(array)) && !js_proto_chain_has_numeric_keys(arr)) {
+    if (js_array_has_props(array) && !js_array_has_numeric_own_accessors(lam::gc_borrow(array)) && !js_proto_chain_has_numeric_keys(arr)) {
         int64_t idx = 0;
         Item elem = ItemNull;
         JsArraySparseKeyCursor sparse_cursor;
@@ -23406,7 +23454,7 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
         js_array_sparse_key_cursor_free(&sparse_cursor);
         return (Item){.item = i2it(-1)};
     }
-    if (array->extra == 0) {
+    if (!js_array_has_props(array)) {
         bool all_dense_int = true;
         for (int64_t int_idx = 0; int_idx < dense_limit; int_idx++) {
             Item elem = array->items[int_idx];
@@ -23454,7 +23502,7 @@ extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, i
         String* method = it2s(method_name);
         if (!g_array_proto_push_ever_set && method &&
                 method->len == 4 && strncmp(method->chars, "push", 4) == 0 &&
-                argc == 1 && arr.array && arr.array->extra == 0) {
+                argc == 1 && arr.array && !js_array_has_props(arr.array)) {
             int64_t length = arr.array->length;
             if (length >= 0 && length < 0xFFFFFFFFLL &&
                     js_array_set_append_or_dense_int_fast(arr, length, args[0])) {
@@ -23485,7 +23533,7 @@ extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, i
 
 extern "C" Item js_array_push_method_direct_1(Item arr, Item value) {
     if (get_type_id(arr) == LMD_TYPE_ARRAY && !g_array_proto_push_ever_set &&
-            arr.array && arr.array->extra == 0) {
+            arr.array && !js_array_has_props(arr.array)) {
         int64_t length = arr.array->length;
         if (length >= 0 && length < 0xFFFFFFFFLL &&
                 js_array_set_append_or_dense_int_fast(arr, length, value)) {
@@ -23568,13 +23616,13 @@ static bool js_array_try_fast_fill(Item object, Item value, int64_t start, int64
     if (!arr) return false;
     if (start >= end) return true;
     if (start < 0 || end < start || end > arr->length) return false;
-    if (arr->is_content == 1 || arr->extra != 0) return false;
+    if (arr->is_content == 1 || js_array_has_props(arr)) return false;
     if (!js_is_extensible(object)) return false;
-    if (end > arr->capacity || !arr->items) return false;
+    if (end > js_array_dense_capacity(arr) || !arr->items) return false;
     if (js_proto_chain_has_numeric_keys(object)) return false;
 
     for (int64_t k = start; k < end; k++) {
-        arr->items[k] = value;
+        js_array_store_owned(arr, k, value);
     }
     return true;
 }
@@ -23616,7 +23664,7 @@ static bool js_concat_ta_has_observable_own_index_or_length(Item element) {
 static bool js_array_concat_try_append_typed_array(Item result, int64_t* n, Item element, int64_t len) {
     if (len < 0 || len > INT32_MAX) return false;
     if (get_type_id(result) != LMD_TYPE_ARRAY || !result.array) return false;
-    if (result.array->extra != 0 || result.array->length != *n) return false;
+    if (js_array_has_props(result.array) || result.array->length != *n) return false;
     if (!js_is_extensible(result)) return false;
     if (!js_is_typed_array(element) || js_is_proxy(element)) return false;
     if (js_typed_array_is_out_of_bounds_item(element)) return false;
@@ -24199,15 +24247,15 @@ static Item js_array_generic_sort(Item object, Item* args, int argc) {
         }
     }
     if (get_type_id(object) == LMD_TYPE_ARRAY && object.array &&
-            (object.array->extra != 0 || len > object.array->capacity)) {
+            (js_array_has_props(object.array) || len > js_array_dense_capacity(object.array))) {
         Array* a = object.array;
         int64_t dense_limit = len;
-        if (dense_limit > a->capacity) dense_limit = a->capacity;
+        if (dense_limit > js_array_dense_capacity(a)) dense_limit = js_array_dense_capacity(a);
         Item hole = lam::hole_sentinel_item();
         for (int64_t j = item_count; j < dense_limit; j++) {
             a->items[j] = hole;
         }
-        if (a->extra != 0) {
+        if (js_array_has_props(a)) {
             js_array_delete_sparse_indices_from(lam::gc_borrow(a), item_count);
         }
     } else {
@@ -24236,13 +24284,13 @@ static Item js_array_generic_includes(Item object, Item* args, int argc) {
         if (js_exception_pending) return ItemNull;
     }
     if (get_type_id(object) == LMD_TYPE_ARRAY && object.array &&
-            object.array->extra == 0 && !js_proto_chain_has_numeric_keys(object)) {
+            !js_array_has_props(object.array) && !js_proto_chain_has_numeric_keys(object)) {
         Array* a = object.array;
         bool search_is_undefined = get_type_id(search_val) == LMD_TYPE_UNDEFINED ||
             search_val.item == ITEM_JS_UNDEFINED;
         while (k < len) {
             Item elem = make_js_undefined();
-            if (k >= 0 && k < a->length && k < a->capacity &&
+            if (k >= 0 && k < a->length && k < js_array_dense_capacity(a) &&
                     a->items[k].item != JS_DELETED_SENTINEL_VAL) {
                 elem = a->items[k];
             } else if (!search_is_undefined) {
@@ -25043,10 +25091,11 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         // v24: ES spec - negative fromIndex means length + fromIndex
         if (start < 0) { start = a->length + start; if (start < 0) start = 0; }
         if (start >= a->length) return (Item){.item = i2it(-1)};
-        int64_t dense_limit = a->capacity < a->length ? a->capacity : a->length;
+        int64_t dense_capacity = js_array_dense_capacity(a);
+        int64_t dense_limit = dense_capacity < a->length ? dense_capacity : a->length;
         bool check_proto = false;
         bool checked_proto = false;
-        if (a->extra == 0) {
+        if (!js_array_has_props(a)) {
             TypeId search_type = get_type_id(search_val);
             if (search_type == LMD_TYPE_INT) {
                 bool all_dense_int = true;
@@ -25127,7 +25176,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             search_type == LMD_TYPE_MAP || search_type == LMD_TYPE_ARRAY ||
             search_type == LMD_TYPE_FUNC || search_type == LMD_TYPE_ELEMENT ||
             search_type == LMD_TYPE_OBJECT || search_type == LMD_TYPE_VMAP;
-        if (identity_search && a->extra == 0 && a->capacity >= a->length) {
+        if (identity_search && !js_array_has_props(a) &&
+                js_array_dense_capacity(a) >= a->length) {
             for (int i = from; i < a->length; i++) {
                 Item elem = a->items[i];
                 if (elem.item == JS_DELETED_SENTINEL_VAL) goto includes_slow_path;
@@ -25210,8 +25260,8 @@ includes_slow_path:
                 if (js_exception_pending) return make_js_undefined();
             }
         }
-        if (src->extra != 0) {
-            Map* pm = (Map*)(uintptr_t)src->extra;
+        if (js_array_has_props(src)) {
+            Map* pm = js_array_props(src);
             TypeMap* tm = pm && pm->type ? (TypeMap*)pm->type : NULL;
             for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
                 if (!se->name) continue;
@@ -25335,7 +25385,7 @@ includes_slow_path:
         Array* src = arr.array;
         Item result = js_array_species_create(arr, src->length);
         if (js_exception_pending) return make_js_undefined();
-        bool result_is_plain_array = (get_type_id(result) == LMD_TYPE_ARRAY && result.array->extra == 0);
+        bool result_is_plain_array = (get_type_id(result) == LMD_TYPE_ARRAY && !js_array_has_props(result.array));
         Array* dst = (get_type_id(result) == LMD_TYPE_ARRAY) ? result.array : NULL;
         JsFunction* fn = (JsFunction*)callback.function;
         // v30: thisArg support with OrdinaryCallBindThis coercion
@@ -25355,7 +25405,7 @@ includes_slow_path:
             Item mapped = js_invoke_fn(fn, cb_args, 3);
             if (js_exception_pending) break;
             if (result_is_plain_array) {
-                dst->items[i] = mapped;
+                js_array_store_owned(dst, i, mapped);
             } else {
                 js_create_data_property_or_throw(result, i, mapped);
                 if (js_exception_pending) break;
@@ -25374,7 +25424,7 @@ includes_slow_path:
         Array* src = arr.array;
         Item result = js_array_species_create(arr, 0);
         if (js_exception_pending) return make_js_undefined();
-        bool result_is_plain_array = (get_type_id(result) == LMD_TYPE_ARRAY && result.array->extra == 0);
+        bool result_is_plain_array = (get_type_id(result) == LMD_TYPE_ARRAY && !js_array_has_props(result.array));
         Array* dst = (get_type_id(result) == LMD_TYPE_ARRAY) ? result.array : NULL;
         JsFunction* fn = (JsFunction*)callback.function;
         // v30: thisArg support with OrdinaryCallBindThis coercion
@@ -25749,35 +25799,36 @@ includes_slow_path:
         js_property_set(deleted, len_key, (Item){.item = i2it(delete_count)});
         if (js_exception_pending) return make_js_undefined();
 
+        int64_t dense_capacity = js_array_dense_capacity(a);
         int sparse_count = 0;
-        if (a->extra != 0) {
-            Map* pm = (Map*)(uintptr_t)a->extra;
+        if (js_array_has_props(a)) {
+            Map* pm = js_array_props(a);
             TypeMap* tm = pm && pm->type ? (TypeMap*)pm->type : NULL;
             for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
                 if (!se->name) continue;
                 int64_t idx = -1;
                 if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
-                if (idx < a->capacity || idx >= a->length) continue;
+                if (idx < dense_capacity || idx >= a->length) continue;
                 if (jspd_is_deleted(se)) continue;
                 Item val = _map_read_field(se, pm->data);
                 if (val.item != JS_DELETED_SENTINEL_VAL) sparse_count++;
             }
             sparse_count += (int)js_array_sparse_collect_indices(
-                arr, a->capacity, a->length, NULL, 0);
+                arr, dense_capacity, a->length, NULL, 0);
         }
         int64_t* sparse_indices = sparse_count > 0 ?
             (int64_t*)mem_alloc((size_t)sparse_count * sizeof(int64_t), MEM_CAT_JS_RUNTIME) : NULL;
         Item* sparse_values = sparse_count > 0 ?
             (Item*)mem_alloc((size_t)sparse_count * sizeof(Item), MEM_CAT_JS_RUNTIME) : NULL;
         int sparse_pos = 0;
-        if (sparse_count > 0 && a->extra != 0) {
-            Map* pm = (Map*)(uintptr_t)a->extra;
+        if (sparse_count > 0 && js_array_has_props(a)) {
+            Map* pm = js_array_props(a);
             TypeMap* tm = pm && pm->type ? (TypeMap*)pm->type : NULL;
             for (ShapeEntry* se = tm ? tm->shape : NULL; se; se = se->next) {
                 if (!se->name) continue;
                 int64_t idx = -1;
                 if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &idx)) continue;
-                if (idx < a->capacity || idx >= a->length) continue;
+                if (idx < dense_capacity || idx >= a->length) continue;
                 if (jspd_is_deleted(se)) continue;
                 Item val = _map_read_field(se, pm->data);
                 if (val.item == JS_DELETED_SENTINEL_VAL) continue;
@@ -25786,7 +25837,7 @@ includes_slow_path:
                 sparse_pos++;
             }
             int64_t hash_count = js_array_sparse_collect_indices(
-                arr, a->capacity, a->length,
+                arr, dense_capacity, a->length,
                 sparse_indices ? sparse_indices + sparse_pos : NULL,
                 sparse_count - sparse_pos);
             for (int64_t hi = 0; hi < hash_count && sparse_pos < sparse_count; hi++) {
@@ -25799,17 +25850,18 @@ includes_slow_path:
         int shift = insert_count - delete_count;
         int old_len = a->length;
         int new_len = old_len + shift;
-        int dense_end = (int)((int64_t)old_len < a->capacity ? old_len : a->capacity);
+        int dense_end = (int)((int64_t)old_len < dense_capacity ? old_len : dense_capacity);
         if (shift > 0) {
-            if (new_len + 4 > a->capacity) {
-                int new_cap = new_len + 4;
+            if (new_len + a->extra + 4 > a->capacity) {
+                int new_cap = new_len + (int)a->extra + 4;
                 Item* new_items = (Item*)mem_alloc(new_cap * sizeof(Item), MEM_CAT_JS_RUNTIME);
                 if (a->items && a->length > 0) {
-                    int copy_cnt = (int)((int64_t)a->length < a->capacity ? a->length : a->capacity);
+                    int copy_cnt = (int)((int64_t)a->length < dense_capacity ? a->length : dense_capacity);
                     memcpy(new_items, a->items, copy_cnt * sizeof(Item));
                 }
                 js_array_install_runtime_items(a, new_items, new_cap);
-                dense_end = (int)((int64_t)old_len < a->capacity ? old_len : a->capacity);
+                dense_capacity = js_array_dense_capacity(a);
+                dense_end = (int)((int64_t)old_len < dense_capacity ? old_len : dense_capacity);
             }
             int elements_to_move = dense_end - start - delete_count;
             if (elements_to_move > 0) {
@@ -25856,14 +25908,14 @@ includes_slow_path:
                 }
             }
         }
-        if (a->extra != 0) js_array_delete_sparse_indices_from(lam::gc_borrow(a), new_len);
+        if (js_array_has_props(a)) js_array_delete_sparse_indices_from(lam::gc_borrow(a), new_len);
         if (sparse_indices) mem_free(sparse_indices);
         if (sparse_values) mem_free(sparse_values);
 
         for (int i = 0; i < insert_count; i++) {
             int64_t idx = (int64_t)start + i;
-            if (idx >= 0 && idx < a->capacity) {
-                a->items[idx] = args[2 + i];
+            if (idx >= 0 && idx < js_array_dense_capacity(a)) {
+                js_array_store_owned(a, idx, args[2 + i]);
             } else {
                 js_array_set(arr, (Item){.item = i2it(idx)}, args[2 + i]);
                 if (js_exception_pending) return make_js_undefined();
@@ -25921,8 +25973,8 @@ includes_slow_path:
         }
         if (from < 0) from = a->length + from;
         if (from >= a->length) from = a->length - 1;
-        if (a->extra != 0) {
-            Map* pm = (Map*)(uintptr_t)a->extra;
+        if (js_array_has_props(a)) {
+            Map* pm = js_array_props(a);
             if (pm && pm->type) {
                 TypeMap* tm = (TypeMap*)pm->type;
                 int64_t best_sparse = -1;
@@ -25930,7 +25982,7 @@ includes_slow_path:
                     if (!se->name) continue;
                     int64_t sparse_idx = -1;
                     if (!js_array_parse_index_name(se->name->str, (int)se->name->length, &sparse_idx)) continue;
-                    if (sparse_idx > from || sparse_idx < a->capacity) continue;
+                    if (sparse_idx > from || sparse_idx < js_array_dense_capacity(a)) continue;
                     bool found = false;
                     Item elem = js_map_get_fast_ext(pm, se->name->str, (int)se->name->length, &found);
                     if (!found || elem.item == JS_DELETED_SENTINEL_VAL) continue;
@@ -25945,7 +25997,7 @@ includes_slow_path:
                     while (hashmap_iter(sm->sparse_indices, &iter, &item)) {
                         JsArraySparseHashEntry* entry = (JsArraySparseHashEntry*)item;
                         int64_t sparse_idx = entry->index;
-                        if (sparse_idx > from || sparse_idx < a->capacity) continue;
+                        if (sparse_idx > from || sparse_idx < js_array_dense_capacity(a)) continue;
                         if (entry->value.item == JS_DELETED_SENTINEL_VAL) continue;
                         if (it2b(js_strict_equal(entry->value, search_val)) && sparse_idx > best_sparse) {
                             best_sparse = sparse_idx;
@@ -25957,7 +26009,8 @@ includes_slow_path:
         }
         bool check_proto = js_proto_chain_has_numeric_keys(arr);
         int64_t dense_from = from;
-        if (dense_from >= a->capacity) dense_from = a->capacity - 1;
+        int64_t dense_capacity = js_array_dense_capacity(a);
+        if (dense_from >= dense_capacity) dense_from = dense_capacity - 1;
         for (int64_t i = dense_from; i >= 0; i--) {
             // v37: use HasProperty (checks prototype chain for holes)
             Item elem;
@@ -27176,14 +27229,14 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
         js_property_set(fn->properties_map, key, proto_to_store);
         return;
     }
-    // Handle arrays: store __proto__ in companion map (arr->extra)
+    // Handle arrays: store __proto__ in the companion map.
     if (ot == LMD_TYPE_ARRAY) {
-        if (object.array->extra == 0) {
+        if (!js_array_has_props(object.array)) {
             Item props = js_new_object();
             props.map->map_kind = MAP_KIND_ARRAY_PROPS;
-            object.array->extra = (int64_t)(uintptr_t)props.map;
+            js_array_set_props(object.array, props.map);
         }
-        Item props = (Item){.map = (Map*)(uintptr_t)object.array->extra};
+        Item props = (Item){.map = js_array_props(object.array)};
         Item key = js_get_proto_key();
         ScopedSkipAccessorDispatch _skip_guard;
         js_property_set(props, key, proto_to_store);
@@ -27261,8 +27314,8 @@ extern "C" Item js_func_get_custom_proto(Item func) {
 // Check if an array has a custom __proto__ set via Object.setPrototypeOf
 extern "C" Item js_array_get_custom_proto(Item arr) {
     if (get_type_id(arr) != LMD_TYPE_ARRAY) return ItemNull;
-    if (arr.array->extra == 0) return ItemNull;
-    Map* pm = (Map*)(uintptr_t)arr.array->extra;
+    if (!js_array_has_props(arr.array)) return ItemNull;
+    Map* pm = js_array_props(arr.array);
     Item pk = js_get_proto_key();
     String* pks = it2s(pk);
     Item pm_item = (Item){.map = pm};
@@ -27860,7 +27913,7 @@ static Item js_async_generator_yield_result(Item value) {
 // v15: Create a 2-element array [value, next_state] for state machine returns
 extern "C" Item js_gen_yield_result(Item value, int64_t next_state) {
     Item arr = js_array_new(2);
-    arr.array->items[0] = value;
+    js_array_store_owned(arr.array, 0, value);
     arr.array->items[1] = (Item){.item = i2it(next_state)};
     return arr;
 }
@@ -27868,7 +27921,7 @@ extern "C" Item js_gen_yield_result(Item value, int64_t next_state) {
 // yield* delegation: create 3-element array [iterable, resume_state, 1(flag)]
 extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state) {
     Item arr = js_array_new(3);
-    arr.array->items[0] = iterable;
+    js_array_store_owned(arr.array, 0, iterable);
     arr.array->items[1] = (Item){.item = i2it(resume_state)};
     arr.array->items[2] = (Item){.item = i2it(1)};  // delegation flag
     return arr;
@@ -27876,7 +27929,7 @@ extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state
 
 extern "C" Item js_gen_await_result(Item value, int64_t next_state) {
     Item arr = js_array_new(3);
-    arr.array->items[0] = value;
+    js_array_store_owned(arr.array, 0, value);
     arr.array->items[1] = (Item){.item = i2it(next_state)};
     arr.array->items[2] = (Item){.item = i2it(2)};  // async-generator await flag
     return arr;
@@ -28072,7 +28125,7 @@ static Item js_get_gen_return_signal_marker() {
 
 extern "C" Item js_gen_return_signal(Item value) {
     Item signal = js_array_new(2);
-    signal.array->items[0] = value;
+    js_array_store_owned(signal.array, 0, value);
     signal.array->items[1] = js_get_gen_return_signal_marker();
     return signal;
 }
@@ -29213,7 +29266,7 @@ extern "C" Item js_iterator_step(Item iterator) {
             if (kind == 2) {
                 Item pair = js_array_new(2);
                 pair.array->items[0] = (Item){.item = i2it(idx)};
-                pair.array->items[1] = elem;
+                js_array_store_owned(pair.array, 1, elem);
                 return pair;
             }
             return elem;
@@ -30634,7 +30687,7 @@ static bool js_promise_resolve_elements_with_constructor(Item constructor, Item 
             js_promise_call_capability_reject(reject, error);
             return false;
         }
-        resolved.array->items[i] = next;
+        js_array_store_owned(resolved.array, i, next);
     }
     *out_array = resolved;
     return true;
@@ -31318,7 +31371,7 @@ static Item js_all_resolve_element(Item counter_obj, Item index_item, Item resul
     Item results = js_property_get(counter_obj, (Item){.item = s2it(k_results)});
     int idx = (int)it2i(index_item);
     if (get_type_id(results) == LMD_TYPE_ARRAY && idx < results.array->length) {
-        results.array->items[idx] = value;
+        js_array_store_owned(results.array, idx, value);
     }
 
     int remaining = (int)it2i(js_property_get(counter_obj, (Item){.item = s2it(k_remaining)})) - 1;
@@ -31360,7 +31413,7 @@ static Item js_any_reject_element(Item counter_obj, Item index_item, Item result
     Item errors = js_property_get(counter_obj, (Item){.item = s2it(k_errors)});
     int idx = (int)it2i(index_item);
     if (get_type_id(errors) == LMD_TYPE_ARRAY && idx < errors.array->length) {
-        errors.array->items[idx] = reason;
+        js_array_store_owned(errors.array, idx, reason);
     }
 
     int remaining = (int)it2i(js_property_get(counter_obj, (Item){.item = s2it(k_remaining)})) - 1;
@@ -31388,7 +31441,7 @@ static Item js_settled_fulfill_element(Item counter_obj, Item index_item, Item r
     Item results = js_property_get(counter_obj, (Item){.item = s2it(k_results)});
     int idx = (int)it2i(index_item);
     if (get_type_id(results) == LMD_TYPE_ARRAY && idx < results.array->length) {
-        results.array->items[idx] = entry;
+        js_array_store_owned(results.array, idx, entry);
     }
 
     int remaining = (int)it2i(js_property_get(counter_obj, (Item){.item = s2it(k_remaining)})) - 1;
@@ -31416,7 +31469,7 @@ static Item js_settled_reject_element(Item counter_obj, Item index_item, Item re
     Item results = js_property_get(counter_obj, (Item){.item = s2it(k_results)});
     int idx = (int)it2i(index_item);
     if (get_type_id(results) == LMD_TYPE_ARRAY && idx < results.array->length) {
-        results.array->items[idx] = entry;
+        js_array_store_owned(results.array, idx, entry);
     }
 
     int remaining = (int)it2i(js_property_get(counter_obj, (Item){.item = s2it(k_remaining)})) - 1;

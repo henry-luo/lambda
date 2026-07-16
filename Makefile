@@ -1721,9 +1721,11 @@ build-graph-structurizr-test:
 
 test-graph-structurizr: build-graph-structurizr-test
 	@echo "Running native Structurizr parser coverage..."
-	@./test/test_graph_parser_gtest.exe --gtest_filter='GraphParserTest.ParserLocBudget:GraphParserTest.ParseStructurizrWorkspace:GraphParserTest.RecoverStructurizrWorkspaceRoot'
+	@./test/test_graph_parser_gtest.exe --gtest_filter='GraphParserTest.ParserLocBudget:GraphParserTest.ParseStructurizrWorkspace:GraphParserTest.ParseStructurizrArchetypes:GraphParserTest.AutoDetectStructurizrDsl:GraphParserTest.RecoverStructurizrWorkspaceRoot'
 	@echo "Running Structurizr/C4 package integration fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*structurizr*'
+	@echo "Running headless .dsl selected-view bridge..."
+	@./lambda.exe view test/lambda/graph/structurizr/advanced_static.dsl --view-key Expression --headless --no-log
 
 test-validator: build
 	@echo "Running validator test suite..."

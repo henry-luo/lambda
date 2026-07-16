@@ -16,7 +16,7 @@ false
 0
 "30. trim ws:"
 1
-"31. trim mixed:a b32. find_child span:a33. find_child em:b34. find_child missing:"
+"31. trim mixed:a32. find_child span:a33. find_child em:b34. find_child missing:"
 true
 "35. find_desc p:deep36. find_desc missing:"
 true

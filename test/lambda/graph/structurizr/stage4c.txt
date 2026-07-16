@@ -1,0 +1,13 @@
+{
+  keys: ["Landscape", "ContextAll", "ContextReluctant", "Components", "Coupled", "Integration", "CoreOnly", "NoExternal"],
+  canonical: [[["queue", "Queue", "Message Bus", ["Element"]], ["archive", "Archive", "Object Store", ["Element"]]], ["store.web.api", "store.web.repo", ["Relationship", "Critical"]]],
+  wildcard: [[["visitor", "store"], ["store", "billing"], ["visitor", "billing"]], [["visitor", "store"], ["store", "billing"]]],
+  expressions: [["store", "billing"], ["store.web", "store.web.api", "store.worker"], ["store.web.api", "store.web.repo"], ["visitor", "store", "store.web", "store.web.api", "store.web.repo", "store.worker", "billing", "queue", "archive"], [true, true, true, false]],
+  components: [["store.web.api", "store.web.repo"], []],
+  coupled: [["store.web.api", "store.web.repo"], [["store.web.api", "store.web.repo"]]],
+  custom: [[["queue", "Queue", "Message Bus", ["Element"]], ["archive", "Archive", "Object Store", ["Element"]]], [["queue", "archive"]]],
+  filtered: [["Landscape", "LR", ["store", "billing"], [["store", "billing"]]], ["Landscape", ["store", "billing"], [["store", "billing"]]]],
+  diagnostics: [],
+  styles: [[["node", "store.web.api", "fill:#eef6ff;color:#17365d;stroke:#3978a8;stroke-width:2;font-size:15"], ["edge", "relationship@1008", "stroke:#b42318;stroke-width:3;stroke-dasharray:6 4"]], [["store.web.api", "fill:#eef6ff;color:#17365d;stroke:#3978a8;stroke-width:2;font-size:15"], ["store.web.repo", ""]], [["relationship@1008", "stroke:#b42318;stroke-width:3;stroke-dasharray:6 4", "#b42318", 3, "6 4"]]],
+  html: ["graph", "lambda-graph lambda-graph-theme-light", 4]
+}
