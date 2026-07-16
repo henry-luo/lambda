@@ -1,6 +1,6 @@
 # Lambda Double Boxing v3 — Inline Doubles via High-Byte Float Self-Tagging
 
-- **Status:** PROPOSED — reviewed (Part 7); implementation plan at `Lambda_Double_Boxing_Impl_Plan.md`
+- **Status:** LANDED — S3 complete 2026-07-11; self-tagged floats are always on and the `LAMBDA_SELF_TAG_FLOAT` transition flag is deleted; implementation record at `Lambda_Impl_Double_Boxing (done).md`. Note the designed residue remains: subnormal/tiny doubles (`|d| < ~1.5e-154`, e.g. `Number.MIN_VALUE`) still box onto the number side stack, so the scalar return lane (`Lambda_Issue_Scalar_Lane.md`) still applies to `FLOAT`.
 - **Date:** 2026-07-10
 - **Co-Author:** Anthropic Fable
 - **Scope:** the runtime `Item` representation of `float` (binary64) across Lambda core, LambdaJS, the MIR transpilers, and the GC. Supersedes and expands **Part 5** of `Lambda_Tuning_Proposal.md`.

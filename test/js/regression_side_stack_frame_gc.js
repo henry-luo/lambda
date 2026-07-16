@@ -4,6 +4,41 @@ function tinyReturn() {
     return value;
 }
 
+function relayTiny(depth) {
+    if (depth === 0) return tinyReturn();
+    return relayTiny(depth - 1);
+}
+
+function mixedReturn(tiny) {
+    return tiny ? Number.MIN_VALUE : "ready";
+}
+
+function overwriteProbe() {
+    const returned = tinyReturn();
+    tinyReturn();
+    return returned;
+}
+
+function retBool() { return true; }
+function retUndefined() { return undefined; }
+function retNull() { return null; }
+function retCompactInt() { return 42; }
+function retString() { return "ready"; }
+function retObject() { return {ready: true}; }
+function retArray() { return [1, 2, 3]; }
+function retFunction() { return retBool; }
+function retInlineDouble() { return 1.25; }
+function retPositiveZero() { return 0; }
+function retNegativeZero() { return -0; }
+function retNaN() { return NaN; }
+function retPositiveInfinity() { return Infinity; }
+function retNegativeInfinity() { return -Infinity; }
+function retNegativeTiny() {
+    const value = -Number.MIN_VALUE;
+    gc();
+    return value;
+}
+
 function rootedLocal() {
     const value = {answer: 42};
     gc();
@@ -46,6 +81,16 @@ async function tinyAsync() {
 const cell = makeTinyCell();
 const generator = tinyGenerator();
 console.log(tinyReturn() === Number.MIN_VALUE);
+console.log(relayTiny(8) === Number.MIN_VALUE);
+console.log(mixedReturn(true) === Number.MIN_VALUE && mixedReturn(false) === "ready");
+console.log(overwriteProbe() === Number.MIN_VALUE);
+console.log(retBool() && retString() === "ready" && retInlineDouble() === 1.25);
+console.log(Object.is(retPositiveZero(), 0) && Object.is(retNegativeZero(), -0));
+console.log(retUndefined() === undefined && retNull() === null &&
+    retCompactInt() === 42 && retObject().ready && retArray().length === 3 &&
+    retFunction() === retBool);
+console.log(retNaN() !== retNaN() && retPositiveInfinity() === Infinity &&
+    retNegativeInfinity() === -Infinity && retNegativeTiny() === -Number.MIN_VALUE);
 console.log(rootedLocal() === 42);
 gc();
 console.log(cell.read() === Number.MIN_VALUE);

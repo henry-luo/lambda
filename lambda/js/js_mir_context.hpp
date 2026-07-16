@@ -465,6 +465,7 @@ struct JsMirTranspiler {
     // precise-root watermark.
     bool side_frame_active;
     bool side_frame_item_return;
+    MirScalarReturnMode side_frame_scalar_return_mode;
     MIR_type_t side_frame_return_type;
     MIR_reg_t side_frame_runtime;
     MIR_reg_t side_root_frame_base;

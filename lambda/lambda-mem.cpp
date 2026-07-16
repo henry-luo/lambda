@@ -576,52 +576,6 @@ extern "C" double lambda_mir_bits_double(uint64_t bits) {
     return dval;
 }
 
-extern "C" uint64_t lambda_item_scalar_lane(Item item) {
-    switch (get_type_id(item)) {
-    case LMD_TYPE_INT64:
-        return (uint64_t)item.get_int64();
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
-        uint64_t bits;
-        double value = item.get_double();
-        memcpy(&bits, &value, sizeof(bits));
-        return bits;
-    }
-    case LMD_TYPE_DTIME: {
-        uint64_t bits;
-        DateTime value = item.get_datetime();
-        memcpy(&bits, &value, sizeof(bits));
-        return bits;
-    }
-    default:
-        return 0;
-    }
-}
-
-extern "C" Item lambda_item_from_scalar_lane(Item item, uint64_t scalar_lane) {
-    switch (get_type_id(item)) {
-    case LMD_TYPE_INT64:
-        return item.is_inline_int64() ? item : box_int64_value((int64_t)scalar_lane);
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
-        // Inline doubles are already self-contained; only the tagged-pointer
-        // residue needs a new home in the caller's number frame.
-        if ((item.item & ITEM_DBL_MASK) || item.item == ITEM_FLOAT_P0 ||
-                item.item == ITEM_FLOAT_N0) return item;
-        double value;
-        memcpy(&value, &scalar_lane, sizeof(value));
-        return push_d(value);
-    }
-    case LMD_TYPE_DTIME: {
-        DateTime value;
-        memcpy(&value, &scalar_lane, sizeof(value));
-        return push_k(value);
-    }
-    default:
-        return item;
-    }
-}
-
 extern "C" Item lambda_item_heap_rehome(Item item) {
     switch (get_type_id(item)) {
     case LMD_TYPE_INT64: {

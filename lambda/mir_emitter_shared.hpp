@@ -151,6 +151,33 @@ struct MirEmitter {
     MIR_item_t consts_bss;        // per-module BSS slot holding const_list->data
 };
 
+// Boxed scalar returns need a lifetime policy that is independent of their
+// machine return type. Both Lambda and LambdaJS use this enum so Item encoding
+// changes cannot make their return epilogues drift apart.
+enum MirScalarReturnMode {
+    MIR_SCALAR_RETURN_NONE,
+    MIR_SCALAR_RETURN_FLOAT,
+    MIR_SCALAR_RETURN_INT64,
+    MIR_SCALAR_RETURN_DTIME,
+    MIR_SCALAR_RETURN_DYNAMIC,
+};
+
+static inline MirScalarReturnMode em_scalar_return_mode_for_type(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
+        return MIR_SCALAR_RETURN_FLOAT;
+    case LMD_TYPE_INT64:
+        return MIR_SCALAR_RETURN_INT64;
+    case LMD_TYPE_DTIME:
+        return MIR_SCALAR_RETURN_DTIME;
+    case LMD_TYPE_ANY:
+        return MIR_SCALAR_RETURN_DYNAMIC;
+    default:
+        return MIR_SCALAR_RETURN_NONE;
+    }
+}
+
 static inline MIR_reg_t em_new_reg(MirEmitter* em, const char* prefix,
                                    MIR_type_t type) {
     return mir_new_numbered_reg(em->ctx, em->func, &em->reg_counter, prefix,
@@ -205,6 +232,174 @@ static inline MIR_reg_t em_load_frame_slot(MirEmitter* em, MIR_reg_t frame_base,
         MIR_new_mem_op(em->ctx, MIR_T_I64,
             (MIR_disp_t)slot * (MIR_disp_t)sizeof(uint64_t),
             frame_base, 0, 1)));
+    return result;
+}
+
+// Re-home a boxed scalar returned from the current number-stack extent. The
+// rare arm donates frame_base[0] to the caller, bounding retained storage to
+// one slot without an imported capture/rebuild call.
+static inline MIR_reg_t em_rehome_scalar_return(MirEmitter* em,
+                                                MirScalarReturnMode mode,
+                                                MIR_reg_t item,
+                                                MIR_reg_t runtime,
+                                                size_t number_top_offset,
+                                                MIR_reg_t frame_base) {
+    if (mode == MIR_SCALAR_RETURN_NONE) {
+        em_store_frame_top(em, runtime, number_top_offset, frame_base);
+        return item;
+    }
+
+    MIR_reg_t current_top = em_load_frame_top(em, runtime, number_top_offset,
+        "scalar_top");
+    MIR_reg_t payload = em_new_reg(em, "scalar_payload", MIR_T_I64);
+    MIR_reg_t result = em_new_reg(em, "scalar_result", MIR_T_I64);
+    MIR_label_t classify_done = em_new_label(em);
+    MIR_label_t float_case = em_new_label(em);
+    MIR_label_t float_tag_case = em_new_label(em);
+    MIR_label_t int64_case = em_new_label(em);
+    MIR_label_t payload_case = em_new_label(em);
+    MIR_label_t donate = em_new_label(em);
+    MIR_label_t restore = em_new_label(em);
+    MIR_label_t done = em_new_label(em);
+
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, payload), MIR_new_int_op(em->ctx, 0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, item)));
+
+    if (mode == MIR_SCALAR_RETURN_DYNAMIC) {
+        MIR_reg_t double_bits = em_new_reg(em, "scalar_double", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+            MIR_new_reg_op(em->ctx, double_bits), MIR_new_reg_op(em->ctx, item),
+            MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, classify_done),
+            MIR_new_reg_op(em->ctx, double_bits)));
+
+        MIR_reg_t tag = em_new_reg(em, "scalar_tag", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_URSH,
+            MIR_new_reg_op(em->ctx, tag), MIR_new_reg_op(em->ctx, item),
+            MIR_new_int_op(em->ctx, 56)));
+        MIR_reg_t is_type = em_new_reg(em, "scalar_is_type", MIR_T_I64);
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+            MIR_new_reg_op(em->ctx, is_type), MIR_new_reg_op(em->ctx, tag),
+            MIR_new_int_op(em->ctx, LMD_TYPE_INT64)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, int64_case),
+            MIR_new_reg_op(em->ctx, is_type)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+            MIR_new_reg_op(em->ctx, is_type), MIR_new_reg_op(em->ctx, tag),
+            MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, float_tag_case),
+            MIR_new_reg_op(em->ctx, is_type)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+            MIR_new_reg_op(em->ctx, is_type), MIR_new_reg_op(em->ctx, tag),
+            MIR_new_int_op(em->ctx, LMD_TYPE_FLOAT64)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, float_tag_case),
+            MIR_new_reg_op(em->ctx, is_type)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+            MIR_new_reg_op(em->ctx, is_type), MIR_new_reg_op(em->ctx, tag),
+            MIR_new_int_op(em->ctx, LMD_TYPE_DTIME)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+            MIR_new_label_op(em->ctx, payload_case),
+            MIR_new_reg_op(em->ctx, is_type)));
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+            MIR_new_label_op(em->ctx, classify_done)));
+    } else if (mode == MIR_SCALAR_RETURN_FLOAT) {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+            MIR_new_label_op(em->ctx, float_case)));
+    } else if (mode == MIR_SCALAR_RETURN_INT64) {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+            MIR_new_label_op(em->ctx, int64_case)));
+    } else {
+        em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+            MIR_new_label_op(em->ctx, payload_case)));
+    }
+
+    em_emit_label(em, float_case);
+    MIR_reg_t inline_double = em_new_reg(em, "scalar_inline_double", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, inline_double), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, classify_done),
+        MIR_new_reg_op(em->ctx, inline_double)));
+    em_emit_label(em, float_tag_case);
+    MIR_reg_t is_packed_zero = em_new_reg(em, "scalar_zero", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, is_packed_zero), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_P0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, classify_done),
+        MIR_new_reg_op(em->ctx, is_packed_zero)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_EQ,
+        MIR_new_reg_op(em->ctx, is_packed_zero), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_N0)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, classify_done),
+        MIR_new_reg_op(em->ctx, is_packed_zero)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, payload_case)));
+
+    em_emit_label(em, int64_case);
+    MIR_reg_t inline_int64 = em_new_reg(em, "scalar_inline_int64", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, inline_int64), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_INT64_INLINE_MARK)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, classify_done),
+        MIR_new_reg_op(em->ctx, inline_int64)));
+
+    em_emit_label(em, payload_case);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, payload), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)UINT64_C(0x00FFFFFFFFFFFFFF))));
+
+    em_emit_label(em, classify_done);
+    MIR_reg_t at_or_above_base = em_new_reg(em, "scalar_ge_base", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UGE,
+        MIR_new_reg_op(em->ctx, at_or_above_base),
+        MIR_new_reg_op(em->ctx, payload), MIR_new_reg_op(em->ctx, frame_base)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BF,
+        MIR_new_label_op(em->ctx, restore),
+        MIR_new_reg_op(em->ctx, at_or_above_base)));
+    MIR_reg_t below_top = em_new_reg(em, "scalar_lt_top", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ULT,
+        MIR_new_reg_op(em->ctx, below_top), MIR_new_reg_op(em->ctx, payload),
+        MIR_new_reg_op(em->ctx, current_top)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, donate), MIR_new_reg_op(em->ctx, below_top)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, restore)));
+
+    em_emit_label(em, donate);
+    MIR_reg_t raw = em_new_reg(em, "scalar_raw", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
+        MIR_new_reg_op(em->ctx, raw),
+        MIR_new_mem_op(em->ctx, MIR_T_I64, 0, payload, 0, 1)));
+    em_store_frame_slot(em, frame_base, 0, raw);
+    MIR_reg_t tag_bits = em_new_reg(em, "scalar_tag_bits", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, tag_bits), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_HIGH_BYTE_MASK)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_OR,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, tag_bits),
+        MIR_new_reg_op(em->ctx, frame_base)));
+    MIR_reg_t donated_top = em_new_reg(em, "scalar_donated_top", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_ADD,
+        MIR_new_reg_op(em->ctx, donated_top), MIR_new_reg_op(em->ctx, frame_base),
+        MIR_new_int_op(em->ctx, (int64_t)sizeof(uint64_t))));
+    em_store_frame_top(em, runtime, number_top_offset, donated_top);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, done)));
+
+    em_emit_label(em, restore);
+    // Only callee-owned payloads may survive the restore; heap and ancestor
+    // pointers deliberately fall through with their original Item unchanged.
+    em_store_frame_top(em, runtime, number_top_offset, frame_base);
+    em_emit_label(em, done);
     return result;
 }
 

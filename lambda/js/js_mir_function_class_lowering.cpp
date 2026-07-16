@@ -641,7 +641,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->tco_jumped = false;
         mt->func_except_label = 0;    // reset — native func needs its own exception label
 
-        jm_begin_function_frame(mt, native_ret_type, false, 0);
+        jm_begin_function_frame(mt, native_ret_type, false,
+            MIR_SCALAR_RETURN_NONE, 0);
         jm_push_scope(mt);
 
         // Register parameters with their inferred native types
@@ -1023,7 +1024,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
         mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
-        jm_begin_function_frame(mt, sm_ret, true, 0);
+        jm_begin_function_frame(mt, sm_ret, true,
+            MIR_SCALAR_RETURN_DYNAMIC, 0);
         jm_push_scope(mt);
         mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -1644,7 +1646,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
             mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
-            jm_begin_function_frame(mt, sm_ret, true, 0);
+            jm_begin_function_frame(mt, sm_ret, true,
+                MIR_SCALAR_RETURN_DYNAMIC, 0);
             jm_push_scope(mt);
 
             mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
@@ -2183,7 +2186,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->current_fc = fc;
     mt->func_except_label = 0;  // reset for this function
 
-    jm_begin_function_frame(mt, ret_type, true, 0);
+    jm_begin_function_frame(mt, ret_type, true,
+        em_scalar_return_mode_for_type(fc->return_type), 0);
     if (has_captures) {
         MIR_reg_t closure_env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);
         jm_create_gc_root_slot(mt, closure_env_reg);
