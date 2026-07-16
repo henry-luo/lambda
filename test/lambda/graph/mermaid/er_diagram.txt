@@ -1,0 +1,8 @@
+{
+  source: ["er", "LR", 3, 4],
+  attributes: [["CUSTOMER", [["string", "customerNumber", "PK", "Primary identifier"], ["string", "name", null, null]]], ["ORDER", [["int", "orderNumber", "PK", null], ["string?", "note", null, null]]], ["LINE-ITEM", []]],
+  relations: [["CUSTOMER", "ORDER", "||--o{", "true", "solid", "exactly-one", "zero-or-more", "tee tee", "odot crow", "places"], ["ORDER", "LINE-ITEM", "||..|{", "false", "dotted", "exactly-one", "one-or-more", "tee tee", "tee crow", "contains"], ["CUSTOMER", "LINE-ITEM", "}o..o{", "false", "dotted", "zero-or-more", "zero-or-more", "odot crow", "odot crow", "references"], ["ORDER", "CUSTOMER", "|o--||", "true", "solid", "zero-or-one", "exactly-one", "odot tee", "tee tee", "billed to"]],
+  canonical: [true, [["CUSTOMER", "CUSTOMER", "content"], ["ORDER", "Sales Order", "content"], ["LINE-ITEM", "LINE-ITEM", "content"]]],
+  html: [["CUSTOMER", "CUSTOMER", "div"], ["ORDER", "Sales Order", "div"], ["LINE-ITEM", "LINE-ITEM", ""]],
+  render: [true, 3, 4, true, [["CUSTOMER", "ORDER", "tee tee", "odot crow"], ["ORDER", "LINE-ITEM", "tee tee", "tee crow"], ["CUSTOMER", "LINE-ITEM", "odot crow", "odot crow"], ["ORDER", "CUSTOMER", "odot tee", "tee tee"]], true, true]
+}

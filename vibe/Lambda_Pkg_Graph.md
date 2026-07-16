@@ -10,9 +10,11 @@ ports, compound and parallel-edge routing, broader shape clipping, safe style
 cascade, final-SVG graph metadata, Graph Scene adaptation/comparison, in-process
 Radiant scene rendering, relational scene validation, and the pinned semantic
 corpus runner are implemented. Section 18.12 records the current boundary;
-Stage 2E has begun with end-to-end Mermaid `classDiagram` support for measured
-class compartments and UML relationships. Additional graph-oriented Mermaid
-families and the extended class syntax remain subsequent tranches.
+Stage 2E has begun with end-to-end Mermaid `classDiagram`, `erDiagram`, and flat
+`stateDiagram` support for measured compartments, UML relationships, entity
+attributes, crow's-foot cardinalities, state transitions, pseudostates, and
+notes. Additional graph-oriented Mermaid families and the extended
+class/ER/state syntax remain subsequent tranches.
 Stage 3 Graphviz support is implemented: source-faithful DOT parsing, pure
 normalization, canonical Graph IR, rich measured content, layered layout and
 routing, semantic HTML/Radiant rendering, DOT formatting, and the pinned
@@ -1091,6 +1093,30 @@ measured node content before common canonicalization. UML endpoint roles reuse
 the common compositional marker vocabulary, and final layout/render continues
 through the retained Radiant callback.
 
+The second Stage 2E tranche implements the baseline Mermaid `erDiagram`
+surface. The manual parser emits source-stage entity declarations and aliases,
+typed and nullable attributes, key/comment metadata, direction, labeled
+identifying and non-identifying relationships, and all four symbolic
+cardinality roles. `graph/mermaid/er.ls` lowers entity attributes into measured
+HTML compartments. Cardinalities are preserved semantically and lowered to the
+existing compositional `tee`, `crow`, and open-dot marker vocabulary, so the
+common paint path renders crow's-foot endpoints without an ER-specific painter.
+The retained test covers source IR, canonical adaptation, semantic HTML,
+measured geometry, marker propagation, and final SVG text.
+
+The third Stage 2E tranche implements flat Mermaid `stateDiagram` and
+`stateDiagram-v2` graphs. The manual parser preserves direction, declarations,
+quoted aliases, repeated descriptions, labeled transitions, start/end
+pseudostates, choice/fork/join roles, left/right notes, class/style directives,
+and accessibility metadata in source-stage Mark. The shared
+`graph/mermaid/compartment.ls` adapter rebuilds measured title/body content for
+class, ER, and state nodes; marker states receive fixed measurable content so
+empty semantic labels do not collapse during Radiant child layout. Notes reuse
+canonical annotations and are included in Graph Scene Mark with ownership,
+kind, text format, and final bounds. Composite states currently produce the
+structured `mermaid.state.composite-unsupported` diagnostic instead of being
+flattened or silently misrepresented.
+
 ### 18.11 Stage 2 acceptance criteria
 
 Stage 2 rich Mermaid graph support is complete when:
@@ -1331,11 +1357,28 @@ semantic HTML compartments, UML markers, and retained in-memory rendering. The
 manifest and Lambda fixture exercise source IR, canonical adaptation, semantic
 HTML, measured node geometry, marker propagation, and final SVG text.
 
+The initial `erDiagram` surface is also complete: entity aliases, typed and
+nullable attributes, PK/FK/UK text and comments, direction, symbolic
+crow's-foot cardinalities, identifying/non-identifying edge styles, rich entity
+compartments, compositional endpoint markers, and retained rendering are all
+covered by the same semantic runner.
+
+The initial flat `stateDiagram` surface is complete: aliases and descriptions,
+start/end, choice, fork, and join states, labeled transitions, left/right notes,
+measured state compartments, annotation placement, semantic final-SVG
+attributes, and Graph Scene adaptation are covered by native manifest cases and
+one retained-runtime Lambda render fixture. Composite input is covered by a
+separate diagnostic fixture so unsupported nesting cannot appear valid.
+
 Extended class syntax such as namespaces, notes, generic-type escaping, and the
-remaining class-specific styling directives is still outstanding. State,
-entity-relationship, requirement, architecture, block, and mindmap adapters
-also remain subsequent Stage 2E tranches. Chart-oriented family dispatch is
-already rejected with structured ownership diagnostics, but detailed sequence,
+remaining class-specific styling directives is still outstanding. ER
+relationship aliases written as words, exhaustive quoted/Unicode identifier
+cases, Markdown-rich entity names, and multiple shorthand classes remain ER
+follow-up work. Composite states, nested transitions, concurrency regions,
+history states, richer state-description markup, and `hide empty description`
+remain state follow-up work. Requirement, architecture, block, and mindmap
+adapters also remain subsequent Stage 2E tranches. Chart-oriented family
+dispatch is already rejected with structured ownership diagnostics, but detailed sequence,
 Gantt, pie, Sankey, timeline, and XY support belongs to
 `lambda.package.chart` and its independent test suites.
 
@@ -1623,19 +1666,24 @@ lines as reported by `wc -l`; it includes the two grammar implementations and
 their shared graph parser source/header, but excludes tests, schemas, generated
 files, and downstream normalization. The Stage 3A ledger is:
 
-| Source unit | Before Stage 3A | Stage 3A | After Stage 2E class | Current vs. original |
-|---|---:|---:|---:|---:|
-| `input-graph-dot.cpp` | 546 | 471 | 471 | -75 |
-| `input-graph-mermaid.cpp` | 1,578 | 1,534 | 1,785 | +207 |
-| `input-graph.cpp` | 206 | 247 | 249 | +43 |
-| `input-graph.h` | 98 | 105 | 109 | +11 |
-| total | 2,428 | 2,357 | 2,614 | +186 |
+| Source unit | Before Stage 3A | Stage 3A | Stage 2E class | Stage 2E ER | Stage 2E state | Current vs. original |
+|---|---:|---:|---:|---:|---:|---:|
+| `input-graph-dot.cpp` | 546 | 471 | 471 | 471 | 471 | -75 |
+| `input-graph-mermaid.cpp` | 1,578 | 1,534 | 1,785 | 2,055 | 2,360 | +782 |
+| `input-graph.cpp` | 206 | 247 | 249 | 249 | 249 | +43 |
+| `input-graph.h` | 98 | 105 | 109 | 109 | 109 | +11 |
+| total | 2,428 | 2,357 | 2,614 | 2,884 | 3,189 | +761 |
 
 The first Stage 2E family adds 251 native Mermaid-parser lines over the Stage 3A
 checkpoint. Its family-specific pure adapter is tracked separately at 57 lines
-because it does not contribute to the native parser footprint. Further Mermaid
-families should reuse the class relationship table, source-span builders, and
-common canonical adapter patterns before adding another parser branch.
+because it does not contribute to the native parser footprint. The ER tranche
+adds 270 native lines and a separately tracked 64-line pure adapter. The state
+tranche adds 305 native lines. Extracting the shared compartment adapter reduces
+the current pure modules to 58 shared lines, 20 class lines, 27 ER lines, and 27
+state lines: 132 lines total, only 11 more than the former class/ER pair.
+Further Mermaid families should reuse the relationship/cardinality helpers,
+source-span builders, and common canonical adapter patterns before adding
+another parser branch.
 
 Reproduce the source measurement from the repository root with:
 

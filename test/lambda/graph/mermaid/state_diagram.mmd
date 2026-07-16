@@ -1,0 +1,18 @@
+stateDiagram-v2
+direction LR
+Idle : Waiting for work
+state "Processing Order" as Processing
+state Decision <<choice>>
+state Fork <<fork>>
+state Join <<join>>
+[*] --> Idle
+Idle --> Processing : begin
+Processing --> Decision : validate
+Decision --> Fork : accepted
+Decision --> Idle : rejected
+Fork --> Join : branch complete
+Join --> [*] : done
+note right of Processing : External service call
+note left of Idle
+  No pending jobs.
+end note

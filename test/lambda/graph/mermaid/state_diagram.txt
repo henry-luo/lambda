@@ -1,0 +1,9 @@
+{
+  source: ["state", "LR", 7, 7, 2],
+  states: [["Idle", "Idle", "rounded", "state", ["Waiting for work"]], ["Processing", "Processing Order", "rounded", "state", []], ["Decision", "", "diamond", "choice", []], ["Fork", "", "box", "fork", []], ["Join", "", "box", "join", []], ["__state_start", "", "circle", "start", []], ["__state_end", "", "doublecircle", "end", []]],
+  transitions: [["__state_start", "Idle", null, "normal"], ["Idle", "Processing", "begin", "normal"], ["Processing", "Decision", "validate", "normal"], ["Decision", "Fork", "accepted", "normal"], ["Decision", "Idle", "rejected", "normal"], ["Fork", "Join", "branch complete", "normal"], ["Join", "__state_end", "done", "normal"]],
+  notes: [["Processing", "note-right", "External service call"], ["Idle", "note-left", "No pending jobs."]],
+  canonical: [true, 7, [["Idle", "content"], ["Processing", "content"], ["Decision", "content"], ["Fork", "content"], ["Join", "content"], ["__state_start", "content"], ["__state_end", "content"]]],
+  html: [7, 2, [["Idle", "div"], ["Processing", ""], ["Decision", "div"], ["Fork", "div"], ["Join", "div"], ["__state_start", "div"], ["__state_end", "div"]]],
+  render: [true, 7, 7, 2, true, true, true, true, true]
+}
