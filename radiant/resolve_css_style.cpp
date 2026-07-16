@@ -149,10 +149,34 @@ static bool font_shorthand_overrides_longhand(LayoutContext* lycon,
     if (!elem || !elem->specified_style) return false;
     CssDeclaration* shorthand = style_tree_get_declaration(
         elem->specified_style, CSS_PROPERTY_FONT);
-    if (!shorthand || shorthand->source_order <= longhand->source_order) return false;
-    log_debug("[CSS] Skipping %s: font shorthand (order=%u) overrides (order=%u)",
+    // shorthand components and longhands compete in the same cascade, including specificity.
+    if (!shorthand || css_declaration_cascade_compare(shorthand, longhand) <= 0) return false;
+    log_debug("[CSS] Skipping %s: font shorthand wins cascade (order=%u vs %u)",
               longhand_name, shorthand->source_order, longhand->source_order);
     return true;
+}
+
+static void inherit_font_shorthand(LayoutContext* lycon, ViewSpan* span) {
+    const FontProp* parent_font = lycon->font.style;
+    if (!parent_font) return;
+    if (!span->font) span->font = alloc_font_prop(lycon);
+
+    if (parent_font->family) {
+        radiant_retain_font_family(span->font, lam::PoolPtr<char>(parent_font->family));
+    } else {
+        radiant_clear_font_family(span->font);
+    }
+    span->font->font_size = parent_font->font_size;
+    span->font->font_size_from_medium = parent_font->font_size_from_medium;
+    span->font->font_weight = parent_font->font_weight;
+    span->font->font_weight_numeric = parent_font->font_weight_numeric;
+    span->font->font_style = parent_font->font_style;
+    span->font->font_variant = parent_font->font_variant;
+
+    DomElement* current = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
+    DomElement* parent = current ? dom_parent_element(current) : nullptr;
+    ensure_span_block(lycon, span);
+    span->blk->line_height = parent && parent->blk ? parent->blk->line_height : nullptr;
 }
 
 template <typename SlotType>
@@ -1050,7 +1074,6 @@ bool css_font_family_is_available(LayoutContext* lycon, const char* family,
         str_ieq(family, flen, "ui-sans-serif", 13) ||
         str_ieq(family, flen, "ui-monospace", 12) ||
         str_ieq(family, flen, "ui-rounded", 10) ||
-        str_ieq(family, flen, "-apple-system", 13) ||
         str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
         return true;
     }
@@ -5925,6 +5948,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             log_debug("[CSS] Processing font shorthand property");
             if (!span->font) { span->font = alloc_font_prop(lycon); }
 
+            if (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                value->data.keyword == CSS_VALUE_INHERIT) {
+                // UA-styled controls already own font state, so inherit must replace every shorthand component.
+                inherit_font_shorthand(lycon, span);
+                break;
+            }
+
             // CSS 2.1 §15.8: font shorthand resets omitted properties to initial values.
             // Pre-reset font-variant before scanning; if small-caps is found, the loop sets it.
             span->font->font_variant = CSS_VALUE_NORMAL;
@@ -5951,9 +5981,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     span->blk->line_height = nullptr;
                     break;
                 }
-                // CSS 2.1 §6.1.1: 'inherit' as sole value inherits from parent.
-                // For font shorthand, this means inherit ALL font sub-properties.
-                // Single-keyword 'inherit' is handled by the global inherit mechanism.
                 break;
             }
 
@@ -6334,11 +6361,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] Set font-family from CUSTOM: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Keyword font family - check if generic or specific
-                const CssEnumInfo* info = css_enum_info(value->data.keyword);
-                if (info) radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)info->name));
-                else radiant_clear_font_family(span->font);
-                log_debug("[CSS] Set font-family from KEYWORD: '%s'", span->font->family);
+                if (value->data.keyword == CSS_VALUE_INHERIT) {
+                    const FontProp* parent_font = lycon->font.style;
+                    // CSS-wide keywords resolve to computed values; "inherit" is never a family name.
+                    if (parent_font && parent_font->family) {
+                        radiant_retain_font_family(span->font, lam::PoolPtr<char>(parent_font->family));
+                    } else {
+                        radiant_clear_font_family(span->font);
+                    }
+                    log_debug("[CSS] Inherited font-family: '%s'",
+                              span->font->family ? span->font->family : "(none)");
+                } else {
+                    // Keyword font family - check if generic or specific
+                    const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                    if (info) radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)info->name));
+                    else radiant_clear_font_family(span->font);
+                    log_debug("[CSS] Set font-family from KEYWORD: '%s'", span->font->family);
+                }
             }
             else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
                 const char* family = css_select_font_family(lycon, value, true);

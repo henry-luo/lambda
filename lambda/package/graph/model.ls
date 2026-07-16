@@ -161,9 +161,7 @@ pub fn style_declarations_for(graph, target_kind, targets) => join([
 fn diagnostic_entries(container) {
   [for (child in element_children(container),
     entry in if (tag(child) == "diagnostic") [child]
-      else if (tag(child) == "diagnostics" or tag(child) == "subgraph")
-        diagnostic_entries(child)
-      else []) entry]
+      else diagnostic_entries(child)) entry]
 }
 
 pub fn diagnostics(graph) => diagnostic_entries(graph)

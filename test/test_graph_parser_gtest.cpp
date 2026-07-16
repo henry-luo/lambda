@@ -71,20 +71,24 @@ TEST_F(GraphParserTest, ParserLocBudget) {
     size_t dot = source_line_count("lambda/input/input-graph-dot.cpp");
     size_t mermaid = source_line_count("lambda/input/input-graph-mermaid.cpp");
     size_t structurizr = source_line_count("lambda/input/input-graph-structurizr.cpp");
+    size_t structurizr_resolver = source_line_count(
+        "lambda/input/input-graph-structurizr-resolver.cpp");
     size_t shared = source_line_count("lambda/input/input-graph.cpp");
     size_t header = source_line_count("lambda/input/input-graph.h");
 
     ASSERT_GT(dot, 0u);
     ASSERT_GT(mermaid, 0u);
     ASSERT_GT(structurizr, 0u);
+    ASSERT_GT(structurizr_resolver, 0u);
     ASSERT_GT(shared, 0u);
     ASSERT_GT(header, 0u);
     EXPECT_LE(dot, 471u);
     EXPECT_LE(mermaid, 1534u);
     EXPECT_LE(structurizr, 800u);
+    EXPECT_LE(structurizr_resolver, 400u);
     EXPECT_LE(shared, 249u);
-    EXPECT_LE(header, 106u);
-    EXPECT_LE(dot + mermaid + structurizr + shared + header, 3160u);
+    EXPECT_LE(header, 109u);
+    EXPECT_LE(dot + mermaid + structurizr + structurizr_resolver + shared + header, 3563u);
 }
 
 // Test DOT graph parsing
@@ -195,6 +199,82 @@ TEST_F(GraphParserTest, ParseStructurizrWorkspace) {
 
     free_lambda_string(type);
     free_lambda_string(flavor);
+}
+
+TEST_F(GraphParserTest, ParseStructurizrArchetypes) {
+    const char* source =
+        "workspace { model { archetypes {\n"
+        "  app = container { technology \"Spring\" }\n"
+        "  sync = -> { technology \"HTTPS\" }\n"
+        "  https = --sync-> { tags \"Encrypted\" }\n"
+        "}\n"
+        "user = person \"User\"\n"
+        "web = app \"Web\"\n"
+        "user --https-> web \"Uses\"\n"
+        "} }\n";
+    String* type = create_lambda_string("graph");
+    String* flavor = create_lambda_string("structurizr");
+    Input* input = input_from_source(source, NULL, type, flavor);
+
+    ASSERT_NE(input, nullptr);
+    ElementReader workspace(input->root);
+    ElementReader model = workspace.findChildElement("model");
+    ElementReader archetypes = model.findChildElement("archetypes");
+    ASSERT_TRUE(archetypes.isValid());
+
+    int64_t definitions = 0;
+    ElementReader child;
+    auto definition_children = archetypes.childElements();
+    while (definition_children.next(&child)) {
+        if (!child.hasTag("archetype")) continue;
+        definitions++;
+        const char* identifier = child.get_attr_string("identifier");
+        if (identifier && strcmp(identifier, "https") == 0) {
+            EXPECT_STREQ(child.get_attr_string("target-kind"), "relationship");
+            EXPECT_STREQ(child.get_attr_string("base"), "sync");
+        }
+    }
+    EXPECT_EQ(definitions, 3);
+
+    bool found_usage = false;
+    auto model_children = model.childElements();
+    while (model_children.next(&child)) {
+        if (child.hasTag("relationship")) {
+            found_usage = true;
+            EXPECT_STREQ(child.get_attr_string("archetype"), "https");
+            EXPECT_STREQ(child.get_attr_string("from"), "user");
+            EXPECT_STREQ(child.get_attr_string("to"), "web");
+        }
+    }
+    EXPECT_TRUE(found_usage);
+
+    free_lambda_string(type);
+    free_lambda_string(flavor);
+}
+
+TEST_F(GraphParserTest, AutoDetectStructurizrDsl) {
+    String* type = create_lambda_string("auto");
+    Url* workspace_url = url_parse("file:///workspace.dsl");
+    Input* workspace_input = input_from_source(
+        "// architecture\nworkspace { model {} views {} }", workspace_url, type, NULL);
+
+    ASSERT_NE(workspace_input, nullptr);
+    ASSERT_EQ(workspace_input->root.type_id(), LMD_TYPE_ELEMENT);
+    ElementReader workspace(workspace_input->root);
+    EXPECT_TRUE(workspace.hasTag("workspace"));
+    EXPECT_STREQ(workspace.get_attr_string("flavor"), "structurizr");
+
+    Url* other_url = url_parse("file:///rules.dsl");
+    Input* other_input = input_from_source(
+        "rule example { allow true }", other_url, type, NULL);
+    ASSERT_NE(other_input, nullptr);
+    EXPECT_EQ(other_input->root.type_id(), LMD_TYPE_STRING);
+
+    Input* memory_input = input_from_source("workspace {}", NULL, type, NULL);
+    ASSERT_NE(memory_input, nullptr);
+    EXPECT_EQ(memory_input->root.type_id(), LMD_TYPE_STRING);
+
+    free_lambda_string(type);
 }
 
 TEST_F(GraphParserTest, RecoverStructurizrWorkspaceRoot) {

@@ -1,0 +1,9 @@
+{
+  installed: true,
+  retained: true,
+  scene: ["LR", true, true, 2, 3, 2],
+  clusters: [["group:Platform", null, true, true], ["group:Platform/Payments", "group:Platform", true, true]],
+  nodes: [["api", "hexagon", "group:Platform/Payments", true, true], ["worker", "hexagon", "group:Platform/Payments", true, true], ["user", "person", null, true, true]],
+  edges: [["curved", "api", "worker", "curved", true], ["direct", "user", "api", "line", true]],
+  svg: true
+}

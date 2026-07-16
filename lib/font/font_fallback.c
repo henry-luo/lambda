@@ -30,7 +30,12 @@ static const char* serif_fonts[] = {
     "Georgia", "DejaVu Serif", NULL
 };
 static const char* sans_serif_fonts[] = {
+#ifdef __APPLE__
+    // macOS browsers resolve the CSS sans-serif generic to Helvetica.
+    "Helvetica", "Arial", "Liberation Sans", "Nimbus Sans",
+#else
     "Arial", "Liberation Sans", "Helvetica", "Nimbus Sans",
+#endif
     "DejaVu Sans", NULL
 };
 static const char* monospace_fonts[] = {
@@ -70,10 +75,9 @@ const char** font_get_generic_family(const char* family) {
     if (strcmp(family, "ui-sans-serif") == 0) return sans_serif_fonts;
     if (strcmp(family, "ui-rounded") == 0) return sans_serif_fonts;
 
-    // browser-specific system font keywords. Safari and Chromium on macOS
-    // resolve -apple-system as the platform UI font; BlinkMacSystemFont is
-    // Chromium's older system UI alias.
-    if (strcmp(family, "-apple-system") == 0) return system_ui_fonts;
+    // BlinkMacSystemFont is Chromium's system UI alias; -apple-system is a
+    // named family, not a generic, so an unavailable face must fall through
+    // to the next authored family.
     if (strcmp(family, "BlinkMacSystemFont") == 0) return system_ui_fonts;
 
     // NOTE: Concrete font names like "Arial", "Times New Roman", "Courier New"
@@ -284,6 +288,13 @@ static void platform_fb_insert(FontHandle* handle, int face_index, float size_px
 FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
                                           uint32_t codepoint) {
     if (!ctx || !style) return NULL;
+
+    FontHandle* authored = font_resolve_authored_for_codepoint(ctx, style, codepoint);
+    if (authored) {
+        // CSS Fonts matches missing glyphs against the remaining authored
+        // families before entering the UA fallback chain.
+        return authored;
+    }
 
     // check codepoint fallback cache
     struct hashmap* cache = ensure_codepoint_cache(ctx);

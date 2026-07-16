@@ -387,6 +387,19 @@ float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
     const FontMetrics* m = font_get_metrics(handle);
     if (m && !m->has_kerning) return 0.0f;
 
+#ifdef __APPLE__
+    if (should_use_ct_advance_override(handle)) {
+        // kerning is confined to a single font run; CoreText pair measurement
+        // substitutes missing characters and would otherwise kern across fallback fonts.
+        if (!font_has_codepoint(handle, left) || !font_has_codepoint(handle, right)) {
+            return 0.0f;
+        }
+        // catalog-backed advances and file-table kerning can represent different
+        // variable-font instances; derive both from the selected CoreText face.
+        return font_get_kerning_coretext(handle, left, right);
+    }
+#endif
+
     // FontTables kern table
     if (handle->tables) {
         KernTable* kern = font_tables_get_kern(handle->tables);

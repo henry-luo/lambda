@@ -8,12 +8,13 @@ workspace "Order platform" {
       audit = container "Audit" "Records activity" "Lambda"
     }
 
-    customer -> store.api "Places order"
-    store.api -> store.database "Writes order" "SQL"
-    store.api -> store.audit "Records activity" "HTTPS"
-    store.api -> customer "Returns receipt" "HTTPS"
+    places = customer -> store.api "Places order"
+    writes = store.api -> store.database "Writes order" "SQL"
+    records = store.api -> store.audit "Records activity" "HTTPS"
+    receipt = store.api -> customer "Returns receipt" "HTTPS"
 
     production = deploymentEnvironment "Production" {
+      blue = deploymentGroup "Blue"
       region = deploymentNode "Region" {
         gateway = infrastructureNode "Gateway"
         application = deploymentNode "Application" {
@@ -28,20 +29,25 @@ workspace "Order platform" {
 
   views {
     dynamic store "PlaceOrder" {
-      1: customer -> store.api "Starts checkout"
+      1: places "Starts checkout"
       {
         {
-          store.api -> store.database "Persists order"
+          writes "Persists order"
         }
         {
-          store.api -> store.audit "Records audit"
+          records "Records audit"
         }
       }
-      3: store.api -> customer "Returns receipt"
+      3: receipt
       autoLayout lr
     }
     deployment * production "Production" {
       include *
+      autoLayout lr
+    }
+    deployment * production "ProductionApi" {
+      include "element.technology==Lambda" production.region.gateway
+      exclude production.region.application.auditInstance
       autoLayout lr
     }
   }

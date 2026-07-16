@@ -1,16 +1,27 @@
 // Public Structurizr/C4 facade.
 
 import normalize_module: .normalize
+import schema_module: .schema
 import view_module: .views
 import graph_transform: lambda.package.graph.transform
 
 pub fn normalize(source) => normalize_module.normalize(source)
 
+pub fn validate_source(source) => schema_module.validate_source(source)
+
+pub fn validate(workspace) => schema_module.validate(workspace)
+
 pub fn view_keys(workspace) => view_module.view_keys(workspace)
 
-pub fn project(workspace, key) => view_module.project(workspace, key)
+fn selected_key(workspace, key) {
+  let keys = view_keys(workspace);
+  if ((key == null or string(key) == "") and len(keys) > 0) keys[0] else key
+}
+
+pub fn project(workspace, key = null) =>
+  view_module.project(workspace, selected_key(workspace, key))
 
 pub fn project_all(workspace) => view_module.project_all(workspace)
 
-pub fn to_html(workspace, key, opts = null) =>
+pub fn to_html(workspace, key = null, opts = null) =>
   graph_transform.to_html(project(workspace, key), opts)

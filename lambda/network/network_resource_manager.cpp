@@ -4,10 +4,11 @@
 #include "network_resource_manager.h"
 #include "network_downloader.h"
 #include "network_scheduler.h"
+#include "network_integration.h"
+#include "font_resource_faces.h"
 #include "resource_loaders.h"
 #include "cookie_jar.h"
 #include "../input/css/dom_element.hpp"
-#include "../input/css/css_font_face.hpp"
 #include "../../radiant/view.hpp"
 #include "../../radiant/event.hpp"
 #include "../../lib/url.h"
@@ -119,9 +120,8 @@ void free_network_resource(NetworkResource* res) {
     }
 
     if (res->type == RESOURCE_FONT && res->user_data) {
-        // Font downloads own a transient @font-face descriptor until the main
-        // thread registers the cached file path with the font resolver.
-        css_font_face_descriptor_free((CssFontFaceDescriptor*)res->user_data);
+        // Font downloads retain every CSS face sharing the deduplicated URL.
+        font_resource_face_list_destroy((FontResourceFaceList*)res->user_data);
         res->user_data = NULL;
     }
     

@@ -1,8 +1,10 @@
 {
-  source: ["parallel", [[["store.api", "store.database", null]], [["store.api", "store.audit", null]]], ["1", "3"]],
-  canonical: [["customer", "store.api", "1", 1, false, true], ["store.api", "store.database", "2", 2, true, true], ["store.api", "store.audit", "2", 2, true, true], ["store.api", "customer", "3", 3, false, true]],
+  source: ["parallel", [[["writes", ["Persists order"]]], [["records", ["Records audit"]]]], [["1:", ["places", "Starts checkout"]], ["3:", ["receipt"]]]],
+  canonical: [["customer", "store.api", "1", 1, false, "places"], ["store.api", "store.database", "2", 2, true, "writes"], ["store.api", "store.audit", "2", 2, true, "records"], ["store.api", "customer", "3", 3, false, "receipt"]],
   instance: ["production.region.application.apiInstance", "production.region.application", "API", ["blue"]],
   dynamic: [["customer", "store.api", "store.database", "store.audit"], [["customer", "store.api", "1. Starts checkout", "1", false], ["store.api", "store.database", "2. Persists order", "2", true], ["store.api", "store.audit", "2. Records audit", "2", true], ["store.api", "customer", "3. Returns receipt", "3", false]]],
   deployment: [[["production.region", "Region"], ["production.region.application", "Application"]], [["production.region.application.apiInstance", "container-instance"], ["production.region.application.databaseInstance", "container-instance"], ["production.region.application.auditInstance", "container-instance"], ["production.region.gateway", "infrastructure-node"]], [["production.region.gateway", "production.region.application.apiInstance", "Forwards requests"], ["production.region.application.apiInstance", "production.region.application.databaseInstance", "Writes order"], ["production.region.application.apiInstance", "production.region.application.auditInstance", "Records activity"]]],
+  deployment_filter: [["production.region", "production.region.application"], ["production.region.application.apiInstance", "production.region.gateway"], [["production.region.gateway", "production.region.application.apiInstance"]]],
+  diagnostics: [],
   html: [["graph", "lambda-graph"], ["graph", "lambda-graph"]]
 }

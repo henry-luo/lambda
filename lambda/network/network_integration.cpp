@@ -2,6 +2,7 @@
 #include "network_resource_manager.h"
 #include "network_thread_pool.h"
 #include "enhanced_file_cache.h"
+#include "font_resource_faces.h"
 #include "resource_loaders.h"
 #include "../input/css/dom_element.hpp"
 #include "../../lib/log.h"
@@ -46,27 +47,15 @@ static bool is_http_resource_url(const char* url) {
     return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
 }
 
-static CssFontFaceDescriptor* clone_font_face_for_resource(const CssFontFaceDescriptor* source) {
-    if (!source) return NULL;
-
-    CssFontFaceDescriptor* clone = (CssFontFaceDescriptor*)mem_calloc(
-        1, sizeof(CssFontFaceDescriptor), MEM_CAT_NETWORK);
-    if (!clone) return NULL;
-
-    clone->family_name = source->family_name
-        ? mem_strdup(source->family_name, MEM_CAT_NETWORK) : NULL;
-    clone->font_style = source->font_style;
-    clone->font_weight = source->font_weight;
-    clone->font_display = source->font_display;
-    return clone;
+static void process_registered_font_resource(const CssFontFaceDescriptor* descriptor,
+                                             void* user_data) {
+    process_font_resource((NetworkResource*)user_data, descriptor);
 }
 
 static void font_resource_complete_callback(NetworkResource* res, void* user_data) {
-    CssFontFaceDescriptor* font_face = (CssFontFaceDescriptor*)user_data;
-    // Downloaded font files must be registered against their @font-face
-    // descriptor before reflow; otherwise layout uses only generic fallback metrics.
-    process_font_resource(res, font_face);
-    css_font_face_descriptor_free(font_face);
+    FontResourceFaceList* faces = (FontResourceFaceList*)user_data;
+    font_resource_face_list_for_each(faces, process_registered_font_resource, res);
+    font_resource_face_list_destroy(faces);
     res->user_data = NULL;
     res->on_complete = NULL;
 }
@@ -74,12 +63,19 @@ static void font_resource_complete_callback(NetworkResource* res, void* user_dat
 static void attach_font_resource_callback(NetworkResource* res,
                                           const CssFontFaceDescriptor* face) {
     if (!res || res->type != RESOURCE_FONT) return;
-    if (res->on_complete || res->user_data) return;
 
-    CssFontFaceDescriptor* clone = clone_font_face_for_resource(face);
-    if (!clone) return;
+    if (res->processed &&
+        (res->state == STATE_COMPLETED || res->state == STATE_CACHED)) {
+        process_font_resource(res, face);
+        return;
+    }
+
+    if (res->on_complete && res->on_complete != font_resource_complete_callback) return;
+
+    FontResourceFaceList* faces = (FontResourceFaceList*)res->user_data;
+    if (!font_resource_face_list_add_unique(&faces, face)) return;
+    res->user_data = faces;
     res->on_complete = font_resource_complete_callback;
-    res->user_data = clone;
 }
 
 // Helper: resolve a potentially relative URL against the document's base URL.

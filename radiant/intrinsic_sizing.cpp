@@ -562,6 +562,27 @@ static void get_horizontal_padding_widths_from_css(LayoutContext* lycon, DomElem
     *padding_right = right_width;
 }
 
+static float intrinsic_horizontal_padding_border_width(LayoutContext* lycon,
+                                                       DomElement* element,
+                                                       float inline_base) {
+    if (!element) return 0.0f;
+
+    ViewBlock* view = lam::unsafe_view_block_element_storage(element);
+    if (view->bound) {
+        return layout_box_metrics(view).pad_border_h;
+    }
+
+    float padding_left = 0.0f;
+    float padding_right = 0.0f;
+    float border_left = 0.0f;
+    float border_right = 0.0f;
+    get_horizontal_padding_widths_from_css(
+        lycon, element, inline_base, &padding_left, &padding_right);
+    get_horizontal_border_widths_from_css(
+        lycon, element, &border_left, &border_right);
+    return padding_left + padding_right + border_left + border_right;
+}
+
 static inline bool intrinsic_is_simple_latin_shaping_byte(unsigned char ch) {
     return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
 }
@@ -2575,13 +2596,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         resolved_width_view->blk && resolved_width_view->blk->given_width >= 0.0f) {
         float resolved_width = resolved_width_view->blk->given_width;
         bool is_border_box = layout_uses_border_box(resolved_width_view);
-        BoxMetrics resolved_box = layout_box_metrics(resolved_width_view);
+        float pad_border_width = intrinsic_horizontal_padding_border_width(
+            lycon, element, lycon->block.content_width);
 
-        if (!is_border_box && resolved_width_view->bound) {
-            resolved_width += resolved_box.pad_border_h;
-        } else if (is_border_box && resolved_width_view->bound) {
-            float pb_w = resolved_box.pad_border_h;
-            if (resolved_width < pb_w) resolved_width = pb_w;
+        if (!is_border_box) {
+            resolved_width += pad_border_width;
+        } else if (resolved_width < pad_border_width) {
+            // border-box widths cannot make the content box negative, including before bounds exist.
+            resolved_width = pad_border_width;
         }
 
         sizes.min_content = resolved_width;
@@ -2617,44 +2639,18 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
 
+                float pad_border_width = intrinsic_horizontal_padding_border_width(
+                    lycon, element, lycon->block.content_width);
                 if (!is_border_box) {
-                    // Add padding and border to content width
-                    float pad_left = 0, pad_right = 0, border_left = 0, border_right = 0;
-                    // Read padding from CSS
-                    CssDeclaration* pad_decl = style_tree_get_declaration(
-                        element->specified_style, CSS_PROPERTY_PADDING);
-                    if (pad_decl && pad_decl->value) {
-                        const CssValue* right = css_box_shorthand_side_value(pad_decl->value, 1);
-                        const CssValue* left = css_box_shorthand_side_value(pad_decl->value, 3);
-                        if (right) {
-                            pad_right = resolve_length_value(lycon, CSS_PROPERTY_PADDING, right);
-                        }
-                        if (left) {
-                            pad_left = resolve_length_value(lycon, CSS_PROPERTY_PADDING, left);
-                        }
-                    }
-                    // Read border: prefer resolved bound, fall back to CSS shorthand
-                    ViewBlock* view_for_bdr = lam::unsafe_view_block_element_storage(element);
-                    if (view_for_bdr->bound && view_for_bdr->bound->border) {
-                        border_left = view_for_bdr->bound->border->width.left;
-                        border_right = view_for_bdr->bound->border->width.right;
-                    }
-                    if (border_left == 0 && border_right == 0) {
-                        get_horizontal_border_widths_from_css(lycon, element, &border_left, &border_right);
-                    }
-                    explicit_width += pad_left + pad_right + border_left + border_right;
-                    log_debug("  -> explicit width: %.0f (after adding padding=%.0f+%.0f, border=%.0f+%.0f)",
-                              explicit_width, pad_left, pad_right, border_left, border_right);
+                    explicit_width += pad_border_width;
+                    log_debug("  -> explicit width: %.0f (after adding padding+border=%.0f)",
+                              explicit_width, pad_border_width);
                 } else {
-                    // border-box: floor at padding+border (content-box >= 0)
-                    ViewBlock* view_for_pb = lam::unsafe_view_block_element_storage(element);
-                    if (view_for_pb->bound) {
-                        BoxMetrics box = layout_box_metrics(view_for_pb);
-                        float pb_w = box.pad_border_h;
-                        if (explicit_width < pb_w) {
-                            log_debug("  -> explicit width: %.0f floored to %.0f (border-box, padding+border)", explicit_width, pb_w);
-                            explicit_width = pb_w;
-                        }
+                    if (explicit_width < pad_border_width) {
+                        // early intrinsic passes must enforce the same nonnegative content-box floor.
+                        log_debug("  -> explicit width: %.0f floored to %.0f (border-box, padding+border)",
+                                  explicit_width, pad_border_width);
+                        explicit_width = pad_border_width;
                     }
                     log_debug("  -> explicit width: %.0f (border-box)", explicit_width);
                 }
@@ -3961,6 +3957,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         IntrinsicSizes child_sizes = {0, 0};
         bool is_inline = false;
+        bool child_is_float = false;
 
         // CSS 2.1 §1.3: Comment nodes generate no boxes and do not participate in layout
         if (child->is_comment()) {
@@ -4229,8 +4226,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             // CSS 2.1 §17.2.1 wraps table-cell boxes in anonymous table boxes;
             // inside an inline parent those wrappers participate as inline-table.
-            is_inline = is_inline_level_element(child_elem) ||
-                (is_inline_level_element(element) && node_is_table_cell_like(child));
+            // Floats are blockified, so whitespace between them must not enter
+            // the inline max-content run used by shrink-to-fit sizing.
+            child_is_float = intrinsic_element_is_float(child_elem);
+            is_inline = !child_is_float && (is_inline_level_element(child_elem) ||
+                (is_inline_level_element(element) && node_is_table_cell_like(child)));
 
             log_debug("  child %s: min=%.1f, max=%.1f, is_inline=%d",
                       child_elem->node_name(), child_sizes.min_content, child_sizes.max_content, is_inline);
@@ -4416,29 +4416,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // around them. So preceding inline content must NOT be flushed when we
             // encounter a floated child; it stays in the inline run and will be
             // combined with float_width_alongside_inline at the end.
-            bool child_is_float = false;
-            if (child->is_element()) {
-                DomElement* child_elem = child->as_element();
-                ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_elem);
-                // Check resolved position first
-                if (child_view->position &&
-                    !layout_position_is_abs_fixed(child_view->position) &&
-                    layout_position_is_floated(child_view->position)) {
-                    child_is_float = true;
-                } else if (child_elem->specified_style) {
-                    // Fall back to specified CSS style
-                    CssDeclaration* float_decl = style_tree_get_declaration(
-                        child_elem->specified_style, CSS_PROPERTY_FLOAT);
-                    if (float_decl && float_decl->value &&
-                        float_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum float_val = float_decl->value->data.keyword;
-                        if (float_val == CSS_VALUE_LEFT || float_val == CSS_VALUE_RIGHT) {
-                            child_is_float = true;
-                        }
-                    }
-                }
-            }
-
             // CSS 2.1: Non-floated block children break inline flow (block-in-inline).
             // Floats do NOT break inline flow — inline content wraps around them.
             // Only flush inline content for non-floated block children.
@@ -4459,6 +4436,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // CSS 2.2 Section 10.3.5: floated/absolutely positioned elements use shrink-to-fit
             // which includes the margin box of child floats
             float child_width = child_sizes.max_content;
+            float child_min_width = child_sizes.min_content;
             float margin_left = 0, margin_right = 0;
             if (child->is_element()) {
                 DomElement* child_elem = child->as_element();
@@ -4523,6 +4501,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                               child_elem->node_name(), child_sizes.max_content);
                 }
             }
+            // a float's outer min/max contributions share its margins; otherwise a negative
+            // margin can make min-content exceed max-content and force an oversized clamp.
+            child_min_width += margin_left + margin_right;
             if (child_is_float) {
                 // Floated block child: accumulate for side-by-side arrangement
                 // At max-content (infinite width), all floats fit on one line → sum widths
@@ -4532,7 +4513,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // wrap once the shrink-wrapped parent is laid out.
                 float_max_sum += child_width;
                 float_width_alongside_inline += child_width;
-                float_min_max = max(float_min_max, child_sizes.min_content);
+                float_min_max = max(float_min_max, child_min_width);
                 log_debug("  float child: accumulating max_sum=%.1f, min_max=%.1f",
                           float_max_sum, float_min_max);
             } else {

@@ -1,0 +1,4 @@
+{
+  source: [["structurizr.invalid-context", "source.model[1]", 5, 3], ["structurizr.invalid-context", "source.declaration[3]", 8, 3]],
+  root: [["structurizr.invalid-root", "source"]]
+}

@@ -3416,9 +3416,10 @@ int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int jpeg_quality);
 
 // Graph syntax files enter Radiant through an in-memory Lambda transform document.
+bool graph_bridge_path_is_graph(const char* graph_file);
 const char* graph_bridge_flavor_for_path(const char* graph_file);
 char* build_graph_to_html_bridge_script(const char* graph_file, const char* theme_name,
-                                        const char* log_prefix);
+                                        const char* view_key, const char* log_prefix);
 
 // ===== render_overlay.hpp =====
 struct RenderContext;

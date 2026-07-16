@@ -421,3 +421,50 @@ This reports `Unexpected syntax near '"source-start":'`; changing the key to
 the quoted symbol `'source-start'` works. The diagnostic should say that map
 keys use names or symbols, or map literals should accept string keys
 consistently with bracket access.
+
+## Empty-array branches can be reported as a missing function body
+
+A recursive helper returning arrays was rejected at the function declaration:
+
+```lambda
+fn chain_of(items, id, stack) {
+  if (id == null) [] else [id, *chain_of(items, null, [*stack, id])]
+}
+```
+
+The compiler reported `Function body requires '=>' or '{...}'` even though the
+body was present. Returning `slice(stack, 0, 0)` for the typed empty result
+compiled. The diagnostic should identify the unresolved empty-array return
+type, or empty arrays should infer consistently in block-bodied functions.
+
+## Collection slice merged adjacent strings
+
+`slice(["shop.web", "shop"], 0, 2)` returned `["shop.webshop"]`. The generic
+slice path built its result with `list_push()`, whose document-content behavior
+merges adjacent strings. The runtime now builds collection slices with
+`array_push()` so item boundaries are preserved, with a regression in
+`slice_two_arg.ls`.
+
+## Scalar `if` expressions inside block functions need unexplained braces
+
+While implementing the Structurizr expression parser, a block-bodied helper
+containing `if (done) -1 else recurse(...)` was diagnosed as `Missing { } for
+if-statement`. The equivalent `if (done) { -1 } else { recurse(...) }` compiles,
+although both forms are ordinary value-producing branches elsewhere. The error
+should explain when `if` is parsed as a statement, or the expression form should
+be accepted consistently inside function blocks.
+
+## One-line Mark child comprehensions fail at the closing delimiter
+
+The valid multiline constructor:
+
+```lambda
+<diagnostics;
+  for (value in values) value
+>
+```
+
+was rejected when written as `<diagnostics; for (value in values) value>` with
+`Expected 'identifier'` at the closing `>`, followed by a second missing-`>`
+diagnostic at end of file. Whitespace should not change this constructor's
+grammar, or the diagnostic should identify the required line break explicitly.

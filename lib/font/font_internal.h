@@ -15,6 +15,7 @@
 #define LAMBDA_FONT_INTERNAL_H
 
 #include "font.h"
+#include "font_weight.h"
 #include "font_tables.h"
 #include "../mempool.h"
 #include "../arena.h"
@@ -505,7 +506,10 @@ void                font_cache_insert(FontContext* ctx, const char* key, FontHan
                                       bool is_global_fallback);
 void                font_cache_evict_lru(FontContext* ctx);
 char*               font_cache_make_key(Arena* arena, const char* family,
-                                        FontWeight weight, FontSlant slant, float size_px);
+                                         FontWeight weight, FontSlant slant, float size_px);
+FontHandle*         font_resolve_authored_for_codepoint(FontContext* ctx,
+                                                        const FontStyleDesc* style,
+                                                        uint32_t codepoint);
 
 // font_fallback.c
 const char**        font_get_generic_family(const char* family);

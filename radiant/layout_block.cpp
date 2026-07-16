@@ -1046,20 +1046,23 @@ static float sibling_margin_collapse_amount(ViewBlock* block) {
 
 static void shift_descendant_float_boxes(BlockContext* bfc, ViewBlock* ancestor, float delta) {
     if (!bfc || !ancestor || delta == 0.0f) return;
+    ViewElement* ancestor_element = lam::view_require_element(ancestor);
     for (int pass = 0; pass < 2; pass++) {
         FloatBox* floating = pass == 0 ? bfc->left_floats : bfc->right_floats;
         for (; floating; floating = floating->next) {
             if (!floating->element) continue;
-            for (DomNode* node = static_cast<DomNode*>(floating->element->parent);
-                 node; node = node->parent) {
-                if (node != static_cast<DomNode*>(ancestor)) continue;
+            // float ownership follows the generated view tree; raw DOM ancestry can
+            // miss descendants nested through anonymous or pseudo layout boxes.
+            if (view_is_descendant_of(
+                    lam::view_require_element(floating->element), ancestor_element)) {
                 floating->margin_box_top += delta;
                 floating->margin_box_bottom += delta;
                 floating->y += delta;
-                break;
             }
         }
     }
+    // translating the previous maximum downward invalidates the incremental cache.
+    block_context_recompute_lowest_float_bottom(bfc);
 }
 
 // DEBUG: Global for tracking table height between calls
@@ -5938,11 +5941,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     lycon->block.given_height = -1.0f;
                 }
                 // Empty or absent alt text keeps explicit dimensions when present.
-                // A block-level missing-image indicator with auto width participates
-                // in normal block width resolution, while inline-level indicators use
-                // the UA broken-image icon size.
+                // Only an in-flow block indicator fills the available inline size;
+                // floated blocks shrink-to-fit and therefore need the UA icon width.
                 bool has_width_percent = block->blk && !isnan(block->blk->given_width_percent);
                 bool block_auto_width = block->display.outer == CSS_VALUE_BLOCK &&
+                    !element_has_float(block) &&
                     (!block->blk || block->blk->given_width_type == CSS_VALUE_AUTO ||
                      block->blk->given_width_type == CSS_VALUE__UNDEF) &&
                     !has_width_percent;
@@ -8322,6 +8325,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                             child_view, y_delta, block->source_loc());
                                         shift_margin_collapse_floats(float_bfc->right_floats, parent,
                                             child_view, y_delta, block->source_loc());
+                                        // selective translations can lower the previous
+                                        // maximum used by clear and BFC auto-height.
+                                        block_context_recompute_lowest_float_bottom(float_bfc);
                                     }
                                 }
 

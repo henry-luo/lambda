@@ -1,0 +1,10 @@
+{
+  model: [["structurizr.groupSeparator", "/", null, null]],
+  group: ["group", "Sales", null, "Sales"],
+  element: [[["owner", "Retail", null, null], ["criticality", "high", null, null]], [["Security", "Public actor", "high", null], ["Reliability", "User availability", "medium", "https://example.test/reliability"]]],
+  relationship: ["uses", [["protocol", "HTTPS", null, null]], [["Security", "Encrypted", null, null]]],
+  expressions: [["user", "app"], [], ["user", "app"], true],
+  projected: [["user", "app"], [["group:Sales", "group", "Sales"]], 1, [["owner", "Retail", null, null], ["criticality", "high", null, null]], [["Security", "Public actor", "high", null], ["Reliability", "User availability", "medium", "https://example.test/reliability"]]],
+  grouped: [["user", "Sales"], ["app", "Sales"]],
+  excluded: 0
+}

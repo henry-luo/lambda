@@ -378,7 +378,7 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
 }
 
 // Font resource handler
-void process_font_resource(NetworkResource* res, struct CssFontFaceDescriptor* font_face) {
+void process_font_resource(NetworkResource* res, const struct CssFontFaceDescriptor* font_face) {
     if (!res || (res->state != STATE_COMPLETED && res->state != STATE_CACHED) || !font_face) return;
 
     log_debug("network: processing font resource %s from %s", res->url, res->local_path);

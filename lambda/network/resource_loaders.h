@@ -19,7 +19,7 @@ struct CssFontFaceDescriptor;
 // Resource processing functions
 void process_css_resource(NetworkResource* res, struct DomDocument* doc);
 void process_image_resource(NetworkResource* res, struct DomElement* img_element);
-void process_font_resource(NetworkResource* res, struct CssFontFaceDescriptor* font_face);
+void process_font_resource(NetworkResource* res, const struct CssFontFaceDescriptor* font_face);
 void process_svg_resource(NetworkResource* res, struct DomElement* use_element);
 void process_html_resource(NetworkResource* res, struct DomDocument* doc);
 void process_script_resource(NetworkResource* res, struct DomDocument* doc);
