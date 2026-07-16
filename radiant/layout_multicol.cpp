@@ -131,6 +131,7 @@ struct ColumnGroup {
     int column_count;
     float column_width;
     float column_gap;
+    float inline_origin;
     float row_gap;
     float target_height;
     float group_used_height;
@@ -161,7 +162,8 @@ static void multicol_group_init(
     float target_height,
     int column_count,
     float column_width,
-    float gap
+    float gap,
+    float inline_origin
 );
 static void multicol_cursor_init(FragmentedFlowCursor* cursor, ColumnGroup* group);
 static bool multicol_group_should_break(
@@ -248,7 +250,7 @@ static float multicol_row_gap(ViewBlock* block) {
     return 0;
 }
 
-static float multicol_normal_gap_size(ViewBlock* block) {
+float multicol_normal_gap_size(ViewBlock* block) {
     if (block && block->font && block->font->font_size > 0.0f) {
         return block->font->font_size;
     }
@@ -1641,7 +1643,9 @@ static float multicol_split_child_around_spanners(
         ColumnGroup group;
         FragmentedFlowCursor cursor;
         group.fragments = fragments_buf;  // Backing store from outer scratch alloc.
-        multicol_group_init(&group, container, target_height, column_count, column_width, column_gap);
+        // the nested split path applies its own child content offset after placement.
+        multicol_group_init(&group, container, target_height, column_count,
+                            column_width, column_gap, 0.0f);
         multicol_cursor_init(&cursor, &group);
 
         for (int j = group_start; j < group_end; j++) {
@@ -2056,7 +2060,8 @@ static void multicol_group_init(
     float target_height,
     int column_count,
     float column_width,
-    float gap
+    float gap,
+    float inline_origin
 ) {
     float row_gap = multicol_row_gap(container);
     if (row_gap < 0) row_gap = 0;
@@ -2065,6 +2070,7 @@ static void multicol_group_init(
     group->column_count = column_count;
     group->column_width = column_width;
     group->column_gap = gap;
+    group->inline_origin = inline_origin;
     group->row_gap = row_gap;
     group->target_height = target_height;
     group->group_used_height = 0;
@@ -2073,7 +2079,9 @@ static void multicol_group_init(
     group->fragments[0].fragment_index = 0;
     group->fragments[0].column_index = 0;
     group->fragments[0].row_index = 0;
-    group->fragments[0].x = 0;
+    // fragment coordinates are local to the container border box, so every
+    // column must retain the content-box inset established by border/padding.
+    group->fragments[0].x = inline_origin;
     group->fragments[0].y = 0;
     group->fragments[0].width = column_width;
     group->fragments[0].target_height = target_height;
@@ -2144,7 +2152,8 @@ static void multicol_cursor_advance_fragment(FragmentedFlowCursor* cursor) {
         fragment->fragment_index = group->fragment_count;
         fragment->column_index = next_column;
         fragment->row_index = next_row;
-        fragment->x = next_column * (group->column_width + group->column_gap);
+        fragment->x = group->inline_origin +
+                      next_column * (group->column_width + group->column_gap);
         fragment->y = next_row * (group->target_height + group->row_gap);
         fragment->width = group->column_width;
         fragment->target_height = group->target_height;
@@ -2324,11 +2333,15 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     float orig_line_left = lycon->line.left;
     float orig_line_right = lycon->line.right;
     float orig_content_width = lycon->block.content_width;
+    AvailableSize orig_available_width = lycon->available_space.width;
 
     // Constrain layout to column width
     lycon->block.content_width = column_width;
     lycon->line.left = 0;
     lycon->line.right = column_width;
+    // child sizing and its layout-cache key must use the fragmentainer width,
+    // otherwise cached full-container widths leak into each column.
+    lycon->available_space.width = AvailableSize::make_definite(column_width);
 
     // Layout children normally within column width
     DomNode* child = block->first_child;
@@ -2351,6 +2364,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     lycon->line.left = orig_line_left;
     lycon->line.right = orig_line_right;
     lycon->block.content_width = orig_content_width;
+    lycon->available_space.width = orig_available_width;
 
     // If content fits in one column, no redistribution needed
     if (total_content_height <= 0) {
@@ -2627,6 +2641,14 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
+    float content_start_y = 0.0f;
+    if (block->bound) {
+        if (block->bound->border) {
+            content_start_y += block->bound->border->width.top;
+        }
+        content_start_y += block->bound->padding.top;
+    }
+
     float max_column_height = 0;  // running Y offset for the entire container
     float prev_margin_bottom = 0; // for margin collapsing between consecutive spanners
 
@@ -2666,8 +2688,9 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             max_column_height -= prev_margin_bottom;
             max_column_height += collapsed_margin;
 
-            child_block->x = 0;
-            child_block->y = max_column_height;
+            // spanners share the multicol content-box origin with column groups.
+            child_block->x = orig_line_left;
+            child_block->y = content_start_y + max_column_height;
             child_block->width = available_width;
 
             max_column_height += child_block->height + spanner_margin_bottom;
@@ -2716,7 +2739,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         ColumnGroup group;
         FragmentedFlowCursor cursor;
         group.fragments = fragments_buf;  // Backing store from outer scratch alloc.
-        multicol_group_init(&group, block, group_target, column_count, column_width, gap);
+        multicol_group_init(&group, block, group_target, column_count,
+                            column_width, gap, orig_line_left);
         multicol_cursor_init(&cursor, &group);
 
         for (int j = group_start; j < group_end; j++) {
@@ -2741,7 +2765,8 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                           fragment ? fragment->y : 0);
             }
 
-            multicol_cursor_place_block(&cursor, cb, max_column_height);
+            multicol_cursor_place_block(
+                &cursor, cb, content_start_y + max_column_height);
 
             if (multicol_has_direct_spanner_child(cb)) {
                 placed_height = multicol_split_child_around_spanners(
@@ -2797,15 +2822,6 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         block, column_count, column_width, gap, mixed_inline_target);
     if (mixed_inline_height > max_column_height) {
         max_column_height = mixed_inline_height;
-    }
-
-    // Calculate total height including padding
-    float content_start_y = 0;
-    if (block->bound) {
-        if (block->bound->border) {
-            content_start_y += block->bound->border->width.top;
-        }
-        content_start_y += block->bound->padding.top;
     }
 
     // Set block height: use CSS given height if specified, otherwise computed

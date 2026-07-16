@@ -1442,6 +1442,35 @@ void update_line_for_bfc_floats(LayoutContext* lycon, float query_height) {
 // Forward declarations
 LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node);
 LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node);
+
+static bool inline_node_is_unbreakable_ascii(DomNode* node) {
+    if (!node) return false;
+    if (node->is_text()) {
+        const unsigned char* text = node->text_data();
+        for (const unsigned char* ch = text; ch && *ch; ch++) {
+            if (*ch >= 0x80 || is_space(*ch) || *ch == '-' || *ch == '?') {
+                return false;
+            }
+        }
+        return text && *text;
+    }
+    if (!node->is_element()) return false;
+    DomElement* element = lam::dom_require_element(node);
+    if (resolve_display_value(element).outer != CSS_VALUE_INLINE) return false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (!inline_node_is_unbreakable_ascii(child)) return false;
+    }
+    return element->first_child != nullptr;
+}
+
+static bool inline_sequence_is_unbreakable_ascii(DomNode* node) {
+    if (!node) return false;
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!inline_node_is_unbreakable_ascii(current)) return false;
+    }
+    return true;
+}
+
 LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
     DomNode* node = nullptr;
     if (span->is_element()) {
@@ -1450,6 +1479,16 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
         if (result) { return result; }
+        if (inline_sequence_is_unbreakable_ascii(node)) {
+            float fragment_width = calculate_max_content_width(lycon, span);
+            float line_right = lycon->line.has_float_intrusion ?
+                lycon->line.effective_right : lycon->line.right;
+            // Future inline boxes need their own font and decorations; measuring
+            // them with the parent font can strand an opening punctuation prefix.
+            if (lycon->line.advance_x + fragment_width > line_right + 0.001f) {
+                return RDT_LINE_FILLED;
+            }
+        }
     }
     return RDT_NOT_SURE;
 }
@@ -1533,6 +1572,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
     lycon->line.prev_codepoint = 0;   // reset codepoint kerning state
+    lycon->line.prev_kerning_font_handle = nullptr;
 
     // IMPORTANT: Reset effective bounds to container bounds before float adjustment
     // line.left/right are the container bounds, set once in line_init()
@@ -1630,12 +1670,17 @@ static bool fixup_view_is_out_of_flow(View* view) {
 
 static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
     if (!lycon || !lycon->view || lycon->view->view_type != RDT_VIEW_BR) return;
+    // Ordinary text lines place <br> from its inherited font when it is created.
+    // Only replaced content changes the finalized baseline after that placement;
+    // fallback glyph extrema must not move the break independently of its text.
+    if (!lycon->line.has_replaced_content) return;
 
     View* br_view = lycon->view;
     float br_ascender = 0.0f;
-    float br_descender = 0.0f;
     if (lycon->font.font_handle) {
-        font_get_content_area_split(lycon->font.font_handle, &br_ascender, &br_descender);
+        // A <br> DOMRect shares the raster text box baseline, not the CSS font
+        // content-area split; mixing those metrics vertically offsets the break.
+        br_ascender = font_get_rendering_ascender(lycon->font.font_handle);
     }
     if (br_ascender <= 0.0f) {
         br_ascender = lycon->block.init_ascender > 0.0f
@@ -2374,7 +2419,9 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     bool trim_cjk_spacing = should_apply_text_spacing_trim(lycon, text_node);
     bool is_word_start = true;  // First character is always word start
     bool has_break_opportunity = false;  // track if hyphen/break found before overflow
-    uint32_t prev_codepoint = lycon->line.prev_codepoint;
+    uint32_t prev_codepoint =
+        lycon->line.prev_kerning_font_handle == lycon->font.font_handle
+            ? lycon->line.prev_codepoint : 0;
 
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
@@ -2493,29 +2540,47 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
 
 // check node and its siblings to see if line is filled
 LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
+    float saved_advance_x = lycon->line.advance_x;
     do {
+        LineFillStatus result = RDT_NOT_SURE;
         if (node->is_text()) {
-            LineFillStatus result = text_has_line_filled(lycon, node);
-            if (result) { return result; }
+            result = text_has_line_filled(lycon, node);
         }
         else if (node->is_element()) {
             // CSS §9.3.1: <br> creates a forced line break — content after it
             // starts on a new line, so it cannot contribute to filling the current line.
             // Stop lookahead here to avoid false-positive wraps before <br>.
-            if (node->tag() == HTM_TAG_BR) { return RDT_LINE_NOT_FILLED; }
+            if (node->tag() == HTM_TAG_BR) {
+                lycon->line.advance_x = saved_advance_x;
+                return RDT_LINE_NOT_FILLED;
+            }
             CssEnum outer_display = resolve_display_value(node).outer;
-            if (outer_display == CSS_VALUE_BLOCK) { return RDT_LINE_NOT_FILLED; }
+            if (outer_display == CSS_VALUE_BLOCK) {
+                lycon->line.advance_x = saved_advance_x;
+                return RDT_LINE_NOT_FILLED;
+            }
             else if (outer_display == CSS_VALUE_INLINE) {
-                LineFillStatus result = span_has_line_filled(lycon, node);
-                if (result) { return result; }
+                result = span_has_line_filled(lycon, node);
             }
         }
         else {
             log_debug("unknown node type");
             // skip the node
         }
+        if (result) {
+            lycon->line.advance_x = saved_advance_x;
+            return result;
+        }
+        if (!inline_node_is_unbreakable_ascii(node)) {
+            lycon->line.advance_x = saved_advance_x;
+            return RDT_NOT_SURE;
+        }
+        // Lookahead spans DOM boundaries, so each fitted unbreakable node must
+        // advance the speculative cursor before measuring the following node.
+        lycon->line.advance_x += calculate_max_content_width(lycon, node);
         node = node->next_sibling;
     } while (node);
+    lycon->line.advance_x = saved_advance_x;
     return RDT_NOT_SURE;
 }
 
@@ -2547,6 +2612,19 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
                 right_edge += sp->bound->padding.right;
             }
             lycon->line.advance_x += right_edge;
+            float line_right = lycon->line.has_float_intrusion ?
+                lycon->line.effective_right : lycon->line.right;
+            if (right_edge > 0.001f &&
+                lycon->line.advance_x > line_right + 0.001f) {
+                float min_content = calculate_min_content_width(lycon, sp);
+                float max_content = calculate_max_content_width(lycon, sp);
+                // A breakable inline must keep its internal soft-wrap opportunity;
+                // only an unbreakable fragment moves when its end decoration overflows.
+                if (min_content >= max_content - 0.001f) {
+                    lycon->line.advance_x -= right_edge;
+                    return RDT_LINE_FILLED;
+                }
+            }
             LineFillStatus result = view_has_line_filled(lycon, view);
             lycon->line.advance_x -= right_edge;
             return result;
@@ -3255,11 +3333,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     float tab_period = space_advance * ts;
                     // Current position from block's starting content edge
                     float current_x = rect->x + rect->width;
+                    float current_offset = current_x - lycon->line.left;
                     // CSS Text 3 §4.2: if the distance to the next tab stop is less
                     // than 0.5ch, the next tab stop after that is used instead.
                     float half_ch = raw_space_advance * 0.5f;
-                    float next_tab = tab_period * ceilf((current_x + half_ch) / tab_period);
-                    wd = next_tab - current_x;
+                    // tab stops are block-relative; using the local absolute x
+                    // shifts every stop when the block has padding or a border.
+                    float next_tab_offset = tab_period *
+                        ceilf((current_offset + half_ch) / tab_period);
+                    wd = next_tab_offset - current_offset;
                 }
             } else {
                 // Regular space: apply word-spacing and letter-spacing once
@@ -3490,7 +3572,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {
-            if (lycon->line.prev_codepoint) {
+            // Kerning belongs to one shaped font run; a glyph from a nested
+            // fallback or styled inline cannot form a pair in the next font.
+            if (lycon->line.prev_codepoint &&
+                lycon->line.prev_kerning_font_handle == lycon->font.font_handle) {
                 uint32_t kerning_codepoint = shaped_latin_run ? shaped_latin_first_codepoint : codepoint;
                 float kerning_css = text_kerning_adjustment(
                     lycon, lycon->line.prev_codepoint, kerning_codepoint);
@@ -3505,6 +3590,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 }
             }
             lycon->line.prev_codepoint = codepoint;
+            lycon->line.prev_kerning_font_handle = lycon->font.font_handle;
         }
 #ifdef RADIANT_TRACE_TEXT_LAYOUT
         // Character-level tracing is only useful for targeted line breaking
