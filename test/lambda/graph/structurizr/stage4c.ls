@@ -67,6 +67,8 @@ let html_edges = direct(coupled_html, "edge")
     [core["base-view-key"], core.direction, ids(model.nodes(core)), edge_pairs(core)],
     [external["base-view-key"], ids(model.nodes(external)), edge_pairs(external)]
   ],
+  diagnostics: [for (value in model.diagnostics(workspace))
+    [value.code, value.severity]],
   styles: [
     [for (assignment in model.style_assignments(coupled))
       [assignment["target-kind"], assignment.targets, assignment.declarations]],

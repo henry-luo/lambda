@@ -467,10 +467,12 @@ group, tag, technology, and property predicates, relationship tag/property/
 source/destination and endpoint predicates, plus `&&` and `||`. Results retain
 model source order.
 
-Unknown element predicates currently select nothing and unknown relationship
-predicates do not match. Structured `structurizr.unsupported-expression` and
-`structurizr.invalid-expression` diagnostics and parenthesized expressions
-remain follow-up work; none may fall back to including everything.
+Unknown element predicates select nothing and unknown relationship predicates
+do not match. Canonical validation distinguishes malformed syntax with
+`structurizr.invalid-expression` errors from valid but unsupported predicates
+with `structurizr.unsupported-expression` warnings. Diagnostics retain the
+authored include/exclude source span. Parenthesized expressions remain follow-up
+work; no invalid or unsupported expression may fall back to including everything.
 
 ### 8.3 Dynamic views
 
@@ -727,7 +729,8 @@ The first three executable slices are implemented and covered by
   and rich instance content inherited from the logical model;
 - selected-view `to_html()` through the existing graph transform;
 - native parser/LOC tests and Lambda source, canonical, static expression,
-  filtered/custom/style, dynamic, deployment, and HTML fixtures.
+  expression-diagnostic, source-contract, filtered/custom/style, dynamic,
+  deployment, and HTML fixtures.
 
 This checkpoint is partial Stage 4A through Stage 4D, not full Structurizr
 support. Conservative `.dsl` auto-detection is implemented: `.structurizr` is
@@ -735,9 +738,12 @@ unambiguous, while `.dsl` is selected only when its first significant token is
 the boundary-safe `workspace` keyword. Initial canonical semantic validation now
 reports duplicate identities/view keys, illegal containment and relationships,
 unresolved instance/deployment-group references, invalid view scopes, and styles
-that cannot be lowered safely. Source schema validation, remaining semantic
-diagnostics, archetypes/implied relationships, expression diagnostics, advanced
-nested-group boundaries, shape/routing style semantics, terminology, fuller
+that cannot be lowered safely. Initial source-contract validation rejects wrong
+roots, duplicate model/view blocks, and misplaced structured workspace children;
+expression validation now reports malformed and unsupported rules without
+changing fail-closed projection. Deeper source-context validation, remaining
+semantic diagnostics, archetypes/implied relationships, advanced nested-group
+boundaries, shape/routing style semantics, terminology, fuller
 deployment view filtering, includes, CLI view selection, reference adaptation,
 scene coverage, and release size measurement remain outstanding.
 
@@ -761,10 +767,11 @@ executable, and compressed-artifact size ledger remains outstanding.
 Status: **partially implemented**. Core hierarchy, hierarchical identifiers,
 relationships, tags, properties, both perspective forms, group membership,
 deployment declarations, and logical instance references normalize deterministically.
-The initial canonical schema/semantic validator attaches source-aware structured
-diagnostics for identity, containment, references, relationship legality, view
-scope, and safe style lowering. Source Mark schema validation, the remaining
-diagnostic codes, archetypes, and implied relationships remain outstanding.
+The initial source contract and canonical semantic validator attach source-aware
+structured diagnostics for workspace structure, identity, containment,
+references, relationship legality, view scope, expressions, and safe style
+lowering. Deeper nested source-context validation, the remaining diagnostic
+codes, archetypes, and implied relationships remain outstanding.
 
 - add source and canonical schemas;
 - resolve flat/hierarchical identifiers and `this`;
@@ -779,9 +786,10 @@ diagnostic codes, archetypes, and implied relationships remain outstanding.
 Status: **substantially implemented**. All six static view kinds, selected-view
 HTML, filtered/custom semantics, reluctant wildcard, the initial pure expression
 allowlist including property/group predicates, group boundaries, safe basic
-style cascade, and warnings for styles skipped by lowering have dedicated
-fixtures. Expression diagnostics, nested-group boundaries, terminology,
-shape/routing semantics, and retained scene/render coverage remain outstanding.
+style cascade, expression diagnostics, and warnings for styles skipped by
+lowering have dedicated fixtures. Parenthesized expressions, nested-group
+boundaries, terminology, shape/routing semantics, and retained scene/render
+coverage remain outstanding.
 
 - implement landscape, context, container, component, filtered, and custom
   projection;

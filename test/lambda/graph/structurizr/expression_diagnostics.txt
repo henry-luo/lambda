@@ -1,0 +1,1 @@
+[["structurizr.unsupported-expression", "warning", "view:Diagnostics.include[0]", 15, 7, true], ["structurizr.invalid-expression", "error", "view:Diagnostics.include[1]", 16, 7, true], ["structurizr.invalid-expression", "error", "view:Diagnostics.exclude[0]", 17, 7, true], ["structurizr.unsupported-expression", "warning", "view:Diagnostics.exclude[1]", 18, 7, true]]

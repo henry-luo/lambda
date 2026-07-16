@@ -341,9 +341,9 @@ fn view_value(value, elements, relationships) {
     ] else [],
     key: view_key,
     includes: [for (include_rule in children(value, "include"))
-      for (item in arguments(include_rule)) item],
+      for (item in arguments(include_rule)) {expression: item, source: include_rule}],
     excludes: [for (exclude_rule in children(value, "exclude"))
-      for (item in arguments(exclude_rule)) item],
+      for (item in arguments(exclude_rule)) {expression: item, source: exclude_rule}],
     interactions: if (value.kind == "dynamic")
       dynamic_interactions(value, elements, relationships, view_key) else [],
     direction: upper(layout_arg(value, 0, "tb")),
@@ -423,8 +423,12 @@ fn c4_view(value, elements) =>
     'base-key': value.base_key, 'filter-mode': value.filter_mode,
     direction: value.direction, 'rank-sep': value.rank_sep, 'node-sep': value.node_sep,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
-    for (include_rule in value.includes) <include expression: include_rule>
-    for (exclude_rule in value.excludes) <exclude expression: exclude_rule>
+    for (rule in value.includes) <include expression: rule.expression,
+      'source-start': rule.source["source-start"], 'source-end': rule.source["source-end"],
+      'source-line': rule.source["source-line"], 'source-column': rule.source["source-column"]>
+    for (rule in value.excludes) <exclude expression: rule.expression,
+      'source-start': rule.source["source-start"], 'source-end': rule.source["source-end"],
+      'source-line': rule.source["source-line"], 'source-column': rule.source["source-column"]>
     for (tag in value.filter_tags) <'filter-tag' name: tag>
     for (item in value.interactions)
       <'c4-interaction' id: item.id, source: item.source,
@@ -464,6 +468,7 @@ fn c4_workspace(name, description, mode, elements, relationships, views, styles,
   >
 
 pub fn normalize(source) {
+  let source_diagnostics = schema.validate_source(source);
   let models = children(source, "model");
   let hierarchical = identifier_mode(source) == "hierarchical";
   let model_properties = if (len(models) > 0) property_values(models[0]) else [];
@@ -486,5 +491,5 @@ pub fn normalize(source) {
   let mode = if (hierarchical) "hierarchical" else "flat";
   let workspace = c4_workspace(workspace_name, workspace_description, mode, elements,
     relationships, views, styles, model_properties, source);
-  schema.attach(workspace, schema.validate(workspace))
+  schema.attach(workspace, [*source_diagnostics, *schema.validate(workspace)])
 }

@@ -19,6 +19,112 @@ fn selected_tags(expression, prefix) => [
   for (tag in split(value_after(expression, prefix), ",") where trim(tag) != "") trim(tag)
 ]
 
+fn issue(code, message) => {code: code, message: message}
+
+fn first_issue(parts, index = 0) {
+  if (index >= len(parts)) { null }
+  else {
+    let found = validate(parts[index]);
+    if (found != null) { found } else { first_issue(parts, index + 1) }
+  }
+}
+
+fn required_value_issue(value, prefix) =>
+  if (trim(value_after(value, prefix)) == "")
+    issue("structurizr.invalid-expression", "Expression predicate requires a value")
+  else null
+
+fn property_issue(value, prefix) {
+  let parts = split(value_after(value, prefix), "]==");
+  if (len(parts) != 2 or trim(parts[0]) == "" or trim(parts[1]) == "")
+    issue("structurizr.invalid-expression", "Property expression requires [name]==value")
+  else null
+}
+
+fn endpoint_issue(value) {
+  let endpoints = split(value, "->");
+  if (len(endpoints) != 2 or trim(endpoints[0]) == "" or trim(endpoints[1]) == "")
+    issue("structurizr.invalid-expression", "Relationship expression requires source->destination")
+  else null
+}
+
+fn atomic_issue(expression) {
+  let value = trim(expression);
+  let relation = trim(if (starts_with(value, "relationship=="))
+    value_after(value, "relationship==") else value);
+  let element_value = trim(if (starts_with(value, "element=="))
+    value_after(value, "element==") else value);
+  if (value == "") issue("structurizr.invalid-expression", "Expression must not be empty")
+  else if (value == "*" or value == "*?") null
+  else if (starts_with(value, "relationship.properties["))
+    property_issue(value, "relationship.properties[")
+  else if (starts_with(value, "relationship.tag=="))
+    required_value_issue(value, "relationship.tag==")
+  else if (starts_with(value, "relationship.tag!="))
+    required_value_issue(value, "relationship.tag!=")
+  else if (starts_with(value, "relationship.source=="))
+    required_value_issue(value, "relationship.source==")
+  else if (starts_with(value, "relationship.destination=="))
+    required_value_issue(value, "relationship.destination==")
+  else if (starts_with(value, "relationship.tag") or
+      starts_with(value, "relationship.source") or
+      starts_with(value, "relationship.destination"))
+    issue("structurizr.invalid-expression", "Relationship predicate has invalid syntax")
+  else if (starts_with(value, "relationship."))
+    issue("structurizr.unsupported-expression", "Relationship predicate is not supported")
+  else if (starts_with(value, "relationship==")) endpoint_issue(relation)
+  else if (value == "*->*" or
+      (index_of(value, "->") > 0 and not ends_with(value, "->"))) endpoint_issue(value)
+  else if (starts_with(value, "element.properties["))
+    property_issue(value, "element.properties[")
+  else if (starts_with(value, "element.type=="))
+    required_value_issue(value, "element.type==")
+  else if (starts_with(value, "element.parent=="))
+    required_value_issue(value, "element.parent==")
+  else if (starts_with(value, "element.group=="))
+    required_value_issue(value, "element.group==")
+  else if (starts_with(value, "element.tag=="))
+    required_value_issue(value, "element.tag==")
+  else if (starts_with(value, "element.tag!="))
+    required_value_issue(value, "element.tag!=")
+  else if (starts_with(value, "element.technology=="))
+    required_value_issue(value, "element.technology==")
+  else if (starts_with(value, "element.technology!="))
+    required_value_issue(value, "element.technology!=")
+  else if (starts_with(value, "element.type") or starts_with(value, "element.parent") or
+      starts_with(value, "element.group") or starts_with(value, "element.tag") or
+      starts_with(value, "element.technology"))
+    issue("structurizr.invalid-expression", "Element predicate has invalid syntax")
+  else if (starts_with(value, "element."))
+    issue("structurizr.unsupported-expression", "Element predicate is not supported")
+  else if (starts_with(element_value, "->") or ends_with(element_value, "->")) {
+    let middle = slice(element_value, if (starts_with(element_value, "->")) 2 else 0,
+      len(element_value) - (if (ends_with(element_value, "->")) 2 else 0));
+    if (trim(middle) == "" or contains(middle, "->"))
+      issue("structurizr.invalid-expression", "Coupling expression requires an element")
+    else null
+  }
+  else if (contains(value, "==") or contains(value, "!=") or
+      contains(value, "[") or contains(value, "]"))
+    issue("structurizr.invalid-expression", "Expression has invalid predicate syntax")
+  else null
+}
+
+pub fn validate(expression) {
+  let value = trim(expression);
+  let opens = len(split(value, "("));
+  let closes = len(split(value, ")"));
+  let alternatives = split(value, "||");
+  let terms = split(value, "&&");
+  if (opens != closes)
+    issue("structurizr.invalid-expression", "Expression has unbalanced parentheses")
+  else if (opens > 1)
+    issue("structurizr.unsupported-expression", "Parenthesized expressions are not supported")
+  else if (len(alternatives) > 1) first_issue(alternatives)
+  else if (len(terms) > 1) first_issue(terms)
+  else atomic_issue(value)
+}
+
 fn has_all_tags(value, wanted) => len([
   for (tag in wanted where contains(tags(value), tag)) tag
 ]) == len(wanted)

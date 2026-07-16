@@ -7,6 +7,8 @@ import graph_transform: lambda.package.graph.transform
 
 pub fn normalize(source) => normalize_module.normalize(source)
 
+pub fn validate_source(source) => schema_module.validate_source(source)
+
 pub fn validate(workspace) => schema_module.validate(workspace)
 
 pub fn view_keys(workspace) => view_module.view_keys(workspace)

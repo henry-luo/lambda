@@ -2,6 +2,7 @@
 
 import graph_model: lambda.package.graph.model
 import diagnostic: lambda.package.graph.diagnostics
+import expression: lambda.package.graph.structurizr.expressions
 import style_rules: lambda.package.graph.structurizr.styles
 
 fn children(value, wanted = null) => [
@@ -24,6 +25,35 @@ fn view_values(workspace) {
 fn style_values(workspace) {
   let blocks = children(workspace, "c4-styles");
   if (len(blocks) == 0) { [] } else { children(blocks[0], "c4-style") }
+}
+
+fn source_block_diagnostics(source, wanted) => [
+  for (i, value in children(source, wanted) where i > 0)
+    diagnostic.for_value("structurizr.invalid-context", "error",
+      "Structurizr workspace must not contain multiple '" ++ wanted ++ "' blocks",
+      "source." ++ wanted ++ "[" ++ string(i) ++ "]", value)
+]
+
+fn source_child_diagnostics(source) => [
+  for (i, value in children(source), let tag = graph_model.tag(value)
+    where not contains([
+      "argument", "statement", "model", "views", "properties", "diagnostics"
+    ], tag))
+    diagnostic.for_value("structurizr.invalid-context", "error",
+      "Structurizr '" ++ tag ++ "' is not valid directly under workspace",
+      "source." ++ tag ++ "[" ++ string(i) ++ "]", value)
+]
+
+pub fn validate_source(source) {
+  if (not (source is element) or graph_model.tag(source) != "workspace" or
+      string(source.flavor) != "structurizr" or string(source["ir-stage"]) != "source") { [
+    diagnostic.for_value("structurizr.invalid-root", "error",
+      "Structurizr source root must be a source-stage <workspace>", "source", source)
+  ] } else { [
+    *source_block_diagnostics(source, "model"),
+    *source_block_diagnostics(source, "views"),
+    *source_child_diagnostics(source)
+  ] }
 }
 
 fn duplicate_diagnostics(values, kind, field = "id",
@@ -176,6 +206,15 @@ fn view_diagnostics(elements, views) => [
   ] } else { [] }) value
 ]
 
+fn expression_diagnostics(views) => [
+  for (view in views, rule_kind in ["include", "exclude"],
+    i, rule in children(view, rule_kind), let found = expression.validate(rule.expression)
+    where found != null)
+    diagnostic.for_value(found.code,
+      if (found.code == "structurizr.invalid-expression") "error" else "warning", found.message,
+      "view:" ++ string(view.key) ++ "." ++ rule_kind ++ "[" ++ string(i) ++ "]", rule)
+]
+
 fn style_diagnostics(workspace) => [
   for (style in style_values(workspace), property in children(style, "property"),
     let target = if (string(style["target-kind"]) == "element") { "node" }
@@ -202,6 +241,7 @@ pub fn validate(workspace) {
       *deployment_group_diagnostics(elements),
       *relationship_diagnostics(elements, relationships),
       *view_diagnostics(elements, views),
+      *expression_diagnostics(views),
       *style_diagnostics(workspace)
     ]
   }
