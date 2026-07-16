@@ -7791,6 +7791,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         }
                         asc_contribution = item_height / 2.0f + x_height_half;
                         desc_contribution = item_height / 2.0f - x_height_half;
+                    } else if (valign == CSS_VALUE_TEXT_TOP) {
+                        // text-top aligns the atomic margin-box top with the
+                        // parent inline's font top, so split it at that baseline.
+                        asc_contribution = lycon->line.parent_font_ascender;
+                        desc_contribution = item_height - asc_contribution;
+                    } else if (valign == CSS_VALUE_TEXT_BOTTOM) {
+                        // text-bottom aligns the atomic margin-box bottom with the
+                        // parent inline's font bottom; a bottom-edge baseline would
+                        // incorrectly add that descender outside the atomic box.
+                        desc_contribution = lycon->line.parent_font_descender;
+                        asc_contribution = item_height - desc_contribution;
                     } else {
                         // For baseline, sub, super, length/percentage offsets
                         float baseline_shift = vertical_align_baseline_shift(
@@ -7993,11 +8004,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // with a content-derived baseline. Keep the strut's
                     // below-baseline extent so an inline-table cannot collapse
                     // the line box to only its own border box.
-                    float half_leading = (lycon->block.line_height -
-                        (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
-                    float strut_below = lycon->block.init_descender + half_leading;
-                    if (strut_below > 0.0f) {
-                        lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
+                    if (!layout_quirks_block_ignores_line_height(lycon, nullptr)) {
+                        float half_leading = (lycon->block.line_height -
+                            (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
+                        float strut_below = lycon->block.init_descender + half_leading;
+                        if (strut_below > 0.0f) {
+                            lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
+                        }
                     }
                     log_debug("%s inline-block with content baseline: ascender=%.1f, descender=%.1f, block_h=%.1f", elmt->source_loc(),
                         effective_baseline, descender_part, block->height);
@@ -8034,11 +8047,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // the strut's below-baseline extent still contributes to the
                     // line box height. Compute actual half-leading (may be negative
                     // when line-height < font-size, e.g. line-height: 0).
-                    float half_leading = (lycon->block.line_height -
-                        (lycon->block.init_ascender + lycon->block.init_descender)) / 2;
-                    float strut_below = lycon->block.init_descender + half_leading;
-                    if (strut_below > 0) {
-                        lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
+                    if (!layout_quirks_block_ignores_line_height(lycon, nullptr)) {
+                        // Atomic inlines retain the root descender only when the
+                        // containing block actually generates a root strut.
+                        float half_leading = (lycon->block.line_height -
+                            (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
+                        float strut_below = lycon->block.init_descender + half_leading;
+                        if (strut_below > 0.0f) {
+                            lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
+                        }
                     }
                 }
                 log_debug("%s inline-block set max_ascender to: %d", elmt->source_loc(), lycon->line.max_ascender);
