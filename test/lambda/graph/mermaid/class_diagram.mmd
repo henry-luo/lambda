@@ -1,0 +1,13 @@
+classDiagram
+direction LR
+class Animal {
+  <<abstract>>
+  +String name
+  +move(distance) void
+}
+class Duck["Duck"] {
+  +swim() void
+}
+Animal <|-- Duck : inherits
+Animal "1" o-- "*" Habitat : lives in
+Duck ..> Habitat : visits

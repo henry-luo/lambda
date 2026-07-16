@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 #include "../lambda/mark_builder.hpp"
+#include "../lambda/mark_reader.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
@@ -235,6 +236,22 @@ TEST_F(MarkBuilderTest, CreateElementWithAttributes) {
 
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     ASSERT_NE(elem_type, nullptr);
+}
+
+TEST_F(MarkBuilderTest, UpdatingFinalizedElementAttributeKeepsOneShapeField) {
+    MarkBuilder builder(input);
+    Item item = builder.element("graph").attr("direction", "TB").final();
+    Element* element = item.element;
+    ASSERT_NE(element, nullptr);
+
+    builder.putToElement(lam::gc_borrow(element), builder.createString("direction"),
+                         builder.createStringItem("LR"));
+
+    // A duplicate field leaves shape-order readers on the stale value even when
+    // hashed lookup finds the newly appended field.
+    ElementReader reader(element);
+    EXPECT_STREQ(reader.get_attr_string("direction"), "LR");
+    EXPECT_EQ(((TypeElmt*)element->type)->length, 1);
 }
 
 // Test nested elements
