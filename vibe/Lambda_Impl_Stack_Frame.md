@@ -69,14 +69,11 @@ Generated async functions reserve the compile-time slot count. Resizing preserve
 
 ### 3.3 Return ABI
 
-Lambda JIT-to-JIT calls have two logical lanes:
+Boxed Lambda JIT-to-JIT calls return one caller-owned Item. Their epilogue uses the shared MIR scalar classifier and donates `frame_base[0]` only when the returned tagged payload lies inside the callee's `[frame_base, current_top)` number extent. Donation copies the raw payload down, retags the Item, and restores `side_number_top` to `frame_base + 1`; all other representations restore exactly to `frame_base`. Callers and generated boxed wrappers therefore forward the result without a scalar side channel or rebuild helper.
 
-- an Item-like result plus raw scalar bits for an escaping wide scalar; or
-- a native scalar plus an error Item for `T^E`.
+Native `T^E` returns still use a scalar result plus an error Item. MIR's ARM64 multi-result lowering loses the primary lane when a nested call feeds the return, so this error-only ABI stages the primary value in one reserved scratch slot and publishes the error Item through `Context::mir_return_lane`.
 
-MIR's ARM64 multi-result lowering lost the primary lane when a nested call fed the return. The implemented portable ABI therefore returns the primary value through the normal machine return, stages it in the function's single reserved number scratch slot across cleanup, and publishes the secondary scalar/error lane through `Context::mir_return_lane`. The caller immediately consumes the handoff and re-homes the result when required. This preserves the logical two-lane contract without relying on the broken backend multi-result path.
-
-Generated boxed wrappers expose the existing single-Item ABI to host/JS callers and re-home their result into the caller/base extent. Imported cross-language functions bypass Lambda `_b` wrapper lookup because their module exports already use the direct boxed ABI.
+Imported cross-language functions bypass Lambda `_b` wrapper lookup because their module exports already use the direct boxed ABI.
 
 Language-level `i64^` success/error returns cover the full `int64` domain, including `INT64_MAX`; the old value-as-error sentinel is not used on this path. The legacy C system-function registry still uses its historical sentinel contract, so `transpile_box_item` retains `push_l_safe` only at that compatibility boundary.
 

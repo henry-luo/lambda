@@ -293,7 +293,8 @@ static void jm_root_call_insn_regs(JsMirTranspiler* mt, MIR_insn_t insn,
 }
 
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
-        bool item_return, MIR_reg_t runtime_reg) {
+        bool item_return, MirScalarReturnMode scalar_return_mode,
+        MIR_reg_t runtime_reg) {
     if (!mt) return;
     if (mt->side_root_bindings) {
         mem_free(mt->side_root_bindings);
@@ -310,6 +311,7 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     mt->side_root_next = 0;
     mt->side_frame_return_type = return_type;
     mt->side_frame_item_return = item_return;
+    mt->side_frame_scalar_return_mode = scalar_return_mode;
     mt->side_frame_runtime = runtime_reg ? runtime_reg : jm_load_side_stack_runtime(mt);
     mt->side_root_frame_base = jm_new_reg(mt, "js_root_frame", MIR_T_I64);
     mt->side_number_frame_base = jm_new_reg(mt, "js_number_frame", MIR_T_I64);
@@ -459,15 +461,6 @@ static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
     jm_emit_raw(mt, MIR_new_ret_insn(mt->ctx, 1, failure));
 }
 
-static MIR_reg_t jm_epilogue_call(JsMirTranspiler* mt, const char* name,
-        MIR_type_t return_type, int nargs, MIR_type_t* arg_types, MIR_op_t* arg_ops) {
-    jm_sync_emitter_from_compat(mt);
-    MIR_reg_t result = em_call_with_args(&mt->em, name, return_type,
-        nargs, arg_types, arg_ops, true);
-    jm_sync_compat_from_emitter(mt);
-    return result;
-}
-
 static void jm_epilogue_call_void(JsMirTranspiler* mt, const char* name,
         int nargs, MIR_type_t* arg_types, MIR_op_t* arg_ops) {
     jm_sync_emitter_from_compat(mt);
@@ -484,28 +477,17 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
         jm_epilogue_call_void(mt, "js_env_rehome_scalars", 1, &arg_type, &arg);
     }
     if (mt->side_frame_item_return) {
-        MIR_type_t lane_arg_type = MIR_T_I64;
-        MIR_op_t lane_arg = MIR_new_reg_op(mt->ctx, mt->side_frame_return_reg);
-        MIR_reg_t lane = jm_epilogue_call(mt, "lambda_item_scalar_lane", MIR_T_I64,
-            1, &lane_arg_type, &lane_arg);
-
-        // The callee must release its scalar extent before rebuilding an
-        // escaping wide value, so the rebuilt Item belongs to the caller.
         jm_sync_emitter_from_compat(mt);
-        em_store_frame_top(&mt->em, mt->side_frame_runtime,
-            offsetof(Context, side_number_top), mt->side_number_frame_base);
+        MIR_reg_t rehomed = em_rehome_scalar_return(&mt->em,
+            mt->side_frame_scalar_return_mode, mt->side_frame_return_reg,
+            mt->side_frame_runtime, offsetof(Context, side_number_top),
+            mt->side_number_frame_base);
         jm_sync_compat_from_emitter(mt);
-
-        MIR_type_t rehome_types[2] = {MIR_T_I64, MIR_T_I64};
-        MIR_op_t rehome_args[2] = {
-            MIR_new_reg_op(mt->ctx, mt->side_frame_return_reg),
-            MIR_new_reg_op(mt->ctx, lane)
-        };
-        MIR_reg_t rehomed = jm_epilogue_call(mt, "lambda_item_from_scalar_lane",
-            MIR_T_I64, 2, rehome_types, rehome_args);
-        jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, mt->side_frame_return_reg),
-            MIR_new_reg_op(mt->ctx, rehomed)));
+        if (rehomed != mt->side_frame_return_reg) {
+            jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, mt->side_frame_return_reg),
+                MIR_new_reg_op(mt->ctx, rehomed)));
+        }
     } else {
         jm_sync_emitter_from_compat(mt);
         em_store_frame_top(&mt->em, mt->side_frame_runtime,

@@ -85,7 +85,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 
 | Type      | Description                      | Example                       |
 | --------- | -------------------------------- | ----------------------------- |
-| `int`     | 56-bit signed integer            | `42`, `-123`                  |
+| `int`     | Integer, float64 safe range ±(2⁵³−1) | `42`, `-123`              |
 | `float`   | 64-bit floating point            | `3.14`, `1e-10`               |
 | `i8` `i16` `i32` | Sized signed integers   | `42i8`, `1000i16`, `100i32`   |
 | `u8` `u16` `u32` | Sized unsigned integers | `255u8`, `60000u16`           |

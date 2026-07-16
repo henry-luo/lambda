@@ -44,7 +44,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 | ---------- | --------------------------- | --------------------- |
 | `null`     | Null/void value             | `null`                |
 | `bool`     | Boolean values              | `true`, `false`       |
-| `int`      | 56-bit signed integers      | `42`, `-123`          |
+| `int`      | Integers, float64 safe range ±(2⁵³−1) | `42`, `-123`          |
 | `integer`  | Arbitrary precision integer | `123n`, `1e3n`        |
 | `float`    | 64-bit floating point       | `3.14`, `1.5e-10`     |
 | `i8` `i16` `i32` | Sized signed integers | `42i8`, `1000i16`     |

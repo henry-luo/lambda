@@ -568,9 +568,8 @@ static void begin_function_epilogue(MirTranspiler* mt, MIR_type_t return_type,
     mt->function_return_mir_type = return_type;
     mt->function_return_reg = new_reg(mt, "return_value", return_type);
     mt->function_return_lane_kind = lane_kind;
-    mt->function_return_second_reg = lane_kind != RETURN_LANE_NONE
-        ? new_reg(mt, lane_kind == RETURN_LANE_ERROR ? "return_error" : "return_scalar",
-                  MIR_T_I64)
+    mt->function_return_second_reg = lane_kind == RETURN_LANE_ERROR
+        ? new_reg(mt, "return_error", MIR_T_I64)
         : 0;
     mt->function_return_active = true;
 }
@@ -609,7 +608,7 @@ static void emit_number_frame_enter(MirTranspiler* mt) {
     mt->side_number_frame_base = em_load_frame_top(&mt->em,
         mt->side_root_runtime, offsetof(Context, side_number_top),
         "number_frame");
-    mt->side_number_frame_slots = mt->function_return_lane_kind == RETURN_LANE_NONE ? 0 : 1;
+    mt->side_number_frame_slots = mt->function_return_lane_kind == RETURN_LANE_ERROR ? 1 : 0;
     if (mt->side_number_frame_slots > 0) {
         MIR_reg_t new_top = new_reg(mt, "number_top", MIR_T_I64);
         MIR_reg_t limit = new_reg(mt, "number_limit", MIR_T_I64);
@@ -682,22 +681,14 @@ static void emit_number_frame_exit(MirTranspiler* mt) {
 
 static void finish_function_epilogue(MirTranspiler* mt) {
     emit_label(mt, mt->function_return_label);
-    if (mt->function_return_lane_kind == RETURN_LANE_SCALAR) {
-        MIR_reg_t scalar = emit_call_1(mt, "lambda_item_scalar_lane", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->function_return_reg));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, mt->function_return_second_reg),
-            MIR_new_reg_op(mt->ctx, scalar)));
-    }
-    if (mt->function_return_lane_kind != RETURN_LANE_NONE) {
+    if (mt->function_return_lane_kind == RETURN_LANE_ERROR) {
         MIR_insn_code_t first_store = mt->function_return_mir_type == MIR_T_D
             ? MIR_DMOV : MIR_MOV;
         MIR_type_t first_type = mt->function_return_mir_type == MIR_T_D
             ? MIR_T_D : MIR_T_I64;
         // MIR's multi-result ARM64 lowering loses the first lane when a nested
-        // call feeds it. Keep the primary result in the frame's reserved raw
-        // scratch slot until cleanup, and publish the secondary lane through
-        // the per-context handoff cell after cleanup.
+        // call feeds it. The error ABI still uses the reserved scratch slot;
+        // scalar returns are single-lane after frame-slot donation.
         emit_insn(mt, MIR_new_insn(mt->ctx, first_store,
             MIR_new_mem_op(mt->ctx, first_type, 0,
                 mt->side_number_frame_base, 0, 1),
@@ -706,10 +697,17 @@ static void finish_function_epilogue(MirTranspiler* mt) {
     // Cleanup is emitted before each branch here; restoring the root watermark
     // last keeps the in-flight return value live across cleanup calls that may collect.
     if (mt->jit_root_next > 0) emit_jit_root_frame_exit(mt);
-    // The scalar/error lane is register-resident before the number watermark is
-    // restored, so no returned Item can point into the dead callee extent.
-    emit_number_frame_exit(mt);
-    if (mt->function_return_lane_kind != RETURN_LANE_NONE) {
+    if (mt->function_return_lane_kind == RETURN_LANE_SCALAR) {
+        // Boxed returns become caller-owned before the callee number extent is
+        // released, eliminating the scalar side channel and rebuild helper.
+        MIR_reg_t rehomed = em_rehome_scalar_return(&mt->em,
+            MIR_SCALAR_RETURN_DYNAMIC, mt->function_return_reg,
+            mt->side_root_runtime, offsetof(Context, side_number_top),
+            mt->side_number_frame_base);
+        emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
+            MIR_new_reg_op(mt->ctx, rehomed)));
+    } else if (mt->function_return_lane_kind == RETURN_LANE_ERROR) {
+        emit_number_frame_exit(mt);
         MIR_reg_t first = new_reg(mt, "return_first_final", mt->function_return_mir_type);
         MIR_insn_code_t first_load = mt->function_return_mir_type == MIR_T_D
             ? MIR_DMOV : MIR_MOV;
@@ -725,6 +723,7 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
             MIR_new_reg_op(mt->ctx, first)));
     } else {
+        emit_number_frame_exit(mt);
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
             MIR_new_reg_op(mt->ctx, mt->function_return_reg)));
     }
@@ -819,16 +818,14 @@ static void finalize_side_root_frame(MirTranspiler* mt) {
     emit_label(mt, overflow_label);
     emit_call_void_1(mt, "lambda_stack_overflow_error",
         MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)"side-stack"));
-    if (mt->function_return_lane_kind != RETURN_LANE_NONE) {
+    if (mt->function_return_lane_kind == RETURN_LANE_ERROR) {
         MIR_op_t first = mt->side_root_return_type == MIR_T_D
             ? MIR_new_double_op(mt->ctx, 0.0)
             : MIR_new_uint_op(mt->ctx, ITEM_ERROR);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, mir_return_lane),
                 mt->side_root_runtime, 0, 1),
-            mt->function_return_lane_kind == RETURN_LANE_ERROR
-                ? MIR_new_uint_op(mt->ctx, ITEM_ERROR)
-                : MIR_new_int_op(mt->ctx, 0)));
+            MIR_new_uint_op(mt->ctx, ITEM_ERROR)));
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, first));
     } else if (mt->side_root_return_type == MIR_T_D) {
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
@@ -8808,7 +8805,6 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             bool call_native_return = (native_call && call_nfi->return_type != LMD_TYPE_ANY);
             MIR_type_t ret_type = call_native_return ? call_nfi->return_mir : MIR_T_I64;
             bool call_error_lane = call_native_return && call_fn_type && call_fn_type->can_raise;
-            bool call_scalar_lane = !call_native_return;
             int call_result_count = 1;
 
             // Create proto for the call (unique name per call site)
@@ -8836,9 +8832,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_reg_t result = new_reg(mt, "call", ret_type);
             ops[2] = MIR_new_reg_op(mt->ctx, result);
             MIR_reg_t second_result = 0;
-            if (call_error_lane || call_scalar_lane) {
-                second_result = new_reg(mt,
-                    call_error_lane ? "call_error" : "call_scalar", MIR_T_I64);
+            if (call_error_lane) {
+                second_result = new_reg(mt, "call_error", MIR_T_I64);
             }
             for (int i = 0; i < ai; i++) {
                 if (arg_root_slots[i] >= 0) {
@@ -8860,11 +8855,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             }
 
             bool result_is_boxed = !call_native_return;
-            if (call_scalar_lane) {
-                result = emit_call_2(mt, "lambda_item_from_scalar_lane", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, second_result));
-            } else if (call_error_lane) {
+            if (call_error_lane) {
                 MIR_reg_t boxed_native = emit_box(mt, result, call_nfi->return_type);
                 MIR_reg_t merged = new_reg(mt, "call_value_or_error", MIR_T_I64);
                 MIR_label_t use_error = new_label(mt);
@@ -11869,9 +11860,8 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     MIR_reg_t result = new_reg(mt, "wres", raw_ret);
     ops[2] = MIR_new_reg_op(mt->ctx, result);
     MIR_reg_t second_result = 0;
-    if (raw_lane_kind != RETURN_LANE_NONE) {
-        second_result = new_reg(mt,
-            raw_lane_kind == RETURN_LANE_ERROR ? "werr" : "wscalar", MIR_T_I64);
+    if (raw_lane_kind == RETURN_LANE_ERROR) {
+        second_result = new_reg(mt, "werr", MIR_T_I64);
     }
     for (int i = 0; i < call_arg_count; i++) {
         ops[2 + raw_result_count + i] = call_args[i];
@@ -11894,11 +11884,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     }
 
     MIR_reg_t boxed_result;
-    if (raw_lane_kind == RETURN_LANE_SCALAR) {
-        boxed_result = emit_call_2(mt, "lambda_item_from_scalar_lane", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, second_result));
-    } else if (native_return) {
+    if (native_return) {
         boxed_result = emit_box(mt, result, nfi->return_type);
         if (raw_lane_kind == RETURN_LANE_ERROR) {
             MIR_label_t normal = new_label(mt);
@@ -11910,6 +11896,8 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
             emit_label(mt, normal);
         }
     } else {
+        // The raw boxed callee donates any escaping number slot, so wrappers
+        // can forward its single caller-owned Item unchanged.
         boxed_result = result;
     }
     emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
@@ -12740,7 +12728,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     finalize_async_frame_enter(mt);
 
     log_frame_slot_counts(name_buf->str, mt->jit_root_next,
-        return_lane_kind == RETURN_LANE_NONE ? 0 : 1);
+        return_lane_kind == RETURN_LANE_ERROR ? 1 : 0);
 
     pop_scope(mt);
 

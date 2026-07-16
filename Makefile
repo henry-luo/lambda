@@ -499,7 +499,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup docs intellisense analyze-binary \
 	    build-debug build-release build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
-	    generate-premake clean-premake build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline \
+	    generate-premake clean-premake build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
@@ -557,7 +557,8 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
-	@echo "  test-radiant-baseline - Run RADIANT layout baseline (baseline, wpt-css-text, pretext, form, wpt-css-multicol, puppertino) + render visual + other checks"
+	@echo "  test-radiant-baseline - Run shared layout baselines ($(LAYOUT_BASELINE_SUITES)) + render visual + other checks"
+	@echo "  test-layout-baseline - Run the shared layout baseline suites only"
 	@echo "  test-radiant-online - Run Radiant online URL smoke tests"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
@@ -1212,8 +1213,43 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo "=============================================================="; \
 	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
-# Layout baseline suites - add new suites here (each must have baseline.txt in its data dir)
+# Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
 LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-text wpt-css-inline wpt-css-images wpt-css-multicol puppertino markdown
+LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only
+LAYOUT_BASELINE_RESULTS = temp/_layout_baseline_results.txt
+
+# Run the shared layout baseline inventory without building. Suites with a
+# recorded baseline run only those entries; suites without one run in full.
+run-layout-baseline-suites:
+	@mkdir -p temp; \
+	> $(LAYOUT_BASELINE_RESULTS); \
+	any_failed=0; \
+	echo ""; \
+	echo "📦 Layout Baseline Tests:"; \
+	for suite in $(LAYOUT_BASELINE_SUITES); do \
+		echo ""; \
+		echo "  ▸ $$suite:"; \
+		layout_log="temp/_layout_baseline_$${suite}.log"; \
+		rm -f "$$layout_log"; \
+		layout_exit=0; \
+		$(LAYOUT_BASELINE_RUNNER) -c "$$suite" > "$$layout_log" 2>&1 || layout_exit=$$?; \
+		grep -E "Baseline-only:|No recorded baseline" "$$layout_log" | head -1 || true; \
+		tail -8 "$$layout_log"; \
+		s_passed=$$(grep "Successful:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
+		s_skipped=$$(grep "Skipped:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_skipped=$${s_skipped:-0}; \
+		s_failed=0; \
+		s_status="✅ PASS"; \
+		if grep -q "Baseline Regressions" "$$layout_log"; then \
+			s_failed=$$(grep "Baseline Regressions" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_failed=$${s_failed:-1}; \
+			s_status="❌ FAIL"; any_failed=1; \
+		elif [ $$layout_exit -ne 0 ] || ! grep -q "Successful:" "$$layout_log"; then \
+			s_failed=$$(grep "Failed:" "$$layout_log" | grep -oE "[0-9]+" | tail -1); s_failed=$${s_failed:-1}; \
+			s_status="❌ FAIL"; any_failed=1; \
+		fi; \
+		echo "$$suite|$$s_status|$$s_passed|$$s_failed|$$s_skipped" >> $(LAYOUT_BASELINE_RESULTS); \
+		rm -f "$$layout_log"; \
+	done; \
+	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-radiant-baseline: build-radiant-baseline
 	@$(MAKE) --no-print-directory run-radiant-baseline
@@ -1233,7 +1269,6 @@ run-radiant-baseline:
 	layout_total_passed=0; layout_total_failed=0; layout_total_skipped=0; \
 	layout_overall_status="✅ PASS"; \
 	mkdir -p temp; \
-	> temp/_layout_baseline_results.txt; \
 	run_logged() { \
 		log_file="$$1"; shift; \
 		rm -f "$$log_file"; \
@@ -1245,33 +1280,15 @@ run-radiant-baseline:
 	echo "🧪 RADIANT BASELINE TEST SUITE"; \
 	echo "=============================================================="; \
 	\
-	echo ""; \
-	echo "📦 Layout Baseline Tests:"; \
-	for suite in $(LAYOUT_BASELINE_SUITES); do \
-		echo ""; \
-		echo "  ▸ $$suite:"; \
-		layout_log="temp/_layout_baseline_$${suite}.log"; \
-		rm -f "$$layout_log"; \
-		layout_exit=0; \
-		$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js -c "$$suite" > "$$layout_log" 2>&1 || layout_exit=$$?; \
-		tail -8 "$$layout_log"; \
-		s_passed=$$(grep "Successful:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
-		s_skipped=$$(grep "Skipped:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_skipped=$${s_skipped:-0}; \
-		s_failed=0; \
-		s_status="✅ PASS"; \
-		if grep -q "Baseline Regressions" "$$layout_log"; then \
-			s_failed=$$(grep "Baseline Regressions" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_failed=$${s_failed:-1}; \
-			s_status="❌ FAIL"; any_failed=1; layout_overall_status="❌ FAIL"; \
-		elif [ $$layout_exit -ne 0 ] || ! grep -q "Successful:" "$$layout_log"; then \
-			s_failed=1; \
-			s_status="❌ FAIL"; any_failed=1; layout_overall_status="❌ FAIL"; \
-		fi; \
+	layout_run_exit=0; \
+	$(MAKE) --no-print-directory run-layout-baseline-suites || layout_run_exit=$$?; \
+	while IFS='|' read -r suite s_status s_passed s_failed s_skipped; do \
 		layout_total_passed=$$((layout_total_passed + s_passed)); \
 		layout_total_failed=$$((layout_total_failed + s_failed)); \
 		layout_total_skipped=$$((layout_total_skipped + s_skipped)); \
-		echo "$$suite|$$s_status|$$s_passed|$$s_failed|$$s_skipped" >> temp/_layout_baseline_results.txt; \
-		rm -f "$$layout_log"; \
-	done; \
+		if [ "$$s_status" = "❌ FAIL" ]; then layout_overall_status="❌ FAIL"; any_failed=1; fi; \
+	done < $(LAYOUT_BASELINE_RESULTS); \
+	if [ $$layout_run_exit -ne 0 ]; then layout_overall_status="❌ FAIL"; any_failed=1; fi; \
 	\
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
@@ -1411,11 +1428,11 @@ run-radiant-baseline:
 	while IFS='|' read -r sname sstatus spassed sfailed sskipped; do \
 		suite_idx=$$((suite_idx + 1)); \
 		if [ $$suite_idx -eq $$suite_count ]; then \
-			printf "   │   └── %-14s $$sstatus  ($$spassed passed, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname"; \
+			printf "   │   └── %-14s $$sstatus  ($$spassed passed, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js --baseline-only -c $$sname)\n" "$$sname"; \
 		else \
-			printf "   │   ├── %-14s $$sstatus  ($$spassed passed, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname"; \
+			printf "   │   ├── %-14s $$sstatus  ($$spassed passed, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js --baseline-only -c $$sname)\n" "$$sname"; \
 		fi; \
-	done < temp/_layout_baseline_results.txt; \
+	done < $(LAYOUT_BASELINE_RESULTS); \
 	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
 	echo "   ├── Radiant View Cmd    $$radiant_view_status  ($$radiant_view_passed passed, $$radiant_view_failed failed) (test_radiant_view_gtest.exe)"; \
@@ -1434,13 +1451,16 @@ run-radiant-baseline:
 		echo "   ⏭️  Skipped:  $$total_skipped"; \
 	fi; \
 	echo "=============================================================="; \
-	rm -f temp/_layout_baseline_results.txt; \
+	rm -f $(LAYOUT_BASELINE_RESULTS); \
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-layout-baseline: build-test
 	@echo "Running Radiant layout BASELINE test suite..."
 	@echo "=============================================================="
-	@$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js -c baseline
+	@layout_exit=0; \
+	$(MAKE) --no-print-directory run-layout-baseline-suites || layout_exit=$$?; \
+	rm -f $(LAYOUT_BASELINE_RESULTS); \
+	if [ $$layout_exit -ne 0 ]; then exit $$layout_exit; fi
 	@if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
 		echo "Running page suite snapshot regression check..."; \

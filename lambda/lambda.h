@@ -861,8 +861,6 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
                            int64_t index, Item item);
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
-uint64_t lambda_item_scalar_lane(Item item);
-Item lambda_item_from_scalar_lane(Item item, uint64_t scalar_lane);
 Item lambda_item_heap_rehome(Item item);
 #ifdef __cplusplus
 }
