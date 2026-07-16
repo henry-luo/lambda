@@ -15,7 +15,7 @@ static bool validate_tree_callback(StyleNode* node, void* context);
 static bool merge_tree_callback(StyleNode* node, void* context);
 static bool clone_tree_callback(StyleNode* node, void* context);
 static bool wrapper_callback(AvlNode* avl_node, void* ctx);
-static int css_get_cascade_level(CssDeclaration* decl);
+static int css_get_cascade_level(const CssDeclaration* decl);
 
 // Context structures for callbacks
 struct CollectContext {
@@ -147,7 +147,7 @@ void css_declaration_unref(CssDeclaration* declaration) {
     }
 }
 
-int css_declaration_cascade_compare(CssDeclaration* a, CssDeclaration* b) {
+int css_declaration_cascade_compare(const CssDeclaration* a, const CssDeclaration* b) {
     if (!a || !b) return 0;
 
     // CSS Cascade Order (per CSS Cascading and Inheritance Level 4):
@@ -181,7 +181,7 @@ int css_declaration_cascade_compare(CssDeclaration* a, CssDeclaration* b) {
 }
 
 // Helper function to determine cascade level
-static int css_get_cascade_level(CssDeclaration* decl) {
+static int css_get_cascade_level(const CssDeclaration* decl) {
     if (decl->specificity.important) {
         // Important declarations (reverse origin order)
         // Note: Inline !important is still author !important but with inline_style flag

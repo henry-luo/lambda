@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
+#include "font_weight.h"
 
 // Include Lambda data structures
 #include "../arraylist.h"

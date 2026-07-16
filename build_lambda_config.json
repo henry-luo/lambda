@@ -3681,6 +3681,10 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
+                        "additional_sources": [
+                            "lambda/input/css/css_font_face.cpp",
+                            "lambda/network/font_resource_faces.cpp"
+                        ],
                         "binary": "test_css_parser_unit.exe",
                         "icon": "🎨"
                     },

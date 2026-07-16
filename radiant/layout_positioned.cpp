@@ -628,6 +628,36 @@ static TextDirection get_static_position_direction(ViewElement* parent) {
     return static_direction;
 }
 
+static bool positioned_element_is_replaced(ViewBlock* block) {
+    if (!block) return false;
+    bool is_form_control =
+        block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form;
+    return block->display.inner == RDT_DISPLAY_REPLACED ||
+        block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
+        block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
+        (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
+        is_form_control;
+}
+
+static bool positioned_height_is_auto(ViewBlock* block) {
+    if (!block || !block->specified_style) return true;
+    CssDeclaration* height_decl = style_tree_get_declaration(
+        block->specified_style, CSS_PROPERTY_HEIGHT);
+    // an absent declaration is the initial auto value; the style API returns it as raw text.
+    return !height_decl || !height_decl->value ||
+        (height_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+         height_decl->value->data.keyword == CSS_VALUE_AUTO);
+}
+
+static float positioned_inset_stretch_css_height(ViewBlock* block, float cb_height,
+    float margin_top, float margin_bottom, float* border_box_height_out) {
+    float border_box_height = max(cb_height - block->position->top -
+        block->position->bottom - margin_top - margin_bottom, 0.0f);
+    if (border_box_height_out) *border_box_height_out = border_box_height;
+    return layout_uses_border_box(block) ? border_box_height :
+        layout_content_height_from_border_box(block, border_box_height);
+}
+
 static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
     TextDirection static_direction, bool was_inline) {
     float line_x = was_inline ? pa_line->advance_x : pa_line->left;
@@ -722,6 +752,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // re-resolve percentage width/height against the actual containing block
     layout_resolve_percent_size_for_child(lycon, block, cb, false, "abspos child");
 
+    // abspos percentage margins and padding use the containing block's padding-box width.
+    layout_reresolve_percentage_box(block, cb_width);
+
     // CSS 2.1 §10.3.8: For absolutely positioned replaced elements with
     // 'width: auto', use the intrinsic width. §10.6.5: Same for height.
     // Replaced elements include iframe (300x150), img (intrinsic from image).
@@ -763,11 +796,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // the auto fallback, but auto sizes with both insets stretch like non-replaced boxes.
     bool is_form_control_replaced =
         block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form;
-    bool is_replaced = (block->display.inner == RDT_DISPLAY_REPLACED) ||
-                       (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
-                        block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-                        (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data"))) ||
-                       is_form_control_replaced;
+    bool is_replaced = positioned_element_is_replaced(block);
 
     float h_border_padding = layout_padding_border_width(block);
 
@@ -996,7 +1025,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     log_debug("[ABS POS] height calc: given_height=%.1f, has_top=%d, has_bottom=%d, cb_height=%.1f",
               lycon->block.given_height, block->position->has_top, block->position->has_bottom, cb_height);
-    bool height_is_auto = block->blk && block->blk->given_height_type == CSS_VALUE_AUTO;
+    bool height_is_auto = positioned_height_is_auto(block);
     bool stretch_form_height = is_form_control_replaced && height_is_auto &&
         block->position->has_top && block->position->has_bottom;
     bool has_height = (lycon->block.given_height >= 0 && !height_is_auto);
@@ -1022,10 +1051,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float margin_bottom = has_auto_margin_bottom ? 0 : (block->bound ? block->bound->margin.bottom : 0);
         float top_edge = block->position->top + margin_top;
         float bottom_edge = cb_height - block->position->bottom - margin_bottom;
-        float border_box_height = max(bottom_edge - top_edge, 0.0f);
-        bool is_border_box = layout_uses_border_box(block);
-        content_height = is_border_box ? border_box_height :
-            layout_content_height_from_border_box(block, border_box_height);
+        float border_box_height = 0.0f;
+        content_height = positioned_inset_stretch_css_height(block, cb_height,
+            margin_top, margin_bottom, &border_box_height);
         // CRITICAL: Store constraint-calculated height so finalize_block_flow knows height is fixed
         lycon->block.given_height = content_height;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
@@ -1198,6 +1226,29 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
         // Re-resolve percentage bottom
         if (child->position && child->position->has_bottom && !isnan(child->position->bottom_percent)) {
             child->position->bottom = child->position->bottom_percent * cb_height / 100.0f;
+        }
+
+        bool is_form_control = child->item_prop_type == DomElement::ITEM_PROP_FORM && child->form;
+        if (child->position && child->position->has_top && child->position->has_bottom &&
+            positioned_height_is_auto(child) &&
+            (!positioned_element_is_replaced(child) || is_form_control)) {
+            float margin_top = child->bound && child->bound->margin.top_type != CSS_VALUE_AUTO
+                ? child->bound->margin.top : 0.0f;
+            float margin_bottom = child->bound && child->bound->margin.bottom_type != CSS_VALUE_AUTO
+                ? child->bound->margin.bottom : 0.0f;
+            bool is_border_box = layout_uses_border_box(child);
+            float css_height = positioned_inset_stretch_css_height(child, cb_height,
+                margin_top, margin_bottom, nullptr);
+            css_height = adjust_min_max_height(child, css_height);
+            float content_height = is_border_box && child->bound
+                ? adjust_border_padding_height(child, css_height) : css_height;
+            float pad_border = child->bound ? layout_box_metrics(child).pad_border_v : 0.0f;
+            child->height = content_height + pad_border;
+            child->y = cb.padding_y + child->position->top + margin_top;
+            if (child->blk) child->blk->given_height = css_height;
+            // an auto-height containing block defers inset stretching until its used height exists.
+            log_debug("[ABS RE-RESOLVE] inset-stretched height for %s: cb=%.1f, height=%.1f, y=%.1f",
+                child->node_name(), cb_height, child->height, child->y);
         }
 
         // If bottom is specified but not top, recompute y from bottom edge.
@@ -1838,17 +1889,26 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             float padding_bottom = block->bound ? block->bound->padding.bottom : 0;
             float border_bottom = (block->bound && block->bound->border) ? block->bound->border->width.bottom : 0;
 
-            // Extract content height from advance_y (which includes top border+padding)
-            float content_height = flow_height - padding_top - border_top;
-            if (content_height < 0) content_height = 0;
+            float pad_border_height = padding_top + padding_bottom + border_top + border_bottom;
+            if (layout_uses_border_box(block)) {
+                // border-box min/max constraints already include padding and border.
+                float border_box_height = flow_height + padding_bottom + border_bottom;
+                block->height = adjust_min_max_height(block, border_box_height);
+                log_debug("auto-sizing border-box height: flow_height=%f, padding+border=%f, total=%f",
+                          flow_height, pad_border_height, block->height);
+            } else {
+                // Extract content height from advance_y (which includes top border+padding)
+                float content_height = flow_height - padding_top - border_top;
+                if (content_height < 0) content_height = 0;
 
-            // CSS 2.1 §10.7: Apply min-height/max-height constraints to content height
-            content_height = adjust_min_max_height(block, content_height);
+                // CSS 2.1 §10.7: Apply min-height/max-height constraints to content height
+                content_height = adjust_min_max_height(block, content_height);
 
-            // Recompute border-box height
-            block->height = content_height + padding_top + border_top + padding_bottom + border_bottom;
-            log_debug("auto-sizing height: flow_height=%f, content_height=%f (after min/max), adding padding=%f+%f, border=%f+%f, total=%f",
-                flow_height, content_height, padding_top, padding_bottom, border_top, border_bottom, block->height);
+                // Recompute border-box height
+                block->height = content_height + pad_border_height;
+                log_debug("auto-sizing height: flow_height=%f, content_height=%f (after min/max), adding padding+border=%f, total=%f",
+                          flow_height, content_height, pad_border_height, block->height);
+            }
         }
 
         // BFC height expansion: if floats extend beyond flow content, expand height

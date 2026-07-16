@@ -2025,6 +2025,24 @@ static int rule_list_compare(const void* a, const void* b, void* udata) {
     return strcmp(ea->key, eb->key);
 }
 
+static uint64_t tag_rule_list_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    (void)seed0;
+    (void)seed1;
+    const RuleListEntry* entry = (const RuleListEntry*)item;
+    if (!entry || !entry->key) return 0;
+    return str_ihash(entry->key, strlen(entry->key));
+}
+
+static int tag_rule_list_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const RuleListEntry* ea = (const RuleListEntry*)a;
+    const RuleListEntry* eb = (const RuleListEntry*)b;
+    if (!ea->key && !eb->key) return 0;
+    if (!ea->key) return -1;
+    if (!eb->key) return 1;
+    return str_icmp(ea->key, strlen(ea->key), eb->key, strlen(eb->key));
+}
+
 // Hash function for CssRule pointers (for seen-set)
 static uint64_t rule_ptr_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const CssRule* ptr = *(const CssRule**)item;
@@ -2124,7 +2142,9 @@ static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool
     if (!index) return nullptr;
 
     index->pool = pool;
-    index->by_tag = hashmap_new(sizeof(RuleListEntry), 64, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
+    // html type selectors are ASCII case-insensitive; the candidate index must preserve that equivalence.
+    index->by_tag = hashmap_new(sizeof(RuleListEntry), 64, 0, 0,
+                                tag_rule_list_hash, tag_rule_list_compare, nullptr, nullptr);
     index->by_class = hashmap_new(sizeof(RuleListEntry), 64, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
     index->by_id = hashmap_new(sizeof(RuleListEntry), 32, 0, 0, rule_list_hash, rule_list_compare, nullptr, nullptr);
     index->universal = arraylist_new(16);

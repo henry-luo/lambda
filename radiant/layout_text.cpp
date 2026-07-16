@@ -2267,12 +2267,13 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
                                       const unsigned char* text_end, CssEnum text_transform) {
     float width = 0.0f;
     bool word_start = true;
+    uint32_t prev_codepoint = 0;
 
     // Skip leading spaces — they are break opportunities, not part of the word
     while (*str && is_space(*str)) str++;
     if (!*str) return 0.0f;
 
-    {
+    while (str < text_end && *str && !is_space(*str)) {
         int shaped_bytes = 0;
         float shaped_width = 0.0f;
         uint32_t first_cp = 0;
@@ -2280,14 +2281,14 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
         if (measure_shaped_simple_latin_run(lycon, str, text_end, text_transform,
                                             false, false, false, &shaped_bytes,
                                             &shaped_width, &first_cp, &last_cp)) {
-            const unsigned char* shaped_end = str + shaped_bytes;
-            if (shaped_end >= text_end || !*shaped_end || is_space(*shaped_end)) {
-                return shaped_width;
-            }
+            // mixed words must use the same shaped Latin runs and boundary kerning as real layout.
+            width += text_kerning_adjustment(lycon, prev_codepoint, first_cp) + shaped_width;
+            prev_codepoint = last_cp;
+            word_start = false;
+            str += shaped_bytes;
+            continue;
         }
-    }
 
-    while (str < text_end && *str && !is_space(*str)) {
         uint32_t codepoint = *str;
         int char_bytes = 1;
         if (codepoint >= 128) {
@@ -2353,7 +2354,9 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
             char_width = (ginfo.id != 0) ? ginfo.advance_x * sc_scale
                                          : lycon->font.current_font_size * sc_scale;
         }
-        width += char_width + lycon->font.style->letter_spacing;
+        width += text_kerning_adjustment(lycon, prev_codepoint, codepoint)
+            + char_width + lycon->font.style->letter_spacing;
+        prev_codepoint = codepoint;
         str += char_bytes;
     }
     return width;

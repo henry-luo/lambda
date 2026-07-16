@@ -1018,7 +1018,9 @@ static void render_text_decorations(RenderContext* rdcon, unsigned char* str, Te
     float thickness = rdcon->font.style->text_deco_thickness > 0
         ? rdcon->font.style->text_deco_thickness
         : fmaxf(deco_m ? deco_m->underline_thickness : 1.0f, 1.0f);
-    thickness = fmaxf(roundf(thickness), 1.0f);
+    // fractional font underline thickness covers the next device pixel; rounding
+    // down makes auto decorations thinner than the browser's rasterized stroke.
+    thickness = fmaxf(ceilf(thickness), 1.0f);
 
     Color deco_color = rdcon->font.style->text_deco_color.a > 0
         ? rdcon->font.style->text_deco_color

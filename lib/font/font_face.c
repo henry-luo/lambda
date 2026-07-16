@@ -112,15 +112,6 @@ bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
     return true;
 }
 
-// ============================================================================
-// Weight distance scoring for CSS font matching
-// ============================================================================
-
-static int weight_distance(FontWeight a, FontWeight b) {
-    int d = abs((int)a - (int)b);
-    return d;
-}
-
 static int slant_distance(FontSlant a, FontSlant b) {
     if (a == b) return 0;
     return 100; // penalty for slant mismatch
@@ -135,7 +126,7 @@ const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* famil
     if (!ctx || !family) return NULL;
 
     const FontFaceEntry* best = NULL;
-    int best_score = INT32_MAX;
+    int best_slant_distance = INT32_MAX;
 
     for (int i = 0; i < ctx->face_descriptor_count; i++) {
         FontFaceEntry* entry = ctx->face_descriptors[i];
@@ -144,11 +135,13 @@ const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* famil
         // family must match (case-insensitive)
         if (str_icmp(entry->family, strlen(entry->family), family, strlen(family)) != 0) continue;
 
-        // compute distance (lower is better)
-        int score = weight_distance(entry->weight, weight) +
-                    slant_distance(entry->slant, slant);
-        if (score < best_score) {
-            best_score = score;
+        int entry_slant_distance = slant_distance(entry->slant, slant);
+        if (!best || entry_slant_distance < best_slant_distance ||
+            (entry_slant_distance == best_slant_distance &&
+             font_css_weight_is_better((int)weight, (int)entry->weight,
+                                       (int)best->weight))) {
+            // css searches weights directionally; equal numeric distance must not let source order win.
+            best_slant_distance = entry_slant_distance;
             best = entry;
         }
     }

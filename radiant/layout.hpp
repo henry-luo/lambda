@@ -2134,6 +2134,9 @@ bool block_context_establishes_bfc(ViewBlock* block);
  */
 void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem);
 
+// recompute the cached lowest edge after existing float boxes are translated.
+void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
+
 /**
  * Position and add a float at the current layout position
  * Implements CSS 2.2 Section 9.5.1 Rules

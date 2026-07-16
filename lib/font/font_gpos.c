@@ -182,8 +182,10 @@ static void collect_pairpos_from_lookup(const uint8_t* gpos_data, uint32_t gpos_
         if (lookup_abs + 6 + (uint32_t)(si + 1) * 2 > gpos_len) break;
         uint16_t st_off = rd16(gpos_data + lookup_abs + 6 + si * 2);
         uint32_t abs_st = lookup_abs + st_off;
+        // each extension sibling has its own wrapper; resolving one must not alter the parent lookup type.
+        uint16_t actual_type = lookup_type;
 
-        if (lookup_type == 9) {
+        if (actual_type == 9) {
             // Extension lookup — resolve to actual subtable
             if (abs_st + 8 > gpos_len) continue;
             uint16_t ext_format = rd16(gpos_data + abs_st);
@@ -192,10 +194,10 @@ static void collect_pairpos_from_lookup(const uint8_t* gpos_data, uint32_t gpos_
             if (ext_format != 1 || ext_type != 2) continue;
             abs_st = abs_st + ext_off;
             if (abs_st + 2 > gpos_len) continue;
-            lookup_type = 2; // treat as PairPos from here
+            actual_type = 2;
         }
 
-        if (lookup_type != 2) continue;
+        if (actual_type != 2) continue;
         if (abs_st + 2 > gpos_len) continue;
 
         uint16_t format = rd16(gpos_data + abs_st);
@@ -248,8 +250,8 @@ static void collect_singlepos_from_lookup(const uint8_t* gpos_data, uint32_t gpo
     }
 }
 
-static bool feature_tag_is_halt(const uint8_t* tag) {
-    return tag[0] == 'h' && tag[1] == 'a' && tag[2] == 'l' && tag[3] == 't';
+static bool feature_tag_is(const uint8_t* tag, const char expected[4]) {
+    return memcmp(tag, expected, 4) == 0;
 }
 
 GposTable* font_gpos_parse(FontTables* tables, void* pool) {
@@ -282,39 +284,34 @@ GposTable* font_gpos_parse(FontTables* tables, void* pool) {
     gpos->gpos_data = gpos_data;
     gpos->gpos_len  = gpos_len;
 
-    // scan all lookups for PairPos (type 2) or Extension (type 9) wrapping PairPos
-    for (int li = 0; li < lookup_count && gpos->num_subs < GPOS_MAX_PAIR_SUBS; li++) {
-        uint16_t lo = rd16(gpos_data + lookup_off + 2 + li * 2);
-        uint32_t abs_lo = (uint32_t)lookup_off + lo;
-        if (abs_lo + 6 > gpos_len) continue;
-
-        uint16_t ltype = rd16(gpos_data + abs_lo);
-        if (ltype == 2 || ltype == 9) {
-            collect_pairpos_from_lookup(gpos_data, gpos_len, abs_lo, gpos);
-        }
-    }
-
-    // collect SinglePos lookups for the 'halt' feature. CSS text-spacing-trim
-    // relies on this half-width punctuation adjustment in the WPT CJK fonts.
+    // only feature-referenced lookups are active; treating PairPos lookups from
+    // unrelated features as kerning applies positioning that CSS never enabled.
     if ((uint32_t)feat_off + 2 <= gpos_len) {
         uint16_t feature_count = rd16(gpos_data + feat_off);
         if ((uint32_t)feat_off + 2 + (uint32_t)feature_count * 6 <= gpos_len) {
-            for (int fi = 0; fi < feature_count && gpos->num_halt_subs < GPOS_MAX_SINGLE_SUBS; fi++) {
+            for (int fi = 0; fi < feature_count; fi++) {
                 uint32_t feature_rec = (uint32_t)feat_off + 2 + (uint32_t)fi * 6;
-                if (!feature_tag_is_halt(gpos_data + feature_rec)) continue;
+                bool is_kern = feature_tag_is(gpos_data + feature_rec, "kern");
+                bool is_halt = feature_tag_is(gpos_data + feature_rec, "halt");
+                if (!is_kern && !is_halt) continue;
                 uint16_t feature_table_off = rd16(gpos_data + feature_rec + 4);
                 uint32_t feature_abs = (uint32_t)feat_off + feature_table_off;
                 if (feature_abs + 4 > gpos_len) continue;
                 uint16_t lookup_index_count = rd16(gpos_data + feature_abs + 2);
                 if (feature_abs + 4 + (uint32_t)lookup_index_count * 2 > gpos_len) continue;
-                for (int li = 0; li < lookup_index_count && gpos->num_halt_subs < GPOS_MAX_SINGLE_SUBS; li++) {
+                for (int li = 0; li < lookup_index_count; li++) {
                     uint16_t lookup_index = rd16(gpos_data + feature_abs + 4 + (uint32_t)li * 2);
                     if (lookup_index >= lookup_count) continue;
                     uint16_t lo = rd16(gpos_data + lookup_off + 2 + (uint32_t)lookup_index * 2);
                     uint32_t abs_lo = (uint32_t)lookup_off + lo;
                     if (abs_lo + 6 > gpos_len) continue;
                     uint16_t ltype = rd16(gpos_data + abs_lo);
-                    if (ltype == 1 || ltype == 9) {
+                    if (is_kern && gpos->num_subs < GPOS_MAX_PAIR_SUBS &&
+                        (ltype == 2 || ltype == 9)) {
+                        collect_pairpos_from_lookup(gpos_data, gpos_len, abs_lo, gpos);
+                    }
+                    if (is_halt && gpos->num_halt_subs < GPOS_MAX_SINGLE_SUBS &&
+                        (ltype == 1 || ltype == 9)) {
                         collect_singlepos_from_lookup(gpos_data, gpos_len, abs_lo, gpos);
                     }
                 }

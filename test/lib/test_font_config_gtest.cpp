@@ -29,6 +29,15 @@ TEST_F(FontConfigTest, DatabaseCreation) {
     EXPECT_EQ(font_database_get_family_count(db), 0);
 }
 
+TEST_F(FontConfigTest, CssWeightSearchOrder) {
+    // css weight matching is directional, so equidistant faces are not interchangeable.
+    EXPECT_TRUE(font_css_weight_is_better(600, 700, 500));
+    EXPECT_FALSE(font_css_weight_is_better(600, 500, 700));
+    EXPECT_TRUE(font_css_weight_is_better(400, 500, 300));
+    EXPECT_TRUE(font_css_weight_is_better(500, 400, 600));
+    EXPECT_TRUE(font_css_weight_is_better(300, 100, 400));
+}
+
 TEST_F(FontConfigTest, AddScanDirectory) {
     font_add_scan_directory(db, "/System/Library/Fonts");
     // Just test that it doesn't crash - we can't easily verify the internal state
