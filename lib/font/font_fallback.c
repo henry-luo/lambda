@@ -30,7 +30,12 @@ static const char* serif_fonts[] = {
     "Georgia", "DejaVu Serif", NULL
 };
 static const char* sans_serif_fonts[] = {
+#ifdef __APPLE__
+    // macOS browsers resolve the CSS sans-serif generic to Helvetica.
+    "Helvetica", "Arial", "Liberation Sans", "Nimbus Sans",
+#else
     "Arial", "Liberation Sans", "Helvetica", "Nimbus Sans",
+#endif
     "DejaVu Sans", NULL
 };
 static const char* monospace_fonts[] = {
