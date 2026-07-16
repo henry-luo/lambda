@@ -45,5 +45,10 @@ workspace "Order platform" {
       include *
       autoLayout lr
     }
+    deployment * production "ProductionApi" {
+      include "element.technology==Lambda" production.region.gateway
+      exclude production.region.application.auditInstance
+      autoLayout lr
+    }
   }
 }

@@ -3642,7 +3642,8 @@ static DomDocument* load_graph_bridge_doc(Url* graph_url, int viewport_width,
         return nullptr;
     }
 
-    char* bridge_source = build_graph_to_html_bridge_script(graph_source, nullptr, "load_html_doc");
+    char* bridge_source = build_graph_to_html_bridge_script(
+        graph_source, nullptr, nullptr, "load_html_doc");
     if (!bridge_source) {
         if (graph_path) mem_free(graph_path);
         return nullptr;
@@ -3680,8 +3681,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
         // Load Lambda script: evaluate script → wrap result → layout
         log_info("[load_html_doc] Detected Lambda script file, using script evaluation pipeline");
         doc = load_lambda_script_doc(full_url, viewport_width, viewport_height, pool);
-    } else if (ext && (strcmp(ext, ".mmd") == 0 || strcmp(ext, ".d2") == 0 ||
-                       strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0)) {
+    } else if (graph_bridge_path_is_graph(doc_url)) {
         log_info("[load_html_doc] Detected graph file, using Lambda graph package pipeline");
         doc = load_graph_bridge_doc(full_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
@@ -6464,6 +6464,7 @@ static bool layout_single_file(
         strcmp(ext, ".wiki") == 0 || strcmp(ext, ".pdf") == 0 ||
         strcmp(ext, ".mmd") == 0 || strcmp(ext, ".d2") == 0 ||
         strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0 ||
+        strcmp(ext, ".dsl") == 0 || strcmp(ext, ".structurizr") == 0 ||
         strcmp(ext, ".svg") == 0 || strcmp(ext, ".png") == 0 ||
         strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0 ||
         strcmp(ext, ".gif") == 0
@@ -6507,8 +6508,7 @@ static bool layout_single_file(
     if (ext && strcmp(ext, ".ls") == 0) {
         log_info("[Layout] Detected Lambda script file, using script evaluation pipeline");
         doc = load_lambda_script_doc(input_url, viewport_width, viewport_height, pool);
-    } else if (ext && (strcmp(ext, ".mmd") == 0 || strcmp(ext, ".d2") == 0 ||
-                       strcmp(ext, ".dot") == 0 || strcmp(ext, ".gv") == 0)) {
+    } else if (graph_bridge_path_is_graph(input_file)) {
         log_info("[Layout] Detected graph file, using Lambda graph package pipeline");
         doc = load_graph_bridge_doc(input_url, viewport_width, viewport_height, pool);
     } else if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {

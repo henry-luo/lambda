@@ -2794,8 +2794,8 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
         ArrayNum* arr = vec.array_num;
         if (arr->get_elem_type() == ELEM_INT) {
             // ELEM_INT (from literals): return content List for spreading
-            List* result = list();
-            for (int64_t i = start; i < end; i++) list_push(result, vector_get(vec, i));
+            Array* result = array();
+            for (int64_t i = start; i < end; i++) array_push(result, vector_get(vec, i));
             result->is_content = 1;
             return { .array = result };
         } else if (arr->get_elem_type() == ELEM_FLOAT64) {
@@ -2809,8 +2809,11 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
         }
     }
     else {
-        List* result = list();
-        for (int64_t i = start; i < end; i++) list_push(result, vector_get(vec, i));
+        Array* result = array();
+        for (int64_t i = start; i < end; i++) {
+            // slice preserves source item boundaries; list_push would merge adjacent strings from split() results.
+            array_push(result, vector_get(vec, i));
+        }
         result->is_content = 1;
         return { .array = result };
     }

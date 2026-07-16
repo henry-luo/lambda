@@ -12,6 +12,7 @@
 {n: len(slice([1, 2, 3, 4], 99))}
 {r: [1, 2, 3, 4].slice(1)}
 {r: [1, 2, 3, 4] |> slice(3)}
+{r: slice(["web", "shop"], 0, 2)}
 
 "=== null ==="
 {r: slice(null, 1)}

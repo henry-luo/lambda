@@ -1,5 +1,6 @@
 workspace "Scoped relationships" {
   !identifiers hierarchical
+  !impliedRelationships false
   model {
     first = softwareSystem "First" {
       api = container "API" {

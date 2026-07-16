@@ -21,12 +21,45 @@ fn selected_tags(expression, prefix) => [
 
 fn issue(code, message) => {code: code, message: message}
 
-fn first_issue(parts, index = 0) {
-  if (index >= len(parts)) { null }
+fn paren_balance(value, index = 0, depth = 0) {
+  if (index >= len(value)) { depth }
   else {
-    let found = validate(parts[index]);
-    if (found != null) { found } else { first_issue(parts, index + 1) }
+    let ch = slice(value, index, index + 1);
+    let next = if (ch == "(") depth + 1 else if (ch == ")") depth - 1 else depth;
+    if (next < 0) { -1 } else { paren_balance(value, index + 1, next) }
   }
+}
+
+fn matching_close(value, index = 1, depth = 1) {
+  if (index >= len(value)) { -1 }
+  else {
+    let ch = slice(value, index, index + 1);
+    let next = if (ch == "(") depth + 1 else if (ch == ")") depth - 1 else depth;
+    if (next == 0) { index } else { matching_close(value, index + 1, next) }
+  }
+}
+
+fn unwrapped(expression) {
+  let value = trim(expression);
+  if (starts_with(value, "(") and matching_close(value) == len(value) - 1) {
+    unwrapped(slice(value, 1, len(value) - 1))
+  } else { value }
+}
+
+fn top_operator(value, operator, index = 0, depth = 0) {
+  if (index > len(value) - len(operator)) { -1 }
+  else {
+    let ch = slice(value, index, index + 1);
+    let next = if (ch == "(") depth + 1 else if (ch == ")") depth - 1 else depth;
+    if (depth == 0 and starts_with(slice(value, index, len(value)), operator)) { index }
+    else { top_operator(value, operator, index + 1, next) }
+  }
+}
+
+fn validate_pair(value, operator, index) {
+  let left = validate(slice(value, 0, index));
+  if (left != null) { left }
+  else { validate(slice(value, index + len(operator), len(value))) }
 }
 
 fn required_value_issue(value, prefix) =>
@@ -111,17 +144,15 @@ fn atomic_issue(expression) {
 }
 
 pub fn validate(expression) {
-  let value = trim(expression);
-  let opens = len(split(value, "("));
-  let closes = len(split(value, ")"));
-  let alternatives = split(value, "||");
-  let terms = split(value, "&&");
-  if (opens != closes)
+  let raw = trim(expression);
+  let balance = paren_balance(raw);
+  let value = unwrapped(raw);
+  let alternative = top_operator(value, "||");
+  let term = top_operator(value, "&&");
+  if (balance != 0)
     issue("structurizr.invalid-expression", "Expression has unbalanced parentheses")
-  else if (opens > 1)
-    issue("structurizr.unsupported-expression", "Parenthesized expressions are not supported")
-  else if (len(alternatives) > 1) first_issue(alternatives)
-  else if (len(terms) > 1) first_issue(terms)
+  else if (alternative >= 0) validate_pair(value, "||", alternative)
+  else if (term >= 0) validate_pair(value, "&&", term)
   else atomic_issue(value)
 }
 
@@ -222,18 +253,18 @@ fn coupled_ids(elements, relationships, expression) {
 }
 
 pub fn element_ids(elements, relationships, expression) {
-  let value = trim(expression);
-  let alternatives = split(value, "||");
-  let terms = split(value, "&&");
-  if (len(alternatives) > 1) ordered_ids(elements, unique([
-    for (part in alternatives) for (id in element_ids(elements, relationships, part)) id
+  let value = unwrapped(expression);
+  let alternative = top_operator(value, "||");
+  let term = top_operator(value, "&&");
+  if (alternative >= 0) ordered_ids(elements, unique([
+    *element_ids(elements, relationships, slice(value, 0, alternative)),
+    *element_ids(elements, relationships,
+      slice(value, alternative + 2, len(value)))
   ]))
-  else if (len(terms) > 1) {
-    let selected = element_ids(elements, relationships, terms[0]);
-    [for (id in selected where len([
-      for (part in slice(terms, 1, len(terms))
-        where contains(element_ids(elements, relationships, part), id)) part
-    ]) == len(terms) - 1) id]
+  else if (term >= 0) {
+    let left = element_ids(elements, relationships, slice(value, 0, term));
+    let right = element_ids(elements, relationships, slice(value, term + 2, len(value)));
+    [for (id in left where contains(right, id)) id]
   }
   else if (starts_with(value, "->") or ends_with(value, "->") or
       starts_with(value, "element==->")) coupled_ids(elements, relationships, value)
@@ -266,20 +297,32 @@ fn relation_atomic_matches(elements, relation, expression) {
 }
 
 pub fn relationship_expression(expression) {
-  let value = trim(expression);
-  starts_with(value, "relationship.") or starts_with(value, "relationship==") or
-    value == "*->*" or (index_of(value, "->") > 0 and not ends_with(value, "->"))
+  let value = unwrapped(expression);
+  let alternative = top_operator(value, "||");
+  let term = top_operator(value, "&&");
+  if (alternative >= 0) {
+    relationship_expression(slice(value, 0, alternative)) or
+      relationship_expression(slice(value, alternative + 2, len(value)))
+  }
+  else if (term >= 0) {
+    relationship_expression(slice(value, 0, term)) or
+      relationship_expression(slice(value, term + 2, len(value)))
+  }
+  else { starts_with(value, "relationship.") or starts_with(value, "relationship==") or
+    value == "*->*" or (index_of(value, "->") > 0 and not ends_with(value, "->")) }
 }
 
 pub fn relationship_matches(elements, relation, expression) {
-  let value = trim(expression);
-  let alternatives = split(value, "||");
-  let terms = split(value, "&&");
-  if (len(alternatives) > 1) len([
-    for (part in alternatives where relationship_matches(elements, relation, part)) part
-  ]) > 0
-  else if (len(terms) > 1) len([
-    for (part in terms where relationship_matches(elements, relation, part)) part
-  ]) == len(terms)
-  else relation_atomic_matches(elements, relation, value)
+  let value = unwrapped(expression);
+  let alternative = top_operator(value, "||");
+  let term = top_operator(value, "&&");
+  if (alternative >= 0) {
+    relationship_matches(elements, relation, slice(value, 0, alternative)) or
+      relationship_matches(elements, relation, slice(value, alternative + 2, len(value)))
+  }
+  else if (term >= 0) {
+    relationship_matches(elements, relation, slice(value, 0, term)) and
+      relationship_matches(elements, relation, slice(value, term + 2, len(value)))
+  }
+  else { relation_atomic_matches(elements, relation, value) }
 }

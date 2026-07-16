@@ -197,6 +197,57 @@ TEST_F(GraphParserTest, ParseStructurizrWorkspace) {
     free_lambda_string(flavor);
 }
 
+TEST_F(GraphParserTest, ParseStructurizrArchetypes) {
+    const char* source =
+        "workspace { model { archetypes {\n"
+        "  app = container { technology \"Spring\" }\n"
+        "  sync = -> { technology \"HTTPS\" }\n"
+        "  https = --sync-> { tags \"Encrypted\" }\n"
+        "}\n"
+        "user = person \"User\"\n"
+        "web = app \"Web\"\n"
+        "user --https-> web \"Uses\"\n"
+        "} }\n";
+    String* type = create_lambda_string("graph");
+    String* flavor = create_lambda_string("structurizr");
+    Input* input = input_from_source(source, NULL, type, flavor);
+
+    ASSERT_NE(input, nullptr);
+    ElementReader workspace(input->root);
+    ElementReader model = workspace.findChildElement("model");
+    ElementReader archetypes = model.findChildElement("archetypes");
+    ASSERT_TRUE(archetypes.isValid());
+
+    int64_t definitions = 0;
+    ElementReader child;
+    auto definition_children = archetypes.childElements();
+    while (definition_children.next(&child)) {
+        if (!child.hasTag("archetype")) continue;
+        definitions++;
+        const char* identifier = child.get_attr_string("identifier");
+        if (identifier && strcmp(identifier, "https") == 0) {
+            EXPECT_STREQ(child.get_attr_string("target-kind"), "relationship");
+            EXPECT_STREQ(child.get_attr_string("base"), "sync");
+        }
+    }
+    EXPECT_EQ(definitions, 3);
+
+    bool found_usage = false;
+    auto model_children = model.childElements();
+    while (model_children.next(&child)) {
+        if (child.hasTag("relationship")) {
+            found_usage = true;
+            EXPECT_STREQ(child.get_attr_string("archetype"), "https");
+            EXPECT_STREQ(child.get_attr_string("from"), "user");
+            EXPECT_STREQ(child.get_attr_string("to"), "web");
+        }
+    }
+    EXPECT_TRUE(found_usage);
+
+    free_lambda_string(type);
+    free_lambda_string(flavor);
+}
+
 TEST_F(GraphParserTest, AutoDetectStructurizrDsl) {
     String* type = create_lambda_string("auto");
     Url* workspace_url = url_parse("file:///workspace.dsl");

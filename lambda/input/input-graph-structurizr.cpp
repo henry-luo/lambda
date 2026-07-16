@@ -15,7 +15,7 @@ static const size_t STRUCTURIZR_MAX_TOKEN = 1024 * 1024;
 
 enum StructurizrContext {
     SZ_ROOT, SZ_WORKSPACE, SZ_MODEL, SZ_ELEMENT, SZ_DEPLOYMENT,
-    SZ_VIEWS, SZ_VIEW, SZ_STYLES, SZ_STYLE, SZ_GENERIC
+    SZ_ARCHETYPES, SZ_VIEWS, SZ_VIEW, SZ_STYLES, SZ_STYLE, SZ_GENERIC
 };
 
 struct StructurizrToken {
@@ -61,6 +61,15 @@ struct StructurizrParser {
         return token;
     }
 
+    size_t relationship_archetype_length() {
+        if (!src.match("--") || !(str_char_is_alpha(src.peek(2)) || src.peek(2) == '_'))
+            return 0;
+        size_t name_length = 1;
+        while (str_char_is_ident(src.peek(2 + name_length))) name_length++;
+        return src.peek(2 + name_length) == '-' && src.peek(3 + name_length) == '>'
+            ? name_length : 0;
+    }
+
     StructurizrToken* token() {
         skip_inline();
         if (src.atEnd() || src.current() == '\n' || src.current() == '{' ||
@@ -73,6 +82,12 @@ struct StructurizrParser {
         if (src.match("->")) {
             src.advance(2);
             return make_token(ctx.builder.createString("->", 2), "operator", start, src.location());
+        }
+        size_t archetype_length = relationship_archetype_length();
+        if (archetype_length > 0) {
+            String* name = ctx.builder.createString(src.rest() + 2, archetype_length);
+            src.advance(archetype_length + 4);
+            return make_token(name, "relationship-archetype", start, src.location());
         }
         if (src.current() == '=' && src.peek(1) != '=') {
             src.advance();
@@ -87,7 +102,8 @@ struct StructurizrParser {
                 (src.peek(1) == '=' || (cursor > begin && cursor[-1] == '='));
             if (current == ' ' || current == '\t' || current == '\r' || current == '\n' ||
                 current == '{' || current == '}' || current == ';' || current == '"' ||
-                src.match("->") || (current == '=' && !expression_equals)) break;
+                src.match("->") || relationship_archetype_length() > 0 ||
+                (current == '=' && !expression_equals)) break;
             src.advance();
         }
         size_t length = (size_t)(src.rest() - begin);
@@ -163,6 +179,8 @@ struct StructurizrParser {
         if (strcmp(keyword, "model") == 0) return "model";
         if (strcmp(keyword, "views") == 0) return "views";
         if (strcmp(keyword, "styles") == 0) return "styles";
+        if (strcmp(keyword, "archetypes") == 0) return "archetypes";
+        if (parent == SZ_ARCHETYPES) return "archetype";
         if (parent == SZ_VIEWS && view_keyword(keyword)) return "view";
         if (parent == SZ_STYLES &&
             (strcmp(keyword, "element") == 0 || strcmp(keyword, "relationship") == 0))
@@ -183,6 +201,7 @@ struct StructurizrParser {
         if (strcmp(tag, "views") == 0) return SZ_VIEWS;
         if (strcmp(tag, "view") == 0) return SZ_VIEW;
         if (strcmp(tag, "styles") == 0) return SZ_STYLES;
+        if (strcmp(tag, "archetypes") == 0) return SZ_ARCHETYPES;
         if (strcmp(tag, "style-rule") == 0) return SZ_STYLE;
         if (strcmp(tag, "declaration") == 0) {
             return strstr(keyword, "deployment") || strstr(keyword, "Instance")
@@ -193,7 +212,8 @@ struct StructurizrParser {
 
     static bool block_required(const char* keyword) {
         return strcmp(keyword, "workspace") == 0 || strcmp(keyword, "model") == 0 ||
-            strcmp(keyword, "views") == 0 || strcmp(keyword, "styles") == 0;
+            strcmp(keyword, "views") == 0 || strcmp(keyword, "styles") == 0 ||
+            strcmp(keyword, "archetypes") == 0;
     }
 
     void add_arguments(Element* owner, ArrayList* tokens, int start) {
@@ -265,11 +285,18 @@ struct StructurizrParser {
         }
         int arrow = -1;
         for (int i = first; i < tokens->length; i++) {
-            if (text_is(token_at(tokens, i)->value, "->")) { arrow = i; break; }
+            StructurizrToken* candidate = token_at(tokens, i);
+            if (text_is(candidate->value, "->") ||
+                strcmp(candidate->kind, "relationship-archetype") == 0) {
+                arrow = i;
+                break;
+            }
         }
         StructurizrToken* keyword_token = token_at(tokens, first);
         const char* keyword = arrow >= 0 ? "relationship" : keyword_token->value->chars;
-        const char* tag = statement_tag(parent, keyword, arrow >= 0);
+        const bool archetype_definition = parent == SZ_ARCHETYPES;
+        const char* tag = archetype_definition ? "archetype"
+            : statement_tag(parent, keyword, arrow >= 0);
         ElementBuilder builder = ctx.builder.element(tag);
         builder.attr("keyword", keyword).attr("statement-index", (int64_t)statement_index++);
         if (identifier) builder.attr("identifier", identifier->value->chars);
@@ -277,7 +304,15 @@ struct StructurizrParser {
             builder.attr("flavor", "structurizr").attr("ir-stage", "source");
         if (strcmp(tag, "view") == 0) builder.attr("kind", keyword);
         if (strcmp(tag, "style-rule") == 0) builder.attr("target-kind", keyword);
-        if (arrow >= 0) {
+        if (archetype_definition) {
+            StructurizrToken* base = token_at(tokens, arrow >= 0 ? arrow : first);
+            builder.attr("target-kind", arrow >= 0 ? "relationship" : "element")
+                .attr("base", text_is(base->value, "->") ? "relationship" : base->value->chars);
+        }
+        if (arrow >= 0 && !archetype_definition) {
+            StructurizrToken* operator_token = token_at(tokens, arrow);
+            if (strcmp(operator_token->kind, "relationship-archetype") == 0)
+                builder.attr("archetype", operator_token->value->chars);
             // an authored dynamic order precedes the source endpoint, not the label args.
             StructurizrToken* explicit_order = arrow > first + 1
                 ? token_at(tokens, first) : nullptr;

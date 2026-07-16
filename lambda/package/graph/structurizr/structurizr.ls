@@ -13,9 +13,15 @@ pub fn validate(workspace) => schema_module.validate(workspace)
 
 pub fn view_keys(workspace) => view_module.view_keys(workspace)
 
-pub fn project(workspace, key) => view_module.project(workspace, key)
+fn selected_key(workspace, key) {
+  let keys = view_keys(workspace);
+  if ((key == null or string(key) == "") and len(keys) > 0) keys[0] else key
+}
+
+pub fn project(workspace, key = null) =>
+  view_module.project(workspace, selected_key(workspace, key))
 
 pub fn project_all(workspace) => view_module.project_all(workspace)
 
-pub fn to_html(workspace, key, opts = null) =>
+pub fn to_html(workspace, key = null, opts = null) =>
   graph_transform.to_html(project(workspace, key), opts)

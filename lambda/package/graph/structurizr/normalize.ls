@@ -1,6 +1,9 @@
 // Pure Structurizr source Mark to canonical C4 workspace normalization.
 
 import graph_model: lambda.package.graph.model
+import archetype: lambda.package.graph.structurizr.archetypes
+import diagnostic: lambda.package.graph.diagnostics
+import implied: lambda.package.graph.structurizr.implied
 import schema: lambda.package.graph.structurizr.schema
 
 fn children(value, wanted = null) => [
@@ -59,6 +62,26 @@ fn health_check_values(value) => [
       source: check}
 ]
 
+fn tag_values(value) => [
+  for (statement in statement_children(value, "tags"))
+    for (tag in split(arg(statement, 0, ""), ",")
+    where trim(tag) != "") trim(tag)
+]
+
+fn archetype_definition(value) => {
+  name: string(value.identifier), base: string(value.base),
+  target_kind: string(value["target-kind"]),
+  description: nested_arg(value, "description"),
+  technology: nested_arg(value, "technology"), metadata: nested_arg(value, "metadata"),
+  tags: tag_values(value), properties: property_values(value),
+  perspectives: perspective_values(value), source: value
+}
+
+fn archetype_definitions(model) => [
+  for (block in children(model, "archetypes"))
+    for (value in children(block, "archetype")) archetype_definition(value)
+]
+
 fn c4_kind(keyword) {
   if (keyword == "softwareSystem") "software-system"
   else if (keyword == "element") "custom"
@@ -85,11 +108,14 @@ fn default_tag(kind) {
   else null
 }
 
-fn is_c4_declaration(value) => graph_model.tag(value) == "declaration" and contains([
-  "person", "softwareSystem", "container", "component", "element", "group",
-  "deploymentEnvironment", "deploymentGroup", "deploymentNode", "infrastructureNode",
-  "softwareSystemInstance", "containerInstance"
-], string(value.keyword))
+fn is_c4_declaration(value, definitions) =>
+  (graph_model.tag(value) == "declaration" and contains([
+    "person", "softwareSystem", "container", "component", "element", "group",
+    "deploymentEnvironment", "deploymentGroup", "deploymentNode", "infrastructureNode",
+    "softwareSystemInstance", "containerInstance"
+  ], string(value.keyword))) or
+  (graph_model.optional(value, "identifier") != null and
+    archetype.find(definitions, string(value.keyword), "element") != null)
 
 fn declared_identifier(value, parent_identifier, hierarchical) {
   let local = graph_model.optional(value, "identifier");
@@ -100,14 +126,12 @@ fn declared_identifier(value, parent_identifier, hierarchical) {
   else stable
 }
 
-fn declaration_tags(value, kind) {
-  let authored = [
-    for (statement in statement_children(value, "tags"))
-      for (tag in split(arg(statement, 0, ""), ",")
-      where trim(tag) != "") trim(tag)
-  ];
+fn declaration_tags(value, kind, definition) {
   let structural = default_tag(kind);
-  ["Element", for (tag in [structural] where tag != null) tag, *authored]
+  let inherited = if (definition == null) [] else definition.tags;
+  unique(["Element", for (tag in [structural] where tag != null) tag,
+    for (name in [if (definition == null) null else definition.name] where name != null) name,
+    *inherited, *tag_values(value)])
 }
 
 fn node_deployment_groups(value) => [
@@ -119,8 +143,9 @@ fn node_deployment_groups(value) => [
 ]
 
 fn element_value(value, parent, parent_identifier, group_name, inherited_groups,
-    hierarchical) {
-  let kind = c4_kind(string(value.keyword));
+    hierarchical, definitions) {
+  let definition = archetype.find(definitions, string(value.keyword), "element");
+  let kind = c4_kind(if (definition == null) string(value.keyword) else definition.kind);
   let id = declared_identifier(value, parent_identifier, hierarchical);
   let model_ref = if (contains(["container-instance", "software-system-instance"], kind))
     arg(value, 0) else null;
@@ -133,49 +158,75 @@ fn element_value(value, parent, parent_identifier, group_name, inherited_groups,
     else if (model_ref != null) unique([*inherited_groups, *explicit_groups])
     else [];
   let custom = kind == "custom";
+  let explicit = {
+    description: if (model_ref != null) null else arg(value, if (custom) 2 else 1),
+    technology: if (model_ref != null or custom) null else arg(value, 2),
+    metadata: if (custom) arg(value, 1) else null,
+    tags: tag_values(value), properties: property_values(value),
+    perspectives: perspective_values(value)
+  };
+  let effective = if (definition == null) explicit else archetype.merge(definition, explicit);
   {
     id: id, identifier: id,
     local_identifier: graph_model.optional(value, "identifier"),
     kind: kind, parent: parent, group: group_name,
     name: if (model_ref != null) null else arg(value, 0, id),
-    metadata: if (custom) arg(value, 1) else null,
-    description: if (model_ref != null) null else arg(value, if (custom) 2 else 1),
-    technology: if (model_ref != null or custom) null else arg(value, 2),
+    archetype: if (definition == null) null else definition.name,
+    metadata: effective.metadata, description: effective.description,
+    technology: effective.technology,
     model_ref: model_ref, deployment_groups: deployment_groups,
-    tags: declaration_tags(value, kind), properties: property_values(value),
-    perspectives: perspective_values(value), health_checks: health_check_values(value),
+    tags: declaration_tags(value, kind, definition), properties: effective.properties,
+    perspectives: effective.perspectives, health_checks: health_check_values(value),
     source: value
   }
 }
 
-fn relationship_tags(value) => [
-  "Relationship",
-  for (tag in split(arg(value, 2, ""), ",") where trim(tag) != "") trim(tag),
-  for (statement in statement_children(value, "tags"))
-    for (tag in split(arg(statement, 0, ""), ",") where trim(tag) != "") trim(tag)
-]
+fn relationship_tags(value, definition) {
+  let inherited = if (definition == null) [] else definition.tags;
+  unique(["Relationship", for (name in [
+      if (definition == null) null else definition.name] where name != null) name,
+    *inherited,
+    for (tag in split(arg(value, 2, ""), ",") where trim(tag) != "") trim(tag),
+    *tag_values(value)])
+}
 
-fn append_relation(state, value, parent_identifier) {
+fn unknown_archetype(name, target_kind, value) => diagnostic.for_value(
+  "structurizr.unknown-archetype", "error",
+  "Unknown " ++ target_kind ++ " archetype '" ++ string(name) ++ "'",
+  target_kind ++ "-archetype:" ++ string(name), value)
+
+fn append_relation(state, value, parent_identifier, definitions) {
   // both relationship endpoints may use the scoped `this` identifier.
   let from = if (string(value.from) == "this") parent_identifier else string(value.from);
   let to = if (string(value.to) == "this") parent_identifier else string(value.to);
   let id = if (graph_model.optional(value, "identifier") != null)
     string(value.identifier)
     else "relationship@" ++ string(value["source-start"]);
+  let definition = archetype.find(definitions,
+    graph_model.optional(value, "archetype"), "relationship");
+  let explicit = {description: arg(value, 0), technology: arg(value, 1), metadata: null,
+    tags: [], properties: property_values(value), perspectives: perspective_values(value)};
+  let effective = if (definition == null) explicit else archetype.merge(definition, explicit);
   let relation = {
-    id: id, from: from, to: to, description: arg(value, 0),
-    technology: arg(value, 1), tags: relationship_tags(value),
-    properties: property_values(value), perspectives: perspective_values(value),
+    id: id, from: from, to: to,
+    archetype: if (definition == null) null else definition.name,
+    implied: false, implied_from: null,
+    description: effective.description, technology: effective.technology,
+    tags: relationship_tags(value, definition),
+    properties: effective.properties, perspectives: effective.perspectives,
     source: value
   };
-  {*:state, relationships: [*state.relationships, relation]}
+  let missing = graph_model.optional(value, "archetype") != null and definition == null;
+  {*:state, relationships: [*state.relationships, relation],
+    diagnostics: if (missing) [*state.diagnostics,
+      unknown_archetype(value.archetype, "relationship", value)] else state.diagnostics}
 }
 
 fn joined_group(parent_group, name, separator) =>
   if (parent_group == null) name else parent_group ++ separator ++ name
 
 fn walk_values(values, index, parent, parent_identifier, parent_kind, group_name,
-    group_separator, inherited_groups, hierarchical, state) {
+    group_separator, inherited_groups, hierarchical, definitions, state) {
   if (index >= len(values)) state
   else {
     let value = values[index];
@@ -185,28 +236,45 @@ fn walk_values(values, index, parent, parent_identifier, parent_kind, group_name
       graph_model.optional(value, "identifier") == null and
       parent_kind == "deployment-node";
     let next = if (group_assignment) state
-    else if (is_c4_declaration(value)) {
+    else if (is_c4_declaration(value, definitions)) {
       let entry = element_value(value, parent, parent_identifier, group_name,
-        inherited_groups, hierarchical);
+        inherited_groups, hierarchical, definitions);
       let added = {*:state, elements: [*state.elements, entry]};
       if (entry.kind == "group")
         walk_values(children(value), 0, parent, parent_identifier, parent_kind,
           joined_group(group_name, entry.name, group_separator), group_separator,
-          inherited_groups, hierarchical, added)
+          inherited_groups, hierarchical, definitions, added)
       else walk_values(children(value), 0, entry.id, entry.identifier, entry.kind,
-        group_name, group_separator, entry.deployment_groups, hierarchical, added)
+        group_name, group_separator, entry.deployment_groups, hierarchical, definitions, added)
     }
-    else if (tag == "relationship") append_relation(state, value, parent_identifier)
+    else if (tag == "relationship")
+      append_relation(state, value, parent_identifier, definitions)
+    else if (tag == "archetypes") state
+    else if (tag == "statement" and graph_model.optional(value, "identifier") != null)
+      {*:state, diagnostics: [*state.diagnostics,
+        unknown_archetype(value.keyword, "element", value)]}
     else walk_values(children(value), 0, parent, parent_identifier, parent_kind,
-      group_name, group_separator, inherited_groups, hierarchical, state);
+      group_name, group_separator, inherited_groups, hierarchical, definitions, state);
     walk_values(values, index + 1, parent, parent_identifier, parent_kind, group_name,
-      group_separator, inherited_groups, hierarchical, next)
+      group_separator, inherited_groups, hierarchical, definitions, next)
   }
 }
 
 fn identifier_mode(source) {
   let settings = statement_children(source, "!identifiers");
   if (len(settings) > 0) arg(settings[len(settings) - 1], 0, "flat") else "flat"
+}
+
+fn implied_config(source) {
+  let settings = statement_children(source, "!impliedRelationships");
+  let setting = if (len(settings) == 0) null else settings[len(settings) - 1];
+  let value = lower(if (setting == null) "true" else arg(setting, 0, "true"));
+  if (value == "true") { {enabled: true, diagnostics: []} }
+  else if (value == "false") { {enabled: false, diagnostics: []} }
+  else { {enabled: false, diagnostics: [diagnostic.for_value(
+    "structurizr.unsafe-directive", "warning",
+    "Custom implied relationship strategies are preserved but not executed",
+    "source.!impliedRelationships", setting)]} }
 }
 
 fn resolve_ref(elements, value) {
@@ -373,11 +441,44 @@ fn style_values(source) => [
       for (rule in children(styles, "style-rule")) style_value(rule)
 ]
 
-fn c4_element(value) =>
+fn terminology_kind(value) {
+  if (value == "softwareSystem") "software-system"
+  else if (value == "deploymentNode") "deployment-node"
+  else if (value == "infrastructureNode") "infrastructure-node"
+  else value
+}
+
+fn terminology_values(source) => [
+  for (block in children(source, "views"), terminology in statement_children(block, "terminology"),
+    term in children(terminology)
+      where contains(["statement", "declaration"], graph_model.tag(term)))
+    {kind: terminology_kind(string(term.keyword)), value: arg(term, 0), source: term}
+]
+
+fn default_terminology(kind) {
+  if (kind == "person") "Person"
+  else if (kind == "software-system") "Software System"
+  else if (kind == "container") "Container"
+  else if (kind == "component") "Component"
+  else if (kind == "deployment-node") "Deployment Node"
+  else if (kind == "infrastructure-node") "Infrastructure Node"
+  else if (kind == "relationship") "Relationship"
+  else kind
+}
+
+fn terminology_value(terms, kind) {
+  let values = [for (term in terms where term.kind == kind) term.value];
+  if (len(values) > 0) values[len(values) - 1] else default_terminology(kind)
+}
+
+fn c4_element(value, terminology) =>
   <'c4-element' id: value.id, identifier: value.identifier,
     'local-identifier': value.local_identifier, kind: value.kind, parent: value.parent,
-    group: value.group,
+    group: value.group, archetype: value.archetype,
     name: value.name, metadata: value.metadata,
+    terminology: terminology_value(terminology,
+      if (value.kind == "software-system-instance") "software-system"
+      else if (value.kind == "container-instance") "container" else value.kind),
     description: value.description, technology: value.technology,
     'model-ref': value.model_ref,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
@@ -402,6 +503,8 @@ fn c4_element(value) =>
 
 fn c4_relationship(value) =>
   <'c4-relationship' id: value.id, source: value.from, destination: value.to,
+    archetype: value.archetype,
+    implied: value.implied, 'implied-from': value.implied_from,
     description: value.description, technology: value.technology,
     'source-start': value.source["source-start"], 'source-end': value.source["source-end"];
     for (tag in value.tags) <tag name: tag>
@@ -447,15 +550,16 @@ fn c4_style(value) =>
   >
 
 fn c4_workspace(name, description, mode, elements, relationships, views, styles,
-    model_properties, source) =>
+    terminology, group_separator, model_properties, source) =>
   <'c4-workspace' name: name, description: description,
-    flavor: "structurizr", 'ir-stage': "canonical", 'identifier-mode': mode;
+    flavor: "structurizr", 'ir-stage': "canonical", 'identifier-mode': mode,
+    'group-separator': group_separator;
     <'c4-model';
       for (property in model_properties)
         <property name: property.name, value: property.value,
           'source-start': property.source["source-start"],
           'source-end': property.source["source-end"]>
-      for (entry in elements) c4_element(entry)
+      for (entry in elements) c4_element(entry, terminology)
       for (entry in relationships) c4_relationship(entry)
     >
     <'c4-views';
@@ -463,6 +567,12 @@ fn c4_workspace(name, description, mode, elements, relationships, views, styles,
     >
     <'c4-styles';
       for (style in styles) c4_style(style)
+    >
+    <'c4-terminology';
+      for (term in terminology)
+        <term kind: term.kind, value: term.value,
+          'source-start': term.source["source-start"],
+          'source-end': term.source["source-end"]>
     >
     for (value in children(source, "diagnostics")) value
   >
@@ -475,21 +585,28 @@ pub fn normalize(source) {
   let separators = [for (property in model_properties
     where property.name == "structurizr.groupSeparator") property.value];
   let group_separator = if (len(separators) > 0) separators[len(separators) - 1] else "/";
+  let archetypes = archetype.resolve(
+    if (len(models) > 0) archetype_definitions(models[0]) else []);
   let walked = if (len(models) > 0)
     walk_values(children(models[0]), 0, null, null, null, null, group_separator, [],
-      hierarchical, {elements: [], relationships: []})
-    else {elements: [], relationships: []};
+      hierarchical, archetypes.values, {elements: [], relationships: [], diagnostics: []})
+    else {elements: [], relationships: [], diagnostics: []};
   let elements = [for (entry in walked.elements) resolved_element(entry, walked.elements)];
-  let relationships = [
+  let explicit_relationships = [
     for (entry in walked.relationships) resolved_relationship(entry, elements)
   ];
+  let implied_setting = implied_config(source);
+  let relationships = implied.expand(elements, explicit_relationships,
+    implied_setting.enabled);
   let views = view_values(source, elements, relationships);
   let styles = style_values(source);
+  let terminology = terminology_values(source);
   let workspace_args = arguments(source);
   let workspace_name = if (len(workspace_args) > 0) workspace_args[0] else null;
   let workspace_description = if (len(workspace_args) > 1) workspace_args[1] else null;
   let mode = if (hierarchical) "hierarchical" else "flat";
   let workspace = c4_workspace(workspace_name, workspace_description, mode, elements,
-    relationships, views, styles, model_properties, source);
-  schema.attach(workspace, [*source_diagnostics, *schema.validate(workspace)])
+    relationships, views, styles, terminology, group_separator, model_properties, source);
+  schema.attach(workspace, [*source_diagnostics, *archetypes.diagnostics,
+    *walked.diagnostics, *implied_setting.diagnostics, *schema.validate(workspace)])
 }

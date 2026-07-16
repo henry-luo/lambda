@@ -912,9 +912,9 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"mdx", parse_mdx_input},
 };
 
-static const char* detected_structurizr_flavor(const char* pathname,
-                                               const char* source,
-                                               size_t source_len) {
+const char* input_detect_structurizr_flavor(const char* pathname,
+                                            const char* source,
+                                            size_t source_len) {
     if (!pathname || !source) return NULL;
     size_t path_len = strlen(pathname);
     if (str_iends_with_const(pathname, path_len, ".structurizr")) return "structurizr";
@@ -1022,7 +1022,7 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
         const char* pathname = abs_url && abs_url->pathname
             ? abs_url->pathname->chars : "";
-        detected_graph_flavor = detected_structurizr_flavor(
+        detected_graph_flavor = input_detect_structurizr_flavor(
             pathname, source, source_len);
         if (detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type

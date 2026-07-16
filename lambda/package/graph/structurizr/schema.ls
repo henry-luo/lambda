@@ -84,8 +84,9 @@ fn parent_allowed(kind, parent_kind) {
     parent_kind == null
   } else if (kind == "container") { parent_kind == "software-system" }
   else if (kind == "component") { parent_kind == "container" }
-  else if (kind == "group") { contains([
-    null, "software-system", "container", "deployment-environment", "deployment-node"
+  // Root groups have a null parent; Lambda membership intentionally skips absence values.
+  else if (kind == "group") { parent_kind == null or contains([
+    "software-system", "container", "deployment-environment", "deployment-node"
   ], parent_kind) }
   else if (kind == "deployment-group") { parent_kind == "deployment-environment" }
   else if (kind == "deployment-node") {
@@ -219,7 +220,7 @@ fn style_diagnostics(workspace) => [
   for (style in style_values(workspace), property in children(style, "property"),
     let target = if (string(style["target-kind"]) == "element") { "node" }
       else { "edge" }
-    where style_rules.declaration(target, property) == "")
+    where not style_rules.supported(target, property))
     diagnostic.for_value("structurizr.unsupported-style", "warning",
       "Style property '" ++ string(property.name) ++ "' cannot be lowered safely",
       "style:" ++ string(style.tag) ++ "." ++ string(property.name), style)

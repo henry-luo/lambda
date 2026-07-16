@@ -91,6 +91,7 @@ fn semantic_edges(children) {
     stroke_width: attr_or(child, "data-stroke-width", parsed_style.stroke_width),
     opacity: attr_or(child, "data-opacity", parsed_style.opacity),
     dash_array: attr_or(child, "data-dash-array", parsed_style.dash_array),
+    route_mode: attr_or(child, "data-route-mode", null),
     min_length: int(attr_or(child, "data-min-length", 1)),
     weight: float(attr_or(child, "data-weight", 1.0)),
     constraint: attr_or(child, "data-constraint", "true") != "false",
