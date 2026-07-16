@@ -10,7 +10,9 @@ ports, compound and parallel-edge routing, broader shape clipping, safe style
 cascade, final-SVG graph metadata, Graph Scene adaptation/comparison, in-process
 Radiant scene rendering, relational scene validation, and the pinned semantic
 corpus runner are implemented. Section 18.12 records the current boundary;
-additional graph-oriented Mermaid families remain a subsequent phase.
+Stage 2E has begun with end-to-end Mermaid `classDiagram` support for measured
+class compartments and UML relationships. Additional graph-oriented Mermaid
+families and the extended class syntax remain subsequent tranches.
 Stage 3 Graphviz support is implemented: source-faithful DOT parsing, pure
 normalization, canonical Graph IR, rich measured content, layered layout and
 routing, semantic HTML/Radiant rendering, DOT formatting, and the pinned
@@ -1079,6 +1081,16 @@ checked-in references during a normal test invocation.
 - route chart-oriented Mermaid ASTs to `lambda.package.chart` and test that
   dispatch independently in the chart suite.
 
+The first Stage 2E tranche implements Mermaid `classDiagram`. The manual parser
+emits source-stage class declarations, source-spanned member/stereotype values,
+direction, relationship labels and cardinalities, and the inheritance,
+composition, aggregation, association, dependency, realization, and plain-link
+operator families in either endpoint direction. The pure
+`graph/mermaid/class.ls` adapter lowers class headers and members into rich
+measured node content before common canonicalization. UML endpoint roles reuse
+the common compositional marker vocabulary, and final layout/render continues
+through the retained Radiant callback.
+
 ### 18.11 Stage 2 acceptance criteria
 
 Stage 2 rich Mermaid graph support is complete when:
@@ -1312,12 +1324,20 @@ fidelity and safe metadata, cluster-aware layout quality, Graph Scene paint and
 relational conformance, a broader reproducible Mermaid corpus, and a
 manifest-driven retained end-to-end runner. The package deliberately compares
 semantic and tolerant geometric relations rather than promising pixel parity
-with Mermaid.
+with Mermaid. Stage 2E now additionally covers the initial `classDiagram`
+surface: class blocks and alias labels, visibility-classified fields and
+methods, stereotypes, graph direction, labeled/cardinal relationships, rich
+semantic HTML compartments, UML markers, and retained in-memory rendering. The
+manifest and Lambda fixture exercise source IR, canonical adaptation, semantic
+HTML, measured node geometry, marker propagation, and final SVG text.
 
-Graph-oriented Mermaid family adapters beyond flowcharts remain a subsequent
-phase. Chart-oriented family dispatch is already rejected with structured
-ownership diagnostics, but detailed sequence, Gantt, pie, Sankey, timeline, and
-XY support belongs to `lambda.package.chart` and its independent test suites.
+Extended class syntax such as namespaces, notes, generic-type escaping, and the
+remaining class-specific styling directives is still outstanding. State,
+entity-relationship, requirement, architecture, block, and mindmap adapters
+also remain subsequent Stage 2E tranches. Chart-oriented family dispatch is
+already rejected with structured ownership diagnostics, but detailed sequence,
+Gantt, pie, Sankey, timeline, and XY support belongs to
+`lambda.package.chart` and its independent test suites.
 
 ## 19. Stage 3 - Graphviz DOT Support
 
@@ -1603,13 +1623,19 @@ lines as reported by `wc -l`; it includes the two grammar implementations and
 their shared graph parser source/header, but excludes tests, schemas, generated
 files, and downstream normalization. The Stage 3A ledger is:
 
-| Source unit | Before Stage 3A | Current ceiling | Difference |
-|---|---:|---:|---:|
-| `input-graph-dot.cpp` | 546 | 471 | -75 |
-| `input-graph-mermaid.cpp` | 1,578 | 1,534 | -44 |
-| `input-graph.cpp` | 206 | 247 | +41 |
-| `input-graph.h` | 98 | 105 | +7 |
-| total | 2,428 | 2,357 | -71 |
+| Source unit | Before Stage 3A | Stage 3A | After Stage 2E class | Current vs. original |
+|---|---:|---:|---:|---:|
+| `input-graph-dot.cpp` | 546 | 471 | 471 | -75 |
+| `input-graph-mermaid.cpp` | 1,578 | 1,534 | 1,785 | +207 |
+| `input-graph.cpp` | 206 | 247 | 249 | +43 |
+| `input-graph.h` | 98 | 105 | 109 | +11 |
+| total | 2,428 | 2,357 | 2,614 | +186 |
+
+The first Stage 2E family adds 251 native Mermaid-parser lines over the Stage 3A
+checkpoint. Its family-specific pure adapter is tracked separately at 57 lines
+because it does not contribute to the native parser footprint. Further Mermaid
+families should reuse the class relationship table, source-span builders, and
+common canonical adapter patterns before adding another parser branch.
 
 Reproduce the source measurement from the repository root with:
 

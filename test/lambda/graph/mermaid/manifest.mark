@@ -107,6 +107,20 @@
       <edge-property target: 'e1', key: 'animate', value: 'true'>
     >
   >
+  <case id: 'class-diagram', source: 'class_diagram.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir',
+      features: 'class-diagram,rich-content,uml-relations,cardinality';
+    <expect kind: 'class', direction: 'LR', nodes: 3, edges: 3>
+    <node id: 'Animal', label: 'Animal', shape: 'box'>
+    <class-member kind: 'stereotype', value: '<<abstract>>'>
+    <edge from: 'Animal', to: 'Duck', relation: '<|--',
+      arrow-tail: 'empty', arrow-head: 'none', label: 'inherits'>
+    <edge from: 'Animal', to: 'Habitat', relation: 'o--',
+      arrow-tail: 'odiamond', arrow-head: 'none',
+      from-cardinality: '1', to-cardinality: '*', label: 'lives in'>
+    <edge from: 'Duck', to: 'Habitat', relation: '..>',
+      arrow-tail: 'none', arrow-head: 'normal', style: 'dotted', label: 'visits'>
+  >
   <case id: 'chart-routing', source: 'chart_routing.mmd',
       origin: 'lambda', status: 'unsupported', policy: 'ir', features: 'chart-dispatch';
     <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0;

@@ -1,0 +1,8 @@
+{
+  source: ["class", "LR", 3, 3],
+  members: [["Animal", [["stereotype", null, "<<abstract>>"], ["field", "public", "+String name"], ["method", "public", "+move(distance) void"]]], ["Duck", [["method", "public", "+swim() void"]]], ["Habitat", []]],
+  relations: [["Animal", "Duck", "<|--", "empty", "none", "solid", "inherits", null, null], ["Animal", "Habitat", "o--", "odiamond", "none", "solid", "lives in", "1", "*"], ["Duck", "Habitat", "..>", "none", "normal", "dotted", "visits", null, null]],
+  canonical: [true, [["Animal", "content"], ["Duck", "content"], ["Habitat", "content"]]],
+  html: [["Animal", "Animal", "div"], ["Duck", "Duck", "div"], ["Habitat", "Habitat", ""]],
+  render: [true, 3, 3, true, [["Animal", "Duck", "empty", "none"], ["Animal", "Habitat", "odiamond", "none"], ["Duck", "Habitat", "none", "normal"]], true]
+}
