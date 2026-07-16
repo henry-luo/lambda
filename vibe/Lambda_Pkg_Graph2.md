@@ -319,6 +319,7 @@ Physical LOC is an acceptance metric, not an informal preference.
 | Unit | Initial target | Hard review threshold |
 |---|---:|---:|
 | `input-graph-structurizr.cpp` core parser | <= 800 | 1,000 |
+| `input-graph-structurizr-resolver.cpp` local include host | <= 400 | 500 |
 | shared graph-parser helper growth | <= 100 | 150 |
 | parser-specific native tests | tracked separately | no production padding |
 
@@ -326,13 +327,15 @@ Current implementation measurement (2026-07-16):
 
 | Unit | Physical LOC | Budget result |
 |---|---:|---|
-| `input-graph-structurizr.cpp` | 405 | passes the 800-line target |
+| `input-graph-structurizr.cpp` | 429 | passes the 800-line target |
+| `input-graph-structurizr-resolver.cpp` | 273 | passes the 400-line target |
 | `input-graph.cpp` growth | 2 | dispatch only |
-| `input-graph.h` growth | 1 | parser declaration only |
+| `input-graph.h` growth | 4 | parser/resolver declarations only |
 
 `GraphParserTest.ParserLocBudget` enforces the parser and aggregate graph-parser
-ceilings. The complete tracked DOT, Mermaid, Structurizr, shared-parser, and
-header set is 2,765 physical lines, below its 3,160-line aggregate ceiling.
+ceilings. The complete tracked DOT, Mermaid, Structurizr parser/resolver,
+shared-parser, and header set is 3,065 physical lines, below its 3,563-line
+aggregate ceiling.
 
 The threshold is not met by compressing multiple statements onto one line or
 removing useful root-cause comments. Crossing it requires a design review of
@@ -352,14 +355,15 @@ ThinLTO build produced by `make release`:
 
 | Release unit | Size | Interpretation |
 |---|---:|---|
-| Structurizr parser LLVM ThinLTO object | 37,856 B | direct native parser and Mark construction unit |
+| Structurizr parser LLVM ThinLTO object | 38,896 B | direct native parser and Mark construction unit |
+| Structurizr include resolver LLVM ThinLTO object | 22,064 B | bounded local host resolution unit |
 | shared graph parser LLVM ThinLTO object | 19,072 B | shared DOT/Mermaid/Structurizr infrastructure |
 | Radiant graph bridge LLVM ThinLTO object | 9,920 B | all graph-source CLI bridge integration |
-| stripped `lambda.exe` | 17,403,864 B | complete current executable |
-| gzip-9 executable proxy | 6,660,929 B | reproducible compressed-artifact measurement |
+| stripped `lambda.exe` | 17,420,408 B | complete current executable |
+| gzip-9 executable proxy | 6,663,193 B | reproducible compressed-artifact measurement |
 
 The Stage 3 checkpoint recorded a 17,261,336-byte executable, making the current
-whole-tree executable 142,528 bytes larger. That delta is deliberately not
+whole-tree executable 159,072 bytes larger. That delta is deliberately not
 attributed entirely to Structurizr: it spans all repository changes since the
 Stage 3 checkpoint. The parser object is the direct implementation-size measure;
 the executable and gzip rows are release guardrails for future Graph2 changes.
@@ -447,6 +451,17 @@ separate host operation with an explicit policy:
 - included sources retain their own file identity and source spans;
 - JSON workspace extension is deferred until a canonical Structurizr JSON
   adapter exists.
+
+Local include resolution is implemented for local-file `input()` calls that
+explicitly select Structurizr/C4 or pass conservative `.dsl` auto-detection.
+In-memory and network inputs remain inert. The containing workspace directory is
+the allowed root; canonicalized paths and symlinks may not escape it. Limits are
+32 nested includes, 256 files, and 16 MiB of included source. A direct file or a
+directory may be included; directory entries are restricted to `.dsl` and
+`.structurizr` files and processed in sorted order. Source Mark retains each
+authored `!include`, nests resolved statements beneath it, and records canonical
+`source-file` identity with file-local spans. Normalization treats those resolved
+children as source-order-transparent.
 
 `!script`, `!plugin`, `!components`, custom-code `!impliedRelationships`, and
 other executable directives remain inert source nodes with
@@ -633,6 +648,8 @@ Stable diagnostic codes include:
 | `structurizr.unsafe-directive` | executable or external extension remains inert |
 | `structurizr.include-cycle` | local include graph contains a cycle |
 | `structurizr.include-limit` | include depth, file count, or byte limit is exceeded |
+| `structurizr.include-missing` | local include path cannot be read |
+| `structurizr.include-policy` | include is remote or escapes the allowed root |
 | `structurizr.unsupported-style` | style value cannot be represented safely |
 | `structurizr.implicit-layout` | deterministic fallback layout was selected |
 
@@ -764,16 +781,19 @@ and default-on Boolean implied relationships now normalize with stable
 provenance; custom Java strategies remain inert and diagnosed. Parenthesized
 view expressions, nested group boundaries, terminology, style-driven shape and
 per-edge routing, and deployment include/exclude filtering are also implemented.
-Deeper source-context validation, remaining semantic diagnostics, includes, and
-reference adaptation remain outstanding.
+Policy-controlled local includes, nested relative includes, deterministic
+directory includes, and cycle diagnostics are implemented. Deeper source-context
+validation, remaining semantic diagnostics, workspace extension, and reference
+adaptation remain outstanding.
 
 ### Stage 4A - Manual parser and source contract
 
 Status: **substantially implemented**. Explicit flavor dispatch, conservative
 `.structurizr`/`.dsl` auto-detection, the manual source contract, parser limits,
 recovery diagnostics, named archetype relationship operators, and enforced LOC
-budgets are present. The manual Structurizr parser is currently 405 lines and
-the tracked graph-parser set is 2,765 lines. The release object, stripped
+budgets are present. The manual Structurizr parser is currently 429 lines, its
+separate local include resolver is 273 lines, and the tracked set is 3,065 lines.
+The release object, stripped
 executable, and compressed-artifact size ledger is recorded in Section 6.5.
 
 - add flavor and conservative `.dsl` dispatch;
@@ -845,14 +865,17 @@ boundaries and removes relationships whose endpoints leave the projection.
 
 ### Stage 4E - Includes, CLI, and conformance
 
-Status: **partially implemented**. The dedicated native/Lambda target now runs
+Status: **substantially implemented**. The dedicated native/Lambda target now runs
 manifest-style package fixtures, retained scene coverage, and a headless `.dsl`
 selected-view smoke test. `view` and `render` accept `--view-key`; omitting it
 selects the first declared view. `.dsl` routing reuses the input parser's
 boundary-safe `workspace` detector, while `.structurizr` remains unambiguous.
+`convert ... -t html` uses the same graph bridge and accepts `--view-key`.
+Bounded local file and directory includes resolve through a separate native host
+resolver with nested-relative, ordering, provenance, and cycle fixtures.
 
-- add policy-controlled local includes with cycle and resource limits;
-- add view selection to conversion commands (`view` and `render` are complete);
+- maintain policy-controlled local includes with cycle and resource limits;
+- maintain selected-view conversion (`view`, `render`, and HTML `convert` are complete);
 - add Structurizr JSON reference adaptation and pinned corpus provenance;
 - extend the native, retained-runtime, scene, and headless tests into the final
   reference corpus manifest;

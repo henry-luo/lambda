@@ -79,6 +79,9 @@ void parse_graph_dot(Input* input, const char* dot_string);
 void parse_graph_mermaid(Input* input, const char* mermaid_string);
 void parse_graph_d2(Input* input, const char* d2_string);
 void parse_graph_structurizr(Input* input, const char* structurizr_string);
+void parse_graph_structurizr_fragment(Input* input, Element* owner,
+    const char* structurizr_string, const char* context_name);
+void resolve_graph_structurizr_local_includes(Input* input, const char* root_path);
 
 // Helper functions for graph construction
 Element* create_graph_element(Input* input, const char* type, const char* layout, const char* flavor);

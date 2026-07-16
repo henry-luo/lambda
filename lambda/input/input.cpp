@@ -1016,14 +1016,15 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
               flavor ? flavor->chars : "null",
               source_len);
     const char* effective_type = NULL;
-    const char* detected_graph_flavor = NULL;
+    const char* pathname = abs_url && abs_url->pathname
+        ? abs_url->pathname->chars : "";
+    // Explicit `graph` inputs still need extension/content flavor detection;
+    // limiting detection to `auto` silently sent flavorless .dsl files to DOT.
+    const char* detected_graph_flavor = flavor ? NULL
+        : input_detect_structurizr_flavor(pathname, source, source_len);
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
-        const char* pathname = abs_url && abs_url->pathname
-            ? abs_url->pathname->chars : "";
-        detected_graph_flavor = input_detect_structurizr_flavor(
-            pathname, source, source_len);
         if (detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type
         MimeDetector* detector = effective_type ? NULL : mime_detector_init();
@@ -1150,6 +1151,13 @@ static Input* input_from_local_path(const char* pathname, Url* abs_url, String* 
     if (!is_binary_pdf) src_len = strlen(source);
 
     Input* input = input_from_source_n(source, src_len, abs_url, type, flavor);
+    const bool explicit_structurizr = flavor &&
+        (strcmp(flavor->chars, "structurizr") == 0 || strcmp(flavor->chars, "c4") == 0);
+    const bool detected_structurizr = !flavor &&
+        input_detect_structurizr_flavor(pathname, source, src_len) != NULL;
+    if (input && !is_binary_pdf && (explicit_structurizr || detected_structurizr)) {
+        resolve_graph_structurizr_local_includes(input, pathname);
+    }
     mem_free(source);
     return input;
 }

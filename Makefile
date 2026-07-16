@@ -1746,6 +1746,12 @@ test-graph-structurizr: build-graph-structurizr-test
 	@./test/test_lambda_gtest.exe --gtest_filter='*structurizr*'
 	@echo "Running headless .dsl selected-view bridge..."
 	@./lambda.exe view test/lambda/graph/structurizr/advanced_static.dsl --view-key Expression --headless --no-log
+	@echo "Running selected-view HTML conversion bridge..."
+	@./lambda.exe convert test/lambda/graph/structurizr/advanced_static.dsl -t html -o temp/structurizr_convert.html --view-key Expression
+	@grep -q 'data-node-id="api"' temp/structurizr_convert.html
+	@grep -q 'data-node-id="user"' temp/structurizr_convert.html
+	@! grep -q 'data-node-id="worker"' temp/structurizr_convert.html
+	@rm -f temp/structurizr_convert.html
 
 test-validator: build
 	@echo "Running validator test suite..."
