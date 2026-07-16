@@ -2926,6 +2926,15 @@ static void adjust_block_children_after_shrink(ViewBlock* parent, float new_pare
     // not by normal block flow rules. Skip adjustment for flex containers.
     if (parent->display.inner == CSS_VALUE_FLEX) return;
 
+    float child_containing_width = new_parent_cw;
+    if (parent->multicol && is_multicol_container(parent) &&
+        parent->multicol->computed_column_count > 1 &&
+        parent->multicol->computed_column_width > 0.0f) {
+        // Shrink-to-fit finalization runs after multicol layout; its block
+        // children fill a fragmentainer, not the full multicol content box.
+        child_containing_width = parent->multicol->computed_column_width;
+    }
+
     for (View* child = lam::view_require_element(parent)->first_placed_child(); child; child = child->next()) {
         // only adjust block-level elements in normal flow
         if (child->view_type != RDT_VIEW_BLOCK && child->view_type != RDT_VIEW_LIST_ITEM)
@@ -2959,14 +2968,14 @@ static void adjust_block_children_after_shrink(ViewBlock* parent, float new_pare
             ml = (cb->bound->margin.left_type == CSS_VALUE_AUTO) ? 0 : cb->bound->margin.left;
             mr = (cb->bound->margin.right_type == CSS_VALUE_AUTO) ? 0 : cb->bound->margin.right;
         }
-        float new_width = max(new_parent_cw - ml - mr, 0.0f);
+        float new_width = max(child_containing_width - ml - mr, 0.0f);
         float old_width = cb->width;
 
         if (fabsf(new_width - old_width) < 0.5f)
             continue;
 
         log_debug("%s adjust block child after shrink: width %.1f -> %.1f (parent_cw=%.1f)",
-            cb->source_loc(), old_width, new_width, new_parent_cw);
+            cb->source_loc(), old_width, new_width, child_containing_width);
         cb->width = new_width;
 
         // compute padding+border for content area calculations
