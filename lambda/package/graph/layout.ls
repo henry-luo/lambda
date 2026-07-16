@@ -291,7 +291,10 @@ fn node_annotation_anchor(label, nodes) {
   if (len(matches) == 0) null
   else {
     let node = matches[0];
-    {x: node.x + node.width / 2.0 + 6.0 + label.width / 2.0, y: node.y}
+    let left = label.kind == "note-left";
+    {x: if (left) node.x - node.width / 2.0 - 6.0 - label.width / 2.0
+        else node.x + node.width / 2.0 + 6.0 + label.width / 2.0,
+      y: node.y}
   }
 }
 

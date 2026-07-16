@@ -1,0 +1,338 @@
+{
+  "configuration" : { },
+  "description" : "Description",
+  "documentation" : { },
+  "id" : 0,
+  "model" : {
+    "customElements" : [ {
+      "description" : "Stores messages",
+      "id" : "10",
+      "metadata" : "Object Store",
+      "name" : "Archive",
+      "properties" : {
+        "structurizr.dsl.identifier" : "archive"
+      },
+      "tags" : "Element"
+    }, {
+      "description" : "Carries commands",
+      "id" : "9",
+      "metadata" : "Message Bus",
+      "name" : "Queue",
+      "properties" : {
+        "structurizr.dsl.identifier" : "queue"
+      },
+      "relationships" : [ {
+        "description" : "Forwards",
+        "destinationId" : "10",
+        "id" : "17",
+        "sourceId" : "9",
+        "tags" : "Relationship"
+      } ],
+      "tags" : "Element"
+    } ],
+    "people" : [ {
+      "description" : "Uses the platform",
+      "id" : "1",
+      "name" : "Visitor",
+      "properties" : {
+        "structurizr.dsl.identifier" : "visitor"
+      },
+      "relationships" : [ {
+        "description" : "Uses",
+        "destinationId" : "2",
+        "id" : "11",
+        "sourceId" : "1",
+        "tags" : "Relationship"
+      }, {
+        "description" : "Pays",
+        "destinationId" : "8",
+        "id" : "13",
+        "sourceId" : "1",
+        "tags" : "Relationship"
+      } ],
+      "tags" : "Element,Person,External"
+    } ],
+    "softwareSystems" : [ {
+      "containers" : [ {
+        "components" : [ {
+          "description" : "Handles requests",
+          "documentation" : { },
+          "id" : "4",
+          "name" : "API",
+          "properties" : {
+            "structurizr.dsl.identifier" : "store.web.api"
+          },
+          "relationships" : [ {
+            "description" : "Writes",
+            "destinationId" : "5",
+            "id" : "15",
+            "sourceId" : "4",
+            "tags" : "Relationship,Critical",
+            "technology" : "SQL"
+          } ],
+          "tags" : "Element,Component,API",
+          "technology" : "Lambda"
+        }, {
+          "description" : "Stores data",
+          "documentation" : { },
+          "id" : "5",
+          "name" : "Repository",
+          "properties" : {
+            "structurizr.dsl.identifier" : "store.web.repo"
+          },
+          "relationships" : [ {
+            "description" : "Migrates",
+            "destinationId" : "6",
+            "id" : "16",
+            "sourceId" : "5",
+            "tags" : "Relationship,Internal"
+          } ],
+          "tags" : "Element,Component,Internal",
+          "technology" : "SQLite"
+        }, {
+          "description" : "Being retired",
+          "documentation" : { },
+          "id" : "6",
+          "name" : "Legacy",
+          "properties" : {
+            "structurizr.dsl.identifier" : "store.web.hidden"
+          },
+          "tags" : "Element,Component,Hidden",
+          "technology" : "C"
+        } ],
+        "description" : "Serves requests",
+        "documentation" : { },
+        "id" : "3",
+        "name" : "Web",
+        "properties" : {
+          "structurizr.dsl.identifier" : "store.web"
+        },
+        "relationships" : [ {
+          "description" : "Dispatches",
+          "destinationId" : "7",
+          "id" : "14",
+          "sourceId" : "3",
+          "tags" : "Relationship"
+        } ],
+        "tags" : "Element,Container,Core",
+        "technology" : "Lambda"
+      }, {
+        "description" : "Runs jobs",
+        "documentation" : { },
+        "id" : "7",
+        "name" : "Worker",
+        "properties" : {
+          "structurizr.dsl.identifier" : "store.worker"
+        },
+        "tags" : "Element,Container,Core",
+        "technology" : "Lambda"
+      } ],
+      "description" : "Sells products",
+      "documentation" : { },
+      "id" : "2",
+      "name" : "Store",
+      "properties" : {
+        "structurizr.dsl.identifier" : "store"
+      },
+      "relationships" : [ {
+        "description" : "Charges",
+        "destinationId" : "8",
+        "id" : "12",
+        "sourceId" : "2",
+        "tags" : "Relationship"
+      } ],
+      "tags" : "Element,Software System,Core"
+    }, {
+      "description" : "Collects payments",
+      "documentation" : { },
+      "id" : "8",
+      "name" : "Billing",
+      "properties" : {
+        "structurizr.dsl.identifier" : "billing"
+      },
+      "tags" : "Element,Software System,Core"
+    } ]
+  },
+  "name" : "Static views",
+  "properties" : {
+    "structurizr.inspection.error" : "12",
+    "structurizr.dsl" : "d29ya3NwYWNlICJTdGF0aWMgdmlld3MiIHsKICAhaWRlbnRpZmllcnMgaGllcmFyY2hpY2FsCiAgbW9kZWwgewogICAgdmlzaXRvciA9IHBlcnNvbiAiVmlzaXRvciIgIlVzZXMgdGhlIHBsYXRmb3JtIiB7CiAgICAgIHRhZ3MgRXh0ZXJuYWwKICAgIH0KICAgIHN0b3JlID0gc29mdHdhcmVTeXN0ZW0gIlN0b3JlIiAiU2VsbHMgcHJvZHVjdHMiIHsKICAgICAgdGFncyBDb3JlCiAgICAgIHdlYiA9IGNvbnRhaW5lciAiV2ViIiAiU2VydmVzIHJlcXVlc3RzIiAiTGFtYmRhIiB7CiAgICAgICAgdGFncyBDb3JlCiAgICAgICAgYXBpID0gY29tcG9uZW50ICJBUEkiICJIYW5kbGVzIHJlcXVlc3RzIiAiTGFtYmRhIiB7CiAgICAgICAgICB0YWdzIEFQSQogICAgICAgIH0KICAgICAgICByZXBvID0gY29tcG9uZW50ICJSZXBvc2l0b3J5IiAiU3RvcmVzIGRhdGEiICJTUUxpdGUiIHsKICAgICAgICAgIHRhZ3MgSW50ZXJuYWwKICAgICAgICB9CiAgICAgICAgaGlkZGVuID0gY29tcG9uZW50ICJMZWdhY3kiICJCZWluZyByZXRpcmVkIiAiQyIgewogICAgICAgICAgdGFncyBIaWRkZW4KICAgICAgICB9CiAgICAgIH0KICAgICAgd29ya2VyID0gY29udGFpbmVyICJXb3JrZXIiICJSdW5zIGpvYnMiICJMYW1iZGEiIHsKICAgICAgICB0YWdzIENvcmUKICAgICAgfQogICAgfQogICAgYmlsbGluZyA9IHNvZnR3YXJlU3lzdGVtICJCaWxsaW5nIiAiQ29sbGVjdHMgcGF5bWVudHMiIHsKICAgICAgdGFncyBDb3JlCiAgICB9CiAgICBxdWV1ZSA9IGVsZW1lbnQgIlF1ZXVlIiAiTWVzc2FnZSBCdXMiICJDYXJyaWVzIGNvbW1hbmRzIgogICAgYXJjaGl2ZSA9IGVsZW1lbnQgIkFyY2hpdmUiICJPYmplY3QgU3RvcmUiICJTdG9yZXMgbWVzc2FnZXMiCgogICAgdmlzaXRvciAtPiBzdG9yZSAiVXNlcyIKICAgIHN0b3JlIC0+IGJpbGxpbmcgIkNoYXJnZXMiCiAgICB2aXNpdG9yIC0+IGJpbGxpbmcgIlBheXMiCiAgICBzdG9yZS53ZWIgLT4gc3RvcmUud29ya2VyICJEaXNwYXRjaGVzIgogICAgc3RvcmUud2ViLmFwaSAtPiBzdG9yZS53ZWIucmVwbyAiV3JpdGVzIiAiU1FMIiB7CiAgICAgIHRhZ3MgQ3JpdGljYWwKICAgIH0KICAgIHN0b3JlLndlYi5yZXBvIC0+IHN0b3JlLndlYi5oaWRkZW4gIk1pZ3JhdGVzIiB7CiAgICAgIHRhZ3MgSW50ZXJuYWwKICAgIH0KICAgIHF1ZXVlIC0+IGFyY2hpdmUgIkZvcndhcmRzIgogIH0KICB2aWV3cyB7CiAgICBzeXN0ZW1MYW5kc2NhcGUgIkxhbmRzY2FwZSIgewogICAgICBpbmNsdWRlICoKICAgICAgYXV0b0xheW91dCBsciAxNDAgOTAKICAgIH0KICAgIHN5c3RlbUNvbnRleHQgc3RvcmUgIkNvbnRleHRBbGwiIHsKICAgICAgaW5jbHVkZSAqCiAgICB9CiAgICBzeXN0ZW1Db250ZXh0IHN0b3JlICJDb250ZXh0UmVsdWN0YW50IiB7CiAgICAgIGluY2x1ZGUgKj8KICAgIH0KICAgIGNvbXBvbmVudCBzdG9yZS53ZWIgIkNvbXBvbmVudHMiIHsKICAgICAgaW5jbHVkZSAiZWxlbWVudC50eXBlPT1Db21wb25lbnQgJiYgZWxlbWVudC5wYXJlbnQ9PXN0b3JlLndlYiIKICAgICAgZXhjbHVkZSAiZWxlbWVudC50YWc9PUhpZGRlbiIKICAgICAgZXhjbHVkZSAicmVsYXRpb25zaGlwLnRhZz09Q3JpdGljYWwiCiAgICB9CiAgICBjb21wb25lbnQgc3RvcmUud2ViICJDb3VwbGVkIiB7CiAgICAgIGluY2x1ZGUgIi0+c3RvcmUud2ViLmFwaS0+IgogICAgfQogICAgY3VzdG9tICJJbnRlZ3JhdGlvbiIgewogICAgICBpbmNsdWRlICoKICAgIH0KICAgIGZpbHRlcmVkICJMYW5kc2NhcGUiIGluY2x1ZGUgIkNvcmUsUmVsYXRpb25zaGlwIiAiQ29yZU9ubHkiCiAgICBmaWx0ZXJlZCAiTGFuZHNjYXBlIiBleGNsdWRlICJFeHRlcm5hbCIgIk5vRXh0ZXJuYWwiCiAgICBzdHlsZXMgewogICAgICBlbGVtZW50IEFQSSB7CiAgICAgICAgYmFja2dyb3VuZCAjZWVmNmZmCiAgICAgICAgY29sb3IgIzE3MzY1ZAogICAgICAgIHN0cm9rZSAjMzk3OGE4CiAgICAgICAgc3Ryb2tlV2lkdGggMgogICAgICAgIGZvbnRTaXplIDE1CiAgICAgIH0KICAgICAgcmVsYXRpb25zaGlwIENyaXRpY2FsIHsKICAgICAgICBjb2xvciAjYjQyMzE4CiAgICAgICAgdGhpY2tuZXNzIDMKICAgICAgICBkYXNoZWQgdHJ1ZQogICAgICB9CiAgICB9CiAgfQp9",
+    "structurizr.inspection.info" : "0",
+    "structurizr.inspection.ignore" : "0",
+    "structurizr.inspection.warning" : "0"
+  },
+  "views" : {
+    "componentViews" : [ {
+      "containerId" : "3",
+      "elements" : [ {
+        "id" : "4",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "5",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalContainerBoundariesVisible" : false,
+      "key" : "Components",
+      "name" : "Component View: Store - Web",
+      "order" : 4
+    }, {
+      "containerId" : "3",
+      "elements" : [ {
+        "id" : "4",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "5",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalContainerBoundariesVisible" : false,
+      "key" : "Coupled",
+      "name" : "Component View: Store - Web",
+      "order" : 5,
+      "relationships" : [ {
+        "id" : "15"
+      } ]
+    } ],
+    "configuration" : {
+      "branding" : { },
+      "styles" : {
+        "elements" : [ {
+          "background" : "#eef6ff",
+          "color" : "#17365d",
+          "fontSize" : 15,
+          "stroke" : "#3978a8",
+          "strokeWidth" : 2,
+          "tag" : "API"
+        } ],
+        "relationships" : [ {
+          "color" : "#b42318",
+          "dashed" : true,
+          "tag" : "Critical",
+          "thickness" : 3
+        } ]
+      },
+      "terminology" : { }
+    },
+    "customViews" : [ {
+      "elements" : [ {
+        "id" : "9",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "10",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "key" : "Integration",
+      "name" : "Custom View: ",
+      "order" : 6,
+      "relationships" : [ {
+        "id" : "17"
+      } ]
+    } ],
+    "filteredViews" : [ {
+      "baseViewKey" : "Landscape",
+      "key" : "CoreOnly",
+      "mode" : "Include",
+      "name" : "Filtered: System Landscape View",
+      "order" : 7,
+      "tags" : [ "Core", "Relationship" ]
+    }, {
+      "baseViewKey" : "Landscape",
+      "key" : "NoExternal",
+      "mode" : "Exclude",
+      "name" : "Filtered: System Landscape View",
+      "order" : 8,
+      "tags" : [ "External" ]
+    } ],
+    "systemContextViews" : [ {
+      "elements" : [ {
+        "id" : "1",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "8",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "enterpriseBoundaryVisible" : true,
+      "key" : "ContextAll",
+      "name" : "System Context View: Store",
+      "order" : 2,
+      "relationships" : [ {
+        "id" : "11"
+      }, {
+        "id" : "12"
+      }, {
+        "id" : "13"
+      } ],
+      "softwareSystemId" : "2"
+    }, {
+      "elements" : [ {
+        "id" : "1",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "8",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "enterpriseBoundaryVisible" : true,
+      "key" : "ContextReluctant",
+      "name" : "System Context View: Store",
+      "order" : 3,
+      "relationships" : [ {
+        "id" : "11"
+      }, {
+        "id" : "12"
+      } ],
+      "softwareSystemId" : "2"
+    } ],
+    "systemLandscapeViews" : [ {
+      "automaticLayout" : {
+        "applied" : false,
+        "edgeSeparation" : 0,
+        "implementation" : "Graphviz",
+        "nodeSeparation" : 90,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 140,
+        "vertices" : false
+      },
+      "elements" : [ {
+        "id" : "1",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "8",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "enterpriseBoundaryVisible" : true,
+      "key" : "Landscape",
+      "name" : "System Landscape View",
+      "order" : 1,
+      "relationships" : [ {
+        "id" : "11"
+      }, {
+        "id" : "12"
+      }, {
+        "id" : "13"
+      } ]
+    } ]
+  }
+}

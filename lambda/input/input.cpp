@@ -594,10 +594,64 @@ bool map_put_undefined_unique_absent_bulk(Map* mp, String** keys, int count,
 }
 
 extern TypeElmt EmptyElmt;
+static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_UNDEFINED:
+        *(bool*)field_ptr = false;
+        break;
+    case LMD_TYPE_BOOL:
+        *(bool*)field_ptr = value.bool_val;
+        break;
+    case LMD_TYPE_INT:
+        *(int64_t*)field_ptr = value.get_int56();
+        break;
+    case LMD_TYPE_INT64:
+        *(int64_t*)field_ptr = value.get_int64();
+        break;
+    case LMD_TYPE_FLOAT:
+        *(double*)field_ptr = value.get_double();
+        break;
+    case LMD_TYPE_DTIME:
+        *(DateTime*)field_ptr = value.get_datetime();
+        break;
+    case LMD_TYPE_DECIMAL:
+        *(Decimal**)field_ptr = value.get_decimal();
+        break;
+    case LMD_TYPE_STRING:
+        *(String**)field_ptr = value.get_safe_string();
+        break;
+    case LMD_TYPE_SYMBOL:
+        *(Symbol**)field_ptr = value.get_safe_symbol();
+        break;
+    case LMD_TYPE_BINARY:
+        *(Binary**)field_ptr = value.get_safe_binary();
+        break;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
+        *(void**)field_ptr = value.container;
+        break;
+    case LMD_TYPE_PATH:
+        *(Path**)field_ptr = value.path;
+        break;
+    default:
+        log_debug("elmt_store_value: unknown type %d", type_id);
+    }
+}
+
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     assert(elmt->type != &EmptyElmt);
     TypeId type_id = get_type_id(value);
     TypeElmt* elmt_type = (TypeElmt*)elmt->type;
+    for (ShapeEntry* field = elmt_type->shape; field; field = field->next) {
+        if (field->name && field->type->type_id == type_id &&
+            strview_equal(field->name, key->chars)) {
+            // ElementReader walks shape order while dynamic lookup is hashed;
+            // same-typed duplicate keys made the APIs observe different values.
+            elmt_store_value((char*)elmt->data + field->byte_offset, type_id, value);
+            return;
+        }
+    }
     if (elmt_type->shape && !elmt_type->is_private_clone) {
         // ElementBuilder::final() pools shape chains; appending attrs after that
         // must not mutate the shared pooled ShapeEntry list.
@@ -628,51 +682,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
 
     // store the value
     void* field_ptr = (char*)elmt->data + byte_offset - bsize;
-    switch (type_id) {
-    case LMD_TYPE_NULL:
-    case LMD_TYPE_UNDEFINED:
-        // null/undefined value doesn't need to store anything
-        *(bool*)field_ptr = false;
-        break;
-    case LMD_TYPE_BOOL:
-        *(bool*)field_ptr = value.bool_val;
-        break;
-    case LMD_TYPE_INT:
-        *(int64_t*)field_ptr = value.get_int56();  // use get_int56() to extract full 56-bit value
-        break;
-    case LMD_TYPE_INT64:
-        *(int64_t*)field_ptr = value.get_int64();
-        break;
-    case LMD_TYPE_FLOAT:
-        *(double*)field_ptr = value.get_double();
-        break;
-    case LMD_TYPE_DTIME:
-        *(DateTime*)field_ptr = value.get_datetime();
-        break;
-    case LMD_TYPE_DECIMAL:
-        *(Decimal**)field_ptr = value.get_decimal();
-        break;
-    case LMD_TYPE_STRING:
-        *(String**)field_ptr = value.get_safe_string();
-        break;
-    case LMD_TYPE_SYMBOL:
-        *(Symbol**)field_ptr = value.get_safe_symbol();
-        break;
-    case LMD_TYPE_BINARY:
-        *(Binary**)field_ptr = value.get_safe_binary();
-        break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
-        Container *container = value.container;
-        *(void**)field_ptr = container;
-        break;
-    }
-    case LMD_TYPE_PATH:
-        *(Path**)field_ptr = value.path;
-        break;
-    default:
-        log_debug("unknown type %d\n", value._type_id);
-    }
+    elmt_store_value(field_ptr, type_id, value);
 }
 
 // ========== Shape Finalization ==========

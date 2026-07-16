@@ -1,0 +1,15 @@
+erDiagram
+direction LR
+CUSTOMER {
+  string customerNumber PK "Primary identifier"
+  string name
+}
+ORDER["Sales Order"] {
+  int orderNumber PK
+  string? note
+}
+LINE-ITEM
+CUSTOMER ||--o{ ORDER : places
+ORDER ||..|{ LINE-ITEM : contains
+CUSTOMER }o..o{ LINE-ITEM : references
+ORDER |o--|| CUSTOMER : billed to

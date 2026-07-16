@@ -1,0 +1,12 @@
+{
+  source: ["class", "TB", 5, 4, 4, 3, 2, 1, 1, 2],
+  nodes: [["Repository", "Repository<List<Entity>>", "~List~Entity~~", [["stereotype", null, null, "<<interface>>", "<<interface>>"], ["field", "public", "static", "+items List~Entity~$", "+items List<Entity>"], ["method", "public", "abstract", "+find(id) Entity*", "+find(id) Entity"]]], ["Display Name", "Display Name", null, [["field", "private", null, "-secret String", "-secret String"]]], ["Adapter", "Adapter", null, [["stereotype", null, null, "<<service>>", "<<service>>"]]], ["Mapper", "Mapper", null, []], ["Implicit", "Implicit<T>", "~T~", []]],
+  edges: [["Repository", "Adapter", "<|--|>", "empty", "empty", "bridges"], ["Repository", "Mapper", "()--", "circle", "none", "exposes"], ["Mapper", "Display Name", "--()", "none", "circle", "consumes"], ["Implicit", "Mapper", "--", "none", "none", "implicit generic"]],
+  namespaces: [["Domain", "Domain Model", "true"], ["Domain.Inner", "Inner", "true"], ["External", "External", "true"], ["External.Tools", "Tools", "true"]],
+  annotations: [["node", "Repository", "Caches entities
+by identifier"], ["node", "Repository", "Repository contract"], ["graph", "__graph__", "Class model"]],
+  styles: [[["important", "fill:#fff,stroke:#111"], ["focus", "fill:#fff,stroke:#111"]], [["Repository,Adapter", "important"]], [["Mapper", "fill:#eee,stroke:#222"]], [["Repository", "link", "https://example.com/repository", null], ["Mapper", "callback", null, "handleMapper"]]],
+  canonical: [true, 5, [["Repository", "content"], ["Display Name", "content"], ["Adapter", "content"], ["Mapper", "content"], ["Implicit", "content"]]],
+  html: [["Repository", "div"], ["Display Name", "div"], ["Adapter", "div"], ["Mapper", ""], ["Implicit", ""]],
+  render: [true, 5, 4, 3, true, true, true]
+}

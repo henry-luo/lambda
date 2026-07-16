@@ -2720,7 +2720,8 @@ static void recompute_inline_descendant_bounds(View* view, FontHandle* fallback_
         if (!inline_span_has_recomputable_child_box(span)) return;
         if (inline_span_has_inline_level_atomic_child_for_recompute(span)) return;
         if (inline_span_has_in_flow_block_child_for_recompute(span)) return;
-        compute_span_bounding_box(span, inline_span_has_multiple_line_fragments(span), fallback_fh);
+        recompute_span_bounding_box_after_line_layout(
+            span, inline_span_has_multiple_line_fragments(span), fallback_fh);
     }
 }
 
@@ -2926,6 +2927,15 @@ static void adjust_block_children_after_shrink(ViewBlock* parent, float new_pare
     // not by normal block flow rules. Skip adjustment for flex containers.
     if (parent->display.inner == CSS_VALUE_FLEX) return;
 
+    float child_containing_width = new_parent_cw;
+    if (parent->multicol && is_multicol_container(parent) &&
+        parent->multicol->computed_column_count > 1 &&
+        parent->multicol->computed_column_width > 0.0f) {
+        // Shrink-to-fit finalization runs after multicol layout; its block
+        // children fill a fragmentainer, not the full multicol content box.
+        child_containing_width = parent->multicol->computed_column_width;
+    }
+
     for (View* child = lam::view_require_element(parent)->first_placed_child(); child; child = child->next()) {
         // only adjust block-level elements in normal flow
         if (child->view_type != RDT_VIEW_BLOCK && child->view_type != RDT_VIEW_LIST_ITEM)
@@ -2959,14 +2969,14 @@ static void adjust_block_children_after_shrink(ViewBlock* parent, float new_pare
             ml = (cb->bound->margin.left_type == CSS_VALUE_AUTO) ? 0 : cb->bound->margin.left;
             mr = (cb->bound->margin.right_type == CSS_VALUE_AUTO) ? 0 : cb->bound->margin.right;
         }
-        float new_width = max(new_parent_cw - ml - mr, 0.0f);
+        float new_width = max(child_containing_width - ml - mr, 0.0f);
         float old_width = cb->width;
 
         if (fabsf(new_width - old_width) < 0.5f)
             continue;
 
         log_debug("%s adjust block child after shrink: width %.1f -> %.1f (parent_cw=%.1f)",
-            cb->source_loc(), old_width, new_width, new_parent_cw);
+            cb->source_loc(), old_width, new_width, child_containing_width);
         cb->width = new_width;
 
         // compute padding+border for content area calculations
@@ -5934,11 +5944,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 if (block->embed) {
                     block->embed->broken_alt_fallback = false;
                 }
-                if (has_css_width && !has_html_width) {
-                    lycon->block.given_width = -1.0f;
-                }
-                if (has_css_height && !has_html_height) {
-                    lycon->block.given_height = -1.0f;
+                bool has_definite_width = has_css_width || has_html_width;
+                bool has_definite_height = has_css_height || has_html_height;
+                if (!has_definite_width || !has_definite_height) {
+                    // A failed image has no intrinsic ratio: one definite axis
+                    // cannot resolve the other, while two definite axes retain the box.
+                    if (has_definite_width) lycon->block.given_width = -1.0f;
+                    if (has_definite_height) lycon->block.given_height = -1.0f;
                 }
                 // Empty or absent alt text keeps explicit dimensions when present.
                 // Only an in-flow block indicator fills the available inline size;
@@ -7789,6 +7801,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         }
                         asc_contribution = item_height / 2.0f + x_height_half;
                         desc_contribution = item_height / 2.0f - x_height_half;
+                    } else if (valign == CSS_VALUE_TEXT_TOP) {
+                        // text-top aligns the atomic margin-box top with the
+                        // parent inline's font top, so split it at that baseline.
+                        asc_contribution = lycon->line.parent_font_ascender;
+                        desc_contribution = item_height - asc_contribution;
+                    } else if (valign == CSS_VALUE_TEXT_BOTTOM) {
+                        // text-bottom aligns the atomic margin-box bottom with the
+                        // parent inline's font bottom; a bottom-edge baseline would
+                        // incorrectly add that descender outside the atomic box.
+                        desc_contribution = lycon->line.parent_font_descender;
+                        asc_contribution = item_height - desc_contribution;
                     } else {
                         // For baseline, sub, super, length/percentage offsets
                         float baseline_shift = vertical_align_baseline_shift(
@@ -7991,11 +8014,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // with a content-derived baseline. Keep the strut's
                     // below-baseline extent so an inline-table cannot collapse
                     // the line box to only its own border box.
-                    float half_leading = (lycon->block.line_height -
-                        (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
-                    float strut_below = lycon->block.init_descender + half_leading;
-                    if (strut_below > 0.0f) {
-                        lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
+                    if (!layout_quirks_block_ignores_line_height(lycon, nullptr)) {
+                        float half_leading = (lycon->block.line_height -
+                            (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
+                        float strut_below = lycon->block.init_descender + half_leading;
+                        if (strut_below > 0.0f) {
+                            lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
+                        }
                     }
                     log_debug("%s inline-block with content baseline: ascender=%.1f, descender=%.1f, block_h=%.1f", elmt->source_loc(),
                         effective_baseline, descender_part, block->height);
@@ -8032,11 +8057,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // the strut's below-baseline extent still contributes to the
                     // line box height. Compute actual half-leading (may be negative
                     // when line-height < font-size, e.g. line-height: 0).
-                    float half_leading = (lycon->block.line_height -
-                        (lycon->block.init_ascender + lycon->block.init_descender)) / 2;
-                    float strut_below = lycon->block.init_descender + half_leading;
-                    if (strut_below > 0) {
-                        lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
+                    if (!layout_quirks_block_ignores_line_height(lycon, nullptr)) {
+                        // Atomic inlines retain the root descender only when the
+                        // containing block actually generates a root strut.
+                        float half_leading = (lycon->block.line_height -
+                            (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
+                        float strut_below = lycon->block.init_descender + half_leading;
+                        if (strut_below > 0.0f) {
+                            lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
+                        }
                     }
                 }
                 log_debug("%s inline-block set max_ascender to: %d", elmt->source_loc(), lycon->line.max_ascender);

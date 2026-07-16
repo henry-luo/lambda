@@ -1,0 +1,25 @@
+{
+  manifest: [4, 3],
+  results: [{
+      id: "basic-reference",
+      errors: [null, null],
+      equal: true,
+      sections: [true, true, true, true, true],
+      counts: [8, 3, 2, 2],
+      diagnostics: []
+    }, {
+      id: "stage4c",
+      errors: [null, null],
+      equal: true,
+      sections: [true, true, true, true, true],
+      counts: [10, 7, 8, 2],
+      diagnostics: []
+    }, {
+      id: "stage4d",
+      errors: [null, null],
+      equal: true,
+      sections: [true, true, true, true, true],
+      counts: [12, 7, 3, 0],
+      diagnostics: []
+    }]
+}

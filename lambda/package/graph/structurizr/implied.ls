@@ -20,16 +20,28 @@ fn branch(chain, other) {
   slice(chain, 0, if (len(shared) == 0) len(chain) else shared[0])
 }
 
+fn logical_kind(kind) => contains([
+  "person", "software-system", "container", "component", "custom"
+], string(kind))
+
 fn candidates(elements, relationship) {
-  let sources = chain_of(elements, relationship.from, []);
-  let destinations = chain_of(elements, relationship.to, []);
-  let source_branch = branch(sources, destinations);
-  let destination_branch = branch(destinations, sources);
-  [for (source in source_branch)
-    for (destination in destination_branch
-    where source != destination and
-      not (source == relationship.from and destination == relationship.to))
-    {source: source, destination: destination}]
+  let source_value = element_by_id(elements, relationship.from);
+  let destination_value = element_by_id(elements, relationship.to);
+  // Structurizr implies relationships only through logical-model ancestry;
+  // deployment nodes and instances use explicit or lifted relationships.
+  if (source_value == null or destination_value == null or
+      not logical_kind(source_value.kind) or not logical_kind(destination_value.kind)) { [] }
+  else {
+    let sources = chain_of(elements, relationship.from, []);
+    let destinations = chain_of(elements, relationship.to, []);
+    let source_branch = branch(sources, destinations);
+    let destination_branch = branch(destinations, sources);
+    [for (source in source_branch)
+      for (destination in destination_branch
+      where source != destination and
+        not (source == relationship.from and destination == relationship.to))
+      {source: source, destination: destination}]
+  }
 }
 
 fn exists(values, candidate) => len([

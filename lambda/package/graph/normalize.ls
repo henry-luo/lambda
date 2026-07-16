@@ -5,6 +5,9 @@ import diagnostic: .diagnostics
 import schema: .schema
 import graph_content: .transform.content
 import graphviz_normalize: .graphviz.normalize
+import mermaid_class: .mermaid.class
+import mermaid_er: .mermaid.er
+import mermaid_state: .mermaid.state
 
 fn noncanonical_children(value) => [
   for (child in model.child_items(value)
@@ -428,8 +431,13 @@ pub fn normalize(graph) {
   // canonical uniqueness checks while authored canonical Mark keeps strict IDs.
   let dot_result = if (is_dot_source_graph(graph)) graphviz_normalize.normalize(graph)
     else {graph: graph, diagnostics: []};
-  let resolved = if (is_mermaid_source_graph(dot_result.graph))
-    merge_mermaid_source_graph(dot_result.graph) else dot_result.graph;
+  let resolved = if (is_mermaid_source_graph(dot_result.graph)) {
+    let merged = merge_mermaid_source_graph(dot_result.graph);
+    if (merged["diagram-type"] == "class") mermaid_class.adapt(merged)
+    else if (merged["diagram-type"] == "er") mermaid_er.adapt(merged)
+    else if (merged["diagram-type"] == "state") mermaid_state.adapt(merged)
+    else merged
+  } else dot_result.graph;
   let canonical = if (resolved is element and string(name(resolved)) == "graph")
     (if (is_canonical_graph(resolved)) resolved else canonical_graph(resolved)) else resolved;
   let final_graph = if (canonical is element and canonical.flavor == "dot")

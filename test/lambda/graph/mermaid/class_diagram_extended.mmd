@@ -1,0 +1,30 @@
+%%{init: { 'class': { 'hideEmptyMembersBox': true } } }%%
+classDiagram
+direction TB
+namespace Domain["Domain Model"] {
+  class Repository~List~Entity~~ <<interface>> {
+    +items List~Entity~$
+    +find(id) Entity*
+    note "Caches entities\nby identifier"
+  }
+  namespace Inner {
+    class `Display Name`["Display Name"] {
+      -secret String
+    }
+  }
+}
+namespace External.Tools {
+  class Adapter,Mapper
+}
+<<service>> Adapter
+Repository <|--|> Adapter : bridges
+Repository ()-- Mapper : exposes
+Mapper --() `Display Name` : consumes
+Implicit~T~ -- Mapper : implicit generic
+note for Repository "Repository contract"
+note "Class model"
+classDef important,focus fill:#fff,stroke:#111
+cssClass "Repository,Adapter" important
+style Mapper fill:#eee,stroke:#222
+link Repository "https://example.com/repository" "Open repository"
+callback Mapper "handleMapper"

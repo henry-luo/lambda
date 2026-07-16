@@ -273,14 +273,16 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style) {
 // List Container Counter Setup
 // ============================================================================
 
+static bool is_html_list_container_tag(uintptr_t tag) {
+    return tag == HTM_TAG_OL || tag == HTM_TAG_UL ||
+        tag == HTM_TAG_MENU || tag == HTM_TAG_DIR;
+}
+
 void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomElement* dom_elem) {
     if (!lycon->counter_context || !dom_elem) return;
 
     uintptr_t tag = dom_elem->tag_id;
-    if (tag != HTM_TAG_OL && tag != HTM_TAG_UL &&
-        tag != HTM_TAG_MENU && tag != HTM_TAG_DIR) {
-        return;
-    }
+    if (!is_html_list_container_tag(tag)) return;
 
     // CSS 2.1 §12.5: OL, UL, MENU, DIR have implicit counter-reset: list-item
     // This creates a new list-item counter instance for each list container,
@@ -434,6 +436,11 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     marker_prop->marker_type = marker_style;
     marker_prop->bullet_size = bullet_size;
     marker_prop->is_outside = is_outside;
+    DomElement* list_parent = dom_element_get_parent(parent_elem);
+    bool is_quirks = lycon->doc && lycon->doc->view_tree &&
+        is_quirks_mode(lycon->doc->view_tree->html_version);
+    marker_prop->reserves_first_line = is_quirks && is_outside &&
+        (!list_parent || !is_html_list_container_tag(list_parent->tag_id));
 
     // CSS 2.1 §12.5: list-style-image overrides list-style-type when image loads successfully
     if (image_url && strcmp(image_url, "none") != 0) {
@@ -479,8 +486,11 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
                                                  (int)strlen(marker_prop->text_content)); // INT_CAST_OK: string length
         marker_prop->width = extents.width;
     } else if (is_bullet_marker) {
-        // bullet: disc/circle/square - use bullet_size + some padding
-        marker_prop->width = bullet_size + font_size * 0.5f;
+        // BackCompat orphan markers reserve Blink's full marker-plus-gap box;
+        // regular outside markers retain their independent marker geometry.
+        marker_prop->width = marker_prop->reserves_first_line
+            ? font_size * 1.375f
+            : bullet_size + font_size * 0.5f;
     } else {
         // fallback: use em-based estimate
         marker_prop->width = font_size * 1.375f;

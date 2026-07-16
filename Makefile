@@ -1234,19 +1234,20 @@ run-layout-baseline-suites:
 		layout_exit=0; \
 		$(LAYOUT_BASELINE_RUNNER) -c "$$suite" > "$$layout_log" 2>&1 || layout_exit=$$?; \
 		grep -E "Baseline-only:|No recorded baseline" "$$layout_log" | head -1 || true; \
-		tail -8 "$$layout_log"; \
-		s_passed=$$(grep "Successful:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
+		grep -A5 "Summary:" "$$layout_log" | tail -6 || true; \
+		grep "Baseline Regressions" "$$layout_log" | head -1 || true; \
+		s_passed=$$(grep "   ✅ Successful:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
+		s_partial=$$(grep "   ⚠️  Partially Passing:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_partial=$${s_partial:-0}; \
 		s_skipped=$$(grep "Skipped:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_skipped=$${s_skipped:-0}; \
-		s_failed=0; \
+		s_failed=$$(grep "   ❌ Failed:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_failed=$${s_failed:-0}; \
 		s_status="✅ PASS"; \
 		if grep -q "Baseline Regressions" "$$layout_log"; then \
-			s_failed=$$(grep "Baseline Regressions" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_failed=$${s_failed:-1}; \
 			s_status="❌ FAIL"; any_failed=1; \
-		elif [ $$layout_exit -ne 0 ] || ! grep -q "Successful:" "$$layout_log"; then \
-			s_failed=$$(grep "Failed:" "$$layout_log" | grep -oE "[0-9]+" | tail -1); s_failed=$${s_failed:-1}; \
+		elif [ $$layout_exit -ne 0 ] || ! grep -q "   ✅ Successful:" "$$layout_log"; then \
+			if [ $$s_failed -eq 0 ]; then s_failed=1; fi; \
 			s_status="❌ FAIL"; any_failed=1; \
 		fi; \
-		echo "$$suite|$$s_status|$$s_passed|$$s_failed|$$s_skipped" >> $(LAYOUT_BASELINE_RESULTS); \
+		echo "$$suite|$$s_status|$$s_passed|$$s_partial|$$s_failed|$$s_skipped" >> $(LAYOUT_BASELINE_RESULTS); \
 		rm -f "$$layout_log"; \
 	done; \
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
@@ -1266,7 +1267,7 @@ run-radiant-baseline:
 	render_passed=0; render_failed=0; render_total=0; render_xpassed=0; render_xfailed=0; render_skipped=0; render_errors=0; render_regressions=0; render_details="not run"; render_status="⏭️  SKIP"; \
 	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
 	any_failed=0; \
-	layout_total_passed=0; layout_total_failed=0; layout_total_skipped=0; \
+	layout_total_passed=0; layout_total_partial=0; layout_total_failed=0; layout_total_skipped=0; \
 	layout_overall_status="✅ PASS"; \
 	mkdir -p temp; \
 	run_logged() { \
@@ -1282,8 +1283,9 @@ run-radiant-baseline:
 	\
 	layout_run_exit=0; \
 	$(MAKE) --no-print-directory run-layout-baseline-suites || layout_run_exit=$$?; \
-	while IFS='|' read -r suite s_status s_passed s_failed s_skipped; do \
+	while IFS='|' read -r suite s_status s_passed s_partial s_failed s_skipped; do \
 		layout_total_passed=$$((layout_total_passed + s_passed)); \
+		layout_total_partial=$$((layout_total_partial + s_partial)); \
 		layout_total_failed=$$((layout_total_failed + s_failed)); \
 		layout_total_skipped=$$((layout_total_skipped + s_skipped)); \
 		if [ "$$s_status" = "❌ FAIL" ]; then layout_overall_status="❌ FAIL"; any_failed=1; fi; \
@@ -1414,7 +1416,7 @@ run-radiant-baseline:
 	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + radiant_view_passed + page_passed + fuzzy_passed + render_passed + wpt_syntax_passed)); \
 	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + radiant_view_failed + page_failed + fuzzy_failed + render_failed + wpt_syntax_failed)); \
 	total_skipped=$$layout_total_skipped; \
-	total_tests=$$((total_passed + total_failed)); \
+	total_tests=$$((total_passed + layout_total_partial + total_failed)); \
 	\
 	echo ""; \
 	echo "=============================================================="; \
@@ -1422,15 +1424,15 @@ run-radiant-baseline:
 	echo "=============================================================="; \
 	echo ""; \
 	echo "📊 Test Results by Suite:"; \
-	echo "   ├── Layout Baseline     $$layout_overall_status  ($$layout_total_passed passed, $$layout_total_failed failed, $$layout_total_skipped skipped)"; \
+	echo "   ├── Layout Baseline     $$layout_overall_status  ($$layout_total_passed passed, $$layout_total_partial partially passing, $$layout_total_failed failed, $$layout_total_skipped skipped)"; \
 	suite_count=$$(wc -l < temp/_layout_baseline_results.txt | tr -d ' '); \
 	suite_idx=0; \
-	while IFS='|' read -r sname sstatus spassed sfailed sskipped; do \
+	while IFS='|' read -r sname sstatus spassed spartial sfailed sskipped; do \
 		suite_idx=$$((suite_idx + 1)); \
 		if [ $$suite_idx -eq $$suite_count ]; then \
-			printf "   │   └── %-14s $$sstatus  ($$spassed passed, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js --baseline-only -c $$sname)\n" "$$sname"; \
+			printf "   │   └── %-14s $$sstatus  ($$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js --baseline-only -c $$sname)\n" "$$sname"; \
 		else \
-			printf "   │   ├── %-14s $$sstatus  ($$spassed passed, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js --baseline-only -c $$sname)\n" "$$sname"; \
+			printf "   │   ├── %-14s $$sstatus  ($$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js --baseline-only -c $$sname)\n" "$$sname"; \
 		fi; \
 	done < $(LAYOUT_BASELINE_RESULTS); \
 	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
@@ -1444,6 +1446,9 @@ run-radiant-baseline:
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \
 	echo "   ✅ Passed:   $$total_passed"; \
+	if [ $$layout_total_partial -gt 0 ]; then \
+		echo "   ⚠️  Partially Passing: $$layout_total_partial"; \
+	fi; \
 	if [ $$total_failed -gt 0 ]; then \
 		echo "   ❌ Failed:   $$total_failed"; \
 	fi; \
@@ -1730,7 +1735,9 @@ test-graph-graphviz: build-graph-graphviz-test
 	@echo "Running manifest-driven Graphviz package fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*graphviz*'
 	@echo "Running headless .gv view bridge..."
-	@./lambda.exe view test/lambda/graph/graphviz/view.gv --headless --no-log
+	@MEMTRACK_MODE=DEBUG ./lambda.exe view test/lambda/graph/graphviz/view.gv --headless --no-log 2>temp/graphviz_view_memtrack.log
+	@! grep -qi 'memtrack: .*leak' temp/graphviz_view_memtrack.log
+	@rm -f temp/graphviz_view_memtrack.log
 
 build-graph-structurizr-test:
 	@echo "Building Structurizr graph test runners..."

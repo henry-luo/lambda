@@ -1,0 +1,6 @@
+The reference JSON in this directory was generated from Lambda's own
+test/lambda/graph/structurizr/basic.dsl fixture using Structurizr CLI
+v2025.11.09. No Structurizr source code or upstream example workspace is copied.
+
+Structurizr CLI is distributed under the Apache License 2.0:
+https://github.com/structurizr/cli/blob/v2025.11.09/LICENSE

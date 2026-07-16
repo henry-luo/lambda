@@ -1074,6 +1074,7 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 // ============================================================================
 
 bool is_multicol_container(ViewBlock* block);
+float multicol_normal_gap_size(ViewBlock* block);
 void calculate_multicol_dimensions(
     MultiColumnProp* multicol,
     float available_width,
@@ -1297,6 +1298,7 @@ typedef struct Linebox {
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
     bool has_c1_control_text;       // true when line contains visible C1 control glyphs
     bool has_non_c1_text;           // true when line contains visible non-C1 text glyphs
+    bool has_direct_block_text;     // non-collapsed text in the block's anonymous inline box
     float c1_control_line_height;   // browser-sized C1 control glyph line strut
     // CSS 2.1 §10.8.1: parent font metrics for vertical-align keywords (text-top, text-bottom, etc.)
     // Set by span_vertical_align before recursing into children; defaults to block init values.
@@ -1332,6 +1334,7 @@ typedef struct Linebox {
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
+    struct FontHandle* prev_kerning_font_handle = nullptr;
     bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
                                      // (used in second pass to expand line box if needed)
@@ -2373,6 +2376,7 @@ bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
 void view_vertical_align(LayoutContext* lycon, View* view);
 float line_baseline_position(LayoutContext* lycon, float* out_line_height);
+bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block);
 float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float span_line_height,
                                float ascender, float descender,
@@ -2414,7 +2418,11 @@ void layout_setup_block_font_metrics(LayoutContext* lycon);
 
 // ViewSpan bounding box computation
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struct FontHandle* fallback_fh = nullptr);
+void recompute_span_bounding_box_after_line_layout(
+    ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh = nullptr);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
+bool inline_span_float_continuation_x(
+    ViewSpan* span, float* continuation_x, bool* has_left_float);
 
 // ============================================================================
 // CSS text-transform

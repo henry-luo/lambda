@@ -1030,12 +1030,14 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
                                             uint32_t codepoint,
                                             bool small_caps_lower,
                                             float kerning,
+                                            bool emoji_presentation,
                                             bool* loaded) {
     FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
     // Intrinsic sizing must use the current FontStyleDesc because font_get_glyph()
     // can retain stale advances after a dynamic @font-face load.
-    LoadedGlyph* glyph = font_load_glyph(
-        lycon->font.font_handle, &style, codepoint, false);
+    LoadedGlyph* glyph = emoji_presentation
+        ? font_load_glyph_emoji(lycon->font.font_handle, &style, codepoint, false)
+        : font_load_glyph(lycon->font.font_handle, &style, codepoint, false);
     *loaded = glyph != nullptr;
     if (!glyph) return 0.0f;
 
@@ -1065,7 +1067,7 @@ static float intrinsic_apply_full_text_transform(LayoutContext* lycon,
         if (text_codepoint_has_zero_advance(transformed[index])) continue;
         bool loaded = false;
         extra_advance += intrinsic_loaded_glyph_advance(
-            lycon, transformed[index], false, 0.0f, &loaded);
+            lycon, transformed[index], false, 0.0f, false, &loaded);
     }
     return extra_advance;
 }
@@ -1305,9 +1307,21 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             kerning = font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint);
         }
 
+        bool emoji_presentation = false;
+        size_t selector_pos = i + (size_t)bytes;
+        if (selector_pos < length) {
+            uint32_t selector = 0;
+            int selector_bytes = str_utf8_decode(
+                (const char*)&str[selector_pos], length - selector_pos, &selector);
+            emoji_presentation = selector_bytes > 0 && selector == 0xFE0F;
+        }
         bool glyph_loaded = false;
+        // VS16 selects the emoji face for both max-content measurement and
+        // final layout; measuring the base glyph in the text face undercounts
+        // dual-presentation clusters such as the warning sign.
         float advance = intrinsic_loaded_glyph_advance(
-            lycon, codepoint, is_small_caps_lower, kerning, &glyph_loaded);
+            lycon, codepoint, is_small_caps_lower, kerning,
+            emoji_presentation, &glyph_loaded);
         if (!glyph_loaded) advance = 11.0f;
         if (glyph_loaded && codepoint == 0x00A0 && lycon->font.style) {
             advance += lycon->font.style->word_spacing;
@@ -2246,10 +2260,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     ViewBlock* view_block_font = lam::unsafe_view_block_element_storage(element);
 
     uintptr_t intrinsic_tag = element->tag();
-    if (!element->styles_resolved &&
-        (intrinsic_tag == HTM_TAG_BUTTON || intrinsic_tag == HTM_TAG_INPUT)) {
-        // Form-control intrinsic sizes depend on UA style, author font, and HTML
-        // attributes, so resolve them before the shared control measurement runs.
+    bool intrinsic_needs_resolved_style =
+        intrinsic_tag == HTM_TAG_BUTTON || intrinsic_tag == HTM_TAG_INPUT ||
+        intrinsic_tag == HTM_TAG_UL || intrinsic_tag == HTM_TAG_OL ||
+        intrinsic_tag == HTM_TAG_MENU;
+    if (!element->styles_resolved && intrinsic_needs_resolved_style) {
+        // Form controls and list containers have UA box metrics that participate
+        // in intrinsic sizing, so resolve the cascade before measuring their box.
         radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
         dom_node_resolve_style(element, lycon);
     }
@@ -4756,6 +4773,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                   inline_max_sum, inline_min_sum, text_indent);
     }
 
+    if (view_block->multicol && view_block->multicol->column_count > 1 &&
+        view_block->multicol->column_width <= 0.0f) {
+        float gap = view_block->multicol->column_gap_is_normal
+            ? multicol_normal_gap_size(view_block)
+            : view_block->multicol->column_gap;
+        if (gap < 0.0f) gap = 0.0f;
+        float total_gap = gap * (view_block->multicol->column_count - 1);
+        // a definite count with auto column width creates equal intrinsic tracks;
+        // measuring it as one track makes shrink-to-fit multicol boxes too narrow.
+        sizes.min_content = sizes.min_content * view_block->multicol->column_count + total_gap;
+        sizes.max_content = sizes.max_content * view_block->multicol->column_count + total_gap;
+    }
+
     // Add padding and border
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     float pad_left = 0, pad_right = 0;
@@ -5106,9 +5136,22 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     }
 
     // Check for explicit height from CSS (e.g., iframe with height: 580px)
-    if (view->blk && view->blk->given_height > 0) {
-        // Element has explicit height specified in CSS
-        float explicit_height = view->blk->given_height;
+    float explicit_height = -1.0f;
+    if (element->specified_style) {
+        CssDeclaration* height_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_HEIGHT);
+        if (height_decl && height_decl->value &&
+            height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
+                                                   height_decl->value);
+        }
+    }
+    if (explicit_height <= 0.0f && view->blk && view->blk->given_height > 0.0f) {
+        // UA intrinsic defaults also populate given_height, so a winning author
+        // height declaration must take precedence during intrinsic measurement.
+        explicit_height = view->blk->given_height;
+    }
+    if (explicit_height > 0.0f) {
 
         // Check box-sizing: if border-box, the height already includes padding/border
         // Only add padding/border for content-box (default)
@@ -5128,21 +5171,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         log_debug("calculate_max_content_height: %s has explicit height=%.1f (box_sizing=%s)",
                   element->node_name(), explicit_height, is_border_box ? "border-box" : "content-box");
         return explicit_height;
-    }
-
-    // Also check specified_style for height declaration if not yet resolved
-    if (element->specified_style) {
-        CssDeclaration* height_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_HEIGHT);
-        if (height_decl && height_decl->value &&
-            height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            float explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-            if (explicit_height > 0) {
-                log_debug("calculate_max_content_height: %s has specified height=%.1f",
-                          element->node_name(), explicit_height);
-                return explicit_height;
-            }
-        }
     }
 
     // CSS 2.1 §10.6.2: Replaced element intrinsic height

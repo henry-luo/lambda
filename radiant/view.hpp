@@ -1183,6 +1183,7 @@ typedef struct MarkerProp {
     char* image_url;         // list-style-image URL (data URI or external URL)
     ImageSurface* loaded_image; // cached loaded image for layout and render
     bool is_outside;         // true = outside position (rendered in margin area, no inline advance)
+    bool reserves_first_line; // outside marker has no parent list gutter to occupy
 } MarkerProp;
 
 /**

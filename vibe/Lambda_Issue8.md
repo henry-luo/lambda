@@ -468,3 +468,19 @@ was rejected when written as `<diagnostics; for (value in values) value>` with
 `Expected 'identifier'` at the closing `>`, followed by a second missing-`>`
 diagnostic at end of file. Whitespace should not change this constructor's
 grammar, or the diagnostic should identify the required line break explicitly.
+
+## A comprehension generator after `let` is diagnosed at the first generator
+
+The Structurizr semantic adapter needed to compute a parent key and then flatten
+the entries produced from that key. This natural ordering is rejected:
+
+```lambda
+[for (value in values, let key = semantic_key(value),
+  entry in entries(value, key)) entry]
+```
+
+The parser reports `Unexpected syntax` at `value in values`, not at the later
+generator that conflicts with the clause ordering. Moving the computed key into
+an `entries_for(value)` helper and keeping both generators before any `let`
+clauses works. Either generators should be accepted after computed bindings, or
+the diagnostic should point to `entry in` and explain the required ordering.

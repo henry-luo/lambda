@@ -830,6 +830,43 @@ static CTFontRef font_platform_copy_with_css_traits(CTFontRef base,
     return copied;
 }
 
+void* font_platform_copy_with_weight_variation(const void* ct_font_ref,
+                                               float size_px,
+                                               int css_weight) {
+    if (!ct_font_ref || css_weight <= 0) return NULL;
+    FourCharCode wght_tag = 'wght';
+    CFNumberRef axis_id = CFNumberCreate(NULL, kCFNumberIntType, &wght_tag);
+    float weight = (float)css_weight;
+    CFNumberRef axis_value = CFNumberCreate(NULL, kCFNumberFloatType, &weight);
+    if (!axis_id || !axis_value) {
+        if (axis_id) CFRelease(axis_id);
+        if (axis_value) CFRelease(axis_value);
+        return NULL;
+    }
+
+    CFDictionaryRef variation = CFDictionaryCreate(
+        NULL, (const void**)&axis_id, (const void**)&axis_value, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFRelease(axis_id);
+    CFRelease(axis_value);
+    if (!variation) return NULL;
+
+    CFStringRef key = kCTFontVariationAttribute;
+    CFDictionaryRef attrs = CFDictionaryCreate(
+        NULL, (const void**)&key, (const void**)&variation, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFRelease(variation);
+    if (!attrs) return NULL;
+
+    CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+    CFRelease(attrs);
+    if (!desc) return NULL;
+    CTFontRef varied = CTFontCreateCopyWithAttributes(
+        (CTFontRef)ct_font_ref, (CGFloat)size_px, NULL, desc);
+    CFRelease(desc);
+    return (void*)varied;
+}
+
 void* font_platform_create_ct_font(const char* postscript_name,
                                     const char* family_name,
                                     float size_px,
@@ -860,6 +897,14 @@ void* font_platform_create_ct_font(const char* postscript_name,
             CFRelease(ct_font);
             ct_font = weighted ? weighted : CTFontCreateUIFontForLanguage(
                                                kCTFontUIFontSystem, (CGFloat)size_px, NULL);
+        }
+        // The system face is variable; use the exact CSS wght coordinate so
+        // measured advances match the instance used by the glyph rasterizer.
+        CTFontRef varied = (CTFontRef)font_platform_copy_with_weight_variation(
+            ct_font, size_px, css_weight);
+        if (varied) {
+            CFRelease(ct_font);
+            ct_font = varied;
         }
     }
 

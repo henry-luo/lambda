@@ -881,6 +881,11 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
     if (!view || !view->view_type || table_cell_vertical_align_skips_child(view)) return;
 
     if (view->view_type == RDT_VIEW_TEXT || view->view_type == RDT_VIEW_BR) {
+        if (view->view_type == RDT_VIEW_BR && view->height <= 0.0f) {
+            // A collapsed terminal break is a caret box on the existing line;
+            // synthesizing a full strut here creates a second phantom cell line.
+            return;
+        }
         float line_height = cell_line_height;
         if (line_height_is_normal && view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
@@ -918,8 +923,13 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
     if (view->view_type == RDT_VIEW_INLINE) {
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
         if (table_inline_span_is_phantom_for_cell_height(span)) return;
+        float descendant_line_height = cell_line_height;
+        if (span->content_height > descendant_line_height) {
+            // Nested inline struts participate independently of the cell's root strut.
+            descendant_line_height = span->content_height;
+        }
         for (View* child = span->first_child; child; child = child->next_sibling) {
-            table_collect_inline_line_box_extent(child, cell_line_height,
+            table_collect_inline_line_box_extent(child, descendant_line_height,
                                                  line_height_is_normal,
                                                  parent_font_size, cell_font, extent);
         }
@@ -932,9 +942,9 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
         view->view_type == RDT_VIEW_TABLE) {
         float child_top = view->y;
         table_note_cell_content_extent(extent, child_top, child_top + view->height);
-        if (view->view_type != RDT_VIEW_INLINE_BLOCK) {
-            // A block inside a split inline occupies the missing stack position;
-            // omitting it makes the surrounding text gap look like a double line pitch.
+        if (view->view_type != RDT_VIEW_INLINE_BLOCK && cell_line_height > 0.0f) {
+            // A suppressed quirks strut has no line pitch; recording its block tops
+            // would turn a multi-line block gap into a phantom terminal line.
             table_note_cell_line_position(extent, child_top, cell_line_height);
         }
     }
@@ -951,6 +961,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     float block_content_min_y = 0.0f;   // Track min y of block content (for offset)
     float block_content_max_y = 0.0f;   // Track max bottom of block content
     bool has_inline_content = false;
+    bool has_inline_formatting_content = false;
     float inline_content_min_y = 0.0f;  // Track min y of inline/text content
     float inline_content_max_y = 0.0f;  // Track max bottom of inline/text content
     View* last_sizing_child = nullptr;
@@ -987,6 +998,10 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             cell_line_height = specified_line_height;
         }
     }
+    if (layout_quirks_block_ignores_line_height(lycon, tcell)) {
+        // The inline-only quirks rule omits the cell root strut during row sizing too.
+        cell_line_height = 0.0f;
+    }
 
     // Restore context
     lycon->font = saved_font;
@@ -995,6 +1010,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            has_inline_formatting_content = true;
             // Track min/max Y for text content to handle multi-line cells with <br> elements
             // Each text node may be on a different line (e.g., y=0, y=20, y=40 for 3 lines)
             // CSS 2.1 §17.5.3: "The height of a cell box is the minimum height required by the content"
@@ -1014,6 +1030,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             }
         }
         else if (child->view_type == RDT_VIEW_BR) {
+            has_inline_formatting_content = true;
             // BR elements also contribute to content extent - they mark line breaks
             // Their Y position indicates where the next line starts
             float br_top = child->y;
@@ -1034,6 +1051,12 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
                 table_inline_span_is_phantom_for_cell_height(
                     lam::view_require<RDT_VIEW_INLINE>(child))) {
                 return;
+            }
+            if (child->view_type == RDT_VIEW_INLINE) {
+                // A nested inline still belongs to the cell's inline formatting
+                // context; its declared line-height can be shorter than an atomic
+                // descendant plus the shared font-strut descender.
+                has_inline_formatting_content = true;
             }
             ViewElement* block = lam::view_require_element(child);
             // Use the actual rendered border-box height (block->height), not the CSS content height
@@ -1160,7 +1183,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     float content_height = has_any ? (overall_max_y - overall_min_y) : 0.0f;
     float flow_content_height = max(
         0.0f, tcell->content_height - ignored_quirky_margin_bottom);
-    if (has_inline_content && flow_content_height > content_height) {
+    if (has_inline_formatting_content && flow_content_height > content_height) {
         // table cell row sizing is based on line boxes; inline DOMRects only
         // cover glyph ink and can drop explicit line-height leading. Keep the
         // quirks-adjusted trailing extent consistent with the child-box path.

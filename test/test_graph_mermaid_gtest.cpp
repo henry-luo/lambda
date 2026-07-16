@@ -200,6 +200,8 @@ static void run_manifest_case(int case_index) {
               expected.get_int_attr("style-assignments", 0));
     EXPECT_EQ(count_tag_recursive(graph, "interaction"),
               expected.get_int_attr("interactions", 0));
+    EXPECT_EQ(count_tag_recursive(graph, "annotation"),
+              expected.get_int_attr("annotations", 0));
     EXPECT_EQ(count_tag_recursive(graph, "edge-property"),
               expected.get_int_attr("edge-properties", 0));
     EXPECT_EQ(count_tag_recursive(graph, "front-matter"),
@@ -220,6 +222,7 @@ static void run_manifest_case(int case_index) {
             expected_item.hasTag("style-rule") ||
             expected_item.hasTag("class-assignment") ||
             expected_item.hasTag("interaction") ||
+            expected_item.hasTag("annotation") ||
             expected_item.hasTag("edge-property")) {
             expect_source_span(actual_item);
         }
