@@ -881,6 +881,11 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
     if (!view || !view->view_type || table_cell_vertical_align_skips_child(view)) return;
 
     if (view->view_type == RDT_VIEW_TEXT || view->view_type == RDT_VIEW_BR) {
+        if (view->view_type == RDT_VIEW_BR && view->height <= 0.0f) {
+            // A collapsed terminal break is a caret box on the existing line;
+            // synthesizing a full strut here creates a second phantom cell line.
+            return;
+        }
         float line_height = cell_line_height;
         if (line_height_is_normal && view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
@@ -918,8 +923,13 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
     if (view->view_type == RDT_VIEW_INLINE) {
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
         if (table_inline_span_is_phantom_for_cell_height(span)) return;
+        float descendant_line_height = cell_line_height;
+        if (span->content_height > descendant_line_height) {
+            // Nested inline struts participate independently of the cell's root strut.
+            descendant_line_height = span->content_height;
+        }
         for (View* child = span->first_child; child; child = child->next_sibling) {
-            table_collect_inline_line_box_extent(child, cell_line_height,
+            table_collect_inline_line_box_extent(child, descendant_line_height,
                                                  line_height_is_normal,
                                                  parent_font_size, cell_font, extent);
         }
@@ -987,6 +997,10 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // a stale layout font strut makes table rows shorter than their lines.
             cell_line_height = specified_line_height;
         }
+    }
+    if (layout_quirks_block_ignores_line_height(lycon, tcell)) {
+        // The inline-only quirks rule omits the cell root strut during row sizing too.
+        cell_line_height = 0.0f;
     }
 
     // Restore context

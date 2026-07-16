@@ -2192,6 +2192,22 @@ void line_break(LayoutContext* lycon) {
         }
     }
 
+    if (layout_quirks_block_ignores_line_height(lycon, nullptr)) {
+        // The quirks inline-only block rule removes the container's minimum strut;
+        // retain the actual descendant font and atomic-inline extents.
+        used_line_height = font_line_height;
+        if (lycon->block.line_height_is_normal &&
+            lycon->line.max_normal_line_height > used_line_height) {
+            used_line_height = lycon->line.max_normal_line_height;
+        }
+        if (used_line_height <= 0.0f && lycon->view &&
+            lycon->view->view_type == RDT_VIEW_BR) {
+            // A break-only line has no glyph extrema, but the break still carries
+            // its inherited inline line-height after the block root is suppressed.
+            used_line_height = css_line_height;
+        }
+    }
+
     // CSS 2.1 §10.8.1: Fix height of collapsed-content inline elements.
     // Inline elements whose content all collapsed (e.g., <em> </em>) get 0×0 from
     // compute_span_bounding_box. However, when the line has visible content, the

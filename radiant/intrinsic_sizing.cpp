@@ -2260,10 +2260,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     ViewBlock* view_block_font = lam::unsafe_view_block_element_storage(element);
 
     uintptr_t intrinsic_tag = element->tag();
-    if (!element->styles_resolved &&
-        (intrinsic_tag == HTM_TAG_BUTTON || intrinsic_tag == HTM_TAG_INPUT)) {
-        // Form-control intrinsic sizes depend on UA style, author font, and HTML
-        // attributes, so resolve them before the shared control measurement runs.
+    bool intrinsic_needs_resolved_style =
+        intrinsic_tag == HTM_TAG_BUTTON || intrinsic_tag == HTM_TAG_INPUT ||
+        intrinsic_tag == HTM_TAG_UL || intrinsic_tag == HTM_TAG_OL ||
+        intrinsic_tag == HTM_TAG_MENU;
+    if (!element->styles_resolved && intrinsic_needs_resolved_style) {
+        // Form controls and list containers have UA box metrics that participate
+        // in intrinsic sizing, so resolve the cascade before measuring their box.
         radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
         dom_node_resolve_style(element, lycon);
     }
@@ -5133,9 +5136,22 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     }
 
     // Check for explicit height from CSS (e.g., iframe with height: 580px)
-    if (view->blk && view->blk->given_height > 0) {
-        // Element has explicit height specified in CSS
-        float explicit_height = view->blk->given_height;
+    float explicit_height = -1.0f;
+    if (element->specified_style) {
+        CssDeclaration* height_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_HEIGHT);
+        if (height_decl && height_decl->value &&
+            height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+            explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT,
+                                                   height_decl->value);
+        }
+    }
+    if (explicit_height <= 0.0f && view->blk && view->blk->given_height > 0.0f) {
+        // UA intrinsic defaults also populate given_height, so a winning author
+        // height declaration must take precedence during intrinsic measurement.
+        explicit_height = view->blk->given_height;
+    }
+    if (explicit_height > 0.0f) {
 
         // Check box-sizing: if border-box, the height already includes padding/border
         // Only add padding/border for content-box (default)
@@ -5155,21 +5171,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         log_debug("calculate_max_content_height: %s has explicit height=%.1f (box_sizing=%s)",
                   element->node_name(), explicit_height, is_border_box ? "border-box" : "content-box");
         return explicit_height;
-    }
-
-    // Also check specified_style for height declaration if not yet resolved
-    if (element->specified_style) {
-        CssDeclaration* height_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_HEIGHT);
-        if (height_decl && height_decl->value &&
-            height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            float explicit_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-            if (explicit_height > 0) {
-                log_debug("calculate_max_content_height: %s has specified height=%.1f",
-                          element->node_name(), explicit_height);
-                return explicit_height;
-            }
-        }
     }
 
     // CSS 2.1 §10.6.2: Replaced element intrinsic height

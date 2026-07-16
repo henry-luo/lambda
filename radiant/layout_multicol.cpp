@@ -683,9 +683,11 @@ static void multicol_apply_positioned_fragment_anchors_in_subtree(
 ) {
     if (!view || !multicol) return;
 
-    if (view->is_element() && view->is_block()) {
+    if (view != static_cast<View*>(multicol) && view->is_element() && view->is_block()) {
         ViewBlock* block = lam::view_require_block(view);
         if (multicol_is_out_of_flow(block)) {
+            // Fragment anchors belong to positioned descendants; reanchoring
+            // the multicol root would replace its own containing-block position.
             multicol_apply_spanner_containing_block_anchor(lycon, multicol, block);
             multicol_apply_static_fragment_anchor(multicol, block);
             return;

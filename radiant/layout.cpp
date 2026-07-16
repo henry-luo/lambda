@@ -1471,15 +1471,17 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
     return true;
 }
 
-static bool quirks_table_cell_uses_descendant_font_baseline(LayoutContext* lycon) {
+bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* block) {
     if (!lycon || !lycon->doc || !lycon->doc->view_tree) return false;
     if (!is_quirks_mode(lycon->doc->view_tree->html_version)) return false;
-    ViewBlock* block = lycon->block.establishing_element;
-    if (!block || block->view_type != RDT_VIEW_TABLE_CELL) return false;
-    if (!lycon->block.line_height_is_normal || !lycon->line.has_different_inline_font) return false;
-    if (lycon->line.max_normal_line_height <= 0.0f) return false;
-    float descendant_line_height = lycon->line.max_ascender + lycon->line.max_descender;
-    return descendant_line_height <= lycon->line.max_normal_line_height + 0.5f;
+    if (!block) block = lycon->block.establishing_element;
+    if (!block) return false;
+    for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+        if (is_block_level_element(child)) return false;
+    }
+    // WHATWG Quirks Mode: an inline-only block container has no root strut;
+    // descendant inline boxes alone establish the minimum line-box height.
+    return true;
 }
 
 float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
@@ -1499,9 +1501,8 @@ float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
         }
     }
     if (out_line_height) *out_line_height = line_height;
-    if (quirks_table_cell_uses_descendant_font_baseline(lycon)) {
-        // BackCompat table cells match Chromium by sizing descendant-only
-        // normal font runs from the descendant baseline instead of the cell strut.
+    if (layout_quirks_block_ignores_line_height(lycon, nullptr)) {
+        // without a root strut, the descendant content establishes the baseline.
         return lycon->line.max_ascender;
     }
     return max(lycon->line.max_ascender, strut_baseline);
