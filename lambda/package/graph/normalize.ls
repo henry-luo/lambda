@@ -7,6 +7,7 @@ import graph_content: .transform.content
 import graphviz_normalize: .graphviz.normalize
 import mermaid_class: .mermaid.class
 import mermaid_er: .mermaid.er
+import mermaid_state: .mermaid.state
 
 fn noncanonical_children(value) => [
   for (child in model.child_items(value)
@@ -434,6 +435,7 @@ pub fn normalize(graph) {
     let merged = merge_mermaid_source_graph(dot_result.graph);
     if (merged["diagram-type"] == "class") mermaid_class.adapt(merged)
     else if (merged["diagram-type"] == "er") mermaid_er.adapt(merged)
+    else if (merged["diagram-type"] == "state") mermaid_state.adapt(merged)
     else merged
   } else dot_result.graph;
   let canonical = if (resolved is element and string(name(resolved)) == "graph")

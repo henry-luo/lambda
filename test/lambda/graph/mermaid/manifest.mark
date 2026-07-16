@@ -136,6 +136,27 @@
       identifying: 'false', style: 'dotted',
       from-cardinality: 'exactly-one', to-cardinality: 'one-or-more'>
   >
+  <case id: 'state-diagram', source: 'state_diagram.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir',
+      features: 'state-diagram,pseudostates,choice,fork-join,notes';
+    <expect kind: 'state', direction: 'LR', nodes: 7, edges: 7, annotations: 2>
+    <node id: 'Idle', label: 'Idle', shape: 'rounded', state-kind: 'state'>
+    <state-description value: 'Waiting for work', label-format: 'text'>
+    <node id: 'Decision', label: '', shape: 'diamond', state-kind: 'choice'>
+    <node id: '__state_start', label: '', shape: 'circle', state-kind: 'start'>
+    <node id: '__state_end', label: '', shape: 'doublecircle', state-kind: 'end'>
+    <edge from: 'Idle', to: 'Processing', relation: '-->', label: 'begin',
+      arrow-tail: 'none', arrow-head: 'normal'>
+    <annotation owner-kind: 'node', owner-id: 'Processing', kind: 'note-right',
+      label: 'External service call'>
+  >
+  <case id: 'state-composite-unsupported', source: 'state_composite_unsupported.mmd',
+      origin: 'lambda', status: 'unsupported', policy: 'ir',
+      features: 'state-diagram,composite-diagnostic';
+    <expect kind: 'state', nodes: 1, edges: 0, diagnostics: 1>
+    <node id: 'Active', composite: 'true'>
+    <diagnostic code: 'mermaid.state.composite-unsupported', severity: 'error'>
+  >
   <case id: 'chart-routing', source: 'chart_routing.mmd',
       origin: 'lambda', status: 'unsupported', policy: 'ir', features: 'chart-dispatch';
     <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0;

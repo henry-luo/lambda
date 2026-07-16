@@ -41,6 +41,7 @@ static void parse_mermaid_subgraph_content(InputContext& ctx, Element* subgraph_
                                             Element* root_graph);
 static void parse_mermaid_class_diagram(InputContext& ctx, Element* graph);
 static void parse_mermaid_er_diagram(InputContext& ctx, Element* graph);
+static void parse_mermaid_state_diagram(InputContext& ctx, Element* graph);
 
 static void skip_inline_whitespace(SourceTracker& tracker) {
     while (!tracker.atEnd() && (tracker.current() == ' ' || tracker.current() == '\t' ||
@@ -73,6 +74,19 @@ static bool parse_mermaid_direction(SourceTracker& tracker, char direction[3]) {
     direction[2] = '\0';
     tracker.advance(2);
     return true;
+}
+
+static void parse_mermaid_family_direction(InputContext& ctx, Element* graph,
+                                            const SourceLocation& source_start,
+                                            const char* code, const char* family) {
+    char direction[3] = {0};
+    if (parse_mermaid_direction(ctx.tracker, direction)) {
+        add_graph_attribute(ctx.input(), graph, "direction", normalize_direction(direction));
+        add_graph_attribute(ctx.input(), graph, "rank-dir", normalize_direction(direction));
+    } else {
+        ctx.addErrorCode(source_start, code,
+            "Expected %s diagram direction LR, RL, TB, TD, or BT", family);
+    }
 }
 
 static bool is_direct_mermaid_edge_start(SourceTracker& tracker) {
@@ -1565,14 +1579,8 @@ static void parse_mermaid_class_diagram(InputContext& ctx, Element* graph) {
         SourceLocation statement_start = tracker.location();
 
         if (consume_keyword(tracker, "direction")) {
-            char direction[3] = {0};
-            if (parse_mermaid_direction(tracker, direction)) {
-                add_graph_attribute(ctx.input(), graph, "direction", normalize_direction(direction));
-                add_graph_attribute(ctx.input(), graph, "rank-dir", normalize_direction(direction));
-            } else {
-                ctx.addErrorCode(statement_start, "mermaid.class.direction",
-                    "Expected class diagram direction LR, RL, TB, TD, or BT");
-            }
+            parse_mermaid_family_direction(ctx, graph, statement_start,
+                "mermaid.class.direction", "class");
         } else if (consume_keyword(tracker, "class")) {
             parse_mermaid_class_declaration(ctx, graph, statement_start);
         } else if (tracker.match("<<")) {
@@ -1827,14 +1835,8 @@ static void parse_mermaid_er_diagram(InputContext& ctx, Element* graph) {
         if (tracker.atEnd()) break;
         SourceLocation statement_start = tracker.location();
         if (consume_keyword(tracker, "direction")) {
-            char direction[3] = {0};
-            if (parse_mermaid_direction(tracker, direction)) {
-                add_graph_attribute(ctx.input(), graph, "direction", normalize_direction(direction));
-                add_graph_attribute(ctx.input(), graph, "rank-dir", normalize_direction(direction));
-            } else {
-                ctx.addErrorCode(statement_start, "mermaid.er.direction",
-                    "Expected ER diagram direction LR, RL, TB, TD, or BT");
-            }
+            parse_mermaid_family_direction(ctx, graph, statement_start,
+                "mermaid.er.direction", "ER");
         } else if (consume_keyword(tracker, "accTitle")) {
             parse_mermaid_accessibility(ctx, graph, statement_start, "title", false);
         } else if (consume_keyword(tracker, "accDescr")) {
@@ -1847,6 +1849,310 @@ static void parse_mermaid_er_diagram(InputContext& ctx, Element* graph) {
             parse_mermaid_style_assignment(ctx, graph, statement_start, false);
         } else {
             parse_mermaid_er_statement(ctx, graph, statement_start);
+        }
+        if (tracker.current() == '\n') tracker.advance();
+    }
+}
+
+struct MermaidStateEndpoint {
+    String* id;
+    const char* kind;
+};
+
+static bool parse_mermaid_state_endpoint(InputContext& ctx, bool source,
+                                          MermaidStateEndpoint* endpoint) {
+    SourceTracker& tracker = ctx.tracker;
+    skip_inline_whitespace(tracker);
+    endpoint->kind = "state";
+    if (tracker.match("[*]")) {
+        tracker.advance(3);
+        endpoint->id = ctx.builder.createString(source ? "__state_start" : "__state_end");
+        endpoint->kind = source ? "start" : "end";
+        return true;
+    }
+    endpoint->id = parse_mermaid_identifier(ctx);
+    return endpoint->id != nullptr;
+}
+
+static Element* ensure_mermaid_state_node(InputContext& ctx, Element* graph,
+                                           const MermaidStateEndpoint& endpoint) {
+    Element* node = find_mermaid_node(graph, endpoint.id->chars);
+    bool created = node == nullptr;
+    if (!node) {
+        const char* shape = strcmp(endpoint.kind, "start") == 0 ? "circle"
+            : strcmp(endpoint.kind, "end") == 0 ? "doublecircle" : "rounded";
+        const char* label = strcmp(endpoint.kind, "state") == 0 ? endpoint.id->chars : "";
+        node = create_node_element(ctx.input(), endpoint.id->chars, label, shape);
+        add_node_to_graph(ctx.input(), graph, node);
+    }
+    add_graph_attribute(ctx.input(), node, "mermaid-family", "state");
+    // ordinary transition references must not erase an explicitly declared
+    // choice/fork/join role on the existing state node.
+    if (created || strcmp(endpoint.kind, "state") != 0) {
+        add_graph_attribute(ctx.input(), node, "state-kind", endpoint.kind);
+    }
+    return node;
+}
+
+static Element* add_mermaid_state_declaration(InputContext& ctx, Element* graph,
+                                               const char* id, const char* label,
+                                               const char* shape, const char* kind,
+                                               const char* label_format,
+                                               const SourceLocation& source_start) {
+    Element* node = add_mermaid_node_declaration(ctx, graph, id, label, shape, label_format);
+    add_graph_attribute(ctx.input(), node, "mermaid-family", "state");
+    add_graph_attribute(ctx.input(), node, "state-kind", kind);
+    graph_set_source_span(ctx, node, source_start, ctx.tracker.location(), false);
+    return node;
+}
+
+static void add_mermaid_state_description(InputContext& ctx, Element* graph, String* id,
+                                           const SourceLocation& source_start) {
+    SourceTracker& tracker = ctx.tracker;
+    tracker.advance();
+    String* raw = parse_mermaid_line_text(ctx, true);
+    const char* format = "text";
+    String* value = normalize_mermaid_label(ctx, raw->chars, raw->len, &format);
+    Element* node = add_mermaid_state_declaration(ctx, graph, id->chars, id->chars,
+        "rounded", "state", "text", source_start);
+    Element* description = ctx.builder.element("state-description")
+        .attr("value", value->chars).attr("label-format", format).final().element;
+    graph_set_source_span(ctx, description, source_start, tracker.location(), false);
+    add_node_to_graph(ctx.input(), node, description);
+    graph_set_source_span(ctx, node, source_start, tracker.location(), false);
+}
+
+static void skip_mermaid_state_composite(InputContext& ctx,
+                                          const SourceLocation& source_start) {
+    SourceTracker& tracker = ctx.tracker;
+    int depth = 1;
+    tracker.advance();
+    while (!tracker.atEnd() && depth > 0) {
+        if (tracker.current() == '{') depth++;
+        else if (tracker.current() == '}') depth--;
+        tracker.advance();
+    }
+    ctx.addErrorCode(source_start, "mermaid.state.composite-unsupported",
+        "Composite Mermaid states require the cluster-aware state tranche");
+}
+
+static void parse_mermaid_state_declaration(InputContext& ctx, Element* graph,
+                                             const SourceLocation& source_start) {
+    SourceTracker& tracker = ctx.tracker;
+    String* id = nullptr;
+    String* label = nullptr;
+    const char* label_format = "text";
+    skip_inline_whitespace(tracker);
+    if (tracker.current() == '"') {
+        label = parse_mermaid_interaction_token(ctx);
+        label_format = "markdown";
+        skip_inline_whitespace(tracker);
+        if (!consume_keyword(tracker, "as")) {
+            ctx.addErrorCode(source_start, "mermaid.state.missing-as",
+                "Expected 'as' after a quoted state description");
+        }
+        id = parse_mermaid_identifier(ctx);
+    } else {
+        id = parse_mermaid_identifier(ctx);
+        label = id;
+    }
+    if (!id) {
+        ctx.addErrorCode(source_start, "mermaid.state.missing-id",
+            "Expected a state identifier");
+        skip_to_eol(tracker);
+        return;
+    }
+
+    parse_mermaid_class_suffix(ctx, graph, id->chars);
+    skip_inline_whitespace(tracker);
+    const char* kind = "state";
+    const char* shape = "rounded";
+    if (tracker.match("<<")) {
+        tracker.advance(2);
+        String* annotation = parse_mermaid_identifier(ctx);
+        if (tracker.match(">>")) tracker.advance(2);
+        if (annotation && strcmp(annotation->chars, "choice") == 0) {
+            kind = "choice";
+            shape = "diamond";
+            label = ctx.builder.createString("");
+        } else if (annotation && (strcmp(annotation->chars, "fork") == 0 ||
+                   strcmp(annotation->chars, "join") == 0)) {
+            kind = annotation->chars;
+            shape = "box";
+            label = ctx.builder.createString("");
+        } else {
+            ctx.addErrorCode(source_start, "mermaid.state.annotation",
+                "Expected state annotation choice, fork, or join");
+        }
+    }
+
+    Element* node = add_mermaid_state_declaration(ctx, graph, id->chars,
+        label ? label->chars : id->chars, shape, kind, label_format, source_start);
+    skip_inline_whitespace(tracker);
+    if (tracker.current() == '{') {
+        add_graph_attribute(ctx.input(), node, "composite", "true");
+        skip_mermaid_state_composite(ctx, source_start);
+    } else {
+        skip_to_eol(tracker);
+    }
+    graph_set_source_span(ctx, node, source_start, tracker.location(), false);
+}
+
+static void parse_mermaid_state_transition_or_description(
+        InputContext& ctx, Element* graph, const SourceLocation& source_start) {
+    SourceTracker& tracker = ctx.tracker;
+    MermaidStateEndpoint from;
+    if (!parse_mermaid_state_endpoint(ctx, true, &from)) {
+        ctx.addErrorCode(source_start, "mermaid.state.statement",
+            "Expected a state declaration or transition");
+        skip_to_eol(tracker);
+        return;
+    }
+    if (strcmp(from.kind, "state") == 0) {
+        parse_mermaid_class_suffix(ctx, graph, from.id->chars);
+    }
+    skip_inline_whitespace(tracker);
+    if (tracker.current() == ':') {
+        add_mermaid_state_description(ctx, graph, from.id, source_start);
+        return;
+    }
+    if (tracker.current() == '\n' || tracker.current() == ';' || tracker.atEnd()) {
+        add_mermaid_state_declaration(ctx, graph, from.id->chars, from.id->chars,
+            "rounded", "state", "text", source_start);
+        skip_to_eol(tracker);
+        return;
+    }
+    if (!tracker.match("-->")) {
+        ctx.addErrorCode(source_start, "mermaid.state.transition",
+            "Expected '-->' after state '%s'", from.id->chars);
+        skip_to_eol(tracker);
+        return;
+    }
+    tracker.advance(3);
+    MermaidStateEndpoint to;
+    if (!parse_mermaid_state_endpoint(ctx, false, &to)) {
+        ctx.addErrorCode(source_start, "mermaid.state.missing-endpoint",
+            "Expected a state after '-->'");
+        skip_to_eol(tracker);
+        return;
+    }
+    if (strcmp(to.kind, "state") == 0) parse_mermaid_class_suffix(ctx, graph, to.id->chars);
+    skip_inline_whitespace(tracker);
+    String* label = nullptr;
+    const char* label_format = "text";
+    if (tracker.current() == ':') {
+        tracker.advance();
+        String* raw = parse_mermaid_line_text(ctx, true);
+        label = normalize_mermaid_label(ctx, raw->chars, raw->len, &label_format);
+    } else {
+        skip_to_eol(tracker);
+    }
+
+    Element* from_node = ensure_mermaid_state_node(ctx, graph, from);
+    Element* to_node = ensure_mermaid_state_node(ctx, graph, to);
+    graph_set_source_span(ctx, from_node, source_start, tracker.location(), true);
+    graph_set_source_span(ctx, to_node, source_start, tracker.location(), true);
+    Element* edge = create_edge_element(ctx.input(), from.id->chars, to.id->chars,
+        label ? label->chars : nullptr, "solid", "false", "true");
+    add_graph_attribute(ctx.input(), edge, "relation", "-->");
+    add_graph_attribute(ctx.input(), edge, "arrow-tail", "none");
+    add_graph_attribute(ctx.input(), edge, "arrow-head", "normal");
+    if (label) add_graph_attribute(ctx.input(), edge, "label-format", label_format);
+    graph_set_source_span(ctx, edge, source_start, tracker.location(), false);
+    add_edge_to_graph(ctx.input(), graph, edge);
+}
+
+static String* parse_mermaid_state_note_text(InputContext& ctx) {
+    SourceTracker& tracker = ctx.tracker;
+    skip_inline_whitespace(tracker);
+    if (tracker.current() == ':') {
+        tracker.advance();
+        return parse_mermaid_line_text(ctx, true);
+    }
+    if (tracker.current() == '\n') tracker.advance();
+    StringBuf* note = ctx.sb;
+    stringbuf_reset(note);
+    while (!tracker.atEnd()) {
+        skip_inline_whitespace(tracker);
+        if (tracker.match("end note")) {
+            tracker.advance(8);
+            break;
+        }
+        const char* line_start = tracker.rest();
+        while (!tracker.atEnd() && tracker.current() != '\n') tracker.advance();
+        String* line = create_trimmed_mermaid_text(ctx, line_start,
+            (size_t)(tracker.rest() - line_start), false);
+        if (line->len > 0) {
+            if (note->str->len > 0) stringbuf_append_char(note, '\n');
+            stringbuf_append_str_n(note, line->chars, line->len);
+        }
+        if (tracker.current() == '\n') tracker.advance();
+    }
+    return ctx.builder.createString(note->str->chars, note->str->len);
+}
+
+static void parse_mermaid_state_note(InputContext& ctx, Element* graph,
+                                     const SourceLocation& source_start) {
+    SourceTracker& tracker = ctx.tracker;
+    skip_inline_whitespace(tracker);
+    const char* side = consume_keyword(tracker, "left") ? "note-left"
+        : consume_keyword(tracker, "right") ? "note-right" : nullptr;
+    skip_inline_whitespace(tracker);
+    if (!side || !consume_keyword(tracker, "of")) {
+        ctx.addErrorCode(source_start, "mermaid.state.note-position",
+            "Expected 'note left of' or 'note right of'");
+        skip_to_eol(tracker);
+        return;
+    }
+    String* target = parse_mermaid_identifier(ctx);
+    if (!target) {
+        ctx.addErrorCode(source_start, "mermaid.state.note-target",
+            "Expected a note target state");
+        skip_to_eol(tracker);
+        return;
+    }
+    String* raw = parse_mermaid_state_note_text(ctx);
+    const char* format = "text";
+    String* label = normalize_mermaid_label(ctx, raw->chars, raw->len, &format);
+    MermaidStateEndpoint endpoint = {target, "state"};
+    ensure_mermaid_state_node(ctx, graph, endpoint);
+    Element* annotation = ctx.builder.element("annotation")
+        .attr("owner-kind", "node").attr("owner-id", target->chars)
+        .attr("kind", side).attr("label", label->chars)
+        .attr("label-format", format).final().element;
+    graph_set_source_span(ctx, annotation, source_start, tracker.location(), false);
+    add_node_to_graph(ctx.input(), graph, annotation);
+}
+
+static void parse_mermaid_state_diagram(InputContext& ctx, Element* graph) {
+    SourceTracker& tracker = ctx.tracker;
+    while (!tracker.atEnd()) {
+        skip_whitespace_and_comments_mermaid(tracker);
+        if (tracker.atEnd()) break;
+        SourceLocation statement_start = tracker.location();
+        if (consume_keyword(tracker, "direction")) {
+            parse_mermaid_family_direction(ctx, graph, statement_start,
+                "mermaid.state.direction", "state");
+        } else if (consume_keyword(tracker, "state")) {
+            parse_mermaid_state_declaration(ctx, graph, statement_start);
+        } else if (consume_keyword(tracker, "note")) {
+            parse_mermaid_state_note(ctx, graph, statement_start);
+        } else if (consume_keyword(tracker, "accTitle")) {
+            parse_mermaid_accessibility(ctx, graph, statement_start, "title", false);
+        } else if (consume_keyword(tracker, "accDescr")) {
+            parse_mermaid_accessibility(ctx, graph, statement_start, "description", true);
+        } else if (consume_keyword(tracker, "classDef")) {
+            parse_mermaid_style_rule(ctx, graph, statement_start);
+        } else if (consume_keyword(tracker, "class")) {
+            parse_mermaid_class_def(ctx, graph, statement_start);
+        } else if (consume_keyword(tracker, "style")) {
+            parse_mermaid_style_assignment(ctx, graph, statement_start, false);
+        } else if (consume_keyword(tracker, "hide")) {
+            ctx.addErrorCode(statement_start, "mermaid.state.hide-unsupported",
+                "State description hiding is not implemented");
+            skip_to_eol(tracker);
+        } else {
+            parse_mermaid_state_transition_or_description(ctx, graph, statement_start);
         }
         if (tracker.current() == '\n') tracker.advance();
     }
@@ -1875,17 +2181,24 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     const char* diagram_type = "flowchart";
     char direction[3] = {'T', 'B', '\0'};
     bool unsupported_chart = false;
-    bool class_diagram = false;
-    bool er_diagram = false;
+    void (*family_parser)(InputContext&, Element*) = nullptr;
+    const char* family_fallback = nullptr;
 
     if (consume_keyword(tracker, "graph") || consume_keyword(tracker, "flowchart")) {
         parse_mermaid_direction(tracker, direction);
     } else if (consume_keyword(tracker, "classDiagram")) {
         diagram_type = "class";
-        class_diagram = true;
+        family_parser = parse_mermaid_class_diagram;
+        family_fallback = "mermaid.class.syntax";
     } else if (consume_keyword(tracker, "erDiagram")) {
         diagram_type = "er";
-        er_diagram = true;
+        family_parser = parse_mermaid_er_diagram;
+        family_fallback = "mermaid.er.syntax";
+    } else if (consume_keyword(tracker, "stateDiagram-v2") ||
+               consume_keyword(tracker, "stateDiagram")) {
+        diagram_type = "state";
+        family_parser = parse_mermaid_state_diagram;
+        family_fallback = "mermaid.state.syntax";
     } else if (consume_keyword(tracker, "sequenceDiagram")) {
         diagram_type = "sequence";
         unsupported_chart = true;
@@ -1943,18 +2256,10 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         return;
     }
 
-    if (class_diagram) {
-        parse_mermaid_class_diagram(ctx, graph);
+    if (family_parser) {
+        family_parser(ctx, graph);
         graph_set_source_span(ctx, graph, graph_start, tracker.location(), false);
-        graph_append_diagnostics(ctx, graph, "mermaid.class.syntax");
-        input->root = {.element = graph};
-        if (ctx.hasErrors()) ctx.logErrors();
-        return;
-    }
-    if (er_diagram) {
-        parse_mermaid_er_diagram(ctx, graph);
-        graph_set_source_span(ctx, graph, graph_start, tracker.location(), false);
-        graph_append_diagnostics(ctx, graph, "mermaid.er.syntax");
+        graph_append_diagnostics(ctx, graph, family_fallback);
         input->root = {.element = graph};
         if (ctx.hasErrors()) ctx.logErrors();
         return;

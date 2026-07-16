@@ -177,6 +177,16 @@ fn scene_edge(edge, labels, nodes) {
   >
 }
 
+fn scene_annotation(annotation, graph_box) {
+  let box = local_bounds(annotation, graph_box);
+  <annotation 'owner-kind': attr(annotation, "data-owner-kind", null),
+      'owner-id': attr(annotation, "data-owner-id", null),
+      kind: attr(annotation, "data-annotation-kind", null),
+      label: attr(annotation, "data-label", null),
+      'label-format': attr(annotation, "data-label-format", null),
+      x: box.x, y: box.y, width: box.width, height: box.height>
+}
+
 pub fn from_svg(source) {
   let parsed_document = if (source is element) source
     else parse(string(source), {type: "xml"});
@@ -202,11 +212,15 @@ pub fn from_svg(source) {
     let edges = [for (entry in elements
       where attr(entry, "data-graph-role", "") == "edge")
       scene_edge(entry, labels, nodes)];
+    let annotations = [for (entry in elements
+      where attr(entry, "data-graph-role", "") == "annotation")
+      scene_annotation(entry, box)];
     <'graph-scene' direction: string(attr(graph, "data-direction", "TB")),
         width: box.width, height: box.height;
       for (cluster in clusters) cluster
       for (node in nodes) node
       for (edge in edges) edge
+      for (annotation in annotations) annotation
     >
   }
 }

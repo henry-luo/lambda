@@ -1194,7 +1194,8 @@ static void svg_cb_render_svg_subscene(void* vctx, const PaintSvgSubscene* subsc
 static const char* SVG_GRAPH_SEMANTIC_ATTRS[] = {
     "data-graph-role", "data-node-id", "data-edge-id", "data-cluster-id",
     "data-parent-cluster-id", "data-subgraph-id", "data-shape",
-    "data-label",
+    "data-label", "data-label-format", "data-owner-kind", "data-owner-id",
+    "data-annotation-kind",
     "data-direction", "data-marker-start", "data-marker-end",
     "data-route", "data-route-kind", "data-from", "data-to",
     "data-fill", "data-stroke", "data-stroke-width", "data-color",
