@@ -174,8 +174,18 @@ Facts: envs are GC-heap arrays of 8-byte Item cells populated by boxing each cap
 - Verification item: env GC tracing today (bare `heap_calloc` Item array, conservative data-buffer fallback) — a tail region is harmless under conservative tracing (raw payloads at worst false-pin); if envs ever get precise tracing, the layout needs an explicit cell-count/tail split like containers' `extra`.
 Closes OS1's capture row and OS2's env half.
 
-**SF14 — Return values: two logical lanes, not number-stack round-trips.** *(decided 2026-07-15; portable ABI refined during implementation)*
-Two options were weighed: (1) callee pushes the scalar through the number stack (Lua-style claim-by-bump), vs. (2) a widened return carrying the scalar in a second lane. **Option 2 wins for JIT→JIT calls**, on verified MIR facts:
+**SF14 — Return values: donate one normalized number slot.** *(implemented 2026-07-16; supersedes the 2026-07-15 scalar-transport design)*
+The initial implementation carried raw scalar bits in a second logical lane, but the portable ARM64 handoff and two imported helpers made every boxed return pay for a rare representation. The landed ABI instead classifies the returned Item inline and donates a callee-owned number slot only when required:
+
+- proven non-wide boxed JS return types restore the number watermark directly;
+- `FLOAT`, `INT64`, `DTIME`, and `DYNAMIC` modes share one MIR emitter in `mir_emitter_shared.hpp`;
+- the emitter donates only payloads in the callee extent `[frame_base, current_top)`, copying the raw value to `frame_base[0]`, retagging the Item, and restoring to `frame_base + 1`;
+- heap-backed and ancestor-frame pointers fall outside that range and pass through unchanged; and
+- native `T^E` returns retain the independent `Context::mir_return_lane` error flag.
+
+This yields a single caller-owned Item return for boxed Lambda and LambdaJS functions, with no imported scalar helper on either arm. The former scalar transport, boxed-wrapper rebuild, and scalar use of the ARM64 scratch workaround are retired. Historical rationale for the superseded two-lane design follows:
+
+Two options were weighed: (1) callee pushes the scalar through the number stack (Lua-style claim-by-bump), vs. (2) a widened return carrying the scalar in a second lane. The original design selected option 2 for JIT→JIT calls, on verified MIR facts:
 - MIR multi-value returns ride **registers** for MIR-to-MIR calls, beyond the C ABI: ARM64 up to 8 int results x0–x7 (`mir-gen-aarch64.c:983`); **x86-64 exactly 2** int results RAX:RDX — a 3rd int result is a hard codegen error ("can not handle this combination of return values", `mir-gen-x86_64.c:977`). So `[item, scalar]` is free; **`[item, scalar, error]` is impossible on x86-64** — the universal 3-lane variant is rejected.
 - The **error lane is redundant next to an Item lane** (errors already travel as `ItemError` in the tag — two channels = two sources of truth) but **valuable as the second lane of native returns**: today `can_raise` forces any `^E` function to return boxed ANY (`transpile-mir.cpp:11525`), and native paths use domain-stealing sentinels (`INT64_ERROR`). Per-signature return shapes, chosen at transpile time, never 3 lanes:
 
@@ -192,7 +202,7 @@ Note `ANY^E` with a possible wide scalar does **not** need `[item, scalar, error
 - **C helpers need no change**: helpers establish no watermark frame, so `push_l` inside a helper homes the value in the *calling JIT frame's* region — returned tagged pointers are caller-homed by construction (an SF6 property). Two-lane protocol is JIT→JIT only; the transpiler already distinguishes helper calls from Lambda-fn calls per call site.
 - Residuals: ANY-returning protos become 2-lane (non-scalar returns write a dummy lane-2 operand — MIR ret requires all results; typically move-eliminated); MIR interpreter handles `nres=2` (multi-results are core MIR; only `mir2c` lacks them); C2MIR keeps today's boxed single-Item returns (frozen path).
 
-**Implemented portable ABI (2026-07-15):** native MIR multi-result lowering on ARM64 lost the primary lane when a nested call fed the return. The logical lane shapes above remain, but their physical transport is one normal machine return plus `Context::mir_return_lane` for the secondary scalar/error bits. The primary value is held in the function's one reserved number scratch slot across epilogue cleanup, the watermark is restored, and the secondary lane is published immediately before return. Callers consume and re-home it at once. This preserves the two-lane semantics on all backends without relying on the faulty multi-result path. Language-level native `i64^` returns consequently preserve the full domain; only legacy C system-function calls retain the historical sentinel boundary.
+**Retired portable ABI (2026-07-15 to 2026-07-16):** native MIR multi-result lowering on ARM64 lost the primary lane when a nested call fed the return, so scalar and error bits temporarily shared `Context::mir_return_lane`. Slot donation removed scalar transport from that cell; only the native error ABI still stages its primary result and publishes the error Item there. Language-level native `i64^` returns consequently preserve the full domain; only legacy C system-function calls retain the historical sentinel boundary.
 
 **OS2 — The 56-bit problem: where does a wide scalar live inside a container?** RESOLVED for containers — see SF15/SF16. Lambda already implements the container-owned side region: wide scalars live in the **tail of the container's own `items` buffer** (growing down from `items[capacity-1]`), Item slots hold tagged pointers into that tail, and `extra` counts them (`lambda-eval.cpp:5628`, `lambda.h:702`). The **closure-env half is RESOLVED too** — envs use the same tail-region mechanism, statically sized (SF18). OS2 fully closed.
 

@@ -1735,7 +1735,9 @@ test-graph-graphviz: build-graph-graphviz-test
 	@echo "Running manifest-driven Graphviz package fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*graphviz*'
 	@echo "Running headless .gv view bridge..."
-	@./lambda.exe view test/lambda/graph/graphviz/view.gv --headless --no-log
+	@MEMTRACK_MODE=DEBUG ./lambda.exe view test/lambda/graph/graphviz/view.gv --headless --no-log 2>temp/graphviz_view_memtrack.log
+	@! grep -qi 'memtrack: .*leak' temp/graphviz_view_memtrack.log
+	@rm -f temp/graphviz_view_memtrack.log
 
 build-graph-structurizr-test:
 	@echo "Building Structurizr graph test runners..."

@@ -1,0 +1,9 @@
+<structurizr-suite version: 1;
+  <case id: 'basic-reference', source: 'basic.dsl',
+    reference: 'reference/basic.structurizr.json'>
+  <case id: 'advanced-static', source: 'advanced_static.dsl'>
+  <case id: 'stage4c', source: 'stage4c.dsl',
+    reference: 'reference/stage4c.structurizr.json'>
+  <case id: 'stage4d', source: 'stage4d.dsl',
+    reference: 'reference/stage4d.structurizr.json'>
+>

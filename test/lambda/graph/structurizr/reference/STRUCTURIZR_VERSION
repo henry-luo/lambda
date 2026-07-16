@@ -1,0 +1,21 @@
+Structurizr CLI v2025.11.09
+release=https://github.com/structurizr/cli/releases/tag/v2025.11.09
+artifact=structurizr-cli.zip
+artifact_sha256=f5365a463fc44d539ed19bec00c48ba1e1ecda0ccfd1ba40d2e7472d264eb79a
+structurizr_dsl=5.0.2
+structurizr_core=5.0.2
+source=../basic.dsl
+source_sha256=dc04e2040ae05100d549b95eefcb6ec99153f67cc4f74d887c66b3988c27c08f
+reference=basic.structurizr.json
+reference_sha256=0eb8195401d78e1d3cb6f0085ac04516cfffed804e1d0cf0cd4b0cb843b247cc
+command=structurizr.sh export -workspace basic.dsl -format json -output reference
+stage4c_source=../stage4c.dsl
+stage4c_source_sha256=4285e82b76dda172c2166ad1617658d5694c9e371d0a644a74af19a0e4d3d587
+stage4c_reference=stage4c.structurizr.json
+stage4c_reference_sha256=02511d34d279678385a165b2612fc1d13d9cafccb1370bb8198c66ba6b6beac2
+stage4c_command=structurizr.sh export -workspace stage4c.dsl -format json -output reference
+stage4d_source=../stage4d.dsl
+stage4d_source_sha256=f08f714e79afad47f892a475059dedcb8acd86574744427b56ef8c76acccddd8
+stage4d_reference=stage4d.structurizr.json
+stage4d_reference_sha256=68d4f88d34089d024ba3e65044c5aff1e4b6e6debb9a92f41b469de62a342baa
+stage4d_command=structurizr.sh export -workspace stage4d.dsl -format json -output reference

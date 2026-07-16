@@ -1,8 +1,10 @@
 # LambdaPy Runtime — Design Document
 
+> ⚠️ **STALE (2026-07-16).** This document describes the runtime's early (~7.8K LOC / 9-file) state; the code is now ~18.6K LOC across 17 files, with closures, classes (`py_class.cpp`), generators/coroutines/asyncio (`py_async.cpp`), BigInt (`py_bigint.cpp`), and a stdlib layer (`py_stdlib.cpp`) implemented. Its memory-management claims predate the stack-frame architecture — there is no GC nursery anymore; floats are inline doubles via the shared `push_d`. Verified current state + alignment design: `vibe/Lambda_Design_Stack_Frame_Python.md`; the full rewrite of this document is owned by `vibe/Lambda_Impl_Stack_Frame_Py.md` stage P4b. Point fixes below correct only the flat-wrong claims.
+
 ## Overview
 
-LambdaPy is Lambda's embedded Python engine (~7.8K LOC across 9 source files). It compiles Python to native machine code through a four-stage pipeline reusing Lambda's type system, memory management, and JIT infrastructure. Python programs execute within the same `Item`-based runtime as Lambda scripts, enabling direct interop with Lambda's input parsers, output formatters, and string internment system.
+LambdaPy is Lambda's embedded Python engine (~18.6K LOC across 17 source files). It compiles Python to native machine code through a four-stage pipeline reusing Lambda's type system, memory management, and JIT infrastructure. Python programs execute within the same `Item`-based runtime as Lambda scripts, enabling direct interop with Lambda's input parsers, output formatters, and string internment system.
 
 ### Design Goals
 
@@ -56,7 +58,7 @@ LambdaPy shares the same runtime layer as Lambda scripts and LambdaJS:
 │                                                                   │
 │  ┌────────────┐ ┌──────────┐ ┌─────────────┐ ┌───────────────┐  │
 │  │ Item Type  │ │ GC Heap  │ │  MIR JIT    │ │ import_resolver│  │
-│  │ System     │ │ & Nursery│ │ (mir.c)     │ │ (sys_func_    │  │
+│  │ System     │ │          │ │ (mir.c)     │ │ (sys_func_    │  │
 │  │ (TypeId)   │ │          │ │             │ │  registry.c)  │  │
 │  └────────────┘ └──────────┘ └─────────────┘ └───────────────┘  │
 │  ┌────────────┐ ┌──────────┐ ┌─────────────┐ ┌───────────────┐  │
@@ -103,7 +105,7 @@ All Python values are represented as Lambda `Item` (64-bit tagged value). There 
 | Python Type | Lambda TypeId | Representation | Boxing |
 |-------------|--------------|----------------|--------|
 | `int` | `LMD_TYPE_INT` | Tag bits + 56-bit signed value inline | Inline (no allocation) |
-| `float` | `LMD_TYPE_FLOAT` | GC nursery-allocated `double*` | Pointer to nursery |
+| `float` | `LMD_TYPE_FLOAT` | Inline double via shared `push_d` | Inline (out-of-band residue → number side stack) |
 | `str` | `LMD_TYPE_STRING` | `String*` via `heap_create_name()` | GC heap allocated |
 | `bool` | `LMD_TYPE_BOOL` | Tag bits + 0/1 inline | Inline (no allocation) |
 | `None` | `LMD_TYPE_NULL` | Tag-only sentinel | Inline |
@@ -134,7 +136,7 @@ LambdaPy reuses Lambda's existing subsystems rather than reimplementing them:
 | Capability | Lambda Subsystem | Py Usage |
 |-----------|-----------------|----------|
 | String interning | `name_pool.hpp` → `heap_create_name()` | All string literals, string operations |
-| GC heap | `lambda-mem.cpp` → `heap_alloc()`, `gc_nursery` | Object/string/float allocation |
+| GC heap | `lambda-mem.cpp` → `heap_alloc()` | Object/string allocation |
 | Memory pools | `lib/mempool.h` → `pool_create()` | AST nodes, temporary allocations |
 | Shape system | `shape_builder.hpp` | Dict property layout |
 | Array | `lambda-data.hpp` → `Array` | Lists, tuples |
@@ -657,7 +659,7 @@ At the MIR level, variables map to named registers within each function:
 | `py_runtime.h` | ~120 | Runtime C API: 73 function declarations callable from JIT code |
 | `py_transpiler.hpp` | ~70 | Transpiler context struct, scope types, lifecycle functions |
 
-**Total:** ~7,780 LOC across 9 source files.
+**Total:** ~7,780 LOC across 9 source files *(stale — now ~18.6K across 17 files; `py_class.cpp`, `py_async.cpp`, `py_bigint.cpp`, `py_builtins.cpp` grown, `py_stdlib.cpp` added; see header note)*.
 
 ---
 
@@ -670,7 +672,7 @@ At the MIR level, variables map to named registers within each function:
 | User function prefix | inline naming | `pyf_<name>` prefix |
 | Variables | `var`/`let`/`const` with hoisting | Assignment-based, LEGB scoping |
 | Scoping | Function-scoped `var`, block-scoped `let`/`const` | LEGB: Local → Enclosing → Global → Built-in |
-| Closures | Shared scope env (mutable reference semantics) | Planned (not yet implemented) |
+| Closures | Shared scope env (mutable reference semantics) | Implemented — `py_alloc_env` slot arrays (see `vibe/Lambda_Design_Stack_Frame_Python.md` §1.4) |
 | Type inference | Evidence-based (arithmetic patterns → int/float) | None (all values boxed) |
 | Native fast path | Dual compilation for typed functions | None (all operators are runtime calls) |
 | Division | JS `/` (float) | `//` floor division, `/` true division |
@@ -680,5 +682,5 @@ At the MIR level, variables map to named registers within each function:
 | DOM integration | Full DOM bridge via Radiant | None |
 | Method dispatch | Prototype chain | Three-tier: string → list → dict |
 | Module vars | `js_module_vars[256]` indexed array | Scope-based (all variables in scope hashmap) |
-| Class system | Prototype-based with constructor shape pre-alloc | Not yet implemented |
-| LOC | ~22K | ~7.8K |
+| Class system | Prototype-based with constructor shape pre-alloc | Implemented — `py_class.cpp` |
+| LOC | ~22K | ~18.6K |

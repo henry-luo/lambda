@@ -31,10 +31,12 @@ default-on; there is no legacy JS root-frame mode to preserve behind
   Generator maps trace their envs; the fixed async-context table roots suspended
   env pointers without adding a range per environment. The old permanent env
   root-range registration and captured-`with` root shim are gone.
-- **J3 number lifetime:** JS frames save and restore `side_number_top`. An Item
-  return is reduced to the shared scalar lane before restore and rebuilt in the
-  caller extent afterward; this gives the SF14 lifetime without prototype or
-  TLS-slot churn. JS envs allocate one raw scalar-tail slot per Item and re-home
+- **J3 number lifetime:** JS frames save and restore `side_number_top`. Return
+  inference selects `NONE`, `FLOAT`, `INT64`, `DTIME`, or `DYNAMIC`; one shared
+  MIR emitter classifies scalar-capable Items inline and donates a normalized
+  frame-base slot only when the payload lies in the callee extent. The returned
+  Item is caller-owned without imported capture/rebuild helpers. JS envs allocate
+  one raw scalar-tail slot per Item and re-home
   captured/write-back/suspended wide values before epilogue restore. Thrown wide
   scalars move to traced heap storage because `js_exception_value` has global
   lifetime. Shared container copy-in/copy-out now includes JS arrays: SF15-J is

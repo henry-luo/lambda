@@ -1304,8 +1304,6 @@ JitImport jit_runtime_imports[] = {
     {"box_int64_value_safe", FPTR(box_int64_value_safe)},
     {"owned_item_slot_read", FPTR(owned_item_slot_read)},
     {"owned_item_slot_store", FPTR(owned_item_slot_store)},
-    {"lambda_item_scalar_lane", FPTR(lambda_item_scalar_lane)},
-    {"lambda_item_from_scalar_lane", FPTR(lambda_item_from_scalar_lane)},
     {"push_l_safe", FPTR(push_l_safe)},
     {"push_d_safe", FPTR(push_d_safe)},
     {"push_k", FPTR(push_k)},

@@ -69,7 +69,7 @@ Because generated code allocates freely, every live GC-managed local must be rea
 
 - Root-slot counts are lowering-time facts. The prologue calls `lambda_side_stack_ensure`, saves `side_root_top`/`side_number_top`, and bumps the root top once; rooted assignments are inline frame-relative stores.
 - Heap/pointer/ANY locals get root slots. Reassignment refreshes the slot, and helper-call boundaries publish all live values before the call. The collector scans only `[side_root_base, side_root_top)`.
-- `push_l`/`push_d`/`push_k` allocate raw scalar payloads from `[side_number_base, side_number_top)`. Returns carry a scalar lane across watermark restoration and are rebuilt in the caller extent; containers and closure envs own analogous scalar tails.
+- `push_l`/`push_d`/`push_k` allocate raw scalar payloads from `[side_number_base, side_number_top)`. Boxed returns classify their Item inline and donate a normalized frame-base slot when its payload lies in the callee extent; otherwise they restore the watermark exactly. Containers and closure envs own analogous scalar tails.
 - All generated returns branch to one epilogue, including error, generator/async suspension, handler, and TCO-controlled paths. Batch crash-recovery boundaries restore an outer side-stack snapshot because a signal `longjmp` bypasses normal generated epilogues.
 - Module-level BSS globals cannot use a per-call frame, so `register_bss_gc_roots` still registers them after linking.
 

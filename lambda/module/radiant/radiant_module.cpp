@@ -1,5 +1,6 @@
 #include "../../jube/jube_registry.h"
 #include "../../input/css/dom_element.hpp"
+#include "../../lambda-error.h"
 #include "../../transpiler.hpp"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
@@ -10,6 +11,7 @@
 #include "../../../lib/mem_context.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/mempool.h"
+#include "../../../lib/side_stack.h"
 #include "../../../lib/gc/gc_heap.h"
 #include "../../../lib/url.h"
 #include <limits.h>
@@ -820,6 +822,13 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         callback_context.pool = runtime->reuse_pool
             ? runtime->reuse_pool : runtime->heap->pool;
         callback_context.type_info = type_info;
+        // Retained layout callbacks outlive Runner's bound context; generated
+        // MIR treats an unbound zeroed side stack as immediate overflow.
+        if (!lambda_side_stack_bind((Context*)&callback_context)) {
+            g_radiant_velmt_active_pass_id = previous_pass_id;
+            log_error("CUSTOM_LAYOUT_LAMBDA_SIDE_STACK: layout='%s'", context->layout_name);
+            return false;
+        }
         if (runtime->ui_mode && runtime->result_arena) {
             callback_context.ui_mode = true;
             callback_context.arena = runtime->result_arena;
@@ -839,15 +848,18 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     // Lambda-registered callbacks are core Function values; the Jube script
     // call hook is JS-specific and corrupts Lambda fn call frames.
     Item result_item = radiant_lambda_fn_call3(entry->fn.function, args[0], args[1], args[2]);
+    bool ok = false;
     if (get_type_id(result_item) == LMD_TYPE_ERROR) {
-        g_radiant_velmt_active_pass_id = previous_pass_id;
-        ::context = saved_context;
-        input_context = saved_input_context;
-        _lambda_rt = saved_lambda_rt;
         log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
-        return false;
+    } else {
+        ok = radiant_custom_layout_parse_result(context, result_item, result);
     }
-    bool ok = radiant_custom_layout_parse_result(context, result_item, result);
+    // This stack-local context owns runtime diagnostics raised by the callback;
+    // dropping it without release leaked both LambdaError and its message.
+    if (callback_context.last_error) {
+        err_free(callback_context.last_error);
+        callback_context.last_error = nullptr;
+    }
     g_radiant_velmt_active_pass_id = previous_pass_id;
     ::context = saved_context;
     input_context = saved_input_context;

@@ -1,0 +1,343 @@
+{
+  "configuration" : { },
+  "description" : "Description",
+  "documentation" : { },
+  "id" : 0,
+  "model" : {
+    "deploymentNodes" : [ {
+      "children" : [ {
+        "containerInstances" : [ {
+          "containerId" : "3",
+          "deploymentGroups" : [ "Blue" ],
+          "environment" : "Production",
+          "id" : "15",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "production.region.application.apiInstance"
+          },
+          "relationships" : [ {
+            "description" : "Writes order",
+            "destinationId" : "16",
+            "id" : "17",
+            "linkedRelationshipId" : "8",
+            "sourceId" : "15",
+            "technology" : "SQL"
+          }, {
+            "description" : "Records activity",
+            "destinationId" : "18",
+            "id" : "19",
+            "linkedRelationshipId" : "9",
+            "sourceId" : "15",
+            "technology" : "HTTPS"
+          } ],
+          "tags" : "Container Instance"
+        }, {
+          "containerId" : "4",
+          "deploymentGroups" : [ "Blue" ],
+          "environment" : "Production",
+          "id" : "16",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "production.region.application.databaseInstance"
+          },
+          "tags" : "Container Instance"
+        }, {
+          "containerId" : "5",
+          "deploymentGroups" : [ "Blue" ],
+          "environment" : "Production",
+          "id" : "18",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "production.region.application.auditInstance"
+          },
+          "tags" : "Container Instance"
+        } ],
+        "environment" : "Production",
+        "id" : "14",
+        "instances" : "1",
+        "name" : "Application",
+        "properties" : {
+          "structurizr.dsl.identifier" : "production.region.application"
+        },
+        "tags" : "Element,Deployment Node"
+      } ],
+      "environment" : "Production",
+      "id" : "12",
+      "infrastructureNodes" : [ {
+        "environment" : "Production",
+        "id" : "13",
+        "name" : "Gateway",
+        "properties" : {
+          "structurizr.dsl.identifier" : "production.region.gateway"
+        },
+        "relationships" : [ {
+          "description" : "Forwards requests",
+          "destinationId" : "15",
+          "id" : "20",
+          "sourceId" : "13",
+          "tags" : "Relationship",
+          "technology" : "HTTPS"
+        } ],
+        "tags" : "Element,Infrastructure Node"
+      } ],
+      "instances" : "1",
+      "name" : "Region",
+      "properties" : {
+        "structurizr.dsl.identifier" : "production.region"
+      },
+      "tags" : "Element,Deployment Node"
+    } ],
+    "people" : [ {
+      "id" : "1",
+      "name" : "Customer",
+      "properties" : {
+        "structurizr.dsl.identifier" : "customer"
+      },
+      "relationships" : [ {
+        "description" : "Places order",
+        "destinationId" : "3",
+        "id" : "6",
+        "properties" : {
+          "structurizr.dsl.identifier" : "places"
+        },
+        "sourceId" : "1",
+        "tags" : "Relationship"
+      }, {
+        "description" : "Places order",
+        "destinationId" : "2",
+        "id" : "7",
+        "linkedRelationshipId" : "6",
+        "sourceId" : "1"
+      } ],
+      "tags" : "Element,Person"
+    } ],
+    "softwareSystems" : [ {
+      "containers" : [ {
+        "description" : "Accepts orders",
+        "documentation" : { },
+        "id" : "3",
+        "name" : "API",
+        "properties" : {
+          "structurizr.dsl.identifier" : "store.api"
+        },
+        "relationships" : [ {
+          "description" : "Writes order",
+          "destinationId" : "4",
+          "id" : "8",
+          "properties" : {
+            "structurizr.dsl.identifier" : "writes"
+          },
+          "sourceId" : "3",
+          "tags" : "Relationship",
+          "technology" : "SQL"
+        }, {
+          "description" : "Records activity",
+          "destinationId" : "5",
+          "id" : "9",
+          "properties" : {
+            "structurizr.dsl.identifier" : "records"
+          },
+          "sourceId" : "3",
+          "tags" : "Relationship",
+          "technology" : "HTTPS"
+        }, {
+          "description" : "Returns receipt",
+          "destinationId" : "1",
+          "id" : "10",
+          "properties" : {
+            "structurizr.dsl.identifier" : "receipt"
+          },
+          "sourceId" : "3",
+          "tags" : "Relationship",
+          "technology" : "HTTPS"
+        } ],
+        "tags" : "Element,Container",
+        "technology" : "Lambda"
+      }, {
+        "description" : "Stores orders",
+        "documentation" : { },
+        "id" : "4",
+        "name" : "Database",
+        "properties" : {
+          "structurizr.dsl.identifier" : "store.database"
+        },
+        "tags" : "Element,Container",
+        "technology" : "SQLite"
+      }, {
+        "description" : "Records activity",
+        "documentation" : { },
+        "id" : "5",
+        "name" : "Audit",
+        "properties" : {
+          "structurizr.dsl.identifier" : "store.audit"
+        },
+        "tags" : "Element,Container",
+        "technology" : "Lambda"
+      } ],
+      "documentation" : { },
+      "id" : "2",
+      "name" : "Order platform",
+      "properties" : {
+        "structurizr.dsl.identifier" : "store"
+      },
+      "relationships" : [ {
+        "description" : "Returns receipt",
+        "destinationId" : "1",
+        "id" : "11",
+        "linkedRelationshipId" : "10",
+        "sourceId" : "2",
+        "technology" : "HTTPS"
+      } ],
+      "tags" : "Element,Software System"
+    } ]
+  },
+  "name" : "Order platform",
+  "properties" : {
+    "structurizr.inspection.error" : "14",
+    "structurizr.dsl" : "d29ya3NwYWNlICJPcmRlciBwbGF0Zm9ybSIgewogICFpZGVudGlmaWVycyBoaWVyYXJjaGljYWwKICBtb2RlbCB7CiAgICBjdXN0b21lciA9IHBlcnNvbiAiQ3VzdG9tZXIiCiAgICBzdG9yZSA9IHNvZnR3YXJlU3lzdGVtICJPcmRlciBwbGF0Zm9ybSIgewogICAgICBhcGkgPSBjb250YWluZXIgIkFQSSIgIkFjY2VwdHMgb3JkZXJzIiAiTGFtYmRhIgogICAgICBkYXRhYmFzZSA9IGNvbnRhaW5lciAiRGF0YWJhc2UiICJTdG9yZXMgb3JkZXJzIiAiU1FMaXRlIgogICAgICBhdWRpdCA9IGNvbnRhaW5lciAiQXVkaXQiICJSZWNvcmRzIGFjdGl2aXR5IiAiTGFtYmRhIgogICAgfQoKICAgIHBsYWNlcyA9IGN1c3RvbWVyIC0+IHN0b3JlLmFwaSAiUGxhY2VzIG9yZGVyIgogICAgd3JpdGVzID0gc3RvcmUuYXBpIC0+IHN0b3JlLmRhdGFiYXNlICJXcml0ZXMgb3JkZXIiICJTUUwiCiAgICByZWNvcmRzID0gc3RvcmUuYXBpIC0+IHN0b3JlLmF1ZGl0ICJSZWNvcmRzIGFjdGl2aXR5IiAiSFRUUFMiCiAgICByZWNlaXB0ID0gc3RvcmUuYXBpIC0+IGN1c3RvbWVyICJSZXR1cm5zIHJlY2VpcHQiICJIVFRQUyIKCiAgICBwcm9kdWN0aW9uID0gZGVwbG95bWVudEVudmlyb25tZW50ICJQcm9kdWN0aW9uIiB7CiAgICAgIGJsdWUgPSBkZXBsb3ltZW50R3JvdXAgIkJsdWUiCiAgICAgIHJlZ2lvbiA9IGRlcGxveW1lbnROb2RlICJSZWdpb24iIHsKICAgICAgICBnYXRld2F5ID0gaW5mcmFzdHJ1Y3R1cmVOb2RlICJHYXRld2F5IgogICAgICAgIGFwcGxpY2F0aW9uID0gZGVwbG95bWVudE5vZGUgIkFwcGxpY2F0aW9uIiB7CiAgICAgICAgICBhcGlJbnN0YW5jZSA9IGNvbnRhaW5lckluc3RhbmNlIHN0b3JlLmFwaSBibHVlCiAgICAgICAgICBkYXRhYmFzZUluc3RhbmNlID0gY29udGFpbmVySW5zdGFuY2Ugc3RvcmUuZGF0YWJhc2UgYmx1ZQogICAgICAgICAgYXVkaXRJbnN0YW5jZSA9IGNvbnRhaW5lckluc3RhbmNlIHN0b3JlLmF1ZGl0IGJsdWUKICAgICAgICB9CiAgICAgICAgZ2F0ZXdheSAtPiBwcm9kdWN0aW9uLnJlZ2lvbi5hcHBsaWNhdGlvbi5hcGlJbnN0YW5jZSAiRm9yd2FyZHMgcmVxdWVzdHMiICJIVFRQUyIKICAgICAgfQogICAgfQogIH0KCiAgdmlld3MgewogICAgZHluYW1pYyBzdG9yZSAiUGxhY2VPcmRlciIgewogICAgICAxOiBwbGFjZXMgIlN0YXJ0cyBjaGVja291dCIKICAgICAgewogICAgICAgIHsKICAgICAgICAgIHdyaXRlcyAiUGVyc2lzdHMgb3JkZXIiCiAgICAgICAgfQogICAgICAgIHsKICAgICAgICAgIHJlY29yZHMgIlJlY29yZHMgYXVkaXQiCiAgICAgICAgfQogICAgICB9CiAgICAgIDM6IHJlY2VpcHQKICAgICAgYXV0b0xheW91dCBscgogICAgfQogICAgZGVwbG95bWVudCAqIHByb2R1Y3Rpb24gIlByb2R1Y3Rpb24iIHsKICAgICAgaW5jbHVkZSAqCiAgICAgIGF1dG9MYXlvdXQgbHIKICAgIH0KICAgIGRlcGxveW1lbnQgKiBwcm9kdWN0aW9uICJQcm9kdWN0aW9uQXBpIiB7CiAgICAgIGluY2x1ZGUgImVsZW1lbnQudGVjaG5vbG9neT09TGFtYmRhIiBwcm9kdWN0aW9uLnJlZ2lvbi5nYXRld2F5CiAgICAgIGV4Y2x1ZGUgcHJvZHVjdGlvbi5yZWdpb24uYXBwbGljYXRpb24uYXVkaXRJbnN0YW5jZQogICAgICBhdXRvTGF5b3V0IGxyCiAgICB9CiAgfQp9",
+    "structurizr.inspection.info" : "0",
+    "structurizr.inspection.ignore" : "0",
+    "structurizr.inspection.warning" : "0"
+  },
+  "views" : {
+    "configuration" : {
+      "branding" : { },
+      "styles" : { },
+      "terminology" : { }
+    },
+    "deploymentViews" : [ {
+      "automaticLayout" : {
+        "applied" : false,
+        "edgeSeparation" : 0,
+        "implementation" : "Graphviz",
+        "nodeSeparation" : 300,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 300,
+        "vertices" : false
+      },
+      "elements" : [ {
+        "id" : "12",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "13",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "14",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "15",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "16",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "18",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "environment" : "Production",
+      "key" : "Production",
+      "name" : "Deployment View: Production",
+      "order" : 2,
+      "relationships" : [ {
+        "id" : "17"
+      }, {
+        "id" : "19"
+      }, {
+        "id" : "20"
+      } ]
+    }, {
+      "automaticLayout" : {
+        "applied" : false,
+        "edgeSeparation" : 0,
+        "implementation" : "Graphviz",
+        "nodeSeparation" : 300,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 300,
+        "vertices" : false
+      },
+      "elements" : [ {
+        "id" : "12",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "13",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "14",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "15",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "environment" : "Production",
+      "key" : "ProductionApi",
+      "name" : "Deployment View: Production",
+      "order" : 3,
+      "relationships" : [ {
+        "id" : "20"
+      } ]
+    } ],
+    "dynamicViews" : [ {
+      "automaticLayout" : {
+        "applied" : false,
+        "edgeSeparation" : 0,
+        "implementation" : "Graphviz",
+        "nodeSeparation" : 300,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 300,
+        "vertices" : false
+      },
+      "elementId" : "2",
+      "elements" : [ {
+        "id" : "1",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "3",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "4",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "5",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalBoundariesVisible" : false,
+      "key" : "PlaceOrder",
+      "name" : "Dynamic View: Order platform",
+      "order" : 1,
+      "relationships" : [ {
+        "description" : "Starts checkout",
+        "id" : "6",
+        "order" : "1",
+        "response" : false
+      }, {
+        "description" : "Persists order",
+        "id" : "8",
+        "order" : "2",
+        "response" : false
+      }, {
+        "description" : "Records audit",
+        "id" : "9",
+        "order" : "2",
+        "response" : false
+      }, {
+        "id" : "10",
+        "order" : "3",
+        "response" : false
+      } ]
+    } ]
+  }
+}

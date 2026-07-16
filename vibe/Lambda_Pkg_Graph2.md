@@ -712,10 +712,13 @@ Comparison checks:
 - projected graph identity and containment;
 - tolerant geometry relations only where layout is under test.
 
-Ordinary tests use checked-in semantic Mark, not images, raw SVG, Java, or the
-Structurizr CLI. Reference provenance records the exact CLI version and source
-case. The existing `lambda.package.graph.conformance` runner is extended rather
-than cloned.
+Ordinary tests use checked-in JSON adapted to semantic values, not images, raw
+SVG, Java, or the Structurizr CLI. The initial corpus pins Structurizr CLI
+v2025.11.09 and covers the basic model plus Stage 4C static/filtered views and
+Stage 4D dynamic/deployment views. Reference provenance records source and
+artifact SHA-256 values, and a maintenance script regenerates all three cases.
+The existing `lambda.package.graph.conformance` runner is extended rather than
+cloned.
 
 ### 12.4 Test command
 
@@ -723,9 +726,9 @@ than cloned.
 make test-graph-structurizr
 ```
 
-The current target runs native parser/LOC tests, Lambda semantic fixtures,
-retained end-to-end Radiant scene tests, and a headless selected-view `.dsl`
-CLI test.
+The current target runs native parser/LOC tests, Lambda semantic and pinned JSON
+reference fixtures, retained end-to-end Radiant scene tests, a headless
+selected-view `.dsl` CLI test, and selected-view HTML conversion.
 
 ## 13. Implementation Stages
 
@@ -782,9 +785,13 @@ provenance; custom Java strategies remain inert and diagnosed. Parenthesized
 view expressions, nested group boundaries, terminology, style-driven shape and
 per-edge routing, and deployment include/exclude filtering are also implemented.
 Policy-controlled local includes, nested relative includes, deterministic
-directory includes, and cycle diagnostics are implemented. Deeper source-context
-validation, remaining semantic diagnostics, workspace extension, and reference
-adaptation remain outstanding.
+directory includes, and cycle diagnostics are implemented. Source-context
+validation now traverses nested model, declaration, view, style, and archetype
+blocks while treating resolved includes transparently. Three pinned official
+Structurizr JSON semantic references cover basic, rich static/filtered, and
+dynamic/deployment workspaces without generated IDs or image fixtures. Remaining
+semantic diagnostics, workspace extension, and broader corpus expansion remain
+outstanding.
 
 ### Stage 4A - Manual parser and source contract
 
@@ -809,15 +816,15 @@ executable, and compressed-artifact size ledger is recorded in Section 6.5.
 Status: **substantially implemented**. Core hierarchy, hierarchical identifiers,
 relationships, tags, properties, both perspective forms, group membership,
 deployment declarations, and logical instance references normalize deterministically.
-The initial source contract and canonical semantic validator attach source-aware
+The recursive source contract and canonical semantic validator attach source-aware
 structured diagnostics for workspace structure, identity, containment,
 references, relationship legality, view scope, expressions, and safe style
 lowering. Pure declarative archetype inheritance supports defaults and explicit
 overrides for elements and relationships, including cycle/kind/base diagnostics.
 Boolean implied relationships default on, stop at shared ancestors, suppress
 existing endpoint pairs, retain source provenance, and can be disabled. Deeper
-nested source-context validation and the remaining diagnostic codes remain
-outstanding.
+nested source contexts, including resolved include fragments, are validated;
+the remaining diagnostic codes remain outstanding.
 
 - add source and canonical schemas;
 - resolve flat/hierarchical identifiers and `this`;
@@ -872,12 +879,18 @@ selects the first declared view. `.dsl` routing reuses the input parser's
 boundary-safe `workspace` detector, while `.structurizr` remains unambiguous.
 `convert ... -t html` uses the same graph bridge and accepts `--view-key`.
 Bounded local file and directory includes resolve through a separate native host
-resolver with nested-relative, ordering, provenance, and cycle fixtures.
+resolver with nested-relative, ordering, provenance, and cycle fixtures. A shared
+conformance manifest now drives a semantic adapter for three Structurizr CLI
+v2025.11.09 JSON exports. The adapter compares stable element paths,
+relationships, resolved and filtered view membership, dynamic order,
+deployment boundaries, layout intent, and styles while discarding generated
+numeric IDs and renderer details.
 
 - maintain policy-controlled local includes with cycle and resource limits;
 - maintain selected-view conversion (`view`, `render`, and HTML `convert` are complete);
-- add Structurizr JSON reference adaptation and pinned corpus provenance;
-- extend the native, retained-runtime, scene, and headless tests into the final
+- expand the pinned basic/static/dynamic/deployment reference set into a broader
+  upstream language corpus;
+- extend retained-runtime, scene, and headless coverage through that broader
   reference corpus manifest;
 - maintain the parser LOC and release-binary size ledger recorded in Section 6.5.
 
