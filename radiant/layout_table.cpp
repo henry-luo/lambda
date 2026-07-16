@@ -951,6 +951,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     float block_content_min_y = 0.0f;   // Track min y of block content (for offset)
     float block_content_max_y = 0.0f;   // Track max bottom of block content
     bool has_inline_content = false;
+    bool has_inline_formatting_content = false;
     float inline_content_min_y = 0.0f;  // Track min y of inline/text content
     float inline_content_max_y = 0.0f;  // Track max bottom of inline/text content
     View* last_sizing_child = nullptr;
@@ -995,6 +996,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+            has_inline_formatting_content = true;
             // Track min/max Y for text content to handle multi-line cells with <br> elements
             // Each text node may be on a different line (e.g., y=0, y=20, y=40 for 3 lines)
             // CSS 2.1 §17.5.3: "The height of a cell box is the minimum height required by the content"
@@ -1014,6 +1016,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             }
         }
         else if (child->view_type == RDT_VIEW_BR) {
+            has_inline_formatting_content = true;
             // BR elements also contribute to content extent - they mark line breaks
             // Their Y position indicates where the next line starts
             float br_top = child->y;
@@ -1034,6 +1037,12 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
                 table_inline_span_is_phantom_for_cell_height(
                     lam::view_require<RDT_VIEW_INLINE>(child))) {
                 return;
+            }
+            if (child->view_type == RDT_VIEW_INLINE) {
+                // A nested inline still belongs to the cell's inline formatting
+                // context; its declared line-height can be shorter than an atomic
+                // descendant plus the shared font-strut descender.
+                has_inline_formatting_content = true;
             }
             ViewElement* block = lam::view_require_element(child);
             // Use the actual rendered border-box height (block->height), not the CSS content height
@@ -1160,7 +1169,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     float content_height = has_any ? (overall_max_y - overall_min_y) : 0.0f;
     float flow_content_height = max(
         0.0f, tcell->content_height - ignored_quirky_margin_bottom);
-    if (has_inline_content && flow_content_height > content_height) {
+    if (has_inline_formatting_content && flow_content_height > content_height) {
         // table cell row sizing is based on line boxes; inline DOMRects only
         // cover glyph ink and can drop explicit line-height leading. Keep the
         // quirks-adjusted trailing extent consistent with the child-box path.

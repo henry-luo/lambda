@@ -1030,12 +1030,14 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
                                             uint32_t codepoint,
                                             bool small_caps_lower,
                                             float kerning,
+                                            bool emoji_presentation,
                                             bool* loaded) {
     FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
     // Intrinsic sizing must use the current FontStyleDesc because font_get_glyph()
     // can retain stale advances after a dynamic @font-face load.
-    LoadedGlyph* glyph = font_load_glyph(
-        lycon->font.font_handle, &style, codepoint, false);
+    LoadedGlyph* glyph = emoji_presentation
+        ? font_load_glyph_emoji(lycon->font.font_handle, &style, codepoint, false)
+        : font_load_glyph(lycon->font.font_handle, &style, codepoint, false);
     *loaded = glyph != nullptr;
     if (!glyph) return 0.0f;
 
@@ -1065,7 +1067,7 @@ static float intrinsic_apply_full_text_transform(LayoutContext* lycon,
         if (text_codepoint_has_zero_advance(transformed[index])) continue;
         bool loaded = false;
         extra_advance += intrinsic_loaded_glyph_advance(
-            lycon, transformed[index], false, 0.0f, &loaded);
+            lycon, transformed[index], false, 0.0f, false, &loaded);
     }
     return extra_advance;
 }
@@ -1305,9 +1307,21 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             kerning = font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint);
         }
 
+        bool emoji_presentation = false;
+        size_t selector_pos = i + (size_t)bytes;
+        if (selector_pos < length) {
+            uint32_t selector = 0;
+            int selector_bytes = str_utf8_decode(
+                (const char*)&str[selector_pos], length - selector_pos, &selector);
+            emoji_presentation = selector_bytes > 0 && selector == 0xFE0F;
+        }
         bool glyph_loaded = false;
+        // VS16 selects the emoji face for both max-content measurement and
+        // final layout; measuring the base glyph in the text face undercounts
+        // dual-presentation clusters such as the warning sign.
         float advance = intrinsic_loaded_glyph_advance(
-            lycon, codepoint, is_small_caps_lower, kerning, &glyph_loaded);
+            lycon, codepoint, is_small_caps_lower, kerning,
+            emoji_presentation, &glyph_loaded);
         if (!glyph_loaded) advance = 11.0f;
         if (glyph_loaded && codepoint == 0x00A0 && lycon->font.style) {
             advance += lycon->font.style->word_spacing;
@@ -4754,6 +4768,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
         log_debug("  inline_max_sum=%.1f, inline_min_sum=%.1f, text_indent=%.1f",
                   inline_max_sum, inline_min_sum, text_indent);
+    }
+
+    if (view_block->multicol && view_block->multicol->column_count > 1 &&
+        view_block->multicol->column_width <= 0.0f) {
+        float gap = view_block->multicol->column_gap_is_normal
+            ? multicol_normal_gap_size(view_block)
+            : view_block->multicol->column_gap;
+        if (gap < 0.0f) gap = 0.0f;
+        float total_gap = gap * (view_block->multicol->column_count - 1);
+        // a definite count with auto column width creates equal intrinsic tracks;
+        // measuring it as one track makes shrink-to-fit multicol boxes too narrow.
+        sizes.min_content = sizes.min_content * view_block->multicol->column_count + total_gap;
+        sizes.max_content = sizes.max_content * view_block->multicol->column_count + total_gap;
     }
 
     // Add padding and border

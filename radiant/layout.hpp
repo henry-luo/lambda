@@ -1074,6 +1074,7 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 // ============================================================================
 
 bool is_multicol_container(ViewBlock* block);
+float multicol_normal_gap_size(ViewBlock* block);
 void calculate_multicol_dimensions(
     MultiColumnProp* multicol,
     float available_width,
@@ -1332,6 +1333,7 @@ typedef struct Linebox {
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
+    struct FontHandle* prev_kerning_font_handle = nullptr;
     bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
                                      // (used in second pass to expand line box if needed)

@@ -5934,11 +5934,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 if (block->embed) {
                     block->embed->broken_alt_fallback = false;
                 }
-                if (has_css_width && !has_html_width) {
-                    lycon->block.given_width = -1.0f;
-                }
-                if (has_css_height && !has_html_height) {
-                    lycon->block.given_height = -1.0f;
+                bool has_definite_width = has_css_width || has_html_width;
+                bool has_definite_height = has_css_height || has_html_height;
+                if (!has_definite_width || !has_definite_height) {
+                    // A failed image has no intrinsic ratio: one definite axis
+                    // cannot resolve the other, while two definite axes retain the box.
+                    if (has_definite_width) lycon->block.given_width = -1.0f;
+                    if (has_definite_height) lycon->block.given_height = -1.0f;
                 }
                 // Empty or absent alt text keeps explicit dimensions when present.
                 // Only an in-flow block indicator fills the available inline size;

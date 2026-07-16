@@ -1185,6 +1185,25 @@ CssSpecificity selector_matcher_calculate_specificity(SelectorMatcher* matcher,
                     spec.classes++;
                     break;
 
+                case CSS_SELECTOR_PSEUDO_NOT:
+                case CSS_SELECTOR_PSEUDO_IS:
+                case CSS_SELECTOR_PSEUDO_HAS: {
+                    CssSpecificity argument_spec = {0, 0, 0, 0, false};
+                    for (size_t k = 0; k < simple->function_selector_count; k++) {
+                        CssSpecificity candidate = selector_matcher_calculate_specificity(
+                            matcher, simple->function_selectors[k]);
+                        if (css_specificity_compare(candidate, argument_spec) > 0) {
+                            argument_spec = candidate;
+                        }
+                    }
+                    // Selectors 4: these functional pseudo-classes take the
+                    // specificity of their most specific complex argument.
+                    spec.ids += argument_spec.ids;
+                    spec.classes += argument_spec.classes;
+                    spec.elements += argument_spec.elements;
+                    break;
+                }
+
                 case CSS_SELECTOR_TYPE_ELEMENT:
                     spec.elements++;
                     break;

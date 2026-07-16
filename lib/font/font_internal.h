@@ -419,6 +419,9 @@ void*               font_platform_create_ct_font(const char* postscript_name,
                                                   float size_px,
                                                   int css_weight,  // css_weight: 100–900
                                                   FontSlant css_slant);
+void*               font_platform_copy_with_weight_variation(const void* ct_font_ref,
+                                                              float size_px,
+                                                              int css_weight);
 void                font_platform_destroy_ct_font(void* ct_font_ref);
 bool                font_platform_has_color_glyphs(void* ct_font_ref);
 float               font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint);

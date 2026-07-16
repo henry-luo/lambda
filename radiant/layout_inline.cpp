@@ -226,10 +226,13 @@ static bool view_is_collapsed_whitespace_text(View* view, ViewSpan* span) {
     return text_is_all_collapsible_space(text, span);
 }
 
-static void inline_text_line_range(View* view, bool* found,
+static void inline_text_line_range(View* view, ViewSpan* whitespace_context, bool* found,
                                    int* first_line, int* last_line) {
     if (!view) return;
     if (view->view_type == RDT_VIEW_TEXT) {
+        // Collapsed line-edge whitespace has no inline fragment and therefore
+        // cannot make an ancestor a multi-line inline box.
+        if (view_is_collapsed_whitespace_text(view, whitespace_context)) return;
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (!*found) {
@@ -246,7 +249,7 @@ static void inline_text_line_range(View* view, bool* found,
     if (view->view_type != RDT_VIEW_INLINE) return;
     ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
     for (View* child = span->first_child; child; child = child->next()) {
-        inline_text_line_range(child, found, first_line, last_line);
+        inline_text_line_range(child, span, found, first_line, last_line);
     }
 }
 
@@ -266,7 +269,7 @@ bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
     bool found_text_line = false;
     int first_line = 0;
     int last_line = 0;
-    inline_text_line_range(static_cast<View*>(span), &found_text_line,
+    inline_text_line_range(static_cast<View*>(span), span, &found_text_line,
                            &first_line, &last_line);
     // Vertical-align changes child y without changing its recorded line identity.
     if (found_text_line) return first_line != last_line;
@@ -657,30 +660,18 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // affect the parent's bounding rect. For children with position:relative
     // (block or inline), use their static (pre-offset) position when computing
     // the parent inline span's bounding box.
+    // collapsed-whitespace unions are anonymous fragment bookkeeping, not the
+    // child's static vertical box; genuine split fragments are handled below.
     auto get_child_static_y = [&get_child_relative_offset](View* c) -> float {
         float dy = 0.0f;
         get_child_relative_offset(c, nullptr, &dy);
-        float y = c->y - dy;
-        if (ViewSpan* elem = lam::view_as<RDT_VIEW_INLINE>(c)) {
-            if (elem->has_ancestor_fragment_union &&
-                elem->ancestor_fragment_min_y < y) {
-                y = elem->ancestor_fragment_min_y;
-            }
-        }
-        return y;
+        return c->y - dy;
     };
 
     auto get_child_static_bottom = [&get_child_relative_offset](View* c) -> float {
         float dy = 0.0f;
         get_child_relative_offset(c, nullptr, &dy);
-        float bottom = c->y - dy + c->height;
-        if (ViewSpan* elem = lam::view_as<RDT_VIEW_INLINE>(c)) {
-            if (elem->has_ancestor_fragment_union &&
-                elem->ancestor_fragment_max_y > bottom) {
-                bottom = elem->ancestor_fragment_max_y;
-            }
-        }
-        return bottom;
+        return c->y - dy + c->height;
     };
 
     auto get_child_content_y = [&get_child_static_y](View* c) -> float {
@@ -690,12 +681,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                 if (cs->bound->border) bt = cs->bound->border->width.top;
                 pt = cs->bound->padding.top > 0 ? cs->bound->padding.top : 0;
             }
-            float content_y = get_child_static_y(c) + bt + pt;
-            if (cs->has_ancestor_fragment_union &&
-                cs->ancestor_fragment_min_y < content_y) {
-                content_y = cs->ancestor_fragment_min_y;
-            }
-            return content_y;
+            return get_child_static_y(c) + bt + pt;
         }
         return get_child_static_y(c);
     };
@@ -706,12 +692,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                 if (cs->bound->border) bb = cs->bound->border->width.bottom;
                 pb = cs->bound->padding.bottom > 0 ? cs->bound->padding.bottom : 0;
             }
-            float content_bottom = get_child_static_bottom(c) - bb - pb;
-            if (cs->has_ancestor_fragment_union &&
-                cs->ancestor_fragment_max_y > content_bottom) {
-                content_bottom = cs->ancestor_fragment_max_y;
-            }
-            return content_bottom;
+            return get_child_static_bottom(c) - bb - pb;
         }
         return get_child_static_bottom(c);
     };
@@ -1751,7 +1732,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // Normal inline-only content
     bool had_children = (child != nullptr);
-    float start_advance_y = lycon->block.advance_y;
     bool has_inline_axis_decoration = span_has_inline_axis_decoration(span);
     if (has_inline_axis_decoration && !lycon->line.start_view) {
         lycon->line.start_view = static_cast<View*>(span);
@@ -1820,16 +1800,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // CSS 2.1 §8.5.1: Detect multi-line by checking if children are on different lines.
     // Multi-line means the span's content itself spans multiple lines, requiring
     // left border+padding only on the first line fragment and right on the last.
+    // Cursor advancement is not evidence here: one tall atomic child can finish
+    // a line while the ancestor still owns exactly one inline fragment.
     bool span_is_multi_line = inline_span_has_multiple_line_fragments(span);
-    // Check 2: advance_y moved during children layout, meaning a line
-    // break occurred while laying out this span's content (text wrapped).
-    // start_advance_y was captured before children layout, so if advance_y
-    // increased, a line_break() was called inside this span.
-    if (!span_is_multi_line && inline_span_first_line_fragment_child(span)) {
-        if (lycon->block.advance_y > start_advance_y) {
-            span_is_multi_line = true;
-        }
-    }
 
     // CSS 2.1 §16.6.1: Trailing whitespace at end of a line should not expand
     // the inline element's bounding box. We trim trailing whitespace from the
