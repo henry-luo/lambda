@@ -2720,7 +2720,8 @@ static void recompute_inline_descendant_bounds(View* view, FontHandle* fallback_
         if (!inline_span_has_recomputable_child_box(span)) return;
         if (inline_span_has_inline_level_atomic_child_for_recompute(span)) return;
         if (inline_span_has_in_flow_block_child_for_recompute(span)) return;
-        compute_span_bounding_box(span, inline_span_has_multiple_line_fragments(span), fallback_fh);
+        recompute_span_bounding_box_after_line_layout(
+            span, inline_span_has_multiple_line_fragments(span), fallback_fh);
     }
 }
 

@@ -1593,6 +1593,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.max_normal_line_height = 0;
     lycon->line.has_c1_control_text = false;
     lycon->line.has_non_c1_text = false;
+    lycon->line.has_direct_block_text = false;
     lycon->line.c1_control_line_height = 0;
     lycon->line.trailing_letter_spacing = 0;
     // CSS 2.1 §10.8.1: top-level inline content inherits the block strut metrics.
@@ -1671,9 +1672,10 @@ static bool fixup_view_is_out_of_flow(View* view) {
 static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
     if (!lycon || !lycon->view || lycon->view->view_type != RDT_VIEW_BR) return;
     // Ordinary text lines place <br> from its inherited font when it is created.
-    // Only replaced content changes the finalized baseline after that placement;
+    // Replaced content and mixed inline fonts can change the finalized baseline;
     // fallback glyph extrema must not move the break independently of its text.
-    if (!lycon->line.has_replaced_content) return;
+    if (!lycon->line.has_replaced_content &&
+        !lycon->line.has_different_inline_font) return;
 
     View* br_view = lycon->view;
     float br_ascender = 0.0f;
@@ -1695,7 +1697,7 @@ static void align_forced_break_rect_to_line_baseline(LayoutContext* lycon) {
     }
 
     // A forced break exposes a zero-width inline box on the line it terminates;
-    // align it to the finalized baseline after replaced content expands the line.
+    // align it after all line contents establish the finalized baseline.
     br_view->y = lycon->block.advance_y + baseline_pos - br_ascender;
 }
 
@@ -1993,9 +1995,8 @@ void line_break(LayoutContext* lycon) {
     }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
     if (lycon->line.trailing_letter_spacing != 0) {
-        float terminal_trim = line_terminal_letter_spacing_trim(
-            lycon->line.trailing_letter_spacing);
-        lycon->line.advance_x -= terminal_trim;
+        // Chromium retains terminal tracking in the text DOMRect, so removing it
+        // here makes center/right alignment overshoot by one letter-spacing unit.
         lycon->line.trailing_letter_spacing = 0;
     }
 
@@ -2661,6 +2662,23 @@ static void include_text_rect_bounds(ViewText* text, const TextRect* rect) {
     text->height = bottom - text->y;
 }
 
+static bool text_range_has_non_collapsed_content(ViewText* text,
+                                                 TextRect* rect,
+                                                 int text_length) {
+    if (!text || !text->text || !rect || text_length <= 0) return false;
+    if (!ws_collapse_spaces(get_white_space_value(text))) return true;
+
+    const char* start = text->text + rect->start_index;
+    const char* end = start + text_length;
+    for (const char* current = start; current < end; current++) {
+        char c = *current;
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
+            return true;
+        }
+    }
+    return false;
+}
+
 void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_length, float text_width) {
     if (text_length <= 0) {
         log_error("output_text: text_length=%d, skipping (node=%s)", text_length, text->node_name());
@@ -2670,6 +2688,13 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     rect->width = text_width;
     rect->line_number = lycon->block.line_number;
     if (!lycon->line.start_view) lycon->line.start_view = static_cast<View*>(text);
+    ViewElement* text_parent = text->parent_view();
+    if (!lycon->line.has_direct_block_text && text_parent && text_parent->is_block() &&
+        text_range_has_non_collapsed_content(text, rect, text_length)) {
+        // Quirks line-height suppression does not apply once the root anonymous
+        // inline box contains text rather than only collapsed whitespace.
+        lycon->line.has_direct_block_text = true;
+    }
     lycon->line.advance_x += text_width;
     // CSS 2.1 §16.6.1: Commit trailing space info for cross-node line break trimming.
     // When new text content is output, the previous trailing space is no longer at
@@ -3816,10 +3841,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         line_break(lycon);
                         goto LAYOUT_TEXT;
                     }
-                    float advance_x = lycon->line.advance_x;  // save current advance_x
                     line_break(lycon);
                     rect->y = lycon->block.advance_y;
-                    rect->x = lycon->line.advance_x;  lycon->line.advance_x = advance_x;
+                    // A previous-node wrap relocates this run; retaining the old-line
+                    // cursor makes the following inline sibling wrap a second time.
+                    rect->x = lycon->line.advance_x;
                     // continue the text flow
                 }
             }

@@ -942,9 +942,9 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
         view->view_type == RDT_VIEW_TABLE) {
         float child_top = view->y;
         table_note_cell_content_extent(extent, child_top, child_top + view->height);
-        if (view->view_type != RDT_VIEW_INLINE_BLOCK) {
-            // A block inside a split inline occupies the missing stack position;
-            // omitting it makes the surrounding text gap look like a double line pitch.
+        if (view->view_type != RDT_VIEW_INLINE_BLOCK && cell_line_height > 0.0f) {
+            // A suppressed quirks strut has no line pitch; recording its block tops
+            // would turn a multi-line block gap into a phantom terminal line.
             table_note_cell_line_position(extent, child_top, cell_line_height);
         }
     }

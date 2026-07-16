@@ -50,12 +50,14 @@ static inline bool is_out_of_flow_child(View* child) {
     return layout_view_is_out_of_flow(child);
 }
 
-static bool quirks_table_cell_br_after_nested_inline_text(LayoutContext* lycon,
-                                                          DomNode* br_node) {
+static bool quirks_br_after_nested_inline_text(LayoutContext* lycon,
+                                               DomNode* br_node) {
     if (!lycon || !lycon->doc || !lycon->doc->view_tree || !br_node) return false;
     if (!is_quirks_mode(lycon->doc->view_tree->html_version)) return false;
-    ViewBlock* block = lycon->block.establishing_element;
-    if (!block || block->view_type != RDT_VIEW_TABLE_CELL) return false;
+    ViewBlock* block = layout_nearest_block_ancestor(
+        lam::view_require_element(static_cast<View*>(br_node)));
+    if (!block || !layout_quirks_block_ignores_line_height(lycon, block)) return false;
+    if (lycon->line.has_direct_block_text) return false;
     ViewText* last_text = lycon->line.last_text_view;
     return last_text && last_text->parent && br_node->parent &&
         last_text->parent != br_node->parent;
@@ -319,16 +321,22 @@ static bool span_children_have_no_line_content(ViewSpan* span) {
     return true;
 }
 
-static bool span_left_float_continuation_x(ViewSpan* span, float* continuation_x) {
+bool inline_span_float_continuation_x(
+        ViewSpan* span, float* continuation_x, bool* has_left_float) {
+    if (has_left_float) *has_left_float = false;
     if (!span || !continuation_x) return false;
+    bool found_float = false;
     bool found_left_float = false;
     float max_right = *continuation_x;
     for (View* child = span->first_child; child; child = child->next()) {
         DomElement* child_elem = layout_inline_as_element(static_cast<DomNode*>(child));
-        if (!child_elem || !child_elem->position ||
-            child_elem->position->float_prop != CSS_VALUE_LEFT) {
+        if (!child_elem || !child_elem->position) {
             continue;
         }
+        CssEnum float_prop = child_elem->position->float_prop;
+        if (float_prop != CSS_VALUE_LEFT && float_prop != CSS_VALUE_RIGHT) continue;
+        found_float = true;
+        if (float_prop != CSS_VALUE_LEFT) continue;
         float dx = 0.0f;
         float dy = 0.0f;
         ViewBlock* child_block = layout_inline_as_block_view(child);
@@ -349,7 +357,8 @@ static bool span_left_float_continuation_x(ViewSpan* span, float* continuation_x
     if (found_left_float) {
         *continuation_x = max_right;
     }
-    return found_left_float;
+    if (has_left_float) *has_left_float = found_left_float;
+    return found_float;
 }
 
 static void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span) {
@@ -830,6 +839,34 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     }
 }
 
+static bool span_has_vertical_decoration_descendant(ViewSpan* span) {
+    for (View* child = span ? span->first_child : nullptr; child; child = child->next()) {
+        ViewSpan* child_span = lam::view_as<RDT_VIEW_INLINE>(child);
+        if (!child_span) continue;
+        float top_edge = 0.0f;
+        float bottom_edge = 0.0f;
+        span_vertical_decoration_edges(child_span, &top_edge, &bottom_edge);
+        if (top_edge > 0.0f || bottom_edge > 0.0f ||
+            span_has_vertical_decoration_descendant(child_span)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void recompute_span_bounding_box_after_line_layout(
+        ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh) {
+    float finalized_y = span->y;
+    float finalized_height = span->height;
+    compute_span_bounding_box(span, is_multi_line, fallback_fh);
+    if (!is_multi_line && !span_has_vertical_decoration_descendant(span)) {
+        // CSS 2.1 §10.6.1: descendant font content may protrude without
+        // replacing this finalized font box; descendant decorations still union.
+        span->y = finalized_y;
+        span->height = finalized_height;
+    }
+}
+
 // ============================================================================
 // Math Element Handling
 // ============================================================================
@@ -1244,7 +1281,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // content on the line, including replaced elements.
         float br_line_height = lycon->block.line_height > 0.0f ? lycon->block.line_height : br_font_height;
         br_view->y = lycon->block.advance_y + (br_line_height - br_font_height) / 2.0f;
-        bool collapse_br_rect = quirks_table_cell_br_after_nested_inline_text(lycon, elmt);
+        bool collapse_br_rect = quirks_br_after_nested_inline_text(lycon, elmt);
         float collapsed_br_y = lycon->block.advance_y + lycon->line.max_ascender;
         // CSS Text 3 §7.2: text-align-last applies to lines immediately before
         // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
@@ -1253,8 +1290,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         line_break(lycon);
         lycon->line.is_last_line = false;
         if (collapse_br_rect) {
-            // BackCompat table cells expose terminal breaks after nested inline
-            // text as caret-position boxes; the line still advances normally.
+            // A quirks block without a root strut exposes this break as a
+            // caret-position box; the descendant line still advances normally.
             br_view->y = collapsed_br_y;
             br_view->height = 0.0f;
         }
@@ -1921,9 +1958,22 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // normal position at the collapsed continuation point so later relative
         // positioning moves the same zero-sized box browsers expose.
         float continuation_x = collapsed_inline_fragment_x;
-        span_left_float_continuation_x(span, &continuation_x);
+        bool has_left_float = false;
+        bool has_float = inline_span_float_continuation_x(
+            span, &continuation_x, &has_left_float);
         span->x = continuation_x;
         span->y = lycon->block.advance_y;
+        if (has_float && lycon->line.is_line_start &&
+            !lycon->line.has_phantom_inline_fragment) {
+            // A float-only inline still has an aligned static position within
+            // the line area shortened by either side's float intrusion.
+            lycon->line.start_view = layout_inline_fragment_root(static_cast<View*>(span));
+            lycon->line.has_phantom_inline_fragment = true;
+        }
+        if (has_float && lycon->line.is_line_start) {
+            // a final float has no following node to refresh the phantom line bounds.
+            update_line_for_bfc_floats(lycon, lycon->block.line_height);
+        }
     }
 
     // CSS 2.1 §10.6.1: For inline non-replaced elements, the bounding box height

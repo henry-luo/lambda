@@ -1817,7 +1817,7 @@ static bool shift_span_current_line_rects(float offset, int line_number, ViewSpa
         FontHandle* fallback_fh = span->font ? span->font->font_handle : nullptr;
         // A multi-line inline exposes the union of its shifted line fragments,
         // not its old bounding box translated as a single rectangle.
-        compute_span_bounding_box(
+        recompute_span_bounding_box_after_line_layout(
             span, inline_span_has_multiple_line_fragments(span), fallback_fh);
     }
     return shifted;
@@ -1866,7 +1866,7 @@ static void align_wrapped_continuation(LayoutContext* lycon, float offset, View*
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(
             static_cast<View*>(parent));
         FontHandle* fallback_fh = span->font ? span->font->font_handle : nullptr;
-        compute_span_bounding_box(
+        recompute_span_bounding_box_after_line_layout(
             span, inline_span_has_multiple_line_fragments(span), fallback_fh);
         cursor = static_cast<View*>(span);
     }
@@ -1897,6 +1897,23 @@ static bool view_is_wrapped_continuation(View* view, int line_number) {
     return has_prior && has_current;
 }
 
+static void shift_span_line_fragment_unions(ViewSpan* span, float offset) {
+    // Fragment unions cache absolute positions; translating only the span lets
+    // later parent recomputation reintroduce pre-alignment coordinates.
+    if (span->has_inline_fragment_union) {
+        span->inline_fragment_min_x += offset;
+        span->inline_fragment_max_x += offset;
+    }
+    if (span->has_ancestor_fragment_union) {
+        span->ancestor_fragment_min_x += offset;
+        span->ancestor_fragment_max_x += offset;
+    }
+    if (span->has_collapsed_line_fragment_union) {
+        span->collapsed_line_fragment_min_x += offset;
+        span->collapsed_line_fragment_max_x += offset;
+    }
+}
+
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
     while (view) {
         log_debug("view line align: %d", view->view_type);
@@ -1915,6 +1932,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
+            shift_span_line_fragment_unions(sp, offset);
             if (sp->first_child) view_line_align(lycon, offset, sp->first_child);
         }
         view = view->next();
@@ -2044,6 +2062,30 @@ View* layout_inline_fragment_root(View* view) {
     return view;
 }
 
+static void normalize_phantom_left_float_spans(View* view, float continuation_x) {
+    while (view) {
+        if (view->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+            float own_continuation_x = continuation_x;
+            bool has_left_float = false;
+            if (span->width == 0.0f && span->height == 0.0f &&
+                inline_span_float_continuation_x(
+                    span, &own_continuation_x, &has_left_float) && has_left_float) {
+                float relative_x = 0.0f;
+                layout_relative_position_offset(
+                    lam::unsafe_view_block_api_span(span), &relative_x, nullptr);
+                // normalizing the static position must retain the visual offset
+                // that relative positioning applies after normal flow layout.
+                span->x = continuation_x + relative_x;
+            }
+            if (span->first_child) {
+                normalize_phantom_left_float_spans(span->first_child, continuation_x);
+            }
+        }
+        view = view->next();
+    }
+}
+
 void line_align(LayoutContext* lycon) {
     // horizontal text alignment: left, right, center, justify, start, end
     // Convert logical values (start/end) to physical values (left/right)
@@ -2072,6 +2114,14 @@ void line_align(LayoutContext* lycon) {
         text_align = is_rtl ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
     } else if (text_align == CSS_VALUE_END) {
         text_align = is_rtl ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
+    }
+
+    if (lycon->line.has_phantom_inline_fragment && lycon->line.is_line_start &&
+        lycon->line.has_float_intrusion && lycon->line.start_view) {
+        // all float-only inline fragments share the line's final zero-width
+        // continuation; per-float anchors expose stale intermediate positions.
+        normalize_phantom_left_float_spans(
+            lycon->line.start_view, lycon->line.advance_x);
     }
 
     if (text_align != CSS_VALUE_LEFT) {
@@ -2341,11 +2391,15 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                         marker_prop->height : lycon->block.line_height;
 
                     if (marker_prop->is_outside) {
-                        // Outside marker: position to the left of content area
-                        // CSS Lists 3 §4: formatted as a zero-width inline box on the first line
-                        // Contributes to line height but does NOT advance inline position
-                        marker_span->x = lycon->line.advance_x - marker_prop->width;
+                        // A parent list supplies the outside-marker gutter. An orphan
+                        // list item instead reserves the used marker box on line one.
+                        marker_span->x = marker_prop->reserves_first_line
+                            ? lycon->line.advance_x
+                            : lycon->line.advance_x - marker_prop->width;
                         marker_span->y = lycon->block.advance_y;
+                        if (marker_prop->reserves_first_line) {
+                            lycon->line.advance_x += marker_prop->width;
+                        }
                     } else {
                         // Inside marker: position at current inline position and advance
                         marker_span->x = lycon->line.advance_x;
