@@ -121,6 +121,21 @@
     <edge from: 'Duck', to: 'Habitat', relation: '..>',
       arrow-tail: 'none', arrow-head: 'normal', style: 'dotted', label: 'visits'>
   >
+  <case id: 'er-diagram', source: 'er_diagram.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir',
+      features: 'er-diagram,entity-attributes,crows-foot,cardinality';
+    <expect kind: 'er', direction: 'LR', nodes: 3, edges: 4>
+    <node id: 'ORDER', label: 'Sales Order', shape: 'box'>
+    <er-attribute type: 'string', name: 'customerNumber', key: 'PK',
+      comment: 'Primary identifier'>
+    <edge from: 'CUSTOMER', to: 'ORDER', relation: '||--o{',
+      identifying: 'true', from-cardinality: 'exactly-one',
+      to-cardinality: 'zero-or-more', arrow-tail: 'tee tee',
+      arrow-head: 'odot crow', label: 'places'>
+    <edge from: 'ORDER', to: 'LINE-ITEM', relation: '||..|{',
+      identifying: 'false', style: 'dotted',
+      from-cardinality: 'exactly-one', to-cardinality: 'one-or-more'>
+  >
   <case id: 'chart-routing', source: 'chart_routing.mmd',
       origin: 'lambda', status: 'unsupported', policy: 'ir', features: 'chart-dispatch';
     <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0;
