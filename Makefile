@@ -1721,7 +1721,7 @@ build-graph-structurizr-test:
 
 test-graph-structurizr: build-graph-structurizr-test
 	@echo "Running native Structurizr parser coverage..."
-	@./test/test_graph_parser_gtest.exe --gtest_filter='GraphParserTest.ParserLocBudget:GraphParserTest.ParseStructurizrWorkspace:GraphParserTest.RecoverStructurizrWorkspaceRoot'
+	@./test/test_graph_parser_gtest.exe --gtest_filter='GraphParserTest.ParserLocBudget:GraphParserTest.ParseStructurizrWorkspace:GraphParserTest.AutoDetectStructurizrDsl:GraphParserTest.RecoverStructurizrWorkspaceRoot'
 	@echo "Running Structurizr/C4 package integration fixtures..."
 	@./test/test_lambda_gtest.exe --gtest_filter='*structurizr*'
 

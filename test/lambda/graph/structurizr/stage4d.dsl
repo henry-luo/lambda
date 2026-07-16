@@ -14,6 +14,7 @@ workspace "Order platform" {
     receipt = store.api -> customer "Returns receipt" "HTTPS"
 
     production = deploymentEnvironment "Production" {
+      blue = deploymentGroup "Blue"
       region = deploymentNode "Region" {
         gateway = infrastructureNode "Gateway"
         application = deploymentNode "Application" {

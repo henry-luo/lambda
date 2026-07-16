@@ -566,9 +566,10 @@ assignments and then pass through the existing safe style parser. The current
 allowlist includes background, text/line color, stroke, stroke width or
 thickness, node font size, node width/height, opacity, and dashed relationships.
 Unsupported shapes, icons, routing, fonts, or paint values remain canonical
-workspace properties but do not become executable CSS. Deterministic warnings
-for skipped values remain outstanding. External icons are not fetched during
-transform or render.
+workspace properties but do not become executable CSS. Canonical validation now
+emits deterministic `structurizr.unsupported-style` warnings for properties that
+the shared safe lowering helper cannot represent. External icons are not fetched
+during transform or render.
 
 ## 10. Layout Mapping
 
@@ -729,17 +730,23 @@ The first three executable slices are implemented and covered by
   filtered/custom/style, dynamic, deployment, and HTML fixtures.
 
 This checkpoint is partial Stage 4A through Stage 4D, not full Structurizr
-support. Conservative `.dsl` auto-detection, canonical schemas and diagnostics,
-archetypes/implied relationships, expression diagnostics, advanced nested-group
-boundaries, shape/routing style semantics, terminology, fuller deployment view
-filtering, includes, CLI view selection, reference adaptation, scene coverage,
-and release size measurement remain outstanding.
+support. Conservative `.dsl` auto-detection is implemented: `.structurizr` is
+unambiguous, while `.dsl` is selected only when its first significant token is
+the boundary-safe `workspace` keyword. Initial canonical semantic validation now
+reports duplicate identities/view keys, illegal containment and relationships,
+unresolved instance/deployment-group references, invalid view scopes, and styles
+that cannot be lowered safely. Source schema validation, remaining semantic
+diagnostics, archetypes/implied relationships, expression diagnostics, advanced
+nested-group boundaries, shape/routing style semantics, terminology, fuller
+deployment view filtering, includes, CLI view selection, reference adaptation,
+scene coverage, and release size measurement remain outstanding.
 
 ### Stage 4A - Manual parser and source contract
 
-Status: **partially implemented**. Explicit flavor dispatch and the manual
-source contract are present; `.dsl` auto-detection and the release size ledger
-remain outstanding.
+Status: **substantially implemented**. Explicit flavor dispatch, conservative
+`.structurizr`/`.dsl` auto-detection, the manual source contract, parser limits,
+recovery diagnostics, and enforced LOC budgets are present. The release object,
+executable, and compressed-artifact size ledger remains outstanding.
 
 - add flavor and conservative `.dsl` dispatch;
 - extract only proven shared graph lexical helpers;
@@ -754,8 +761,10 @@ remain outstanding.
 Status: **partially implemented**. Core hierarchy, hierarchical identifiers,
 relationships, tags, properties, both perspective forms, group membership,
 deployment declarations, and logical instance references normalize deterministically.
-Schemas, full diagnostics, archetypes, and implied relationships remain
-outstanding.
+The initial canonical schema/semantic validator attaches source-aware structured
+diagnostics for identity, containment, references, relationship legality, view
+scope, and safe style lowering. Source Mark schema validation, the remaining
+diagnostic codes, archetypes, and implied relationships remain outstanding.
 
 - add source and canonical schemas;
 - resolve flat/hierarchical identifiers and `this`;
@@ -769,10 +778,10 @@ outstanding.
 
 Status: **substantially implemented**. All six static view kinds, selected-view
 HTML, filtered/custom semantics, reluctant wildcard, the initial pure expression
-allowlist including property/group predicates, group boundaries, and safe basic
-style cascade have dedicated fixtures. Expression diagnostics, nested-group
-boundaries, terminology, shape/routing styles, and retained scene/render
-coverage remain outstanding.
+allowlist including property/group predicates, group boundaries, safe basic
+style cascade, and warnings for styles skipped by lowering have dedicated
+fixtures. Expression diagnostics, nested-group boundaries, terminology,
+shape/routing semantics, and retained scene/render coverage remain outstanding.
 
 - implement landscape, context, container, component, filtered, and custom
   projection;

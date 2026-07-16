@@ -46,6 +46,8 @@ let deployment_html = structurizr.to_html(workspace, "Production")
       [cluster.id, cluster.label]],
     [for (node in model.nodes(deployment_graph)) [node.id, node["c4-kind"]]],
     [for (edge in model.edges(deployment_graph)) [edge.from, edge.to, edge.label]]],
+  diagnostics: [for (value in model.diagnostics(workspace))
+    [value.code, value.severity]],
   html: [[string(name(dynamic_html)), dynamic_html["data-radiant-layout"]],
     [string(name(deployment_html)), deployment_html["data-radiant-layout"]]]
 }

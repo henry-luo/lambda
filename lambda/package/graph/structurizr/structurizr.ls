@@ -1,10 +1,13 @@
 // Public Structurizr/C4 facade.
 
 import normalize_module: .normalize
+import schema_module: .schema
 import view_module: .views
 import graph_transform: lambda.package.graph.transform
 
 pub fn normalize(source) => normalize_module.normalize(source)
+
+pub fn validate(workspace) => schema_module.validate(workspace)
 
 pub fn view_keys(workspace) => view_module.view_keys(workspace)
 

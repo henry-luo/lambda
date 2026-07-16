@@ -1,6 +1,7 @@
 // Pure Structurizr source Mark to canonical C4 workspace normalization.
 
 import graph_model: lambda.package.graph.model
+import schema: lambda.package.graph.structurizr.schema
 
 fn children(value, wanted = null) => [
   for (child in graph_model.element_children(value)
@@ -483,6 +484,7 @@ pub fn normalize(source) {
   let workspace_name = if (len(workspace_args) > 0) workspace_args[0] else null;
   let workspace_description = if (len(workspace_args) > 1) workspace_args[1] else null;
   let mode = if (hierarchical) "hierarchical" else "flat";
-  c4_workspace(workspace_name, workspace_description, mode, elements, relationships,
-    views, styles, model_properties, source)
+  let workspace = c4_workspace(workspace_name, workspace_description, mode, elements,
+    relationships, views, styles, model_properties, source);
+  schema.attach(workspace, schema.validate(workspace))
 }

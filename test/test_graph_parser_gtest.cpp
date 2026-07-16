@@ -197,6 +197,31 @@ TEST_F(GraphParserTest, ParseStructurizrWorkspace) {
     free_lambda_string(flavor);
 }
 
+TEST_F(GraphParserTest, AutoDetectStructurizrDsl) {
+    String* type = create_lambda_string("auto");
+    Url* workspace_url = url_parse("file:///workspace.dsl");
+    Input* workspace_input = input_from_source(
+        "// architecture\nworkspace { model {} views {} }", workspace_url, type, NULL);
+
+    ASSERT_NE(workspace_input, nullptr);
+    ASSERT_EQ(workspace_input->root.type_id(), LMD_TYPE_ELEMENT);
+    ElementReader workspace(workspace_input->root);
+    EXPECT_TRUE(workspace.hasTag("workspace"));
+    EXPECT_STREQ(workspace.get_attr_string("flavor"), "structurizr");
+
+    Url* other_url = url_parse("file:///rules.dsl");
+    Input* other_input = input_from_source(
+        "rule example { allow true }", other_url, type, NULL);
+    ASSERT_NE(other_input, nullptr);
+    EXPECT_EQ(other_input->root.type_id(), LMD_TYPE_STRING);
+
+    Input* memory_input = input_from_source("workspace {}", NULL, type, NULL);
+    ASSERT_NE(memory_input, nullptr);
+    EXPECT_EQ(memory_input->root.type_id(), LMD_TYPE_STRING);
+
+    free_lambda_string(type);
+}
+
 TEST_F(GraphParserTest, RecoverStructurizrWorkspaceRoot) {
     String* type = create_lambda_string("graph");
     String* flavor = create_lambda_string("c4");
