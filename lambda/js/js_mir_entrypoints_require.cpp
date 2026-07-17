@@ -272,6 +272,16 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     transpile_js_mir_ast(mt, ast);
 
 #ifndef NDEBUG
+    if (getenv("JS_MIR_DUMP") && filename && strstr(filename, "gsap")) {
+        FILE* dump = fopen("temp/gsap_mir_dump.txt", "w");
+        if (dump) {
+            MIR_output(ctx, dump);
+            fclose(dump);
+        }
+    }
+#endif
+
+#ifndef NDEBUG
     if (getenv("JS_MIR_DUMP")) {
     create_dir_recursive("temp");
     FILE* mir_dump = fopen("temp/ts_mir_dump.txt", "w");
@@ -769,6 +779,16 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     transpile_js_mir_ast(mt, js_ast);
     g_last_js_mir_phase_timing.mir_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ast_to_mir");
+
+#ifndef NDEBUG
+    if (getenv("JS_MIR_DUMP") && filename && strstr(filename, "gsap")) {
+        FILE* dump = fopen("temp/gsap_mir_dump.txt", "w");
+        if (dump) {
+            MIR_output(ctx, dump);
+            fclose(dump);
+        }
+    }
+#endif
 
 #ifndef NDEBUG
     if (getenv("JS_MIR_DUMP")) {

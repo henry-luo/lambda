@@ -776,8 +776,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     {
                         JsMirVarEntry* hvar = jm_find_var(mt, e->name);
                         if (hvar) {
-                            if (e->from_func_decl &&
-                                jm_function_has_direct_body_function_binding(fn, e->name)) {
+                            if (current_binding && current_binding->from_env) {
+                                // A function-scoped declaration owns this binding; retaining
+                                // outer-capture metadata reloads the stale capture after every
+                                // local write (notably `for (var key in object)`).
                                 jm_function_clear_shadowed_capture_binding(hvar);
                             }
                             hvar->from_hoist = true;
@@ -3124,8 +3126,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     {
                         JsMirVarEntry* hvar = jm_find_var(mt, e->name);
                         if (hvar) {
-                            if (e->from_func_decl &&
-                                jm_function_has_direct_body_function_binding(fn, e->name)) {
+                            if (current_binding && current_binding->from_env) {
+                                // A function-scoped declaration owns this binding; retaining
+                                // outer-capture metadata reloads the stale capture after every
+                                // local write (notably `for (var key in object)`).
                                 jm_function_clear_shadowed_capture_binding(hvar);
                             }
                             hvar->from_hoist = true;

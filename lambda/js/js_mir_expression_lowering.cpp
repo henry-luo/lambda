@@ -1238,6 +1238,27 @@ static MIR_reg_t jm_emit_plain_call_this_arg(JsMirTranspiler* mt, JsCallNode* ca
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
 }
 
+static bool jm_emit_live_cell_load(JsMirTranspiler* mt, JsMirVarEntry* var,
+        MIR_reg_t target) {
+    if (var->in_scope_env && var->scope_env_reg != 0 &&
+        var->scope_env_slot >= 0 && var->mir_type == MIR_T_I64) {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, target),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                var->scope_env_slot * (int)sizeof(uint64_t),
+                var->scope_env_reg, 0, 1)));
+        return true;
+    }
+    if (var->from_env && var->env_reg != 0 && var->env_slot >= 0) {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, target),
+            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
+        return true;
+    }
+    return false;
+}
+
 MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
     if (!id || !id->name) {
         // Unsupported identifier-shaped AST nodes can reach expression lowering
@@ -1327,6 +1348,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inner_class_binding->inner_module_var_index));
     }
     if (var) {
+        int live_cell_root_slot = -1;
         // Js57 P3 (Track B2): live binding for self-imported default — re-fetch
         // `namespace.default` from the module registry each time the local
         // identifier is read. Throws ReferenceError if the source module's
@@ -1339,11 +1361,8 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             jm_emit_exc_propagate_check(mt);
             return live_val;
         }
-        if (var->in_scope_env && var->scope_env_reg != 0 && var->mir_type == MIR_T_I64) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
+        if (jm_emit_live_cell_load(mt, var, var->reg)) {
+            live_cell_root_slot = jm_create_gc_root_slot(mt, var->reg);
         }
         // v20 TDZ: emit runtime check for let/const variables before their declaration
         if (var->tdz_active) {
@@ -1395,6 +1414,18 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->arguments_reg),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, param_index),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+        }
+        if (var_read_reg == var->reg && live_cell_root_slot >= 0) {
+            MIR_reg_t live_value = jm_new_reg(mt, "live_cell", MIR_T_I64);
+            // Identifier validation emits helper calls that can replace both
+            // capture and env registers; preserve the evaluated cell in the
+            // GC frame before those calls and read that stable snapshot last.
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, live_value),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    live_cell_root_slot * (int)sizeof(uint64_t),
+                    mt->side_root_frame_base, 0, 1)));
+            return live_value;
         }
         return var_read_reg;
     }
@@ -10171,7 +10202,17 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
-    MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
+    MIR_reg_t callee_slot = jm_call_1(mt, "js_args_push", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+    MIR_reg_t callee_binding = jm_transpile_box_item(mt, call->callee);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, callee_slot, 0, 1),
+        MIR_new_reg_op(mt->ctx, callee_binding)));
+    MIR_reg_t callee = jm_new_reg(mt, "call_callee", MIR_T_I64);
+    // Call evaluation captures the callee value before its arguments; keeping
+    // an alias to a mutable binding register lets later helper emission replace it.
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, callee), MIR_new_reg_op(mt->ctx, callee_binding)));
 
     // Generator spill: if any argument contains a yield, the callee register will be lost
     // after the yield suspend/resume cycle. Save it to an env slot and restore after args.
@@ -10299,11 +10340,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         return result;
     }
 
-    // Debug: emit runtime check with site_id
-    jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
-
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
         if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
@@ -10312,7 +10348,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
         bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
         MIR_reg_t call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+            MIR_T_I64, MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, callee_slot, 0, 1),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
         jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
@@ -10328,7 +10364,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
     bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
     MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+        MIR_T_I64, MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, callee_slot, 0, 1),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));

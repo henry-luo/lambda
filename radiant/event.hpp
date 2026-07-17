@@ -1913,7 +1913,7 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block);
 void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block);
 void scroll_apply_pending_element_scroll(ViewBlock* block);
 
-void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);
+bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);
 bool scrollpane_target(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);

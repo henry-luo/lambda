@@ -7644,6 +7644,16 @@ bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
 
     transpile_js_mir_ast(mt, js_ast);
 
+#ifndef NDEBUG
+    if (getenv("JS_MIR_DUMP") && strstr(node->path, "gsap")) {
+        FILE* dump = fopen("temp/gsap_mir_dump.txt", "w");
+        if (dump) {
+            MIR_output(ctx, dump);
+            fclose(dump);
+        }
+    }
+#endif
+
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-parallel: NULL labels detected for '%s'", node->path);
         jm_destroy_mir_transpiler(mt);
@@ -7966,6 +7976,16 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     mt->module = MIR_new_module(ctx, "js_module");
 
     transpile_js_mir_ast(mt, js_ast);
+
+#ifndef NDEBUG
+    if (getenv("JS_MIR_DUMP") && strstr(filename, "gsap")) {
+        FILE* dump = fopen("temp/gsap_mir_dump.txt", "w");
+        if (dump) {
+            MIR_output(ctx, dump);
+            fclose(dump);
+        }
+    }
+#endif
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir: module: NULL labels detected for '%s'", filename);

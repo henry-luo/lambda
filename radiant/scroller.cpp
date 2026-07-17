@@ -210,7 +210,7 @@ void scroll_apply_pending_element_scroll(ViewBlock* block) {
     elem->has_pending_element_scroll_y = false;
 }
 
-void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
+bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
     ScrollEvent* event = &evcon->event.scroll;
     // GLFW gives scroll deltas that are pre-adjusted to match the user's OS scrolling preference
     // yoffset > 0 = Scroll up, yoffset < 0 = Scroll down
@@ -224,6 +224,8 @@ void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
     DocState* state = doc ? (DocState*)doc->state : nullptr;
     float h = 0.0f, v = 0.0f, h_max = 0.0f, v_max = 0.0f;
     scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, &h_max, &v_max);
+    float previous_h = h;
+    float previous_v = v;
     float scroll_amount = 50;  // pixels to scroll per offset
 
     if (event->yoffset != 0 && v_max > 0) {
@@ -240,6 +242,7 @@ void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
     log_debug("updated scroll position: %f, %f", h, v);
     evcon->need_repaint = true;
     // todo: set invalidate_rect
+    return h != previous_h || v != previous_v;
 }
 
 static DocState* scrollpane_doc_state(EventContext* evcon, ViewBlock* block) {

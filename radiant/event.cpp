@@ -82,6 +82,9 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* p
                                      struct CssStylesheet*** stylesheets, int* count, int depth = 0);
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
 static void clear_cascaded_styles_recursive(DomNode* node);
+static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
+                                          const char* type,
+                                          bool bubbles, bool cancelable);
 
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
@@ -1327,7 +1330,12 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     fire_inline_event(evcon, lam::view_require_element(block));
     if (block->scroller && block->scroller->pane) {
         if (evcon->event.type == RDT_EVENT_SCROLL) {
-            scrollpane_scroll(evcon, block, block->scroller->pane);
+            if (scrollpane_scroll(evcon, block, block->scroller->pane)) {
+                // Native wheel scrolling mutates the pane outside JS; dispatch
+                // the non-bubbling element scroll event that virtualizers observe.
+                radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
+                                              "scroll", false, false);
+            }
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
             scroll_state_is_hovered_for_view(event_view_owner_state(static_cast<View*>(block)),

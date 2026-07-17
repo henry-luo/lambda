@@ -12856,6 +12856,13 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         return ItemNull;
     }
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
+        if (getenv("JS_SCOPE_TRACE") && args && _trace_last_fn_len == 1 &&
+            _trace_last_fn && _trace_last_fn[0] == 'v') {
+            log_notice("js-scope-call-slot: func_type=%d func_raw=0x%llx prev_type=%d prev_raw=0x%llx args=%p",
+                (int)get_type_id(func_item), (unsigned long long)func_item.item,
+                (int)get_type_id(args[-1]), (unsigned long long)args[-1].item,
+                (void*)args);
+        }
         // Proxy [[Call]] trap
         if (js_is_proxy(func_item)) {
             return js_proxy_trap_apply(func_item, this_val, args, arg_count);
@@ -12940,6 +12947,12 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
     else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
     _trace_total_calls++;
+
+    if (getenv("JS_SCOPE_TRACE") && fn && fn->env && fn->name &&
+        fn->name->len == 2 && strncmp(fn->name->chars, "ga", 2) == 0) {
+        log_notice("js-scope-ga-env: slot6_type=%d slot6_raw=0x%llx",
+            (int)get_type_id(fn->env[6]), (unsigned long long)fn->env[6].item);
+    }
 
     if (fn && fn->name && fn->name->len == 4 && strncmp(fn->name->chars, "Date", 4) == 0) {
         extern Item js_date_now_string(void);
