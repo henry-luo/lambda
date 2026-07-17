@@ -66,10 +66,52 @@ typedef struct SysFuncInfo {
     bool is_async;              // call is a suspension seed for Lambda pn analysis
 } SysFuncInfo;
 
-// JIT import entry: maps name to function pointer for MIR import resolution
+// GC effect and representation metadata consumed by MIR emitters. Unknown
+// entries are deliberately conservative: they remain MAY_GC and their value
+// classes are inferred only by the legacy physical-type fallback.
+typedef enum JitGcEffect {
+    JIT_EFFECT_MAY_GC = 0,
+    JIT_EFFECT_NO_GC,
+} JitGcEffect;
+
+typedef enum JitReentryEffect {
+    JIT_REENTRY_UNKNOWN = 0,
+    JIT_REENTRY_NO,
+    JIT_REENTRY_YES,
+} JitReentryEffect;
+
+typedef enum JitValueClass {
+    JIT_VALUE_UNKNOWN = 0,
+    JIT_VALUE_BOXED_ITEM,
+    JIT_VALUE_RAW_GC_POINTER,
+    JIT_VALUE_NON_GC_SCALAR,
+    JIT_VALUE_RAW_NON_GC_POINTER,
+} JitValueClass;
+
+#define JIT_ARG_CLASS_BITS 3
+#define JIT_ARG_CLASS(index, value_class) \
+    ((uint32_t)(value_class) << ((index) * JIT_ARG_CLASS_BITS))
+
+typedef struct JitImportMetadata {
+    JitGcEffect gc_effect;
+    JitReentryEffect reentry_effect;
+    JitValueClass ret_class;
+    uint32_t arg_classes;
+} JitImportMetadata;
+
+static inline JitValueClass jit_import_arg_class(
+        const JitImportMetadata* metadata, int index) {
+    if (!metadata || index < 0 || index >= 8) return JIT_VALUE_UNKNOWN;
+    return (JitValueClass)((metadata->arg_classes >>
+        (index * JIT_ARG_CLASS_BITS)) & 7u);
+}
+
+// JIT import entry: maps name to function pointer and is the single source of
+// effect/representation metadata for MIR import emission.
 typedef struct JitImport {
     const char* name;
     fn_ptr func;
+    JitImportMetadata metadata;
 } JitImport;
 
 // System function definitions (AST metadata + JIT pointers)
@@ -80,6 +122,7 @@ fn_ptr find_dynamic_sys_func_import(const char* c_func_name);
 // Runtime JIT imports (non-sys-func entries: operators, runtime infra, JS, etc.)
 extern JitImport jit_runtime_imports[];
 extern const int jit_runtime_import_count;
+bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata);
 
 #ifdef __cplusplus
 }

@@ -1592,7 +1592,11 @@ JitImport jit_runtime_imports[] = {
     {"js_to_string", FPTR(js_to_string)},
     {"js_to_boolean", FPTR(js_to_boolean)},
     {"js_to_object", FPTR(js_to_object)},
-    {"js_is_truthy", FPTR(js_is_truthy)},
+    // Truthiness has explicit representation/re-entry metadata, but remains
+    // conservatively MAY_GC until the native-helper audit proves NO_GC.
+    {"js_is_truthy", FPTR(js_is_truthy),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     {"js_is_nullish", FPTR(js_is_nullish)},
     {"js_increment", FPTR(js_increment)},
     {"js_decrement", FPTR(js_decrement)},
@@ -1717,8 +1721,13 @@ JitImport jit_runtime_imports[] = {
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_env_rehome_scalars", FPTR(js_env_rehome_scalars)},
     {"js_args_push", FPTR(js_args_push)},
-    {"js_args_save", FPTR(js_args_save)},
-    {"js_args_restore", FPTR(js_args_restore)},
+    // Argument-stack watermark operations have explicit value/re-entry metadata,
+    // but remain conservatively MAY_GC until the native-helper audit proves NO_GC.
+    {"js_args_save", FPTR(js_args_save),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
+    {"js_args_restore", FPTR(js_args_restore),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"js_call_function", FPTR(js_call_function)},
     {"js_apply_function", FPTR(js_apply_function)},
     {"js_apply_constructor", FPTR(js_apply_constructor)},
@@ -1765,7 +1774,10 @@ JitImport jit_runtime_imports[] = {
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
     {"js_throw_value", FPTR(js_throw_value)},
-    {"js_check_exception", FPTR(js_check_exception)},
+    // Exception polling has explicit scalar/re-entry metadata, but remains
+    // conservatively MAY_GC until the native-helper audit proves NO_GC.
+    {"js_check_exception", FPTR(js_check_exception),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
     {"js_clear_exception", FPTR(js_clear_exception)},
     {"js_require_object_coercible", FPTR(js_require_object_coercible)},
     // Tune8 §2.3: js_throw_syntax_error / _reference_error replaced by

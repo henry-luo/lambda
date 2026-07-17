@@ -193,6 +193,7 @@ static void jm_store_gc_root_slot(JsMirTranspiler* mt, int slot, MIR_reg_t value
     jm_sync_emitter_from_compat(mt);
     em_store_frame_slot(&mt->em, mt->side_root_frame_base, slot, bits);
     jm_sync_compat_from_emitter(mt);
+    mt->side_root_store_count++;
 }
 
 int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value) {
@@ -302,6 +303,9 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     }
     mt->side_root_binding_count = 0;
     mt->side_root_binding_capacity = 0;
+    mt->side_root_store_count = 0;
+    mt->side_may_gc_call_count = 0;
+    mt->side_no_gc_call_count = 0;
     if (mt->side_env_bindings) {
         mem_free(mt->side_env_bindings);
         mt->side_env_bindings = NULL;
@@ -506,9 +510,10 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
     jm_finalize_side_root_prologue(mt);
     const char* enabled = getenv("LAMBDA_MIR_LOG_FRAME_SLOTS");
     if (enabled && enabled[0] && strcmp(enabled, "0") != 0) {
-        log_info("js-mir-frame-slots: function=%s roots=%d numbers=watermark envs=%d",
+        log_info("js-mir-frame-slots: function=%s roots=%d numbers=watermark envs=%d root_stores=%d may_gc_calls=%d no_gc_calls=%d",
             function_name ? function_name : "<anonymous>", mt->side_root_next,
-            mt->side_env_binding_count);
+            mt->side_env_binding_count, mt->side_root_store_count,
+            mt->side_may_gc_call_count, mt->side_no_gc_call_count);
     }
     if (mt->side_root_bindings) {
         mem_free(mt->side_root_bindings);
@@ -544,6 +549,9 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
         return;
     }
     if (mt->side_frame_active && (insn->code == MIR_CALL || insn->code == MIR_JCALL)) {
+        // Calls emitted outside the effect-aware helper path have no trusted
+        // metadata, so preserve the conservative MAY_GC contract.
+        mt->side_may_gc_call_count++;
         jm_root_live_scope_vars(mt);
         // Temporaries used only for argument evaluation are absent from lexical
         // scopes; publishing call inputs/results closes that precise-root gap.

@@ -477,6 +477,9 @@ struct JsMirTranspiler {
     JsMirRootBinding* side_root_bindings;
     int side_root_binding_count;
     int side_root_binding_capacity;
+    int side_root_store_count;
+    int side_may_gc_call_count;
+    int side_no_gc_call_count;
     JsMirEnvBinding* side_env_bindings;
     int side_env_binding_count;
     int side_env_binding_capacity;
