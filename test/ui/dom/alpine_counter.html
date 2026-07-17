@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 24px; font: 16px sans-serif; }
+    button { width: 120px; height: 36px; }
+  </style>
+</head>
+<body>
+  <main x-data="{ count: 0 }">
+    <button id="increment" type="button" x-on:click="count++">Increment</button>
+    <output id="count" x-text="count">0</output>
+  </main>
+  <script src="../../js/alpine.min.js"></script>
+</body>
+</html>

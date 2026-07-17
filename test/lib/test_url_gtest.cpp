@@ -49,6 +49,13 @@ TEST_F(UrlTest, HttpUrlParsing) {
     url_destroy(url);
 }
 
+TEST_F(UrlTest, FileUrlHasOpaqueOrigin) {
+    Url* url = url_parse("file:///workspace/page.html");
+    ASSERT_NE(url, nullptr);
+    EXPECT_STREQ(url_get_origin(url), "null");
+    url_destroy(url);
+}
+
 TEST_F(UrlTest, UrlWithoutPath) {
     // Test URL without explicit path
     Url* url = url_parse("https://example.com");

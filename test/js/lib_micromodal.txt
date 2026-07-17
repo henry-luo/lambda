@@ -1,0 +1,4 @@
+micromodal:open: true false
+micromodal:focus: modal-first
+micromodal:close: false true
+micromodal:return: modal-trigger

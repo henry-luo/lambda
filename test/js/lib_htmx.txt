@@ -1,0 +1,3 @@
+htmx:swap: swapped
+htmx:event: 1
+htmx:history: true true

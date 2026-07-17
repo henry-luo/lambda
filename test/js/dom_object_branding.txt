@@ -1,0 +1,6 @@
+[object HTMLButtonElement]
+[object HTMLElement]
+[object DocumentFragment]
+true
+true
+true

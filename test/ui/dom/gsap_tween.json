@@ -1,0 +1,10 @@
+{
+  "name": "GSAP click-driven tween reaches its exact final style",
+  "html": "test/ui/dom/gsap_tween.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "click", "target": {"selector": "#start"}},
+    {"type": "wait", "ms": 140},
+    {"type": "assert_style", "target": {"selector": "#box"}, "property": "opacity", "value": "0.25"}
+  ]
+}

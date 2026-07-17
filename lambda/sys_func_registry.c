@@ -1091,6 +1091,7 @@ extern void js_private_brand_add(Item object, Item private_key, Item callee);
 extern Item js_private_field_define(Item object, Item private_key, Item value);
 extern void js_set_private_class_index(Item class_item, int index);
 extern void js_set_class_ctor_shape_metadata(Item class_item, const char** prop_names, const int* prop_lens, int count);
+extern void js_set_function_ctor_shape_metadata(Item fn_item, const char** prop_names, const int* prop_lens, int count);
 // Tune8 §2.2: define_global_{var,eval_var,function}_property collapsed into
 // js_define_global_property_v(kind, key, value). C functions kept as named
 // symbols; only the JIT import is unified.
@@ -1740,6 +1741,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_internal_class_name", FPTR(js_set_internal_class_name)},
     {"js_get_shaped_slot", FPTR(js_get_shaped_slot)},
     {"js_set_shaped_slot", FPTR(js_set_shaped_slot)},
+    {"js_set_shaped_slot_guarded", FPTR(js_set_shaped_slot_guarded)},
     {"js_shape_slot_guard", FPTR(js_shape_slot_guard)},
     {"js_get_slot_f", FPTR(js_get_slot_f)},
     {"js_get_slot_i", FPTR(js_get_slot_i)},
@@ -1980,6 +1982,7 @@ JitImport jit_runtime_imports[] = {
     {"js_private_field_define", FPTR(js_private_field_define)},
     {"js_set_private_class_index", FPTR(js_set_private_class_index)},
     {"js_set_class_ctor_shape_metadata", FPTR(js_set_class_ctor_shape_metadata)},
+    {"js_set_function_ctor_shape_metadata", FPTR(js_set_function_ctor_shape_metadata)},
     {"js_define_global_property_v", FPTR(js_define_global_property_v)},
     {"js_global_lexical_declare", FPTR(js_global_lexical_declare)},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},

@@ -1315,17 +1315,17 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
     char vname[128];
     snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
 
-    // Class name inside its own class scope is a distinct immutable binding.
-    // Check this before ordinary locals/captures so a named class expression
-    // like `var Cv = class C { m() { return C; } }` does not read a stale
-    // outer/unresolved binding named C.
+    JsMirVarEntry* var = jm_find_var(mt, vname);
     JsClassEntry* inner_class_binding = jm_current_inner_class_binding(mt, id->name, (JsAstNode*)id);
-    if (inner_class_binding && inner_class_binding->inner_module_var_index >= 0) {
+    if (inner_class_binding && inner_class_binding->inner_module_var_index >= 0 &&
+        (!var || var->from_env)) {
+        // Parameters and method-body locals shadow the surrounding class-name
+        // environment, while an outer capture does not. Capture analysis can
+        // retain a stale same-named outer reference for named class expressions,
+        // so only that outer reference yields to the class's immutable binding.
         return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inner_class_binding->inner_module_var_index));
     }
-
-    JsMirVarEntry* var = jm_find_var(mt, vname);
     if (var) {
         // Js57 P3 (Track B2): live binding for self-imported default — re-fetch
         // `namespace.default` from the module registry each time the local
@@ -1355,7 +1355,12 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         }
         MIR_reg_t var_read_reg = var->reg;
         MIR_reg_t lookup_key = 0;
-        if (var->from_env && mt->eval_local_frame_reg != 0) {
+        if (var->from_env && mt->eval_local_frame_reg != 0 &&
+            mt->is_eval_direct && mt->in_main) {
+            // The caller's eval-local environment participates only while
+            // executing direct eval itself. Functions created by eval already
+            // captured their lexical cells and must not be shadowed by an
+            // unrelated same-named caller local on every later read.
             lookup_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
             var_read_reg = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
@@ -1621,8 +1626,9 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             snprintf(lookup2.name, sizeof(lookup2.name), "%s", vname);
             JsModuleConstEntry* mc2 = mt->module_consts ? (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup2) : NULL;
             if (!mc2) {
-                log_debug("js-mir: identifier '%s' not found in vars, module_consts, or entry (func=%s)",
-                    vname, mt->current_fc ? (mt->current_fc->node && mt->current_fc->node->name ? mt->current_fc->node->name->chars : "(anon)") : "?");
+                log_debug("js-mir: identifier '%s' not found in vars, module_consts, or entry (func=%s, byte=%u)",
+                    vname, mt->current_fc ? mt->current_fc->name : "?",
+                    ts_node_is_null(id->node) ? 0 : ts_node_start_byte(id->node));
             }
         }
     }
@@ -5356,41 +5362,17 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 int p3_slot = jm_ctor_prop_slot(mt->current_fc, prop_id->name->chars, (int)prop_id->name->len);
                 if (p3_slot >= 0) {
                     MIR_reg_t this_reg = jm_call_0(mt, "js_get_this", MIR_T_I64);
-                    int64_t byte_offset = (int64_t)p3_slot * (int64_t)sizeof(void*);
-                    TypeId field_type = mt->current_fc->ctor_prop_types[p3_slot];
-                    TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
-
-                    // P1: Native typed slot write — bypass boxing when field & RHS types match
-                    if (field_type == LMD_TYPE_FLOAT &&
-                        (rhs_type == LMD_TYPE_FLOAT || rhs_type == LMD_TYPE_INT)) {
-                        MIR_reg_t native_f = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
-                        jm_call_void_3(mt, "js_set_slot_f",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
-                            MIR_T_D,  MIR_new_reg_op(mt->ctx, native_f));
-                        log_debug("P1: native float store this.%.*s → offset %d",
-                                  (int)prop_id->name->len, prop_id->name->chars, (int)byte_offset);
-                        // Return boxed value for expression result (rare: `let x = this.y = 1.0`)
-                        return jm_transpile_box_item(mt, asgn->right);
-                    }
-                    if (field_type == LMD_TYPE_INT && rhs_type == LMD_TYPE_INT) {
-                        MIR_reg_t native_i = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
-                        jm_call_void_3(mt, "js_set_slot_i",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, native_i));
-                        log_debug("P1: native int store this.%.*s → offset %d",
-                                  (int)prop_id->name->len, prop_id->name->chars, (int)byte_offset);
-                        return jm_transpile_box_item(mt, asgn->right);
-                    }
-
-                    // Fallback: boxed slot write
                     MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
-                    jm_call_void_3(mt, "js_set_shaped_slot",
+                    jm_call_5(mt, "js_set_shaped_slot_guarded", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p3_slot),
+                        MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)prop_id->name->chars),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)prop_id->name->len),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
-                    log_debug("P3: constructor this.%.*s → slot %d",
+                    // A base constructor may run on an instance whose runtime
+                    // heritage was unavailable to shape composition. Guard the
+                    // pre-shaped slot and fall back to an ordinary property set.
+                    log_debug("P3: guarded constructor this.%.*s → slot %d",
                               (int)prop_id->name->len, prop_id->name->chars, p3_slot);
                     return new_val;
                 }
@@ -7042,8 +7024,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
                 return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
             }
-            if (mt->current_class && mt->current_class->superclass) {
-                JsClassEntry* parent = mt->current_class->superclass;
+            JsAstNode* current_heritage = mt->current_class && mt->current_class->node
+                ? mt->current_class->node->superclass : NULL;
+            JsClassEntry* static_superclass = jm_matching_static_superclass(
+                mt->current_class, current_heritage);
+            if (static_superclass) {
+                JsClassEntry* parent = static_superclass;
                 if (parent->constructor && parent->constructor->fc && parent->constructor->fc->func_item) {
                     MIR_reg_t this_val = jm_call_0(mt, "js_get_super_this_value", MIR_T_I64);
                     MIR_reg_t ctor_fn;
@@ -8702,84 +8688,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
-            // Date instance methods use the catalog ID; runtime operation numbers stay explicit.
-            {
-                int date_method_id = -1;
-                int date_setter_id = -1;
-                int date_builtin_id = js_builtin_catalog_lookup_id(
-                    JS_BUILTIN_OWNER_DATE_PROTOTYPE_METHOD,
-                    prop->name->chars, (int)prop->name->len);
-                switch (date_builtin_id) {
-                case JS_BUILTIN_DATE_GET_TIME: date_method_id = 0; break;
-                case JS_BUILTIN_DATE_GET_FULL_YEAR: date_method_id = 1; break;
-                case JS_BUILTIN_DATE_GET_MONTH: date_method_id = 2; break;
-                case JS_BUILTIN_DATE_GET_DATE: date_method_id = 3; break;
-                case JS_BUILTIN_DATE_GET_HOURS: date_method_id = 4; break;
-                case JS_BUILTIN_DATE_GET_MINUTES: date_method_id = 5; break;
-                case JS_BUILTIN_DATE_GET_SECONDS: date_method_id = 6; break;
-                case JS_BUILTIN_DATE_GET_MILLISECONDS: date_method_id = 7; break;
-                case JS_BUILTIN_DATE_TO_ISO_STRING: date_method_id = 8; break;
-                case JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING: date_method_id = 9; break;
-                case JS_BUILTIN_DATE_GET_UTC_FULL_YEAR: date_method_id = 10; break;
-                case JS_BUILTIN_DATE_GET_UTC_MONTH: date_method_id = 11; break;
-                case JS_BUILTIN_DATE_GET_UTC_DATE: date_method_id = 12; break;
-                case JS_BUILTIN_DATE_GET_UTC_HOURS: date_method_id = 13; break;
-                case JS_BUILTIN_DATE_GET_UTC_MINUTES: date_method_id = 14; break;
-                case JS_BUILTIN_DATE_GET_UTC_SECONDS: date_method_id = 15; break;
-                case JS_BUILTIN_DATE_GET_UTC_MILLISECONDS: date_method_id = 16; break;
-                case JS_BUILTIN_DATE_GET_DAY: date_setter_id = 40; break;
-                case JS_BUILTIN_DATE_GET_UTC_DAY: date_setter_id = 41; break;
-                case JS_BUILTIN_DATE_GET_TIMEZONE_OFFSET: date_setter_id = 42; break;
-                case JS_BUILTIN_DATE_VALUE_OF: date_setter_id = 43; break;
-                case JS_BUILTIN_DATE_TO_JSON: date_setter_id = 44; break;
-                case JS_BUILTIN_DATE_TO_UTC_STRING: date_setter_id = 45; break;
-                case JS_BUILTIN_DATE_TO_DATE_STRING: date_setter_id = 46; break;
-                case JS_BUILTIN_DATE_TO_TIME_STRING: date_setter_id = 47; break;
-                case JS_BUILTIN_DATE_SET_TIME: date_setter_id = 20; break;
-                case JS_BUILTIN_DATE_SET_FULL_YEAR: date_setter_id = 21; break;
-                case JS_BUILTIN_DATE_SET_MONTH: date_setter_id = 22; break;
-                case JS_BUILTIN_DATE_SET_DATE: date_setter_id = 23; break;
-                case JS_BUILTIN_DATE_SET_HOURS: date_setter_id = 24; break;
-                case JS_BUILTIN_DATE_SET_MINUTES: date_setter_id = 25; break;
-                case JS_BUILTIN_DATE_SET_SECONDS: date_setter_id = 26; break;
-                case JS_BUILTIN_DATE_SET_MILLISECONDS: date_setter_id = 27; break;
-                case JS_BUILTIN_DATE_SET_UTC_FULL_YEAR: date_setter_id = 30; break;
-                case JS_BUILTIN_DATE_SET_UTC_MONTH: date_setter_id = 31; break;
-                case JS_BUILTIN_DATE_SET_UTC_DATE: date_setter_id = 32; break;
-                case JS_BUILTIN_DATE_SET_UTC_HOURS: date_setter_id = 33; break;
-                case JS_BUILTIN_DATE_SET_UTC_MINUTES: date_setter_id = 34; break;
-                case JS_BUILTIN_DATE_SET_UTC_SECONDS: date_setter_id = 35; break;
-                case JS_BUILTIN_DATE_SET_UTC_MILLISECONDS: date_setter_id = 36; break;
-                default: break;
-                }
-                if (date_method_id >= 0) {
-                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
-                    return jm_call_2(mt, "js_date_method", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, date_method_id));
-                }
-                // v20: setter/extra getter dispatch with up to 4 args
-                // Skip if a yield in args would corrupt earlier evaluated regs in a generator.
-                if (date_setter_id >= 0 && jm_call_yield_blocks_direct(mt, call->arguments)) date_setter_id = -1;
-                if (date_setter_id >= 0) {
-                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
-                    JsAstNode* a0 = call->arguments;
-                    JsAstNode* a1 = a0 ? a0->next : NULL;
-                    JsAstNode* a2 = a1 ? a1->next : NULL;
-                    JsAstNode* a3 = a2 ? a2->next : NULL;
-                    MIR_reg_t r0 = a0 ? jm_transpile_box_item(mt, a0) : jm_emit_undefined(mt);
-                    MIR_reg_t r1 = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_item_error(mt);
-                    MIR_reg_t r2 = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_item_error(mt);
-                    MIR_reg_t r3 = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_item_error(mt);
-                    return jm_call_6(mt, "js_date_setter", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, date_setter_id),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, r0),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, r1),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, r2),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, r3));
-                }
-            }
+            // Date-named methods must use ordinary property dispatch: non-Date
+            // objects can own methods such as `setDate`, and name-only lowering
+            // would bypass that property and call the Date intrinsic instead.
 
             // P7: Native method call for typed class instance — avoids generic
             // boxing + runtime dispatch when receiver type and method are known.
@@ -9086,6 +8997,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     // Collected method metadata from complex live scripts can be
                     // incomplete; P3 only has a zero-parameter call shape.
                     if (p3_method && p3_method->param_count != 0) p3_method = NULL;
+                    // Direct MIR calls bypass js_invoke_fn, so they cannot seed the
+                    // actual call-site values used to materialize `arguments`.
+                    if (p3_method && p3_method->fc->uses_arguments) p3_method = NULL;
                     if (p3_method && p3_method->fc->func_item && p3_method->fc->capture_count == 0 && !p3_overridden) {
                         log_debug("P3: direct method call %.*s.%.*s() in %s",
                             (int)(p3_ce->name ? p3_ce->name->len : 0),
@@ -13879,6 +13793,9 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 if (ce) effective_name = ce->name;
             }
         }
+        JsAstNode* heritage = cls_expr->superclass ? cls_expr->superclass :
+            ((ce && ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
+        JsClassEntry* static_superclass = jm_matching_static_superclass(ce, heritage);
         jm_emit_set_private_class_index(mt, cls_obj, ce);
         jm_emit_set_class_source(mt, cls_obj, cls_expr);
         // TDZ: class x extends x {} → throw ReferenceError
@@ -13907,7 +13824,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             if (ce) {
                 JsClassEntry* static_chain[32];
                 int static_chain_length = 0;
-                for (JsClassEntry* parent = ce->superclass;
+                for (JsClassEntry* parent = static_superclass;
                      parent && static_chain_length < 32; parent = parent->superclass) {
                     static_chain[static_chain_length++] = parent;
                 }
@@ -13936,7 +13853,9 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             // Store __ctor__ and __instance_proto__ on class object for dynamic instantiation
             // (new Type() where Type is a runtime variable holding this class object)
             if (ce) {
-                jm_emit_class_constructor_property(mt, cls_obj, ce, false);
+                // Dynamic `new` calls use the stored constructor directly, so
+                // its lexical super lookup must retain this class as home object.
+                jm_emit_class_constructor_property(mt, cls_obj, ce, true);
                 // Create __instance_proto__ with all instance methods
                 MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                 jm_call_void_2(mt, "js_set_default_constructor_property",
@@ -13944,7 +13863,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                 // Set up prototype's __proto__ chain for instanceof on parent classes
                 {
-                    JsClassEntry* sc = ce->superclass;
+                    JsClassEntry* sc = static_superclass;
                     MIR_reg_t last_proto = proto_obj;
                     if (sc) {
                         // Link prototype to parent's actual .prototype for identity correctness
@@ -13966,7 +13885,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         ctor_super_val = super_val;
                     }
                     // v20: Handle builtin superclass (Error, TypeError, etc.) when no JsClassEntry
-                    if (!ce->superclass && ce->node && ce->node->superclass &&
+                    if (!static_superclass && ce->node && ce->node->superclass &&
                         ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
                         JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
                         if (super_id->name) {
@@ -14013,7 +13932,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                     }
                     // v21: Handle member-expression / general-expression superclass
                     // e.g. class Foo extends obj.Bar, class Foo extends require('events').EventEmitter
-                    if (!ce->superclass && ce->node && ce->node->superclass &&
+                    if (!static_superclass && ce->node && ce->node->superclass &&
                         ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER &&
                                                 ce->node->superclass->node_type != JS_AST_NODE_NULL &&
                                                 !(ce->node->superclass->node_type == JS_AST_NODE_LITERAL &&
@@ -14037,8 +13956,6 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
                         ctor_super_val = super_val;
                     }
-                    JsAstNode* heritage = cls_expr->superclass ? cls_expr->superclass :
-                        ((ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
                     bool heritage_is_null = heritage && (heritage->node_type == JS_AST_NODE_NULL ||
                         (heritage->node_type == JS_AST_NODE_LITERAL &&
                          ((JsLiteralNode*)heritage)->literal_type == JS_LITERAL_NULL));

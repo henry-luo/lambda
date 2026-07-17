@@ -14,6 +14,111 @@
 
 // forward declarations
 static char js_decode_escape_char(char c);
+static String* js_decode_identifier_name(JsTranspiler* tp, const char* source,
+    int source_len);
+
+static StrView js_predeclare_node_source(JsTranspiler* tp, TSNode node) {
+    StrView source;
+    source.str = tp->source + ts_node_start_byte(node);
+    source.length = ts_node_end_byte(node) - ts_node_start_byte(node);
+    return source;
+}
+
+static bool js_ts_is_nested_var_scope(const char* node_type) {
+    if (!node_type) return false;
+    return strcmp(node_type, "function_declaration") == 0 ||
+        strcmp(node_type, "function_expression") == 0 ||
+        strcmp(node_type, "generator_function_declaration") == 0 ||
+        strcmp(node_type, "generator_function") == 0 ||
+        strcmp(node_type, "arrow_function") == 0 ||
+        strcmp(node_type, "method_definition") == 0 ||
+        strcmp(node_type, "class_declaration") == 0 ||
+        strcmp(node_type, "class") == 0;
+}
+
+static void js_predeclare_var_pattern(JsTranspiler* tp, TSNode pattern,
+        TSNode declarator_node) {
+    if (ts_node_is_null(pattern)) return;
+    const char* pattern_type = ts_node_type(pattern);
+    if (!pattern_type) return;
+    if (strcmp(pattern_type, "identifier") == 0 ||
+        strcmp(pattern_type, "shorthand_property_identifier_pattern") == 0) {
+        StrView source = js_predeclare_node_source(tp, pattern);
+        String* name = js_decode_identifier_name(tp, source.str, (int)source.length);
+        if (!name) return;
+        JsIdentifierNode* placeholder = (JsIdentifierNode*)pool_alloc(
+            tp->ast_pool, sizeof(JsIdentifierNode));
+        memset(placeholder, 0, sizeof(JsIdentifierNode));
+        placeholder->node_type = JS_AST_NODE_IDENTIFIER;
+        placeholder->node = declarator_node;
+        placeholder->type = &TYPE_ANY;
+        placeholder->name = name;
+        js_scope_define(tp, name, (JsAstNode*)placeholder, JS_VAR_VAR);
+        return;
+    }
+    if (strcmp(pattern_type, "pair_pattern") == 0 ||
+        strcmp(pattern_type, "pair") == 0) {
+        TSNode value = ts_node_child_by_field_name(pattern, "value", 5);
+        if (!ts_node_is_null(value)) js_predeclare_var_pattern(tp, value, declarator_node);
+        return;
+    }
+    if (strcmp(pattern_type, "assignment_pattern") == 0) {
+        TSNode left = ts_node_child_by_field_name(pattern, "left", 4);
+        if (ts_node_is_null(left)) left = ts_node_named_child(pattern, 0);
+        js_predeclare_var_pattern(tp, left, declarator_node);
+        return;
+    }
+    if (strcmp(pattern_type, "rest_pattern") == 0) {
+        js_predeclare_var_pattern(tp, ts_node_named_child(pattern, 0), declarator_node);
+        return;
+    }
+    if (strcmp(pattern_type, "array_pattern") != 0 &&
+        strcmp(pattern_type, "object_pattern") != 0) {
+        return;
+    }
+    uint32_t child_count = ts_node_named_child_count(pattern);
+    for (uint32_t i = 0; i < child_count; i++) {
+        js_predeclare_var_pattern(tp, ts_node_named_child(pattern, i), declarator_node);
+    }
+}
+
+static bool js_ts_declaration_uses_var(JsTranspiler* tp, TSNode declaration) {
+    uint32_t child_count = ts_node_child_count(declaration);
+    for (uint32_t i = 0; i < child_count; i++) {
+        StrView source = js_predeclare_node_source(tp, ts_node_child(declaration, i));
+        if (source.length == 3 && memcmp(source.str, "var", 3) == 0) return true;
+        if ((source.length == 3 && memcmp(source.str, "let", 3) == 0) ||
+            (source.length == 5 && memcmp(source.str, "const", 5) == 0) ||
+            (source.length == 5 && memcmp(source.str, "using", 5) == 0)) {
+            return false;
+        }
+    }
+    return false;
+}
+
+static void js_predeclare_function_vars(JsTranspiler* tp, TSNode node) {
+    if (ts_node_is_null(node)) return;
+    const char* node_type = ts_node_type(node);
+    if (js_ts_is_nested_var_scope(node_type)) return;
+    if (node_type &&
+        (strcmp(node_type, "variable_declaration") == 0 ||
+         strcmp(node_type, "lexical_declaration") == 0) &&
+        js_ts_declaration_uses_var(tp, node)) {
+        uint32_t declaration_count = ts_node_named_child_count(node);
+        for (uint32_t i = 0; i < declaration_count; i++) {
+            TSNode declarator = ts_node_named_child(node, i);
+            if (strcmp(ts_node_type(declarator), "variable_declarator") != 0) continue;
+            TSNode pattern = ts_node_child_by_field_name(declarator, "name", 4);
+            if (ts_node_is_null(pattern)) pattern = ts_node_child(declarator, 0);
+            js_predeclare_var_pattern(tp, pattern, declarator);
+        }
+        return;
+    }
+    uint32_t child_count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        js_predeclare_function_vars(tp, ts_node_named_child(node, i));
+    }
+}
 
 // Encode a Unicode code point as WTF-8 (allows lone surrogates, unlike utf8_encode).
 // Returns number of bytes written (1-4), or 0 on error.
@@ -1455,6 +1560,10 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     if (!ts_node_is_null(body_node)) {
         const char* body_type = ts_node_type(body_node);
         if (strcmp(body_type, "statement_block") == 0) {
+            // `var` owns a function-wide binding before any initializer runs;
+            // source-order binding made an early minified initializer capture
+            // and overwrite a same-named outer closure cell.
+            js_predeclare_function_vars(tp, body_node);
             func->has_use_strict_directive = js_ts_body_has_use_strict_directive(tp, body_node);
             func->body = build_js_block_statement(tp, body_node, JS_SCOPE_BLOCK);
         } else {
@@ -4304,6 +4413,9 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
     if (!ts_node_is_null(body_node)) {
         const char* body_type = ts_node_type(body_node);
         if (strcmp(body_type, "statement_block") == 0) {
+            // Keep the TypeScript-compatible builder on the same function-wide
+            // var-hoisting invariant as the JavaScript builder above.
+            js_predeclare_function_vars(tp, body_node);
             func->body = build_js_block_statement(tp, body_node, JS_SCOPE_BLOCK);
         } else {
             func->body = build_js_expression(tp, body_node);

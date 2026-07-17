@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 20px; font: 16px sans-serif; }
+    button, #htmx-target { display: block; margin: 8px 0; padding: 6px; }
+  </style>
+</head>
+<body hx-history-elt>
+  <button id="htmx-load" hx-get="htmx_fixture_payload.html" hx-target="#htmx-target" hx-push-url="true">load</button>
+  <button id="htmx-back" type="button">back</button>
+  <div id="htmx-target">initial</div>
+  <script src="../../js/htmx.min.js"></script>
+  <script>
+    document.getElementById('htmx-back').addEventListener('click', function () {
+      history.back();
+    });
+  </script>
+</body>
+</html>

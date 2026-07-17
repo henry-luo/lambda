@@ -1,0 +1,13 @@
+{
+  "name": "htmx swaps a file response and restores its history snapshot",
+  "html": "test/ui/dom/htmx_click_swap.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "click", "target": {"selector": "#htmx-load"}},
+    {"type": "wait", "ms": 120},
+    {"type": "assert_text", "target": {"selector": "#htmx-target"}, "equals": "swapped"},
+    {"type": "click", "target": {"selector": "#htmx-back"}},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_text", "target": {"selector": "#htmx-target"}, "equals": "initial"}
+  ]
+}

@@ -12,6 +12,7 @@
 #include "js_permission.h"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
+#include "../lambda-error.h"
 #include "../../lib/lambda_typed.hpp"
 #include "../../lib/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
@@ -1603,7 +1604,16 @@ extern "C" Item js_proxy_trap_construct(Item proxy, Item* args, int arg_count, I
 
 // Create a new object for a constructor call: sets __proto__ from callee.prototype
 extern "C" Item js_constructor_create_object(Item callee) {
-    Item obj = js_new_object();
+    Item shape_callee = js_bound_function_ultimate_target(callee);
+    JsFunction* shape_fn = get_type_id(shape_callee) == LMD_TYPE_FUNC
+        ? (JsFunction*)shape_callee.function : NULL;
+    // Compiled constructor bodies use fixed this.prop slots. A constructor
+    // reached through an alias must receive the same pre-shaped object as a
+    // statically resolved `new`, or those slot writes address an empty layout.
+    Item obj = shape_fn && shape_fn->ctor_prop_count > 0
+        ? js_new_object_with_shape(shape_fn->ctor_prop_names,
+            shape_fn->ctor_prop_lens, shape_fn->ctor_prop_count)
+        : js_new_object();
     TypeId callee_type = get_type_id(callee);
     if (callee_type == LMD_TYPE_FUNC || js_is_proxy(callee)) {
         Item proto_source = callee;
@@ -2917,6 +2927,25 @@ extern "C" void js_set_class_ctor_shape_metadata(Item class_item,
     js_mark_non_enumerable(class_item, key);
 }
 
+extern "C" void js_set_function_ctor_shape_metadata(Item fn_item,
+    const char** prop_names, const int* prop_lens, int count) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC || !prop_names || !prop_lens ||
+        count <= 0 || !js_input || !js_input->pool) {
+        return;
+    }
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    const char** names_copy = (const char**)pool_alloc(js_input->pool,
+        (size_t)count * sizeof(const char*));
+    int* lens_copy = (int*)pool_alloc(js_input->pool,
+        (size_t)count * sizeof(int));
+    if (!names_copy || !lens_copy) return;
+    memcpy(names_copy, prop_names, (size_t)count * sizeof(const char*));
+    memcpy(lens_copy, prop_lens, (size_t)count * sizeof(int));
+    fn->ctor_prop_names = names_copy;
+    fn->ctor_prop_lens = lens_copy;
+    fn->ctor_prop_count = count;
+}
+
 static Item js_class_create_shaped_instance_object(Item class_item) {
     if (get_type_id(class_item) != LMD_TYPE_MAP) return js_new_object();
     bool found = false;
@@ -3131,7 +3160,7 @@ static ShapeEntry* js_shape_entry_for_slot_offset(TypeMap* tm, int slot, int64_t
 }
 
 extern "C" int64_t js_shape_slot_guard(Item object, const char* name,
-        int64_t name_len, int64_t byte_offset) {
+                                         int64_t name_len, int64_t byte_offset) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_SHAPE_SLOT_GUARD);
     if (!name || name_len <= 0 || byte_offset < 0) return 0;
     if ((byte_offset % (int64_t)sizeof(void*)) != 0) return 0;
@@ -3154,6 +3183,17 @@ extern "C" int64_t js_shape_slot_guard(Item object, const char* name,
     if (entry->name->length != (size_t)name_len) return 0;
     if (entry->name->str == name) return 1;
     return memcmp(entry->name->str, name, (size_t)name_len) == 0 ? 1 : 0;
+}
+
+extern "C" Item js_set_shaped_slot_guarded(Item object, int64_t slot,
+        const char* name, int64_t name_len, Item value) {
+    int64_t byte_offset = slot * (int64_t)sizeof(void*);
+    if (js_shape_slot_guard(object, name, name_len, byte_offset)) {
+        js_set_shaped_slot(object, slot, value);
+        return value;
+    }
+    Item key = (Item){.item = s2it(heap_create_name(name, (int)name_len))};
+    return js_property_set(object, key, value);
 }
 
 extern "C" double js_get_slot_f(Item object, int64_t byte_offset) {
@@ -8840,24 +8880,23 @@ extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int cou
 extern "C" void js_console_write_to_stdout(const char* data, int len);
 
 extern "C" void js_console_log(Item value) {
-    Item str = js_to_string(value);
-    if (get_type_id(str) == LMD_TYPE_STRING) {
-        String* s = it2s(str);
-        // child_process pipes depend on console output being visible before a
-        // short-lived child exits; route through the flushed stdout helper.
-        js_console_write_to_stdout(s->chars, (int)s->len);
-        js_console_write_to_stdout("\n", 1);
-    }
+    extern void js_console_log_multi(Item* args, int argc);
+    js_console_log_multi(&value, 1);
 }
 
 extern "C" void js_console_error(Item value) {
-    Item str = js_to_string(value);
-    if (get_type_id(str) == LMD_TYPE_STRING) {
-        String* s = it2s(str);
-        fwrite(s->chars, 1, s->len, stderr);
-        fputc('\n', stderr);
-        fflush(stderr);
-    }
+    extern void js_console_error_multi(Item* args, int argc);
+    js_console_error_multi(&value, 1);
+}
+
+extern "C" void js_console_warn(Item value) {
+    extern void js_console_warn_multi(Item* args, int argc);
+    js_console_warn_multi(&value, 1);
+}
+
+extern "C" void js_console_debug(Item value) {
+    extern void js_console_debug_multi(Item* args, int argc);
+    js_console_debug_multi(&value, 1);
 }
 
 // Per ES spec §9.2.2: if constructor returns an Object, use that instead of `this`
@@ -9350,7 +9389,10 @@ static Item js_object_to_string_tag_override(Item this_val) {
     }
 
     Item receiver = this_val;
-    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC) {
+    // VMap host objects already implement ordinary object property lookup;
+    // boxing them discards their native @@toStringTag projection.
+    if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_FUNC &&
+        tid != LMD_TYPE_VMAP) {
         receiver = js_to_object(this_val);
     }
 
@@ -12562,6 +12604,17 @@ extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallb
     if (js_current_private_home_class.item != 0 &&
         js_current_private_home_class.item != ItemNull.item &&
         get_type_id(js_current_private_home_class) != LMD_TYPE_UNDEFINED) {
+        if (get_type_id(js_current_private_home_class) == LMD_TYPE_MAP) {
+            bool super_found = false;
+            Item recorded_super = js_map_get_fast(
+                js_current_private_home_class.map, "__super_class__", 15, &super_found);
+            // Runtime-valued heritage cannot be reconstructed from the static
+            // class table. Class creation records its exact value here, which is
+            // the lexical [[GetPrototypeOf]] target for super() resolution.
+            if (super_found && js_super_callee_is_constructor(recorded_super)) {
+                return recorded_super;
+            }
+        }
         // super is lexical. An inherited constructor can run on a deeper
         // subclass receiver, so deriving from receiver.constructor would call
         // that inherited constructor again and recurse indefinitely.
@@ -12725,6 +12778,12 @@ extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int
     if (!js_super_callee_is_constructor(callee)) {
         return js_throw_type_error("Super constructor is not a constructor");
     }
+    if (get_type_id(callee) == LMD_TYPE_MAP) {
+        // A runtime-valued `extends` identifier can denote another Lambda class
+        // object. The static lowering cannot classify that heritage, so route
+        // class maps through their stored constructor instead of calling the map.
+        return js_super_call_class(callee, this_val, args, argc);
+    }
     int ta_type = js_resolve_ta_type_from_ctor(callee);
     if (ta_type < 0 && get_type_id(callee) == LMD_TYPE_MAP) {
         ta_type = js_resolve_ta_type_from_class_map(callee);
@@ -12780,6 +12839,9 @@ extern "C" void js_set_call_stack_limit(int64_t limit) {
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
     static int js_call_depth = 0;
+    static thread_local const char* js_call_name_stack[64];
+    static thread_local int js_call_name_length_stack[64];
+    static thread_local int js_call_name_depth = 0;
     struct JsCallDepthGuard {
         int* depth;
         bool ok;
@@ -12822,10 +12884,28 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         // v18: throw TypeError for calling non-callable values
         static int error_count = 0;
         if (error_count < 20) {
+            void* caller_addr = __builtin_return_address(0);
+            FuncDebugInfo* caller_info = context && context->debug_info
+                ? lookup_debug_info(context->debug_info, caller_addr)
+                : nullptr;
             log_error("js_call_function: not a function (type=%d, argc=%d, this_type=%d) last_fn='%.*s' total_calls=%d func_raw=0x%llx",
                 get_type_id(func_item), arg_count, get_type_id(this_val),
                 _trace_last_fn_len, _trace_last_fn ? _trace_last_fn : "(null)", _trace_total_calls,
                 (unsigned long long)func_item.item);
+            if (caller_info) {
+                log_error("js_call_function caller: %s (%s:%u)",
+                          caller_info->lambda_func_name ? caller_info->lambda_func_name : "?",
+                          caller_info->source_file ? caller_info->source_file : "?",
+                          caller_info->source_line);
+            }
+            int trace_start = js_call_name_depth > 6 ? js_call_name_depth - 6 : 0;
+            for (int trace_index = js_call_name_depth - 1;
+                 trace_index >= trace_start; trace_index--) {
+                log_error("js_call_function stack[%d]: %.*s", trace_index,
+                          js_call_name_length_stack[trace_index],
+                          js_call_name_stack[trace_index]
+                              ? js_call_name_stack[trace_index] : "(anon)");
+            }
             error_count++;
         }
         // Log args for context
@@ -12840,6 +12920,23 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     }
 
     JsFunction* fn = (JsFunction*)func_item.function;
+    struct JsCallNameGuard {
+        int* depth;
+        bool pushed;
+        JsCallNameGuard(int* depth_ptr, const char** names, int* lengths,
+                        const char* name, int name_length)
+            : depth(depth_ptr), pushed(*depth_ptr < 64) {
+            if (pushed) {
+                names[*depth] = name;
+                lengths[*depth] = name_length;
+                (*depth)++;
+            }
+        }
+        ~JsCallNameGuard() { if (pushed) (*depth)--; }
+    } call_name_guard(&js_call_name_depth, js_call_name_stack,
+                      js_call_name_length_stack,
+                      fn && fn->name ? fn->name->chars : "(anon)",
+                      fn && fn->name ? (int)fn->name->len : 6);
     if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
     else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
     _trace_total_calls++;
@@ -26457,6 +26554,8 @@ extern "C" Item js_get_console_object_value() {
         // Populate console methods as function objects
         extern void js_console_log(Item);
         extern void js_console_error(Item);
+        extern void js_console_warn(Item);
+        extern void js_console_debug(Item);
         extern void js_console_log_multi(Item*, int);
         extern Item js_console_count_fn(Item);
         extern Item js_console_countReset_fn(Item);
@@ -26475,13 +26574,13 @@ extern "C" Item js_get_console_object_value() {
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("log", 3))},
             js_new_function((void*)js_console_log, 1));
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("warn", 4))},
-            js_new_function((void*)js_console_error, 1));
+            js_new_function((void*)js_console_warn, 1));
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("error", 5))},
             js_new_function((void*)js_console_error, 1));
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("info", 4))},
             js_new_function((void*)js_console_log, 1));
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("debug", 5))},
-            js_new_function((void*)js_console_log, 1));
+            js_new_function((void*)js_console_debug, 1));
         // count, countReset
         js_property_set(js_console_object, (Item){.item = s2it(heap_create_name("count", 5))},
             js_new_function((void*)js_console_count_fn, 1));

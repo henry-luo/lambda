@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 20px; font: 16px sans-serif; }
+    #date-input { display: block; width: 180px; height: 28px; }
+    .flatpickr-calendar { display: none; width: 308px; padding: 8px; background: white; border: 1px solid #777; }
+    .flatpickr-calendar.open { display: block; }
+    .flatpickr-months, .flatpickr-weekdays, .dayContainer { display: flex; flex-wrap: wrap; width: 308px; }
+    .flatpickr-month, .flatpickr-weekdaycontainer { width: 308px; }
+    .flatpickr-day, .flatpickr-weekday { display: block; box-sizing: border-box; width: 44px; height: 30px; padding: 6px; }
+  </style>
+</head>
+<body>
+  <label for="date-input">Date</label>
+  <input id="date-input" type="text">
+  <script src="../../js/flatpickr.min.js"></script>
+  <script>
+    var datePicker = flatpickr(document.getElementById('date-input'), {
+      dateFormat: 'Y-m-d',
+      defaultDate: '2024-03-01',
+      disableMobile: true
+    });
+    datePicker.clear(false);
+    var candidateDays = document.querySelectorAll('.flatpickr-day');
+    for (var dayIndex = 0; dayIndex < candidateDays.length; dayIndex++) {
+      if (candidateDays[dayIndex].getAttribute('aria-label') === 'March 14, 2024') {
+        candidateDays[dayIndex].id = 'pick-day';
+        break;
+      }
+    }
+  </script>
+</body>
+</html>

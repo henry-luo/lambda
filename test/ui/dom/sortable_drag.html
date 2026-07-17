@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 20px; font: 16px sans-serif; }
+    #sortable { width: 220px; margin: 0; padding: 0; list-style: none; }
+    #sortable li { display: block; box-sizing: border-box; height: 44px; margin: 4px 0; padding: 12px; background: #dce8f8; }
+    #order { display: block; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <ul id="sortable">
+    <li id="sort-one" data-id="one">one</li>
+    <li id="sort-two" data-id="two">two</li>
+    <li id="sort-three" data-id="three">three</li>
+  </ul>
+  <output id="order">one,two,three</output>
+  <script src="../../js/sortable.min.js"></script>
+  <script>
+    var sortableList = document.getElementById('sortable');
+    function publishSortableOrder() {
+      var ids = Array.prototype.map.call(sortableList.children, function (child) {
+        return child.getAttribute('data-id');
+      });
+      document.getElementById('order').textContent = ids.join(',');
+    }
+    Sortable.create(sortableList, { animation: 0, onEnd: publishSortableOrder });
+  </script>
+</body>
+</html>

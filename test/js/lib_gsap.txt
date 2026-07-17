@@ -1,0 +1,3 @@
+gsap:tween:complete
+gsap:opacity:0.5
+gsap:timeline:first>second:2

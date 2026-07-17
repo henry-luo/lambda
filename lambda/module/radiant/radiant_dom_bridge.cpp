@@ -3,6 +3,7 @@
 #include "../../jube/jube_registry.h"
 #include "radiant_host_api.hpp"
 #include "radiant_dom_bridge.hpp"
+#include "radiant_input_value.hpp"
 #include "../../jube/jube_interface.h"
 #include "../../input/css/dom_node.hpp"
 #include "../../input/css/dom_element.hpp"
@@ -70,6 +71,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_owner_document_for_node radiant_host_api->dom->owner_document_for_node
 #define js_dom_to_attribute_cstr radiant_host_api->dom->to_attribute_cstr
 #define js_is_truthy radiant_host_api->script->is_truthy
+#define js_to_string radiant_host_api->script->to_string
 #define js_dom_after_set_attribute radiant_host_api->dom->after_set_attribute
 #define js_dom_after_remove_attribute radiant_host_api->dom->after_remove_attribute
 #define js_dom_after_toggle_attribute_remove radiant_host_api->dom->after_toggle_attribute_remove
@@ -299,12 +301,21 @@ static Item radiant_dom_array_item() {
     return (Item){.array = arr};
 }
 
+static const char* radiant_dom_to_dom_string_cstr(Item value) {
+    Item string_value = js_to_string(value);
+    return fn_to_cstr(string_value);
+}
+
 static bool radiant_dom_is_internal_attr(const char* name) {
     return name && strncmp(name, "__lambda_", 9) == 0;
 }
 
 static bool radiant_dom_is_attr_name_projection(const char* name) {
-    return name && strchr(name, '-') != nullptr;
+    if (!name) return false;
+    // Lambda exposes declarative data/ARIA attributes by dashed name, but an
+    // arbitrary hyphenated JavaScript key is an expando (htmx stores objects
+    // under `htmx-internal-data` and must not be coerced into an attribute).
+    return strncmp(name, "data-", 5) == 0 || strncmp(name, "aria-", 5) == 0;
 }
 
 static Item radiant_dom_class_name_item(DomElement* elem) {
@@ -734,6 +745,19 @@ static bool radiant_dom_node_is_connected(DomNode* node) {
         if (current == (DomNode*)doc->root) return true;
     }
     return false;
+}
+
+static Item radiant_dom_node_root_item(DomNode* node) {
+    if (!node) return ItemNull;
+    DomDocument* doc = radiant_dom_node_document(node, false);
+    if (doc && radiant_dom_node_is_connected(node)) {
+        // A connected engine tree omits an explicit Document parent, so expose
+        // the document proxy as the DOM root instead of stopping at <html>.
+        return js_dom_document_proxy_for_doc_bridge((void*)doc);
+    }
+    DomNode* root = node;
+    while (root->parent) root = root->parent;
+    return radiant_dom_node_item(root);
 }
 
 static bool radiant_dom_node_contains(DomNode* root, DomNode* other) {
@@ -2024,6 +2048,244 @@ RADIANT_C_API int radiant_dom_guard_input_nontc(Item receiver) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     return elem && radiant_dom_is_tag(elem, "input") && !tc_is_text_control(elem);
 }
+RADIANT_C_API int radiant_dom_guard_input_typed_value(Item receiver) {
+    DomElement* elem = radiant_dom_member_elem(receiver);
+    if (!elem || !radiant_dom_is_tag(elem, "input")) return 0;
+    const char* type = dom_element_get_attribute(elem, "type");
+    RadiantInputValueKind kind = radiant_input_value_kind(type);
+    return kind != RADIANT_INPUT_VALUE_TEXT &&
+           kind != RADIANT_INPUT_VALUE_UNSUPPORTED;
+}
+
+static Item radiant_dom_input_empty_file_list(void) {
+    Item constructor = radiant_host_api->script->global_property(
+        (Item){.item = s2it(heap_create_name("DataTransfer"))});
+    if (get_type_id(constructor) != LMD_TYPE_FUNC) {
+        return radiant_host_api->value->array_new(0);
+    }
+    Item transfer = radiant_host_api->script->call_function(
+        constructor, (Item){.item = ITEM_JS_UNDEFINED}, nullptr, 0);
+    return radiant_host_api->value->property_get(
+        transfer, (Item){.item = s2it(heap_create_name("files"))});
+}
+
+static Item radiant_dom_input_files_get(DomElement* elem) {
+    if (radiant_input_value_kind(dom_element_get_attribute(elem, "type")) !=
+        RADIANT_INPUT_VALUE_FILE) return ItemNull;
+    Item files = radiant_input_files(elem);
+    if (get_type_id(files) != LMD_TYPE_ARRAY) {
+        files = radiant_dom_input_empty_file_list();
+        radiant_input_set_files(elem, files);
+    }
+    return files;
+}
+
+static void radiant_dom_input_throw(const char* name, const char* message) {
+    Item error = radiant_host_api->script->new_error_with_name(
+        (Item){.item = s2it(heap_create_name(name))},
+        (Item){.item = s2it(heap_create_name(message))});
+    radiant_host_api->script->throw_value(error);
+}
+
+RADIANT_C_API int radiant_dom_input_type_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    char normalized[32];
+    *out = (Item){.item = s2it(heap_create_name(radiant_input_type_normalize(
+        dom_element_get_attribute(elem, "type"), normalized, sizeof(normalized))))};
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_type_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    char normalized[32];
+    const char* type = radiant_input_type_normalize(fn_to_cstr(v), normalized,
+                                                     sizeof(normalized));
+    dom_element_set_attribute(elem, "type", type);
+    // The live value belongs to a value state, so a type transition must run
+    // that state's sanitizer instead of leaving an impossible old value behind.
+    radiant_input_type_changed(elem);
+    js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
+                           (void*)elem->parent);
+    *out = v;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_typed_value_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    RadiantInputValueKind kind = radiant_input_value_kind(
+        dom_element_get_attribute(elem, "type"));
+    if (kind == RADIANT_INPUT_VALUE_FILE) {
+        Item files = radiant_dom_input_files_get(elem);
+        if (radiant_host_api->value->array_length(files) <= 0) {
+            *out = (Item){.item = s2it(heap_create_name(""))};
+            return 1;
+        }
+        Item file = radiant_host_api->value->array_get(files, 0);
+        Item name = radiant_host_api->value->property_get(
+            file, (Item){.item = s2it(heap_create_name("name"))});
+        const char* filename = fn_to_cstr(name);
+        char fake_path[512];
+        snprintf(fake_path, sizeof(fake_path), "C:\\fakepath\\%s",
+                 filename ? filename : "");
+        *out = (Item){.item = s2it(heap_create_name(fake_path))};
+        return 1;
+    }
+    *out = (Item){.item = s2it(heap_create_name(radiant_input_live_value(elem)))};
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_typed_value_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* text = fn_to_cstr(v);
+    if (!text) text = "";
+    RadiantInputValueKind kind = radiant_input_value_kind(
+        dom_element_get_attribute(elem, "type"));
+    if (kind == RADIANT_INPUT_VALUE_FILE) {
+        if (text[0]) {
+            // File inputs cannot manufacture host paths from script-provided text.
+            radiant_dom_input_throw("InvalidStateError",
+                                    "File input value can only be set to the empty string");
+        } else {
+            radiant_input_set_files(elem, radiant_dom_input_empty_file_list());
+        }
+        *out = v;
+        return 1;
+    }
+    radiant_input_set_live_value(elem, text);
+    if (elem->form) elem->form->value = radiant_input_live_value(elem);
+    *out = v;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_value_as_number_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    double number = NAN;
+    radiant_input_value_as_number(dom_element_get_attribute(elem, "type"),
+                                  radiant_input_live_value(elem), &number);
+    *out = radiant_host_api->script->make_number(number);
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_value_as_number_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    double number = radiant_host_api->script->get_number(v);
+    char formatted[128];
+    if (!isfinite(number)) {
+        radiant_dom_input_throw("TypeError", "valueAsNumber must be finite");
+    } else if (!radiant_input_value_from_number(
+                   dom_element_get_attribute(elem, "type"), number,
+                   formatted, sizeof(formatted))) {
+        radiant_dom_input_throw("InvalidStateError",
+                                "This input type has no numeric value state");
+    } else {
+        radiant_input_set_live_value(elem, formatted);
+    }
+    *out = v;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_value_as_date_get(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* type = dom_element_get_attribute(elem, "type");
+    double number;
+    if (!radiant_input_value_as_date_supported(type) ||
+        !radiant_input_value_as_number(type, radiant_input_live_value(elem), &number)) {
+        *out = ItemNull;
+        return 1;
+    }
+    *out = radiant_host_api->script->date_new_from(
+        radiant_host_api->script->make_number(number));
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_value_as_date_set(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    const char* type = dom_element_get_attribute(elem, "type");
+    if (!radiant_input_value_as_date_supported(type)) {
+        radiant_dom_input_throw("InvalidStateError",
+                                "This input type has no Date value state");
+    } else if (v.item == ITEM_NULL) {
+        radiant_input_set_live_value(elem, "");
+    } else if (radiant_host_api->script->class_id(v) != JS_CLASS_DATE) {
+        radiant_dom_input_throw("TypeError", "valueAsDate requires a Date or null");
+    } else {
+        Item time = radiant_host_api->script->date_method(v, 0);
+        double number = radiant_host_api->script->get_number(time);
+        char formatted[128];
+        if (!isfinite(number)) {
+            radiant_input_set_live_value(elem, "");
+        } else if (radiant_input_value_from_number(type, number, formatted,
+                                                    sizeof(formatted))) {
+            radiant_input_set_live_value(elem, formatted);
+        }
+    }
+    *out = v;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_files_get_member(Item r, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    *out = radiant_dom_input_files_get(elem);
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_files_set_member(Item r, Item v, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    if (radiant_input_value_kind(dom_element_get_attribute(elem, "type")) !=
+        RADIANT_INPUT_VALUE_FILE) {
+        *out = v;
+        return 1;
+    }
+    if (v.item == ITEM_NULL) {
+        radiant_input_set_files(elem, radiant_dom_input_empty_file_list());
+    } else if (get_type_id(v) == LMD_TYPE_ARRAY &&
+               radiant_host_api->script->class_id(v) == JS_CLASS_FILE_LIST) {
+        // Only the browser-created FileList brand is assignable; accepting an
+        // arbitrary Array would let script bypass the file-input security model.
+        radiant_input_set_files(elem, v);
+    } else {
+        radiant_dom_input_throw("TypeError", "files must be a FileList or null");
+    }
+    *out = v;
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_step_up(Item r, Item* args, int argc, Item* out) {
+    DomElement* elem = radiant_dom_member_elem(r);
+    if (!elem || !out) return 0;
+    int count = argc > 0 ? (int)radiant_host_api->script->get_number(args[0]) : 1;
+    char stepped[128];
+    if (!radiant_input_value_step(dom_element_get_attribute(elem, "type"),
+            radiant_input_live_value(elem), dom_element_get_attribute(elem, "min"),
+            dom_element_get_attribute(elem, "max"), dom_element_get_attribute(elem, "step"),
+            count, stepped, sizeof(stepped))) {
+        radiant_dom_input_throw("InvalidStateError", "Input value cannot be stepped");
+    } else {
+        radiant_input_set_live_value(elem, stepped);
+    }
+    *out = (Item){.item = ITEM_JS_UNDEFINED};
+    return 1;
+}
+
+RADIANT_C_API int radiant_dom_input_step_down(Item r, Item* args, int argc, Item* out) {
+    if (argc > 0) {
+        Item negated = radiant_host_api->script->make_number(
+            -radiant_host_api->script->get_number(args[0]));
+        return radiant_dom_input_step_up(r, &negated, 1, out);
+    }
+    Item minus_one = radiant_host_api->script->make_number(-1.0);
+    return radiant_dom_input_step_up(r, &minus_one, 1, out);
+}
 RADIANT_C_API int radiant_dom_m4c_get_checked(Item r, Item* out) {
     *out = js_dom_get_property_impl(r, (Item){.item = s2it(heap_create_name("checked"))});
     return 1;
@@ -2350,6 +2612,11 @@ RADIANT_C_API int radiant_dom_m4d_contains(Item r, Item* args, int argc, Item* o
 RADIANT_C_API int radiant_dom_m4d_compare_document_position(Item r, Item* args, int argc, Item* out) {
     *out = radiant_dom_element_method(r,
         (Item){.item = s2it(heap_create_name("compareDocumentPosition"))}, args, argc);
+    return 1;
+}
+RADIANT_C_API int radiant_dom_m4d_get_root_node(Item r, Item* args, int argc, Item* out) {
+    *out = radiant_dom_element_method(r,
+        (Item){.item = s2it(heap_create_name("getRootNode"))}, args, argc);
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4d_remove2(Item r, Item* args, int argc, Item* out) {
@@ -2688,6 +2955,20 @@ static bool radiant_dom_get_basic_property(Item elem_item, Item prop_name, Item*
     const char* prop = fn_to_cstr(prop_name);
     if (!prop) return false;
 
+    if (strcmp(prop, "__sym_4") == 0) {
+        // Host DOM wrappers do not store ordinary prototype slots themselves;
+        // project the WebIDL @@toStringTag from their resolved interface ctor.
+        Item proto = js_dom_get_prototype_value(elem_item);
+        Item ctor = radiant_host_api->value->property_get(
+            proto, (Item){.item = s2it(heap_create_name("constructor"))});
+        Item name = radiant_host_api->value->property_get(
+            ctor, (Item){.item = s2it(heap_create_name("name"))});
+        if (get_type_id(name) == LMD_TYPE_STRING) {
+            *out = name;
+            return true;
+        }
+    }
+
     if (node->is_text()) {
         return radiant_dom_get_text_property(node->as_text(), prop, out);
     }
@@ -2829,6 +3110,12 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         return true;
     }
 
+    if (strcmp(method, "getRootNode") == 0) {
+        // Shadow DOM is deferred, so composed and non-composed roots coincide.
+        *out = radiant_dom_node_root_item(node);
+        return true;
+    }
+
     if (strcmp(method, "remove") == 0) {
         *out = js_dom_remove_bridge((void*)node);
         return true;
@@ -2935,7 +3222,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) {
             *out = ItemNull;
             return true;
@@ -2961,7 +3248,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) {
             *out = ItemNull;
             return true;
@@ -2993,7 +3280,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = (Item){.item = b2it(0)};
             return true;
         }
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) {
             *out = (Item){.item = b2it(0)};
             return true;
@@ -3015,7 +3302,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) {
             *out = ItemNull;
             return true;
@@ -3758,8 +4045,15 @@ RADIANT_C_API int radiant_dom_document_host_own_property_names(Item object, Item
 
 RADIANT_C_API Item radiant_dom_document_host_prototype(Item object) {
     (void)object;
-    // Document wrappers have no ordinary __proto__ slot; keep their inherited
-    // Object surface in the registered host op instead of an engine-side brand check.
+    Item global = radiant_host_api->script->global_this();
+    Item ctor = radiant_host_api->value->property_get(
+        global, radiant_dom_string_item("Document"));
+    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+        Item proto = radiant_host_api->value->property_get(
+            ctor, radiant_dom_string_item("prototype"));
+        if (get_type_id(proto) == LMD_TYPE_MAP) return proto;
+    }
+    // Startup can ask for the host prototype before DOM globals are installed.
     Item proto = js_get_intrinsic_prototype_for_class(JS_CLASS_OBJECT);
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
@@ -4081,6 +4375,11 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         return 1;
     }
 
+    if (strcmp(method, "getRootNode") == 0) {
+        *out = doc ? js_dom_document_proxy_for_doc_bridge((void*)doc) : ItemNull;
+        return 1;
+    }
+
     if (strcmp(method, "getElementById") == 0) {
         if (argc < 1) {
             *out = ItemNull;
@@ -4128,7 +4427,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             *out = ItemNull;
             return 1;
         }
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !doc || !doc->pool) {
             *out = ItemNull;
             return 1;
@@ -4154,7 +4453,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             *out = ItemNull;
             return 1;
         }
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !doc || !doc->pool) {
             *out = radiant_dom_array_item();
             return 1;

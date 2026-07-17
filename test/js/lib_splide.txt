@@ -1,0 +1,3 @@
+splide:initial: 0 one
+splide:moved: 1 0>1
+splide:active: two

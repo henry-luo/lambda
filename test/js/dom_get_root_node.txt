@@ -1,0 +1,10 @@
+root-node:connected: true
+root-node:selector-domstring: span,button 1 1
+root-node:composed: true
+root-node:document: true
+root-node:document-interface: function true
+root-node:html-interfaces: true true true
+root-node:detached: true
+root-node:fragment: true
+root-node:character-data-expandos: true false
+root-node:cross-document-adoption: true true owned

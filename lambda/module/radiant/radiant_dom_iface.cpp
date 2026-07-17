@@ -193,6 +193,9 @@ const char radiant_dom_interface_decl[] =
     "    content_editable: string,\n"
     "    checked: bool,\n"
     "    value: string,\n"
+    "    value_as_number: float,\n"
+    "    value_as_date: any,\n"
+    "    files: any,\n"
     "    selected_index: int,\n"
     "    length: int,\n"
     "    selected: bool,\n"
@@ -213,6 +216,7 @@ const char radiant_dom_interface_decl[] =
     "    remove: fn(a0: any) any,\n"
     "    contains: fn(a0: any) any,\n"
     "    compare_document_position: fn(a0: any) any,\n"
+    "    get_root_node: fn(a0: any) any,\n"
     "    replace_with: fn(a0: any) any,\n"
     "    has_child_nodes: fn() any,\n"
     "    clone_node: fn(a0: any) any,\n"
@@ -263,6 +267,8 @@ const char radiant_dom_interface_decl[] =
     "    set_custom_validity: fn(a0: any) any,\n"
     "    set_selection_range: fn(a0: any, a1: any, a2: any) any,\n"
     "    set_range_text: fn(a0: any, a1: any, a2: any, a3: any) any,\n"
+    "    step_up: fn(a0: any) any,\n"
+    "    step_down: fn(a0: any) any,\n"
     "    select: fn() any,\n"
     "    item: fn(a0: any) any,\n"
     "    toggle: fn(a0: any, a1: any) any,\n"
@@ -349,6 +355,7 @@ const char radiant_dom_interface_decl[] =
     "    adopt_node: fn(a0: any) any,\n"
     "    append_child: fn(a0: any) any,\n"
     "    contains: fn(a0: any) any,\n"
+    "    get_root_node: fn(a0: any) any,\n"
     "    add_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
     "    remove_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
     "    dispatch_event: fn(a0: any) any\n"
@@ -942,6 +949,7 @@ extern "C" int radiant_dom_m4b_content_editable_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4b_is_content_editable_get(Item r, Item* out);
 extern "C" int radiant_dom_guard_tc(Item receiver);
 extern "C" int radiant_dom_guard_input_nontc(Item receiver);
+extern "C" int radiant_dom_guard_input_typed_value(Item receiver);
 extern "C" int radiant_dom_guard_node(Item receiver);
 extern "C" int radiant_dom_guard_text(Item receiver);
 extern "C" int radiant_dom_guard_character_data(Item receiver);
@@ -951,6 +959,7 @@ extern "C" int radiant_dom_m4d_add(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_remove(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_contains(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_compare_document_position(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_get_root_node(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_remove2(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_replace_with(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_has_child_nodes(Item r, Item* args, int argc, Item* out);
@@ -1018,6 +1027,18 @@ extern "C" int radiant_dom_m4c_value_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_value2_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_value3_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_value4_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_input_type_get(Item r, Item* out);
+extern "C" int radiant_dom_input_type_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_input_typed_value_get(Item r, Item* out);
+extern "C" int radiant_dom_input_typed_value_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_input_value_as_number_get(Item r, Item* out);
+extern "C" int radiant_dom_input_value_as_number_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_input_value_as_date_get(Item r, Item* out);
+extern "C" int radiant_dom_input_value_as_date_set(Item r, Item v, Item* out);
+extern "C" int radiant_dom_input_files_get_member(Item r, Item* out);
+extern "C" int radiant_dom_input_files_set_member(Item r, Item v, Item* out);
+extern "C" int radiant_dom_input_step_up(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_input_step_down(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4c_get_selectedIndex(Item r, Item* out);
 extern "C" int radiant_dom_m4c_selected_index_set(Item r, Item v, Item* out);
 extern "C" int radiant_dom_m4c_get_length(Item r, Item* out);
@@ -1188,6 +1209,16 @@ static const JubeMemberBind radiant_dom_node_members[] = {
      JUBE_MEMBER_NON_ENUMERABLE},
     {"checked", NULL, NULL, radiant_dom_guard_input, radiant_dom_m4c_get_checked, radiant_dom_m4c_checked_set, NULL, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
+    {"type", NULL, NULL, radiant_dom_guard_input, radiant_dom_input_type_get, radiant_dom_input_type_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"value", NULL, NULL, radiant_dom_guard_input_typed_value, radiant_dom_input_typed_value_get, radiant_dom_input_typed_value_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"value_as_number", "valueAsNumber", NULL, radiant_dom_guard_input, radiant_dom_input_value_as_number_get, radiant_dom_input_value_as_number_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"value_as_date", "valueAsDate", NULL, radiant_dom_guard_input, radiant_dom_input_value_as_date_get, radiant_dom_input_value_as_date_set, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
+    {"files", NULL, NULL, radiant_dom_guard_input, radiant_dom_input_files_get_member, radiant_dom_input_files_set_member, NULL, NULL,
+     JUBE_MEMBER_NON_ENUMERABLE},
     {"value", NULL, NULL, radiant_dom_guard_select, radiant_dom_m4c_get_value, radiant_dom_m4c_value_set, NULL, NULL,
      JUBE_MEMBER_NON_ENUMERABLE},
     {"value", NULL, NULL, radiant_dom_guard_tc, radiant_dom_m4c_get_value, radiant_dom_m4c_value2_set, NULL, NULL,
@@ -1229,6 +1260,7 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     {"remove", NULL, NULL, radiant_dom_guard_select, NULL, NULL, radiant_dom_m4d_remove, NULL, 0},
     {"contains", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_contains, NULL, 0},
     {"compare_document_position", "compareDocumentPosition", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_compare_document_position, NULL, 0},
+    {"get_root_node", "getRootNode", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_get_root_node, NULL, 0},
     {"remove", NULL, NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_remove2, NULL, 0},
     {"replace_with", "replaceWith", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_replace_with, NULL, 0},
     {"has_child_nodes", "hasChildNodes", NULL, radiant_dom_guard_node, NULL, NULL, radiant_dom_m4d_has_child_nodes, NULL, 0},
@@ -1280,6 +1312,8 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     {"set_custom_validity", "setCustomValidity", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_custom_validity, NULL, 0},
     {"set_selection_range", "setSelectionRange", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_selection_range, NULL, 0},
     {"set_range_text", "setRangeText", NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_set_range_text, NULL, 0},
+    {"step_up", "stepUp", NULL, radiant_dom_guard_input, NULL, NULL, radiant_dom_input_step_up, NULL, 0},
+    {"step_down", "stepDown", NULL, radiant_dom_guard_input, NULL, NULL, radiant_dom_input_step_down, NULL, 0},
     {"select", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_select, NULL, 0},
     {"item", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_item, NULL, 0},
     {"toggle", NULL, NULL, radiant_dom_member_is_element, NULL, NULL, radiant_dom_m4d_toggle, NULL, 0},
@@ -1374,6 +1408,7 @@ RADIANT_DOC_CALL_FN(radiant_doc_call_normalize, "normalize")
 RADIANT_DOC_CALL_FN(radiant_doc_call_adopt_node, "adoptNode")
 RADIANT_DOC_CALL_FN(radiant_doc_call_append_child, "appendChild")
 RADIANT_DOC_CALL_FN(radiant_doc_call_contains, "contains")
+RADIANT_DOC_CALL_FN(radiant_doc_call_get_root_node, "getRootNode")
 RADIANT_DOC_CALL_FN(radiant_doc_call_add_event_listener, "addEventListener")
 RADIANT_DOC_CALL_FN(radiant_doc_call_remove_event_listener, "removeEventListener")
 RADIANT_DOC_CALL_FN(radiant_doc_call_dispatch_event, "dispatchEvent")
@@ -1452,6 +1487,7 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("adopt_node", "adoptNode", radiant_doc_call_adopt_node),
     DOC_METHOD("append_child", "appendChild", radiant_doc_call_append_child),
     DOC_METHOD("contains", NULL, radiant_doc_call_contains),
+    DOC_METHOD("get_root_node", "getRootNode", radiant_doc_call_get_root_node),
     DOC_METHOD("add_event_listener", "addEventListener", radiant_doc_call_add_event_listener),
     DOC_METHOD("remove_event_listener", "removeEventListener", radiant_doc_call_remove_event_listener),
     DOC_METHOD("dispatch_event", "dispatchEvent", radiant_doc_call_dispatch_event),

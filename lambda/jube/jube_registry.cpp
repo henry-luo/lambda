@@ -1,6 +1,7 @@
 #include "jube_registry.h"
 #include "jube_interface.h"
 #include "../input/css/dom_element.hpp"
+#include "../js/js_class.h"
 #include "../../lib/log.h"
 #include <string.h>
 #include <stdlib.h>
@@ -25,6 +26,8 @@ extern "C" Item vmap_new(void);
 extern "C" Item js_new_object(void);
 extern "C" Item js_array_new(int capacity);
 extern "C" Item js_array_push(Item array, Item value);
+extern "C" int64_t js_array_length(Item array);
+extern "C" Item js_array_get_int(Item array, int64_t index);
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" Item js_new_function(void* func_ptr, int param_count);
@@ -41,6 +44,15 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
 extern "C" int js_check_exception(void);
 extern "C" bool js_is_truthy(Item value);
 extern "C" Item js_get_intrinsic_prototype_for_class(int class_id);
+Item js_make_number(double value);
+double js_get_number(Item value);
+extern "C" Item js_date_new_from(Item value);
+extern "C" Item js_date_method(Item date, int method_id);
+extern "C" Item js_to_string(Item value);
+
+static int jube_script_class_id(Item value) {
+    return (int)js_class_id(value);
+}
 extern "C" void* js_dom_get_document(void);
 extern "C" void* js_dom_get_ui_context(void);
 extern "C" bool js_dom_force_layout_for_geometry(void* doc);
@@ -268,6 +280,8 @@ static const JubeHostValueAPI jube_host_value_api = {
     js_new_object,
     js_array_new,
     js_array_push,
+    js_array_length,
+    js_array_get_int,
     js_property_get,
     js_property_set,
 };
@@ -287,6 +301,12 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_check_exception,
     js_is_truthy,
     js_get_intrinsic_prototype_for_class,
+    js_make_number,
+    js_get_number,
+    js_date_new_from,
+    js_date_method,
+    jube_script_class_id,
+    js_to_string,
 };
 
 static const JubeHostDomAPI jube_host_dom_api = {

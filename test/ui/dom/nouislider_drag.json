@@ -1,0 +1,9 @@
+{
+  "name": "noUiSlider updates ARIA value through a real pointer drag",
+  "html": "test/ui/dom/nouislider_drag.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "pointer_drag", "target": {"selector": ".noUi-handle"}, "dx": 150, "dy": 0, "pointerType": "mouse", "steps": 6},
+    {"type": "assert_attr", "target": {"selector": ".noUi-handle"}, "attribute": "aria-valuenow", "equals": "75.0"}
+  ]
+}

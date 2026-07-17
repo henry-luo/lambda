@@ -1174,6 +1174,7 @@ void add_capture(Transpiler* tp, FnCapture** captures, String* name, NameEntry* 
     capture->entry = entry;
     capture->scope_env_slot = -1;
     capture->grandparent_slot = -1;
+    capture->parent_env_link_slot_override = -1;
     capture->is_mutable = false;
     capture->next = *captures;
     *captures = capture;

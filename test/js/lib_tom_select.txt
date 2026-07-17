@@ -1,0 +1,3 @@
+tom-select:create: true
+tom-select:value: b b
+tom-select:selected: Beta

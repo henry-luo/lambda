@@ -311,18 +311,25 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
         target_scope = tp->global_scope;
     }
 
+    NameEntry* existing = NULL;
+    NameEntry* scan = target_scope->first;
+    while (scan) {
+        if (scan->name->len == name->len &&
+            memcmp(scan->name->chars, name->chars, name->len) == 0) {
+            existing = scan;
+            break;
+        }
+        scan = scan->next;
+    }
+
+    // Function-scoped var declarations are one hoisted binding even when the
+    // source contains several declarations or a declaration is pre-scanned.
+    if (existing && kind == JS_VAR_VAR && !existing->is_lexical) {
+        return existing;
+    }
+
     // Check for redeclaration in strict mode or with let/const
     if (target_scope->strict || kind != JS_VAR_VAR) {
-        NameEntry* existing = NULL;
-        NameEntry* scan = target_scope->first;
-        while (scan) {
-            if (scan->name->len == name->len &&
-                memcmp(scan->name->chars, name->chars, name->len) == 0) {
-                existing = scan;
-                break;
-            }
-            scan = scan->next;
-        }
         if (existing) {
             log_error("Identifier '%.*s' has already been declared",
                      (int)name->len, name->chars);

@@ -1,0 +1,7 @@
+initial: 1 true
+push: 2 1 kept #one
+replace: 2 2 #two
+second-push: 3 3 #three
+popstate: 2 2 #two
+hashchange: #three #two
+hashchange: #two #local

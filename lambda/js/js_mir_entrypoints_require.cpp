@@ -1007,6 +1007,10 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     }
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - phase_start;
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
+    if (result.item == ItemError.item || js_check_exception()) {
+        log_error("js-mir-execution: uncaught exception: %s",
+                  js_get_exception_message());
+    }
     log_mem_stage("js-core: js_main_done");
 
     // v14: drain the event loop while JIT module is still alive

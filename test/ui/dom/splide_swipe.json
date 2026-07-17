@@ -1,0 +1,10 @@
+{
+  "name": "Splide advances from a touch-like pointer swipe",
+  "html": "test/ui/dom/splide_swipe.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "pointer_drag", "target": {"selector": ".splide__track"}, "dx": -220, "dy": 0, "pointerType": "touch", "steps": 8},
+    {"type": "wait", "ms": 80},
+    {"type": "assert_attribute", "target": {"selector": ".splide__slide", "index": 1}, "attribute": "class", "contains": "is-active"}
+  ]
+}

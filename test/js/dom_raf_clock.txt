@@ -1,0 +1,4 @@
+frames:4
+timestamp-advanced:true
+performance-advanced:true
+date-advanced:true

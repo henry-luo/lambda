@@ -78,6 +78,7 @@ static Item g_file_proto = {0};
 static Item g_clipboard_item_proto = {0};
 static Item g_clipboard_event_proto = {0};
 static Item g_data_transfer_proto = {0};
+static Item g_file_list_proto = {0};
 static int64_t g_clipboard_generation = 1;
 
 static void attach_known_prototype(Item obj, Item proto) {
@@ -573,6 +574,10 @@ extern "C" Item js_dt_set_data(Item type_item, Item data_item);
 extern "C" Item js_dt_get_data(Item type_item);
 extern "C" Item js_dt_clear_data(Item format_item);
 
+extern "C" Item js_file_list_new(void) {
+    return js_throw_type_error("Illegal constructor");
+}
+
 static bool dt_is_class(Item v, const char* name, size_t name_len) {
     if (get_type_id(v) != LMD_TYPE_MAP) return false;
     JsClass cls = js_class_from_name(name, (int)name_len);
@@ -950,6 +955,13 @@ static Item js_make_data_transfer_object(void) {
     Item items = js_array_new(0);
     Item files = js_array_new(0);
     Item types = js_array_new(0);
+    // FileList is array-backed internally, but its Web IDL prototype and brand
+    // must survive input.files assignment and DataTransfer view recomputation.
+    if (get_type_id(g_file_list_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(files, g_file_list_proto);
+        Map* props = js_array_props(files.array);
+        if (props) js_class_stamp((Item){.map = props}, JS_CLASS_FILE_LIST);
+    }
     js_property_set(items, make_str("_owner"), dt);
     js_property_set(files, make_str("_owner"), dt);
     js_property_set(items, make_str("add"),
@@ -960,8 +972,6 @@ static Item js_make_data_transfer_object(void) {
         js_new_function((void*)js_dt_items_remove, 1));
     js_property_set(items, make_str("clear"),
         js_new_function((void*)js_dt_items_clear, 0));
-    js_property_set(files, make_str("item"),
-        js_new_function((void*)js_dt_files_item, 1));
     js_property_set(dt, make_str("items"), items);
     js_property_set(dt, make_str("files"), files);
     js_property_set(dt, make_str("types"), types);
@@ -1799,6 +1809,22 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         js_property_set(global_this, make_str("ClipboardItem"), ctor);
     }
 
+    // ---- FileList --------------------------------------------------------
+    {
+        Item ctor = js_new_function((void*)js_file_list_new, 0);
+        js_set_function_name(ctor, make_str("FileList"));
+        Item proto = js_new_object();
+        js_property_set(proto, make_str("constructor"), ctor);
+        js_property_set(proto, make_str("item"),
+            js_new_function((void*)js_dt_files_item, 1));
+        js_property_set(proto, make_str("__sym_4"), make_str("FileList"));
+        Item array_proto = js_get_intrinsic_prototype_for_class(JS_CLASS_ARRAY);
+        if (get_type_id(array_proto) == LMD_TYPE_MAP) js_set_prototype(proto, array_proto);
+        js_property_set(ctor, make_str("prototype"), proto);
+        g_file_list_proto = proto;
+        js_property_set(global_this, make_str("FileList"), ctor);
+    }
+
     // ---- ClipboardEvent --------------------------------------------------
     {
         Item ctor = js_new_function((void*)js_clipboard_event_new, 2);
@@ -1885,6 +1911,10 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
         js_property_set(navigator, make_str("platform"), make_str("MacIntel"));
         js_property_set(navigator, make_str("userAgent"),
             make_str("Lambda/Headless (Macintosh)"));
+        // Legacy UA-sniffing libraries still call string methods on
+        // Navigator.appVersion; keep it present and consistent with this host.
+        js_property_set(navigator, make_str("appVersion"),
+            make_str("5.0 (Macintosh) Lambda/Headless"));
         js_property_set(navigator, make_str("vendor"), make_str(""));
         js_property_set(navigator, make_str("language"), make_str("en-US"));
         // Radiant exposes PointerEvent input in both interactive and headless

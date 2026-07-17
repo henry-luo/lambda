@@ -2719,6 +2719,36 @@
                         "libraries": ["gtest"],
                         "requires_lambda_exe": true,
                         "icon": "🎞️"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_input_events_gtest.cpp",
+                        "name": "WPT Input Events Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_input_events_gtest.exe",
+                        "libraries": ["gtest"],
+                        "requires_lambda_exe": true,
+                        "icon": "⌨️"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_dom_ranges_gtest.cpp",
+                        "name": "WPT DOM Ranges Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_dom_ranges_gtest.exe",
+                        "libraries": ["gtest"],
+                        "requires_lambda_exe": true,
+                        "icon": "📏"
+                    },
+                    {
+                        "source": "test/wpt/test_wpt_html_reflection_gtest.cpp",
+                        "name": "WPT HTML Reflection Tests",
+                        "category": "extended",
+                        "dependencies": [],
+                        "binary": "test_wpt_html_reflection_gtest.exe",
+                        "libraries": ["gtest"],
+                        "requires_lambda_exe": true,
+                        "icon": "🪞"
                     }
                 ],
                 "type": "library"

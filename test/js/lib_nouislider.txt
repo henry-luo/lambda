@@ -1,0 +1,3 @@
+nouislider:value: 75.00
+nouislider:update: true
+nouislider:aria: 75.0

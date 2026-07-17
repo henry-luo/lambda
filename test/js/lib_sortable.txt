@@ -1,0 +1,3 @@
+sortable:create: true
+sortable:order: three,one,two
+sortable:end: 0>2

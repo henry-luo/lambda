@@ -181,7 +181,13 @@ void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg) {
 }
 
 static MIR_reg_t jm_root_value_bits(JsMirTranspiler* mt, MIR_reg_t value) {
-    MIR_reg_t bits = jm_new_reg(mt, "js_root_bits", MIR_T_I64);
+    // Root publication is sequential, so one scratch register is sufficient.
+    // Giving every call result a distinct conversion register made large vendor
+    // functions exceed MIR's practical register-allocation range at loop back-edges.
+    if (!mt->side_root_bits_scratch) {
+        mt->side_root_bits_scratch = jm_new_reg(mt, "js_root_bits", MIR_T_I64);
+    }
+    MIR_reg_t bits = mt->side_root_bits_scratch;
     jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, bits), MIR_new_reg_op(mt->ctx, value)));
     return bits;
@@ -193,6 +199,29 @@ static void jm_store_gc_root_slot(JsMirTranspiler* mt, int slot, MIR_reg_t value
     jm_sync_emitter_from_compat(mt);
     em_store_frame_slot(&mt->em, mt->side_root_frame_base, slot, bits);
     jm_sync_compat_from_emitter(mt);
+}
+
+void jm_emit_loop_backedge_frame_reload(JsMirTranspiler* mt) {
+    if (!mt || !mt->side_frame_active || !mt->side_root_frame_base) return;
+    MIR_reg_t runtime = jm_load_side_stack_runtime(mt);
+    MIR_reg_t top = jm_new_reg(mt, "js_root_top_backedge", MIR_T_I64);
+    jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, top),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, side_root_top),
+            runtime, 0, 1)));
+    MIR_insn_t reload = MIR_new_insn(mt->ctx, MIR_SUB,
+        MIR_new_reg_op(mt->ctx, mt->side_root_frame_base),
+        MIR_new_reg_op(mt->ctx, top), MIR_new_int_op(mt->ctx, 0));
+    jm_emit_raw(mt, reload);
+    if (mt->side_root_backedge_reload_count >= mt->side_root_backedge_reload_capacity) {
+        int next_capacity = mt->side_root_backedge_reload_capacity
+            ? mt->side_root_backedge_reload_capacity * 2 : 8;
+        mt->side_root_backedge_reloads = (MIR_insn_t*)mem_realloc(
+            mt->side_root_backedge_reloads,
+            (size_t)next_capacity * sizeof(MIR_insn_t), MEM_CAT_JS_RUNTIME);
+        mt->side_root_backedge_reload_capacity = next_capacity;
+    }
+    mt->side_root_backedge_reloads[mt->side_root_backedge_reload_count++] = reload;
 }
 
 int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value) {
@@ -256,7 +285,12 @@ void jm_root_live_scope_vars(JsMirTranspiler* mt) {
         void* item = NULL;
         while (hashmap_iter(mt->var_scopes[depth], &iter, &item)) {
             JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
-            jm_update_gc_root_slot(mt, &entry->var);
+            // A rooted variable's slot is updated at every defining MIR
+            // instruction. Republishing every unchanged lexical before every
+            // call inflated large loop bodies beyond backend branch reach.
+            if (entry->var.root_slot < 0) {
+                jm_update_gc_root_slot(mt, &entry->var);
+            }
         }
     }
 }
@@ -302,6 +336,12 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     }
     mt->side_root_binding_count = 0;
     mt->side_root_binding_capacity = 0;
+    if (mt->side_root_backedge_reloads) {
+        mem_free(mt->side_root_backedge_reloads);
+        mt->side_root_backedge_reloads = NULL;
+    }
+    mt->side_root_backedge_reload_count = 0;
+    mt->side_root_backedge_reload_capacity = 0;
     if (mt->side_env_bindings) {
         mem_free(mt->side_env_bindings);
         mt->side_env_bindings = NULL;
@@ -309,6 +349,7 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     mt->side_env_binding_count = 0;
     mt->side_env_binding_capacity = 0;
     mt->side_root_next = 0;
+    mt->side_root_bits_scratch = 0;
     mt->side_frame_return_type = return_type;
     mt->side_frame_item_return = item_return;
     mt->side_frame_scalar_return_mode = scalar_return_mode;
@@ -470,6 +511,17 @@ static void jm_epilogue_call_void(JsMirTranspiler* mt, const char* name,
 
 void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
     if (!mt || !mt->side_frame_active) return;
+    // The precise-root frame size is only final after lowering the whole
+    // function. Patch loop reloads now so their bases survive calls across a
+    // back-edge without carrying a fragile allocator register around the loop.
+    int64_t root_frame_bytes =
+        (int64_t)mt->side_root_next * (int64_t)sizeof(uint64_t);
+    for (int i = 0; i < mt->side_root_backedge_reload_count; i++) {
+        MIR_insn_t reload = mt->side_root_backedge_reloads[i];
+        if (reload && reload->nops >= 3 && reload->ops[2].mode == MIR_OP_INT) {
+            reload->ops[2].u.i = root_frame_bytes;
+        }
+    }
     jm_emit_label(mt, mt->side_frame_return_label);
     for (int i = 0; i < mt->side_env_binding_count; i++) {
         MIR_type_t arg_type = MIR_T_P;
@@ -516,6 +568,12 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
     }
     mt->side_root_binding_count = 0;
     mt->side_root_binding_capacity = 0;
+    if (mt->side_root_backedge_reloads) {
+        mem_free(mt->side_root_backedge_reloads);
+        mt->side_root_backedge_reloads = NULL;
+    }
+    mt->side_root_backedge_reload_count = 0;
+    mt->side_root_backedge_reload_capacity = 0;
     if (mt->side_env_bindings) {
         mem_free(mt->side_env_bindings);
         mt->side_env_bindings = NULL;
@@ -754,11 +812,11 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             }
         }
         if (!existing) existing = jm_find_var(mt, name);
-        if (existing) {
-            // Preserve env slot info from predeclared TDZ/hoisted bindings so
-            // closures keep observing the same lexical cell after initialization.
-            if (existing->from_env &&
-                (existing_in_target_scope || existing->tdz_active || existing->from_hoist)) {
+        if (existing && existing_in_target_scope) {
+            // A fresh lexical shadow may share an identifier with an outer
+            // capture, but it is a distinct binding and must not inherit that
+            // binding's environment, TDZ, or const metadata.
+            if (existing->from_env) {
                 entry.var.from_env = true;
                 entry.var.env_slot = existing->env_slot;
                 entry.var.env_reg = existing->env_reg;
@@ -774,8 +832,9 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             if (existing->from_catch_param) {
                 entry.var.from_catch_param = true;
             }
-            if (existing->in_scope_env &&
-                (existing_in_target_scope || existing->tdz_active || existing->from_hoist)) {
+            entry.var.binding_start = existing->binding_start;
+            entry.var.binding_end = existing->binding_end;
+            if (existing->in_scope_env) {
                 entry.var.in_scope_env = true;
                 entry.var.scope_env_slot = existing->scope_env_slot;
                 entry.var.scope_env_reg = existing->scope_env_reg;

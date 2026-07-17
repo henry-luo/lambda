@@ -1,0 +1,8 @@
+console: visible 2
+timer-monotonic: true
+timer-spaced: true
+time-origin: true
+epoch-consistent: true
+raf-monotonic: true
+raf-shared-origin: true
+CONSOLE_PERF_DONE

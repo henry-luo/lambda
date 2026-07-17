@@ -449,6 +449,7 @@ extern "C" void js_dynfunc_cache_reset(void);
 extern "C" void js_canvas_cleanup(void);
 extern "C" void js_cjs_metadata_reset(void);
 extern "C" void js_fetch_reset(void);
+extern "C" void js_history_reset(void);
 
 extern "C" void js_batch_reset() {
     // increment epoch to invalidate cached heap objects
@@ -557,6 +558,7 @@ extern "C" void js_batch_reset() {
     // fetch() Response bodies live in a static side table so promise methods can
     // read them later; batch cleanup must release the table before memtrack.
     js_fetch_reset();
+    js_history_reset();
     extern void js_string_decoder_reset(void);
     js_string_decoder_reset();
     extern void js_assert_reset(void);
@@ -693,6 +695,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // fetch() Response bodies live in a static side table so promise methods can
     // read them later; batch cleanup must release the table before memtrack.
     js_fetch_reset();
+    js_history_reset();
     extern void js_string_decoder_reset(void);
     js_string_decoder_reset();
     extern void js_assert_reset(void);

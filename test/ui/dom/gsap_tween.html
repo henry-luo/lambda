@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    #box { width: 100px; height: 40px; opacity: 1; background: #58a; }
+  </style>
+</head>
+<body>
+  <button id="start">start tween</button>
+  <div id="box">box</div>
+  <script src="../../js/gsap.min.js"></script>
+  <script>
+    document.getElementById('start').addEventListener('click', function () {
+      gsap.to('#box', {
+        opacity: 0.25,
+        duration: 0.06,
+        onComplete: function () { gsap.ticker.sleep(); }
+      });
+    });
+  </script>
+</body>
+</html>

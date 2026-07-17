@@ -415,7 +415,13 @@ static void jm_count_lexical_binding_name_for_slot(JsAstNode* node, const char* 
 static bool jm_parent_has_duplicate_lexical_slot_name(JsFuncCollected* parent, const char* name) {
     if (!parent || !parent->node || !parent->node->body || !name) return false;
     int count = 0;
+    for (JsAstNode* param = parent->node->params; param; param = param->next) {
+        jm_count_lexical_pattern_name_for_slot(param, name, &count);
+    }
     jm_count_lexical_binding_name_for_slot(parent->node->body, name, &count);
+    // A nested lexical may shadow a parameter while a child closure captures
+    // the lexical. Treat both declarations as distinct env cells or callback
+    // writeback overwrites the parameter after the block exits.
     return count > 1;
 }
 
@@ -4551,6 +4557,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 // Mark captures
                 for (int ci = 0; ci < fc->capture_count; ci++) {
+                    if (fc->captures[ci].is_let_const ||
+                        strchr(fc->captures[ci].scope_env_key, '@') != NULL) {
+                        // A ranged key came from the resolver and can identify
+                        // a nearer var binding; do not overwrite it from a
+                        // same-named lexical in the ancestor-name fallback.
+                        continue;
+                    }
                     JsNameSetEntry lookup;
                     memset(&lookup, 0, sizeof(lookup));
                     snprintf(lookup.name, sizeof(lookup.name), "%s", fc->captures[ci].name);
@@ -4776,6 +4789,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             child->captures[ci].scope_env_key[0] ? child->captures[ci].scope_env_key : cap_name);
                         parent->captures[parent->capture_count].scope_env_slot = -1;
                         parent->captures[parent->capture_count].grandparent_slot = -1;
+                        parent->captures[parent->capture_count].parent_env_link_slot_override = -1;
                         parent->captures[parent->capture_count].is_let_const = child->captures[ci].is_let_const;
                         parent->captures[parent->capture_count].is_const = child->captures[ci].is_const;
                         // A child closure can reference its enclosing named function
@@ -4787,8 +4801,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         parent->captures[parent->capture_count].force_env_capture = child->captures[ci].force_env_capture;
                         parent->capture_count++;
                         changed = true;
-                        log_debug("js-mir: propagated capture '%s' from '%s' to parent '%s'",
-                            cap_name, child->name, parent->name);
+                        log_debug("js-mir: propagated capture '%s' [%s] from '%s' to parent '%s'",
+                            cap_name, parent->captures[parent->capture_count - 1].scope_env_key,
+                            child->name, parent->name);
                     }
                     hashmap_free(parent_own);
                 }
@@ -5338,6 +5353,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         JsFuncCollected* parent_fc = &mt->func_entries[fi];
         parent_fc->has_parent_env_link = false;
         parent_fc->parent_env_link_uses_grandparent = false;
+        parent_fc->has_immediate_parent_env_link = false;
+        parent_fc->immediate_parent_env_link_slot = -1;
         if (!parent_fc->has_scope_env || parent_fc->scope_env_count == 0) continue;
         if (parent_fc->reuse_parent_env) continue;  // Phase 1.7b already handles pure-transitive
         if (parent_fc->capture_count == 0) continue; // no captures = no transitive vars possible
@@ -5501,6 +5518,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         fc->reuse_env_slot_count = 0;
         fc->has_parent_env_link = true;
         fc->parent_env_link_uses_grandparent = true;
+        // A mixed parent needs two distinct links: the inherited link preserves
+        // transitive captures, while this direct link keeps parent-local cells
+        // shared with sibling closures instead of copying stale values.
+        fc->has_immediate_parent_env_link = true;
+        fc->immediate_parent_env_link_slot = fc->scope_env_count;
+        snprintf(fc->scope_env_names[fc->scope_env_count], 64, "__immediate_parent_env__");
+        fc->scope_env_count++;
         int parent_env_link_slot = fc->scope_env_count;
         snprintf(fc->scope_env_names[fc->scope_env_count], 64, "__parent_env__");
         fc->scope_env_count++;
@@ -5512,12 +5536,22 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (strcmp(child->captures[k].name, fc->scope_env_names[s]) == 0) {
                         child->captures[k].scope_env_slot = s;
                         child->captures[k].grandparent_slot = -1;
+                        child->captures[k].parent_env_link_slot_override = -1;
                         for (int c = 0; c < fc->capture_count; c++) {
-                            if (strcmp(child->captures[k].name, fc->captures[c].name) == 0 &&
-                                fc->captures[c].grandparent_slot >= 0) {
-                                child->captures[k].grandparent_slot = fc->captures[c].grandparent_slot;
-                                break;
+                            if (strcmp(child->captures[k].name, fc->captures[c].name) != 0) continue;
+                            if (fc->captures[c].grandparent_slot >= 0) {
+                                child->captures[k].grandparent_slot =
+                                    fc->captures[c].grandparent_slot;
+                            } else if (fc->captures[c].scope_env_slot >= 0) {
+                                // This binding belongs to the immediate mixed
+                                // parent. A copied compact slot would freeze its
+                                // pre-assignment value and split sibling closures.
+                                child->captures[k].grandparent_slot =
+                                    fc->captures[c].scope_env_slot;
+                                child->captures[k].parent_env_link_slot_override =
+                                    fc->immediate_parent_env_link_slot;
                             }
+                            break;
                         }
                         break;
                     }
@@ -5528,14 +5562,39 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // have already marked them as grandparent reads before 1.7d changed
             // this function from parent-env reuse to an owned compact env.
             if (child->has_scope_env && child->scope_env_names) {
+                // A child that still reuses its parent has no independent cell
+                // layout: its children must follow this newly owned environment.
+                // Remapping them through the child's pre-reuse layout aliases
+                // unrelated siblings when the slot orders differ.
+                JsFuncCollected* capture_env_owner = child->reuse_parent_env ? fc : child;
                 for (int gi = 0; gi < mt->func_count; gi++) {
                     JsFuncCollected* grandchild = &mt->func_entries[gi];
                     if (grandchild->parent_index != ci) continue;
                     for (int gk = 0; gk < grandchild->capture_count; gk++) {
-                        for (int s = 0; s < child->scope_env_count; s++) {
-                            if (strcmp(grandchild->captures[gk].name, child->scope_env_names[s]) == 0) {
+                        for (int s = 0; s < capture_env_owner->scope_env_count; s++) {
+                            if (strcmp(grandchild->captures[gk].name,
+                                    capture_env_owner->scope_env_names[s]) == 0) {
                                 grandchild->captures[gk].scope_env_slot = s;
                                 grandchild->captures[gk].grandparent_slot = -1;
+                                grandchild->captures[gk].parent_env_link_slot_override = -1;
+                                if (capture_env_owner == child) {
+                                    for (int c = 0; c < child->capture_count; c++) {
+                                        if (strcmp(grandchild->captures[gk].name,
+                                                child->captures[c].name) == 0 &&
+                                            child->captures[c].scope_env_slot >= 0 &&
+                                            child->captures[c].grandparent_slot < 0) {
+                                            // A capture owned by the mixed direct
+                                            // parent must not become a stale copy
+                                            // in this compact env (Splide's sibling
+                                            // transition callback assignment).
+                                            grandchild->captures[gk].grandparent_slot =
+                                                child->captures[c].scope_env_slot;
+                                            grandchild->captures[gk].parent_env_link_slot_override =
+                                                child->immediate_parent_env_link_slot;
+                                            break;
+                                        }
+                                    }
+                                }
                                 break;
                             }
                         }
@@ -6463,6 +6522,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
+                    jm_emit_set_function_name(mt, fn_item, fn->name->chars,
+                        fc->formal_length);
+                    jm_emit_set_function_source(mt, fn_item, fn);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));
@@ -6664,10 +6726,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     jm_call_void_2(mt, "js_mark_non_configurable",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, early_pt_key));
+                    JsAstNode* heritage = cls_node->superclass ? cls_node->superclass :
+                        ((ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
+                    JsClassEntry* static_superclass = jm_matching_static_superclass(ce, heritage);
                     // Inherit static methods from parent classes (base-first, then own overrides).
                     JsClassEntry* static_chain[32];
                     int static_chain_length = 0;
-                    for (JsClassEntry* parent = ce->superclass;
+                    for (JsClassEntry* parent = static_superclass;
                          parent && static_chain_length < 32; parent = parent->superclass) {
                         static_chain[static_chain_length++] = parent;
                     }
@@ -6693,7 +6758,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_emit_class_method_install(mt, &policy);
                     }
 
-                    jm_emit_class_constructor_property(mt, cls_obj, ce, false);
+                    // The stored constructor may be invoked through a runtime
+                    // class value; preserve its home class for lexical super().
+                    jm_emit_class_constructor_property(mt, cls_obj, ce, true);
 
                     // Create __instance_proto__ with all instance methods
                     {
@@ -6703,7 +6770,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                         // Set up prototype's __proto__ chain for instanceof on parent classes
                         {
-                            JsClassEntry* sc = ce->superclass;
+                            JsClassEntry* sc = static_superclass;
                             MIR_reg_t last_proto = proto_obj;
                             if (sc) {
                                 // Link prototype to parent's actual .prototype for identity correctness
@@ -6725,7 +6792,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 ctor_super_val = super_val;
                             }
                             // v20: Handle builtin superclass (Error, etc.) when no JsClassEntry
-                            if (!ce->superclass && ce->node && ce->node->superclass &&
+                            if (!static_superclass && ce->node && ce->node->superclass &&
                                 ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
                                 JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
                                 if (super_id->name) {
@@ -6774,7 +6841,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 }
                             }
                             // v21: Handle member-expression superclass in class expressions
-                            if (!ce->superclass && ce->node && ce->node->superclass &&
+                            if (!static_superclass && ce->node && ce->node->superclass &&
                                 ce->node->superclass->node_type != JS_AST_NODE_IDENTIFIER &&
                                                                 ce->node->superclass->node_type != JS_AST_NODE_NULL &&
                                                                 !(ce->node->superclass->node_type == JS_AST_NODE_LITERAL &&
@@ -6795,8 +6862,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_proto));
                                 ctor_super_val = super_val;
                             }
-                            JsAstNode* heritage = cls_node->superclass ? cls_node->superclass :
-                                ((ce->node && ce->node->superclass) ? ce->node->superclass : NULL);
                             bool heritage_is_null = heritage && (heritage->node_type == JS_AST_NODE_NULL ||
                                 (heritage->node_type == JS_AST_NODE_LITERAL &&
                                  ((JsLiteralNode*)heritage)->literal_type == JS_LITERAL_NULL));

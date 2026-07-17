@@ -30,6 +30,7 @@
 #include "../jube/jube_interface.h"
 #include "../../lib/base64.h"
 #include "../../lib/escape.h"
+#include "../../lib/log.h"
 #include "../../lib/utf.h"
 
 extern "C" Item js_to_property_key(Item key);
@@ -1470,9 +1471,16 @@ extern "C" Item js_process_hrtime(Item prev) {
     return arr;
 }
 
-// performance.now() — returns milliseconds (monotonic, high-resolution)
+// performance clock — one origin per isolated JS heap/document.
 
-extern "C" Item js_performance_now(void) {
+static __thread uint64_t js_performance_origin_epoch = (uint64_t)-1;
+static __thread double js_performance_origin_monotonic_ms = 0.0;
+static __thread double js_performance_origin_epoch_ms = 0.0;
+static __thread bool js_performance_frame_clock_active = false;
+static __thread double js_performance_frame_clock_ms = 0.0;
+
+extern "C" double js_performance_monotonic_now_ms(void) {
+    if (js_performance_frame_clock_active) return js_performance_frame_clock_ms;
 #ifdef __APPLE__
     static mach_timebase_info_data_t timebase = {0, 0};
     if (timebase.denom == 0) {
@@ -1480,13 +1488,91 @@ extern "C" Item js_performance_now(void) {
     }
     uint64_t ticks = mach_absolute_time();
     double ns = (double)ticks * (double)timebase.numer / (double)timebase.denom;
-    double ms = ns / 1e6;
+    return ns / 1e6;
 #else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 #endif
-    return push_d(ms);
+}
+
+extern "C" void js_performance_frame_clock_begin(double monotonic_ms) {
+    js_performance_frame_clock_ms = monotonic_ms;
+    js_performance_frame_clock_active = true;
+}
+
+extern "C" void js_performance_frame_clock_end(void) {
+    js_performance_frame_clock_active = false;
+}
+
+static double js_performance_epoch_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+}
+
+static void js_performance_ensure_origin(void) {
+    if (js_performance_origin_epoch == js_heap_epoch) return;
+    // A heap epoch represents an isolated script/document; capturing both
+    // clocks together keeps timeOrigin + now() consistent with Date.now().
+    js_performance_origin_monotonic_ms = js_performance_monotonic_now_ms();
+    js_performance_origin_epoch_ms = js_performance_epoch_now_ms();
+    js_performance_origin_epoch = js_heap_epoch;
+}
+
+extern "C" double js_performance_monotonic_to_relative(double monotonic_ms) {
+    js_performance_ensure_origin();
+    return monotonic_ms - js_performance_origin_monotonic_ms;
+}
+
+extern "C" double js_performance_now_ms(void) {
+    return js_performance_monotonic_to_relative(js_performance_monotonic_now_ms());
+}
+
+extern "C" double js_performance_time_origin_ms(void) {
+    js_performance_ensure_origin();
+    return js_performance_origin_epoch_ms;
+}
+
+extern "C" Item js_performance_now(void) {
+    return push_d(js_performance_now_ms());
+}
+
+static Item js_performance_noop_1(Item unused) {
+    (void)unused;
+    return ItemNull;
+}
+
+static Item js_performance_noop_3(Item name, Item start_or_options, Item end_mark) {
+    (void)name;
+    (void)start_or_options;
+    (void)end_mark;
+    return ItemNull;
+}
+
+static Item js_performance_empty_entries(void) {
+    return js_array_new(0);
+}
+
+static Item js_performance_empty_entries_2(Item name, Item type) {
+    (void)name;
+    (void)type;
+    return js_array_new(0);
+}
+
+static Item js_performance_entries_by_type(Item type_item) {
+    Item entries = js_array_new(0);
+    Item type_string = js_to_string(type_item);
+    String* type = get_type_id(type_string) == LMD_TYPE_STRING ? it2s(type_string) : NULL;
+    if (!type || type->len != 10 || memcmp(type->chars, "navigation", 10) != 0) {
+        return entries;
+    }
+    Item navigation = js_new_object();
+    js_property_set(navigation, make_string_item("type"), make_string_item("navigate"));
+    js_property_set(navigation, make_string_item("transferSize"), (Item){.item = i2it(1)});
+    js_property_set(navigation, make_string_item("deliveryType"), make_string_item(""));
+    js_array_push(entries, navigation);
+    return entries;
 }
 
 static Item js_performance_observer_string(const char* str) {
@@ -1805,9 +1891,18 @@ static void js_date_format_iso_year(char* buf, size_t size, int year) {
 }
 
 extern "C" Item js_date_now(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+    double ms;
+    if (js_performance_frame_clock_active) {
+        // Date.now() must advance with the same synthetic frame clock as rAF;
+        // animation tickers commonly use epoch time instead of performance.now().
+        js_performance_ensure_origin();
+        ms = js_performance_origin_epoch_ms +
+            (js_performance_frame_clock_ms - js_performance_origin_monotonic_ms);
+    } else {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+    }
     ms = js_date_time_clip(ms);
     return (Item){.item = i2it((int64_t)ms)};
 }
@@ -1824,6 +1919,12 @@ static void js_date_set_instance_prototype(Item obj) {
         Item proto = js_property_get(date_ctor, (Item){.item = s2it(heap_create_name("prototype", 9))});
         if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(obj, proto);
     }
+}
+
+static Item js_date_get_time_value(Item date_obj, bool* found) {
+    if (found) *found = false;
+    if (get_type_id(date_obj) != LMD_TYPE_MAP) return ItemNull;
+    return js_map_get_fast_ext(date_obj.map, "__time__", 8, found);
 }
 
 extern "C" Item js_date_new(void) {
@@ -1910,7 +2011,7 @@ extern "C" Item js_date_new_from(Item value) {
     } else if (tid == LMD_TYPE_MAP) {
         // Date object: extract _time from the other Date
         bool has_time = false;
-        Item other_time = js_map_get_fast_ext(value.map, "__time__", 8, &has_time);
+        Item other_time = js_date_get_time_value(value, &has_time);
         if (has_time && (get_type_id(other_time) == LMD_TYPE_FLOAT || get_type_id(other_time) == LMD_TYPE_INT || get_type_id(other_time) == LMD_TYPE_INT64)) {
             double ms = js_date_number_to_double(other_time);
             store_time(ms);
@@ -2000,9 +2101,7 @@ extern "C" Item js_date_utc(Item args_array) {
 extern "C" Item js_date_method(Item date_obj, int method_id) {
     // extract epoch-ms from the _time property
     bool has_time = false;
-    Item time_val = get_type_id(date_obj) == LMD_TYPE_MAP
-        ? js_map_get_fast_ext(date_obj.map, "__time__", 8, &has_time)
-        : ItemNull;
+    Item time_val = js_date_get_time_value(date_obj, &has_time);
 
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
@@ -2158,11 +2257,14 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     }
 
     Item key = (Item){.item = s2it(heap_create_name("__time__"))};
-    Item time_val = js_property_get(date_obj, key);
+    bool has_time = false;
+    // Date's internal slot is intentionally hidden from ordinary property lookup;
+    // setters must read the same own storage used by Date getters and constructors.
+    Item time_val = js_date_get_time_value(date_obj, &has_time);
 
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
-    if (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64) {
+    if (!has_time || (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64)) {
         if (method_id == 43) { // valueOf — non-Date: check own/prototype valueOf first
             // The transpiler unconditionally routes *.valueOf() here, so we must
             // handle non-Date objects by looking up their own valueOf function.
@@ -5935,10 +6037,16 @@ static bool has_format_specifiers(String* s) {
     return false;
 }
 
-extern "C" void js_console_log_multi(Item* args, int argc) {
+typedef enum JsConsoleLevel {
+    JS_CONSOLE_DEBUG,
+    JS_CONSOLE_INFO,
+    JS_CONSOLE_WARN,
+    JS_CONSOLE_ERROR,
+} JsConsoleLevel;
+
+static int js_console_format_args(Item* args, int argc, char* buf, int capacity) {
     // if first arg is a string with format specifiers and there are more args,
     // use util.format-style substitution (matches Node.js console.log behavior)
-    char buf[4096];
     int pos = 0;
     if (argc >= 2 && get_type_id(args[0]) == LMD_TYPE_STRING &&
         has_format_specifiers(it2s(args[0]))) {
@@ -5950,25 +6058,61 @@ extern "C" void js_console_log_multi(Item* args, int argc) {
         if (get_type_id(formatted) == LMD_TYPE_STRING) {
             String* s = it2s(formatted);
             if (s && s->len > 0) {
-                int copy = (int)s->len < (int)sizeof(buf) - 1 ? (int)s->len : (int)sizeof(buf) - 1;
+                int copy = (int)s->len < capacity - 1 ? (int)s->len : capacity - 1;
                 memcpy(buf, s->chars, copy);
                 pos = copy;
             }
         }
     } else {
         for (int i = 0; i < argc; i++) {
-            if (i > 0 && pos < (int)sizeof(buf) - 1) buf[pos++] = ' ';
+            if (i > 0 && pos < capacity - 1) buf[pos++] = ' ';
             Item str = js_to_string(args[i]);
             String* s = it2s(str);
             if (s && s->len > 0) {
-                int copy = (int)s->len < (int)sizeof(buf) - 1 - pos ? (int)s->len : (int)sizeof(buf) - 1 - pos;
+                int copy = (int)s->len < capacity - 1 - pos ? (int)s->len : capacity - 1 - pos;
                 memcpy(buf + pos, s->chars, copy);
                 pos += copy;
             }
         }
     }
-    if (pos < (int)sizeof(buf) - 1) buf[pos++] = '\n';
-    js_console_write_to_stdout(buf, pos);
+    return pos;
+}
+
+static void js_console_emit(Item* args, int argc, JsConsoleLevel level) {
+    char buf[4096];
+    int message_len = js_console_format_args(args, argc, buf, (int)sizeof(buf));
+
+    // Browser documents and command-line scripts share one formatter so their
+    // captured output cannot drift from the diagnostic log representation.
+    switch (level) {
+        case JS_CONSOLE_DEBUG: log_debug("js-console: %.*s", message_len, buf); break;
+        case JS_CONSOLE_INFO: log_info("js-console: %.*s", message_len, buf); break;
+        case JS_CONSOLE_WARN: log_warn("js-console: %.*s", message_len, buf); break;
+        case JS_CONSOLE_ERROR: log_error("js-console: %.*s", message_len, buf); break;
+    }
+
+    if (message_len < (int)sizeof(buf) - 1) buf[message_len++] = '\n';
+    if (level == JS_CONSOLE_WARN || level == JS_CONSOLE_ERROR) {
+        js_console_write_to_stderr(buf, message_len);
+    } else {
+        js_console_write_to_stdout(buf, message_len);
+    }
+}
+
+extern "C" void js_console_log_multi(Item* args, int argc) {
+    js_console_emit(args, argc, JS_CONSOLE_INFO);
+}
+
+extern "C" void js_console_warn_multi(Item* args, int argc) {
+    js_console_emit(args, argc, JS_CONSOLE_WARN);
+}
+
+extern "C" void js_console_error_multi(Item* args, int argc) {
+    js_console_emit(args, argc, JS_CONSOLE_ERROR);
+}
+
+extern "C" void js_console_debug_multi(Item* args, int argc) {
+    js_console_emit(args, argc, JS_CONSOLE_DEBUG);
 }
 
 // =============================================================================
@@ -15977,17 +16121,27 @@ extern "C" Item js_get_global_this() {
                 js_new_function((void*)js_btoa, 1));
         }
 
-        // globalThis.performance (basic stub with now())
+        // globalThis.performance shares the document clock used by rAF/events.
         {
             extern Item js_performance_now(void);
             extern Item js_performance_observer_new(Item callback);
             Item perf = js_new_object();
             js_property_set(perf, make_string_item("now"),
                 js_new_function((void*)js_performance_now, 0));
-            // timeOrigin: process start time (use 0 for simplicity)
+            js_property_set(perf, make_string_item("mark"),
+                js_new_function((void*)js_performance_noop_1, 1));
+            js_property_set(perf, make_string_item("measure"),
+                js_new_function((void*)js_performance_noop_3, 3));
+            js_property_set(perf, make_string_item("getEntries"),
+                js_new_function((void*)js_performance_empty_entries, 0));
+            js_property_set(perf, make_string_item("getEntriesByName"),
+                js_new_function((void*)js_performance_empty_entries_2, 2));
+            js_property_set(perf, make_string_item("getEntriesByType"),
+                js_new_function((void*)js_performance_entries_by_type, 1));
             double* origin = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *origin = 0.0;
+            *origin = js_performance_time_origin_ms();
             js_property_set(perf, make_string_item("timeOrigin"), lambda_float_ptr_to_item(origin));
+            js_property_set(perf, make_string_item("timing"), js_new_object());
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
             Item perf_observer = js_new_function(

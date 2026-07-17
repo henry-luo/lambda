@@ -143,6 +143,7 @@ int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var);
 void jm_root_live_scope_vars(JsMirTranspiler* mt);
 void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg);
+void jm_emit_loop_backedge_frame_reload(JsMirTranspiler* mt);
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
 MIR_reg_t jm_emit_get_value(JsMirTranspiler* mt, const JsMirReference* ref);
 MIR_reg_t jm_emit_put_value(JsMirTranspiler* mt, const JsMirReference* ref, MIR_reg_t value);
@@ -307,6 +308,7 @@ MIR_reg_t jm_transpile_array_get_inline(JsMirTranspiler* mt, MIR_reg_t arr_reg,
                                                 MIR_reg_t idx_native,
                                                 MIR_reg_t h_items = 0, MIR_reg_t h_len = 0);;
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node);
+JsClassEntry* jm_matching_static_superclass(JsClassEntry* ce, JsAstNode* heritage);
 Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node);
 
 // --- AST constant folding (Tune3 §3) ---

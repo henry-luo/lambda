@@ -1,0 +1,9 @@
+{
+  "name": "Sortable.js reorders items through the native mouse event funnel",
+  "html": "test/ui/dom/sortable_drag.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "mouse_drag", "target": {"selector": "#sort-one"}, "dx": 0, "dy": 40, "button": 0},
+    {"type": "assert_text", "target": {"selector": "#order"}, "equals": "two,three,one"}
+  ]
+}

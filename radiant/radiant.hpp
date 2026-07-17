@@ -138,6 +138,8 @@ void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* po
 void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc, Pool* pool,
                                        Url* base_url, DocumentScriptPhaseTiming* timing);
 void script_runner_set_retain_js_state(bool retain);
+// Pump callbacks against the retained document runtime between host input turns.
+bool radiant_pump_js_event_loop(struct UiContext* uicon, int wait_ms);
 void script_runner_set_execute_external_scripts(bool execute);
 struct JsMirCache;
 void script_runner_set_js_mir_cache(JsMirCache* cache);

@@ -144,6 +144,8 @@ struct JubeHostValueAPI {
     Item (*new_object)(void);
     Item (*array_new)(int capacity);
     Item (*array_push)(Item array, Item value);
+    int64_t (*array_length)(Item array);
+    Item (*array_get)(Item array, int64_t index);
     Item (*property_get)(Item object, Item key);
     Item (*property_set)(Item object, Item key, Item value);
 };
@@ -163,6 +165,12 @@ struct JubeHostScriptAPI {
     int (*check_exception)(void);
     bool (*is_truthy)(Item value);
     Item (*intrinsic_prototype_for_class)(int class_id);
+    Item (*make_number)(double value);
+    double (*get_number)(Item value);
+    Item (*date_new_from)(Item value);
+    Item (*date_method)(Item date, int method_id);
+    int (*class_id)(Item value);
+    Item (*to_string)(Item value);
 };
 
 struct JubeHostDomAPI {

@@ -11,6 +11,7 @@
 #include "js_dom.h"
 #include "js_dom_events.h"
 #include "js_dom_selection.h"
+#include "js_history.h"
 #include "js_xhr.h"
 #include "js_cssom.h"
 #include "js_runtime.h"
@@ -24,6 +25,7 @@
 #include "../mark_builder.hpp"
 #include "../mark_editor.hpp"
 #include "../mark_reader.hpp"
+#include "../module/radiant/radiant_input_value.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/mem_factory.h"
@@ -91,6 +93,11 @@ static const char* js_dom_to_attr_cstr(Item value) {
     return s ? s : "";
 }
 
+static const char* js_dom_to_dom_string_cstr(Item value) {
+    Item string_value = js_to_string(value);
+    return fn_to_cstr(string_value);
+}
+
 extern "C" const char* js_dom_to_attribute_cstr(Item value) {
     return js_dom_to_attr_cstr(value);
 }
@@ -126,6 +133,7 @@ static bool js_dom_node_is_connected(DomNode* node);
 static DomElement* _nearest_select_for_node(DomNode* node);
 static void _select_refresh_cached_selected_options_for_node(DomNode* node);
 static void _select_ask_for_reset(DomElement* sel);
+static bool _get_selectedness(DomElement* opt);
 
 #define JS_DOM_RICH_HISTORY_CAP 64
 #define JS_DOM_RICH_HISTORY_PATH_CAP 32
@@ -262,9 +270,6 @@ extern "C" bool js_dom_is_host_driven_loop(void) {
 // HTML spec, even when the foreign-doc dispatcher temporarily swaps them in
 // as _js_current_document.
 static __thread DomDocument* _js_main_document = nullptr;
-static void js_dom_install_window_location_history_globals(void);
-static bool js_dom_apply_location_assignment(DomDocument* doc,
-                                             const char* next_url);
 
 static Item js_font_face_set_ready_then(Item callback) {
     if (get_type_id(callback) == LMD_TYPE_FUNC) {
@@ -403,10 +408,16 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     doc->js_mutation_sequence++;
 
     bool has_pending_structural_record = false;
-    if (kind == DOM_JS_MUTATION_UNKNOWN && !target && !parent &&
-        doc->js_mutation_record_count > 0) {
+    if (doc->js_mutation_record_count > 0) {
         DomJsMutationRecord* last = &doc->js_mutation_records[doc->js_mutation_record_count - 1];
-        has_pending_structural_record = last->sequence == doc->js_mutation_sequence;
+        bool legacy_flush = kind == DOM_JS_MUTATION_UNKNOWN && !target && !parent;
+        bool same_detail = last->kind == kind && last->target == target &&
+                           last->parent == parent;
+        // dom_pre_remove/dom_post_insert publish the precise structural shape
+        // before the common notifier; do not record that same mutation twice.
+        has_pending_structural_record =
+            last->sequence == doc->js_mutation_sequence &&
+            (legacy_flush || same_detail);
     }
 
     if (!has_pending_structural_record) {
@@ -1213,6 +1224,9 @@ static Item expando_get_or_create_map(DomNode* node) {
     Item m = js_new_object();
     _expando_table[first_empty].key = node;
     _expando_table[first_empty].map = m;
+    // DOM nodes retain expando maps outside the JS object graph; rooting the
+    // side-table slot prevents a collection from recycling live library state.
+    heap_register_gc_root(&_expando_table[first_empty].map.item);
     return m;
 }
 
@@ -1224,6 +1238,20 @@ static bool expando_map_has_key(Item exp_map, Item key) {
     // Deleted expando entries leave shape tombstones behind; presence checks
     // must use the JS own-slot kernel, not raw shape lookup.
     return js_ordinary_has_own(exp_map, s->chars, (int)s->len);
+}
+
+static bool expando_get_property(DomNode* node, Item key, Item* out) {
+    if (!node || !out) return false;
+    Item exp_map = expando_get_map(node);
+    if (!expando_map_has_key(exp_map, key)) return false;
+    *out = js_property_get(exp_map, key);
+    return true;
+}
+
+static void expando_set_property(DomNode* node, Item key, Item value) {
+    if (!node) return;
+    Item exp_map = expando_get_or_create_map(node);
+    if (exp_map.item != ITEM_NULL) js_property_set(exp_map, key, value);
 }
 
 static bool expando_key_is_engine_internal(const char* name, int name_len) {
@@ -1279,6 +1307,11 @@ extern "C" Item js_dom_expando_own_property_names(Item obj) {
 }
 
 static void expando_reset() {
+    for (int i = 0; i < EXPANDO_TABLE_SIZE; i++) {
+        if (_expando_table[i].key) {
+            heap_unregister_gc_root(&_expando_table[i].map.item);
+        }
+    }
     memset(_expando_table, 0, sizeof(_expando_table));
     _expando_initialized = false;
 }
@@ -1376,6 +1409,31 @@ extern "C" bool js_dom_set_event_handler_function(void* dom_elem,
 // case-insensitively matches `name`.
 static inline bool _is_tag(DomElement* elem, const char* name) {
     return elem && elem->tag_name && strcasecmp(elem->tag_name, name) == 0;
+}
+
+static bool js_dom_resolve_selector_pseudo_state(void* context,
+                                                 DomElement* elem,
+                                                 uint32_t pseudo_state) {
+    DomDocument* doc = (DomDocument*)context;
+    if (_is_tag(elem, "option") &&
+        (pseudo_state == PSEUDO_STATE_CHECKED ||
+         pseudo_state == PSEUDO_STATE_SELECTED)) {
+        // Option selectedness is live IDL state, so attribute-only selector
+        // matching makes option:checked stale after script changes .selected.
+        return _get_selectedness(elem);
+    }
+    return state_resolve_selector_pseudo_state(
+        doc ? doc->state : nullptr, elem, pseudo_state);
+}
+
+static SelectorMatcher* js_dom_create_selector_matcher(DomDocument* doc) {
+    if (!doc || !doc->pool) return nullptr;
+    SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+    if (matcher) {
+        selector_matcher_set_pseudo_state_resolver(
+            matcher, js_dom_resolve_selector_pseudo_state, doc);
+    }
+    return matcher;
 }
 
 // Returns the lowercased input `type` attribute (e.g. "checkbox", "radio",
@@ -1600,7 +1658,7 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         extern void js_dom_install_option_constructor(void);
         js_dom_install_option_constructor();
         js_dom_install_dom_parser_global();
-        js_dom_install_window_location_history_globals();
+        js_history_install_globals();
         Item global = js_get_global_this();
         js_property_set(global, js_string_key("__lambda_testdriver_key"),
             js_new_function((void*)js_dom_testdriver_key, 5));
@@ -1718,6 +1776,33 @@ extern "C" void js_dom_initialize_node_wrapper(void* dom_elem) {
     }
 }
 
+struct JsDomHtmlInterfaceEntry {
+    const char* tag_name;
+    const char* constructor_name;
+};
+
+static const JsDomHtmlInterfaceEntry s_js_dom_html_interfaces[] = {
+    {"a", "HTMLAnchorElement"},
+    {"button", "HTMLButtonElement"},
+    {"form", "HTMLFormElement"},
+    {"input", "HTMLInputElement"},
+    {"option", "HTMLOptionElement"},
+    {"select", "HTMLSelectElement"},
+    {"textarea", "HTMLTextAreaElement"},
+};
+
+static const char* js_dom_html_interface_name(DomElement* elem) {
+    if (!elem || !elem->tag_name || elem->tag_name[0] == '#') return nullptr;
+    int count = (int)(sizeof(s_js_dom_html_interfaces) /
+        sizeof(s_js_dom_html_interfaces[0]));
+    for (int i = 0; i < count; i++) {
+        if (strcasecmp(elem->tag_name, s_js_dom_html_interfaces[i].tag_name) == 0) {
+            return s_js_dom_html_interfaces[i].constructor_name;
+        }
+    }
+    return nullptr;
+}
+
 extern "C" Item js_dom_get_prototype_value(Item obj) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(obj);
     const char* ctor_name = "Node";
@@ -1728,8 +1813,10 @@ extern "C" Item js_dom_get_prototype_value(Item obj) {
         } else {
             // HTML DOM wrappers need HTMLElement as their immediate prototype so
             // browser-library instanceof checks walk HTMLElement -> Element -> Node.
-            ctor_name = (elem && elem->tag_name && elem->tag_name[0] != '#')
-                ? "HTMLElement" : "Element";
+            const char* html_interface = js_dom_html_interface_name(elem);
+            ctor_name = html_interface ? html_interface :
+                ((elem && elem->tag_name && elem->tag_name[0] != '#')
+                    ? "HTMLElement" : "Element");
         }
     }
     Item global = js_get_global_this();
@@ -2087,10 +2174,10 @@ static void _refresh_live_child_collection(Item collection, DomElement* owner, i
         // decorated collections have a companion map; keep its length in sync
         // because array property reads consult it before the dense length, and
         // normal JS writes can be rejected once the slot is descriptor-backed.
-        Map* props = js_array_props(collection.array);
-        Item props_item = (Item){.map = props};
-        fn_map_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
-                   (Item){.item = i2it(collection.array->length)});
+        // A companion map can exist solely for namedItem()/constructor and
+        // therefore have no length slot; only update an actual descriptor slot.
+        _array_companion_set_int_slot(collection, "length", 6,
+                                      collection.array->length);
     }
 }
 
@@ -2111,10 +2198,8 @@ static void _refresh_live_form_collection(Item collection, LiveFormCollectionEnt
         }
     }
     if (js_array_has_props(collection.array)) {
-        Map* props = js_array_props(collection.array);
-        Item props_item = (Item){.map = props};
-        fn_map_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
-                   (Item){.item = i2it(collection.array->length)});
+        _array_companion_set_int_slot(collection, "length", 6,
+                                      collection.array->length);
     }
 }
 
@@ -2151,17 +2236,15 @@ static void _refresh_live_lookup_collection(Item collection, LiveLookupCollectio
         }
     }
     if (js_array_has_props(collection.array)) {
-        Map* props = js_array_props(collection.array);
-        Item props_item = (Item){.map = props};
-        fn_map_set(props_item, (Item){.item = s2it(heap_create_name("length"))},
-                   (Item){.item = i2it(collection.array->length)});
+        _array_companion_set_int_slot(collection, "length", 6,
+                                      collection.array->length);
     }
 }
 
 static Item _new_live_lookup_collection(DomDocument* doc, DomElement* root,
                                         int kind, bool include_root,
                                         Item query_item, const char* ctor_name) {
-    const char* query = fn_to_cstr(query_item);
+    const char* query = js_dom_to_dom_string_cstr(query_item);
     if (!query) return ItemNull;
     Item collection = js_array_new(0);
     _register_live_lookup_collection(collection, doc, root, kind, include_root, query);
@@ -2529,10 +2612,13 @@ extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
     if (get_type_id(prop_name) == LMD_TYPE_STRING) {
         String* s = it2s(prop_name);
         if ((s && s->len == 4 && strncmp(s->chars, "href", 4) == 0) ||
-            (s && s->len == 8 && strncmp(s->chars, "location", 8) == 0)) {
-            const char* next_url = fn_to_cstr(value);
-            DomDocument* doc = _js_current_document ? _js_current_document : _js_main_document;
-            js_dom_apply_location_assignment(doc, next_url);
+            (s && s->len == 8 && strncmp(s->chars, "location", 8) == 0) ||
+            (s && s->len == 4 && strncmp(s->chars, "hash", 4) == 0) ||
+            (s && s->len == 6 && strncmp(s->chars, "search", 6) == 0) ||
+            (s && s->len == 8 && strncmp(s->chars, "pathname", 8) == 0)) {
+            // Location writes share the module-owned same-document history
+            // machine; this prevents URL reflection and traversal from diverging.
+            js_history_set_location(value);
             return value;
         }
         if (s && s->len == 5 && strncmp(s->chars, "title", 5) == 0) {
@@ -2620,14 +2706,6 @@ static IframeContentEntry* lookup_iframe_entry(DomElement* iframe) {
     return NULL;
 }
 
-static IframeContentEntry* lookup_iframe_entry_by_doc(DomDocument* doc) {
-    if (!doc) return NULL;
-    for (int i = 0; i < s_iframe_cache_count; i++) {
-        if (s_iframe_cache[i].doc == doc) return &s_iframe_cache[i];
-    }
-    return NULL;
-}
-
 static bool doc_already_destroyed(DomDocument** docs, int doc_count, DomDocument* doc) {
     if (!doc) return true;
     for (int i = 0; i < doc_count; i++) {
@@ -2678,6 +2756,74 @@ static void reset_foreign_document_cache() {
         s_doc_with_window[i] = nullptr;
     }
     s_doc_with_window_count = 0;
+}
+
+static void js_dom_destroy_adopted_document(void* data) {
+    free_document((DomDocument*)data);
+}
+
+static bool js_dom_transfer_document_storage(DomDocument* source,
+                                             DomDocument* destination) {
+    if (!source || !destination || source == destination ||
+        source == _js_main_document) {
+        return true;
+    }
+
+    ForeignDocCacheEntry* foreign_owner = nullptr;
+    IframeContentEntry* iframe_owner = nullptr;
+    for (int i = 0; i < s_foreign_doc_cache_count; i++) {
+        if (s_foreign_doc_cache[i].doc == source &&
+            s_foreign_doc_cache[i].owns_doc) {
+            foreign_owner = &s_foreign_doc_cache[i];
+            break;
+        }
+    }
+    for (int i = 0; i < s_iframe_cache_count; i++) {
+        if (s_iframe_cache[i].doc == source && s_iframe_cache[i].owns_doc) {
+            iframe_owner = &s_iframe_cache[i];
+            break;
+        }
+    }
+    if (!foreign_owner && !iframe_owner) return true;
+
+    if (!dom_document_add_resource(destination, source,
+                                   js_dom_destroy_adopted_document)) {
+        log_error("js_dom_adopt: failed to retain source document storage");
+        return false;
+    }
+    if (foreign_owner) foreign_owner->owns_doc = false;
+    if (iframe_owner) iframe_owner->owns_doc = false;
+    return true;
+}
+
+static void js_dom_rebind_subtree_document(DomNode* node,
+                                           DomDocument* destination) {
+    if (!node || !destination) return;
+    node->id = destination->next_node_id++;
+    node->view_state_ref = nullptr;
+    if (!node->is_element()) return;
+
+    DomElement* elem = node->as_element();
+    elem->doc = destination;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        js_dom_rebind_subtree_document(child, destination);
+    }
+    if (elem->shadow_root) {
+        js_dom_rebind_subtree_document((DomNode*)elem->shadow_root, destination);
+    }
+}
+
+static bool js_dom_prepare_cross_document_insertion(DomNode* node,
+                                                    DomElement* parent) {
+    if (!node || !parent || !parent->doc) return false;
+    DomDocument* source = js_dom_node_owner_document(node);
+    DomDocument* destination = parent->doc;
+    if (!source || source == destination) return true;
+    // Adopted nodes retain allocations from their source arena. Transfer that
+    // arena's lifetime before rebinding so shutdown cannot free a live subtree.
+    if (!js_dom_transfer_document_storage(source, destination)) return false;
+    js_dom_rebind_subtree_document(node, destination);
+    return true;
 }
 
 static Item wrap_foreign_doc_owned(DomDocument* doc, bool owns_doc) {
@@ -2847,13 +2993,6 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
             }
         }
     }
-}
-
-static void reset_iframe_document_from_srcdoc(DomElement* iframe,
-                                              DomDocument* doc) {
-    DomElement* body = document_body_element(doc);
-    clear_element_children_for_navigation(body);
-    append_iframe_srcdoc_to_document(iframe, doc);
 }
 
 // Public: create a foreign HTML document, return wrapped Item.
@@ -3069,41 +3208,6 @@ static void _schedule_iframe_load(DomElement* iframe) {
 extern "C" void js_dom_after_srcdoc_set(void* dom_elem) {
     // srcdoc writes mutate an iframe's nested document asynchronously.
     _schedule_iframe_load((DomElement*)dom_elem);
-}
-
-static Url* js_dom_resolve_navigation_url(DomDocument* doc,
-                                          const char* next_url) {
-    if (!next_url || !next_url[0]) return nullptr;
-    Url* resolved = doc && doc->url
-        ? url_parse_with_base(next_url, doc->url)
-        : url_parse(next_url);
-    if (!resolved || !url_is_valid(resolved)) {
-        if (resolved) url_destroy(resolved);
-        resolved = js_dom_make_fallback_url(next_url);
-    }
-    return resolved;
-}
-
-static bool js_dom_apply_location_assignment(DomDocument* doc,
-                                             const char* next_url) {
-    if (!doc || !next_url || !next_url[0]) return false;
-    Url* resolved = js_dom_resolve_navigation_url(doc, next_url);
-    if (!resolved) return false;
-
-    if (doc->url) url_destroy(doc->url);
-    doc->url = resolved;
-
-    IframeContentEntry* iframe_entry = lookup_iframe_entry_by_doc(doc);
-    if (iframe_entry && iframe_entry->iframe) {
-        reset_iframe_document_from_srcdoc(iframe_entry->iframe, doc);
-        _schedule_iframe_load(iframe_entry->iframe);
-        log_info("js_iframe_location_assignment: navigated iframe to %s",
-                 next_url);
-        return true;
-    }
-
-    log_info("js_location_assignment: navigated document to %s", next_url);
-    return true;
 }
 
 static DomElement* js_dom_find_iframe_by_name(DomNode* node, const char* target_name) {
@@ -3401,6 +3505,58 @@ static Item js_dom_get_inline_style_wrapper(DomElement* elem) {
         js_property_set(exp_map, key, wrapped);
     }
     return wrapped;
+}
+
+static Item js_classlist_value_item(DomElement* elem) {
+    if (!elem || elem->class_count == 0) {
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+    StrBuf* sb = strbuf_new_cap(64);
+    for (int i = 0; i < elem->class_count; i++) {
+        if (i > 0) strbuf_append_char(sb, ' ');
+        strbuf_append_str(sb, elem->class_names[i]);
+    }
+    Item result = (Item){.item = s2it(heap_create_name(sb->str ? sb->str : ""))};
+    strbuf_free(sb);
+    return result;
+}
+
+static Item js_classlist_proxy_invoke(Item rest_args) {
+    if (get_type_id(rest_args) != LMD_TYPE_ARRAY || !rest_args.array ||
+        rest_args.array->length < 2) {
+        return ItemNull;
+    }
+    Item* items = rest_args.array->items;
+    return js_classlist_method(items[0], items[1], items + 2,
+        (int)rest_args.array->length - 2);
+}
+
+static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
+    if (!elem) return ItemNull;
+    Item exp_map = expando_get_or_create_map((DomNode*)elem);
+    Item cache_key = (Item){.item = s2it(heap_create_name("__classListWrapper"))};
+    Item wrapper = exp_map.item != ITEM_NULL ? js_property_get(exp_map, cache_key) : ItemNull;
+    if (get_type_id(wrapper) != LMD_TYPE_MAP && get_type_id(wrapper) != LMD_TYPE_VMAP) {
+        wrapper = js_new_object();
+        const char* methods[] = {"add", "remove", "toggle", "contains", "item", "replace", "toString"};
+        for (int i = 0; i < 7; i++) {
+            Item bound_args[2] = {
+                elem_item,
+                (Item){.item = s2it(heap_create_name(methods[i]))}
+            };
+            Item method = js_bind_function(
+                js_new_function((void*)js_classlist_proxy_invoke, -1),
+                make_js_undefined(), bound_args, 2);
+            js_property_set(wrapper,
+                (Item){.item = s2it(heap_create_name(methods[i]))}, method);
+        }
+        if (exp_map.item != ITEM_NULL) js_property_set(exp_map, cache_key, wrapper);
+    }
+    js_property_set(wrapper, (Item){.item = s2it(heap_create_name("length"))},
+        (Item){.item = i2it((int64_t)elem->class_count)});
+    js_property_set(wrapper, (Item){.item = s2it(heap_create_name("value"))},
+        js_classlist_value_item(elem));
+    return wrapper;
 }
 
 struct JsComputedStyleHost {
@@ -4312,8 +4468,7 @@ static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId
         return nullptr;
     }
 
-    Pool* pool = doc->pool;
-    SelectorMatcher* matcher = selector_matcher_create(pool);
+    SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
     if (!matcher) return nullptr;
 
     CssDeclaration* best_decl = nullptr;
@@ -4434,7 +4589,7 @@ static CssDeclaration* js_match_custom_property(DomElement* elem, const char* pr
 
     // search stylesheets (lower specificity than inline)
     if (doc->stylesheets && doc->stylesheet_count > 0) {
-        SelectorMatcher* matcher = selector_matcher_create(pool);
+        SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
         if (matcher) {
             for (int s = 0; s < doc->stylesheet_count; s++) {
                 CssStylesheet* sheet = doc->stylesheets[s];
@@ -5476,6 +5631,10 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
     while (child) {
         DomNode* next = child->next_sibling;
         dom_pre_remove(child);
+        // Replace-all previously only updated the reconcile ledger; observers
+        // therefore saw no removedNodes/addedNodes for innerHTML changes.
+        js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE,
+                                         child, elem, nullptr, nullptr);
         child->parent = nullptr;
         child->next_sibling = nullptr;
         child->prev_sibling = nullptr;
@@ -5521,12 +5680,20 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                     body_elem->items[i].element, doc, nullptr);
                 if (child_dom && dom_element_append_child(elem, child_dom)) {
                     dom_post_insert((DomNode*)elem, (DomNode*)child_dom);
+                    js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                                                     child_dom, elem,
+                                                     nullptr, nullptr);
                 }
             } else if (type == LMD_TYPE_STRING) {
                 String* s = js_dom_fragment_text(body_elem->items[i]);
                 if (!s) continue;
                 DomText* text_dom = dom_element_append_text(elem, s->chars);
-                if (text_dom) dom_post_insert((DomNode*)elem, (DomNode*)text_dom);
+                if (text_dom) {
+                    dom_post_insert((DomNode*)elem, (DomNode*)text_dom);
+                    js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                                                     text_dom, elem,
+                                                     nullptr, nullptr);
+                }
             }
         }
     }
@@ -5970,7 +6137,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // querySelector(selector)
     if (strcmp(method, "querySelector") == 0) {
         if (argc < 1) return ItemNull;
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text) return ItemNull;
 
         Pool* pool = doc->pool;
@@ -5983,7 +6150,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
             return ItemNull;
         }
 
-        SelectorMatcher* matcher = selector_matcher_create(pool);
+        SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
         DomElement* found = js_dom_selector_group_find_first(
             matcher, selector_group, root, true);
         return found ? js_dom_wrap_element(found) : ItemNull;
@@ -5992,7 +6159,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     // querySelectorAll(selector)
     if (strcmp(method, "querySelectorAll") == 0) {
         if (argc < 1) return ItemNull;
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text) return ItemNull;
 
         Pool* pool = doc->pool;
@@ -6007,7 +6174,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
             return (Item){.array = arr};
         }
 
-        SelectorMatcher* matcher = selector_matcher_create(pool);
+        SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
         ArrayList* results = arraylist_new(16);
         if (!results) return ItemNull;
         js_dom_selector_group_collect_all(
@@ -7184,7 +7351,9 @@ static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_ar
 extern "C" Item js_dom_set_text_data_property(void* text_ptr, Item value) {
     DomText* text_node = (DomText*)text_ptr;
     if (!text_node) return value;
-    const char* new_text = fn_to_cstr(value);
+    // The specialized MIR member path must preserve CharacterData's DOMString
+    // conversion just like the generic host-property path.
+    const char* new_text = js_dom_to_dom_string_cstr(value);
     if (new_text) {
         uint32_t old_u16_len = dom_text_utf16_length(text_node);
         // text data writes must continue through the JS helper because it
@@ -7338,6 +7507,12 @@ static const char* _elem_current_value(DomElement* elem) {
     if (!elem || !elem->tag_name) return "";
     const char* tag = elem->tag_name;
     if (strcasecmp(tag, "input") == 0) {
+        RadiantInputValueKind kind = radiant_input_value_kind(
+            dom_element_get_attribute(elem, "type"));
+        if (kind != RADIANT_INPUT_VALUE_TEXT &&
+            kind != RADIANT_INPUT_VALUE_UNSUPPORTED) {
+            return radiant_input_live_value(elem);
+        }
         if (tc_is_text_control(elem)) {
             tc_ensure_init(elem);
             return (elem->form && elem->form->current_value) ? elem->form->current_value : "";
@@ -7354,63 +7529,14 @@ static const char* _elem_current_value(DomElement* elem) {
 
 // Build and return a ValidityState plain JS object for the given element.
 
-// Parse "HH:MM[:SS[.mmm]]" to milliseconds since midnight (-1 on error)
-static long long _time_to_ms(const char* t) {
-    if (!t || !*t) return -1;
-    int h = 0, m = 0, s = 0;
-    int parsed = sscanf(t, "%d:%d:%d", &h, &m, &s);
-    if (parsed < 2) return -1;
-    return (long long)h * 3600000 + m * 60000 + s * 1000;
-}
-
-// Parse "YYYY-MM-DD" to days since 1970-01-01 (-9999999 on error)
-static long long _date_to_days(int year, int mon, int day) {
-    int y = year - 1;
-    long long days = 365LL * y + y/4 - y/100 + y/400;
-    static const int dm[] = {0, 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
-    days += dm[mon];
-    if (mon > 2 && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0)) days++;
-    days += day - 1;
-    return days - 719162LL;  // subtract days before 1970-01-01
-}
-
-static long long _parse_date(const char* s) {
-    if (!s || !*s) return -(1LL<<62);
-    int year = 0, mon = 0, day = 0;
-    if (sscanf(s, "%d-%d-%d", &year, &mon, &day) != 3) return -(1LL<<62);
-    return _date_to_days(year, mon, day);
-}
-
-// Parse "YYYY-MM" to months since 1970-01 (0-based)
-static long long _parse_month(const char* s) {
-    if (!s || !*s) return -(1LL<<62);
-    int year = 0, mon = 0;
-    if (sscanf(s, "%d-%d", &year, &mon) != 2) return -(1LL<<62);
-    return (long long)(year - 1970) * 12 + (mon - 1);
-}
-
-// Parse "YYYY-Www" to a monotonically increasing week index
-static long long _parse_week(const char* s) {
-    if (!s || !*s) return -(1LL<<62);
-    int year = 0, week = 0;
-    if (sscanf(s, "%d-W%d", &year, &week) != 2) return -(1LL<<62);
-    return (long long)(year - 1970) * 53 + (week - 1);
-}
-
-// Parse "YYYY-MM-DDTHH:MM[:SS]" to ms since epoch
-static long long _parse_datetime(const char* s) {
-    if (!s || !*s) return -(1LL<<62);
-    int year = 0, mon = 0, day = 0, h = 0, m = 0, sec = 0;
-    if (sscanf(s, "%d-%d-%dT%d:%d:%d", &year, &mon, &day, &h, &m, &sec) < 5) return -(1LL<<62);
-    long long days = _date_to_days(year, mon, day);
-    return days * 86400000LL + (long long)h * 3600000 + m * 60000 + sec * 1000;
-}
-
 // For a <select required> element, returns true iff no <option> is
 // "selected" with a non-empty value (i.e. the placeholder option requires
 // user to explicitly pick a non-empty one).
 static bool _get_selectedness(DomElement* opt);
 static void _set_selectedness(DomElement* opt, bool v);
+static void _select_sync_native_selected_index(DomElement* sel,
+                                               int selected_index,
+                                               int option_count);
 
 // Walk the descendants of `sel` and append each <option> to `arr`. Direct
 // optgroup descendants contribute options, but nested option/hr/select/optgroup
@@ -7687,6 +7813,9 @@ static void _select_set_selected_index(DomElement* sel, int idx) {
         if (!opt) continue;
         _set_selectedness(opt, (int)i == idx); // INT_CAST_OK: option index
     }
+    _select_sync_native_selected_index(
+        sel, idx >= 0 && idx < n ? idx : -1,
+        (int)n); // INT_CAST_OK: option count
     _select_mark_dirty(sel);
 }
 
@@ -7695,10 +7824,17 @@ static void _select_select_only_option(DomElement* sel, DomElement* selected_opt
     Item arr = js_array_new(0);
     _collect_options(sel->first_child, arr);
     int64_t n = js_array_length(arr);
+    int selected_index = -1;
     for (int64_t i = 0; i < n; i++) {
         DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
-        if (opt) _set_selectedness(opt, opt == selected_opt);
+        if (opt) {
+            bool selected = opt == selected_opt;
+            _set_selectedness(opt, selected);
+            if (selected) selected_index = (int)i; // INT_CAST_OK: option index
+        }
     }
+    _select_sync_native_selected_index(sel, selected_index,
+                                       (int)n); // INT_CAST_OK: option count
 }
 
 static void _select_normalize_for_selected_options(DomElement* sel, Item options) {
@@ -7976,6 +8112,57 @@ static char* _option_value(DomElement* opt) {
     return _option_text(opt);
 }
 
+static char* _select_value(DomElement* elem) {
+    if (!elem || !_is_tag(elem, "select")) {
+        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+    }
+    Item options = js_array_new(0);
+    _collect_options(elem->first_child, options);
+    int64_t count = js_array_length(options);
+    DomElement* first_non_disabled = nullptr;
+    for (int64_t i = 0; i < count; i++) {
+        DomElement* option = (DomElement*)js_dom_unwrap_element(
+            js_array_get_int(options, i));
+        if (!option) continue;
+        if (_get_selectedness(option)) return _option_value(option);
+        if (!first_non_disabled &&
+            !dom_element_has_attribute(option, "disabled")) {
+            first_non_disabled = option;
+        }
+    }
+
+    const char* size_attr = dom_element_get_attribute(elem, "size");
+    int size = 0;
+    if (size_attr) {
+        char* end = nullptr;
+        long parsed = strtol(size_attr, &end, 10);
+        if (end != size_attr && parsed > 0) {
+            size = (int)parsed; // INT_CAST_OK: HTML select size
+        }
+    }
+    if (!dom_element_has_attribute(elem, "multiple") && size <= 1 &&
+        first_non_disabled && !_select_is_dirty(elem)) {
+        return _option_value(first_non_disabled);
+    }
+    return mem_strdup("", MEM_CAT_JS_RUNTIME);
+}
+
+static void _select_sync_native_selected_index(DomElement* sel,
+                                               int selected_index,
+                                               int option_count) {
+    if (!sel || !_is_tag(sel, "select")) return;
+    if (sel->item_prop_type == DomElement::ITEM_PROP_FORM && sel->form) {
+        // Script can reorder/add options without rebuilding the form control;
+        // keep native option bounds aligned before storing live selectedness.
+        sel->form->option_count = option_count;
+    }
+    if (sel->doc && sel->doc->state) {
+        form_control_set_selected_index((DocState*)sel->doc->state,
+                                        static_cast<View*>(sel),
+                                        selected_index);
+    }
+}
+
 // Return index of `opt` within its owner select's options list (-1 if not
 // in any select).
 static int _option_index_in_select(DomElement* opt) {
@@ -8040,6 +8227,9 @@ static void _select_ask_for_reset(DomElement* sel) {
             }
         }
     }
+    int native_index = require_one ? chosen : last_selected;
+    _select_sync_native_selected_index(sel, native_index,
+                                       (int)n); // INT_CAST_OK: option count
 }
 
 extern "C" void js_dom_after_default_selected_set(void* dom_elem, bool selected) {
@@ -8085,6 +8275,8 @@ extern "C" void js_dom_select_set_value_bridge(void* dom_elem, const char* value
         if (!opt) continue;
         _set_selectedness(opt, found >= 0 && (int)i == found); // INT_CAST_OK: option index
     }
+    _select_sync_native_selected_index(elem, found,
+                                       (int)n); // INT_CAST_OK: option count
     _select_mark_dirty(elem);
 }
 
@@ -8275,11 +8467,18 @@ static void _reset_form_control(DomElement* elem) {
         if (strcmp(itype, "submit") == 0 || strcmp(itype, "reset") == 0 ||
             strcmp(itype, "button") == 0 || strcmp(itype, "image") == 0 ||
             strcmp(itype, "hidden") == 0 || strcmp(itype, "file") == 0) {
-            // Buttons/hidden/image/file: skip (file resets selection only).
-            if (strcmp(itype, "file") == 0 && tc_is_text_control_elem(elem)) {
-                tc_ensure_init(elem);
-                tc_set_value(elem, "", 0);
+            // File reset clears the selected FileList; its public value is
+            // derived from that list and must never restore the value attribute.
+            if (strcmp(itype, "file") == 0) {
+                radiant_input_set_files(elem, ItemNull);
+                radiant_input_set_live_value(elem, "");
             }
+            return;
+        }
+        RadiantInputValueKind value_kind = radiant_input_value_kind(itype);
+        if (value_kind != RADIANT_INPUT_VALUE_TEXT &&
+            value_kind != RADIANT_INPUT_VALUE_UNSUPPORTED) {
+            radiant_input_reset_live_value(elem);
             return;
         }
         // Text-like input: value := defaultValue (= value attribute)
@@ -8469,74 +8668,14 @@ static Item _build_validity_state(DomElement* elem) {
         const char* val = _elem_current_value(elem);
         bool val_empty  = (val[0] == '\0');
 
-        // For typed input controls (date, time, number, etc.) the value
-        // sanitization algorithm replaces an unparseable value with the
-        // empty string. WPT tests expect valueMissing=true when the
-        // value attribute is an invalid date/time/number string.
+        // Typed value setters already sanitize through the module codec. Keeping
+        // validity on that same grammar prevents calendar and step semantics
+        // from disagreeing with the value exposed through the IDL.
         if (!val_empty && strcasecmp(tag, "input") == 0) {
-            const char* itype = js_dom_input_type_lower(elem);
-            bool sanitized_empty = false;
-            if (strcmp(itype, "number") == 0 || strcmp(itype, "range") == 0) {
-                char* ep = nullptr;
-                strtod(val, &ep);
-                if (ep == val || *ep != '\0') sanitized_empty = true;
-            } else if (strcmp(itype, "date") == 0) {
-                if (_parse_date(val) == -(1LL<<62)) sanitized_empty = true;
-                else {
-                    // Also validate Y/M/D ranges
-                    int y=0,m=0,d=0;
-                    if (sscanf(val, "%d-%d-%d", &y,&m,&d) != 3 ||
-                        m < 1 || m > 12 || d < 1 || d > 31) sanitized_empty = true;
-                }
-            } else if (strcmp(itype, "month") == 0) {
-                if (_parse_month(val) == -(1LL<<62)) sanitized_empty = true;
-                else { int y=0,m=0;
-                    if (sscanf(val, "%d-%d", &y,&m) != 2 || m<1 || m>12) sanitized_empty=true;
-                }
-            } else if (strcmp(itype, "week") == 0) {
-                if (_parse_week(val) == -(1LL<<62)) sanitized_empty = true;
-                else { int y=0,w=0;
-                    if (sscanf(val, "%d-W%d", &y,&w) != 2 || w<1 || w>53) sanitized_empty=true;
-                }
-            } else if (strcmp(itype, "time") == 0) {
-                int h=0, m=0, s=0;
-                int n = sscanf(val, "%d:%d:%d", &h, &m, &s);
-                if (n < 2 || h<0 || h>23 || m<0 || m>59 || (n==3 && (s<0 || s>59))) sanitized_empty = true;
-                // reject extra colon segments like "12:00:00:001"
-                if (!sanitized_empty) {
-                    int colons = 0;
-                    for (const char* p = val; *p; p++) if (*p == ':') colons++;
-                    if (colons > 2) sanitized_empty = true;
-                }
-            } else if (strcmp(itype, "datetime-local") == 0) {
-                // Accept either "T" or single space as separator (per spec
-                // setter normalises space → T, but raw attribute may have
-                // either). However extra spaces (e.g. "  ") are invalid.
-                char tmp[64]; size_t vl = strlen(val);
-                bool space_sep = false;
-                if (vl < sizeof(tmp)) {
-                    snprintf(tmp, sizeof(tmp), "%s", val);
-                    // require exactly one space or T at position 10
-                    if (vl >= 11 && tmp[10] == ' ' && tmp[11] != ' ') {
-                        tmp[10] = 'T'; space_sep = true;
-                    }
-                }
-                const char* parse_str = space_sep ? tmp : val;
-                if (_parse_datetime(parse_str) == -(1LL<<62)) sanitized_empty = true;
-                else {
-                    int y=0,mo=0,d=0,h=0,mi=0;
-                    if (sscanf(parse_str, "%d-%d-%dT%d:%d", &y,&mo,&d,&h,&mi) < 5 ||
-                        mo<1||mo>12||d<1||d>31||h<0||h>23||mi<0||mi>59)
-                        sanitized_empty = true;
-                }
-            } else if (strcmp(itype, "color") == 0) {
-                // valid color: #RRGGBB
-                if (val[0] != '#' || strlen(val) != 7) sanitized_empty = true;
-                else for (int i = 1; i < 7; i++)
-                    if (!((val[i]>='0'&&val[i]<='9')||(val[i]>='a'&&val[i]<='f')||(val[i]>='A'&&val[i]<='F')))
-                    { sanitized_empty = true; break; }
-            }
-            if (sanitized_empty) val_empty = true;
+            char sanitized[128];
+            radiant_input_value_sanitize(js_dom_input_type_lower(elem), val,
+                                          sanitized, sizeof(sanitized));
+            val_empty = sanitized[0] == '\0';
         }
 
         // valueMissing
@@ -8616,9 +8755,9 @@ static Item _build_validity_state(DomElement* elem) {
                 if (strcmp(itype, "checkbox") == 0) {
                     value_missing = !js_dom_get_checkedness(elem);
                 } else if (strcmp(itype, "file") == 0) {
-                    // file input: missing iff no files. We don't support
-                    // file uploads in headless, so always missing if required.
-                    value_missing = true;
+                    Item files = radiant_input_files(elem);
+                    value_missing = get_type_id(files) != LMD_TYPE_ARRAY ||
+                                    js_array_length(files) == 0;
                 } else {
                     value_missing = val_empty;
                 }
@@ -8669,134 +8808,18 @@ static Item _build_validity_state(DomElement* elem) {
             }
         }
 
-        // rangeOverflow / rangeUnderflow: number input type only (simplified)
+        // Numeric value states share their scalar conversion and step base with
+        // valueAsNumber/stepUp, including ISO week and calendar-month rules.
         if (!val_empty && strcasecmp(tag, "input") == 0) {
             const char* itype = js_dom_input_type_lower(elem);
-            if (strcmp(itype, "number") == 0 || strcmp(itype, "range") == 0) {
-                char* end_ptr = nullptr;
-                double dval = strtod(val, &end_ptr);
-                if (end_ptr != val && *end_ptr == '\0') { // valid number
-                    const char* max_attr = dom_element_get_attribute(elem, "max");
-                    if (max_attr && *max_attr) {
-                        double dmax = strtod(max_attr, &end_ptr);
-                        if (end_ptr != max_attr) range_overflow = (dval > dmax);
-                    }
-                    const char* min_attr = dom_element_get_attribute(elem, "min");
-                    if (min_attr && *min_attr) {
-                        double dmin = strtod(min_attr, &end_ptr);
-                        if (end_ptr != min_attr) range_underflow = (dval < dmin);
-                    }
-                    // stepMismatch: if step attr set and value doesn't align
-                    const char* step_attr = dom_element_get_attribute(elem, "step");
-                    if (step_attr && strcmp(step_attr, "any") != 0 && *step_attr) {
-                        double dstep = strtod(step_attr, &end_ptr);
-                        if (end_ptr != step_attr && dstep > 0) {
-                            const char* min_attr2 = dom_element_get_attribute(elem, "min");
-                            double base = (min_attr2 && *min_attr2) ? strtod(min_attr2, nullptr) : 0.0;
-                            double remainder = fmod(dval - base, dstep);
-                            if (remainder < 0) remainder += dstep;
-                            step_mismatch = (remainder > 1e-10 && (dstep - remainder) > 1e-10);
-                        }
-                    }
-                }
-            } else if (strcmp(itype, "date") == 0) {
-                // ISO date strings are lexicographically ordered, so string compare works
-                const char* max_a = dom_element_get_attribute(elem, "max");
-                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
-                const char* min_a = dom_element_get_attribute(elem, "min");
-                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
-                const char* step_a = dom_element_get_attribute(elem, "step");
-                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
-                    char* ep = nullptr;
-                    long long step_days = (long long)strtod(step_a, &ep);
-                    if (ep != step_a && step_days > 0) {
-                        long long vdays = _parse_date(val);
-                        long long base_days = min_a && *min_a ? _parse_date(min_a) : 0LL;
-                        if (vdays != -(1LL<<62) && base_days != -(1LL<<62)) {
-                            long long rem = (vdays - base_days) % step_days;
-                            if (rem < 0) rem += step_days;
-                            step_mismatch = (rem != 0);
-                        }
-                    }
-                }
-            } else if (strcmp(itype, "month") == 0) {
-                const char* max_a = dom_element_get_attribute(elem, "max");
-                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
-                const char* min_a = dom_element_get_attribute(elem, "min");
-                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
-                const char* step_a = dom_element_get_attribute(elem, "step");
-                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
-                    char* ep = nullptr;
-                    long long step_mon = (long long)strtod(step_a, &ep);
-                    if (ep != step_a && step_mon > 0) {
-                        long long vmon = _parse_month(val);
-                        long long base_mon = min_a && *min_a ? _parse_month(min_a) : 0LL;
-                        if (vmon != -(1LL<<62) && base_mon != -(1LL<<62)) {
-                            long long rem = (vmon - base_mon) % step_mon;
-                            if (rem < 0) rem += step_mon;
-                            step_mismatch = (rem != 0);
-                        }
-                    }
-                }
-            } else if (strcmp(itype, "week") == 0) {
-                const char* max_a = dom_element_get_attribute(elem, "max");
-                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
-                const char* min_a = dom_element_get_attribute(elem, "min");
-                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
-                const char* step_a = dom_element_get_attribute(elem, "step");
-                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
-                    char* ep = nullptr;
-                    long long step_wk = (long long)strtod(step_a, &ep);
-                    if (ep != step_a && step_wk > 0) {
-                        long long vwk = _parse_week(val);
-                        long long base_wk = min_a && *min_a ? _parse_week(min_a) : 0LL;
-                        if (vwk != -(1LL<<62) && base_wk != -(1LL<<62)) {
-                            long long rem = (vwk - base_wk) % step_wk;
-                            if (rem < 0) rem += step_wk;
-                            step_mismatch = (rem != 0);
-                        }
-                    }
-                }
-            } else if (strcmp(itype, "time") == 0) {
-                // lexicographic compare works for HH:MM:SS format
-                const char* max_a = dom_element_get_attribute(elem, "max");
-                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
-                const char* min_a = dom_element_get_attribute(elem, "min");
-                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
-                const char* step_a = dom_element_get_attribute(elem, "step");
-                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
-                    char* ep = nullptr;
-                    long long step_ms = (long long)strtod(step_a, &ep);
-                    if (ep != step_a && step_ms > 0) {
-                        long long vms = _time_to_ms(val);
-                        long long base_ms = min_a && *min_a ? _time_to_ms(min_a) : 0LL;
-                        if (vms >= 0 && base_ms >= 0) {
-                            long long rem = (vms - base_ms) % step_ms;
-                            if (rem < 0) rem += step_ms;
-                            step_mismatch = (rem != 0);
-                        }
-                    }
-                }
-            } else if (strcmp(itype, "datetime-local") == 0) {
-                const char* max_a = dom_element_get_attribute(elem, "max");
-                if (max_a && *max_a) range_overflow  = (strcmp(val, max_a) > 0);
-                const char* min_a = dom_element_get_attribute(elem, "min");
-                if (min_a && *min_a) range_underflow = (strcmp(val, min_a) < 0);
-                const char* step_a = dom_element_get_attribute(elem, "step");
-                if (step_a && *step_a && strcmp(step_a, "any") != 0) {
-                    char* ep = nullptr;
-                    long long step_ms = (long long)strtod(step_a, &ep);
-                    if (ep != step_a && step_ms > 0) {
-                        long long vms = _parse_datetime(val);
-                        long long base_ms = min_a && *min_a ? _parse_datetime(min_a) : 0LL;
-                        if (vms != -(1LL<<62) && base_ms != -(1LL<<62)) {
-                            long long rem = (vms - base_ms) % step_ms;
-                            if (rem < 0) rem += step_ms;
-                            step_mismatch = (rem != 0);
-                        }
-                    }
-                }
-            }
+            RadiantInputValidity typed = {};
+            radiant_input_value_validate(itype, val,
+                dom_element_get_attribute(elem, "min"),
+                dom_element_get_attribute(elem, "max"),
+                dom_element_get_attribute(elem, "step"), &typed);
+            range_overflow = typed.range_overflow;
+            range_underflow = typed.range_underflow;
+            step_mismatch = typed.step_mismatch;
         }
     }
 
@@ -9304,8 +9327,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return js_bind_function(js_new_function((void*)js_text_substring_data_method, 2),
                 elem_item, NULL, 0);
         }
+        Item expando_value = ItemNull;
+        if (expando_get_property(node, prop_name, &expando_value)) return expando_value;
         log_debug("js_dom_get_property: unknown text node property '%s'", prop);
-        return ItemNull;
+        return make_js_undefined();
     }
 
     // Comment node properties
@@ -9358,8 +9383,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             }
             return js_get_document_object_value();
         }
+        Item expando_value = ItemNull;
+        if (expando_get_property(node, prop_name, &expando_value)) return expando_value;
         log_debug("js_dom_get_property: unknown comment node property '%s'", prop);
-        return ItemNull;
+        return make_js_undefined();
     }
 
     // Element properties below — safe to cast
@@ -9439,15 +9466,13 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // className (space-joined class list)
     if (strcmp(prop, "className") == 0) {
-        if (elem->class_count == 0) return (Item){.item = s2it(heap_create_name(""))};
-        StrBuf* sb = strbuf_new_cap(64);
-        for (int i = 0; i < elem->class_count; i++) {
-            if (i > 0) strbuf_append_char(sb, ' ');
-            strbuf_append_str(sb, elem->class_names[i]);
-        }
-        String* result = heap_create_name(sb->str ? sb->str : "");
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
+        return js_classlist_value_item(elem);
+    }
+
+    if (strcmp(prop, "classList") == 0) {
+        // Nested member chains use the generic property path, so classList
+        // must expose the same live owner-bound operations as the MIR fast path.
+        return js_dom_get_classlist_wrapper(elem, elem_item);
     }
 
     // style — live CSSStyleDeclaration-like wrapper for inline style.
@@ -9882,36 +9907,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(-1)};
         }
         if (strcmp(prop, "value") == 0) {
-            Item arr = js_array_new(0);
-            _collect_options(elem->first_child, arr);
-            int64_t n = js_array_length(arr);
-            int first_non_disabled = -1;
-            for (int64_t i = 0; i < n; i++) {
-                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
-                if (!opt) continue;
-                if (_get_selectedness(opt)) {
-                    char* v = _option_value(opt);
-                    String* s = heap_create_name(v ? v : "");
-                    mem_free(v);
-                    return (Item){.item = s2it(s)};
-                }
-                if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled"))
-                    first_non_disabled = (int)i; // INT_CAST_OK: option index
-            }
-            int size = 0;
-            const char* sz = dom_element_get_attribute(elem, "size");
-            if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
-            if (!dom_element_has_attribute(elem, "multiple") && size <= 1
-                && first_non_disabled >= 0 && !_select_is_dirty(elem)) {
-                DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, first_non_disabled));
-                if (opt) {
-                    char* v = _option_value(opt);
-                    String* s = heap_create_name(v ? v : "");
-                    mem_free(v);
-                    return (Item){.item = s2it(s)};
-                }
-            }
-            return (Item){.item = s2it(heap_create_name(""))};
+            char* value = _select_value(elem);
+            String* result = heap_create_name(value ? value : "");
+            if (value) mem_free(value);
+            return (Item){.item = s2it(result)};
         }
         if (strcmp(prop, "type") == 0) {
             const char* t = dom_element_has_attribute(elem, "multiple")
@@ -10727,7 +10726,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
          strcmp(prop, "nodeValue") == 0 ||
          strcmp(prop, "textContent") == 0)) {
         DomText* text_node = node->as_text();
-        const char* new_text = fn_to_cstr(value);
+        // CharacterData setters accept DOMString, so numeric/boolean values
+        // must be converted instead of being mistaken for an absent string.
+        const char* new_text = js_dom_to_dom_string_cstr(value);
         if (new_text) {
             uint32_t old_u16_len = dom_text_utf16_length(text_node);
             js_dom_replace_text_data(text_node, 0, old_u16_len, new_text);
@@ -10736,10 +10737,11 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         return value;
     }
 
-    // remaining properties require an element node
+    // CharacterData wrappers are ordinary JS objects too. Cleanup code in
+    // DOM libraries stores bookkeeping on Text/Comment nodes before removal.
     if (!node->is_element()) {
-        log_debug("js_dom_set_property: node is not an element for property '%s'", prop);
-        return ItemNull;
+        expando_set_property(node, prop_name, value);
+        return value;
     }
     DomElement* elem = node->as_element();
 
@@ -10982,7 +10984,10 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
     // textContent
     if (strcmp(prop, "textContent") == 0) {
-        const char* text_str = fn_to_cstr(value);
+        // Node.textContent performs DOMString conversion; reactive libraries
+        // routinely assign numbers directly from their data model.
+        const char* text_str = value.item == ITEM_NULL
+            ? "" : js_dom_to_dom_string_cstr(value);
         if (text_str) {
             // remove all children and add a single text node
             // first, detach all children (firing pre_remove for live ranges)
@@ -11297,11 +11302,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // Real attribute reflection is handled by the explicit reflected setters
     // above, and setAttribute() remains the DOM attribute mutation path.
     {
-        Item exp_map = expando_get_or_create_map((DomNode*)elem);
-        if (exp_map.item != ITEM_NULL) {
-            Item key = (Item){.item = s2it(heap_create_name(prop))};
-            js_property_set(exp_map, key, value);
-        }
+        expando_set_property((DomNode*)elem, prop_name, value);
     }
     return value;
 }
@@ -11334,7 +11335,9 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     }
 
     const char* js_prop = fn_to_cstr(prop_name);
-    const char* val_str = fn_to_cstr(value);
+    // CSSStyleDeclaration assignment performs Web IDL DOMString coercion;
+    // reading raw Item storage made numeric animation values look empty.
+    const char* val_str = js_dom_to_dom_string_cstr(value);
     if (!js_prop || !val_str) return ItemNull;
 
     // convert camelCase JS property to CSS property
@@ -12187,6 +12190,9 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
             DomNode* frag_child = child_elem->first_child;
             while (frag_child) {
                 DomNode* next = frag_child->next_sibling;
+                if (!js_dom_prepare_cross_document_insertion(frag_child, elem)) {
+                    return ItemNull;
+                }
                 dom_pre_remove(frag_child);
                 child_elem->remove_child(frag_child);
                 ((DomNode*)elem)->append_child(frag_child);
@@ -12197,6 +12203,7 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
             return child_arg;
         }
     }
+    if (!js_dom_prepare_cross_document_insertion(child_node, elem)) return ItemNull;
     if (child_node->parent) {
         DomNode* old_parent = child_node->parent;
         if (old_parent->is_element()) {
@@ -12263,6 +12270,9 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
             DomNode* frag_child = new_elem->first_child;
             while (frag_child) {
                 DomNode* next = frag_child->next_sibling;
+                if (!js_dom_prepare_cross_document_insertion(frag_child, elem)) {
+                    return ItemNull;
+                }
                 dom_pre_remove(frag_child);
                 new_elem->remove_child(frag_child);
                 if (parent_node->insert_before(frag_child, ref_child)) {
@@ -12275,6 +12285,7 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
             return new_child_arg;
         }
     }
+    if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
     if (new_child->parent) {
         dom_pre_remove(new_child);
         new_child->parent->remove_child(new_child);
@@ -12291,15 +12302,16 @@ extern "C" Item js_dom_remove_bridge(void* node_ptr) {
     DomNode* node = (DomNode*)node_ptr;
     if (!node) return ItemNull;
     if (node->parent) {
+        DomNode* old_parent = node->parent;
         DomElement* owner_select = nullptr;
         if (node->is_element() && node->as_element()->tag() == HTM_TAG_OPTION) {
             owner_select = _option_owner_select(node->as_element());
         }
         // removal must notify live ranges before native sibling links change.
         dom_pre_remove(node);
-        node->parent->remove_child(node);
+        old_parent->remove_child(node);
         if (owner_select) _select_ask_for_reset(owner_select);
-        js_dom_mutation_notify();
+        js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_REMOVE, node, old_parent);
     }
     return ItemNull;
 }
@@ -12520,6 +12532,7 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         dom_pre_remove(old_child);
         return old_child_arg;
     }
+    if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
     if (new_child->parent) {
         dom_pre_remove(new_child);
         new_child->parent->remove_child(new_child);
@@ -12557,6 +12570,9 @@ extern "C" Item js_dom_replace_with_bridge(void* node_ptr, Item* args, int argc)
     for (int i = 0; i < argc; i++) {
         DomNode* a = (DomNode*)js_dom_unwrap_element(args[i]);
         if (!a) continue;
+        if (!js_dom_prepare_cross_document_insertion(a, parent->as_element())) {
+            return ItemNull;
+        }
         if (a->parent) {
             dom_pre_remove(a);
             a->parent->remove_child(a);
@@ -12972,14 +12988,14 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // querySelector(selector) — from this element
     if (strcmp(method, "querySelector") == 0) {
         if (argc < 1) return ItemNull;
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
 
         Pool* pool = elem->doc->pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return ItemNull;
 
-        SelectorMatcher* matcher = selector_matcher_create(pool);
+        SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         DomElement* found = js_dom_selector_group_find_first(
             matcher, selector_group, elem, false);
         return found ? js_dom_wrap_element(found) : ItemNull;
@@ -12988,7 +13004,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // querySelectorAll(selector) — from this element
     if (strcmp(method, "querySelectorAll") == 0) {
         if (argc < 1) return ItemNull;
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
 
         Pool* pool = elem->doc->pool;
@@ -13002,7 +13018,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
 
         if (!selector_group) return (Item){.array = arr};
 
-        SelectorMatcher* matcher = selector_matcher_create(pool);
+        SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         ArrayList* results = arraylist_new(16);
         if (!results) return (Item){.array = arr};
         js_dom_selector_group_collect_all(
@@ -13017,14 +13033,14 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // matches(selector) → boolean
     if (strcmp(method, "matches") == 0) {
         if (argc < 1) return (Item){.item = ITEM_FALSE};
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return (Item){.item = ITEM_FALSE};
 
         Pool* pool = elem->doc->pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return (Item){.item = ITEM_FALSE};
 
-        SelectorMatcher* matcher = selector_matcher_create(pool);
+        SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         MatchResult result;
         bool matched = selector_matcher_matches_group(matcher, selector_group, elem, &result);
         return (Item){.item = b2it(matched ? 1 : 0)};
@@ -13033,14 +13049,14 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // closest(selector) → element or null
     if (strcmp(method, "closest") == 0) {
         if (argc < 1) return ItemNull;
-        const char* sel_text = fn_to_cstr(args[0]);
+        const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
 
         Pool* pool = elem->doc->pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return ItemNull;
 
-        SelectorMatcher* matcher = selector_matcher_create(pool);
+        SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         MatchResult mresult;
         DomElement* current = elem;
         while (current) {
@@ -13959,15 +13975,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
 
     // toString() → space-separated class string
     if (strcmp(method, "toString") == 0) {
-        if (elem->class_count == 0) return (Item){.item = s2it(heap_create_name(""))};
-        StrBuf* sb = strbuf_new_cap(64);
-        for (int i = 0; i < elem->class_count; i++) {
-            if (i > 0) strbuf_append_char(sb, ' ');
-            strbuf_append_str(sb, elem->class_names[i]);
-        }
-        String* result = heap_create_name(sb->str ? sb->str : "");
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
+        return js_classlist_value_item(elem);
     }
 
     log_debug("js_classlist_method: unknown method '%s'", method);
@@ -13988,15 +13996,7 @@ extern "C" Item js_classlist_get_property(Item elem_item, Item prop_name) {
 
     // value — space-separated class string
     if (strcmp(prop, "value") == 0) {
-        if (elem->class_count == 0) return (Item){.item = s2it(heap_create_name(""))};
-        StrBuf* sb = strbuf_new_cap(64);
-        for (int i = 0; i < elem->class_count; i++) {
-            if (i > 0) strbuf_append_char(sb, ' ');
-            strbuf_append_str(sb, elem->class_names[i]);
-        }
-        String* result = heap_create_name(sb->str ? sb->str : "");
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
+        return js_classlist_value_item(elem);
     }
 
     // numeric index → item(index)
@@ -14157,82 +14157,6 @@ static Url* js_dom_make_fallback_url(const char* raw_url) {
     return url;
 }
 
-static Item js_history_apply_url(Item url_item) {
-    if (get_type_id(url_item) == LMD_TYPE_UNDEFINED || is_js_undefined(url_item)) {
-        return make_js_undefined();
-    }
-
-    const char* next_url = fn_to_cstr(url_item);
-    DomDocument* doc = _js_current_document ? _js_current_document : _js_main_document;
-    if (!doc || !next_url || !next_url[0]) return make_js_undefined();
-
-    Url* resolved = doc->url ? url_parse_with_base(next_url, doc->url) : url_parse(next_url);
-    if (!resolved || !url_is_valid(resolved)) {
-        if (resolved) url_destroy(resolved);
-        resolved = js_dom_make_fallback_url(next_url);
-        if (!resolved) return make_js_undefined();
-    }
-
-    if (doc->url) url_destroy(doc->url);
-    doc->url = resolved;
-    return make_js_undefined();
-}
-
-extern "C" Item js_history_push_state(Item state, Item title, Item url_item) {
-    (void)state;
-    (void)title;
-    return js_history_apply_url(url_item);
-}
-
-extern "C" Item js_history_replace_state(Item state, Item title, Item url_item) {
-    (void)state;
-    (void)title;
-    return js_history_apply_url(url_item);
-}
-
-static Item js_history_noop(Item arg) {
-    (void)arg;
-    return make_js_undefined();
-}
-
-static Item js_window_noop(void) {
-    return make_js_undefined();
-}
-
-static void js_dom_install_window_location_history_globals(void) {
-    Item global = js_get_global_this();
-    Item doc_proxy = js_get_document_object_value();
-    js_property_set(global, js_string_key("location"), doc_proxy);
-    js_property_set(global, js_string_key("focus"),
-        js_new_function((void*)js_window_noop, 0));
-    js_property_set(global, js_string_key("blur"),
-        js_new_function((void*)js_window_noop, 0));
-
-    Item history = js_new_object();
-    js_property_set(history, js_string_key("pushState"),
-        js_new_function((void*)js_history_push_state, 3));
-    js_property_set(history, js_string_key("replaceState"),
-        js_new_function((void*)js_history_replace_state, 3));
-    js_property_set(history, js_string_key("back"),
-        js_new_function((void*)js_history_noop, 1));
-    js_property_set(history, js_string_key("forward"),
-        js_new_function((void*)js_history_noop, 1));
-    js_property_set(history, js_string_key("go"),
-        js_new_function((void*)js_history_noop, 1));
-    js_property_set(history, js_string_key("length"), (Item){.item = i2it(1)});
-    js_property_set(global, js_string_key("history"), history);
-
-    Item window = js_property_get(global, js_string_key("window"));
-    if (get_type_id(window) == LMD_TYPE_MAP) {
-        js_property_set(window, js_string_key("location"), doc_proxy);
-        js_property_set(window, js_string_key("history"), history);
-        js_property_set(window, js_string_key("focus"),
-            js_new_function((void*)js_window_noop, 0));
-        js_property_set(window, js_string_key("blur"),
-            js_new_function((void*)js_window_noop, 0));
-    }
-}
-
 // ============================================================================
 // Node.contains() (v12)
 // ============================================================================
@@ -14353,15 +14277,28 @@ static Item _coll_illegal_constructor(Item /*first*/) {
     return js_throw_type_error("Illegal constructor");
 }
 
+static void _set_iface_to_string_tag(Item proto, const char* name) {
+    if (get_type_id(proto) != LMD_TYPE_MAP || !name) return;
+    // WebIDL interface prototypes carry @@toStringTag; selector/tooltip
+    // libraries use this brand to distinguish a DOM Element from plain data.
+    js_property_set(proto, js_string_key("__sym_4"),
+                    (Item){.item = s2it(heap_create_name(name))});
+}
+
 static void _install_iface(Item global, const char* name) {
     Item key = (Item){.item = s2it(heap_create_name(name))};
     Item existing = js_property_get(global, key);
-    if (get_type_id(existing) == LMD_TYPE_FUNC) return;
+    if (get_type_id(existing) == LMD_TYPE_FUNC) {
+        Item proto = js_property_get(existing, js_string_key("prototype"));
+        _set_iface_to_string_tag(proto, name);
+        return;
+    }
     // Interface constructors share one native illegal-constructor callback but
     // must not share a cached JsFunction: each owns a distinct `.prototype`.
     Item ctor = js_new_method_function((void*)_coll_illegal_constructor, 0);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name(name))});
     Item proto = js_new_object();
+    _set_iface_to_string_tag(proto, name);
     js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
     js_property_set(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
     js_property_set(global, key, ctor);
@@ -14387,10 +14324,120 @@ static void _set_ctor_int_constant(Item ctor, const char* name, int64_t value) {
         (Item){.item = i2it(value)});
 }
 
+static bool _xpath_attr_name_matches(const char* expression, const char* attr_name) {
+    if (!expression || !attr_name) return false;
+    const char* marker = "starts-with(name(), \"";
+    size_t marker_len = strlen(marker);
+    const char* scan = expression;
+    while ((scan = strstr(scan, marker)) != nullptr) {
+        const char* prefix = scan + marker_len;
+        const char* end = strchr(prefix, '\"');
+        if (!end) break;
+        size_t prefix_len = (size_t)(end - prefix);
+        if (prefix_len > 0 && strncmp(attr_name, prefix, prefix_len) == 0) return true;
+        scan = end + 1;
+    }
+    return false;
+}
+
+static bool _xpath_element_matches(Item expression_item, DomElement* elem) {
+    const char* expression = fn_to_cstr(expression_item);
+    if (!expression || !elem) return false;
+    int attr_count = 0;
+    const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+    for (int i = 0; attr_names && i < attr_count; i++) {
+        if (_xpath_attr_name_matches(expression, attr_names[i])) return true;
+    }
+    return false;
+}
+
+static void _xpath_collect_descendants(DomNode* node, Item expression, Item matches) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* elem = current->as_element();
+        if (_xpath_element_matches(expression, elem)) {
+            js_array_push(matches, js_dom_wrap_element(elem));
+        }
+        if (elem->first_child) {
+            _xpath_collect_descendants(elem->first_child, expression, matches);
+        }
+    }
+}
+
+static Item _xpath_result_iterate_next(void) {
+    Item self = js_get_this();
+    Item items = js_property_get(self, js_string_key("__lambda_xpath_items"));
+    Item index_item = js_property_get(self, js_string_key("__lambda_xpath_index"));
+    int64_t index = get_type_id(index_item) == LMD_TYPE_INT ? it2i(index_item) : 0;
+    if (get_type_id(items) != LMD_TYPE_ARRAY || index >= js_array_length(items)) {
+        return ItemNull;
+    }
+    Item match = js_array_get_int(items, index);
+    js_property_set(self, js_string_key("__lambda_xpath_index"),
+                    (Item){.item = i2it(index + 1)});
+    return match;
+}
+
+static Item _xpath_expression_evaluate(Item context_node, Item /*result_type*/,
+                                       Item /*existing_result*/) {
+    Item self = js_get_this();
+    Item expression = js_property_get(self, js_string_key("__lambda_xpath_source"));
+    DomElement* root = (DomElement*)js_dom_unwrap_element(context_node);
+    Item matches = js_array_new(0);
+    if (root && root->first_child) {
+        // XPath `.//*` selects descendants, not the context node itself; htmx
+        // checks the context node separately before consuming this iterator.
+        _xpath_collect_descendants(root->first_child, expression, matches);
+    }
+
+    Item result = js_new_object();
+    js_property_set(result, js_string_key("__lambda_xpath_items"), matches);
+    js_property_set(result, js_string_key("__lambda_xpath_index"),
+                    (Item){.item = i2it(0)});
+    Item iterate_next = js_new_method_function((void*)_xpath_result_iterate_next, 0);
+    js_set_function_name(iterate_next, js_string_key("iterateNext"));
+    js_property_set(result, js_string_key("iterateNext"), iterate_next);
+    return result;
+}
+
+static Item _xpath_evaluator_create_expression(Item expression, Item /*resolver*/) {
+    Item compiled = js_new_object();
+    js_property_set(compiled, js_string_key("__lambda_xpath_source"),
+                    js_to_string(expression));
+    Item evaluate = js_new_method_function((void*)_xpath_expression_evaluate, 3);
+    js_set_function_name(evaluate, js_string_key("evaluate"));
+    js_property_set(compiled, js_string_key("evaluate"), evaluate);
+    return compiled;
+}
+
+static Item _xpath_evaluator_ctor(void) {
+    Item evaluator = js_new_object();
+    Item create_expression = js_new_method_function(
+        (void*)_xpath_evaluator_create_expression, 2);
+    js_set_function_name(create_expression, js_string_key("createExpression"));
+    js_property_set(evaluator, js_string_key("createExpression"), create_expression);
+
+    Item global = js_get_global_this();
+    Item ctor = js_property_get(global, js_string_key("XPathEvaluator"));
+    Item proto = js_property_get(ctor, js_string_key("prototype"));
+    if (get_type_id(proto) == LMD_TYPE_MAP) js_set_prototype(evaluator, proto);
+    return evaluator;
+}
+
+static void _install_xpath_evaluator(Item global) {
+    Item ctor = js_new_method_function((void*)_xpath_evaluator_ctor, 0);
+    js_set_function_name(ctor, js_string_key("XPathEvaluator"));
+    Item proto = js_new_object();
+    js_property_set(proto, js_string_key("constructor"), ctor);
+    js_property_set(ctor, js_string_key("prototype"), proto);
+    js_property_set(global, js_string_key("XPathEvaluator"), ctor);
+}
+
 static void _install_node_iface(Item global) {
     Item ctor = js_new_method_function((void*)_coll_illegal_constructor, 0);
     js_set_function_name(ctor, (Item){.item = s2it(heap_create_name("Node"))});
     Item proto = js_new_object();
+    _set_iface_to_string_tag(proto, "Node");
     js_property_set(proto, (Item){.item = s2it(heap_create_name("constructor"))}, ctor);
     js_property_set(ctor, (Item){.item = s2it(heap_create_name("prototype"))}, proto);
     _set_ctor_int_constant(ctor, "ELEMENT_NODE", 1);
@@ -14411,10 +14458,25 @@ static void _install_node_iface(Item global) {
 extern "C" void js_dom_install_collection_globals(void) {
     Item global = js_get_global_this();
     _install_node_iface(global);
+    // Document wrappers are module-owned, but bare WebIDL constructor lookup
+    // must still succeed before libraries inspect static Document features.
+    _install_iface(global, "Document");
+    _link_iface_proto(global, "Document", "Node");
+    _install_iface(global, "HTMLDocument");
+    _link_iface_proto(global, "HTMLDocument", "Document");
     _install_iface(global, "Element");
     _link_iface_proto(global, "Element", "Node");
     _install_iface(global, "HTMLElement");
     _link_iface_proto(global, "HTMLElement", "Element");
+    int html_interface_count = (int)(sizeof(s_js_dom_html_interfaces) /
+        sizeof(s_js_dom_html_interfaces[0]));
+    for (int i = 0; i < html_interface_count; i++) {
+        // Specialized HTML wrappers must inherit HTMLElement so WebIDL brand
+        // checks do not collapse every form control to the generic interface.
+        _install_iface(global, s_js_dom_html_interfaces[i].constructor_name);
+        _link_iface_proto(global, s_js_dom_html_interfaces[i].constructor_name,
+                          "HTMLElement");
+    }
     _install_iface(global, "DocumentFragment");
     _link_iface_proto(global, "DocumentFragment", "Node");
     _install_iface(global, "ShadowRoot");
@@ -14435,6 +14497,7 @@ extern "C" void js_dom_install_collection_globals(void) {
     _install_iface(global, "HTMLOptionsCollection");
     _install_iface(global, "NodeList");
     _install_iface(global, "RadioNodeList");
+    _install_xpath_evaluator(global);
     log_debug("js_dom_install_collection_globals: installed collection interfaces");
 }
 

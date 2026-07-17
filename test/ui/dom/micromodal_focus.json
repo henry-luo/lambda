@@ -1,0 +1,16 @@
+{
+  "name": "MicroModal traps Tab, closes on Escape, and returns focus",
+  "html": "test/ui/dom/micromodal_focus.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "click", "target": {"selector": "#modal-trigger"}},
+    {"type": "assert_focus", "target": {"selector": "#modal-first"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#modal-last"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#modal-first"}},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_visible", "target": {"selector": "#modal"}, "visible": false},
+    {"type": "assert_focus", "target": {"selector": "#modal-trigger"}}
+  ]
+}

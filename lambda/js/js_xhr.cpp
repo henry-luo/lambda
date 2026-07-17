@@ -50,6 +50,7 @@ struct XhrState {
     int     ready_state;    // 0=UNSENT, 1=OPENED, 2=HEADERS_RECEIVED, 3=LOADING, 4=DONE
     long    status;
     char*   status_text;
+    char*   override_mime_type;
     char*   response_text;
     size_t  response_size;
     char**  resp_headers;       // raw header strings from http_fetch
@@ -136,6 +137,10 @@ static void xhr_free_state(XhrState* xhr) {
     if (xhr->method) { mem_free(xhr->method); xhr->method = nullptr; }
     if (xhr->url) { mem_free(xhr->url); xhr->url = nullptr; }
     if (xhr->status_text) { mem_free(xhr->status_text); xhr->status_text = nullptr; }
+    if (xhr->override_mime_type) {
+        mem_free(xhr->override_mime_type);
+        xhr->override_mime_type = nullptr;
+    }
     if (xhr->response_text) { mem_free(xhr->response_text); xhr->response_text = nullptr; }
     for (int i = 0; i < xhr->req_header_count; i++) {
         if (xhr->req_headers[i].name) mem_free(xhr->req_headers[i].name);
@@ -154,6 +159,13 @@ static char* xhr_mem_strdup(const char* s) {
     char* dup = (char*)mem_calloc(1, len + 1, MEM_CAT_JS_RUNTIME);
     memcpy(dup, s, len);
     return dup;
+}
+
+static void xhr_free_request_header_lines(char** lines, int count) {
+    if (!lines) return;
+    for (int i = 0; i < count; i++) {
+        if (lines[i]) mem_free(lines[i]);
+    }
 }
 
 extern "C" void js_xhr_set_base_url(const char* base_url) {
@@ -348,12 +360,26 @@ extern "C" Item js_xhr_new(void) {
     k = (Item){.item = s2it(heap_create_name("getAllResponseHeaders"))};
     js_property_set(obj, k, garh_fn);
 
+    Item override_mime_fn = js_new_function((void*)js_xhr_override_mime_type, 1);
+    k = (Item){.item = s2it(heap_create_name("overrideMimeType"))};
+    js_property_set(obj, k, override_mime_fn);
+
     // addEventListener / removeEventListener stubs (jQuery sets onreadystatechange directly)
     Item noop_fn = js_new_function((void*)js_xhr_noop, 0);
     k = (Item){.item = s2it(heap_create_name("addEventListener"))};
     js_property_set(obj, k, noop_fn);
     k = (Item){.item = s2it(heap_create_name("removeEventListener"))};
     js_property_set(obj, k, noop_fn);
+
+    Item upload = js_new_object();
+    // XMLHttpRequestUpload is a distinct EventTarget; request libraries
+    // register progress listeners on both targets before send().
+    k = (Item){.item = s2it(heap_create_name("addEventListener"))};
+    js_property_set(upload, k, noop_fn);
+    k = (Item){.item = s2it(heap_create_name("removeEventListener"))};
+    js_property_set(upload, k, noop_fn);
+    k = (Item){.item = s2it(heap_create_name("upload"))};
+    js_property_set(obj, k, upload);
 
     // callback slots (initially null)
     js_property_set(obj, (Item){.item = s2it(heap_create_name("onreadystatechange"))}, ItemNull);
@@ -390,6 +416,10 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     if (xhr->url) mem_free(xhr->url);
     if (xhr->response_text) { mem_free(xhr->response_text); xhr->response_text = nullptr; }
     if (xhr->status_text) { mem_free(xhr->status_text); xhr->status_text = nullptr; }
+    if (xhr->override_mime_type) {
+        mem_free(xhr->override_mime_type);
+        xhr->override_mime_type = nullptr;
+    }
     for (int i = 0; i < xhr->req_header_count; i++) {
         if (xhr->req_headers[i].name) mem_free(xhr->req_headers[i].name);
         if (xhr->req_headers[i].value) mem_free(xhr->req_headers[i].value);
@@ -431,6 +461,18 @@ extern "C" Item js_xhr_set_request_header(Item name_arg, Item value_arg) {
     xhr->req_headers[xhr->req_header_count].value = xhr_mem_strdup(value);
     xhr->req_header_count++;
 
+    return make_js_undef();
+}
+
+extern "C" Item js_xhr_override_mime_type(Item mime_arg) {
+    XhrState* xhr = xhr_state_from_this();
+    if (!xhr) return make_js_undef();
+    const char* mime = fn_to_cstr(mime_arg);
+    if (!mime) return make_js_undef();
+    if (xhr->override_mime_type) mem_free(xhr->override_mime_type);
+    // Responses are decoded into responseText, but retaining the override is
+    // required because callers may set it between open() and send().
+    xhr->override_mime_type = xhr_mem_strdup(mime);
     return make_js_undef();
 }
 
@@ -498,6 +540,9 @@ extern "C" Item js_xhr_send(Item body_arg) {
             // read_binary_file uses the tracked allocator, so its buffer must
             // return through mem_free rather than the platform C allocator.
             mem_free(file_data);
+            // File requests bypass http_fetch, but their synthesized header
+            // lines have the same per-send ownership as network requests.
+            xhr_free_request_header_lines(header_strs, xhr->req_header_count);
             return make_js_undef();
         }
     }
@@ -506,9 +551,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
     FetchResponse* resp = http_fetch(xhr->url, &config);
 
     // free header strings
-    for (int i = 0; i < xhr->req_header_count; i++) {
-        mem_free(header_strs[i]);
-    }
+    xhr_free_request_header_lines(header_strs, xhr->req_header_count);
 
     if (resp) {
         // store response headers for getResponseHeader/getAllResponseHeaders
