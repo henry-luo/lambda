@@ -10,7 +10,7 @@
 
 **Related LambdaJS MIR review:** [Lambda_Stack_JS_MIR.md](./Lambda_Stack_JS_MIR.md)
 
-**Related precise-only migration plan:** [Lambda_Design_Stack_Frame2.md](./Lambda_Design_Stack_Frame2.md)
+**Related precise-only rooting proposal:** [Lambda_Design_Stack_Rooting.md](./Lambda_Design_Stack_Rooting.md)
 
 This report compares how V8, SpiderMonkey, JavaScriptCore, QuickJS, and CRuby
 keep live language values visible to memory management. It then compares those
@@ -370,7 +370,7 @@ It is a defensible steady-state design only if Lambda accepts:
 - ongoing native-stack scan cost;
 - conservative correctness constraints for all MIR and native helpers.
 
-It does not help achieve the goal in `Lambda_Design_Stack_Frame2.md`, because
+It does not help achieve the goal in `Lambda_Design_Stack_Rooting.md`, because
 the conservative scan is the scheme rather than a migration fallback.
 
 ---
@@ -1312,4 +1312,4 @@ for fixing today's regression.
 
 - [Lambda runtime stack/rooting review](./Lambda_Stack_MIR.md)
 - [LambdaJS emitted-MIR review](./Lambda_Stack_JS_MIR.md)
-- [Conservative-scan removal plan](./Lambda_Design_Stack_Frame2.md)
+- [Canonical-slot rooting proposal and scan-removal plan](./Lambda_Design_Stack_Rooting.md)
