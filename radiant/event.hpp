@@ -33,6 +33,9 @@ void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
     const char* type, int client_x, int client_y, int button, int buttons,
     int mods, const char* pointer_type);
+extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
+    const char* type, int client_x, int client_y, int button, int buttons,
+    int mods, int detail, double timestamp_ms);
 #endif
 
 // ===== event core =====
@@ -1910,7 +1913,7 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block);
 void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block);
 void scroll_apply_pending_element_scroll(ViewBlock* block);
 
-void scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);
+bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);
 bool scrollpane_target(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);

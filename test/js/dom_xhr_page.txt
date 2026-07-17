@@ -1,4 +1,6 @@
 function
+function
+object function
 200
 OK
 true

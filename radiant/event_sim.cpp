@@ -16,6 +16,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/arena.h"
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/js/js_runtime.h"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -3666,6 +3667,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 int px = drag_x + (drag_to_x - drag_x) * step / 5;
                 int py = drag_y + (drag_to_y - drag_y) * step / 5;
                 sim_mouse_move(uicon, px, py);
+                // Browser drag libraries schedule hit-testing intervals during
+                // the gesture; pumping only after mouseup makes every move look
+                // like one indivisible host task and prevents reordering.
+                radiant_pump_js_event_loop(uicon, -1);
             }
             sim_mouse_button(uicon, drag_to_x, drag_to_y, ev->button, ev->mods, false);
             break;
@@ -3684,17 +3689,53 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             const char* pointer_type = ev->pointer_type ? ev->pointer_type : "touch";
             log_info("event_sim: pointer_drag pointerType=%s from (%d, %d) to (%d, %d)",
                      pointer_type, drag_x, drag_y, drag_to_x, drag_to_y);
-            radiant_dispatch_event_sim_pointer(uicon, target, "pointerdown",
-                drag_x, drag_y, ev->button, 1, ev->mods, pointer_type);
             int steps = ev->drag_steps > 0 ? ev->drag_steps : 5;
+            if (strcmp(pointer_type, "mouse") == 0) {
+                // A physical mouse pointer produces both PointerEvents and the
+                // compatibility mouse stream; legacy drag listeners rely on
+                // mousedown/move/up even when a test describes pointer input.
+                sim_mouse_button(uicon, drag_x, drag_y,
+                                 ev->button, ev->mods, true);
+                for (int step = 1; step <= steps; step++) {
+                    int x = drag_x + (drag_to_x - drag_x) * step / steps;
+                    int y = drag_y + (drag_to_y - drag_y) * step / steps;
+                    sim_mouse_move(uicon, x, y);
+                    radiant_pump_js_event_loop(uicon, -1);
+                }
+                sim_mouse_button(uicon, drag_to_x, drag_to_y,
+                                 ev->button, ev->mods, false);
+                break;
+            }
+            bool pointer_down_prevented = radiant_dispatch_event_sim_pointer(uicon, target, "pointerdown",
+                drag_x, drag_y, ev->button, 1, ev->mods, pointer_type);
+            // Without TouchEvent, libraries select legacy mouse drag handlers.
+            // Pointer Events require a compatibility mouse stream unless the
+            // primary pointerdown was canceled, so keep both API families live.
+            bool dispatch_compat_mouse = !pointer_down_prevented;
+            double gesture_timestamp_ms = js_performance_now_ms();
+            if (dispatch_compat_mouse) {
+                radiant_dispatch_event_sim_mouse(uicon, target, "mousedown",
+                    drag_x, drag_y, ev->button, 1, ev->mods, 1,
+                    gesture_timestamp_ms);
+            }
             for (int step = 1; step <= steps; step++) {
                 int x = drag_x + (drag_to_x - drag_x) * step / steps;
                 int y = drag_y + (drag_to_y - drag_y) * step / steps;
                 radiant_dispatch_event_sim_pointer(uicon, target, "pointermove",
                     x, y, ev->button, 1, ev->mods, pointer_type);
+                if (dispatch_compat_mouse) {
+                    radiant_dispatch_event_sim_mouse(uicon, target, "mousemove",
+                        x, y, ev->button, 1, ev->mods, 0,
+                        gesture_timestamp_ms + 50.0 * (double)step / (double)steps);
+                }
             }
             radiant_dispatch_event_sim_pointer(uicon, target, "pointerup",
                 drag_to_x, drag_to_y, ev->button, 0, ev->mods, pointer_type);
+            if (dispatch_compat_mouse) {
+                radiant_dispatch_event_sim_mouse(uicon, target, "mouseup",
+                    drag_to_x, drag_to_y, ev->button, 0, ev->mods, 1,
+                    gesture_timestamp_ms + 60.0);
+            }
             break;
         }
 
@@ -4551,7 +4592,23 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // for HTML <input>/<textarea>. Falling back to the attribute keeps
             // legacy non-FormControl widgets (e.g. todo.ls) working.
             const char* actual = nullptr;
-            if (dom_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+            if (dom_elem->tag() == HTM_TAG_SELECT) {
+                // A select's value comes from live option selectedness, not
+                // from the select's immutable content attribute/edit buffer.
+                DocState* state = (DocState*)uicon->document->state;
+                int selected_index = form_control_get_selected_index(
+                    state, static_cast<View*>(dom_elem));
+                int option_index = 0;
+                for (DomElement* option = dom_select_next_option(dom_elem, nullptr);
+                     option;
+                     option = dom_select_next_option(dom_elem, option), option_index++) {
+                    if (option_index != selected_index) continue;
+                    actual = dom_element_get_attribute(option, "value");
+                    if (!actual) actual = dom_option_text(option);
+                    break;
+                }
+                if (!actual) actual = "";
+            } else if (dom_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                 dom_elem->form && dom_elem->form->current_value) {
                 actual = dom_elem->form->current_value;
             }
@@ -5016,8 +5073,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             View* elem = nullptr;
-            if (ev->target_selector)
-                elem = find_element_by_selector(doc, ev->target_selector);
+            if (ev->target_selector) {
+                // Attribute assertions share the indexed target contract used
+                // by input events; defaulting to match zero made assertions on
+                // repeated controls silently inspect the wrong element.
+                elem = find_element_by_selector(doc, ev->target_selector,
+                    ev->target_index);
+            }
             if (!elem) {
                 log_error("event_sim: assert_attribute FAIL - target '%s' not found",
                     ev->target_selector ? ev->target_selector : "(null)");

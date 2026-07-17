@@ -25,6 +25,7 @@
 #include "../lambda.hpp"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
+#include "../module/radiant/radiant_input_value.hpp"
 #include "../../radiant/view.hpp"
 #include "../../radiant/event.hpp"
 #include "../../lib/log.h"
@@ -657,11 +658,23 @@ static void fd_walk_form_controls(Item entries, DomNode* node) {
                             js_array_push(entries, pair);
                         }
                     } else if (strcmp(itype, "file") == 0) {
-                        // type=file: include an empty File stub (no files selected)
-                        Item pair = js_array_new(0);
-                        js_array_push(pair, name_item);
-                        js_array_push(pair, fd_make_file_stub());
-                        js_array_push(entries, pair);
+                        Item files = radiant_input_files(elem);
+                        int64_t file_count = get_type_id(files) == LMD_TYPE_ARRAY
+                            ? js_array_length(files) : 0;
+                        if (file_count == 0) {
+                            Item pair = js_array_new(0);
+                            js_array_push(pair, name_item);
+                            js_array_push(pair, fd_make_file_stub());
+                            js_array_push(entries, pair);
+                        } else {
+                            for (int64_t file_index = 0; file_index < file_count;
+                                 file_index++) {
+                                Item pair = js_array_new(0);
+                                js_array_push(pair, name_item);
+                                js_array_push(pair, js_array_get_int(files, file_index));
+                                js_array_push(entries, pair);
+                            }
+                        }
                     } else {
                         // text, number, email, url, tel, search, password, hidden, etc.
                         // Use tc_ensure_init for initialized text controls; fall back to
@@ -943,16 +956,14 @@ static Item js_formdata_construct(Item first, Item submitter) {
         // null, string, number, non-form MAP → TypeError
         bool is_form_elem = false;
 
-        if (ft == LMD_TYPE_MAP) {
-            // Check if it is a DOM element whose tag is "form"
-            // js_dom_unwrap_element returns void* = DomNode*; must check is_element() first
-            void* node_raw = js_dom_unwrap_element(first);
-            DomNode* node = (DomNode*)node_raw;
-            if (node && node->is_element()) {
-                DomElement* elem = (DomElement*)node;
-                if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
-                    is_form_elem = true;
-                }
+        // DOM3 wrappers are host VMaps, so receiver identity must be decided by
+        // unwrapping rather than by the obsolete map-shell representation.
+        void* node_raw = js_dom_unwrap_element(first);
+        DomNode* node = (DomNode*)node_raw;
+        if (node && node->is_element()) {
+            DomElement* elem = (DomElement*)node;
+            if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+                is_form_elem = true;
             }
         }
 
@@ -974,12 +985,10 @@ static Item js_formdata_construct(Item first, Item submitter) {
         if (node && node->is_element()) {
             DomElement* form_elem = (DomElement*)node;
             fd_walk_form_controls(entries, form_elem->first_child);
-            if (get_type_id(submitter) == LMD_TYPE_MAP) {
-                void* submitter_raw = js_dom_unwrap_element(submitter);
-                DomNode* submitter_node = (DomNode*)submitter_raw;
-                if (submitter_node && submitter_node->is_element()) {
-                    fd_append_submitter_entry(entries, (DomElement*)submitter_node);
-                }
+            void* submitter_raw = js_dom_unwrap_element(submitter);
+            DomNode* submitter_node = (DomNode*)submitter_raw;
+            if (submitter_node && submitter_node->is_element()) {
+                fd_append_submitter_entry(entries, (DomElement*)submitter_node);
             }
             log_debug("js_formdata_construct: populated from <form>, entries=%lld",
                       (long long)js_array_length(entries));

@@ -3289,6 +3289,11 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         }
     }
 
+    // Page scripts execute before final document bookkeeping below, but their
+    // URL-dependent globals and relative fetches must already observe the
+    // redirected/<base>-adjusted document URL.
+    dom_doc->url = html_url;
+
     DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
         log_error("Failed to build DomElement tree");

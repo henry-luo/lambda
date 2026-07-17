@@ -236,6 +236,8 @@ void js_args_stack_reset(void);
 void js_args_stack_cleanup(void);
 void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source(Item fn_item, Item source_item);
+void js_set_function_ctor_shape_metadata(Item fn_item, const char** prop_names,
+                                         const int* prop_lens, int count);
 void js_mark_generator_func(Item fn_item);
 void js_mark_async_generator_func(Item fn_item);
 void js_mark_async_func(Item fn_item);
@@ -416,6 +418,12 @@ void js_append_builtin_method_names_for_class(int js_class, TypeId fallback_type
 void js_append_builtin_method_names(TypeId type, Item result);
 Item js_array_is_array(Item value);
 Item js_performance_now(void);
+double js_performance_now_ms(void);
+double js_performance_monotonic_now_ms(void);
+double js_performance_monotonic_to_relative(double monotonic_ms);
+void js_performance_frame_clock_begin(double monotonic_ms);
+void js_performance_frame_clock_end(void);
+double js_performance_time_origin_ms(void);
 Item js_date_now(void);
 Item js_date_now_string(void);
 Item js_date_new(void);
@@ -660,6 +668,8 @@ Item js_constructor_create_object_shaped_cached(Item callee, const char** prop_n
 // js_set_shaped_slot: writes with correct unboxing, updates ShapeEntry type.
 Item js_get_shaped_slot(Item object, int64_t slot);
 void js_set_shaped_slot(Item object, int64_t slot, Item value);
+Item js_set_shaped_slot_guarded(Item object, int64_t slot, const char* name,
+                                int64_t name_len, Item value);
 
 // P1: Type-specific native slot access — bypass boxing/unboxing entirely.
 // byte_offset = slot * 8, pre-computed at compile time by the transpiler.

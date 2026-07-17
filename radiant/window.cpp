@@ -44,7 +44,8 @@ extern __thread Context* input_context;
 extern "C" Context* _lambda_rt;
 extern UiContext ui_context;
 
-static bool view_pump_js_event_loop(DomDocument* doc, int wait_ms) {
+bool radiant_pump_js_event_loop(UiContext* uicon, int wait_ms) {
+    DomDocument* doc = uicon ? uicon->document : nullptr;
     if (!doc || !doc->js_runtime_heap || !doc->js_runtime_name_pool) {
         if (wait_ms >= 0) return js_event_loop_pump_wait(wait_ms);
         js_event_loop_pump_nowait();
@@ -72,7 +73,7 @@ static bool view_pump_js_event_loop(DomDocument* doc, int wait_ms) {
     bool pumped = true;
     if (wait_ms >= 0) pumped = js_event_loop_pump_wait(wait_ms);
     else js_event_loop_pump_nowait();
-    radiant_reconcile_js_dom_mutations(&ui_context, doc);
+    if (uicon) radiant_reconcile_js_dom_mutations(uicon, doc);
     context = saved_ctx;
     input_context = saved_input_ctx;
     _lambda_rt = saved_lambda_rt;
@@ -1224,11 +1225,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                 // so a self-rescheduling callback can't spin to the watchdog.
                 if (event_sim_assertion_retry_pending(sim_ctx)) {
                     int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
-                    if (view_pump_js_event_loop(ui_context.document, retry_wait_ms)) {
+                    if (radiant_pump_js_event_loop(&ui_context, retry_wait_ms)) {
                         event_sim_wake_assertion_retry(sim_ctx);
                     }
                 } else {
-                    view_pump_js_event_loop(ui_context.document, -1);
+                    radiant_pump_js_event_loop(&ui_context, -1);
                 }
                 // Advance time by event interval
                 SimEvent* ev = (sim_ctx->current_index > 0 && sim_ctx->current_index <= sim_ctx->events->length)

@@ -1,0 +1,3 @@
+flatpickr:open: true
+flatpickr:value: 2024-03-14
+flatpickr:change: 1 1

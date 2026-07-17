@@ -82,6 +82,9 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* p
                                      struct CssStylesheet*** stylesheets, int* count, int depth = 0);
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
 static void clear_cascaded_styles_recursive(DomNode* node);
+static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
+                                          const char* type,
+                                          bool bubbles, bool cancelable);
 
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
@@ -1327,7 +1330,12 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     fire_inline_event(evcon, lam::view_require_element(block));
     if (block->scroller && block->scroller->pane) {
         if (evcon->event.type == RDT_EVENT_SCROLL) {
-            scrollpane_scroll(evcon, block, block->scroller->pane);
+            if (scrollpane_scroll(evcon, block, block->scroller->pane)) {
+                // Native wheel scrolling mutates the pane outside JS; dispatch
+                // the non-bubbling element scroll event that virtualizers observe.
+                radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
+                                              "scroll", false, false);
+            }
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
             scroll_state_is_hovered_for_view(event_view_owner_state(static_cast<View*>(block)),
@@ -1408,6 +1416,28 @@ static const char* key_code_to_name(int key) {
         case RDT_KEY_HOME:      return "Home";
         case RDT_KEY_END:       return "End";
         default:                return "";
+    }
+}
+
+static int key_code_to_legacy_code(int key) {
+    switch (key) {
+        case RDT_KEY_BACKSPACE: return 8;
+        case RDT_KEY_TAB:       return 9;
+        case RDT_KEY_ENTER:     return 13;
+        case RDT_KEY_ESCAPE:    return 27;
+        case RDT_KEY_PAGE_UP:   return 33;
+        case RDT_KEY_PAGE_DOWN: return 34;
+        case RDT_KEY_END:       return 35;
+        case RDT_KEY_HOME:      return 36;
+        case RDT_KEY_LEFT:      return 37;
+        case RDT_KEY_UP:        return 38;
+        case RDT_KEY_RIGHT:     return 39;
+        case RDT_KEY_DOWN:      return 40;
+        case RDT_KEY_DELETE:    return 46;
+        default:
+            // GLFW/Radiant printable letter, digit, and space codes already
+            // match the legacy DOM virtual-key values.
+            return key >= 32 && key <= 90 ? key : 0;
     }
 }
 
@@ -4887,13 +4917,18 @@ typedef struct {
     bool alt;
     bool meta;
     int detail;
+    double timestamp_ms;
 } MouseEventBuildArgs;
 
 static Item build_mouse_event_item(void* userdata) {
     MouseEventBuildArgs* args = (MouseEventBuildArgs*)userdata;
-    return js_create_native_mouse_event(args->type, args->client_x, args->client_y,
+    Item event = js_create_native_mouse_event(args->type, args->client_x, args->client_y,
         args->button, args->buttons, args->ctrl, args->shift, args->alt,
         args->meta, args->detail, ItemNull);
+    if (args->timestamp_ms >= 0.0) {
+        js_event_set_timestamp(event, args->timestamp_ms);
+    }
+    return event;
 }
 
 static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
@@ -4905,10 +4940,28 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
 {
     MouseEventBuildArgs args = {
         type, client_x, client_y, button, buttons,
-        ctrl, shift, alt, meta, detail
+        ctrl, shift, alt, meta, detail, -1.0
     };
     return radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
         &args, true, dispatched);
+}
+
+extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
+    const char* type, int client_x, int client_y, int button, int buttons,
+    int mods, int detail, double timestamp_ms)
+{
+    if (!uicon || !uicon->document || !target || !type) return false;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = uicon->document;
+    MouseEventBuildArgs args = {
+        type, client_x, client_y, button, buttons,
+        (mods & RDT_MOD_CTRL) != 0, (mods & RDT_MOD_SHIFT) != 0,
+        (mods & RDT_MOD_ALT) != 0, (mods & RDT_MOD_SUPER) != 0,
+        detail, timestamp_ms
+    };
+    return radiant_dispatch_built_event(&evcon, target, build_mouse_event_item,
+        &args, true);
 }
 
 typedef struct {
@@ -4931,6 +4984,20 @@ static Item build_pointer_event_item(void* userdata) {
         args->meta, args->pointer_type, 1, true);
 }
 
+static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
+                                           const char* type, int client_x,
+                                           int client_y, int button, int buttons,
+                                           bool ctrl, bool shift, bool alt,
+                                           bool meta, const char* pointer_type,
+                                           bool* dispatched = nullptr) {
+    PointerEventBuildArgs args = {
+        type, client_x, client_y, button, buttons,
+        ctrl, shift, alt, meta, pointer_type ? pointer_type : "mouse"
+    };
+    return radiant_dispatch_built_event(evcon, target, build_pointer_event_item,
+        &args, true, dispatched);
+}
+
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
     const char* type, int client_x, int client_y, int button, int buttons,
     int mods, const char* pointer_type)
@@ -4939,14 +5006,11 @@ extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* targe
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = uicon->document;
-    PointerEventBuildArgs args = {
-        type, client_x, client_y, button, buttons,
+    return radiant_dispatch_pointer_event(&evcon, target, type,
+        client_x, client_y, button, buttons,
         (mods & RDT_MOD_CTRL) != 0, (mods & RDT_MOD_SHIFT) != 0,
         (mods & RDT_MOD_ALT) != 0, (mods & RDT_MOD_SUPER) != 0,
-        pointer_type ? pointer_type : "touch"
-    };
-    return radiant_dispatch_built_event(&evcon, target, build_pointer_event_item,
-        &args, true);
+        pointer_type ? pointer_type : "touch");
 }
 
 /**
@@ -4957,6 +5021,7 @@ extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* targe
 typedef struct {
     const char* type;
     const char* key_name;
+    int legacy_key_code;
     bool ctrl;
     bool shift;
     bool alt;
@@ -4967,6 +5032,7 @@ typedef struct {
 static Item build_keyboard_event_item(void* userdata) {
     KeyboardEventBuildArgs* args = (KeyboardEventBuildArgs*)userdata;
     return js_create_native_keyboard_event(args->type, args->key_name, args->key_name,
+        args->legacy_key_code,
         args->ctrl, args->shift, args->alt, args->meta, args->repeat);
 }
 
@@ -4978,6 +5044,7 @@ static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
     KeyboardEventBuildArgs args = {
         type,
         key_name,
+        key_code_to_legacy_code(key_code),
         (mods & RDT_MOD_CTRL) != 0,
         (mods & RDT_MOD_SHIFT) != 0,
         (mods & RDT_MOD_ALT) != 0,
@@ -5546,7 +5613,17 @@ void update_hover_state(EventContext* evcon, View* new_target) {
     sync_hover_pseudo_state_after_transition(state, prev_hover, new_target);
     evcon->need_repaint = true;
 
-    if (prev_hover) log_debug("update_hover_state: cleared hover on %p", prev_hover);
+    if (prev_hover) {
+        log_debug("update_hover_state: cleared hover on %p", prev_hover);
+        // Hover transitions previously emitted only mouseover, leaving
+        // mouseenter-driven tooltip libraries unable to observe real input.
+        radiant_dispatch_mouse_event(evcon, prev_hover, "mouseout",
+            evcon->event.mouse_position.x, evcon->event.mouse_position.y,
+            0, 0, false, false, false, false, 0);
+        radiant_dispatch_mouse_event(evcon, prev_hover, "mouseleave",
+            evcon->event.mouse_position.x, evcon->event.mouse_position.y,
+            0, 0, false, false, false, false, 0);
+    }
 
     if (new_target) {
         log_debug("update_hover_state: set hover on %p", new_target);
@@ -5554,6 +5631,9 @@ void update_hover_state(EventContext* evcon, View* new_target) {
         // Dispatch through the unified EventTarget path. Static inline
         // attributes have already been installed as IDL `onmouseover` slots.
         radiant_dispatch_mouse_event(evcon, new_target, "mouseover",
+            evcon->event.mouse_position.x, evcon->event.mouse_position.y,
+            0, 0, false, false, false, false, 0);
+        radiant_dispatch_mouse_event(evcon, new_target, "mouseenter",
             evcon->event.mouse_position.x, evcon->event.mouse_position.y,
             0, 0, false, false, false, false, 0);
     }
@@ -6163,6 +6243,13 @@ bool is_view_programmatically_focusable(View* view) {
     // A negative tabindex excludes sequential focus only; HTMLElement.focus()
     // must still accept the target so keyboard events reach modal-style widgets.
     return elem->get_attribute("tabindex") != NULL;
+}
+
+static View* mouse_focus_target(View* hit) {
+    for (View* view = hit; view; view = view->parent) {
+        if (is_view_programmatically_focusable(view)) return view;
+    }
+    return nullptr;
 }
 
 static bool prepare_previous_focus_blur(EventContext* evcon,
@@ -6967,6 +7054,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            int buttons = uicon->mouse_state.is_mouse_down ? 1 : 0;
+            // Native mouse input has a compatibility PointerEvent stream. JS
+            // drag libraries select that stream when PointerEvent exists, so
+            // omitting it made real mouse motion invisible after pointerdown.
+            radiant_dispatch_pointer_event(&evcon, evcon.target,
+                "pointermove", mouse_x, mouse_y, 0, buttons,
+                false, false, false, false, "mouse");
+            radiant_dispatch_mouse_event(&evcon, evcon.target,
+                "mousemove", mouse_x, mouse_y, 0, buttons,
+                false, false, false, false, 0);
             dispatch_lambda_handler(&evcon, evcon.target, "mousemove");
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
@@ -7412,6 +7509,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         DocState* state = event_context_target_state(&evcon);
 
+        if (btn_event->button == GLFW_MOUSE_BUTTON_LEFT) {
+            uicon->mouse_state.is_mouse_down = event->type == RDT_EVENT_MOUSE_DOWN;
+        }
+
         // F8 (Radiant_Design_Form_Input.md §3.10): native context menu
         // hit-testing. Runs before any focus / drag work so a click inside
         // the popup or its dismissal doesn't reach underlying views.
@@ -7458,6 +7559,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             update_active_state(&evcon, evcon.target, true);
 
             dispatch_lambda_handler(&evcon, evcon.target, "mousedown");
+            bool pointer_prevented = radiant_dispatch_pointer_event(
+                &evcon, evcon.target, "pointerdown",
+                btn_event->x, btn_event->y, btn_event->button,
+                1 << btn_event->button,
+                event_mod_ctrl(btn_event->mods),
+                event_mod_shift(btn_event->mods),
+                event_mod_alt(btn_event->mods),
+                event_mod_super(btn_event->mods), "mouse");
+            if (pointer_prevented) evcon.default_prevented = true;
             // Dispatch through JS EventTarget before native defaults so
             // preventDefault() can suppress focus/caret default actions.
             {
@@ -7475,8 +7585,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Update focus if target is focusable (mouse-triggered focus).
             // A canceled mousedown suppresses the browser focus default action;
             // toolbar controls use this to keep text-control selection active.
-            if (!evcon.default_prevented && is_view_focusable(evcon.target)) {
-                update_focus_state(&evcon, evcon.target, false);  // from_keyboard=false
+            // Hit testing commonly lands on a button's text child; browser
+            // mouse focus belongs to the nearest focusable ancestor instead.
+            View* mouse_focus = mouse_focus_target(evcon.target);
+            if (!evcon.default_prevented && mouse_focus) {
+                update_focus_state(&evcon, mouse_focus, false);  // from_keyboard=false
             } else if (!evcon.default_prevented) {
                 DomElement* rich_host = rich_editable_from_target(evcon.target);
                 if (rich_host && is_view_focusable(static_cast<View*>(rich_host))) {
@@ -7847,6 +7960,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (event->type == RDT_EVENT_MOUSE_UP) {
+            if (evcon.target) {
+                bool pointer_up_prevented = radiant_dispatch_pointer_event(
+                    &evcon, evcon.target, "pointerup",
+                    btn_event->x, btn_event->y, btn_event->button, 0,
+                    event_mod_ctrl(btn_event->mods),
+                    event_mod_shift(btn_event->mods),
+                    event_mod_alt(btn_event->mods),
+                    event_mod_super(btn_event->mods), "mouse");
+                if (pointer_up_prevented) evcon.default_prevented = true;
+            }
             // Dispatch the JS 'mouseup' event through the EventTarget pipeline
             // (browsers fire mouseup before click). Only mousedown + click were
             // dispatched before, so window/document-level drag listeners that

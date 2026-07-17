@@ -54,6 +54,7 @@ void log_dom_element_timing() {
 // Forward declaration
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* document, DomElement* parent);
 DomElement* build_dom_tree_from_element_with_input(Element* elem, DomDocument* document, DomElement* parent);
+static bool dom_element_add_cached_class(DomElement* element, const char* class_name);
 
 // helper: append a DomNode child to a parent's sibling chain
 static void dom_append_to_sibling_chain(DomElement* parent, DomNode* child) {
@@ -494,7 +495,7 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
                         char* token = strtok(class_copy, " \t\n\r");
                         while (token) {
                             if (strlen(token) > 0) {
-                                dom_element_add_class(element, token);
+                                dom_element_add_cached_class(element, token);
                             }
                             token = strtok(nullptr, " \t\n\r");
                         }
@@ -661,7 +662,7 @@ const char** dom_element_get_attribute_names(DomElement* element, int* count) {
 // Class Management
 // ============================================================================
 
-bool dom_element_add_class(DomElement* element, const char* class_name) {
+static bool dom_element_add_cached_class(DomElement* element, const char* class_name) {
     if (!element || !class_name) {
         return false;
     }
@@ -702,7 +703,7 @@ bool dom_element_add_class(DomElement* element, const char* class_name) {
     return true;
 }
 
-bool dom_element_remove_class(DomElement* element, const char* class_name) {
+static bool dom_element_remove_cached_class(DomElement* element, const char* class_name) {
     if (!element || !class_name) {
         return false;
     }
@@ -721,6 +722,49 @@ bool dom_element_remove_class(DomElement* element, const char* class_name) {
     }
 
     return false;
+}
+
+static bool dom_element_sync_class_attribute(DomElement* element) {
+    if (!element || !element->native_element || !element->doc) {
+        return true;
+    }
+
+    StrBuf* serialized = strbuf_new();
+    if (!serialized) {
+        return false;
+    }
+    for (int i = 0; i < element->class_count; i++) {
+        if (i > 0) {
+            strbuf_append_char(serialized, ' ');
+        }
+        strbuf_append_str(serialized, element->class_names[i]);
+    }
+
+    // DOMTokenList mutates the content attribute; keeping only the selector cache
+    // made classList and getAttribute()/native automation observe different DOMs.
+    bool updated = dom_element_set_attribute(element, "class", serialized->str);
+    strbuf_free(serialized);
+    return updated;
+}
+
+bool dom_element_add_class(DomElement* element, const char* class_name) {
+    if (!element || !class_name) {
+        return false;
+    }
+    if (dom_element_has_class(element, class_name)) {
+        return true;
+    }
+    if (!dom_element_add_cached_class(element, class_name)) {
+        return false;
+    }
+    return dom_element_sync_class_attribute(element);
+}
+
+bool dom_element_remove_class(DomElement* element, const char* class_name) {
+    if (!dom_element_remove_cached_class(element, class_name)) {
+        return false;
+    }
+    return dom_element_sync_class_attribute(element);
 }
 
 bool dom_element_has_class(DomElement* element, const char* class_name) {
@@ -3001,7 +3045,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             char* token = strtok(class_copy, " \t\n");
             while (token) {
                 if (strlen(token) > 0) {
-                    dom_element_add_class(dom_elem, token);
+                    dom_element_add_cached_class(dom_elem, token);
                 }
                 token = strtok(nullptr, " \t\n");
             }

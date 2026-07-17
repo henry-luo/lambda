@@ -1,0 +1,18 @@
+date: date 2024-02-29 1709164800000 2024-02-29T00:00:00.000Z
+date-invalid: true true
+date-number: 1970-01-01
+date-validity: true false true
+date-step-valid: true
+month: 2025-07 2025-07-01T00:00:00.000Z
+month-step: 2025-09
+week: 2020-W53 2020-12-28T00:00:00.000Z
+week-invalid: true
+time: 23:59:58.125 86398125 1970-01-01T23:59:58.125Z
+time-number: 00:01
+datetime: 2024-01-02T03:04 true
+color: #aa00ff
+color-invalid: #000000
+unknown-type: text
+file: 1 sample.txt C:\fakepath\sample.txt sample.txt
+file-list: true sample.txt [object FileList]
+file-list-brand: TypeError

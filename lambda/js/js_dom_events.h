@@ -140,6 +140,9 @@ Item js_create_native_mouse_event(const char* type,
     bool ctrl, bool shift, bool alt, bool meta,
     int detail, Item related_target);
 
+/** Override the timestamp for deterministic native-event simulation. */
+void js_event_set_timestamp(Item event, double timestamp_ms);
+
 Item js_create_native_pointer_event(const char* type,
     int client_x, int client_y,
     int button, int buttons,
@@ -151,6 +154,7 @@ Item js_create_native_css_event(const char* type, const char* detail_name,
 
 Item js_create_native_keyboard_event(const char* type,
     const char* key, const char* code,
+    int legacy_key_code,
     bool ctrl, bool shift, bool alt, bool meta,
     bool repeat);
 

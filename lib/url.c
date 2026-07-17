@@ -354,6 +354,16 @@ String* url_serialize_without_fragment(const Url* url) {
 String* url_serialize_origin(const Url* url) {
     if (!url) return NULL;
 
+    bool has_tuple_origin = url->scheme == URL_SCHEME_HTTP ||
+        url->scheme == URL_SCHEME_HTTPS || url->scheme == URL_SCHEME_FTP ||
+        url->scheme == URL_SCHEME_FTPS || url->scheme == URL_SCHEME_WS ||
+        url->scheme == URL_SCHEME_WSS;
+    if (!has_tuple_origin) {
+        // File and other non-tuple schemes have opaque origins; serializing
+        // their protocol alone makes same-origin URL comparisons fail.
+        return url_create_string("null");
+    }
+
     // Calculate required buffer size
     size_t total_size = 0;
 
@@ -509,7 +519,13 @@ const char* url_get_href(const Url* url) {
 }
 
 const char* url_get_origin(const Url* url) {
-    return (url && url->origin) ? url->origin->chars : NULL;
+    if (!url) return NULL;
+    if (url->origin && url->origin->len > 0) return url->origin->chars;
+    bool has_tuple_origin = url->scheme == URL_SCHEME_HTTP ||
+        url->scheme == URL_SCHEME_HTTPS || url->scheme == URL_SCHEME_FTP ||
+        url->scheme == URL_SCHEME_FTPS || url->scheme == URL_SCHEME_WS ||
+        url->scheme == URL_SCHEME_WSS;
+    return has_tuple_origin ? NULL : "null";
 }
 
 const char* url_get_protocol(const Url* url) {

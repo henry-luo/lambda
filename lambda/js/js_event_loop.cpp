@@ -50,6 +50,7 @@ extern "C" Item js_domain_set_stack(Item stack);
 extern "C" void js_domain_restore_stack(Item previous);
 extern "C" Context* _lambda_rt;
 extern Runtime* js_source_runtime;
+extern Item js_make_number(double value);
 
 // =============================================================================
 // Task Queues
@@ -272,7 +273,13 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
     int called = 0;
     if (pending <= 0) return 0;
 
-    Item timestamp = (Item){.item = i2it((int64_t)timestamp_ms)};
+    // The frame clock supplies absolute monotonic time; DOMHighResTimeStamp is
+    // relative to the same document origin as performance.now().
+    Item timestamp = js_make_number(js_performance_monotonic_to_relative(timestamp_ms));
+    // rAF callbacks and performance.now() share one document frame clock.
+    // Headless draining advances synthetic frames faster than wall time, so
+    // exposing wall time here prevented animation libraries from completing.
+    js_performance_frame_clock_begin(timestamp_ms);
 
     for (int i = 0; i < pending; i++) {
         int64_t id = -1;
@@ -283,6 +290,7 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
             called++;
         }
     }
+    js_performance_frame_clock_end();
     js_microtask_flush();
     return called;
 }
@@ -293,7 +301,7 @@ extern "C" int js_animation_frame_drain(int max_frames) {
     if (max_frames <= 0) max_frames = 1;
     int frames = 0;
     int called = 0;
-    double timestamp_ms = 0.0;
+    double timestamp_ms = js_performance_monotonic_now_ms();
     while (raf_count > 0 && frames < max_frames) {
         timestamp_ms += 16.6667;
         called += js_animation_frame_flush(timestamp_ms);

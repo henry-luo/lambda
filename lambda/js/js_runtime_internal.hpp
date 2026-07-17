@@ -94,6 +94,9 @@ struct JsFunction {
     String* vm_stack_source;
     int64_t vm_stack_line_offset;
     int64_t vm_stack_column_offset;
+    const char** ctor_prop_names; // fixed-slot layout for dynamic constructor calls
+    int* ctor_prop_lens;
+    int ctor_prop_count;
 };
 
 #define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu

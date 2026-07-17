@@ -25,12 +25,8 @@
 #include "../input/css/dom_element.hpp"
 
 #include <cstring>
-#include <ctime>
 #include <cmath>
 #include <functional>
-#ifdef __APPLE__
-#include <mach/mach_time.h>
-#endif
 
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
 // js_dom.h, declared here under extern "C" to avoid header coupling).
@@ -168,25 +164,12 @@ static void event_apply_new_target_prototype(Item event) {
     }
 }
 
-// High-resolution monotonic ms with the SAME time origin as
-// performance.now() (no origin subtraction; counts since boot on macOS,
-// since CLOCK_MONOTONIC origin on Linux). Spec requires that an event's
-// `timeStamp` is comparable with values returned by performance.now().
+// Event timestamps share the document-relative performance clock. Spec
+// requires that `timeStamp` is directly comparable with performance.now().
 // The value is clamped to 5 microsecond resolution per HR-Time / WPT
 // `Event-timestamp-safe-resolution` (timing-attack hardening).
 static double event_now_ms() {
-    double ms;
-#ifdef __APPLE__
-    static mach_timebase_info_data_t timebase = {0, 0};
-    if (timebase.denom == 0) mach_timebase_info(&timebase);
-    uint64_t ticks = mach_absolute_time();
-    double ns = (double)ticks * (double)timebase.numer / (double)timebase.denom;
-    ms = ns / 1e6;
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
-#endif
+    double ms = js_performance_now_ms();
     // clamp to 5us = 0.005ms resolution
     return floor(ms / 0.005) * 0.005;
 }
@@ -392,8 +375,6 @@ struct NodeListeners {
 
 struct EventListenerSnapshot {
     char* type;
-    Item callback;
-    Item signal;
     uint64_t order;
     bool capture;
     bool once;
@@ -645,7 +626,7 @@ static EventListener* nl_find_snapshot_listener(NodeListeners* nl,
         EventListener* el = &nl->items[i];
         if (el->removed) continue;
         if (el->type == snap->type &&
-            event_listener_root_item(el->callback_root).item == snap->callback.item &&
+            el->order == snap->order &&
             el->capture == snap->capture) {
             return el;
         }
@@ -1534,7 +1515,11 @@ extern "C" Item js_create_native_composition_event(const char* type,
     const char* data)
 {
     Item init = js_new_object();
-    event_set_bool(init, "bubbles", true);
+    // Boundary hover events are intentionally non-bubbling; setting the
+    // factory default to true made ancestor mouseenter handlers fire twice.
+    bool boundary_hover = type &&
+        (strcmp(type, "mouseenter") == 0 || strcmp(type, "mouseleave") == 0);
+    event_set_bool(init, "bubbles", !boundary_hover);
     event_set_bool(init, "cancelable", false);
     event_set_bool(init, "composed", true);
     event_set_str(init, "data", data ? data : "");
@@ -1746,6 +1731,10 @@ extern "C" Item js_create_native_mouse_event(const char* type,
     return ev;
 }
 
+extern "C" void js_event_set_timestamp(Item event, double timestamp_ms) {
+    event_set_double(event, "timeStamp", timestamp_ms);
+}
+
 extern "C" Item js_create_native_pointer_event(const char* type,
     int client_x, int client_y,
     int button, int buttons,
@@ -1814,6 +1803,7 @@ extern "C" Item js_create_native_drag_event(const char* type,
 
 extern "C" Item js_create_native_keyboard_event(const char* type,
     const char* key, const char* code,
+    int legacy_key_code,
     bool ctrl, bool shift, bool alt, bool meta,
     bool repeat)
 {
@@ -1823,6 +1813,8 @@ extern "C" Item js_create_native_keyboard_event(const char* type,
     event_set_bool(init, "composed", true);
     if (key) event_set_str(init, "key", key);
     if (code) event_set_str(init, "code", code);
+    event_set_int(init, "keyCode", legacy_key_code);
+    event_set_int(init, "which", legacy_key_code);
     event_set_bool(init, "repeat", repeat);
     stamp_modifier_init(init, ctrl, shift, alt, meta);
     Item type_str = (Item){.item = s2it(heap_create_name(type ? type : ""))};
@@ -2130,8 +2122,6 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         if (signal_is_aborted(listener_signal)) { el->removed = true; continue; }
         EventListenerSnapshot* dst = &snap[snap_count++];
         dst->type = el->type;
-        dst->callback = event_listener_root_item(el->callback_root);
-        dst->signal = listener_signal;
         dst->order = el->order;
         dst->capture = el->capture;
         dst->once = el->once;
@@ -2160,10 +2150,14 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         EventListener* live = nl_find_snapshot_listener(live_nl, el);
         // re-check tombstone in case a prior listener removed this one
         if (!live) continue;
-        if (signal_is_aborted(el->signal)) { live->removed = true; continue; }
+        Item live_signal = event_listener_root_item(live->signal_root);
+        if (signal_is_aborted(live_signal)) { live->removed = true; continue; }
 
         // Resolve callback — function or {handleEvent}
-        Item callback = el->callback;
+        // A prior listener may collect and move heap objects. Reload from the
+        // stable root instead of using the raw snapshot Item, or the remaining
+        // listeners disappear from the same dispatch.
+        Item callback = event_listener_root_item(live->callback_root);
         Item this_for_call = wrap_path_key(key, key_is_dom);
         TypeId ct = get_type_id(callback);
         if (ct != LMD_TYPE_FUNC) {

@@ -1651,97 +1651,115 @@ static void jm_scan_ctor_super_call(JsFuncCollected* fc, JsCallNode* call) {
     fc->ctor_has_dynamic_this_call = true;
 }
 
+static void jm_scan_ctor_prop_assignment(JsFuncCollected* fc, JsAssignmentNode* asgn) {
+    if (!fc || !asgn || asgn->op != JS_OP_ASSIGN || !asgn->left ||
+        asgn->left->node_type != JS_AST_NODE_MEMBER_EXPRESSION) return;
+    JsMemberNode* mem = (JsMemberNode*)asgn->left;
+    if (!mem->object || mem->object->node_type != JS_AST_NODE_IDENTIFIER ||
+        mem->computed || !mem->property ||
+        mem->property->node_type != JS_AST_NODE_IDENTIFIER) return;
+    JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
+    if (obj_id->name->len != 4 ||
+        strncmp(obj_id->name->chars, "this", 4) != 0) return;
+
+    JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
+    int idx = -1;
+    for (int existing = 0; existing < fc->ctor_prop_count; existing++) {
+        if (fc->ctor_prop_lens[existing] == (int)prop->name->len &&
+            strncmp(fc->ctor_prop_ptrs[existing], prop->name->chars,
+                (int)prop->name->len) == 0) {
+            idx = existing;
+            break;
+        }
+    }
+    if (idx < 0 && fc->ctor_prop_count >= 16) return;
+
+    bool is_new_prop = idx < 0;
+    if (is_new_prop) idx = fc->ctor_prop_count;
+    fc->ctor_prop_ptrs[idx] = prop->name->chars;
+    fc->ctor_prop_lens[idx] = (int)prop->name->len;
+    int ta_type = jm_detect_typed_array_new(asgn->right);
+    if (ta_type >= 0 || is_new_prop) fc->ctor_prop_ta_types[idx] = ta_type;
+    TypeId detected_type = jm_detect_ctor_field_type(asgn->right);
+    if (detected_type != LMD_TYPE_NULL || is_new_prop) {
+        fc->ctor_prop_types[idx] = detected_type;
+    }
+    if (is_new_prop) fc->ctor_prop_param_idx[idx] = -1;
+    if (asgn->right && asgn->right->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* rhs_id = (JsIdentifierNode*)asgn->right;
+        JsAstNode* param = fc->node->params;
+        for (int pi = 0; param; pi++, param = param->next) {
+            const char* pname = NULL;
+            int plen = 0;
+            if (param->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* pid = (JsIdentifierNode*)param;
+                pname = pid->name->chars;
+                plen = (int)pid->name->len;
+            } else if (param->node_type == (int)TS_AST_NODE_PARAMETER) {
+                TsParameterNode* tsp = (TsParameterNode*)param;
+                if (tsp->pattern && tsp->pattern->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* pid = (JsIdentifierNode*)tsp->pattern;
+                    pname = pid->name->chars;
+                    plen = (int)pid->name->len;
+                }
+            }
+            if (pname && plen == (int)rhs_id->name->len &&
+                strncmp(pname, rhs_id->name->chars, plen) == 0) {
+                fc->ctor_prop_param_idx[idx] = pi;
+                break;
+            }
+        }
+    } else if (!is_new_prop && detected_type != LMD_TYPE_NULL) {
+        fc->ctor_prop_param_idx[idx] = -1;
+    }
+    if (is_new_prop) fc->ctor_prop_count++;
+}
+
+static void jm_scan_ctor_expression(JsFuncCollected* fc, JsAstNode* expression) {
+    if (!expression) return;
+    if (expression->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        jm_scan_ctor_super_call(fc, (JsCallNode*)expression);
+        return;
+    }
+    if (expression->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
+        jm_scan_ctor_prop_assignment(fc, (JsAssignmentNode*)expression);
+        return;
+    }
+    if (expression->node_type == JS_AST_NODE_SEQUENCE_EXPRESSION) {
+        // Minifiers commonly collapse constructor initialization into a comma
+        // sequence; every member still belongs to the fixed instance shape.
+        JsSequenceNode* sequence = (JsSequenceNode*)expression;
+        for (JsAstNode* child = sequence->expressions; child; child = child->next) {
+            jm_scan_ctor_expression(fc, child);
+        }
+        return;
+    }
+    if (expression->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        // Short-circuit tails such as `(this.next = next) && ...` are still
+        // unconditional shape declarations even when their RHS is not run.
+        JsBinaryNode* binary = (JsBinaryNode*)expression;
+        jm_scan_ctor_expression(fc, binary->left);
+        jm_scan_ctor_expression(fc, binary->right);
+    }
+}
+
 // A5: Scan constructor body for this.property = expr assignment patterns.
 // Records property names in order so we can pre-build the object shape.
 void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
     if (!body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
     memset(fc->ctor_prop_param_idx, -1, sizeof(fc->ctor_prop_param_idx));
     JsBlockNode* blk = (JsBlockNode*)body;
-    JsAstNode* stmt = blk->statements;
-    while (stmt) {
+    for (JsAstNode* stmt = blk->statements; stmt; stmt = stmt->next) {
         if (stmt->node_type == JS_AST_NODE_RETURN_STATEMENT ||
-            stmt->node_type == JS_AST_NODE_THROW_STATEMENT) {
-            break;
-        }
+            stmt->node_type == JS_AST_NODE_THROW_STATEMENT) break;
         if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-            JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
-            if (es->expression && es->expression->node_type == JS_AST_NODE_CALL_EXPRESSION) {
-                jm_scan_ctor_super_call(fc, (JsCallNode*)es->expression);
-            }
-            if (es->expression && es->expression->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
-                JsAssignmentNode* asgn = (JsAssignmentNode*)es->expression;
-                if (asgn->op == JS_OP_ASSIGN && asgn->left &&
-                    asgn->left->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
-                    JsMemberNode* mem = (JsMemberNode*)asgn->left;
-                    if (mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER) {
-                        JsIdentifierNode* obj_id = (JsIdentifierNode*)mem->object;
-                        if (obj_id->name->len == 4 &&
-                            strncmp(obj_id->name->chars, "this", 4) == 0 &&
-                            !mem->computed && mem->property &&
-                            mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
-                            JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
-                            int idx = -1;
-                            for (int existing = 0; existing < fc->ctor_prop_count; existing++) {
-                                if (fc->ctor_prop_lens[existing] == (int)prop->name->len &&
-                                    strncmp(fc->ctor_prop_ptrs[existing], prop->name->chars,
-                                            (int)prop->name->len) == 0) {
-                                    idx = existing;
-                                    break;
-                                }
-                            }
-                            if (idx >= 0 || fc->ctor_prop_count < 16) {
-                                bool is_new_prop = idx < 0;
-                                if (is_new_prop) idx = fc->ctor_prop_count;
-                                fc->ctor_prop_ptrs[idx] = prop->name->chars;
-                                fc->ctor_prop_lens[idx] = (int)prop->name->len;
-                                // detect typed array type from RHS
-                                int ta_type = jm_detect_typed_array_new(asgn->right);
-                                if (ta_type >= 0 || is_new_prop) {
-                                    fc->ctor_prop_ta_types[idx] = ta_type;
-                                }
-                                // P1: detect field type from init expression
-                                TypeId detected_type = jm_detect_ctor_field_type(asgn->right);
-                                if (detected_type != LMD_TYPE_NULL || is_new_prop) {
-                                    fc->ctor_prop_types[idx] = detected_type;
-                                }
-                                // P4b: detect if RHS is a constructor parameter
-                                if (is_new_prop) fc->ctor_prop_param_idx[idx] = -1;
-                                if (asgn->right && asgn->right->node_type == JS_AST_NODE_IDENTIFIER) {
-                                    JsIdentifierNode* rhs_id = (JsIdentifierNode*)asgn->right;
-                                    JsAstNode* param = fc->node->params;
-                                    for (int pi = 0; param; pi++, param = param->next) {
-                                        const char* pname = NULL;
-                                        int plen = 0;
-                                        if (param->node_type == JS_AST_NODE_IDENTIFIER) {
-                                            JsIdentifierNode* pid = (JsIdentifierNode*)param;
-                                            pname = pid->name->chars; plen = (int)pid->name->len;
-                                        } else if (param->node_type == (int)TS_AST_NODE_PARAMETER) {
-                                            TsParameterNode* tsp = (TsParameterNode*)param;
-                                            if (tsp->pattern && tsp->pattern->node_type == JS_AST_NODE_IDENTIFIER) {
-                                                JsIdentifierNode* pid = (JsIdentifierNode*)tsp->pattern;
-                                                pname = pid->name->chars; plen = (int)pid->name->len;
-                                            }
-                                        }
-                                        if (pname && plen == (int)rhs_id->name->len &&
-                                            strncmp(pname, rhs_id->name->chars, plen) == 0) {
-                                            fc->ctor_prop_param_idx[idx] = pi;
-                                            break;
-                                        }
-                                    }
-                                } else if (!is_new_prop && detected_type != LMD_TYPE_NULL) {
-                                    fc->ctor_prop_param_idx[idx] = -1;
-                                }
-                                if (is_new_prop) fc->ctor_prop_count++;
-                            }
-                        }
-                    }
-                }
-            }
+            jm_scan_ctor_expression(fc,
+                ((JsExpressionStatementNode*)stmt)->expression);
         }
-        stmt = stmt->next;
     }
     if (fc->ctor_prop_count > 0) {
-        log_debug("A5: constructor '%s' has %d this.prop assignments", fc->name, fc->ctor_prop_count);
+        log_debug("A5: constructor '%s' has %d this.prop assignments", fc->name,
+            fc->ctor_prop_count);
     }
 }
 
@@ -2001,12 +2019,12 @@ void jm_infer_walk(JsAstNode* node, const char param_names[][128],
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
         JsMemberNode* mem = (JsMemberNode*)node;
-        // arr[param] → param used as index is likely int, param used as object is a container
+        // A computed key is a full JavaScript PropertyKey, not evidence of an
+        // array index. Treating target[key] as numeric miscompiled generic
+        // setters used by libraries when key held a CSS property string.
         if (mem->computed) {
             int oi = find_param(mem->object);
             if (oi >= 0) evidence[oi].used_as_container = true;
-            int pi = find_param(mem->property);
-            if (pi >= 0) evidence[pi].int_evidence++;
         }
         jm_infer_walk(mem->object, param_names, evidence, param_count, self_name);
         jm_infer_walk(mem->property, param_names, evidence, param_count, self_name);
@@ -2566,7 +2584,7 @@ void jm_infer_return_type(JsFuncCollected* fc) {
 // should be created as FLOAT from the start to avoid type mismatch in loops.
 
 // Check if an expression contains evidence that it will evaluate to float
-// (float literals, division operators, or member/property access on non-typed-array objects)
+// (float literals or division operators)
 bool jm_expression_has_float_hint(JsAstNode* node) {
     if (!node) return false;
     switch (node->node_type) {
@@ -2594,11 +2612,10 @@ bool jm_expression_has_float_hint(JsAstNode* node) {
         if (id->name->len == 8 && strncmp(id->name->chars, "Infinity", 8) == 0) return true;
         return false;
     }
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* mem = (JsMemberNode*)node;
-        if (!mem->computed) return true;
+    case JS_AST_NODE_MEMBER_EXPRESSION:
+        // A named property can contain any JS value. Float-array element
+        // reads are recognized separately with container-specific evidence.
         return false;
-    }
     default:
         return false;
     }
@@ -2812,6 +2829,22 @@ bool jm_should_widen_to_float(JsMirTranspiler* mt, const char* vname) {
     memset(&key, 0, sizeof(key));
     snprintf(key.name, sizeof(key.name), "%s", bare);
     return hashmap_get(mt->widen_to_float, &key) != NULL;
+}
+
+JsClassEntry* jm_matching_static_superclass(JsClassEntry* ce, JsAstNode* heritage) {
+    if (!ce || !ce->superclass || !ce->superclass->name || !heritage ||
+        heritage->node_type != JS_AST_NODE_IDENTIFIER) {
+        return NULL;
+    }
+    JsIdentifierNode* heritage_id = (JsIdentifierNode*)heritage;
+    if (!heritage_id->name || heritage_id->name->len != ce->superclass->name->len ||
+        strncmp(heritage_id->name->chars, ce->superclass->name->chars,
+            heritage_id->name->len) != 0) {
+        // Static alias inference is optimization metadata; a differently named
+        // heritage binding must still be evaluated in its lexical environment.
+        return NULL;
+    }
+    return ce->superclass;
 }
 
 // ============================================================================

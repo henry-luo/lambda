@@ -1,0 +1,11 @@
+{
+  "name": "Tom Select filters and commits through native keyboard input",
+  "html": "test/ui/dom/tomselect_keyboard.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "type", "target": {"selector": ".ts-control input"}, "text": "Bet"},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_value", "target": {"selector": "#select"}, "equals": "b"}
+  ]
+}

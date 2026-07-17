@@ -163,6 +163,8 @@ struct JsFuncCollected {
     int reuse_env_slot_count;        // v16: slot count when reusing parent env
     bool has_parent_env_link;        // v29: scope env slot 0 stores parent env pointer (for mixed transitive)
     bool parent_env_link_uses_grandparent; // parent link should store parent's parent env
+    bool has_immediate_parent_env_link; // compact env also links direct parent-local cells
+    int immediate_parent_env_link_slot;
     bool closure_env_has_parent_link; // copied closure env carries direct parent scope_env for mixed loop captures
     int closure_env_parent_link_slot; // slot in copied closure env holding direct parent scope_env
     // Phase 4: Type inference results
@@ -470,6 +472,7 @@ struct JsMirTranspiler {
     MIR_reg_t side_frame_runtime;
     MIR_reg_t side_root_frame_base;
     MIR_reg_t side_number_frame_base;
+    MIR_reg_t side_root_bits_scratch;
     MIR_label_t side_root_anchor;
     MIR_label_t side_frame_return_label;
     MIR_reg_t side_frame_return_reg;
@@ -480,6 +483,9 @@ struct JsMirTranspiler {
     int side_root_store_count;
     int side_may_gc_call_count;
     int side_no_gc_call_count;
+    MIR_insn_t* side_root_backedge_reloads;
+    int side_root_backedge_reload_count;
+    int side_root_backedge_reload_capacity;
     JsMirEnvBinding* side_env_bindings;
     int side_env_binding_count;
     int side_env_binding_capacity;

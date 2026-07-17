@@ -1,0 +1,11 @@
+{
+  "name": "Alpine updates reactive text from a real click",
+  "html": "test/ui/dom/alpine_counter.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "wait", "ms": 30},
+    {"type": "click", "target": {"selector": "#increment"}},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_text", "target": {"selector": "#count"}, "equals": "1"}
+  ]
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 20px; font: 16px sans-serif; }
+    #table { width: 420px; height: 180px; }
+  </style>
+</head>
+<body>
+  <div id="table"></div>
+  <script src="../../js/tabulator.min.js"></script>
+  <script>
+    var rows = [];
+    for (var id = 1; id <= 40; id++) rows.push({ id: id, name: 'row-' + id });
+    new Tabulator('#table', {
+      height: 180,
+      rowHeight: 30,
+      data: rows,
+      columns: [
+        { title: 'Id', field: 'id', sorter: 'number' },
+        { title: 'Name', field: 'name' }
+      ]
+    });
+  </script>
+</body>
+</html>

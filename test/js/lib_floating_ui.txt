@@ -1,0 +1,2 @@
+floating:initial: 120 100 bottom
+floating:resized: 140 100

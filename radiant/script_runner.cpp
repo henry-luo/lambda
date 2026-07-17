@@ -1186,7 +1186,14 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "var $ = undefined;\n"
         // PointerEvent is installed natively; advertise the matching touch
         // capability so libraries select their pointer branch in headless UI.
-        "var navigator = {userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0', platform: 'MacIntel', language: 'en-US', languages: ['en-US', 'en'], maxTouchPoints: 1};\n"
+        "var navigator = {\n"
+        "  userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0',\n"
+        // Navigator.appVersion is legacy but still synchronously string-sniffed
+        // by established UI libraries such as noUiSlider.
+        "  appVersion: '5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0',\n"
+        "  vendor: '', platform: 'MacIntel', language: 'en-US',\n"
+        "  languages: ['en-US', 'en'], maxTouchPoints: 1\n"
+        "};\n"
         "navigator.sendBeacon = navigator.sendBeacon || function(){ return false; };\n"
         "window.navigator = navigator;\n"
         "window.document = document;\n"
@@ -1221,11 +1228,7 @@ static void append_browser_document_preamble(StrBuf* script_buf) {
         "window.clearInterval = clearInterval;\n"
         "window.requestAnimationFrame = requestAnimationFrame;\n"
         "window.cancelAnimationFrame = cancelAnimationFrame;\n"
-        "var console = {log: function(){}, warn: function(){}, error: function(){}, info: function(){}, debug: function(){}, dir: function(){}, table: function(){}};\n"
-        "var performance = {now: function(){ return 0; }, mark: function(){}, measure: function(){}, getEntries: function(){ return []; }, getEntriesByName: function(){ return []; }, getEntriesByType: function(t){ return t === 'navigation' ? [{type: 'navigate', transferSize: 1, deliveryType: ''}] : []; }, timing: {}};\n"
         "var screen = undefined;\n"
-        "window.console = console;\n"
-        "window.performance = performance;\n"
         "window.screen = screen;\n"
         "function WebSocket(url) { this.send = function(){}; this.close = function(){}; this.addEventListener = function(){}; this.readyState = 3; }\n"
         "function Worker(url) { this.postMessage = function(){}; this.terminate = function(){}; this.addEventListener = function(){}; }\n"

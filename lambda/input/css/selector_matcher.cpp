@@ -644,7 +644,11 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
 
     const char* element_attr = dom_element_get_attribute(element, attr_name);
     if (!element_attr) {
-        // Attribute exists but has empty/null value - can't match any value-based selector
+        // Empty attributes may be stored without a value pointer; exact-empty
+        // selectors must still distinguish them from absent attributes.
+        if (attr_type == CSS_SELECTOR_ATTR_EXACT && attr_value[0] == '\0') {
+            return dom_element_has_attribute(element, attr_name);
+        }
         return false;
     }
 

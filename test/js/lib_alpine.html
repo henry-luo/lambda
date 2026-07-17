@@ -1,0 +1,9 @@
+<!doctype html>
+<html><body>
+  <div id="alpine-static" x-data="{ count: 1, visible: true }">
+    <button id="alpine-increment" x-on:click="count++">add</button>
+    <span id="alpine-count" x-text="count"></span>
+    <span id="alpine-visible" x-show="visible">visible</span>
+  </div>
+  <div id="alpine-host"></div>
+</body></html>

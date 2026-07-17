@@ -6,6 +6,28 @@
 // Function definition transpiler
 // ============================================================================
 
+static MIR_reg_t jm_emit_keyed_scope_env_tdz(JsMirTranspiler* mt) {
+    MIR_reg_t value = jm_new_reg(mt, "keyed_lex_tdz", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, value),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ)));
+    return value;
+}
+
+static JsMirVarEntry* jm_scope_env_entry_binding_at_function_entry(JsMirTranspiler* mt,
+        const char* scope_name, const char* lookup_name) {
+    JsMirVarEntry* candidate = jm_find_var(mt, lookup_name);
+    if (!strchr(scope_name, '@')) return candidate;
+    if (candidate && candidate->from_env) return candidate;
+    if (candidate && (candidate->binding_start != 0 || candidate->binding_end != 0)) {
+        char binding_key[128];
+        snprintf(binding_key, sizeof(binding_key), "%s@%u:%u", lookup_name,
+            candidate->binding_start, candidate->binding_end);
+        if (strcmp(scope_name, binding_key) == 0) return candidate;
+    }
+    return NULL;
+}
+
 MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) {
     if (!mt || !ce || !ce->name) return 0;
     if (ce->inner_module_var_index >= 0) {
@@ -754,8 +776,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     {
                         JsMirVarEntry* hvar = jm_find_var(mt, e->name);
                         if (hvar) {
-                            if (e->from_func_decl &&
-                                jm_function_has_direct_body_function_binding(fn, e->name)) {
+                            if (current_binding && current_binding->from_env) {
+                                // A function-scoped declaration owns this binding; retaining
+                                // outer-capture metadata reloads the stale capture after every
+                                // local write (notably `for (var key in object)`).
                                 jm_function_clear_shadowed_capture_binding(hvar);
                             }
                             hvar->from_hoist = true;
@@ -790,6 +814,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     ve->is_let_const = true;
                     ve->is_const = (lce->var_kind == 2);
                     ve->tdz_active = true;
+                    ve->binding_start = lce->binding_start;
+                    ve->binding_end = lce->binding_end;
                 }
             }
             hashmap_free(let_consts);
@@ -1411,9 +1437,15 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     }
                 }
                 // keyed duplicate lexical slots keep their base MIR binding name.
-                JsMirVarEntry* svar = jm_find_var(mt, lookup_sname);
+                JsMirVarEntry* svar = jm_scope_env_entry_binding_at_function_entry(
+                    mt, sname, lookup_sname);
                 MIR_reg_t val;
-                if (svar) {
+                if (keyed_at && !svar) {
+                    // The range key denotes a nested lexical that is not active
+                    // at function entry. Associating its cell with a same-named
+                    // parameter makes callback reload overwrite that parameter.
+                    val = jm_emit_keyed_scope_env_tdz(mt);
+                } else if (svar) {
                     val = svar->reg;
                     if (jm_is_native_type(svar->type_id))
                         val = jm_box_native(mt, svar->reg, svar->type_id);
@@ -1920,9 +1952,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         }
                     }
                     // keyed duplicate lexical slots keep their base MIR binding name.
-                    JsMirVarEntry* svar = jm_find_var(mt, lookup_sname);
+                    JsMirVarEntry* svar = jm_scope_env_entry_binding_at_function_entry(
+                        mt, sname, lookup_sname);
                     MIR_reg_t val;
-                    if (svar) {
+                    if (keyed_at && !svar) {
+                        val = jm_emit_keyed_scope_env_tdz(mt);
+                    } else if (svar) {
                         val = svar->reg;
                         if (jm_is_native_type(svar->type_id))
                             val = jm_box_native(mt, svar->reg, svar->type_id);
@@ -2733,8 +2768,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 if (gp_slot >= 0) {
                     // Find the parent env link slot (last slot in parent's scope env)
                     int pi = fc->parent_index;
-                    int parent_env_link_slot = -1;
-                    if (pi >= 0 && pi < mt->func_count && mt->func_entries[pi].has_parent_env_link) {
+                    int parent_env_link_slot =
+                        fc->captures[i].parent_env_link_slot_override;
+                    if (parent_env_link_slot < 0 && pi >= 0 && pi < mt->func_count &&
+                        mt->func_entries[pi].has_parent_env_link) {
                         parent_env_link_slot = mt->func_entries[pi].scope_env_count - 1;
                     }
                     if (parent_env_link_slot < 0 && fc->closure_env_has_parent_link) {
@@ -2788,8 +2825,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // so scope_env_reload_vars and write-back use the correct env
                 if (gp_slot >= 0) {
                     int pi2 = fc->parent_index;
-                    int pel_slot = -1;
-                    if (pi2 >= 0 && pi2 < mt->func_count && mt->func_entries[pi2].has_parent_env_link)
+                    int pel_slot = fc->captures[i].parent_env_link_slot_override;
+                    if (pel_slot < 0 && pi2 >= 0 && pi2 < mt->func_count &&
+                        mt->func_entries[pi2].has_parent_env_link)
                         pel_slot = mt->func_entries[pi2].scope_env_count - 1;
                     if (pel_slot < 0 && fc->closure_env_has_parent_link) {
                         pel_slot = fc->closure_env_parent_link_slot;
@@ -3088,8 +3126,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     {
                         JsMirVarEntry* hvar = jm_find_var(mt, e->name);
                         if (hvar) {
-                            if (e->from_func_decl &&
-                                jm_function_has_direct_body_function_binding(fn, e->name)) {
+                            if (current_binding && current_binding->from_env) {
+                                // A function-scoped declaration owns this binding; retaining
+                                // outer-capture metadata reloads the stale capture after every
+                                // local write (notably `for (var key in object)`).
                                 jm_function_clear_shadowed_capture_binding(hvar);
                             }
                             hvar->from_hoist = true;
@@ -3123,6 +3163,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     ve->is_let_const = true;
                     ve->is_const = (lce->var_kind == 2);
                     ve->tdz_active = true;
+                    ve->binding_start = lce->binding_start;
+                    ve->binding_end = lce->binding_end;
                 }
             }
             hashmap_free(let_consts);
@@ -3216,6 +3258,18 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_new_reg_op(mt->ctx, parent_env_value)));
                 log_debug("js-mir: stored parent env link in scope_env[%d] for '%s'", parent_env_slot, fc->name);
             }
+            if (fc->has_immediate_parent_env_link && has_captures && env_reg != 0 &&
+                fc->immediate_parent_env_link_slot >= 0) {
+                // The compact env's inherited link can skip a mixed parent; keep
+                // a separate direct link for mutable cells owned by that parent.
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        fc->immediate_parent_env_link_slot * (int)sizeof(uint64_t),
+                        mt->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, env_reg)));
+                log_debug("js-mir: stored immediate parent env link in scope_env[%d] for '%s'",
+                    fc->immediate_parent_env_link_slot, fc->name);
+            }
 
             // Populate scope env with current values and mark vars for write-back
             // Only iterate normal slots — NFE extra slots are populated by self-patch code
@@ -3236,9 +3290,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 if (fc->has_parent_env_link && s == fc->scope_env_count - 1) continue;
                 // duplicate lexical captures use keyed env-slot names; the
                 // active MIR binding is still stored under the base identifier.
-                JsMirVarEntry* svar = jm_find_var(mt, lookup_sname);
+                JsMirVarEntry* svar = jm_scope_env_entry_binding_at_function_entry(
+                    mt, sname, lookup_sname);
                 MIR_reg_t val;
-                if (svar) {
+                if (keyed_at && !svar) {
+                    val = jm_emit_keyed_scope_env_tdz(mt);
+                } else if (svar) {
                     if (svar->from_env) {
                         // v16: Re-read LIVE from parent's env instead of stale register.
                         // This ensures mutations by sibling closures (e.g. beforeAll)

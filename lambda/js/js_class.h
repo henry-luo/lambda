@@ -141,6 +141,7 @@ enum JsClass : uint8_t {
     JS_CLASS_IMMEDIATE,
     JS_CLASS_TRANSITION_EVENT,
     JS_CLASS_ANIMATION_EVENT,
+    JS_CLASS_FILE_LIST,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -231,6 +232,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
         case 8:
             if (!strncmp(nm, "DataView", 8)) return JS_CLASS_DATA_VIEW;
             if (!strncmp(nm, "FormData", 8)) return JS_CLASS_FORM_DATA;
+            if (!strncmp(nm, "FileList", 8)) return JS_CLASS_FILE_LIST;
             if (!strncmp(nm, "Function", 8)) return JS_CLASS_FUNCTION;
             if (!strncmp(nm, "URIError", 8)) return JS_CLASS_URI_ERROR;
             if (!strncmp(nm, "Readable", 8)) return JS_CLASS_READABLE;
@@ -369,6 +371,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_BLOB: return "Blob";
         case JS_CLASS_FILE: return "File";
         case JS_CLASS_DATA_TRANSFER: return "DataTransfer";
+        case JS_CLASS_FILE_LIST: return "FileList";
         case JS_CLASS_AGENT: return "Agent";
         case JS_CLASS_CLIENT_REQUEST: return "ClientRequest";
         case JS_CLASS_INCOMING_MESSAGE: return "IncomingMessage";
@@ -493,8 +496,17 @@ static inline bool js_class_is_mouse_event_like(JsClass cls) {
 // byte stamped on the Map's TypeMap; user properties with matching names are
 // ordinary JS properties and cannot spoof built-in brands.
 static inline JsClass js_class_id(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return JS_CLASS_NONE;
-    Map* m = obj.map;
+    TypeId type = get_type_id(obj);
+    Map* m = NULL;
+    if (type == LMD_TYPE_MAP) {
+        m = obj.map;
+    } else if (type == LMD_TYPE_ARRAY && obj.array && js_array_has_props(obj.array)) {
+        // Array-backed Web IDL collections carry their unforgeable brand on
+        // the companion property map because the Array payload has no TypeMap.
+        m = js_array_props(obj.array);
+    } else {
+        return JS_CLASS_NONE;
+    }
     if (!m) return JS_CLASS_NONE;
     if (js_typemap_ptr_is_plausible(m->type)) {
         return (JsClass)((TypeMap*)m->type)->js_class;

@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 20px; font: 16px sans-serif; }
+    button { display: inline-block; margin: 4px; padding: 6px; }
+    .modal { display: none; }
+    .modal.is-open { display: block; position: fixed; left: 30px; top: 70px; width: 260px; height: 120px; background: white; border: 1px solid #555; }
+  </style>
+</head>
+<body>
+  <button id="modal-trigger" data-micromodal-trigger="modal">open</button>
+  <div id="modal" class="modal" aria-hidden="true">
+    <div tabindex="-1" data-micromodal-close>
+      <div role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <h2 id="modal-title">Dialog</h2>
+        <button id="modal-first">first</button>
+        <button id="modal-last" data-micromodal-close>close</button>
+      </div>
+    </div>
+  </div>
+  <script src="../../js/micromodal.min.js"></script>
+  <script>MicroModal.init({ awaitOpenAnimation: false, awaitCloseAnimation: false });</script>
+</body>
+</html>

@@ -53,6 +53,8 @@ struct VarEntry {
     bool from_block_func_decl;
     bool from_catch_param;
     bool tdz_active;
+    uint32_t binding_start;
+    uint32_t binding_end;
     MIR_reg_t hoisted_data_reg;
     MIR_reg_t hoisted_len_reg;
     bool from_hoist;

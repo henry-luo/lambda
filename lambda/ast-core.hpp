@@ -574,6 +574,7 @@ typedef struct FnCapture {
     NameEntry* entry;
     int scope_env_slot;
     int grandparent_slot;
+    int parent_env_link_slot_override;
     bool is_mutable;
     bool is_let_const;
     bool is_const;

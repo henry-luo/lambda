@@ -1,0 +1,10 @@
+{
+  "name": "flatpickr selects a calendar day through real clicks",
+  "html": "test/ui/dom/flatpickr_pick.html",
+  "viewport": {"width": 640, "height": 520},
+  "events": [
+    {"type": "click", "target": {"selector": "#date-input"}},
+    {"type": "click", "target": {"selector": "#pick-day"}},
+    {"type": "assert_value", "target": {"selector": "#date-input"}, "equals": "2024-03-14"}
+  ]
+}

@@ -1,0 +1,6 @@
+42
+true
+empty:0
+17
+false
+null

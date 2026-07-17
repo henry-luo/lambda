@@ -1,0 +1,3 @@
+alpine:boot: 2 true
+alpine:dynamic: 5
+alpine:cleanup: 1

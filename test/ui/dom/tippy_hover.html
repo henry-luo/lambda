@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 0; font: 16px sans-serif; }
+    #tip-anchor { position: absolute; left: 180px; top: 120px; width: 100px; height: 36px; }
+    .tippy-box { min-width: 80px; min-height: 24px; }
+  </style>
+</head>
+<body>
+  <button id="tip-anchor" title="">Hover me</button>
+  <script src="../../js/popper_src_min.js"></script>
+  <script src="../../js/tippy.min.js"></script>
+  <script>
+    tippy(document.getElementById('tip-anchor'), {
+      content: 'Floating tip',
+      placement: 'bottom',
+      duration: 0,
+      animation: false
+    });
+  </script>
+</body>
+</html>

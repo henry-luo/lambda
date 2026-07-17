@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 20px; font: 16px sans-serif; }
+    #select { width: 240px; }
+    .ts-wrapper { display: block; width: 240px; }
+    .ts-control { display: block; box-sizing: border-box; width: 240px; min-height: 34px; padding: 6px; border: 1px solid #777; }
+    .ts-control input { display: inline-block; width: 180px; height: 22px; }
+    .ts-dropdown { display: none; width: 240px; border: 1px solid #777; background: white; }
+    .ts-dropdown.single { display: block; }
+    .ts-dropdown .option { display: block; height: 28px; padding: 5px; }
+  </style>
+</head>
+<body>
+  <label for="select">Choice</label>
+  <select id="select" placeholder="Choose">
+    <option value="" selected></option>
+    <option value="a">Alpha</option>
+    <option value="b">Beta</option>
+    <option value="g">Gamma</option>
+  </select>
+  <script src="../../js/tom-select.min.js"></script>
+  <script>new TomSelect(document.getElementById('select'), { allowEmptyOption: true });</script>
+</body>
+</html>
