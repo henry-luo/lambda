@@ -99,6 +99,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
 void update_scroller(ViewBlock* block, float content_width, float content_height);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
+void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard);
 
 static WebViewHandle* focused_layer_webview_handle(View* focused) {
     // A focused element can become display:none before script restores focus;
@@ -3524,6 +3525,12 @@ static bool editing_text_drag_dispatch_insert(EventContext* evcon,
     if (!state) return false;
     const char* text = payload ? payload : "";
     uint32_t text_len = (uint32_t)strlen(text);
+    // A cross-surface drop starts an editing intention in the destination.
+    // Transfer focus before setting its range so an embedded source control
+    // cannot remain focused while a rich transaction targets its outer host.
+    if (surface->owner) {
+        update_focus_state(evcon, static_cast<View*>(surface->owner), false);
+    }
     editing_text_drag_set_range(evcon, surface, range_view, start, end,
                                 "dropTarget");
     if (editing_surface_is_text_control(surface)) {
