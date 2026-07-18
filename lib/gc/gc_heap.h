@@ -91,6 +91,7 @@ typedef int (*gc_js_function_trace_fn)(void* data, gc_heap_t* gc);
 // Releases refcounted/native payloads embedded in otherwise zone-owned objects.
 // Implementations must clear the released field so repeated teardown is safe.
 typedef void (*gc_external_destroy_fn)(void* data, uint16_t type_tag);
+typedef void (*gc_weak_clear_fn)(uint64_t* slot, void* context);
 
 /**
  * Small per-cleanup native-pointer set used by runtime finalizers that own
@@ -118,6 +119,12 @@ typedef struct gc_root_range {
     uint64_t* base;
     int count;
 } gc_root_range_t;
+
+typedef struct gc_weak_slot {
+    uint64_t* slot;
+    gc_weak_clear_fn on_clear;
+    void* context;
+} gc_weak_slot_t;
 
 /**
  * GCHeap - manages all GC-tracked allocations.
@@ -169,6 +176,12 @@ typedef struct gc_heap {
     uint64_t** root_slots;
     int root_slot_count;
     int root_slot_capacity;
+
+    // Weak slots participate in identity caches without marking their Item.
+    // Dead referents are cleared after tracing and before object sweep.
+    gc_weak_slot_t* weak_slots;
+    int weak_slot_count;
+    int weak_slot_capacity;
 
     // Collection trigger
     size_t gc_threshold;            // data zone bytes that trigger auto-collection
@@ -324,6 +337,12 @@ void gc_register_root(gc_heap_t* gc, uint64_t* slot);
  * @param slot pointer previously registered with gc_register_root
  */
 void gc_unregister_root(gc_heap_t* gc, uint64_t* slot);
+
+/** Register/unregister a non-marking Item slot. The clear callback runs after
+ * the slot is zeroed, while the dead object's header is still available to GC. */
+void gc_register_weak(gc_heap_t* gc, uint64_t* slot,
+                      gc_weak_clear_fn on_clear, void* context);
+void gc_unregister_weak(gc_heap_t* gc, uint64_t* slot);
 
 /**
  * Register a contiguous range of Items as GC roots.

@@ -36,6 +36,7 @@
 #include "../../lib/url.h"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
+#include "../input/css/dom_lifecycle.hpp"
 #include "../input/css/css_parser.hpp"
 #include "../input/css/css_engine.hpp"
 #include "../input/css/css_style_node.hpp"
@@ -361,14 +362,21 @@ static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
     doc->js.mutation_kind_mask |= js_dom_mutation_bit(kind);
 
     if (doc->js.mutation_record_count < DOM_JS_MUTATION_RECORD_CAP) {
+        DomNodeRef target_ref = dom_node_ref(target);
+        DomNodeRef parent_ref = dom_node_ref(parent);
+        if (target && !dom_node_pin(doc, target_ref, DOM_NODE_PIN_RECONCILE)) return;
+        if (parent && !dom_node_pin(doc, parent_ref, DOM_NODE_PIN_RECONCILE)) {
+            if (target) dom_node_unpin(doc, target_ref, DOM_NODE_PIN_RECONCILE);
+            return;
+        }
         DomJsMutationRecord* record =
             &doc->js.mutation_records[doc->js.mutation_record_count++];
         record->sequence = sequence;
         record->kind = kind;
         record->target = target;
         record->parent = parent;
-        record->target_id = target ? target->id : 0;
-        record->parent_id = parent ? parent->id : 0;
+        record->target_id = target_ref.expected_id;
+        record->parent_id = parent_ref.expected_id;
     } else {
         doc->js.mutation_record_overflow++;
     }
@@ -442,12 +450,7 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* targ
 }
 
 static void js_dom_reset_mutation_records(DomDocument* doc) {
-    if (!doc) return;
-    doc->js.mutation_count = 0;
-    doc->js.mutation_sequence = 0;
-    doc->js.mutation_kind_mask = 0;
-    doc->js.mutation_record_count = 0;
-    doc->js.mutation_record_overflow = 0;
+    dom_js_mutation_records_reset(doc);
 }
 
 static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
@@ -1077,6 +1080,7 @@ static void expando_reset(); // forward declaration
 static void reset_dom_wrapper_cache(); // forward declaration
 static void reset_foreign_document_cache(); // forward declaration
 static void reset_live_dom_collections(); // forward declaration
+static void reset_pending_iframe_loads();
 // Phase 6E: text-control helpers are shared with Radiant event/render paths.
 #include "../../radiant/event.hpp"
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
@@ -1107,6 +1111,7 @@ extern "C" void js_dom_batch_reset() {
     js_dom_selection_reset();
     js_dom_rich_history_reset();
     reset_live_dom_collections();
+    reset_pending_iframe_loads();
     reset_dom_wrapper_cache();
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
@@ -1128,6 +1133,7 @@ extern "C" void js_dom_batch_reset() {
 extern "C" void js_dom_shutdown() {
     js_dom_rich_history_reset();
     reset_live_dom_collections();
+    reset_pending_iframe_loads();
     reset_dom_wrapper_cache();
     js_dom_events_reset();
     js_xhr_reset();
@@ -1161,7 +1167,12 @@ extern "C" bool js_dom_evaluate_media_query(const char* query) {
 
 // simple open-addressing hash table for DomNode* → Item (JS Map)
 #define EXPANDO_TABLE_SIZE 256
-static struct { DomNode* key; Item map; } _expando_table[EXPANDO_TABLE_SIZE];
+static struct {
+    DomNode* key;
+    DomDocument* doc;
+    DomNodeRef ref;
+    Item map;
+} _expando_table[EXPANDO_TABLE_SIZE];
 static bool _expando_initialized = false;
 
 static void expando_init() {
@@ -1196,8 +1207,15 @@ static Item expando_get_or_create_map(DomNode* node) {
         }
     }
     if (first_empty < 0) return ItemNull; // table full
+    DomDocument* doc = js_dom_node_owner_document(node);
+    if (!doc) doc = _js_current_document;
+    DomNodeRef ref = dom_node_ref(node);
+    if (!doc || !dom_node_ref_validate(doc, ref) ||
+        !dom_node_pin(doc, ref, DOM_NODE_PIN_EXTERNAL)) return ItemNull;
     Item m = js_new_object();
     _expando_table[first_empty].key = node;
+    _expando_table[first_empty].doc = doc;
+    _expando_table[first_empty].ref = ref;
     _expando_table[first_empty].map = m;
     // DOM nodes retain expando maps outside the JS object graph; rooting the
     // side-table slot prevents a collection from recycling live library state.
@@ -1285,6 +1303,8 @@ static void expando_reset() {
     for (int i = 0; i < EXPANDO_TABLE_SIZE; i++) {
         if (_expando_table[i].key) {
             heap_unregister_gc_root(&_expando_table[i].map.item);
+            dom_node_unpin(_expando_table[i].doc, _expando_table[i].ref,
+                           DOM_NODE_PIN_EXTERNAL);
         }
     }
     memset(_expando_table, 0, sizeof(_expando_table));
@@ -1402,8 +1422,8 @@ static bool js_dom_resolve_selector_pseudo_state(void* context,
 }
 
 static SelectorMatcher* js_dom_create_selector_matcher(DomDocument* doc) {
-    if (!doc || !doc->pool) return nullptr;
-    SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+    if (!doc || !doc->document_pool) return nullptr;
+    SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
     if (matcher) {
         selector_matcher_set_pseudo_state_resolver(
             matcher, js_dom_resolve_selector_pseudo_state, doc);
@@ -1609,8 +1629,8 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         // rebind XHR to the retained document URL instead of leaving relative
         // requests with the reset batch's empty base.
         js_xhr_set_base_url(doc->url ? url_get_href(doc->url) : nullptr);
-        if (doc->pool) {
-            css_property_system_init(doc->pool);
+        if (doc->document_pool) {
+            css_property_system_init(doc->document_pool);
         }
         // populate global object with element IDs (browser-like named access on Window)
         if (doc->root) {
@@ -1842,12 +1862,14 @@ extern "C" bool js_is_dom_node(Item item) {
 struct SelectOptionsOwnerEntry {
     Array* array;
     DomElement* owner;
+    DomNodeRef owner_ref;
     int kind;
 };
 
 struct LiveChildCollectionEntry {
     Array* array;
     DomElement* owner;
+    DomNodeRef owner_ref;
     int kind;
 };
 
@@ -1855,6 +1877,7 @@ struct LiveFormCollectionEntry {
     Array* array;
     DomDocument* doc;
     DomElement* owner;
+    DomNodeRef owner_ref;
     int kind;
 };
 
@@ -1862,6 +1885,7 @@ struct LiveLookupCollectionEntry {
     Array* array;
     DomDocument* doc;
     DomElement* root;
+    DomNodeRef root_ref;
     String* query;
     int kind;
     bool include_root;
@@ -1898,8 +1922,41 @@ struct DomCollectionRefreshGuard {
     ~DomCollectionRefreshGuard() { s_dom_collection_refresh_depth--; }
 };
 
+static bool live_collection_pin(DomDocument* doc, DomElement* owner,
+                                DomNodeRef* out_ref) {
+    if (!doc || !owner || !out_ref) return false;
+    *out_ref = dom_node_ref((DomNode*)owner);
+    if (!dom_node_ref_validate(doc, *out_ref)) return false;
+    return dom_node_pin(doc, *out_ref, DOM_NODE_PIN_LIVE_COLLECTION);
+}
+
+static void live_collection_unpin(DomDocument* doc, DomNodeRef* ref) {
+    if (!doc || !ref || !ref->address) return;
+    dom_node_unpin(doc, *ref, DOM_NODE_PIN_LIVE_COLLECTION);
+    *ref = {nullptr, 0};
+}
+
 static void reset_live_dom_collections() {
-    // Live collection registries borrow per-document owners; batch reset must drop them before the next document mutates.
+    // Live collections keep native owner pointers outside the GC graph; release
+    // their explicit lifecycle pins before the next document epoch can recycle.
+    for (int i = 0; i < s_select_options_owner_count; i++) {
+        DomElement* owner = s_select_options_owners[i].owner;
+        live_collection_unpin(owner ? owner->doc : nullptr,
+                              &s_select_options_owners[i].owner_ref);
+    }
+    for (int i = 0; i < s_live_child_collection_count; i++) {
+        DomElement* owner = s_live_child_collections[i].owner;
+        live_collection_unpin(owner ? owner->doc : nullptr,
+                              &s_live_child_collections[i].owner_ref);
+    }
+    for (int i = 0; i < s_live_form_collection_count; i++) {
+        live_collection_unpin(s_live_form_collections[i].doc,
+                              &s_live_form_collections[i].owner_ref);
+    }
+    for (int i = 0; i < s_live_lookup_collection_count; i++) {
+        live_collection_unpin(s_live_lookup_collections[i].doc,
+                              &s_live_lookup_collections[i].root_ref);
+    }
     memset(s_select_options_owners, 0, sizeof(s_select_options_owners));
     s_select_options_owner_count = 0;
     memset(s_live_child_collections, 0, sizeof(s_live_child_collections));
@@ -1914,15 +1971,25 @@ static void _register_select_options_owner(Item collection, DomElement* owner, i
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
     for (int i = 0; i < s_select_options_owner_count; i++) {
         if (s_select_options_owners[i].array == collection.array) {
+            if (s_select_options_owners[i].owner != owner) {
+                DomElement* old_owner = s_select_options_owners[i].owner;
+                live_collection_unpin(old_owner ? old_owner->doc : nullptr,
+                                      &s_select_options_owners[i].owner_ref);
+                if (!live_collection_pin(owner->doc, owner,
+                        &s_select_options_owners[i].owner_ref)) return;
+            }
             s_select_options_owners[i].owner = owner;
             s_select_options_owners[i].kind = kind;
             return;
         }
     }
     if (s_select_options_owner_count >= SELECT_OPTIONS_OWNER_CACHE_SIZE) return;
-    s_select_options_owners[s_select_options_owner_count].array = collection.array;
-    s_select_options_owners[s_select_options_owner_count].owner = owner;
-    s_select_options_owners[s_select_options_owner_count].kind = kind;
+    SelectOptionsOwnerEntry* entry =
+        &s_select_options_owners[s_select_options_owner_count];
+    if (!live_collection_pin(owner->doc, owner, &entry->owner_ref)) return;
+    entry->array = collection.array;
+    entry->owner = owner;
+    entry->kind = kind;
     s_select_options_owner_count++;
 }
 
@@ -1941,15 +2008,25 @@ static void _register_live_child_collection(Item collection, DomElement* owner, 
     if (get_type_id(collection) != LMD_TYPE_ARRAY || !collection.array || !owner) return;
     for (int i = 0; i < s_live_child_collection_count; i++) {
         if (s_live_child_collections[i].array == collection.array) {
+            if (s_live_child_collections[i].owner != owner) {
+                DomElement* old_owner = s_live_child_collections[i].owner;
+                live_collection_unpin(old_owner ? old_owner->doc : nullptr,
+                                      &s_live_child_collections[i].owner_ref);
+                if (!live_collection_pin(owner->doc, owner,
+                        &s_live_child_collections[i].owner_ref)) return;
+            }
             s_live_child_collections[i].owner = owner;
             s_live_child_collections[i].kind = kind;
             return;
         }
     }
     if (s_live_child_collection_count >= LIVE_CHILD_COLLECTION_CACHE_SIZE) return;
-    s_live_child_collections[s_live_child_collection_count].array = collection.array;
-    s_live_child_collections[s_live_child_collection_count].owner = owner;
-    s_live_child_collections[s_live_child_collection_count].kind = kind;
+    LiveChildCollectionEntry* entry =
+        &s_live_child_collections[s_live_child_collection_count];
+    if (!live_collection_pin(owner->doc, owner, &entry->owner_ref)) return;
+    entry->array = collection.array;
+    entry->owner = owner;
+    entry->kind = kind;
     s_live_child_collection_count++;
 }
 
@@ -1971,6 +2048,15 @@ static void _register_live_form_collection(Item collection, DomDocument* doc,
     if (!doc && !owner) return;
     for (int i = 0; i < s_live_form_collection_count; i++) {
         if (s_live_form_collections[i].array == collection.array) {
+            DomElement* pin_owner = owner ? owner : doc->root;
+            DomElement* old_owner = s_live_form_collections[i].owner
+                ? s_live_form_collections[i].owner : s_live_form_collections[i].doc->root;
+            if (old_owner != pin_owner || s_live_form_collections[i].doc != doc) {
+                live_collection_unpin(s_live_form_collections[i].doc,
+                                      &s_live_form_collections[i].owner_ref);
+                if (!live_collection_pin(doc, pin_owner,
+                        &s_live_form_collections[i].owner_ref)) return;
+            }
             s_live_form_collections[i].doc = doc;
             s_live_form_collections[i].owner = owner;
             s_live_form_collections[i].kind = kind;
@@ -1978,10 +2064,14 @@ static void _register_live_form_collection(Item collection, DomDocument* doc,
         }
     }
     if (s_live_form_collection_count >= LIVE_FORM_COLLECTION_CACHE_SIZE) return;
-    s_live_form_collections[s_live_form_collection_count].array = collection.array;
-    s_live_form_collections[s_live_form_collection_count].doc = doc;
-    s_live_form_collections[s_live_form_collection_count].owner = owner;
-    s_live_form_collections[s_live_form_collection_count].kind = kind;
+    LiveFormCollectionEntry* entry =
+        &s_live_form_collections[s_live_form_collection_count];
+    DomElement* pin_owner = owner ? owner : doc->root;
+    if (!live_collection_pin(doc, pin_owner, &entry->owner_ref)) return;
+    entry->array = collection.array;
+    entry->doc = doc;
+    entry->owner = owner;
+    entry->kind = kind;
     s_live_form_collection_count++;
 }
 
@@ -2004,6 +2094,15 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
     String* query_name = heap_create_name(query);
     for (int i = 0; i < s_live_lookup_collection_count; i++) {
         if (s_live_lookup_collections[i].array == collection.array) {
+            DomElement* pin_root = root ? root : doc->root;
+            DomElement* old_root = s_live_lookup_collections[i].root
+                ? s_live_lookup_collections[i].root : s_live_lookup_collections[i].doc->root;
+            if (old_root != pin_root || s_live_lookup_collections[i].doc != doc) {
+                live_collection_unpin(s_live_lookup_collections[i].doc,
+                                      &s_live_lookup_collections[i].root_ref);
+                if (!live_collection_pin(doc, pin_root,
+                        &s_live_lookup_collections[i].root_ref)) return;
+            }
             s_live_lookup_collections[i].doc = doc;
             s_live_lookup_collections[i].root = root;
             s_live_lookup_collections[i].query = query_name;
@@ -2013,12 +2112,16 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
         }
     }
     if (s_live_lookup_collection_count >= LIVE_LOOKUP_COLLECTION_CACHE_SIZE) return;
-    s_live_lookup_collections[s_live_lookup_collection_count].array = collection.array;
-    s_live_lookup_collections[s_live_lookup_collection_count].doc = doc;
-    s_live_lookup_collections[s_live_lookup_collection_count].root = root;
-    s_live_lookup_collections[s_live_lookup_collection_count].query = query_name;
-    s_live_lookup_collections[s_live_lookup_collection_count].kind = kind;
-    s_live_lookup_collections[s_live_lookup_collection_count].include_root = include_root;
+    LiveLookupCollectionEntry* entry =
+        &s_live_lookup_collections[s_live_lookup_collection_count];
+    DomElement* pin_root = root ? root : doc->root;
+    if (!live_collection_pin(doc, pin_root, &entry->root_ref)) return;
+    entry->array = collection.array;
+    entry->doc = doc;
+    entry->root = root;
+    entry->query = query_name;
+    entry->kind = kind;
+    entry->include_root = include_root;
     s_live_lookup_collection_count++;
 }
 
@@ -2896,8 +2999,7 @@ static DomDocument* create_foreign_html_doc(const char* title) {
     if (head_dom && title_dom) {
         head_dom->append_child(title_dom);
         if (title && *title) {
-            String* tstr = dom_document_create_string(fd, title, strlen(title));
-            DomText* tnode = dom_text_create_detached(tstr, fd);
+            DomText* tnode = DomText::create_copy(title, strlen(title), title_dom);
             if (tnode) title_dom->append_child(tnode);
         }
     }
@@ -2937,10 +3039,10 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     const char* srcdoc = iframe->get_attribute("srcdoc");
     if (!srcdoc || !*srcdoc) return;
     DomElement* body = document_body_element(doc);
-    if (!body || !doc->pool || !doc->arena || !doc->input) return;
+    if (!body || !doc->document_pool || !doc->node_arena || !doc->input) return;
 
     Html5Parser* parser = html5_fragment_parser_create(
-        doc->pool, doc->arena, doc->input);
+        doc->document_pool, doc->node_arena, doc->input);
     if (!parser) return;
     html5_fragment_parse(parser, srcdoc);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -3148,6 +3250,8 @@ static void js_dom_install_window_dialog_globals(void) {
 // drain that fires `load` on each pending iframe in insertion order.
 // ----------------------------------------------------------------------------
 static __thread DomElement* s_pending_iframe_loads[16] = {};
+static __thread DomNodeRef s_pending_iframe_refs[16] = {};
+static __thread DomDocument* s_pending_iframe_docs[16] = {};
 static __thread int s_pending_iframe_load_count = 0;
 static __thread bool s_iframe_load_drain_scheduled = false;
 
@@ -3156,13 +3260,29 @@ static Item _iframe_load_drain(Item this_val, Item* args, int argc) {
     int n = s_pending_iframe_load_count;
     s_pending_iframe_load_count = 0;
     s_iframe_load_drain_scheduled = false;
+    DomDocument* sweep_docs[16] = {};
+    int sweep_doc_count = 0;
     for (int i = 0; i < n; i++) {
         DomElement* ifr = s_pending_iframe_loads[i];
         s_pending_iframe_loads[i] = nullptr;
+        DomDocument* owner_doc = s_pending_iframe_docs[i];
+        DomNodeRef ref = s_pending_iframe_refs[i];
+        s_pending_iframe_docs[i] = nullptr;
+        s_pending_iframe_refs[i] = {nullptr, 0};
         if (!ifr) continue;
         Item ev = js_create_event("load", /*bubbles=*/false, /*cancelable=*/false);
         js_dom_dispatch_event(js_dom_wrap_element(ifr), ev);
+        dom_node_unpin(owner_doc, ref, DOM_NODE_PIN_EVENT_QUEUE);
+        bool known = false;
+        for (int d = 0; d < sweep_doc_count; d++) {
+            if (sweep_docs[d] == owner_doc) {
+                known = true;
+                break;
+            }
+        }
+        if (owner_doc && !known) sweep_docs[sweep_doc_count++] = owner_doc;
     }
+    for (int i = 0; i < sweep_doc_count; i++) dom_retire_sweep(sweep_docs[i]);
     return ItemNull;
 }
 
@@ -3172,12 +3292,32 @@ static void _schedule_iframe_load(DomElement* iframe) {
         if (s_pending_iframe_loads[i] == iframe) return;
     }
     if (s_pending_iframe_load_count >= 16) return;
-    s_pending_iframe_loads[s_pending_iframe_load_count++] = iframe;
+    DomNodeRef ref = dom_node_ref((DomNode*)iframe);
+    if (!iframe->doc || !dom_node_ref_validate(iframe->doc, ref) ||
+        !dom_node_pin(iframe->doc, ref, DOM_NODE_PIN_EVENT_QUEUE)) return;
+    int pending_index = s_pending_iframe_load_count++;
+    s_pending_iframe_loads[pending_index] = iframe;
+    s_pending_iframe_refs[pending_index] = ref;
+    s_pending_iframe_docs[pending_index] = iframe->doc;
     if (!s_iframe_load_drain_scheduled) {
         s_iframe_load_drain_scheduled = true;
         Item cb = js_new_function((void*)_iframe_load_drain, 0);
         js_setTimeout(cb, (Item){.item = i2it(0)});
     }
+}
+
+static void reset_pending_iframe_loads() {
+    for (int i = 0; i < s_pending_iframe_load_count; i++) {
+        if (s_pending_iframe_docs[i] && s_pending_iframe_refs[i].address) {
+            dom_node_unpin(s_pending_iframe_docs[i], s_pending_iframe_refs[i],
+                           DOM_NODE_PIN_EVENT_QUEUE);
+        }
+    }
+    memset(s_pending_iframe_loads, 0, sizeof(s_pending_iframe_loads));
+    memset(s_pending_iframe_refs, 0, sizeof(s_pending_iframe_refs));
+    memset(s_pending_iframe_docs, 0, sizeof(s_pending_iframe_docs));
+    s_pending_iframe_load_count = 0;
+    s_iframe_load_drain_scheduled = false;
 }
 
 extern "C" void js_dom_after_srcdoc_set(void* dom_elem) {
@@ -3559,7 +3699,7 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
     }
 
     DomElement* elem = node->as_element();
-    Pool* pool = elem && elem->doc ? elem->doc->pool : nullptr;
+    Pool* pool = elem && elem->doc ? elem->doc->document_pool : nullptr;
     JsComputedStyleHost* host = pool ? (JsComputedStyleHost*)pool_calloc(pool, sizeof(JsComputedStyleHost)) : nullptr;
     if (!host) return ItemNull;
     host->elem = elem;
@@ -4075,7 +4215,7 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
             // on-demand matching for custom property
             CssDeclaration* decl = js_match_custom_property(elem, css_prop);
             if (decl && (decl->value || decl->value_text)) {
-                Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+                Pool* pool = elem->doc ? elem->doc->document_pool : nullptr;
                 if (!pool) return (Item){.item = s2it(heap_create_name(""))};
                 const char* val = css_serialize_declaration_value(decl, pool);
                 if (!val) val = "";
@@ -4122,7 +4262,7 @@ static CssDeclaration* js_match_custom_property(DomElement* elem, const char* pr
     if (!elem || !elem->doc || !prop_name) return nullptr;
 
     DomDocument* doc = elem->doc;
-    Pool* pool = doc->pool;
+    Pool* pool = doc->document_pool;
 
     CssDeclaration* best_decl = nullptr;
     CssSpecificity best_spec = {0, 0, 0, 0, false};
@@ -5235,7 +5375,7 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
         if (!doc || !doc->input) return false;
 
         Html5Parser* parser = html5_fragment_parser_create(
-            doc->pool, doc->arena, doc->input);
+            doc->document_pool, doc->node_arena, doc->input);
         if (!parser) return false;
 
         html5_fragment_parse(parser, html_str);
@@ -5709,7 +5849,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text) return ItemNull;
 
-        Pool* pool = doc->pool;
+        Pool* pool = doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) {
             // per DOM spec, throw SyntaxError for invalid selectors
@@ -5731,7 +5871,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text) return ItemNull;
 
-        Pool* pool = doc->pool;
+        Pool* pool = doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) {
             // return empty array
@@ -5806,8 +5946,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (!text) return ItemNull;
 
         // create a detached String-backed DomText node (no parent yet)
-        String* str = dom_document_create_string(doc, text, strlen(text));
-        DomText* text_node = dom_text_create_detached(str, doc);
+        DomText* text_node = DomText::create_detached_copy(doc, text, strlen(text));
         if (!text_node) {
             log_error("js_document_method: createTextNode failed for '%s'", text);
             return ItemNull;
@@ -5866,8 +6005,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
             }
             size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
             if (text_len > 0) {
-                String* str = dom_document_create_string(doc, cursor, text_len);
-                DomText* text_node = dom_text_create_detached(str, doc);
+                DomText* text_node = DomText::create_detached_copy(doc, cursor, text_len);
                 if (text_node) {
                     ((DomNode*)body)->append_child((DomNode*)text_node);
                     dom_post_insert((DomNode*)body, (DomNode*)text_node);
@@ -7332,8 +7470,7 @@ extern "C" Item js_dom_text_control_set_default_value_bridge(void* dom_elem, Ite
         elem->first_child = nullptr;
         elem->last_child = nullptr;
         if (*s) {
-            String* str = dom_document_create_string(elem->doc, s, strlen(s));
-            DomText* tn = dom_text_create(str, elem);
+            DomText* tn = DomText::create_copy(s, strlen(s), elem);
             if (tn) {
                 tn->parent = elem;
                 elem->first_child = tn;
@@ -7946,8 +8083,7 @@ extern "C" void js_dom_set_option_text_bridge(void* dom_elem, const char* value)
     }
     elem->first_child = nullptr;
     elem->last_child = nullptr;
-    String* str = dom_document_create_string(elem->doc, sv, strlen(sv));
-    DomText* tn = dom_text_create(str, elem);
+    DomText* tn = DomText::create_copy(sv, strlen(sv), elem);
     if (tn) {
         tn->parent = elem;
         elem->first_child = tn;
@@ -10248,7 +10384,7 @@ static void parse_class_names(DomElement* elem, const char* class_str) {
     }
 
     // allocate class_names array in the document arena
-    Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+    Pool* pool = elem->doc ? elem->doc->document_pool : nullptr;
     const char** names = nullptr;
     if (count > 0 && pool) {
         names = (const char**)pool_alloc(pool, count * sizeof(const char*));
@@ -10480,9 +10616,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // id
     if (strcmp(prop, "id") == 0) {
         const char* id_str = fn_to_cstr(value);
-        if (id_str && elem->doc && elem->doc->pool) {
+        if (id_str && elem->doc && elem->doc->document_pool) {
             size_t len = strlen(id_str);
-            char* id_copy = (char*)pool_alloc(elem->doc->pool, len + 1);
+            char* id_copy = (char*)pool_alloc(elem->doc->document_pool, len + 1);
             memcpy(id_copy, id_str, len);
             id_copy[len] = '\0';
             elem->id = id_copy;
@@ -10516,9 +10652,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
                 if (*p == '\n' || *p == '\r' || *p == '\0') {
                     size_t segment_len = (size_t)(p - segment);
                     if (segment_len > 0) {
-                        String* s = dom_document_create_string(
-                            elem->doc, segment, segment_len);
-                        DomText* text_node = dom_text_create(s, elem);
+                        DomText* text_node = DomText::create_copy(
+                            segment, segment_len, elem);
                         if (text_node) {
                             ((DomNode*)elem)->append_child((DomNode*)text_node);
                             dom_post_insert((DomNode*)elem, (DomNode*)text_node);
@@ -10575,8 +10710,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             // DOM string-replace-all uses no replacement node for empty
             // strings; otherwise textContent="" leaves observable children.
             if (text_str[0] != '\0') {
-                String* s = dom_document_create_string(elem->doc, text_str, strlen(text_str));
-                DomText* text_node = dom_text_create(s, elem);
+                DomText* text_node = DomText::create_copy(
+                    text_str, strlen(text_str), elem);
                 if (text_node) {
                     ((DomNode*)text_node)->parent = (DomNode*)elem;
                     elem->first_child = (DomNode*)text_node;
@@ -11047,7 +11182,7 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
         return (Item){.item = s2it(heap_create_name(""))};
     }
 
-    Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+    Pool* pool = elem->doc ? elem->doc->document_pool : nullptr;
     if (!pool) {
         return (Item){.item = s2it(heap_create_name(""))};
     }
@@ -11636,7 +11771,19 @@ extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem) {
     if (!elem) return make_js_undefined();
     DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
     if (doc) {
+        if (doc->pending_scroll_into_view_target) {
+            dom_node_unpin(doc,
+                {(DomNode*)doc->pending_scroll_into_view_target,
+                 doc->pending_scroll_into_view_target_id},
+                DOM_NODE_PIN_RECONCILE);
+        }
+        DomNodeRef ref = dom_node_ref((DomNode*)elem);
+        if (!dom_node_ref_validate(doc, ref) ||
+            !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
+            return make_js_undefined();
+        }
         doc->pending_scroll_into_view_target = elem;
+        doc->pending_scroll_into_view_target_id = ref.expected_id;
         log_debug("js_dom_scrollIntoView: queued target <%s>",
                   elem->tag_name ? elem->tag_name : "?");
     }
@@ -11887,8 +12034,7 @@ extern "C" Item js_dom_document_write_bridge(void* doc_ptr, Item text_arg) {
         }
         size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
         if (text_len > 0) {
-            String* str = dom_document_create_string(doc, cursor, text_len);
-            DomText* text_node = dom_text_create_detached(str, doc);
+            DomText* text_node = DomText::create_detached_copy(doc, cursor, text_len);
             if (text_node) {
                 ((DomNode*)body)->append_child((DomNode*)text_node);
                 dom_post_insert((DomNode*)body, (DomNode*)text_node);
@@ -11921,17 +12067,19 @@ extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
                 uint32_t head_u16  = dom_text_utf16_length(text);
                 uint32_t tail_u16  = dom_text_utf16_length(next_text);
                 size_t new_len = text->length + next_text->length;
-                char* combined = (char*)pool_alloc(elem->doc->pool, new_len + 1);
+                char* combined = (char*)pool_alloc(elem->doc->document_pool, new_len + 1);
+                if (!combined) break;
                 if (text->text && text->length > 0)
                     memcpy(combined, text->text, text->length);
                 if (next_text->text && next_text->length > 0)
                     memcpy(combined + text->length, next_text->text, next_text->length);
                 combined[new_len] = '\0';
                 String* s = dom_document_create_string(elem->doc, combined, new_len);
+                pool_free(elem->doc->document_pool, combined);
                 if (!s) break;
-                text->native_string = s;
-                text->text = s->chars;
-                text->length = new_len;
+                // Normalization repeatedly replaces the survivor's payload; it
+                // must transfer ownership so prior merge strings are reclaimed.
+                dom_text_adopt_document_string(text, elem->doc, s);
                 DocState* st = js_dom_current_state();
                 if (st) {
                     dom_mutation_text_replace_data(st, text, head_u16, 0, tail_u16);
@@ -12130,7 +12278,7 @@ extern "C" Item js_dom_insert_adjacent_html_bridge(void* elem_ptr, Item position
     if (!position || !html_str || !elem->doc) return ItemNull;
     DomDocument* doc = elem->doc;
     if (!doc->input) return ItemNull;
-    Html5Parser* parser = html5_fragment_parser_create(doc->pool, doc->arena, doc->input);
+    Html5Parser* parser = html5_fragment_parser_create(doc->document_pool, doc->node_arena, doc->input);
     if (!parser) return ItemNull;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -12194,8 +12342,7 @@ extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int ar
         } else {
             const char* text = fn_to_cstr(args[i]);
             if (text) {
-                String* s = dom_document_create_string(elem->doc, text, strlen(text));
-                DomText* tn = dom_text_create(s, elem);
+                DomText* tn = DomText::create_copy(text, strlen(text), elem);
                 if (tn) ((DomNode*)elem)->append_child(tn);
             }
         }
@@ -12225,8 +12372,7 @@ extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int a
         } else {
             const char* text = fn_to_cstr(args[i]);
             if (text) {
-                String* s = dom_document_create_string(elem->doc, text, strlen(text));
-                DomText* tn = dom_text_create(s, elem);
+                DomText* tn = DomText::create_copy(text, strlen(text), elem);
                 if (tn) ((DomNode*)elem)->insert_before(tn, ref);
             }
         }
@@ -12488,7 +12634,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
 
-        Pool* pool = elem->doc->pool;
+        Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return ItemNull;
 
@@ -12504,7 +12650,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
 
-        Pool* pool = elem->doc->pool;
+        Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
 
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
@@ -12533,7 +12679,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return (Item){.item = ITEM_FALSE};
 
-        Pool* pool = elem->doc->pool;
+        Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return (Item){.item = ITEM_FALSE};
 
@@ -12549,7 +12695,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         const char* sel_text = js_dom_to_dom_string_cstr(args[0]);
         if (!sel_text || !elem->doc) return ItemNull;
 
-        Pool* pool = elem->doc->pool;
+        Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
         if (!selector_group) return ItemNull;
 
@@ -12703,7 +12849,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                     uint32_t tail_u16  = dom_text_utf16_length(next_text);
                     // concatenate text content
                     size_t new_len = text->length + next_text->length;
-                    char* combined = (char*)pool_alloc(elem->doc->pool, new_len + 1);
+                    char* combined = (char*)pool_alloc(elem->doc->document_pool, new_len + 1);
+                    if (!combined) break;
                     if (text->text && text->length > 0)
                         memcpy(combined, text->text, text->length);
                     if (next_text->text && next_text->length > 0)
@@ -12711,10 +12858,11 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                     combined[new_len] = '\0';
                     // update main text node
                     String* s = dom_document_create_string(elem->doc, combined, new_len);
+                    pool_free(elem->doc->document_pool, combined);
                     if (!s) break;
-                    text->native_string = s;
-                    text->text = s->chars;
-                    text->length = new_len;
+                    // The surviving node owns its generated merge string; this
+                    // keeps repeated normalize() calls memory-neutral.
+                    dom_text_adopt_document_string(text, elem->doc, s);
                     // Spec: ranges with (next_text, k) move to (text, head_u16 + k);
                     // appended-data shift handled separately.
                     {
@@ -12974,7 +13122,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
 
         // parse the HTML fragment
         Html5Parser* parser = html5_fragment_parser_create(
-            doc->pool, doc->arena, doc->input);
+            doc->document_pool, doc->node_arena, doc->input);
         if (!parser) return ItemNull;
         html5_fragment_parse(parser, html_str);
         Element* body_elem = html5_fragment_get_body(parser);
@@ -13111,8 +13259,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                 // string arg → create text node
                 const char* text = fn_to_cstr(args[i]);
                 if (text) {
-                    String* s = dom_document_create_string(elem->doc, text, strlen(text));
-                    DomText* tn = dom_text_create(s, elem);
+                    DomText* tn = DomText::create_copy(text, strlen(text), elem);
                     if (tn) ((DomNode*)elem)->append_child(tn);
                 }
             }
@@ -13142,8 +13289,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
             } else {
                 const char* text = fn_to_cstr(args[i]);
                 if (text) {
-                    String* s = dom_document_create_string(elem->doc, text, strlen(text));
-                    DomText* tn = dom_text_create(s, elem);
+                    DomText* tn = DomText::create_copy(text, strlen(text), elem);
                     if (tn) ((DomNode*)elem)->insert_before(tn, ref);
                 }
             }
@@ -14022,8 +14168,7 @@ static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item s
     if (text_arg.item != ITEM_NULL && !is_js_undefined(text_arg)) {
         const char* t = fn_to_cstr(text_arg);
         if (t && *t) {
-            String* str = dom_document_create_string(doc, t, strlen(t));
-            DomText* tn = dom_text_create(str, opt);
+            DomText* tn = DomText::create_copy(t, strlen(t), opt);
             if (tn) {
                 tn->parent = opt;
                 opt->first_child = tn;

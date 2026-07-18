@@ -2,190 +2,538 @@
 
 **Date:** 2026-07-18
 **Baseline commit:** `a267387db`
-**Parent design:** `vibe/radiant/Radiant_Design_View_Reuse.md` — decisions VR1–VR13, findings VF1–VF6, phases R0–R5. This doc turns those into execution-grade tasks.
-**Related:** `Radiant_Design_Dom_View_Struct.md` + `Radiant_Impl_Dom_View_Struct.md` (DV1–DV16 complete; §11 alias ledger, §17 memory profile = this campaign's baseline numbers), `Radiant_Design_Robustness.md` (T7, RADIANT_CHECK), `doc/dev/C_Plus_Convention.md`.
+**Parent design:** `vibe/radiant/Radiant_Design_View_Reuse.md` — allocation domains §0, decisions VR1–VR14
+**Related:** completed DOM/view structure campaign, `Radiant_Design_Robustness.md` T7, and the DOM/view memory profile
 
-**Campaign status: not started.**
+**Campaign status: complete.** R0–R7 are implemented and release-profiled. Adopted: retained reset/scratch separation, canonical and tree-wide `InlineProp` reuse, external DOM liveness with existing-arena retirement, and canonical style epochs. Evidence-gated Font sharing and a custom `TextRect` cache were not adopted. Final validation and profile evidence are recorded in §9.
 
 ---
 
-## 0. Ground rules (apply to every task)
+## 0. Ground Rules and Allocation Contract
 
-1. **Gates per PR:** `make build` · `make test-radiant-baseline` 100% · `make layout suite=baseline` clean · `make lint` green. R3 additionally: full UI automation + editor suites. R5 additionally: CSS + DOM-CRUD gtest suites (`test/css/`). Perf-relevant phases (R1+) get a **release-build** timing spot-check.
-2. **Measure first, adopt by evidence (VR11).** R0's probe report is a merge prerequisite for R2/R4/R5 scope decisions — no interning lands for a group the probe doesn't justify. All memory claims re-run the §17 harness (46-page corpus, release build) and record deltas in §8.
-3. **Behind existing gates only (VR13).** Sharing and recycling slot in behind `create()` (P7), `ensure_*` (`radiant/view_prop_ensure.cpp`), and the `VIEW_PROP_TEARDOWN` table (view_pool.cpp:396). No parallel allocation or teardown paths; the table gains *modes*, not siblings. A reviewer finding a second way to allocate/free the same object class is finding a defect.
-4. **Fail toward owned.** Every sharing mechanism (alias, intern, signature) must have a one-line demotion path to the owned state, taken on any doubt (cap overflow, checksum mismatch, signature verification failure). Owned is always correct; shared is an optimization.
-5. **Root-cause comment at every liveness/ownership decision point** (CLAUDE.md rule 12) — retirement gates, unshare triggers, and teardown-mode selections are exactly the code a future reader will misjudge without the invariant stated.
-6. **LOC (ground rule 7 discipline, carried over):** target ~flat for the campaign — this round adds mechanism (free lists, intern tables, registry) whose offsets are the unified retire/destroy path (R3.2), teardown-mode consolidation (R1.1), and probe-driven deletions. Run `verify_loc_reduction.sh --ref a267387db` at phase ends as the consciousness check.
-7. **Never mix a sharing change and a recycling change in one PR** — when a T7-class bug appears, the bisect must implicate one mechanism, not both.
+### 0.1 Ground rules
 
-### Baseline numbers (from impl plan §17, re-verified at `a267387db` before R0 merges)
+1. **Per-PR gates:** `make build`, `make test-radiant-baseline`, `make layout suite=baseline`, and `make lint`. R3/R4 additionally run JS DOM, UI automation, editor, and ASAN churn tests. R6 additionally runs CSS and DOM-CRUD suites.
+2. **Release-only performance evidence:** allocator/timing decisions use `make release`.
+3. **One lifecycle path:** extend `create()`, `ensure_*`, `VIEW_PROP_TEARDOWN`, the existing arena recycler, one canonical-prop store, one style-epoch manager, and one retirement sweep. No shadow paths.
+4. **Fail toward owned/pinned:** equality uncertainty produces owned prop/style storage; liveness uncertainty leaves a subtree unretired.
+5. **No element-owned shared storage:** canonical props belong to `canonical_prop_arena`; canonical styles belong to a `StyleEpoch::pool`.
+6. **Hash is not proof:** exact semantic equality follows every hash hit.
+7. **No node reuse before R3 closes liveness.** R3 changes references/metadata only; R4 enables `arena_free` retirement.
+8. **Root-cause comments:** allocation-domain crossings, COW, epoch changes, pin/unpin, retirement rejection, and teardown order receive invariant comments.
+9. **Sharing and recycling stay in separate PRs.** A bisect must implicate one mechanism.
+10. **LOC is reported, not gamed:** run `verify_loc_reduction.sh --ref a267387db` at phase boundaries.
+
+### 0.2 Six-domain implementation contract
+
+| Domain | Target owner/member | Allocation API | Must survive |
+|---|---|---|---|
+| `dom.document.pool` | `DomDocument::document_pool` | `pool_*` | all layout generations; document lifetime |
+| `dom.node.arena` | `DomDocument::node_arena` | `arena_*` | all layout generations; live-node lifetime |
+| `view_tree.prop_pool` | `ViewTree::prop_pool` | `pool_*` | retained/incremental reflow |
+| `view_tree.canonical_prop_arena` | `ViewTree::canonical_prop_arena` | `arena_*` | retained/incremental reflow and ordinary style epochs |
+| `view_tree.scratch_arena` | `ViewTree::scratch_arena` | `arena_*`/scratch wrapper | only the active safe layout/render scope |
+| `style.canonical.epoch.pool` | `StyleEpoch::pool` | `pool_*` | all reflows until epoch refcount reaches zero |
+
+UI fat Lambda elements are the compatibility exception to the usual physical
+`dom.node.arena` owner: their primary block remains in the retained
+`Input::arena`. The external lifecycle registry records the actual owner arena
+and returns the block there. This is not an additional logical category; the
+six-domain `page` profile contains ordinary nodes in `dom.node.arena`.
+
+The target destruction order is:
+
+```text
+ViewTree full destroy:
+  detach/reset element prop pointers
+  release owned prop resources
+  destroy canonical indexes and release canonical external-resource ledger
+  destroy canonical_prop_arena
+  assert/release scratch scopes; destroy scratch_arena
+  destroy prop_pool
+
+DomDocument full destroy:
+  quiesce layout/events and invalidate wrappers
+  destroy ViewTree/StateStore dependents, detaching view props
+  release node-held owned styles and canonical style bindings
+  destroy style-epoch manager/pools
+  destroy node_arena
+  destroy document_pool
+```
+
+Ordinary reflow increments `layout_generation`; it does not destroy `prop_pool`, `canonical_prop_arena`, or any still-valid style epoch. A global stylesheet/CSSOM/media-matching change starts `style_epoch + 1`; a pure reflow does not.
+
+### 0.3 Starting measurements
 
 | Metric (46-page corpus, release, post-layout) | Baseline |
 |---|---|
-| DOM arena used (sum) | 3,193,344 B |
-| View arena used (sum) | 490,544 B |
-| Pool cumulative allocations (dom.document + view_tree.pool) | 28,325,328 B |
-| Median combined arena / page | 28,192 B |
-| DOM-churn fixture (R0.3) arena growth | linear (unbounded) |
+| DOM node-arena used, sum | 3,193,344 B |
+| Current ViewTree arena used, sum | 490,544 B |
+| Current document + ViewTree pools cumulative allocations | 28,325,328 B |
+| Median combined arena per page | 28,192 B |
+| DOM churn committed/fresh growth | linear |
+
+These historical totals are not six-domain-exclusive. R0 replaces them with physical backing and logical attribution reports.
 
 ---
 
-## R0 — Probe, metrics, fixtures (no production behavior change)
+## R0 — Allocation Seams, Canonical Probes, Metrics, and Fixtures
 
-### R0.1 — Prop duplicate-rate probe  **[VR11]**
-- Temporary diagnostic pass (same pattern as the §17 hook: capture after `layout_html_doc()`, removed after the campaign; raw CSV in `temp/`): for every `DomElement`, hash each present prop group's content (`XXH64` over the struct bytes for POD groups; for pointer-bearing groups hash the pointee chain — family string, shadow list, transform functions — so the numbers reflect *value* duplication).
-- Report per group, per page and corpus-wide: instance count, distinct-value count, duplicate ratio, reclaimable bytes (`(instances − distinct) × sizeof`), and **inherit-chain ratio** (duplicates whose value equals their parent's — the Tier-1-reachable subset) vs non-ancestral duplicates (Tier-2-only).
-- Output lands as a table in §8 of this doc. This single report decides: which groups get Tier-1 in R2, whether R4 happens at all, and for which groups.
+### R0.1 — Allocation-domain naming seam  **[VR14]**
 
-### R0.2 — Cascade-signature duplicate probe  **[VR12 input]**
-- In the same pass: accumulate the per-element signature hash (ordered `(CssRule*, specificity)` applications — instrument `dom_element_apply_rule`) plus an `element_specific` flag (inline style present / presentational-attribute declarations / post-parse CSSOM mutation).
-- Report: signature-distinct count vs element count, shareable ratio (equal signature ∧ ¬element_specific), estimated `StyleTree` bytes reclaimable (measure actual per-tree footprint: AVL node count × node size from `css_style_node.cpp`).
-- **Verification sub-probe:** for a sample of same-signature pairs, byte-compare their built trees — this validates signature *sufficiency* before R5 stakes correctness on it. Any mismatch in the probe = a missed signature input; find it now, not in R5.
+- In one mechanical PR, rename or provide a single migration seam for:
+  - `DomDocument::pool` → `document_pool`;
+  - `DomDocument::arena` → `node_arena`;
+  - `ViewTree::pool` → `prop_pool`; and
+  - `ViewTree::arena` → `scratch_arena`.
+- Update allocator labels to the six names from §0.2. Do not create `canonical_prop_arena` or style epoch pools in this naming-only PR.
+- Audit constructor/destructor order and every raw field use with `rg`; no compatibility duplicate field remains.
+- Add comments on each field stating its contents and reset boundary.
 
-### R0.3 — DOM-churn stress fixture  **[acceptance instrument for R3]**
-- New layout/JS fixture: `removeChild`/`appendChild`/`createElement`/text mutation loops ×N (N≈10k) with periodic reconcile + relayout; assert via mem-context snapshot that doc-arena used bytes plateau after warmup. **Committed failing-by-design** (marked expected-fail like the known-failure convention) — it is R3's fails-before/passes-after test.
-- Variant: same loop while JS holds references to a rotating subset of removed nodes (wrapper-liveness stress — nodes must NOT be retired while referenced, must be retired after release + GC).
+### R0.2 — Exclusive physical/logical memory accounting  **[VR12]**
 
-### R0.4 — Metrics hooks
-- Permanent (cheap, debug-only where costly): doc-arena garbage ratio (bytes in retired-node free lists + abandoned vs used), free-list hit rate per class, intern-table size/hit-rate counters, exposed through the existing mem-context dump (`--mem-dump`).
-- Gate: R0 changes nothing in production paths; baselines trivially 100%. Probe report reviewed before R1 merges.
+- Extend arena stats to report exact backing bytes requested from the parent pool, active bump bytes, interior recyclable/free bytes, chunk-header overhead, allocation reuse hits/misses, and fresh chunk growth.
+- Physical totals count top-level pools once. Child arena samples remain visible but are not added again to physical totals.
+- Logical direct-pool attribution excludes exact child-allocator backing. Assert rather than silently clamp if child backing exceeds the parent sample.
+- Domain-specific cumulative counters count prop/style/node operations directly; do not infer all logical work from the backing pool's aggregate allocation count.
+- Update `--mem-dump` schema/output with `physical_total` and `logical_domains`; document that they answer different questions.
 
----
+### R0.3 — Prop equality/duplicate probe  **[VR1, VR6, VR12]**
 
-## R1 — Churn cut: reset-in-place + TextRect recycling (no sharing, no liveness)
+- Add temporary post-layout traversal using explicit field hashing/equality. Zero scratch; do not use raw struct bytes as the semantic contract.
+- Pointer groups compare immutable payload content or report “not safely comparable.”
+- Report per group: instances, exact distinct values, fully-resolved equal-to-parent count, non-parent duplicates, owned struct/payload bytes, theoretical canonical-arena bytes, and compare time.
+- Record every post-commit writer and whether it already crosses `ensure_*`/finalization.
 
-### R1.1 — `VIEW_PROP_TEARDOWN` RESET mode  **[VR9]**
-- Add `VIEW_TEARDOWN_RESET_IN_PLACE` to the flags consumed by `view_teardown_apply_table` (view_pool.cpp:433): for each present group — run `release_external` and `free_payload` exactly as today (font handles, embed docs, boundary payloads must still release), then instead of `view_pool_free_ptr` + clear, **memcpy the group from its canonical default** (`view_prop_defaults.cpp` instances) and keep the pointer.
-- Retained-relayout call sites switch from FREE_POOL to RESET_IN_PLACE; full teardown (`ViewTree::destroy`, pool recreate) keeps FREE_POOL semantics (moot under pool destruction, but the mode stays correct for partial teardowns).
-- **Care:** (a) groups whose *size class varies* don't exist — all groups are fixed-size structs; assert it (`static_assert` per table entry via a size field). (b) The union groups (`fi/gi`, `tb/td/form`): RESET must re-default to the *same member currently tagged* or clear to none — clearing to none is correct (next resolve re-establishes role), matches today's `clear_item_prop`. (c) `layout_cache` entry: reset = invalidate, not default-fill (it has its own generation logic).
-- Test: gtest asserting pointer stability across a retained relayout (`el->blk` address unchanged, contents re-defaulted) + full layout baseline.
+### R0.4 — Exact cascade-recipe probe  **[VR13]**
 
-### R1.2 — TextRect free list  **[VR10]**
-- `ViewTree` gains a `TextRect* rect_free_list`; teardown's text handling pushes rect chains instead of `pool_free`; the two allocation sites (layout_text.cpp:3176, :3194) pop-or-`pool_calloc` (memset on pop).
-- Care: rects are chained (`next`) — push the whole chain in one splice; pop singly.
+- Collect ordered diagnostic recipe entries containing rule identity/version input, specificity, origin/source order, style epoch, and relevant mode inputs.
+- Mark inline/presentational/direct mutation element-specific until represented canonically.
+- Group by hash then exact recipe equality. Verify sampled equal recipes by sorted semantic `StyleTree` comparison, not bytes.
+- Measure current tree header, AVL node, per-element declaration clone, and value-payload bytes with tagged counters.
+- Predict canonical epoch-pool bytes, recipe-table bytes, and number of concurrently live epochs for scripted stylesheet/media changes.
 
-### R1.3 — Measure + record
-- Re-run §17 harness + R0.4 counters. Expected: pool cumulative-allocation delta drops substantially on relayout-heavy pages (this phase's whole point); live bytes ~flat. Record in §8. Release timing spot-check (reset-in-place should be neutral-to-faster; memcpy default vs free+calloc).
+### R0.5 — DOM arena allocation/ownership probe  **[VR7, VR8]**
 
----
+- Inventory every `node_arena` allocation and classify it:
+  1. primary node/co-allocation block with exact size;
+  2. node-owned auxiliary allocation that retirement must return with exact size; or
+  3. intentional document-lifetime allocation.
+- Record missing owner/size metadata as an R4 blocker.
+- Confirm current `arena_alloc/calloc` free-bin reuse, split, coalesce, and bump-back behavior under node/text sizes. This report decides whether any reusable allocation-class extension is needed; a second DOM free-list is not the default.
 
-## R2 — Tier-1 sharing: ownership + inherit-alias + unshare-on-write
+### R0.6 — Churn fixture
 
-### R2.1 — Ownership bitmask  **[VR3]**
-- `owned_groups` bits in the `elmt_flags` reserve, one per shareable group (probe-confirmed set; plan for `font`, `in_line` + headroom). `ensure_*` sets the bit on allocation; `VIEW_PROP_TEARDOWN` (both FREE_POOL and RESET modes) acts **only when the bit is set**, else just clears the pointer.
-- Land this *before* any aliasing exists (semantically null: every present group is owned today) — the mechanism proves itself against the full baseline before sharing turns on. Same accessor-first logic as the P1 seam.
+- Add deterministic create/append/remove/reinsert/subtree replacement/text/class/style churn for at least 10k cycles with reconcile and reflow.
+- Variants retain nodes through wrappers, Range/Selection, observers, queues, live collections, DocState, and reconciliation/Lambda backing.
+- Include more than `DOM_JS_MUTATION_RECORD_CAP` removals between reconciles.
+- R0 records non-gating growth; R4 adds plateau assertions.
 
-### R2.2 — Inherit-alias: `FontProp`  **[VR2 Tier 1, VR4]**
-- Resolver change (`resolve_css_style.cpp` font section): if **no declaration in this element's cascade touched any font-group property** and the parent element has a font group, set `el->font = parent->font`, owned bit clear. The resolver already knows per-property application; add a per-group "touched" accumulator during rule application.
-- **`FontHandle` discipline:** sharers never own the handle (`owns_font_handle` false path); `release_element_font_prop` (view_pool.cpp:213) runs only for owned groups — R2.1 already gates it. The owning ancestor's teardown runs while descendants still point at the group **only** during whole-subtree teardown (top-down) — verify teardown order is leaf-first or make the RESET/FREE pass clear descendant aliases first; this is the one ordering hazard in R2, gets a dedicated gtest (teardown of a shared-font subtree, ASAN-clean).
-- **OQ-B resolved here: transitive aliasing.** Child aliases the *resolution root's* group (grandchild → grandparent directly): flatter chains, one-hop unshare copy. Record the decision + rationale in the design doc when it lands.
-- Derived-metrics care: `FontProp` carries computed metrics (`space_width`, ascender…) filled by `setup_font` — confirm these are deterministic per (family,size,style) so sharing them is value-correct (they are — they derive from the handle); root-cause comment at the alias site.
-
-### R2.3 — Inherit-alias: `InlineProp`
-- Same pattern; pure-POD group, no handle discipline. Color/visibility/cursor inherit — probe (R0.1) expected to show this as the highest-ratio group.
-
-### R2.4 — Unshare-on-write  **[VR4]**
-- `ensure_G(el, tree)` in `view_prop_ensure.cpp`: if pointer present but owned bit clear → allocate, memcpy from the shared instance, set bit, return. One function per group; no call-site changes (P1's seam pays off).
-- Debug assert: writing detection — in debug builds, `ensure_*` on a shared group logs the unshare with element source_loc (visibility into unshare churn; a hot unshare path means the alias detection is misfiring).
-
-### R2.5 — Debug write-barrier checksum  **[VR8, VR1 assertion]**
-- Debug builds: when a group becomes shared (alias established), record `XXH64` of its bytes in a side table; at teardown/next-resolve, re-verify. Mismatch = something wrote through a shared pointer → `RADIANT_CHECK` failure naming the group + element. This is the guard that keeps VR1's "cascade-final" classification honest.
-
-### R2.6 — Re-profile + record
-- §17 re-run: expect pool live-bytes drop ≈ probe's inherit-chain reclaimable estimate for font+inline; DOM arena flat. Baselines + UI automation 100% (hover/focus restyle paths exercise unshare). Record §8.
+**R0 exit:** naming build/tests clean; six-domain report recorded in §9; R2/R5/R6 adoption scope frozen; node-arena owner/size ledger created.
 
 ---
 
-## R3 — Node recycling: free lists + retirement (the liveness phase)
+## R1 — Retained Reflow and Scratch-Lifetime Split
 
-### R3.1 — Free-list infrastructure  **[VR7]**
-- `DomDocument` gains: `DomElement* elem_free_list`, `DomComment* comment_free_list`, `DomText* text_free_buckets[N_BUCKETS]` (16 B classes over the `[DomText][String][chars]` block; block size stored in the retired node's own storage; bucket geometry from R0 text-length data), plus counters (R0.4).
-- `T::create()` (all three) pops before `arena_calloc`; memset the popped block (preserves DV16's zeroed-storage contract); fresh node id from `next_node_id` (ids are never reused — event/state logs stay unambiguous).
-- Care: `DomText::create` co-allocation sizing already computes the block size — pop the smallest fitting bucket; oversized remainder is NOT split (kept simple; measured waste in R0.4 counters).
+### R1.1 — Preserve `prop_pool` across retained reset  **[VR10]**
 
-### R3.2 — `retire_node()` — unified teardown  **[VR7, absorbs `dom_element_destroy`]**
-- One function per type (`DomElement::retire(doc)` etc.): asserts the retirement conditions (below), releases retained side structures exactly once — `specified_style` (via `style_tree_destroy`; **ownership-aware after R5** — owned only), retained tag/id/class strings (`PersistentFieldRef` clears), `view_state_ref`/DocState deregistration, view props via `VIEW_PROP_TEARDOWN` FREE_POOL (ownership-aware post-R2), `ext` — then poisons (debug) and pushes to the free list.
-- `dom_element_destroy`'s body becomes `retire` minus the free-list push where external callers need destroy-without-recycle semantics; audit its callers — expected outcome: destroy folds into retire entirely and is deleted (LOC offset).
-- **Retirement conditions (all must hold; assert in debug):** `parent == nullptr` ∧ not document root ∧ no live JS wrapper (R3.3) ∧ no DocState reference (cursor/selection/focus check via `view_state_ref` registry) ∧ not a pseudo-content node (owned via `PseudoContentProp`, torn down by its owner). Per OQ-A resolution: **no editor-history gate exists** — radiant has no DOM-level undo/redo (Lambda reactive templates own editing history above this layer); root-cause comment states this so nobody adds a "safety" gate that hides real leaks.
+- Change `ViewTree::reset_retained()` so it no longer destroys/recreates `prop_pool` for an ordinary retained reflow.
+- Add `VIEW_TEARDOWN_RESET_IN_PLACE` to the existing table. At R1 all present prop groups are owned: release external resources/payloads once, copy typed defaults into the same block, retain pointer ownership.
+- Keep FREE behavior for full ViewTree destruction. Union roles clear consistently; `layout_cache` uses explicit generation invalidation.
+- Add typed size/default table metadata and compile-time size assertions. No parallel per-group reset functions.
 
-### R3.3 — Wrapper-liveness registry  **[VR7 gate]**
-- JS wrappers are branded native VMaps in the retained JS GC heap holding `DomNode*` (js_dom.h wrapping strategy). Add a bridge-side registry: `HashMap* wrapped_nodes` on `DomDocument` (DomNode* → wrap count / epoch), inserted at wrapper creation in `js_dom.cpp`, swept after each collection on the retained heap (`gc_collect` completion callback): entries whose branded VMap did not survive are dropped.
-- **Conservative fallback (acceptable first landing):** if post-GC wrapper-death detection proves intrusive to the GC layer, mode B = "ever-wrapped ⇒ never retired (until document teardown)". Still bounded (wrapper creation is user-driven), still fixes the dominant no-JS/reconcile churn case, and the registry API is identical — detection precision upgrades later without touching retirement logic. R0.3's wrapper-stress variant marks its second half expected-fail under mode B.
+### R1.2 — Safe `scratch_arena` reset
 
-### R3.4 — Sweep points  **[VR7]**
-- Two, only: (1) **end of reconcile** — after the incremental/full reconcile paths (the `dom_js_record_reconcile` sites, event.cpp:4686 vicinity) walk the delink records (`DomJsMutationRecord` CHILD_REMOVE entries + reconcile-replaced subtrees) and retire nodes meeting R3.2's conditions; (2) **post-JS-GC** — after the registry sweep (R3.3), retire nodes newly wrapper-free that are already detached. Never inline in `removeChild` (JS re-insertion is legal and common).
-- Detached-but-alive nodes (wrapped, or awaiting re-insert) simply wait — the fixture's wrapper-stress variant proves both directions.
+- Inventory every layout/render scratch, `PaintList`, display-list, and temporary consumer backed by `scratch_arena`.
+- Add an active-scope counter/assertion. Reset/clear scratch only after the prior layout/render temporary scopes are closed and before the next layout generation begins.
+- Retained display-list/cache storage must remain in its existing dedicated allocator; no retained pointer may target `scratch_arena`.
+- Select `arena_reset` versus `arena_clear` from release high-water measurements: reset retains chunks for speed; clear returns excess chunks to `prop_pool`.
 
-### R3.5 — Poison + epoch  **[VR8]**
-- Debug: `memset(0xDD)` before free-list push; `uint16_t debug_epoch` in DomNode debug-only padding, bumped on reuse; `RADIANT_CHECK` epoch validation in view-state deref and event target resolution paths.
+### R1.3 — `TextRect` decision  **[VR11]**
 
-### R3.6 — Acceptance
-- R0.3 fixture flips to passing (bounded growth; plateau asserted). Full gates: radiant baseline, layout suite, UI automation, editor suites, ASAN run of the churn fixture. §17 + R0.4 re-profile recorded in §8. This phase's PRs are the campaign's most scrutinized; each lands separately (infrastructure → retire → registry → sweeps).
+- Keep `TextRect` in `prop_pool`, not scratch.
+- Compare rpmalloc reuse with a local cache prototype under repeated relayout. Adopt one shared push-chain/pop-zero helper only for a material release-build allocator/time win; otherwise remove the prototype and record “not adopted.”
 
----
+### R1.4 — Acceptance
 
-## R4 — Tier-2 interning (probe-gated; POD groups only)
+- Tests: owned block/font/inline pointer stability, default restoration, payload/handle release once, union/cache reset, and scratch pointer rejection after generation advance.
+- Assert `prop_pool` identity is unchanged across retained reflow while `layout_generation` increments.
+- Record direct prop-pool allocations, scratch committed/active/high-water bytes, reset/clear time, and release timing.
 
-### R4.1 — Intern table  **[VR2 Tier 2, VR5, VR6]**
-- Only for groups where R0.1 shows non-ancestral duplicate ratio worth it (design threshold: savings > table footprint + hash cost). Expected candidates: `PositionProp`, `TransformProp`-sans-functions, `InlineProp` residual (non-inherited duplicates). **Skip entirely if the probe says Tier-1 already captured the win — R4 is optional by design.**
-- `ViewTree`-owned open-addressing table keyed by group hash; resolve-commit path: build in stack scratch → hash → hit ? share (owned bit clear) : insert copy (table-owned). Interned instances immutable + checksummed (R2.5 machinery reused).
-- Cap (elements-interned per group; from probe headroom) → past cap, fall back to owned (ground rule 4). Table drops wholesale on pool recreate.
-
-### R4.2 — Validation
-- Realized savings within 20% of probe prediction (else investigate before expanding); style-thrash micro-fixture (JS mutating inline styles per frame) shows no table growth (mutations go through `ensure_*` → owned, never intern).
+**R1 exit:** owned props genuinely survive retained reset; scratch has a proven safe clearing boundary.
 
 ---
 
-## R5 — `specified_style` signature sharing  **[VR12; last by design]**
+## R2 — Canonical Prop Arena and Immutable Sharing
 
-### R5.1 — Signature accumulation
-- Productionize R0.2's instrumentation: during rule application (`dom_element_apply_rule` / pseudo-element variants), fold `(CssRule*, specificity)` into a per-element running hash; set `element_specific` on inline-style application (`apply_inline_style`), presentational-attribute declaration injection, and any post-parse `apply_declaration` (JS CSSOM).
-- The R0.2 verification sub-probe must have come back clean (or its gaps fixed) — that report is this task's merge prerequisite.
+### R2.1 — Ownership bits and transition helpers  **[VR3]**
 
-### R5.2 — Doc-level tree intern + ownership
-- `DomDocument`-owned signature table: signature → shared `StyleTree*` (tier-1, doc pool). Cascade completion per element: `element_specific` ? owned tree (today's path) : table lookup — hit shares (ownership bit on the element, mirroring VR3; reuse an `elmt_flags` bit), miss inserts this element's tree as the shared instance.
-- `retire_node` (R3.2) and style-reset paths call `style_tree_destroy` **only for owned trees**. Table invalidation: stylesheet set change / document rebuild drops the table wholesale (trees freed with it); element `style_version` bumps work unchanged.
+- Assign named high `elmt_flags` bits for selected shareable groups and reserve the R6 `specified_style` ownership bit. Assert no overlap with bits 0–16 and no overflow of the 15-bit reserve.
+- Add one set of helpers used by `ensure_*`, resolver commit, and teardown: state query, mark owned/shared, COW, promote, return-owned, and clear-shared.
+- Before sharing, every shareable `ensure_*` allocation sets owned state; teardown frees only owned prop-pool blocks. This PR is semantically neutral.
+- Unit-test every VR3 transition, especially owned→shared and shared→owned.
 
-### R5.3 — Unshare-on-write
-- First element-specific mutation on a sharing element: deep-copy shared → owned (`style_tree_clone` exists, css_style_node.cpp:865), set ownership, proceed. Gate is the same three entry points that set `element_specific`.
+### R2.2 — Create `canonical_prop_arena` and teardown ledger  **[VR5]**
 
-### R5.4 — Debug verification sampling
-- Debug builds: for 1-in-N sharing elements, build the owned tree anyway, byte-compare against the shared instance; mismatch → `RADIANT_CHECK` naming the signature inputs + **demote to owned** (fail-safe). This is the standing guard against signature under-coverage (the phase's defining risk).
+- Create `canonical_prop_arena` from `prop_pool`; do not reuse `scratch_arena`.
+- Allocate canonical structs and copied immutable payload graphs with `arena_calloc/alloc`.
+- Keep resizable indexes and the typed external-resource destruction ledger in `prop_pool`, because they must be traversed/destroyed before the canonical arena disappears.
+- Add a canonical-byte cap. Arena cap overflow falls back to owned prop-pool storage.
+- Full teardown order: destroy index → release each ledger resource exactly once → destroy canonical arena. Ordinary layout generation does none of these.
 
-### R5.5 — Acceptance
-- CSS + DOM-CRUD gtest suites, layout baseline, UI automation (pseudo-state restyle exercises signature variance), JS style-mutation fixtures. §17 re-profile: DOM-arena (doc pool) drop ≈ R0.2 estimate. Record §8.
+### R2.3 — Fully resolved `InlineProp` parent-value sharing  **[VR1, VR2, VR6]**
+
+- Define explicit `inline_prop_hash/equal` over every field.
+- At resolver commit, compare the child's normalized full value with the parent:
+  - equal canonical parent → return child temporary owned block, bind canonical;
+  - equal owned parent → allocate canonical copy, change parent to shared, return both superseded owned storage as applicable, bind child;
+  - unequal/uncertain → keep child owned.
+- Group-touched flags remain diagnostics only.
+
+### R2.4 — COW and post-commit writer audit  **[VR4]**
+
+- `ensure_inline()` COWs from canonical arena into a mutable `prop_pool` block.
+- Audit animation/transition, hover/focus restyle, HTML/SVG defaults, table anonymous wrappers, layout helpers, and tests.
+- A writer with only `InlineProp*` must move before freeze or receive the element/ensure gate.
+- Count COWs by call site; unexpected hot COW blocks expansion.
+
+### R2.5 — Optional finalized Font sharing
+
+- Add `font_prop_finalize()` before a Font can become canonical. Make later `setup_font()` read-only for finalized canonical values or split mutable resource state.
+- Define semantic family/shadow/descriptor/metric/resource equality.
+- Canonical Font handle/payload ownership registers in the canonical teardown ledger; discarded owned candidates release their own resources.
+- Font-context invalidation COWs/re-resolves without mutating canonical entries. Enable only if R0 predicts sufficient savings.
+
+### R2.6 — Acceptance
+
+- Test mixed inheritance (`opacity`, `vertical-align`, `color`, `visibility`), parent/child animation, independent restyle, promotion, COW, retained reset, arena cap fallback, and full canonical teardown.
+- If Font enabled: finalize/read-only setup, invalidation, handle release once, and ASAN subtree tests.
+- Assert canonical addresses belong to `canonical_prop_arena`, owned addresses belong directly to `prop_pool`, and neither belongs to `scratch_arena`.
+- Record prop-pool live/cumulative bytes, canonical arena committed/active/waste, promotions, COWs, and release time.
+
+**R2 exit:** all shared props are immutable canonical-arena objects and survive ordinary layout generations.
 
 ---
 
-## 7. Test plan (new tests by phase)
+## R3 — Node Liveness Infrastructure (No Recycling Yet)
 
-| Test | Phase | Proves |
+### R3.1 — Complete raw-node holder ledger  **[VR7]**
+
+Close a checked ledger containing owner, field, acquisition, release, pin reason, and retirement behavior for wrappers, Range/Selection, observers/transient roots, mutation/reconcile records, event/task queues, live collections, DocState, Lambda backing/reconcile maps, and pseudo/generated ownership.
+
+New raw/deferred `DomNode*` fields added during the campaign join the ledger before merge.
+
+### R3.2 — GC weak slots and wrapper cache conversion
+
+- Add weak-slot/weak-handle support plus post-collection cleared-slot processing to `lib/gc` and the Jube host API; strong-root registration is insufficient.
+- Convert wrapper identity entries to weak slots while preserving identity while live.
+- Weak clear removes the cache index and releases the wrapper pin without dereferencing recycled node bytes. Document teardown invalidates surviving wrappers.
+- “Ever wrapped means never retire” is not accepted.
+
+### R3.3 — External generation and retainer registry
+
+- Allocate a document-owned registry from `document_pool`, keyed by node address with current ID, node type, exact primary allocation size, state, and per-reason pin counts.
+- `DomNodeRef` contains address + expected ID and validates only through this registry. It never reads the target bytes before validation.
+- Node creation registers a fresh ID/size/type. Structural retirement first verifies pins/current ID, then removes the live mapping before `arena_free`.
+- Pin underflow, wrong-ID unpin, duplicate live registration, or retirement with pins is a `RADIANT_CHECK` failure.
+
+### R3.4 — Detached-root queue
+
+- Add one `document_pool`-owned candidate set/list of address + expected ID. Coalesce descendants beneath the highest detached root.
+- Reinsertion cancels the root/ancestor candidate before linkage becomes visible.
+- Candidate tracking is independent of mutation records. Last-pin release schedules eligibility for a later safe sweep; it never retires inline.
+
+### R3.5 — Acceptance
+
+- Run R0 churn variants and assert pins, validated refs, candidate state, wrapper weak behavior, rewrap identity, reinsertion cancellation, and >64 mutation overflow.
+- Assert no call to `arena_free(node_arena, ...)` occurs for nodes and no recycled node allocation occurs.
+- Run ASAN and negative stale-ID tests.
+
+**R3 exit:** external registry and all holder integrations pass; zero node reuse.
+
+---
+
+## R4 — DOM Retirement Through the Existing Node Arena Recycler
+
+### R4.1 — Exact node and auxiliary allocation ownership  **[VR8]**
+
+- Fixed primary sizes use `sizeof(DomElement)`/`sizeof(DomComment)`; co-allocated `DomText` registers its exact aligned allocation size at creation.
+- For every R0 class-2 node-owned auxiliary arena allocation, either:
+  - register address + exact size under the node for bottom-up return; or
+  - move truly independently mutable storage to `document_pool` with explicit ownership.
+- Unknown owner/size remains an R4 blocker; do not guess size or leave churn payloads abandoned.
+
+### R4.2 — Unified bottom-up `retire_node()`
+
+- Replace `dom_element_destroy` semantics with one typed retirement visitor.
+- Before retirement assert: detached candidate ID current, not document/pseudo root, entire subtree unpinned, no Lambda/reconcile reference, and side-state detach complete.
+- If any descendant fails, retain the whole subtree and record its rejection reason.
+- Retire bottom-up: release owned view props and style binding, release retained resources, return registered auxiliary blocks with `arena_free`, poison primary bytes, unregister the live generation, then `arena_free(registered_primary_owner_arena, primary, exact_size)`. The owner is normally `node_arena`; UI fat Lambda backing retains its `Input::arena` owner.
+
+### R4.3 — Existing arena reuse path
+
+- Keep node factories on `arena_calloc`; it already searches free bins and zeroes reused storage.
+- Register a fresh monotonic node ID after allocation. Generic cross-type block reuse is safe because stale validation consults the external registry.
+- Add arena hit/miss/split/coalesce/fresh-chunk counters needed by R0.2. Do not add document-level type free lists.
+- If measurements require type-stable lanes, implement a reusable arena allocation-class facility and re-probe; do not duplicate per-node free-list code.
+
+### R4.4 — Safe sweep checkpoints and acceptance
+
+- One `dom_retire_sweep()` runs after reconcile, GC weak processing, and event/observer/task delivery checkpoints where pins can reach zero. Never retire inline in removal/finalization.
+- Convert R0 churn to gating assertions: node-arena committed/fresh growth plateaus after warm-up for unheld and hold/release variants.
+- Test pinned descendant, reinsertion, wrapper/Range/observer/event release, mutation overflow, variable text sizes, auxiliary payload return, generic cross-type reuse, fresh IDs, and stale registry rejection.
+- Run full Radiant/layout/JS DOM/UI/editor/ASAN and release timing gates.
+
+**R4 exit:** bounded `dom.node.arena` growth without a second free-list mechanism.
+
+---
+
+## R5 — Optional Tree-Wide Prop Interning
+
+### R5.1 — Canonical index  **[VR5, VR6]**
+
+- Adopt only groups whose R0 non-parent savings exceed canonical arena, prop-pool index, hash/equality, and payload costs.
+- Reuse R2 canonical entries/arena and ownership transitions. The resizable capped index lives in `prop_pool`; canonical values live in `canonical_prop_arena`.
+- Resolve normalized value, hash, exact-compare, then share or stay owned. Start with pointer-free groups.
+- Table/canonical cap fallback remains owned; style-thrash must not append a canonical value per frame without bound.
+
+### R5.2 — Acceptance
+
+- Realized live-byte savings within 20% of R0 prediction or discrepancy explained before retention.
+- Record lookup time, collisions/exact comparisons, prop-pool index bytes, canonical arena bytes, COW, and cap fallback.
+- Phase may be recorded as skipped.
+
+---
+
+## R6 — Versioned Canonical Style Epoch Pools
+
+### R6.1 — `StyleEpoch` manager and triggers  **[VR13]**
+
+- Add a `document_pool`-owned manager with current/retired epoch list. Each `StyleEpoch` has monotonic ID, independent `Pool*`, exact recipe table, bound-element refcount, and current/retired state.
+- Create the epoch pool directly under the document memory context with the `style.canonical.epoch.pool` label; it is not the DOM node arena and is not backed by `document_pool`.
+- Start a new global epoch on stylesheet add/remove/reparse, global CSSOM rule/declaration mutation, or media/style-environment change that affects matching.
+- Do not start a new global epoch for pure reflow, element-local inline mutation, or element-local pseudo-state rematching.
+
+### R6.2 — Production exact cascade recipe
+
+- Accumulate compact ordered recipe entries before constructing a shareable tree. Include epoch, rule identity/version inputs, specificity, origin/source order, and mode inputs.
+- Hash indexes; exact length/entry equality accepts sharing.
+- Temporary recipe construction may use a scoped scratch allocator, but stored recipes copy into the current epoch pool before scratch reset.
+
+### R6.3 — Canonical construction and element binding
+
+- On recipe hit, bind the element directly without per-element declaration clones.
+- On miss, allocate canonical `StyleTree`, immutable declaration/value snapshots, stored recipe, and `StyleCanonicalEntry` from `StyleEpoch::pool`; existing pool-based AVL APIs remain usable.
+- Store explicit absent/shared/owned style state using the reserved ownership bit. A canonical tree/header points back to its `StyleCanonicalEntry`/epoch so unbind decrements entry diagnostics and epoch refcount exactly once without adding an element-sized epoch pointer.
+- A retired epoch pool is destroyed wholesale only when bound-element refcount reaches zero. Current zero-ref epoch remains until superseded/document teardown.
+
+### R6.4 — Owned mutation/COW into `document_pool`
+
+- Add a purpose-specific clone API. Existing `style_tree_clone()` remains documented shallow and is not called “deep.”
+- COW produces independent tree nodes and mutable declaration records in `document_pool`.
+- Borrow `CssValue` only when its immutable lifetime provably exceeds the owned tree; otherwise snapshot it into document-owned storage. A COW tree may not silently retain a destroyable epoch pool.
+- Only after successful clone does the element unbind/decrement its style epoch and apply inline/presentational/CSSOM mutation.
+
+### R6.5 — Verification and acceptance
+
+- Debug sampling compares sorted property IDs and winning declaration semantics; never tree bytes.
+- Test forced hash collision, same rule pointer/new epoch, old/new epoch coexistence, incremental rebinding and wholesale old-pool destruction, media change, pseudo-state within epoch, inline COW, property removal, and COW value lifetime.
+- Run CSS, DOM-CRUD, Radiant, layout, UI automation, and mutation suites.
+- Record pool bytes per epoch, current vs retired referenced epochs, recipe/index bytes, hits, COWs, epoch lifetime, and release timing. Report no DOM node-arena reduction.
+
+**R6 exit:** canonical styles are isolated in exact style-epoch pools; owned mutations are document-pool-independent of epoch destruction.
+
+---
+
+## R7 — `page` Suite Six-Domain Memory Profile
+
+### R7.1 — Capture comparable before/after snapshots  **[VR12]**
+
+- Profile all 46 HTML fixtures in `test/layout/data/page/` with release builds. Run each page in a fresh process and sample immediately after `layout_html_doc()` completes, before rendering, so renderer surfaces, JIT memory, and unrelated framework RSS remain outside the result.
+- Capture the **before** snapshot at baseline commit `a267387db` with an instrumentation-only version of the R0 metrics hook, before R1–R6 behavior changes. Capture the **after** snapshot at the completed campaign revision with the identical page manifest, sampling point, domain definitions, and aggregation script.
+- Keep the four pre-campaign fields mapped to their §0.2 target domains. Record `canonical_prop_arena` and `style.canonical.epoch.pool` as “not present (0 B)” before the change rather than folding their future bytes into a backing pool.
+- For every page, record all six logical domains:
+  - direct live and cumulative bytes for `dom.document.pool` and `view_tree.prop_pool`;
+  - committed, active, recyclable/free, waste, and high-water bytes for `dom.node.arena`, `view_tree.canonical_prop_arena`, and `view_tree.scratch_arena`; and
+  - current plus retired-but-referenced bytes, recipes, canonical trees/declarations, and bound-element refs for `style.canonical.epoch.pool`.
+- Also record the exclusive physical total, counting each independent top-level pool once. Never add a child arena's committed bytes to its backing pool a second time.
+- Store raw per-page results in `temp/view_reuse_page_memory_comparison.csv` and the aggregate report in `temp/view_reuse_page_memory_summary.json`. The committed implementation plan receives the final result table so evidence does not depend on temporary artifacts.
+
+### R7.2 — Report deltas and validate comparability
+
+- Report before, after, byte delta, percentage delta, and improved/unchanged/regressed page counts for each domain and for the exclusive physical total. Include sum, median, and p95 per-page values; report both active/live and committed/reserved memory because arena reuse may retain chunks while reducing fresh growth.
+- Add focused composites for DOM storage (`document_pool` direct + `node_arena` logical active), view-prop storage (`prop_pool` direct + both view arenas), and canonical-style storage. Label these as logical attribution, not additional physical totals.
+- Run `make layout suite=page` at both revisions and require the same 46-page manifest with no missing/crashing page. Record any layout-result difference next to its memory delta; do not claim savings from a page that failed or skipped post-layout capture.
+- Attribute changes by completed phase where possible: R1 scratch/prop churn, R2/R5 canonical view props, R4 node-arena recycling, and R6 style-epoch pools. Explain regressions and retained-capacity effects instead of reporting only the aggregate net.
+
+**R7 exit:** reproducible release-build before/after evidence is documented for every page and all six domains, with exclusive physical totals and no missing page result.
+
+---
+
+## 8. Test Matrix
+
+| Test | Phase | Invariant |
 |---|---|---|
-| `view_reset_pointer_stability` gtest | R1 | RESET keeps prop addresses, re-defaults contents |
-| shared-font subtree teardown (ASAN) | R2 | alias teardown ordering, handle release-once |
-| unshare-on-write gtest (mutate shared → owned copy, sharer unaffected) | R2 | VR4 |
-| DOM-churn fixture (R0.3) | R0 fail → R3 pass | bounded arena growth |
-| wrapper-liveness stress (hold/release/GC cycles) | R3 | no premature retire; retire after release |
-| epoch/poison RADIANT_CHECK negative test | R3 | stale-deref detection fires |
-| style-thrash intern-cap fixture | R4 | no table pathology |
-| signature share/unshare gtest + sampled verification | R5 | VR12 correctness |
+| allocator naming/destruction order | R0 | six domains have one owner and correct backing |
+| physical vs logical memory snapshot | R0 | child arenas are not double-counted |
+| retained prop/scratch reset | R1 | prop pool survives; scratch resets safely |
+| owned reset/default/payload lifetime | R1 | reset releases once and preserves owned block |
+| mixed inheritance/full-value comparison | R2 | no group-touched correctness proxy |
+| canonical arena ownership and teardown | R2 | shared props never enter pool/scratch owner paths |
+| parent/child animation/restyle COW | R2 | canonical bytes remain immutable |
+| Font finalize/invalidate/handle release | R2 optional | canonical resource ledger is correct |
+| weak wrapper identity/death/rewrap | R3 | wrapper cache does not pin dead wrappers |
+| Range/observer/event/collection pins | R3 | every holder blocks retirement until release |
+| external stale-ID validation | R3/R4 | validation never dereferences repurposed storage |
+| >64 detach records and reinsertion | R3/R4 | candidate queue is independent and cancellable |
+| primary/auxiliary node block return | R4 | all recyclable node-arena bytes have exact ownership |
+| generic arena cross-type reuse | R4 | registry generations preserve safety |
+| intern collision/cap/style thrash | R5 optional | equality and growth bounds hold |
+| style epoch triggers/coexistence/destruction | R6 | epoch pools follow global style inputs, not reflows |
+| style recipe collision/pseudo/source order | R6 | recipe equality is sufficient |
+| owned style COW/value lifetime | R6 | epoch destruction cannot dangle owned styles |
+| 46-page six-domain before/after profile | R7 | identical post-layout sampling and no physical double-counting |
 
-## 8. Metrics tracking (filled per phase; §17 harness + R0.4 counters)
+---
 
-| Milestone | Pool cumulative (B) | Pool live Δ | DOM arena used (B) | Churn fixture | Notes |
-|---|---|---|---|---|---|
-| Baseline `a267387db` | 28,325,328 | — | 3,193,344 | linear | re-verify at R0 |
-| after R1 | expect ↓↓ | ~flat | flat | linear | churn cut |
-| after R2 | ↓ | ↓ (font+inline dup) | flat | linear | |
-| after R3 | ↓ | ~flat | **plateau under churn** | **bounded** | |
-| after R4 | ↓ | ↓ (probe-gated) | flat | bounded | optional |
-| after R5 | ↓ | — | ↓ (tree dedup) | bounded | |
+## 9. Six-Domain Metrics Tracking
 
-## 9. Sequencing & risk register
+Physical totals count independent top-level pools once. Logical rows below are attribution and must not be summed with their backing pool as additional physical memory.
 
-- **Critical path:** R0 → R1 → R2 → R3; R4 and R5 depend on R2's ownership machinery + their probe verdicts, and can land in either order after R3 (R5 also wants R3.2's ownership-aware retire).
-- **Highest-risk task: R3.3/R3.4** (premature retire = use-after-reuse). Contained by: conservative fallback mode B, sweep-points-only, poison+epoch, the wrapper-stress fixture, ASAN gate, and ground rule 7 (recycling PRs never mixed with sharing PRs).
-- **R2 teardown ordering** (owner freed before sharers cleared) — dedicated gtest + leaf-first audit before aliasing enables.
-- **R5 signature under-coverage** — R0.2 verification sub-probe before build; sampled byte-compare + fail-safe demotion after. R5 last so the cheaper phases' wins aren't hostage to cascade subtleties.
-- **Scope discipline:** if R0's probe shows a group/signature win below threshold, the corresponding task is *dropped*, recorded in §8 — not built "since we're here".
+### 9.1 Completed phase/adoption matrix
+
+| Phase | Final result |
+|---|---|
+| R0 | Implemented singular allocator names and labels, direct-vs-backing accounting, arena recycler counters, canonical probes, and deterministic churn fixtures. |
+| R1 | Adopted retained `prop_pool`, table-driven owned reset-in-place, `layout_generation`, scope-checked scratch reset, and allocation-domain assertions. The `TextRect` cache prototype was not adopted because the existing pool allocator already supplied the needed reuse. |
+| R2 | Adopted immutable canonical `InlineProp` values, exact field hash/equality, parent promotion, ownership flags, COW, cap fallback, and ordered teardown. Font sharing was not adopted: mutable handle/metrics state did not justify another resource-sharing contract. |
+| R3 | Implemented GC weak slots/Jube weak wrappers, external address+generation validation, per-reason pins, holder integration, and detached-root candidates independent of mutation-record capacity. No recycling was enabled until this ledger passed. |
+| R4 | Adopted bottom-up retirement through the existing arena bins. Nodes register exact size and actual primary owner; UI fat Lambda elements return to `Input::arena`. Unheld, held-then-released, overflow, and variable-size churn all plateau after warm-up. |
+| R5 | Adopted exact tree-wide interning only for `InlineProp`, reusing the R2 arena/index. Other groups were left owned. |
+| R6 | Adopted exact style recipes, independent epoch pools, immutable deep snapshots, shared/owned state, global invalidation, local COW, and refcounted old-pool destruction. |
+| R7 | Completed the fresh-process release A/B for all 46 pages and all six domains; 46/46 normalized layout JSON hashes are identical. |
+
+### 9.2 Reproducibility contract and artifacts
+
+- Baseline source: exact commit `a267387dbf373a1a142dd30fd5bd9bf193f0c739` plus the instrumentation-only R0 profile hook, built as `temp/view-reuse-baseline/lambda.exe`.
+- After source: completed campaign release build, `lambda.exe`.
+- Harness: `python3 utils/profile_view_reuse_memory.py --capture after --after-exe ./lambda.exe`; use `--capture both --baseline-exe temp/view-reuse-baseline/lambda.exe` to recapture both sides.
+- Corpus/sample: the same sorted 46 files under `test/layout/data/page/`; one fresh release process per page; 1200×800 viewport; sample at `post_layout_pre_output`.
+- Raw profiles/layout hashes/manifests: `temp/view_reuse_page_memory/`.
+- Per-page comparison: `temp/view_reuse_page_memory_comparison.csv`.
+- Aggregate machine-readable result: `temp/view_reuse_page_memory_summary.json`.
+
+The harness rejects a missing domain, attribution error, manifest mismatch, wrong
+sample point, failed page, or changed normalized layout hash. Wall-clock capture
+timestamps are removed before hashing; layout state is otherwise unchanged.
+
+### 9.3 Final 46-page memory result
+
+Page counts are `improved / unchanged / regressed`, where lower memory is
+“improved.” Medians and p95 values are per-page bytes (`before → after`).
+
+| Metric | Before sum | After sum | Delta | Delta % | Pages I/U/R | Median B→A | p95 B→A |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Exclusive physical live | 33,634,432 | 33,592,256 | −42,176 | −0.125% | 19/0/27 | 312,040→294,256 | 2,045,872→2,204,560 |
+| Exclusive physical reserved | 33,634,432 | 34,801,968 | +1,167,536 | +3.471% | 19/0/27 | 312,040→297,376 | 2,045,872→2,250,384 |
+| Logical DOM active composite | 20,878,880 | 16,991,440 | −3,887,440 | −18.619% | 30/0/16 | 184,096→77,488 | 1,750,784→1,482,192 |
+| `dom.document.pool` direct live | 17,570,704 | 14,417,648 | −3,153,056 | −17.945% | 29/0/17 | 143,800→51,688 | 1,544,864→1,349,936 |
+| `dom.node.arena` active | 3,308,176 | 2,573,792 | −734,384 | −22.199% | 46/0/0 | 27,168→21,512 | 180,112→144,160 |
+| `dom.node.arena` committed | 4,145,152 | 3,276,800 | −868,352 | −20.949% | 18/28/0 | 28,672→28,672 | 192,512→192,512 |
+| Logical view-prop active composite | 8,399,600 | 8,087,216 | −312,384 | −3.719% | 30/12/4 | 68,552→67,856 | 465,296→443,248 |
+| `view_tree.prop_pool` direct live | 8,399,600 | 8,082,032 | −317,568 | −3.781% | 30/12/4 | 68,552→67,792 | 465,296→443,056 |
+| `view_tree.canonical_prop_arena` active | 0 | 5,184 | +5,184 | n/a | 0/13/33 | 0→96 | 0→320 |
+| `view_tree.canonical_prop_arena` committed | 0 | 188,416 | +188,416 | n/a | 0/0/46 | 0→4,096 | 0→4,096 |
+| `view_tree.scratch_arena` active | 0 | 0 | 0 | 0% | 0/46/0 | 0→0 | 0→0 |
+| `view_tree.scratch_arena` committed | 974,944 | 1,245,280 | +270,336 | +27.728% | 0/32/14 | 4,096→8,192 | 159,840→159,840 |
+| `style.canonical.epoch.pool` live/reserved | 0 | 3,922,784 | +3,922,784 | n/a | 0/0/46 | 0→41,872 | 0→272,624 |
+
+The logical composites are attribution views and are not added to physical
+totals. Physical live is almost flat because the large owned DOM/style
+reduction is intentionally exchanged for independently owned canonical style
+pools and lifecycle metadata. Physical reserved increases because each page
+retains minimum canonical/scratch arena chunks; active canonical view-prop data
+is only 5,184 B while its 46 minimum chunks commit 188,416 B. Scratch finishes
+with zero active bytes on every page, but retained chunks add 270,336 B.
+
+Cumulative allocation traffic is not a live-memory total:
+
+| Counter | Before sum | After sum | Delta |
+|---|---:|---:|---:|
+| `dom.document.pool` cumulative | 21,567,608 | 21,882,775 | +315,167 (+1.461%) |
+| `view_tree.prop_pool` cumulative | 9,202,380 | 9,715,866 | +513,486 (+5.580%) |
+
+### 9.4 R5/R6 adoption evidence
+
+Across the 46 final pages, canonical Inline reuse produced 81 values, 803 index
+lookups, 722 hits, 5,396 parent promotions, 218 COWs, 19,488 B of index storage,
+zero collisions, and zero cap fallbacks. Exact equality remained authoritative.
+
+Canonical styles produced 1,194 exact recipes/trees and 12,935 bound element
+references. There were 14,082 lookups, 12,888 hits, 1,194 misses, 12,888 exact
+comparisons, zero collisions, and 1,147 owned COWs. Static page capture creates
+one current epoch per document, so it has no retired epoch; coexistence and
+last-binding wholesale release are covered by focused tests.
+
+The R6 stop condition was evaluated with two additional 46-page release runs;
+all three variants retained 46/46 identical normalized layouts:
+
+| Style policy | Physical live sum | Delta vs baseline | Document direct live | Style-epoch live | Decision |
+|---|---:|---:|---:|---:|---|
+| R6 disabled | 37,028,896 | +3,394,464 (+10.092%) | 21,777,072 | 0 | reject; per-element cascade records dominate |
+| Canonicalize duplicate recipes seen in the current cascade only | 33,837,424 | +202,992 (+0.604%) | 17,160,496 | 1,425,104 | reject; misses reuse in later cascade batches |
+| Exact epoch index for every recipe (adopted) | 33,592,256 | −42,176 (−0.125%) | 14,417,648 | 3,922,784 | adopt; saves 3,436,640 B vs disabled and 245,168 B vs batch-local duplicate-only |
+
+### 9.5 Validation record
+
+| Gate | Result |
+|---|---|
+| Release build | `make release` passed; final `lambda.exe` is the release build. |
+| Focused campaign suite | `test_view_reuse_gtest.exe`: 19/19 passed, covering exact prop/style collisions, cap/COW, weak/stale liveness, arena retirement, overflow, variable sizes, UI owner arena, epoch coexistence, invalidation, and value lifetime. |
+| Allocator/GC | Arena 91/91; GC 47/47; all focused memory-factory/pool/scratch suites passed. |
+| CSS/DOM/layout components | DOM CRUD 63/63; WPT CSS syntax 38 passed + 6 intentional skips; layout custom 11/11; CSS animation 18/18; StateStore 4/4. |
+| ASAN churn | 10k/overflow retained mutation churn passed; debug ASAN rich-text editor passed 27/27. |
+| UI automation | 238 passed, 2 GUI skips; the sole release `test_rich_text_editor` crash reproduces at baseline commit. All campaign-sensitive RTE toolbar/dynamic-class scenarios pass after the runtime-attribute selector-cache fix. |
+| Baseline layout | 4,365/4,379 passed, 6 skipped, 14 existing browser-reference failures. |
+| `page` browser-reference run | 28/46 passed versus 27/46 at the instrumented baseline run. The batch comparator reports five stored-score regressions, but the stronger direct baseline-vs-after fresh-process comparison has 46/46 identical normalized layout JSON hashes. |
+| Radiant cast lint | `make lint ARGS='--rule ^no-int-cast-radiant$'`: no violations. |
+| Header-structure lint | No new Radiant header violates DD4 and the count is 19/24. The target still exits nonzero for one pre-existing non-allow-listed per-file mirror. Campaign declarations were placed in coherent headers. |
+| Diff hygiene | `git diff --check`: clean. |
+
+The full Radiant aggregate still inherits pre-existing repository debt: the 14
+browser-reference baseline cases, the Puppertino expectation, and the
+release-optimized rich-text-editor crash. None changes under the exact baseline
+executable comparison, and the campaign does not hard-code around them.
+
+### 9.6 LOC change
+
+Measured from baseline commit `a267387dbf373a1a142dd30fd5bd9bf193f0c739`,
+excluding these two design/plan documents and unrelated user files:
+
+| Scope | Added | Deleted | Net |
+|---|---:|---:|---:|
+| Production/build source | 4,231 | 616 | +3,615 |
+| Tests and profiling tool | 1,030 | 13 | +1,017 |
+| Total implementation | 5,261 | 629 | +4,632 |
+
+The positive LOC is deliberate correctness infrastructure rather than repeated
+per-type paths: external generation/pin ownership, GC weak slots, exact deep
+style snapshots, allocator telemetry, profile serialization, and churn/equality
+tests. DOM node retirement still uses the one generic arena recycler, prop reset
+uses one typed table, and canonical lookup uses one exact hash/equality path per
+representation.
+
+---
+
+## 10. Sequencing and Stop Conditions
+
+**Critical path:** R0 → R1 → R2 → R3 → R4 → R7. R5 is optional after R2. R6 depends on R0 recipe evidence and may follow R4 to isolate liveness risk; when adopted, it completes before the final R7 snapshot. The R7 baseline snapshot is captured after R0 instrumentation is available but against baseline commit `a267387db`, before any reuse behavior change.
+
+- Stop R1 if any retained consumer still points into scratch at the proposed clear boundary.
+- Stop Font sharing if finalization cannot make canonical values immutable at acceptable cost; keep Inline results.
+- Stop R4 if any raw-node holder or node-arena auxiliary allocation lacks reliable lifetime/size metadata.
+- Do not add per-type DOM free lists merely because the existing arena needs counters or allocation-class metadata; extend the shared allocator once.
+- Stop any R5 group below measured metadata/hash cost.
+- Stop R6 if epoch/recipe/COW cost exceeds measured clone savings or an owned clone cannot be independent of epoch destruction.
+- Stop R7 comparison if the page manifests, sampling point, build mode, or metric definitions differ; correct the harness and rerun rather than normalize incomparable totals.
+- Record a phase as not adopted rather than hard-coding around a failed invariant.

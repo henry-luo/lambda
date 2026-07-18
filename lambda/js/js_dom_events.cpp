@@ -23,6 +23,7 @@
 #include "../../lib/url.h"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
+#include "../input/css/dom_lifecycle.hpp"
 
 #include <cstring>
 #include <cmath>
@@ -385,6 +386,8 @@ struct EventListenerSnapshot {
 // flat array mapping void* keys → NodeListeners
 struct NodeListenerEntry {
     void* key;
+    DomDocument* owner_doc;
+    DomNodeRef node_ref;
     NodeListeners listeners;
 };
 
@@ -470,7 +473,8 @@ static void* get_event_target_key(Item target) {
     return (void*)&_window_sentinel;
 }
 
-static NodeListeners* get_or_create_listeners(void* key) {
+static NodeListeners* get_or_create_listeners(void* key, DomDocument* owner_doc,
+                                              DomNodeRef node_ref) {
     // search existing entries
     for (int i = 0; i < _entry_count; i++) {
         if (_entries[i].key == key) {
@@ -492,6 +496,13 @@ static NodeListeners* get_or_create_listeners(void* key) {
 
     NodeListenerEntry* entry = &_entries[_entry_count++];
     entry->key = key;
+    entry->owner_doc = owner_doc;
+    entry->node_ref = node_ref;
+    if (owner_doc && node_ref.address) {
+        // Listener tables live outside the DOM tree and may survive removal;
+        // the event-queue pin closes that native lifetime edge until reset.
+        dom_node_pin(owner_doc, node_ref, DOM_NODE_PIN_EVENT_QUEUE);
+    }
     entry->listeners.items = nullptr;
     entry->listeners.count = 0;
     entry->listeners.capacity = 0;
@@ -775,7 +786,20 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
         }
     }
 
-    NodeListeners* nl = get_or_create_listeners(key);
+    DomNode* event_node = (DomNode*)js_dom_unwrap_element(elem_item);
+    DomDocument* event_doc = nullptr;
+    if (event_node) {
+        for (DomNode* current = event_node; current; current = current->parent) {
+            if (current->is_element() && current->as_element()->doc) {
+                event_doc = current->as_element()->doc;
+                break;
+            }
+        }
+        if (!event_doc) event_doc = (DomDocument*)js_dom_get_document();
+    }
+    DomNodeRef event_ref = event_node ? dom_node_ref(event_node) : DomNodeRef{nullptr, 0};
+    if (event_node && (!event_doc || !dom_node_ref_validate(event_doc, event_ref))) return;
+    NodeListeners* nl = get_or_create_listeners(key, event_doc, event_ref);
 
     // check for duplicate (same type + callback + capture); ignore tombstones
     for (int i = 0; i < nl->count; i++) {
@@ -2514,6 +2538,10 @@ void js_dom_events_reset(void) {
             event_listener_release_roots(&nl->items[j]);
         }
         if (nl->items) mem_free(nl->items);
+        if (_entries[i].owner_doc && _entries[i].node_ref.address) {
+            dom_node_unpin(_entries[i].owner_doc, _entries[i].node_ref,
+                           DOM_NODE_PIN_EVENT_QUEUE);
+        }
     }
     if (_entries) {
         mem_free(_entries);

@@ -88,6 +88,7 @@ typedef void (*MemDestroyFn)(void* allocator);
 #define MEM_FLAG_DRAINED   0x02u   // allocator drained/invalidated
 #define MEM_FLAG_LEAKED    0x04u   // outlived its owner (set by leak report)
 #define MEM_FLAG_CHILDREN  0x08u   // has live children backed by it
+#define MEM_FLAG_ATTRIBUTION_ERROR 0x10u // child backing exceeded parent live bytes
 
 // Flat, fixed-width, copyable snapshot record (no live pointers — ids only).
 struct MemStatSample {
@@ -101,7 +102,26 @@ struct MemStatSample {
     uint64_t birth_seq;        // creation order
     uint64_t bytes_reserved;   // capacity held from OS
     uint64_t bytes_in_use;     // live/bump-used bytes (best effort)
+    uint64_t backing_bytes;    // exact bytes this allocator occupies in its parent
+    uint64_t direct_bytes;     // logical live bytes excluding child allocator backing
+    uint64_t committed_bytes;  // allocator capacity available to clients
+    uint64_t recyclable_bytes; // inactive bytes available to allocator free bins
+    uint64_t waste_bytes;      // committed bytes unavailable to active allocations
+    uint64_t overhead_bytes;   // allocator/chunk headers and backing rounding
+    uint64_t high_water_bytes; // peak live/active bytes
+    uint64_t cumulative_bytes; // cumulative requested allocation bytes
     uint64_t alloc_count;      // cumulative allocations (upper bound for rpmalloc)
+    uint64_t free_count;
+    uint64_t reuse_hits;
+    uint64_t reuse_misses;
+    uint64_t split_count;
+    uint64_t coalesce_count;
+    uint64_t bump_back_count;
+    uint64_t fresh_chunk_count;
+    uint64_t fresh_growth_bytes;
+    uint64_t reset_count;
+    uint64_t clear_count;
+    uint32_t active_scope_count;
     uint32_t flags;            // MEM_FLAG_*
     char     label[44];        // copied, truncated — self-contained for offline view
 };
@@ -114,6 +134,10 @@ typedef struct MemSnapshot {
     MemStatSample* samples;        // `count` entries
     uint64_t       total_reserved;
     uint64_t       total_in_use;
+    // Physical totals include independent root-level allocators once. Logical
+    // child samples stay visible without double-counting their parent backing.
+    uint64_t       physical_total_reserved;
+    uint64_t       physical_total_in_use;
 } MemSnapshot;
 
 // ---- Context lifecycle ----

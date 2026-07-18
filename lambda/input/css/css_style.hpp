@@ -780,6 +780,8 @@ typedef struct CssDeclaration {
     size_t value_text_len;
 
     // Memory management and validation
+    bool owns_payload;        // declaration owns a deep CssValue/string snapshot
+    bool tree_owned_record;   // containing StyleTree may reclaim this declaration record
     bool valid;               // Validation flag
     int ref_count;            // Reference counting for memory management
 } CssDeclaration;

@@ -640,7 +640,7 @@ static InlineProp* ensure_inline_prop(ViewSpan* span) {
 // animation when the element has no static background declaration)
 static BackgroundProp* ensure_background_prop(ViewSpan* span) {
     DomElement* el = lam::dom_require_element(span);
-    Pool* pool = (el->doc && el->doc->view_tree) ? el->doc->view_tree->pool : NULL;
+    Pool* pool = (el->doc && el->doc->view_tree) ? el->doc->view_tree->prop_pool : NULL;
     if (!pool) return NULL;
     if (!span->bound) span->ensure_boundary(el->doc->view_tree);
     if (span->bound && !span->boundary()->background) {
@@ -718,7 +718,7 @@ void css_animation_tick(AnimationInstance* anim, float t) {
     }
 
     Pool* pool = anim->play_state != ANIM_PLAY_FINISHED ?
-                 state->element->doc->pool : NULL;
+                 state->element->doc->document_pool : NULL;
 
     // interpolate each property present in either stop
     // use stop_b's properties as the canonical set
@@ -978,7 +978,7 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
 
     // build keyframe registry if not yet built
     if (!doc->services.keyframe_registry) {
-        doc->services.keyframe_registry = keyframe_registry_create(doc, doc->pool);
+        doc->services.keyframe_registry = keyframe_registry_create(doc, doc->document_pool);
     }
 
     CssKeyframes* keyframes = keyframe_registry_find(
@@ -1103,7 +1103,7 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     // create the animation
     double now = scheduler->current_time;
     AnimationInstance* instance = css_animation_create(
-        scheduler, element, &anim_prop, keyframes, now, doc->pool);
+        scheduler, element, &anim_prop, keyframes, now, doc->document_pool);
     if (instance && instance->state) {
         ((CssAnimState*)instance->state)->ui_context = lycon->ui_context;
     }
@@ -1576,7 +1576,7 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
     DocState* rs = (DocState*)doc->state;
     if (!rs || !rs->animation_scheduler) return;
     AnimationScheduler* scheduler = rs->animation_scheduler;
-    Pool* pool = doc->pool;
+    Pool* pool = doc->document_pool;
 
     // Resolve the transition config. Even if no transition is declared we still
     // maintain the used-value snapshot below (so a later declaration starts from

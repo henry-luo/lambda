@@ -24,13 +24,17 @@ static void ensure_release_hooks(void) {
 // ============================================================================
 
 static bool pool_stat_fn(void* a, MemStatSample* s) {
-    size_t reserved = 0, in_use = 0, count = 0;
-    int is_mmap = 0;
-    pool_get_mem_stats((Pool*)a, &reserved, &in_use, &count, &is_mmap);
-    s->bytes_reserved = reserved;
-    s->bytes_in_use = in_use;
-    s->alloc_count = count;
-    if (is_mmap) s->flags |= MEM_FLAG_MMAP;
+    PoolStats stats;
+    pool_get_detailed_stats((Pool*)a, &stats);
+    s->bytes_reserved = stats.reserved_bytes;
+    s->bytes_in_use = stats.live_bytes;
+    s->direct_bytes = stats.live_bytes;
+    s->committed_bytes = stats.reserved_bytes;
+    s->high_water_bytes = stats.high_water_live_bytes;
+    s->cumulative_bytes = stats.cumulative_bytes;
+    s->alloc_count = stats.allocation_count;
+    s->free_count = stats.free_count;
+    if (stats.is_mmap) s->flags |= MEM_FLAG_MMAP;
     return true;
 }
 
@@ -72,10 +76,30 @@ void mem_pool_destroy(Pool* pool) {
 // ============================================================================
 
 static bool arena_stat_fn(void* a, MemStatSample* s) {
-    Arena* ar = (Arena*)a;
-    s->bytes_reserved = arena_total_allocated(ar);
-    s->bytes_in_use = arena_total_used(ar);
-    s->chunk_count = (uint32_t)arena_chunk_count(ar);
+    ArenaStats stats;
+    arena_get_stats((Arena*)a, &stats);
+    s->bytes_reserved = stats.committed_bytes;
+    s->bytes_in_use = stats.active_bytes;
+    s->backing_bytes = stats.backing_bytes;
+    s->direct_bytes = stats.active_bytes;
+    s->committed_bytes = stats.committed_bytes;
+    s->recyclable_bytes = stats.recyclable_bytes;
+    s->waste_bytes = stats.waste_bytes;
+    s->overhead_bytes = stats.overhead_bytes;
+    s->high_water_bytes = stats.high_water_active_bytes;
+    s->alloc_count = stats.allocation_count;
+    s->free_count = stats.free_count;
+    s->reuse_hits = stats.reuse_hits;
+    s->reuse_misses = stats.reuse_misses;
+    s->split_count = stats.split_count;
+    s->coalesce_count = stats.coalesce_count;
+    s->bump_back_count = stats.bump_back_count;
+    s->fresh_chunk_count = stats.fresh_chunk_count;
+    s->fresh_growth_bytes = stats.fresh_growth_bytes;
+    s->reset_count = stats.reset_count;
+    s->clear_count = stats.clear_count;
+    s->active_scope_count = stats.active_scope_count;
+    s->chunk_count = (uint32_t)arena_chunk_count((Arena*)a);
     return true;
 }
 

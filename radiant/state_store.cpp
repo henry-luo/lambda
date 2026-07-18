@@ -999,7 +999,7 @@ StateStore* state_store_create(DomDocument* document) {
         return document->state_store;
     }
 
-    StateStore* store = (StateStore*)pool_calloc(document->pool, sizeof(StateStore));
+    StateStore* store = (StateStore*)pool_calloc(document->document_pool, sizeof(StateStore));
     if (!store) {
         log_error("state_store_create: failed to allocate StateStore");
         return NULL;
@@ -1019,15 +1019,15 @@ bool StateStore::init(DomDocument* owner_document) {
     }
 
     document = owner_document;
-    pool = owner_document->pool;
-    arena = mem_arena_create(NULL, owner_document->pool, MEM_ROLE_VIEW, "state.store");
+    pool = owner_document->document_pool;
+    arena = mem_arena_create(NULL, owner_document->document_pool, MEM_ROLE_VIEW, "state.store");
     if (!arena) {
         log_error("state_store_create: failed to create StateStore arena");
         destroy();
         return false;
     }
 
-    doc_state = owner_document->state ? owner_document->state : radiant_state_create(owner_document->pool, STATE_MODE_IN_PLACE);
+    doc_state = owner_document->state ? owner_document->state : radiant_state_create(owner_document->document_pool, STATE_MODE_IN_PLACE);
     if (!doc_state) {
         log_error("state_store_create: failed to create DocState");
         destroy();

@@ -34,6 +34,19 @@ extern "C" {
     void heap_unregister_gc_root(uint64_t* slot) {
         (void)slot;
     }
+
+    __attribute__((weak))
+    void heap_register_gc_weak(uint64_t* slot,
+            void (*on_clear)(uint64_t*, void*), void* context) {
+        (void)slot;
+        (void)on_clear;
+        (void)context;
+    }
+
+    __attribute__((weak))
+    void heap_unregister_gc_weak(uint64_t* slot) {
+        (void)slot;
+    }
 }
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};

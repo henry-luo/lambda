@@ -369,6 +369,8 @@
                 "lambda/input/css/css_style_node.cpp",
                 "lambda/input/css/dom_node.cpp",
                 "lambda/input/css/dom_element.cpp",
+                "lambda/input/css/dom_lifecycle.cpp",
+                "lambda/input/css/style_epoch.cpp",
                 "lambda/input/css/selector_matcher.cpp",
                 "radiant/layout_counters.cpp",
                 "radiant/view_prop_defaults.cpp",
@@ -2443,6 +2445,23 @@
                         "icon": "📐"
                     },
                     {
+                        "source": "test/test_view_reuse_gtest.cpp",
+                        "name": "View Reuse Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "radiant/view_reuse.cpp"
+                        ],
+                        "binary": "test_view_reuse_gtest.exe",
+                        "icon": "♻️"
+                    },
+                    {
                         "source": "lib/test_pdf_writer_gtest.cpp",
                         "name": "PDF Writer Tests",
                         "dependencies": [
@@ -2487,6 +2506,8 @@
                         "additional_sources": [
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
+                            "lambda/input/css/dom_lifecycle.cpp",
+                            "lambda/input/css/style_epoch.cpp",
                             "lambda/input/css/selector_matcher.cpp",
                             "lambda/render_map.cpp",
                             "lambda/template_state.cpp",

@@ -4293,7 +4293,7 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
                                                    CssEnum display_type, const char* tag_name) {
     if (!lycon || !parent) return nullptr;
 
-    Pool* pool = lycon->doc->view_tree->pool;
+    Pool* pool = lycon->doc->view_tree->prop_pool;
     if (!pool) return nullptr;
 
     // Allocate the anonymous element
@@ -4625,7 +4625,7 @@ static void flush_anonymous_row_run(LayoutContext* lycon, DomElement* table,
 static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* table) {
     if (!lycon || !table) return;
 
-    Pool* pool = lycon->doc->view_tree->pool;
+    Pool* pool = lycon->doc->view_tree->prop_pool;
     if (!pool) return;
 
     log_debug("%s [ANON-TABLE] === Starting CSS 2.1 anonymous box generation ===", table->source_loc());
@@ -7248,7 +7248,7 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
             if (lycon->counter_context) {
                 content = dom_element_get_pseudo_element_content_with_counters(
                     cell_elem, is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER,
-                    lycon->counter_context, lycon->doc ? lycon->doc->arena : nullptr);
+                    lycon->counter_context, lycon->scratch.arena);
             }
             if (!content) {
                 content = dom_element_get_pseudo_element_content(
@@ -9165,7 +9165,7 @@ bool is_table_internal_display(CssEnum display) {
 bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
     if (!lycon || !parent || !parent->first_child) return false;
 
-    Pool* pool = lycon->doc->view_tree->pool;
+    Pool* pool = lycon->doc->view_tree->prop_pool;
     if (!pool) return false;
 
     // First pass: check if any children have table-internal display

@@ -67,6 +67,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
@@ -2612,6 +2613,9 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
                                         SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
     if (!root || !stylesheet || !matcher || !pool) return;
 
+    bool epoch_scope = style_epoch_cascade_begin(
+        root->doc, root, engine, false);
+
     // Build selector index
     SelectorIndex* index = build_selector_index(stylesheet, pool);
 
@@ -2620,6 +2624,7 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
 
     // Free index
     free_selector_index(index);
+    if (epoch_scope) style_epoch_cascade_end(root->doc);
 }
 
 static bool load_scripts_before_cascade_legacy() {
@@ -2632,7 +2637,7 @@ static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
     if (node->is_element()) {
         DomElement* elem = lam::dom_require_element(node);
         bool changed = false;
-        if (elem->specified_style &&
+        if (elem->specified_style && style_epoch_ensure_owned(elem) &&
             style_tree_remove_non_inline_declarations(elem->specified_style)) {
             changed = true;
         }
@@ -2737,6 +2742,8 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
     auto t_cascade_start = high_resolution_clock::now();
     reset_cascade_timing();
     reset_dom_element_timing();
+    bool epoch_scope = style_epoch_cascade_begin(
+        dom_doc, dom_root, css_engine, false);
 
     if (external_stylesheet && external_stylesheet->rule_count > 0) {
         log_debug("[Lambda CSS] Applying external stylesheet with %d rules", external_stylesheet->rule_count);
@@ -2775,6 +2782,7 @@ static void apply_load_css_cascade(DomDocument* dom_doc,
     }
 
     auto t_cascade = high_resolution_clock::now();
+    if (epoch_scope) style_epoch_cascade_end(dom_doc);
     log_debug("[Lambda CSS] CSS cascade complete (%s)", phase ? phase : "load");
     log_cascade_timing_summary();
     log_dom_element_timing();
@@ -4744,7 +4752,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Ensure CSS property system is initialized before building DOM tree,
     // so that inline style declarations get correct property IDs.
-    css_property_system_init(dom_doc->pool);
+    css_property_system_init(dom_doc->document_pool);
 
     DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
@@ -4965,7 +4973,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     }
 
     // Assign pool to DOM document for future allocations
-    dom_doc->pool = pool;
+    dom_doc->document_pool = pool;
     dom_doc->url = xml_url;
 
     // Step 7: Build DOM tree from XML elements
@@ -5325,7 +5333,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
 
     // Ensure CSS property system is initialized before building DOM tree,
     // so that inline style declarations get correct property IDs.
-    css_property_system_init(dom_doc->pool);
+    css_property_system_init(dom_doc->document_pool);
 
     DomElement* dom_root = build_dom_tree_from_element(html_elem, dom_doc, nullptr);
     if (!dom_root) {
@@ -5713,7 +5721,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     bool had_focus = capture_lambda_focus_restore(state, &focus_restore);
 
     // ensure CSS property system is initialized
-    css_property_system_init(doc->pool);
+    css_property_system_init(doc->document_pool);
 
     // create/reset element-to-DOM map (enables incremental rebuild next time)
     if (!doc->element_dom_map) {
@@ -5740,10 +5748,10 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     if (!inline_sheets) {
         // first rebuild: parse and cache stylesheets
-        css_engine = css_engine_create(doc->pool);
+        css_engine = css_engine_create(doc->document_pool);
         if (css_engine) {
             inline_sheets = extract_and_collect_css(
-                html_elem, css_engine, nullptr, doc->pool, &inline_count);
+                html_elem, css_engine, nullptr, doc->document_pool, &inline_count);
             doc->cached_inline_sheets = inline_sheets;
             doc->cached_inline_sheet_count = inline_count;
             doc->services.cached_css_engine = css_engine;
@@ -5752,16 +5760,16 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
 
     if (css_engine && inline_sheets && inline_count > 0) {
-        SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+        SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
         state_configure_selector_matcher((DocState*)doc->state, matcher);
         for (int i = 0; i < inline_count; i++) {
             apply_stylesheet_to_dom_tree_if_nonempty(new_root, inline_sheets[i],
-                                                     matcher, doc->pool, css_engine);
+                                                     matcher, doc->document_pool, css_engine);
         }
     }
 
     // apply inline style attributes
-    apply_inline_styles_to_tree(new_root, html_elem, doc->pool);
+    apply_inline_styles_to_tree(new_root, html_elem, doc->document_pool);
     auto t_css = high_resolution_clock::now();
 
     // mark view tree dirty for full relayout
@@ -5903,7 +5911,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     bool had_focus = capture_lambda_focus_restore(state, &focus_restore);
 
     // ensure CSS property system is initialized
-    css_property_system_init(doc->pool);
+    css_property_system_init(doc->document_pool);
 
     // Get cached CSS (must already exist from prior full rebuild)
     CssStylesheet** inline_sheets = doc->cached_inline_sheets;
@@ -5963,16 +5971,16 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
         // Phase 12.2: Apply CSS cascade to new subtree only
         if (css_engine && inline_sheets && inline_count > 0) {
-            SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+            SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
             state_configure_selector_matcher((DocState*)doc->state, matcher);
             for (int s = 0; s < inline_count; s++) {
                 apply_stylesheet_to_dom_tree_if_nonempty(new_dom, inline_sheets[s],
-                                                         matcher, doc->pool, css_engine);
+                                                         matcher, doc->document_pool, css_engine);
             }
         }
 
         // Apply inline styles to new subtree only
-        apply_inline_styles_to_tree(new_dom, new_elem, doc->pool);
+        apply_inline_styles_to_tree(new_dom, new_elem, doc->document_pool);
     }
     auto t_dom_css = high_resolution_clock::now();
 
@@ -6067,6 +6075,7 @@ struct LayoutOptions {
     bool continue_on_error;                     // continue processing on errors in batch mode
     bool summary;                               // print summary statistics
     const char* timing_output_file;              // optional JSONL phase timing output
+    const char* memory_profile_output_file;      // post-layout six-domain snapshot
     bool auto_close;                            // cancel async JS timers after load/onload
 };
 
@@ -6086,6 +6095,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->continue_on_error = false;
     opts->summary = false;
     opts->timing_output_file = nullptr;
+    opts->memory_profile_output_file = nullptr;
     opts->auto_close = false;
 
     // Parse arguments
@@ -6166,6 +6176,14 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
                 return false;
             }
         }
+        else if (strcmp(argv[i], "--view-memory-profile") == 0) {
+            if (i + 1 < argc) {
+                opts->memory_profile_output_file = argv[++i];
+            } else {
+                log_error("Error: --view-memory-profile requires an argument");
+                return false;
+            }
+        }
         else if (strcmp(argv[i], "--font-dir") == 0) {
             if (i + 1 < argc) {
                 if (opts->font_dir_count < 16) {
@@ -6199,6 +6217,11 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     // Batch mode requires --output-dir
     if (opts->input_file_count > 1 && !opts->output_dir) {
         log_error("Error: batch mode (multiple input files) requires --output-dir");
+        return false;
+    }
+    if (opts->memory_profile_output_file && opts->input_file_count != 1) {
+        // One fresh process per page is part of the R7 comparability contract.
+        log_error("Error: --view-memory-profile requires exactly one input file");
         return false;
     }
 
@@ -6430,6 +6453,7 @@ static bool layout_single_file(
     bool enable_event_log = false,
     bool enable_state_dump = false,
     FILE* timing_file = nullptr,
+    const char* memory_profile_output_file = nullptr,
     bool auto_close = false
 ) {
     log_debug("[Layout] Processing file: %s", input_file);
@@ -6693,7 +6717,10 @@ static bool layout_single_file(
         log_debug("[Layout] layout_html_doc returned");
     }
 
-    bool success = true;
+    // Capture while all six domains are live and before output/render work can
+    // contaminate the page-layout sample.
+    bool success = !memory_profile_output_file || view_memory_profile_write(
+        doc, input_file, memory_profile_output_file);
     if (!doc->view_tree || !doc->view_tree->root) {
         log_warn("Layout computation did not produce view tree for %s", input_file);
         success = false;
@@ -7185,6 +7212,7 @@ int cmd_layout(int argc, char** argv) {
                 opts.event_log,
                 opts.state_dump,
                 timing_file,
+                opts.memory_profile_output_file,
                 auto_close
             );
         } catch (...) {
@@ -7209,6 +7237,7 @@ int cmd_layout(int argc, char** argv) {
                     opts.event_log,
                     opts.state_dump,
                     timing_file,
+                    opts.memory_profile_output_file,
                     auto_close
                 );
             } catch (...) {

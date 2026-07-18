@@ -299,8 +299,8 @@ void free_document(DomDocument* doc) {
 
     if (doc->view_tree) {
         // Some imported DOM/view fixtures alias the pools; the view-tree destroy path owns that shared pool.
-        if (doc->pool == doc->view_tree->pool) {
-            doc->pool = nullptr;  // Pool will be destroyed by view_pool_destroy
+        if (doc->document_pool == doc->view_tree->prop_pool) {
+            doc->document_pool = nullptr;  // Pool will be destroyed by view_pool_destroy
         }
 
         view_pool_destroy(doc->view_tree);

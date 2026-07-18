@@ -134,6 +134,367 @@ CssDeclaration* css_declaration_create(CssPropertyId property_id,
     return decl;
 }
 
+CssDeclaration* css_declaration_clone_for_cascade(
+    const CssDeclaration* source, CssSpecificity specificity,
+    CssOrigin origin, Pool* pool) {
+    if (!source || !pool) return NULL;
+    CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
+    if (!decl) return NULL;
+    *decl = *source;
+    decl->specificity = specificity;
+    decl->specificity.important = source->important;
+    decl->origin = origin;
+    // A cascade clone owns only its declaration record; value/source payload
+    // remains tied to the stylesheet that supplied the immutable declaration.
+    decl->owns_payload = false;
+    decl->tree_owned_record = true;
+    decl->ref_count = 1;
+    return decl;
+}
+
+static bool css_value_can_clone_owned(const CssValue* value) {
+    if (!value) return true;
+    switch (value->type) {
+        case CSS_VALUE_TYPE_KEYWORD:
+        case CSS_VALUE_TYPE_LENGTH:
+        case CSS_VALUE_TYPE_PERCENTAGE:
+        case CSS_VALUE_TYPE_NUMBER:
+        case CSS_VALUE_TYPE_STRING:
+        case CSS_VALUE_TYPE_URL:
+        case CSS_VALUE_TYPE_ANGLE:
+        case CSS_VALUE_TYPE_TIME:
+        case CSS_VALUE_TYPE_FREQUENCY:
+            return true;
+        case CSS_VALUE_TYPE_COLOR:
+            return value->data.color.type >= CSS_COLOR_KEYWORD &&
+                value->data.color.type <= CSS_COLOR_SYSTEM;
+        case CSS_VALUE_TYPE_CUSTOM:
+            return css_value_can_clone_owned(value->data.custom_property.fallback);
+        case CSS_VALUE_TYPE_LIST:
+            if (value->data.list.count < 0 ||
+                (value->data.list.count > 0 && !value->data.list.values)) return false;
+            for (int i = 0; i < value->data.list.count; i++) {
+                if (!css_value_can_clone_owned(value->data.list.values[i])) return false;
+            }
+            return true;
+        case CSS_VALUE_TYPE_FUNCTION:
+            if (!value->data.function || value->data.function->arg_count < 0 ||
+                (value->data.function->arg_count > 0 &&
+                 !value->data.function->args)) return false;
+            for (int i = 0; i < value->data.function->arg_count; i++) {
+                if (!css_value_can_clone_owned(value->data.function->args[i])) return false;
+            }
+            return true;
+        case CSS_VALUE_TYPE_VAR:
+            return value->data.var_ref &&
+                css_value_can_clone_owned(value->data.var_ref->fallback);
+        case CSS_VALUE_TYPE_ENV:
+            return value->data.env_ref &&
+                css_value_can_clone_owned(value->data.env_ref->fallback);
+        case CSS_VALUE_TYPE_ATTR:
+            return value->data.attr_ref &&
+                css_value_can_clone_owned(value->data.attr_ref->fallback);
+        case CSS_VALUE_TYPE_COLOR_MIX:
+            return value->data.color_mix &&
+                css_value_can_clone_owned(value->data.color_mix->color1) &&
+                css_value_can_clone_owned(value->data.color_mix->color2);
+        case CSS_VALUE_TYPE_CALC:
+            // CssCalcNode has no leaf/operator discriminant, so its pointer union
+            // cannot be traversed safely until that representation is corrected.
+            return false;
+        case CSS_VALUE_TYPE_UNKNOWN:
+            return false;
+    }
+    return false;
+}
+
+bool css_declaration_can_clone_owned(const CssDeclaration* source) {
+    return source && css_value_can_clone_owned(source->value);
+}
+
+static char* css_owned_strdup(Pool* pool, const char* source) {
+    return source ? pool_strdup(pool, source) : NULL;
+}
+
+static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool);
+static void css_value_destroy_owned(CssValue* value, Pool* pool);
+
+static CssValue** css_value_array_clone_owned(CssValue* const* source,
+                                               int count, Pool* pool) {
+    if (count <= 0) return NULL;
+    CssValue** values = (CssValue**)pool_calloc(
+        pool, (size_t)count * sizeof(CssValue*));
+    if (!values) return NULL;
+    for (int i = 0; i < count; i++) {
+        values[i] = css_value_clone_owned(source[i], pool);
+        if (source[i] && !values[i]) {
+            for (int prior = 0; prior < i; prior++) {
+                css_value_destroy_owned(values[prior], pool);
+            }
+            pool_free(pool, values);
+            return NULL;
+        }
+    }
+    return values;
+}
+
+static void css_value_destroy_owned(CssValue* value, Pool* pool) {
+    if (!value || !pool) return;
+    switch (value->type) {
+        case CSS_VALUE_TYPE_STRING:
+            pool_free(pool, (void*)value->data.string);
+            break;
+        case CSS_VALUE_TYPE_URL:
+            pool_free(pool, (void*)value->data.url);
+            break;
+        case CSS_VALUE_TYPE_COLOR:
+            if (value->data.color.type == CSS_COLOR_KEYWORD) {
+                pool_free(pool, (void*)value->data.color.data.keyword);
+            } else if (value->data.color.type == CSS_COLOR_HSL ||
+                       value->data.color.type == CSS_COLOR_HWB ||
+                       value->data.color.type == CSS_COLOR_LAB ||
+                       value->data.color.type == CSS_COLOR_LCH ||
+                       value->data.color.type == CSS_COLOR_OKLAB ||
+                       value->data.color.type == CSS_COLOR_OKLCH ||
+                       value->data.color.type == CSS_COLOR_COLOR) {
+                pool_free(pool, value->data.color.data.components);
+            }
+            break;
+        case CSS_VALUE_TYPE_CUSTOM:
+            pool_free(pool, (void*)value->data.custom_property.name);
+            css_value_destroy_owned(value->data.custom_property.fallback, pool);
+            break;
+        case CSS_VALUE_TYPE_LIST:
+            for (int i = 0; i < value->data.list.count; i++) {
+                css_value_destroy_owned(value->data.list.values[i], pool);
+            }
+            pool_free(pool, value->data.list.values);
+            break;
+        case CSS_VALUE_TYPE_FUNCTION:
+            if (value->data.function) {
+                for (int i = 0; i < value->data.function->arg_count; i++) {
+                    css_value_destroy_owned(value->data.function->args[i], pool);
+                }
+                pool_free(pool, value->data.function->args);
+                pool_free(pool, (void*)value->data.function->name);
+                pool_free(pool, value->data.function);
+            }
+            break;
+        case CSS_VALUE_TYPE_VAR:
+            if (value->data.var_ref) {
+                pool_free(pool, (void*)value->data.var_ref->name);
+                css_value_destroy_owned(value->data.var_ref->fallback, pool);
+                pool_free(pool, value->data.var_ref);
+            }
+            break;
+        case CSS_VALUE_TYPE_ENV:
+            if (value->data.env_ref) {
+                pool_free(pool, (void*)value->data.env_ref->name);
+                css_value_destroy_owned(value->data.env_ref->fallback, pool);
+                pool_free(pool, value->data.env_ref);
+            }
+            break;
+        case CSS_VALUE_TYPE_ATTR:
+            if (value->data.attr_ref) {
+                pool_free(pool, (void*)value->data.attr_ref->name);
+                pool_free(pool, (void*)value->data.attr_ref->type_or_unit);
+                css_value_destroy_owned(value->data.attr_ref->fallback, pool);
+                pool_free(pool, value->data.attr_ref);
+            }
+            break;
+        case CSS_VALUE_TYPE_COLOR_MIX:
+            if (value->data.color_mix) {
+                css_value_destroy_owned(value->data.color_mix->color1, pool);
+                css_value_destroy_owned(value->data.color_mix->color2, pool);
+                pool_free(pool, (void*)value->data.color_mix->method);
+                pool_free(pool, value->data.color_mix);
+            }
+            break;
+        default:
+            break;
+    }
+    pool_free(pool, value);
+}
+
+static CssValue* css_value_clone_owned(const CssValue* source, Pool* pool) {
+    if (!source) return NULL;
+    if (!css_value_can_clone_owned(source)) return NULL;
+    CssValue* clone = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!clone) return NULL;
+    *clone = *source;
+
+    switch (source->type) {
+        case CSS_VALUE_TYPE_STRING:
+            clone->data.string = css_owned_strdup(pool, source->data.string);
+            if (source->data.string && !clone->data.string) goto clone_failed;
+            break;
+        case CSS_VALUE_TYPE_URL:
+            clone->data.url = css_owned_strdup(pool, source->data.url);
+            if (source->data.url && !clone->data.url) goto clone_failed;
+            break;
+        case CSS_VALUE_TYPE_COLOR:
+            if (source->data.color.type == CSS_COLOR_KEYWORD) {
+                clone->data.color.data.keyword = css_owned_strdup(
+                    pool, source->data.color.data.keyword);
+                if (source->data.color.data.keyword &&
+                    !clone->data.color.data.keyword) goto clone_failed;
+            } else if (source->data.color.type == CSS_COLOR_HSL ||
+                       source->data.color.type == CSS_COLOR_HWB ||
+                       source->data.color.type == CSS_COLOR_LAB ||
+                       source->data.color.type == CSS_COLOR_LCH ||
+                       source->data.color.type == CSS_COLOR_OKLAB ||
+                       source->data.color.type == CSS_COLOR_OKLCH ||
+                       source->data.color.type == CSS_COLOR_COLOR) {
+                clone->data.color.data.components = NULL;
+                if (source->data.color.data.components) {
+                    clone->data.color.data.components =
+                        (CssColorComponents*)pool_alloc(
+                            pool, sizeof(CssColorComponents));
+                    if (!clone->data.color.data.components) goto clone_failed;
+                    *clone->data.color.data.components =
+                        *source->data.color.data.components;
+                }
+            }
+            break;
+        case CSS_VALUE_TYPE_CUSTOM:
+            clone->data.custom_property.name = css_owned_strdup(
+                pool, source->data.custom_property.name);
+            if (source->data.custom_property.name &&
+                !clone->data.custom_property.name) goto clone_failed;
+            clone->data.custom_property.fallback = css_value_clone_owned(
+                source->data.custom_property.fallback, pool);
+            if (source->data.custom_property.fallback &&
+                !clone->data.custom_property.fallback) goto clone_failed;
+            break;
+        case CSS_VALUE_TYPE_LIST:
+            clone->data.list.values = css_value_array_clone_owned(
+                source->data.list.values, source->data.list.count, pool);
+            if (source->data.list.count > 0 && !clone->data.list.values) {
+                clone->data.list.count = 0;
+                goto clone_failed;
+            }
+            break;
+        case CSS_VALUE_TYPE_FUNCTION: {
+            clone->data.function = NULL;
+            CssFunction* function = (CssFunction*)pool_calloc(pool, sizeof(CssFunction));
+            if (!function) goto clone_failed;
+            clone->data.function = function;
+            function->name = css_owned_strdup(pool, source->data.function->name);
+            if (source->data.function->name && !function->name) goto clone_failed;
+            function->arg_count = source->data.function->arg_count;
+            function->args = css_value_array_clone_owned(
+                source->data.function->args, function->arg_count, pool);
+            if (function->arg_count > 0 && !function->args) {
+                function->arg_count = 0;
+                goto clone_failed;
+            }
+            break;
+        }
+        case CSS_VALUE_TYPE_VAR: {
+            clone->data.var_ref = NULL;
+            CSSVarRef* ref = (CSSVarRef*)pool_calloc(pool, sizeof(CSSVarRef));
+            if (!ref) goto clone_failed;
+            clone->data.var_ref = ref;
+            *ref = *source->data.var_ref;
+            ref->name = css_owned_strdup(pool, source->data.var_ref->name);
+            ref->fallback = css_value_clone_owned(source->data.var_ref->fallback, pool);
+            if ((source->data.var_ref->name && !ref->name) ||
+                (source->data.var_ref->fallback && !ref->fallback)) goto clone_failed;
+            break;
+        }
+        case CSS_VALUE_TYPE_ENV: {
+            clone->data.env_ref = NULL;
+            CSSEnvRef* ref = (CSSEnvRef*)pool_calloc(pool, sizeof(CSSEnvRef));
+            if (!ref) goto clone_failed;
+            clone->data.env_ref = ref;
+            *ref = *source->data.env_ref;
+            ref->name = css_owned_strdup(pool, source->data.env_ref->name);
+            ref->fallback = css_value_clone_owned(source->data.env_ref->fallback, pool);
+            if ((source->data.env_ref->name && !ref->name) ||
+                (source->data.env_ref->fallback && !ref->fallback)) goto clone_failed;
+            break;
+        }
+        case CSS_VALUE_TYPE_ATTR: {
+            clone->data.attr_ref = NULL;
+            CSSAttrRef* ref = (CSSAttrRef*)pool_calloc(pool, sizeof(CSSAttrRef));
+            if (!ref) goto clone_failed;
+            clone->data.attr_ref = ref;
+            *ref = *source->data.attr_ref;
+            ref->name = css_owned_strdup(pool, source->data.attr_ref->name);
+            ref->type_or_unit = css_owned_strdup(
+                pool, source->data.attr_ref->type_or_unit);
+            ref->fallback = css_value_clone_owned(source->data.attr_ref->fallback, pool);
+            if ((source->data.attr_ref->name && !ref->name) ||
+                (source->data.attr_ref->type_or_unit && !ref->type_or_unit) ||
+                (source->data.attr_ref->fallback && !ref->fallback)) goto clone_failed;
+            break;
+        }
+        case CSS_VALUE_TYPE_COLOR_MIX: {
+            clone->data.color_mix = NULL;
+            CSSColorMix* mix = (CSSColorMix*)pool_calloc(pool, sizeof(CSSColorMix));
+            if (!mix) goto clone_failed;
+            clone->data.color_mix = mix;
+            *mix = *source->data.color_mix;
+            mix->color1 = css_value_clone_owned(source->data.color_mix->color1, pool);
+            mix->color2 = css_value_clone_owned(source->data.color_mix->color2, pool);
+            mix->method = css_owned_strdup(pool, source->data.color_mix->method);
+            if ((source->data.color_mix->color1 && !mix->color1) ||
+                (source->data.color_mix->color2 && !mix->color2) ||
+                (source->data.color_mix->method && !mix->method)) goto clone_failed;
+            break;
+        }
+        default:
+            break;
+    }
+    return clone;
+
+clone_failed:
+    css_value_destroy_owned(clone, pool);
+    return NULL;
+}
+
+CssDeclaration* css_declaration_clone_owned(
+    const CssDeclaration* source, CssSpecificity specificity,
+    CssOrigin origin, Pool* target_pool) {
+    if (!source || !target_pool || !css_declaration_can_clone_owned(source)) return NULL;
+    CssDeclaration* clone = (CssDeclaration*)pool_calloc(
+        target_pool, sizeof(CssDeclaration));
+    if (!clone) return NULL;
+    *clone = *source;
+    clone->owns_payload = true;
+    clone->tree_owned_record = true;
+    clone->specificity = specificity;
+    clone->specificity.important = source->important;
+    clone->origin = origin;
+    clone->value = NULL;
+    clone->source_file = NULL;
+    clone->property_name = NULL;
+    clone->value_text = NULL;
+    clone->value = css_value_clone_owned(source->value, target_pool);
+    if (source->value && !clone->value) goto declaration_clone_failed;
+    clone->source_file = css_owned_strdup(target_pool, source->source_file);
+    clone->property_name = css_owned_strdup(target_pool, source->property_name);
+    if (source->value_text) {
+        char* value_text = (char*)pool_alloc(target_pool, source->value_text_len + 1u);
+        if (!value_text) goto declaration_clone_failed;
+        memcpy(value_text, source->value_text, source->value_text_len);
+        value_text[source->value_text_len] = '\0';
+        clone->value_text = value_text;
+    }
+    if ((source->source_file && !clone->source_file) ||
+        (source->property_name && !clone->property_name)) goto declaration_clone_failed;
+    clone->ref_count = 1;
+    return clone;
+
+declaration_clone_failed:
+    css_value_destroy_owned(clone->value, target_pool);
+    pool_free(target_pool, (void*)clone->source_file);
+    pool_free(target_pool, (void*)clone->property_name);
+    pool_free(target_pool, (void*)clone->value_text);
+    pool_free(target_pool, clone);
+    return NULL;
+}
+
 void css_declaration_ref(CssDeclaration* declaration) {
     if (declaration) {
         declaration->ref_count++;
@@ -873,6 +1234,178 @@ StyleTree* style_tree_clone(StyleTree* source, Pool* target_pool) {
     style_tree_foreach(source, clone_tree_callback, &clone_context);
 
     return cloned;
+}
+
+struct OwnedCloneCollectContext {
+    CssDeclaration** declarations;
+    size_t count;
+    size_t capacity;
+};
+
+static bool owned_clone_count_declarations(StyleNode* node, void* context) {
+    size_t* count = (size_t*)context;
+    if (node->winning_decl) (*count)++;
+    for (WeakDeclaration* weak = node->weak_list; weak; weak = weak->next) (*count)++;
+    return true;
+}
+
+static bool owned_clone_collect_declarations(StyleNode* node, void* context) {
+    OwnedCloneCollectContext* collect = (OwnedCloneCollectContext*)context;
+    if (node->winning_decl && collect->count < collect->capacity) {
+        collect->declarations[collect->count++] = node->winning_decl;
+    }
+    for (WeakDeclaration* weak = node->weak_list;
+         weak && collect->count < collect->capacity; weak = weak->next) {
+        collect->declarations[collect->count++] = weak->declaration;
+    }
+    return true;
+}
+
+static int declaration_source_order_compare(const void* left, const void* right) {
+    const CssDeclaration* a = *(CssDeclaration* const*)left;
+    const CssDeclaration* b = *(CssDeclaration* const*)right;
+    if (a->source_order != b->source_order) {
+        return a->source_order < b->source_order ? -1 : 1;
+    }
+    if (a->property_id != b->property_id) {
+        return a->property_id < b->property_id ? -1 : 1;
+    }
+    return 0;
+}
+
+StyleTree* style_tree_clone_owned(StyleTree* source, Pool* target_pool) {
+    if (!source || !target_pool) return NULL;
+    StyleTree* clone = style_tree_create(target_pool);
+    if (!clone) return NULL;
+
+    size_t count = 0;
+    style_tree_foreach(source, owned_clone_count_declarations, &count);
+    if (count == 0) return clone;
+    CssDeclaration** declarations = (CssDeclaration**)pool_alloc(
+        target_pool, count * sizeof(CssDeclaration*));
+    if (!declarations) {
+        style_tree_destroy_owned(clone);
+        return NULL;
+    }
+    OwnedCloneCollectContext collect = {declarations, 0, count};
+    style_tree_foreach(source, owned_clone_collect_declarations, &collect);
+    qsort(declarations, collect.count, sizeof(CssDeclaration*),
+          declaration_source_order_compare);
+
+    for (size_t i = 0; i < collect.count; i++) {
+        CssDeclaration* source_decl = declarations[i];
+        CssDeclaration* copy = css_declaration_clone_owned(
+            source_decl, source_decl->specificity, source_decl->origin, target_pool);
+        if (!copy || !style_tree_apply_declaration(clone, copy)) {
+            pool_free(target_pool, declarations);
+            style_tree_destroy_owned(clone);
+            return NULL;
+        }
+    }
+    pool_free(target_pool, declarations);
+    return clone;
+}
+
+static void css_declaration_destroy_tree_copy(CssDeclaration* declaration,
+                                               Pool* pool) {
+    if (!declaration || !declaration->tree_owned_record) return;
+    if (declaration->owns_payload) {
+        css_value_destroy_owned(declaration->value, pool);
+        pool_free(pool, (void*)declaration->source_file);
+        pool_free(pool, (void*)declaration->property_name);
+        pool_free(pool, (void*)declaration->value_text);
+    }
+    pool_free(pool, declaration);
+}
+
+static void style_tree_reclaim_branch(AvlNode* avl_node, Pool* pool) {
+    if (!avl_node) return;
+    AvlNode* left = avl_node->left;
+    AvlNode* right = avl_node->right;
+    style_tree_reclaim_branch(left, pool);
+    style_tree_reclaim_branch(right, pool);
+
+    StyleNode* node = (StyleNode*)avl_node->declaration;
+    if (node) {
+        css_declaration_destroy_tree_copy(node->winning_decl, pool);
+        WeakDeclaration* weak = node->weak_list;
+        while (weak) {
+            WeakDeclaration* next = weak->next;
+            css_declaration_destroy_tree_copy(weak->declaration, pool);
+            pool_free(pool, weak);
+            weak = next;
+        }
+        pool_free(pool, node);
+    }
+    pool_free(pool, avl_node);
+}
+
+void style_tree_destroy_owned(StyleTree* style_tree) {
+    if (!style_tree) return;
+    // Canonical epoch trees disappear only with their entire epoch pool; an
+    // element-level destroy would invalidate every other shared binding.
+    assert(style_tree->canonical_owner == NULL);
+    Pool* pool = style_tree->pool;
+    if (style_tree->tree) {
+        style_tree_reclaim_branch(style_tree->tree->root, pool);
+        pool_free(pool, style_tree->tree);
+    }
+    pool_free(pool, style_tree);
+}
+
+static bool style_tree_find_inline(StyleNode* node, void* context) {
+    bool* found = (bool*)context;
+    if (node->winning_decl && node->winning_decl->specificity.inline_style) {
+        *found = true;
+        return false;
+    }
+    for (WeakDeclaration* weak = node->weak_list; weak; weak = weak->next) {
+        if (weak->declaration && weak->declaration->specificity.inline_style) {
+            *found = true;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool style_tree_has_inline_declarations(StyleTree* style_tree) {
+    bool found = false;
+    if (style_tree) style_tree_foreach(style_tree, style_tree_find_inline, &found);
+    return found;
+}
+
+bool style_tree_is_empty(StyleTree* style_tree) {
+    return !style_tree || !style_tree->tree || style_tree->tree->node_count == 0;
+}
+
+static bool declaration_winner_equal(const CssDeclaration* left,
+                                     const CssDeclaration* right) {
+    if (left == right) return true;
+    if (!left || !right || left->property_id != right->property_id ||
+        left->origin != right->origin || left->important != right->important ||
+        memcmp(&left->specificity, &right->specificity,
+               sizeof(CssSpecificity)) != 0) return false;
+    if (left->value_text && right->value_text) {
+        return left->value_text_len == right->value_text_len &&
+            memcmp(left->value_text, right->value_text,
+                   left->value_text_len) == 0;
+    }
+    // Without a canonical serialization, distinct value graphs are uncertain
+    // and intentionally fail toward non-sharing in debug verification.
+    return left->value == right->value;
+}
+
+bool style_tree_winners_equal(StyleTree* left, StyleTree* right) {
+    if (left == right) return true;
+    if (!left || !right) return false;
+    for (int property = CSS_PROPERTY_DISPLAY; property < CSS_PROPERTY_COUNT; property++) {
+        if (!declaration_winner_equal(
+                style_tree_get_declaration(left, (CssPropertyId)property),
+                style_tree_get_declaration(right, (CssPropertyId)property))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 int style_tree_merge(StyleTree* target, StyleTree* source) {

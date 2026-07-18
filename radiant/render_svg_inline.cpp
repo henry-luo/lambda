@@ -5453,7 +5453,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
     render_svg_to_display_list(svg_elem, viewport_width, viewport_height,
-                               rdcon->ui_context->document->pool, scale,
+                               rdcon->ui_context->document->document_pool, scale,
                                font_ctx, &base_transform, rdcon->dl,
                                &initial_paint.current_color,
                                initial_paint.has_fill_color ? &initial_paint.fill_color : nullptr,
@@ -5490,7 +5490,7 @@ void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
     }
     FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
     Pool* pool = (rdcon->ui_context && rdcon->ui_context->document)
-        ? rdcon->ui_context->document->pool : nullptr;
+        ? rdcon->ui_context->document->document_pool : nullptr;
     Color current_color = rdcon->color;
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;

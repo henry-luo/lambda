@@ -246,7 +246,7 @@ static void resolve_counter_property(LayoutContext* lycon, const CssValue* value
     bool is_reversed = allow_reversed && value->type == CSS_VALUE_TYPE_FUNCTION;
     if (!is_list && !is_reversed) return;
 
-    StringBuf* buffer = stringbuf_new(lycon->doc->view_tree->pool);
+    StringBuf* buffer = stringbuf_new(lycon->doc->view_tree->prop_pool);
     if (!buffer) {
         log_error("[CSS] %s: stringbuf_new failed", property_name);
         return;
@@ -770,10 +770,10 @@ const char* css_font_family_name_from_value(const CssValue* value) {
 }
 
 static char* duplicate_view_pool_layout_string(LayoutContext* lycon, const char* value) {
-    if (!value || !lycon || !lycon->doc || !lycon->doc->view_tree || !lycon->doc->view_tree->pool) {
+    if (!value || !lycon || !lycon->doc || !lycon->doc->view_tree || !lycon->doc->view_tree->prop_pool) {
         return nullptr;
     }
-    return pool_strdup(lycon->doc->view_tree->pool, value);
+    return pool_strdup(lycon->doc->view_tree->prop_pool, value);
 }
 
 static void replace_view_pool_layout_string(LayoutContext* lycon, char** target, const char* value) {
@@ -1141,7 +1141,7 @@ const char* css_join_font_family_values(LayoutContext* lycon, const CssValue* li
     if (part_count == 0) return NULL;
     total_len += part_count - 1;
 
-    char* combined = (char*)pool_alloc(lycon->doc->view_tree->pool, total_len + 1);
+    char* combined = (char*)pool_alloc(lycon->doc->view_tree->prop_pool, total_len + 1);
     if (!combined) return NULL;
     combined[0] = '\0';
 
@@ -1189,7 +1189,7 @@ static const char* css_join_font_family_groups(LayoutContext* lycon,
     if (part_count == 0) return NULL;
     total_len += (part_count - 1) * 2;
 
-    char* combined = (char*)pool_alloc(lycon->doc->view_tree->pool, total_len + 1);
+    char* combined = (char*)pool_alloc(lycon->doc->view_tree->prop_pool, total_len + 1);
     if (!combined) return NULL;
     combined[0] = '\0';
     size_t pos = 0;
@@ -1252,7 +1252,7 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
     }
     total_len += (part_count - 1) * 2;
 
-    char* combined = (char*)pool_alloc(lycon->doc->view_tree->pool, total_len + 1);
+    char* combined = (char*)pool_alloc(lycon->doc->view_tree->prop_pool, total_len + 1);
     if (!combined) return first;
     combined[0] = '\0';
     size_t pos = 0;
@@ -5801,20 +5801,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // This is a CSS custom property, store it
         DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
 
-        // Create new custom property entry
-        CssCustomProp* new_var = (CssCustomProp*)pool_calloc(lycon->doc->view_tree->pool, sizeof(CssCustomProp));
-        if (new_var) {
-            // Allocate name from arena
-            size_t name_len = strlen(decl->property_name);
-            char* name_copy = (char*)arena_alloc(lycon->doc->arena, name_len + 1);
-            if (name_copy) {
-                memcpy(name_copy, decl->property_name, name_len + 1);
-                new_var->name = name_copy;
-                new_var->value = value;
+        CssCustomProp* new_var = element->css_variables;
+        while (new_var && strcmp(new_var->name, decl->property_name) != 0) {
+            new_var = new_var->next;
+        }
+        if (!new_var) {
+            // CSS variables are retained DOM state, not a view-generation prop;
+            // document-pool ownership keeps retained reset from dangling this list.
+            new_var = (CssCustomProp*)pool_calloc(
+                lycon->doc->document_pool, sizeof(CssCustomProp));
+            if (new_var) {
+                new_var->name = decl->property_name;
                 new_var->next = element->css_variables;
                 element->css_variables = new_var;
-                log_debug("[CSS] Stored custom property: %s", decl->property_name);
             }
+        }
+        if (new_var) {
+            new_var->value = value;
+            log_debug("[CSS] Stored custom property: %s", decl->property_name);
         }
         return;  // Custom properties don't have standard processing
     }
@@ -6139,7 +6143,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     ensure_span_block(lycon, span);
                     span->blk->line_height = line_height_value
                         ? line_height_value
-                        : css_value_create_keyword(lycon->doc->view_tree->pool, "normal");
+                        : css_value_create_keyword(lycon->doc->view_tree->prop_pool, "normal");
                     log_debug("[CSS] Font shorthand: %s line-height",
                               line_height_value ? "set" : "reset");
                 }

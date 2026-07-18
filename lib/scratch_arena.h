@@ -54,6 +54,7 @@ typedef struct ScratchArena {
     Arena* arena;            // backing arena for actual memory
     ScratchHeader* head;     // most recent allocation (top of stack)
     void* mem_node;          // MemContext registration node (NULL if untracked)
+    bool scope_active;       // paired arena scope registration
 } ScratchArena;
 
 // Mark for save/restore pattern

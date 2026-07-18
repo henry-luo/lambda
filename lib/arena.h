@@ -7,6 +7,7 @@ extern "C" {
 
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include "mempool.h"
 
 /**
@@ -38,6 +39,29 @@ extern "C" {
  * Opaque arena structure - use accessor functions
  */
 typedef struct Arena Arena;
+
+typedef struct ArenaStats {
+    size_t backing_bytes;       // exact bytes occupied in the backing pool
+    size_t committed_bytes;     // aggregate chunk data capacity
+    size_t bump_used_bytes;     // bump extent including recyclable interior blocks
+    size_t active_bytes;        // bump_used_bytes minus recyclable_bytes
+    size_t recyclable_bytes;    // interior blocks available through free bins
+    size_t waste_bytes;         // unused chunk tails
+    size_t overhead_bytes;      // arena/chunk headers and allocator rounding
+    size_t high_water_active_bytes;
+    uint64_t allocation_count;
+    uint64_t free_count;
+    uint64_t reuse_hits;
+    uint64_t reuse_misses;
+    uint64_t split_count;
+    uint64_t coalesce_count;
+    uint64_t bump_back_count;
+    uint64_t fresh_chunk_count;
+    uint64_t fresh_growth_bytes;
+    uint64_t reset_count;
+    uint64_t clear_count;
+    uint32_t active_scope_count;
+} ArenaStats;
 
 /**
  * Create a new arena with custom chunk sizes
@@ -157,6 +181,15 @@ size_t arena_waste(Arena* arena);
  * @return Number of chunks
  */
 size_t arena_chunk_count(Arena* arena);
+
+/** Copy the allocator's detailed logical/backing counters. */
+void arena_get_stats(Arena* arena, ArenaStats* out);
+
+// Scoped scratch users register their lifetime so reset/clear cannot invalidate
+// active temporary pointers.
+void arena_scope_enter(Arena* arena);
+void arena_scope_leave(Arena* arena);
+uint32_t arena_active_scope_count(Arena* arena);
 
 /**
  * Check if a pointer belongs to this arena

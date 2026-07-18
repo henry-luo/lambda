@@ -155,7 +155,7 @@ static bool format_css_value(DomElement* element, CssPropertyId id,
         // cascade resolver with an invalid context.
         if (format_decl_color(element, value, out, out_size)) return true;
     }
-    Pool* pool = element && element->doc ? element->doc->pool : nullptr;
+    Pool* pool = element && element->doc ? element->doc->document_pool : nullptr;
     if (!pool) return false;
     CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
     if (!formatter) return false;

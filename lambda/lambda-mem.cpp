@@ -337,6 +337,17 @@ extern "C" void heap_unregister_gc_root(uint64_t* slot) {
     gc_unregister_root(context->heap->gc, slot);
 }
 
+extern "C" void heap_register_gc_weak(uint64_t* slot,
+        gc_weak_clear_fn on_clear, void* weak_context) {
+    if (!context || !context->heap || !context->heap->gc || !slot) return;
+    gc_register_weak(context->heap->gc, slot, on_clear, weak_context);
+}
+
+extern "C" void heap_unregister_gc_weak(uint64_t* slot) {
+    if (!context || !context->heap || !context->heap->gc || !slot) return;
+    gc_unregister_weak(context->heap->gc, slot);
+}
+
 void* heap_alloc(int size, TypeId type_id) {
     gc_heap_t *gc = context->heap->gc;
     void *data = gc_heap_alloc(gc, size, type_id);

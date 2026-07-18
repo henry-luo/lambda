@@ -1778,26 +1778,57 @@ inline bool is_quirks_mode(HtmlVersion v) {
 }
 
 struct MeasurementCacheEntry;
+struct CanonicalInlineEntry;
+
+typedef struct CanonicalPropStats {
+    uint64_t inline_lookups;
+    uint64_t inline_hits;
+    uint64_t inline_misses;
+    uint64_t inline_exact_compares;
+    uint64_t inline_collisions;
+    uint64_t inline_promotions;
+    uint64_t inline_cows;
+    uint64_t cap_fallbacks;
+    size_t index_bytes;
+} CanonicalPropStats;
 
 // tier-2: view-pool, rebuilt each relayout
 struct ViewTree {
-    Pool *pool;
-    Arena *arena;  // bump allocator for view allocations (O(1) alloc, bulk free)
+    Pool* prop_pool;       // Mutable element-owned view props; survives retained reflow.
+    Arena* canonical_prop_arena; // Immutable shared props; survives ordinary style/layout generations.
+    Arena* scratch_arena;  // Pass-local layout/render scratch; never owns retained props.
+    CanonicalInlineEntry** inline_canonical_buckets; // Resizable exact-value index in prop_pool.
+    size_t inline_canonical_bucket_count;
+    size_t inline_canonical_count;
+    size_t canonical_prop_cap_bytes;
+    CanonicalPropStats canonical_stats;
+    TextRect* free_text_rects; // Reusable retained text fragments owned by prop_pool.
     View* root;
     HtmlVersion html_version;
     MeasurementCacheEntry* measurement_cache;
     int measurement_cache_count;
     int measurement_cache_capacity;
     uint32_t measurement_cache_generation;
+    uint32_t layout_generation; // Advances at each retained full-layout boundary.
 #ifdef __cplusplus
     void init();
     void reset_retained();
     void destroy();
     void* alloc_prop(size_t size);
+    TextRect* alloc_text_rect();
+    void recycle_text_rects(TextRect* first);
 #endif
 };
 
+uint64_t inline_prop_hash(const InlineProp* value);
+bool inline_prop_equal(const InlineProp* left, const InlineProp* right);
+void view_tree_canonical_init(ViewTree* tree);
+void view_tree_canonical_destroy(ViewTree* tree);
+void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
+                                  DomElement* parent);
+
 void release_dom_owned_embed_images(DomElement* elem);
+void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
 
 // Forward declaration for DocState (full definition in state_store.hpp)
 struct DocState;

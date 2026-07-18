@@ -16,6 +16,7 @@ extern "C" {
 
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
@@ -164,7 +165,10 @@ static void layout_resolve_pending_scroll_into_view(DomDocument* doc,
     if (!doc || !root_block || !doc->pending_scroll_into_view_target) return;
 
     DomElement* target = doc->pending_scroll_into_view_target;
+    DomNodeRef target_ref = {(DomNode*)target,
+                             doc->pending_scroll_into_view_target_id};
     doc->pending_scroll_into_view_target = nullptr;
+    doc->pending_scroll_into_view_target_id = 0;
 
     float target_x = layout_scroll_document_coord(target, true);
     float target_y = layout_scroll_document_coord(target, false);
@@ -190,6 +194,7 @@ static void layout_resolve_pending_scroll_into_view(DomDocument* doc,
         log_info("layout_scrollIntoView: queued viewport scroll (%.1f, %.1f)",
                  target_x, target_y);
     }
+    dom_node_unpin(doc, target_ref, DOM_NODE_PIN_RECONCILE);
 }
 
 static inline float collapse_root_margins(float a, float b) {
@@ -1081,6 +1086,15 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                         dom_elem->font->word_spacing = lycon->font.style->word_spacing;
                 }
             }
+        }
+
+        if (!layout_context_is_measuring(lycon) && lycon->doc && lycon->doc->view_tree) {
+            DomElement* parent_elem = (dom_elem->parent && dom_elem->parent->is_element())
+                ? dom_elem->parent->as_element() : nullptr;
+            // Canonicalization happens only after HTML defaults, cascade,
+            // animation/transition setup, and inherited fallbacks have produced
+            // the element's complete committed value.
+            view_tree_commit_inline_prop(lycon->doc->view_tree, dom_elem, parent_elem);
         }
     }
 
@@ -2720,7 +2734,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // Create the initial Block Formatting Context for the root element
     // CSS 2.2: The root element establishes the initial BFC
     html->content_width = physical_width;
-    Pool* layout_pool = lycon->doc->view_tree->pool;
+    Pool* layout_pool = lycon->doc->view_tree->prop_pool;
     log_debug("[BlockContext] Initializing root BFC for HTML element");
 
     // Initialize the unified BlockContext for the root element
@@ -3238,13 +3252,14 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     FontProp* default_font = doc->view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
     setup_font(uicon, &lycon->font, default_font);
 
-    // Initialize CSS counter context for counter-reset/counter-increment/counter()/counters()
-    lycon->counter_context = counter_context_create(doc->arena);
-    log_debug("Initialized counter context");
-
     // Initialize scratch allocator for scoped temporary buffers
-    lycon->pool = doc->view_tree->pool;
-    mem_scratch_init((MemContext*)doc->services.mem_ctx, &lycon->scratch, doc->view_tree->arena, MEM_ROLE_LAYOUT, "layout.scratch");
+    lycon->pool = doc->view_tree->prop_pool;
+    mem_scratch_init((MemContext*)doc->services.mem_ctx, &lycon->scratch, doc->view_tree->scratch_arena, MEM_ROLE_LAYOUT, "layout.scratch");
+
+    // Counter scopes are pass-local. Allocating them in the stable DOM arena
+    // made every reflow permanently grow dom.node.arena.
+    lycon->counter_context = counter_context_create(lycon->scratch.arena);
+    log_debug("Initialized counter context");
 
     // BlockContext floats are already initialized to NULL in memset
 }
@@ -3257,6 +3272,16 @@ void layout_cleanup(LayoutContext* lycon) {
     if (lycon->counter_context) {
         counter_context_destroy(lycon->counter_context);
         lycon->counter_context = nullptr;
+    }
+
+    if (lycon->doc && lycon->doc->view_tree &&
+        lycon->doc->view_tree->scratch_arena) {
+        Arena* scratch_arena = lycon->doc->view_tree->scratch_arena;
+        // Counter scopes allocate directly from the shared scratch arena, so
+        // releasing the ScratchArena wrapper alone leaves pass-local bytes live.
+        // The completed pass is the ownership boundary for every such value.
+        assert(arena_active_scope_count(scratch_arena) == 0);
+        arena_reset(scratch_arena);
     }
 
     // BlockContext cleanup - floats are pool-allocated, no explicit cleanup needed
@@ -3283,7 +3308,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         if (!doc->view_tree) {
             doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
             init_view_pool = true;
-        } else if (!doc->view_tree->pool) {
+        } else if (!doc->view_tree->prop_pool) {
             init_view_pool = true;
         }
     } else {
@@ -3296,11 +3321,13 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (init_view_pool && !doc->incremental_layout) {
         view_pool_init(doc->view_tree);
         // attribute the view-tree pool/arena to this document for grouped reporting
-        if (doc->services.mem_ctx && doc->view_tree->pool) {
+        if (doc->services.mem_ctx && doc->view_tree->prop_pool) {
             uint32_t did = mem_context_doc_id((MemContext*)doc->services.mem_ctx);
-            mem_node_set_doc((MemNode*)pool_get_mem_node(doc->view_tree->pool), did);
-            if (doc->view_tree->arena)
-                mem_node_set_doc((MemNode*)arena_get_mem_node(doc->view_tree->arena), did);
+            mem_node_set_doc((MemNode*)pool_get_mem_node(doc->view_tree->prop_pool), did);
+            if (doc->view_tree->canonical_prop_arena)
+                mem_node_set_doc((MemNode*)arena_get_mem_node(doc->view_tree->canonical_prop_arena), did);
+            if (doc->view_tree->scratch_arena)
+                mem_node_set_doc((MemNode*)arena_get_mem_node(doc->view_tree->scratch_arena), did);
         }
     }
 

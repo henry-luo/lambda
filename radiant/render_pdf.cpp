@@ -1632,7 +1632,7 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
 
     FontContext* font_ctx = ctx->ui_context ? ctx->ui_context->font_ctx : nullptr;
     Pool* pool = (ctx->ui_context && ctx->ui_context->document)
-        ? ctx->ui_context->document->pool
+        ? ctx->ui_context->document->document_pool
         : nullptr;
     SvgInitialPaint initial_paint;
     render_svg_initial_paint(block, color, &initial_paint);

@@ -38,6 +38,8 @@ void scratch_init(ScratchArena* sa, Arena* arena) {
     sa->arena = arena;
     sa->head = NULL;
     sa->mem_node = NULL;
+    sa->scope_active = true;
+    arena_scope_enter(arena);
 }
 
 void* scratch_alloc(ScratchArena* sa, size_t size) {
@@ -141,6 +143,10 @@ void scratch_release(ScratchArena* sa) {
     if (sa->mem_node && g_scratch_node_release) {
         g_scratch_node_release(sa->mem_node);
         sa->mem_node = NULL;
+    }
+    if (sa->scope_active) {
+        arena_scope_leave(sa->arena);
+        sa->scope_active = false;
     }
 }
 

@@ -134,9 +134,13 @@ typedef struct JubeTypeBinding {
     const JubeHostObjectOps* legacy_ops;
 } JubeTypeBinding;
 
+typedef void (*JubeGcWeakClearFn)(uint64_t* slot, void* context);
+
 struct JubeHostGcAPI {
     void (*register_root)(uint64_t* slot);
     void (*unregister_root)(uint64_t* slot);
+    void (*register_weak)(uint64_t* slot, JubeGcWeakClearFn on_clear, void* context);
+    void (*unregister_weak)(uint64_t* slot);
 };
 
 struct JubeHostValueAPI {

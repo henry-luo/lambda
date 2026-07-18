@@ -102,11 +102,19 @@ protected:
 
 static int external_destroy_calls = 0;
 static uint16_t external_destroy_last_tag = 0;
+static int weak_clear_calls = 0;
+static void* weak_clear_context = nullptr;
 
 static void test_external_destroy(void* data, uint16_t type_tag) {
     external_destroy_calls++;
     external_destroy_last_tag = type_tag;
     *(void**)data = NULL;
+}
+
+static void test_weak_clear(uint64_t* slot, void* context) {
+    weak_clear_calls++;
+    weak_clear_context = context;
+    EXPECT_EQ(*slot, 0u);
 }
 
 // ============================================================================
@@ -255,6 +263,48 @@ TEST_F(GCHeapTest, DataZoneReuseAfterPartialResetIsZeroed) {
 // ============================================================================
 // 3. Root Registration
 // ============================================================================
+
+TEST_F(GCHeapTest, WeakSlotClearsDeadReferentBeforeSweep) {
+    weak_clear_calls = 0;
+    weak_clear_context = nullptr;
+    uint64_t weak = string_item(make_string("weak"));
+    int marker = 42;
+    gc_register_weak(gc, &weak, test_weak_clear, &marker);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(weak, 0u);
+    EXPECT_EQ(weak_clear_calls, 1);
+    EXPECT_EQ(weak_clear_context, &marker);
+    EXPECT_EQ(gc->weak_slot_count, 0);
+}
+
+TEST_F(GCHeapTest, WeakSlotPreservesStronglyReachableReferent) {
+    weak_clear_calls = 0;
+    uint64_t weak = string_item(make_string("reachable"));
+    uint64_t root = weak;
+    gc_register_root(gc, &root);
+    gc_register_weak(gc, &weak, test_weak_clear, nullptr);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_NE(weak, 0u);
+    EXPECT_EQ(weak_clear_calls, 0);
+    gc_unregister_weak(gc, &weak);
+    gc_unregister_root(gc, &root);
+}
+
+TEST_F(GCHeapTest, UnregisteredWeakSlotIsNotTouched) {
+    weak_clear_calls = 0;
+    uint64_t weak = string_item(make_string("unregistered"));
+    gc_register_weak(gc, &weak, test_weak_clear, nullptr);
+    gc_unregister_weak(gc, &weak);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    EXPECT_NE(weak, 0u);
+    EXPECT_EQ(weak_clear_calls, 0);
+}
 
 TEST_F(GCHeapTest, RegisterRoot) {
     uint64_t slot1 = 0;

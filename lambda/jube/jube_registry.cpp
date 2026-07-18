@@ -22,6 +22,9 @@ static int jube_static_modules_count = 0;
 static bool jube_dynamic_modules_from_env_loaded = false;
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
+extern "C" void heap_register_gc_weak(uint64_t* slot,
+    JubeGcWeakClearFn on_clear, void* context);
+extern "C" void heap_unregister_gc_weak(uint64_t* slot);
 extern "C" Item vmap_new(void);
 extern "C" Item js_new_object(void);
 extern "C" Item js_array_new(int capacity);
@@ -273,6 +276,8 @@ static void jube_host_dom_notify_mutation_detail(int kind, void* target, void* p
 static const JubeHostGcAPI jube_host_gc_api = {
     heap_register_gc_root,
     heap_unregister_gc_root,
+    heap_register_gc_weak,
+    heap_unregister_gc_weak,
 };
 
 static const JubeHostValueAPI jube_host_value_api = {

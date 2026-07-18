@@ -426,7 +426,7 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return NULL;
     sim_flush_pending_reflow(doc);
 
-    Pool* pool = doc->pool;
+    Pool* pool = doc->document_pool;
     if (!pool) return NULL;
 
     // Tokenize and parse the selector
@@ -479,7 +479,7 @@ static bool sim_count_visitor(View* view, void* udata) {
 static int count_elements_by_selector(DomDocument* doc, const char* selector_text) {
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return 0;
 
-    Pool* pool = doc->pool;
+    Pool* pool = doc->document_pool;
     if (!pool) return 0;
 
     size_t token_count = 0;

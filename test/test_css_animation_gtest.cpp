@@ -121,7 +121,7 @@ static void setup_keyframes_sheet(DomDocument* doc, CssStylesheet* sheet,
                                    CssStylesheet** sheet_ptr,
                                    const char* content) {
     memset(sheet, 0, sizeof(*sheet));
-    sheet->pool = doc->pool;
+    sheet->pool = doc->document_pool;
     sheet->disabled = false;
 
     memset(rule, 0, sizeof(*rule));
@@ -214,11 +214,11 @@ protected:
     void SetUp() override {
         pool = pool_create();
         memset(&doc, 0, sizeof(doc));
-        doc.pool = pool;
-        doc.arena = arena_create_default(pool);
+        doc.document_pool = pool;
+        doc.node_arena = arena_create_default(pool);
     }
     void TearDown() override {
-        if (doc.arena) arena_destroy(doc.arena);
+        if (doc.node_arena) arena_destroy(doc.node_arena);
         pool_destroy(pool);
     }
     void setupKeyframes(const char* content) {
@@ -340,12 +340,12 @@ protected:
         pool = pool_create();
         scheduler = animation_scheduler_create(pool);
         memset(&doc, 0, sizeof(doc));
-        doc.pool = pool;
-        doc.arena = arena_create_default(pool);
+        doc.document_pool = pool;
+        doc.node_arena = arena_create_default(pool);
     }
     void TearDown() override {
         animation_scheduler_destroy(scheduler);
-        if (doc.arena) arena_destroy(doc.arena);
+        if (doc.node_arena) arena_destroy(doc.node_arena);
         pool_destroy(pool);
     }
 

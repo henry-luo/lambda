@@ -209,7 +209,7 @@ const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyId css_
     }
 
     if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        StringBuf* sb = stringbuf_new(lycon->doc->view_tree->pool);
+        StringBuf* sb = stringbuf_new(lycon->doc->view_tree->prop_pool);
         if (!sb) return nullptr;
 
         int count = value->data.list.count;
@@ -444,17 +444,17 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
 
     // CSS 2.1 §12.5: list-style-image overrides list-style-type when image loads successfully
     if (image_url && strcmp(image_url, "none") != 0) {
-        marker_prop->image_url = lam::promote_to_arena(parent_elem->doc->arena, image_url).get();
+        marker_prop->image_url = lam::promote_to_pool(lycon->pool, image_url).get();
         marker_prop->loaded_image = load_image(lycon->ui_context, marker_prop->image_url);
     }
 
     if (marker_css_content) {
         // ::marker { content: ... } overrides list-style-type
-        radiant_retain_marker_text_content(marker_prop, lam::promote_to_arena(parent_elem->doc->arena, marker_css_content));
+        radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_css_content));
         marker_prop->marker_type = CSS_VALUE_DECIMAL;  // force text rendering
     } else if (is_string_marker) {
         // CSS Lists 3 §4.1: use the string directly as marker content
-        radiant_retain_marker_text_content(marker_prop, lam::promote_to_arena(parent_elem->doc->arena, string_marker));
+        radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, string_marker));
     } else if (!is_bullet_marker) {
         char marker_text[64];
         int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
@@ -464,7 +464,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
             marker_text[marker_len + 2] = '\0';
             marker_len += 2;
 
-            radiant_retain_marker_text_content(marker_prop, lam::promote_to_arena(parent_elem->doc->arena, marker_text));
+            radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_text));
         }
     }
 
@@ -597,7 +597,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             } else if (!(cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NORMAL)) {
                 // explicit content (not 'normal') - resolve using counter context
                 marker_css_content = dom_element_get_pseudo_element_content_with_counters(
-                    list_elem, 6, lycon->counter_context, list_elem->doc->arena);
+                    list_elem, 6, lycon->counter_context, lycon->scratch.arena);
                 if (marker_css_content) {
                     has_marker = true;
                     log_debug("    [List] ::marker { content: '%s' } - using CSS content", marker_css_content);

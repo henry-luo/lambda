@@ -122,7 +122,7 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
                 DomText* dt = nullptr;
                 DomText* candidate = string_to_dom_text(s);
                 // safety: verify this is a fat DomText-String allocation
-                if (arena_owns(parent->doc->arena, candidate) &&
+                if (arena_owns(parent->doc->node_arena, candidate) &&
                     candidate->node_type == DOM_NODE_TEXT &&
                     candidate->native_string == s) {
                     dt = candidate;

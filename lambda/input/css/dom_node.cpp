@@ -1,5 +1,6 @@
 #include "dom_node.hpp"
 #include "dom_element.hpp"
+#include "dom_lifecycle.hpp"
 #include "css_formatter.hpp"
 #include "css_style_node.hpp"
 #include "../../../lib/log.h"
@@ -316,6 +317,11 @@ bool DomNode::append_child(DomNode* child) {
         return false;
     }
 
+    DomDocument* doc = static_cast<DomElement*>(this)->doc;
+    // Reinsertion wins before linkage becomes visible; leaving the detached
+    // candidate armed could recycle a now-connected subtree at the next sweep.
+    dom_node_cancel_detached(doc, child);
+
     // Set parent relationship
     child->parent = this;
 
@@ -388,6 +394,8 @@ bool DomNode::remove_child(DomNode* child) {
     child->prev_sibling = nullptr;
     child->next_sibling = nullptr;
 
+    dom_node_schedule_detached(element->doc, child);
+
     return true;
 }
 
@@ -415,6 +423,8 @@ bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
 
     // Cast to DomElement to access first_child
     DomElement* element = static_cast<DomElement*>(this);
+
+    dom_node_cancel_detached(element->doc, new_node);
 
     // Set parent relationship
     new_node->parent = this;

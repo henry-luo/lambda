@@ -289,6 +289,40 @@ TEST(ArenaTest, Statistics) {
     pool_destroy(pool);
 }
 
+TEST(ArenaTest, DetailedStatisticsTrackReuseAndBacking) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Arena* arena = arena_create_default(pool);
+    ASSERT_NE(arena, nullptr);
+
+    void* first = arena_alloc(arena, 64);
+    void* guard = arena_alloc(arena, 64);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(guard, nullptr);
+    arena_free(arena, first, 64);
+    void* reused = arena_alloc(arena, 64);
+    EXPECT_EQ(reused, first);
+
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_GT(stats.backing_bytes, stats.committed_bytes);
+    EXPECT_EQ(stats.committed_bytes, ARENA_INITIAL_CHUNK_SIZE);
+    EXPECT_EQ(stats.active_bytes, 128u);
+    EXPECT_EQ(stats.allocation_count, 3u);
+    EXPECT_EQ(stats.free_count, 1u);
+    EXPECT_EQ(stats.reuse_hits, 1u);
+    EXPECT_EQ(stats.fresh_chunk_count, 1u);
+    EXPECT_GE(stats.high_water_active_bytes, stats.active_bytes);
+
+    arena_reset(arena);
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.active_bytes, 0u);
+    EXPECT_EQ(stats.reset_count, 1u);
+
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+
 TEST(ArenaTest, ReusePattern) {
     Pool* pool = pool_create_mmap();
     Arena* arena = arena_create_default(pool);
@@ -1601,4 +1635,3 @@ TEST(ArenaContainerRegressionTest, MapDataInitialization) {
     arena_destroy(arena);
     pool_destroy(pool);
 }
-

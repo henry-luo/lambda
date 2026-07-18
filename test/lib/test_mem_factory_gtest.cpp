@@ -66,13 +66,26 @@ TEST_F(MemFactoryTest, ArenaParentEdgeToPool) {
     EXPECT_EQ(snap->count, 2u);
     uint32_t pool_id = mem_node_id(pool_node);
     bool arena_linked = false;
+    uint64_t arena_backing = 0;
+    uint64_t pool_direct = 0;
+    uint64_t pool_live = 0;
     for (uint32_t i = 0; i < snap->count; i++) {
         if (snap->samples[i].kind == MEM_KIND_ARENA) {
             EXPECT_EQ(snap->samples[i].parent_id, pool_id);
+            EXPECT_GT(snap->samples[i].backing_bytes, 0u);
+            EXPECT_EQ(snap->samples[i].committed_bytes, ARENA_INITIAL_CHUNK_SIZE);
+            arena_backing = snap->samples[i].backing_bytes;
             arena_linked = true;
+        } else if (snap->samples[i].id == pool_id) {
+            pool_direct = snap->samples[i].direct_bytes;
+            pool_live = snap->samples[i].bytes_in_use;
         }
     }
     EXPECT_TRUE(arena_linked);
+    EXPECT_EQ(pool_live, pool_direct + arena_backing);
+    EXPECT_EQ(snap->physical_total_reserved, snap->samples[0].parent_id == 0 &&
+              snap->samples[0].id == pool_id ? snap->samples[0].bytes_reserved :
+              snap->samples[1].bytes_reserved);
     mem_snapshot_free(snap);
 
     mem_arena_destroy(a);
