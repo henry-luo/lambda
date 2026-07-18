@@ -86,6 +86,35 @@ TEST(CssPropTable, DirtyMutationFlushesBeforeSerialization) {
     EXPECT_EQ(doc.js.mutation_count, 0);
 }
 
+TEST(CssPropTable, VisibilityUsesRenderEnumNames) {
+    DomDocument doc = {};
+    DomElement element = {};
+    element.node_type = DOM_NODE_ELEMENT;
+    element.set_synthetic(true);
+    InlineProp in_line = INLINE_PROP_DEFAULT;
+    element.doc = &doc;
+    element.in_line = &in_line;
+    element.set_styles_resolved(true);
+    doc.root = &element;
+
+    struct VisibilityCase {
+        Visibility value;
+        const char* expected;
+    } cases[] = {
+        {VIS_VISIBLE, "visible"},
+        {VIS_HIDDEN, "hidden"},
+        {VIS_COLLAPSE, "collapse"},
+    };
+
+    for (const VisibilityCase& test_case : cases) {
+        in_line.visibility = test_case.value;
+        char value[32];
+        ASSERT_TRUE(css_prop_serialize_computed(
+            &element, CSS_PROPERTY_VISIBILITY, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, test_case.expected);
+    }
+}
+
 // Helper: set up a stylesheet with one @keyframes rule on a doc
 static void setup_keyframes_sheet(DomDocument* doc, CssStylesheet* sheet,
                                    CssRule* rule, CssRule** rule_ptr,

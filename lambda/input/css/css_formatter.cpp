@@ -390,6 +390,38 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
     // This function just appends to the formatter's output buffer
 }
 
+const char* css_serialize_declaration_value(CssDeclaration* declaration, Pool* pool) {
+    if (!declaration || !pool) return "";
+
+    bool is_custom = declaration->property_id == CSS_PROPERTY_CUSTOM ||
+        (declaration->property_name && declaration->property_name[0] == '-' &&
+         declaration->property_name[1] == '-');
+    bool has_var = declaration->value_text && strstr(declaration->value_text, "var(");
+    bool raw_needs_escape_resolution = declaration->value_text &&
+        declaration->value_text_len > 0 &&
+        memchr(declaration->value_text, '\\', declaration->value_text_len);
+
+    if ((is_custom || has_var) && declaration->value_text &&
+        declaration->value_text_len > 0 && !raw_needs_escape_resolution) {
+        return declaration->value_text;
+    }
+
+    if (declaration->value) {
+        CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        if (formatter) {
+            formatter->options.quote_urls = !is_custom;
+            // CSSOM serializes parsed component values; raw source would retain
+            // non-canonical numbers, whitespace, escapes, and unclosed functions.
+            css_format_value_with_property(
+                formatter, declaration->value, declaration->property_id);
+            String* result = stringbuf_to_string(formatter->output);
+            if (result) return result->chars;
+        }
+    }
+
+    return declaration->value_text ? declaration->value_text : "";
+}
+
 // ============================================================================
 // Declaration Formatting
 // ============================================================================

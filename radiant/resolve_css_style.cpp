@@ -114,17 +114,18 @@ static float resolve_filter_amount(const CssValue* value, bool clamp_unit_interv
     return amount;
 }
 
-static bool font_shorthand_overrides_longhand(LayoutContext* lycon,
-                                              const CssDeclaration* longhand,
-                                              const char* longhand_name) {
+static bool shorthand_overrides_longhand(LayoutContext* lycon,
+                                         CssPropertyId shorthand_id,
+                                         const CssDeclaration* longhand,
+                                         const char* longhand_name) {
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
     if (!elem || !elem->specified_style) return false;
     CssDeclaration* shorthand = style_tree_get_declaration(
-        elem->specified_style, CSS_PROPERTY_FONT);
+        elem->specified_style, shorthand_id);
     // shorthand components and longhands compete in the same cascade, including specificity.
     if (!shorthand || css_declaration_cascade_compare(shorthand, longhand) <= 0) return false;
-    log_debug("[CSS] Skipping %s: font shorthand wins cascade (order=%u vs %u)",
-              longhand_name, shorthand->source_order, longhand->source_order);
+    log_debug("[CSS] Skipping %s: shorthand %d wins cascade (order=%u vs %u)",
+              longhand_name, shorthand_id, shorthand->source_order, longhand->source_order);
     return true;
 }
 
@@ -6187,7 +6188,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_SIZE: {
             log_debug("[CSS] Processing font-size property");
-            if (font_shorthand_overrides_longhand(lycon, decl, "font-size")) break;
+            if (shorthand_overrides_longhand(
+                    lycon, CSS_PROPERTY_FONT, decl, "font-size")) break;
             span->ensure_font(lycon);
 
             float font_size = 0.0f;  bool valid = false;
@@ -6289,7 +6291,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_WEIGHT: {
             log_debug("[CSS] Processing font-weight property");
-            if (font_shorthand_overrides_longhand(lycon, decl, "font-weight")) break;
+            if (shorthand_overrides_longhand(
+                    lycon, CSS_PROPERTY_FONT, decl, "font-weight")) break;
             span->ensure_font(lycon);
             // map CSS font weight to enum and preserve numeric value
             span->font->font_weight = map_font_weight(value);
@@ -6299,7 +6302,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_FAMILY: {
             log_debug("[CSS] Processing font-family property");
-            if (font_shorthand_overrides_longhand(lycon, decl, "font-family")) break;
+            if (shorthand_overrides_longhand(
+                    lycon, CSS_PROPERTY_FONT, decl, "font-family")) break;
             span->ensure_font(lycon);
 
 
@@ -6344,7 +6348,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             log_debug("[CSS] Processing line-height property");
-            if (font_shorthand_overrides_longhand(lycon, decl, "line-height")) break;
+            if (shorthand_overrides_longhand(
+                    lycon, CSS_PROPERTY_FONT, decl, "line-height")) break;
             ensure_span_block(lycon, span);
             span->blk->line_height = value;  // Store CssValue*, resolve during layout
             break;
@@ -7126,6 +7131,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_BACKGROUND_COLOR: {
             log_debug("[CSS] Processing background-color property (value type=%d)", value->type);
+            // The property tree resolves background before background-color;
+            // preserve the shorthand's higher cascade priority across that boundary.
+            if (shorthand_overrides_longhand(
+                    lycon, CSS_PROPERTY_BACKGROUND, decl, "background-color")) break;
             ensure_span_background(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD &&
                 value->data.keyword == CSS_VALUE_INHERIT) {
@@ -9362,7 +9371,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_STYLE: {
             log_debug("[CSS] Processing font-style property");
-            if (font_shorthand_overrides_longhand(lycon, decl, "font-style")) break;
+            if (shorthand_overrides_longhand(
+                    lycon, CSS_PROPERTY_FONT, decl, "font-style")) break;
             span->ensure_font(lycon);
             resolve_keyword_slot(value, &span->font_mut()->font_style, "font-style");
             break;
@@ -9456,7 +9466,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_FONT_VARIANT: {
             log_debug("[CSS] Processing font-variant property");
-            if (font_shorthand_overrides_longhand(lycon, decl, "font-variant")) break;
+            if (shorthand_overrides_longhand(
+                    lycon, CSS_PROPERTY_FONT, decl, "font-variant")) break;
             span->ensure_font(lycon);
 
 

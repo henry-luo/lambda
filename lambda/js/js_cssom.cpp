@@ -598,47 +598,6 @@ static const char* serialize_selector_text(CssRule* rule, Pool* pool) {
     return text ? text : "";
 }
 
-// =============================================================================
-// Helper: Serialize a declaration value to text
-// =============================================================================
-
-static const char* serialize_declaration_value(CssDeclaration* decl, Pool* pool) {
-    if (!decl || !pool) return "";
-
-    // for custom properties (--foo) or pending-substitution values (containing
-    // var()), prefer raw source text (preserves comments, blocks faithfully)
-    // unless it contains a backslash (needs escape resolution via parsed value)
-    bool is_custom = decl->property_id == CSS_PROPERTY_CUSTOM
-        || (decl->property_name && decl->property_name[0] == '-' && decl->property_name[1] == '-');
-    bool has_var = decl->value_text && strstr(decl->value_text, "var(");
-
-    if ((is_custom || has_var) && decl->value_text && decl->value_text_len > 0
-        && !memchr(decl->value_text, '\\', decl->value_text_len)) {
-        return decl->value_text;
-    }
-
-    if (decl->value_text && decl->value_text_len > 0) {
-        // CSSOM rule declarations expose authored strings. Setter-created
-        // declarations can carry parser value trees that are not safe to walk.
-        return decl->value_text;
-    }
-
-    // use parsed value only when no raw declaration text is available.
-    if (decl->value) {
-        CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
-        if (fmt) {
-            fmt->options.quote_urls = !is_custom;
-            css_format_value(fmt, decl->value);
-            String* result = stringbuf_to_string(fmt->output);
-            if (result && result->len > 0 != '\0') {
-                return result->chars;
-            }
-        }
-    }
-
-    return "";
-}
-
 static const char* copy_cssom_value_text(const char* value, Pool* pool) {
     if (!value || !pool) return "";
     size_t len = strlen(value);
@@ -657,9 +616,7 @@ static void append_rule_declaration_text(StringBuf* buf, CssDeclaration* decl, P
 
     stringbuf_append_str(buf, name);
     stringbuf_append_str(buf, ": ");
-    // CSSOM setters synthesize declarations from JS strings; their parsed value
-    // trees are not the serialization source of truth and can be unsafe to walk.
-    stringbuf_append_str(buf, serialize_declaration_value(decl, pool));
+    stringbuf_append_str(buf, css_serialize_declaration_value(decl, pool));
     if (decl->important) {
         stringbuf_append_str(buf, " !important");
     }
@@ -1077,7 +1034,7 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
     }
 
     if (last_match) {
-        const char* val = serialize_declaration_value(last_match, pool);
+        const char* val = css_serialize_declaration_value(last_match, pool);
         log_debug("js_cssom_rule_decl_get_property: '%s' -> '%s'", prop, val);
         return make_string_item(val);
     }
@@ -1169,8 +1126,8 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         log_debug("js_cssom_rule_decl_set_property: parse error for '%s: %s'", css_prop, val_str);
         return value;
     }
-    // Keep the JS-authored value as the CSSOM serialization source; parser
-    // value graphs are optimized for cascade/layout and may not be walkable.
+    // Retain authored token text for custom properties, var() values, and the
+    // parse-failure fallback; ordinary CSSOM reads use the parsed canonical value.
     new_decl->value_text = copy_cssom_value_text(val_str, pool);
     new_decl->value_text_len = strlen(new_decl->value_text);
 
@@ -1240,7 +1197,8 @@ extern "C" Item js_cssom_rule_decl_remove_property(Item decl_item, Item prop_arg
         if (prop_id != CSS_PROPERTY_UNKNOWN && d->property_id == prop_id) match = true;
         else if (d->property_name && strcmp(d->property_name, css_prop) == 0) match = true;
         if (match) {
-            const char* old_val = serialize_declaration_value(d, unwrap_rule_decl_pool(decl_item));
+            const char* old_val = css_serialize_declaration_value(
+                d, unwrap_rule_decl_pool(decl_item));
             // shift remaining declarations
             for (size_t j = i; j + 1 < rm_rule->data.style_rule.declaration_count; j++) {
                 rm_rule->data.style_rule.declarations[j] = rm_rule->data.style_rule.declarations[j + 1];

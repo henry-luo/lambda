@@ -87,6 +87,12 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
 void css_format_value(CssFormatter* formatter, CssValue* value);
 
 /**
+ * Serialize a parsed declaration value according to CSSOM rules.
+ * Custom properties retain raw token text unless escape normalization is needed.
+ */
+const char* css_serialize_declaration_value(CssDeclaration* declaration, Pool* pool);
+
+/**
  * Format a declaration (property: value) to string
  */
 const char* css_format_declaration(CssFormatter* formatter, CssPropertyId property_id, CssValue* value);

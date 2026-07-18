@@ -4075,35 +4075,16 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
             // on-demand matching for custom property
             CssDeclaration* decl = js_match_custom_property(elem, css_prop);
             if (decl && (decl->value || decl->value_text)) {
-                const char* val = nullptr;
-
-                // prefer raw source text (preserves comments, blocks) unless it
-                // contains a backslash (which needs escape resolution via parsed value)
-                bool use_raw = decl->value_text && decl->value_text_len > 0
-                    && !memchr(decl->value_text, '\\', decl->value_text_len);
-                if (use_raw) {
-                    val = decl->value_text;
-                } else if (decl->value) {
-                    Pool* pool = elem->doc ? elem->doc->pool : nullptr;
-                    if (!pool) return (Item){.item = s2it(heap_create_name(""))};
-                    CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
-                    if (!fmt) return (Item){.item = s2it(heap_create_name(""))};
-                    css_format_value(fmt, decl->value);
-                    String* result = stringbuf_to_string(fmt->output);
-                    val = result ? result->chars : "";
-                } else if (decl->value_text && decl->value_text_len > 0) {
-                    val = decl->value_text;
-                }
+                Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+                if (!pool) return (Item){.item = s2it(heap_create_name(""))};
+                const char* val = css_serialize_declaration_value(decl, pool);
                 if (!val) val = "";
                 // trim leading/trailing whitespace per CSS spec
                 while (*val == ' ' || *val == '\t' || *val == '\n' || *val == '\r') val++;
                 size_t vlen = strlen(val);
                 while (vlen > 0 && (val[vlen-1] == ' ' || val[vlen-1] == '\t' || val[vlen-1] == '\n' || val[vlen-1] == '\r')) vlen--;
-                Pool* pool = elem->doc ? elem->doc->pool : nullptr;
-                if (pool) {
-                    char* trimmed = (char*)pool_alloc(pool, vlen + 1);
-                    if (trimmed) { memcpy(trimmed, val, vlen); trimmed[vlen] = '\0'; val = trimmed; }
-                }
+                char* trimmed = (char*)pool_alloc(pool, vlen + 1);
+                if (trimmed) { memcpy(trimmed, val, vlen); trimmed[vlen] = '\0'; val = trimmed; }
 
                 // resolve var() references in the value
                 if (val && strstr(val, "var(")) {
@@ -11066,85 +11047,12 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
         return (Item){.item = s2it(heap_create_name(""))};
     }
 
-    if (decl->value_text && decl->value_text_len > 0) {
-        // JS style writes preserve authored text; return it directly because
-        // parser value graphs may be layout-only and unsafe for CSSOM reads.
-        return (Item){.item = s2it(heap_create_name(decl->value_text))};
-    }
-
-    if (!decl->value) {
+    Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+    if (!pool) {
         return (Item){.item = s2it(heap_create_name(""))};
     }
-
-    // convert the CSS value back to a string
-    CssValue* val = decl->value;
-    switch (val->type) {
-        case CSS_VALUE_TYPE_KEYWORD: {
-            const CssEnumInfo* info = css_enum_info(val->data.keyword);
-            if (info && info->name) {
-                return (Item){.item = s2it(heap_create_name(info->name))};
-            }
-            break;
-        }
-        case CSS_VALUE_TYPE_LENGTH: {
-            char buf[64];
-            const char* unit_str = "";
-            switch (val->data.length.unit) {
-                case CSS_UNIT_PX: unit_str = "px"; break;
-                case CSS_UNIT_EM: unit_str = "em"; break;
-                case CSS_UNIT_REM: unit_str = "rem"; break;
-                case CSS_UNIT_PERCENT: unit_str = "%"; break;
-                case CSS_UNIT_VW: unit_str = "vw"; break;
-                case CSS_UNIT_VH: unit_str = "vh"; break;
-                case CSS_UNIT_CM: unit_str = "cm"; break;
-                case CSS_UNIT_MM: unit_str = "mm"; break;
-                case CSS_UNIT_IN: unit_str = "in"; break;
-                case CSS_UNIT_PT: unit_str = "pt"; break;
-                case CSS_UNIT_PC: unit_str = "pc"; break;
-                default: unit_str = "px"; break;
-            }
-            double v = val->data.length.value;
-            if (v == (int)v) {
-                snprintf(buf, sizeof(buf), "%d%s", (int)v, unit_str);
-            } else {
-                snprintf(buf, sizeof(buf), "%g%s", v, unit_str);
-            }
-            return (Item){.item = s2it(heap_create_name(buf))};
-        }
-        case CSS_VALUE_TYPE_PERCENTAGE: {
-            char buf[64];
-            double v = val->data.percentage.value;
-            if (v == (int)v) {
-                snprintf(buf, sizeof(buf), "%d%%", (int)v);
-            } else {
-                snprintf(buf, sizeof(buf), "%g%%", v);
-            }
-            return (Item){.item = s2it(heap_create_name(buf))};
-        }
-        case CSS_VALUE_TYPE_NUMBER: {
-            char buf[64];
-            if (val->data.number.is_integer) {
-                snprintf(buf, sizeof(buf), "%d", (int)val->data.number.value);
-            } else {
-                snprintf(buf, sizeof(buf), "%g", val->data.number.value);
-            }
-            return (Item){.item = s2it(heap_create_name(buf))};
-        }
-        case CSS_VALUE_TYPE_STRING:
-            if (val->data.string) {
-                return (Item){.item = s2it(heap_create_name(val->data.string))};
-            }
-            break;
-        case CSS_VALUE_TYPE_CUSTOM:
-            if (val->data.custom_property.name) {
-                return (Item){.item = s2it(heap_create_name(val->data.custom_property.name))};
-            }
-            break;
-        default:
-            break;
-    }
-
-    return (Item){.item = s2it(heap_create_name(""))};
+    const char* serialized = css_serialize_declaration_value(decl, pool);
+    return (Item){.item = s2it(heap_create_name(serialized ? serialized : ""))};
 }
 
 // open-name membership for style hosts: `in` answers from the CSS property

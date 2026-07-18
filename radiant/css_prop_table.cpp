@@ -227,6 +227,22 @@ static bool serialize_display(const CssPropAccessor*, DomElement* element, int p
     return copy_text(out, out_size, info && info->name ? info->name : "block");
 }
 
+static bool serialize_visibility(const CssPropAccessor*, DomElement* element,
+                                 int pseudo_type, char* out, size_t out_size) {
+    if (!element || pseudo_type != 0) return false;
+    const InlineProp* in_line = element->inl();
+    Visibility visibility = in_line
+        ? (Visibility)in_line->visibility : VIS_VISIBLE;
+    // Visibility is a compact render enum, not a CssEnum; indexing the CSS
+    // keyword table with it serialized VIS_HIDDEN as the unrelated "_length".
+    switch (visibility) {
+        case VIS_HIDDEN: return copy_text(out, out_size, "hidden");
+        case VIS_COLLAPSE: return copy_text(out, out_size, "collapse");
+        case VIS_VISIBLE:
+        default: return copy_text(out, out_size, "visible");
+    }
+}
+
 static bool serialize_used_size(const CssPropAccessor* accessor, DomElement* element,
                                 int pseudo_type, char* out, size_t out_size) {
     if (!accessor || !element || pseudo_type != 0) return false;
@@ -299,6 +315,30 @@ static bool serialize_color_prop(const CssPropAccessor*, DomElement* element, in
     Color color = inl->color;
     if (!inl->has_color) { color.r = color.g = color.b = 0; color.a = 255; }
     return format_color(out, out_size, color);
+}
+
+static bool serialize_background_color(const CssPropAccessor*, DomElement* element,
+                                       int pseudo_type, char* out, size_t out_size) {
+    if (!element || pseudo_type != 0) return false;
+    const BoundaryProp* boundary = element->boundary();
+    if (boundary && boundary->background) {
+        return format_color(out, out_size, boundary->background->color);
+    }
+
+    CssDeclaration* longhand = computed_decl(
+        element, CSS_PROPERTY_BACKGROUND_COLOR, pseudo_type);
+    CssDeclaration* shorthand = computed_decl(
+        element, CSS_PROPERTY_BACKGROUND, pseudo_type);
+    // A shorthand and its longhand occupy separate style-tree nodes; compare
+    // them before layout so computed style cannot expose the losing longhand.
+    if (shorthand && (!longhand ||
+        css_declaration_cascade_compare(shorthand, longhand) > 0)) {
+        if (format_decl_color(element, shorthand->value, out, out_size)) return true;
+    }
+    return longhand
+        ? format_css_value(element, CSS_PROPERTY_BACKGROUND_COLOR,
+                           longhand->value, out, out_size)
+        : copy_text(out, out_size, "rgba(0, 0, 0, 0)");
 }
 
 static bool serialize_minmax(const CssPropAccessor* accessor, DomElement* element,
@@ -391,7 +431,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DIRECT_ROW(CSS_PROPERTY_CLEAR, PROP_GROUP_POSITION, PositionProp, clear, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_OVERFLOW_X, PROP_GROUP_SCROLL, ScrollProp, overflow_x, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_OVERFLOW_Y, PROP_GROUP_SCROLL, ScrollProp, overflow_y, CSS_PROP_VALUE_ENUM, 0),
-    DIRECT_ROW(CSS_PROPERTY_VISIBILITY, PROP_GROUP_INLINE, InlineProp, visibility, CSS_PROP_VALUE_ENUM, 0),
+    DERIVED_ROW(CSS_PROPERTY_VISIBILITY, serialize_visibility, 0),
     DERIVED_ROW(CSS_PROPERTY_WIDTH, serialize_used_size, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_HEIGHT, serialize_used_size, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_MIN_WIDTH, serialize_minmax, CSS_PROP_ACCESSOR_USED_VALUE),
@@ -435,7 +475,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DECL_ROW(CSS_PROPERTY_GAP),
     DECL_ROW(CSS_PROPERTY_ROW_GAP),
     DECL_ROW(CSS_PROPERTY_COLUMN_GAP),
-    DECL_ROW(CSS_PROPERTY_BACKGROUND_COLOR),
+    DERIVED_ROW(CSS_PROPERTY_BACKGROUND_COLOR, serialize_background_color, 0),
     DECL_ROW(CSS_PROPERTY_BORDER_TOP_WIDTH),
     DECL_ROW(CSS_PROPERTY_BORDER_RIGHT_WIDTH),
     DECL_ROW(CSS_PROPERTY_BORDER_BOTTOM_WIDTH),

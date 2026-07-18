@@ -210,6 +210,23 @@ TEST_F(CssFormatterUnitTest, FormatValue_KeywordInherit) {
     EXPECT_STREQ(result, "inherit");
 }
 
+TEST_F(CssFormatterUnitTest, CssomDeclarationValueCanonicalizesParsedTokens) {
+    CssStylesheet* stylesheet = ParseStylesheet(
+        ".x { line-height: 1.0; width: .1px; background-image: url( \"foo\" ); }");
+    ASSERT_NE(stylesheet, nullptr);
+    ASSERT_EQ(stylesheet->rule_count, 1u);
+    CssRule* rule = stylesheet->rules[0];
+    ASSERT_NE(rule, nullptr);
+    ASSERT_EQ(rule->data.style_rule.declaration_count, 3u);
+
+    EXPECT_STREQ(css_serialize_declaration_value(
+        rule->data.style_rule.declarations[0], pool.get()), "1");
+    EXPECT_STREQ(css_serialize_declaration_value(
+        rule->data.style_rule.declarations[1], pool.get()), "0.1px");
+    EXPECT_STREQ(css_serialize_declaration_value(
+        rule->data.style_rule.declarations[2], pool.get()), "url(\"foo\")");
+}
+
 TEST_F(CssFormatterUnitTest, FormatValue_LengthPixels) {
     auto formatter = CreateFormatter();
     auto value = CreateLengthValue(10.0, CSS_UNIT_PX);
