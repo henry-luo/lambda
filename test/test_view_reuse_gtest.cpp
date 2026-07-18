@@ -391,6 +391,27 @@ TEST_F(StyleEpochTest, ExactRecipesBindOneCanonicalTreeWithoutElementClones) {
     EXPECT_GT(stats.current_reserved_bytes, 0u);
 }
 
+TEST_F(StyleEpochTest, InvalidLaterDeclarationPreservesLastValidValue) {
+    DomElement* child = append("child");
+    CssRule* valid_height = rule(CSS_PROPERTY_HEIGHT,
+        css_value_create_length(doc.document_pool, 40.0, CSS_UNIT_PX));
+    CssRule* invalid_height = rule(CSS_PROPERTY_HEIGHT,
+        css_value_create_length(doc.document_pool, -1.0, CSS_UNIT_PX), 2);
+
+    ASSERT_TRUE(style_epoch_cascade_begin(
+        &doc, document_root, &engine, false));
+    EXPECT_EQ(dom_element_apply_rule(child, valid_height, {}), 1);
+    EXPECT_EQ(dom_element_apply_rule(child, invalid_height, {}), 0);
+    style_epoch_cascade_end(&doc);
+
+    CssDeclaration* winner = dom_element_get_specified_value(
+        child, CSS_PROPERTY_HEIGHT);
+    ASSERT_NE(winner, nullptr);
+    ASSERT_NE(winner->value, nullptr);
+    EXPECT_EQ(winner->value->type, CSS_VALUE_TYPE_LENGTH);
+    EXPECT_DOUBLE_EQ(winner->value->data.length.value, 40.0);
+}
+
 TEST_F(StyleEpochTest, ForcedHashCollisionStillRequiresExactRecipeEquality) {
     DomElement* first = append("first");
     DomElement* second = append("second");
