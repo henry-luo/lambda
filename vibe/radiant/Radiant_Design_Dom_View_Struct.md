@@ -1,6 +1,6 @@
 # Radiant Design: DOM/View Struct Refactoring
 
-Status: **DRAFT for review** — decisions DV1–DV15 proposed, sizes measured 2026-07-18.
+Status: **DV1–DV15 IMPLEMENTED** (campaign complete — see impl plan §10/§16); **DV16 (construction convention) proposed 2026-07-18 as follow-up**, implementation = impl plan P7.
 Scope: `dom_node.hpp`, `dom_element.hpp` (lambda/input/css/), `radiant/view.hpp`, `radiant/layout.hpp`.
 Follows: header consolidation (`vibe/radiant/Radiant_Imp_Code_Dedup.md`), robustness design (T7 stale-View), memory design (R1–R7).
 
@@ -174,6 +174,31 @@ Interning identical prop groups across elements is the natural next phase. This 
 - Uniform size keeps pool allocation/recycling trivial and fragmentation-free.
 The existing `static_assert(sizeof(View*) == sizeof(DomElement))` wall is this decision's enforcement; it stays.
 
+### DV16 — Construction convention: no C++ constructors; static `create()` member functions  *(follow-up; impl plan P7)*
+All C++ constructors on `DomNode`, `DomText`, `DomComment`, `DomElement` are **removed**. Node creation is one static member function per type that combines allocation and initialization in one place:
+
+```cpp
+// contract: storage comes zeroed (arena_calloc); create() stores ONLY the
+// non-zero fields — null/0 fields are never written again.
+static DomElement* DomElement::create(DomDocument* doc, const char* tag_name, Element* backing);
+static DomText*    DomText::create(String* str, DomElement* parent);
+static DomComment* DomComment::create(Element* backing, DomElement* parent);
+```
+
+Rationale (evidence 2026-07-18, still true post-campaign):
+- **The constructors never run in production.** All real allocation paths (`dom_element_create`, `mark_builder.cpp` UI mode, `lambda-data-runtime.cpp`) do `arena_calloc` + sparse manual stores; the lengthy init lists execute only for stack/test objects.
+- **They have already drifted from the real paths**: the `DomElement` ctor sets `display{CSS_VALUE_NONE}` (non-zero) while `dom_element_init` (dom_element.cpp:307) sets `{CSS_VALUE__UNDEF}` (=0, "critical for table elements"); `DomNode`'s ctor sets `inline_line_number = −1` vs the arena paths' 0. Parallel init lists are a standing divergence hazard; `create()` makes there be exactly one.
+- **Zero + sparse stores is also the fastest form**: no ~500-B template read (vs memcpy-from-default), no redundant zero writes (vs constructor); arena pages are often pre-zeroed by the OS.
+
+Rules:
+- `create()` assumes zeroed storage as a stated contract (allocator must be a calloc/zeroing arena).
+- Guarded by `static_assert(std::is_trivially_copyable_v<T>)` per node type; a member that would break triviality is a design change requiring amendment here.
+- Existing `dom_*_create` free functions become one-line C-ABI shims over the static members (JS bridge/Jube linkage only), or are absorbed where nothing external links them.
+- Stack-allocated/test uses migrate to `create()` on an arena, or `T x = {};` + the same sparse-defaults helper — never a hand-written field list.
+- The `display` (NONE vs `__UNDEF`) and `inline_line_number` (−1 vs 0) divergences are resolved to one canonical value each; the arena paths are the de facto behavior and win unless a consumer proves otherwise.
+- **Net LOC must decrease**: this is pure consolidation (four init lists + per-site duplicated stores → one `create()` per type); a LOC-positive outcome means an old init path was not fully retired.
+
+**This is the normative C+ struct-based construction method** for DOM/view node types, complementing DV4's memcpy-from-canonical-default for prop groups — the same "canonical defaults" principle with the implementation chosen by default density (nodes: ~all-zero → zero + sparse stores; prop groups: dense CSS initials → template copy). `doc/dev/C_Plus_Convention.md` gets a section recording the pattern once P7 lands.
 
 ---
 

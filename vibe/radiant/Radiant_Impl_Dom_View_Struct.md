@@ -2,10 +2,10 @@
 
 **Date:** 2026-07-18
 **Baseline commit:** `019f47214`
-**Parent design:** `vibe/radiant/Radiant_Design_Dom_View_Struct.md` — decisions DV1–DV15, findings F1–F8, target sketch (§4). This doc turns those into execution-grade tasks.
+**Parent design:** `vibe/radiant/Radiant_Design_Dom_View_Struct.md` — decisions DV1–DV16, findings F1–F8, target sketch (§4). This doc turns those into execution-grade tasks.
 **Related:** `vibe/radiant/Radiant_Imp_Code_Dedup.md` (header consolidation), `vibe/radiant/Radiant_Design_Robustness.md` (T7 stale-View), `vibe/Lambda_Jube_DOM3.md` (property-table dispatch), `doc/dev/C_Plus_Convention.md`.
 
-**Campaign status:** complete. All implementation phases and refactor-specific acceptance gates are complete; repository-wide baseline defects encountered by the aggregate gate are isolated and recorded in §16.
+**Campaign status:** P0–P6 complete. All implementation phases and refactor-specific acceptance gates are complete; repository-wide baseline defects encountered by the aggregate gate are isolated and recorded in §16. **P7 (DV16 constructor retirement, added 2026-07-18) is a follow-up phase — not started.**
 
 ---
 
@@ -188,6 +188,37 @@ Order chosen so each task's measurement is attributable. Run `size_probe` + reco
 
 ---
 
+## P7 — Constructor retirement: static `create()` construction  **[DV16 — follow-up, NOT STARTED]**
+
+*(Added 2026-07-18 after campaign completion. The P0–P6 campaign left the C++ constructors untouched; they remain a fourth init path that production never runs and that has already drifted from the real ones. This phase establishes the C+ struct-based construction convention.)*
+
+**LOC expectation (ground rule 7): P7 must come out net-negative.** It is pure consolidation — four constructor init lists plus the duplicated field stores at every allocation site (`dom_element_create`/`dom_element_init`, `mark_builder.cpp`, `lambda-data-runtime.cpp`) collapse into one `create()` per type; nothing new is added except those functions. Verify with `verify_loc_reduction.sh --ref <pre-P7 commit>` over the touched set at phase end; a positive reading means an old init path wasn't fully retired.
+
+### P7.1 — Remove the constructors
+- Delete the constructor init lists on `DomNode` (dom_node.hpp:186), `DomText` (:236), `DomComment` (:376), `DomElement` (dom_element.hpp:702). The structs become trivially constructible; add `static_assert(std::is_trivially_copyable_v<T>)` for each node type next to the existing overlay/size asserts.
+- **Pre-audit:** find every site that currently relies on a constructor running — stack/local declarations (`DomElement el;`, `DomText t;`), any placement `new`, any `{}`-value-init that assumed ctor defaults (grep + compile-probe: temporarily `= delete` the ctors and let the compiler enumerate). Expected: tests + the `dom_element_init` "stack-allocated" path only.
+- `DomNode`'s protected ctor was also what made the types non-standard-layout — after removal, revisit the `-Winvalid-offsetof` pragma block in `dom_element.hpp` (it may become unnecessary; delete it if so).
+
+### P7.2 — Static `create()` member functions
+- One per type, **combining `arena_calloc` + sparse non-zero stores in a single function** — the zeroed-storage contract stated in the function comment; null/0 fields are never written again:
+  - `DomElement::create(DomDocument*, const char* tag_name, Element* backing)` — absorbs `dom_element_create` + the field-init half of `dom_element_init` (the non-zero stores: `node_type`, node id, `doc`, `display = {CSS_VALUE__UNDEF, …}`, tag retain/id, `specified_style` tree, `ELMT_FLAG_SYNTHETIC` handling).
+  - `DomText::create(String*, DomElement* parent)` / `DomText::create_detached(String*, DomDocument*)` — absorbs `dom_text_create*`.
+  - `DomComment::create(Element*, DomElement* parent)` / `create_detached` — absorbs `dom_comment_create*`.
+  - `mark_builder.cpp` UI-mode and `lambda-data-runtime.cpp` allocation sites call the same `create()` (or a `create_in(Arena*)` variant where no `DomDocument` exists yet) — **no site keeps its own field list**.
+- Existing `dom_*_create` free functions: keep only those the JS bridge/Jube links as one-line shims; delete the rest (grep `js_dom.cpp` + `sys_func_registry.c` for the live set).
+- `dom_element_init` survives only if a genuine re-init-in-place consumer remains after the audit; otherwise it folds into `create()` and is deleted.
+
+### P7.3 — Resolve the init divergences (canonical values)
+- `display`: ctor's `CSS_VALUE_NONE` vs `dom_element_init`'s `CSS_VALUE__UNDEF` (=0, dom_element.cpp:307 — "critical for table elements"). Canonical: **`CSS_VALUE__UNDEF`** (the arena paths' de facto behavior). Root-cause comment at the store.
+- `inline_line_number`: `DomNode` ctor's −1 vs arena paths' 0. Audit consumers of the −1 sentinel (`inline_line_number >= 0` style checks); pick the arena paths' 0 unless a consumer proves the sentinel is load-bearing, in which case `create()` sets −1 explicitly (it is then a documented non-zero default, not a divergence).
+- Gate: baseline 100% — any diff traces directly to one of these two values.
+
+### P7.4 — Record the convention
+- Add a "Struct construction" section to `doc/dev/C_Plus_Convention.md`: *nodes and pool-allocated structs use static `create()` (zeroed storage + sparse non-zero stores, no C++ constructors); prop groups use `ensure_*()` (lazy alloc + memcpy from canonical default, DV4). Implementation chosen by default density.*
+- LOC: net negative (four init lists + duplicated allocation-path field stores → one `create()` per type). Gates: `make build`, `make test-radiant-baseline` 100%, `make layout suite=baseline` clean, `verify_loc_reduction.sh` over the touched set.
+
+---
+
 ## 7. Size + LOC tracking (updated per phase; LOC = `verify_loc_reduction.sh --ref 019f47214` cumulative net)
 
 | Milestone | `DomNode` | `DomText` | `DomElement` | net LOC | Notes |
@@ -234,6 +265,7 @@ Order chosen so each task's measurement is attributable. Run `size_probe` + reco
 | P4 | complete | The immutable 78-row computed-style table, flush entry, JS routing, unsupported-property logging, gtests, and live mutation UI fixture landed. |
 | P5 | complete | Tree/attribute operations are methods and obsolete wrappers have zero callers. Scratch fields were moved where a stable owner exists; the explicitly allowed tagged deferrals are recorded in §14. |
 | P6 | complete | JS runtime, viewport, reconcile, and opaque service state are grouped under named `DomDocument` sub-structures. |
+| P7 | **not started** | DV16 constructor retirement (added 2026-07-18): remove node constructors, static `create()` = `arena_calloc` + sparse non-zero stores, resolve `display`/`inline_line_number` init divergences, record convention in `C_Plus_Convention.md`. |
 
 ## 11. P1 shared-group alias ledger
 
