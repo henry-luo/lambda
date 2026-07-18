@@ -106,7 +106,7 @@ static WebViewHandle* focused_layer_webview_handle(View* focused) {
     // only block views can carry an embedded layer during that interval.
     if (!focused || !focused->is_element() || !focused->is_block()) return nullptr;
     ViewBlock* block = lam::view_require_block(focused);
-    WebViewProp* webview = block->embed ? block->embed->webview : nullptr;
+    WebViewProp* webview = block->embed ? block->embedp()->webview : nullptr;
     return webview && webview->mode == WEBVIEW_MODE_LAYER ? webview->handle : nullptr;
 }
 
@@ -541,10 +541,10 @@ static bool sync_viewport_scroll_state(EventContext* evcon) {
     }
 
     ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
-    if (!root_block->scroller || !root_block->scroller->pane) return false;
+    if (!root_block->scroller || !root_block->scroll()->pane) return false;
 
     float scroll_x = 0.0f, scroll_y = 0.0f;
-    scroll_state_get_position_for_view(state, static_cast<View*>(root_block), root_block->scroller->pane,
+    scroll_state_get_position_for_view(state, static_cast<View*>(root_block), root_block->scroll()->pane,
                                        &scroll_x, &scroll_y, NULL, NULL);
 
     // Keep viewport scroll in the centralized state store and the document
@@ -686,9 +686,9 @@ static DomDocument* event_context_find_focused_document_in_view(View* view,
          view->view_type == RDT_VIEW_LIST_ITEM) &&
         view->is_element()) {
         ViewBlock* block = lam::view_require_block(view);
-        if (block->embed && block->embed->doc) {
+        if (block->embed && block->embedp()->doc) {
             DomDocument* found = event_context_find_focused_document(
-                block->embed->doc, (uint8_t)(depth + 1));
+                block->embedp()->doc, (uint8_t)(depth + 1));
             if (found) return found;
         }
     }
@@ -806,7 +806,7 @@ static void target_positioned_children(EventContext* evcon, ViewBlock* block) {
 }
 
 static void target_custom_layout_children(EventContext* evcon, ViewBlock* block) {
-    if (!evcon || !block || !block->custom_layout_paint) return;
+    if (!evcon || !block || !block->custom_layout_paint_prop()) return;
     RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
     // Generated SVG layers are non-interactive, but their position in this
     // sequence determines which authored child is visually topmost.
@@ -909,8 +909,7 @@ static bool text_target_allows_caret(View* target) {
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = lam::dom_require_element(node);
-            if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                elem->form && form_control_is_disabled(elem->doc ? elem->doc->state : NULL, static_cast<View*>(elem))) {
+            if (elem->form_control() && form_control_is_disabled(elem->doc ? elem->doc->state : NULL, static_cast<View*>(elem))) {
                 return false;
             }
             if (elem->has_attribute("data-editable")) return true;
@@ -1057,7 +1056,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // target the scrollbars first
     View* view = NULL;
     bool hover = false;
-    if (block->scroller && block->scroller->pane) {
+    if (block->scroller && block->scroll_mut()->pane) {
         hover = scrollpane_target(evcon, block);
         if (hover) {
             log_debug("hit on block scroll: %s", block->node_name());
@@ -1073,7 +1072,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         DocState* state = event_view_owner_state(static_cast<View*>(block));
         if (!state) state = event_context_target_state(evcon);
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroller->pane,
+        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
                                            &scroll_x, &scroll_y, NULL, NULL);
         evcon->block.x -= scroll_x;
         evcon->block.y -= scroll_y;
@@ -1082,8 +1081,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     // Check if this block is a child-window webview — stop hit-testing here.
     // In child-window mode, the OS delivers events directly to the native web view.
     // Radiant should not process events that land inside the webview area.
-    if (block->embed && block->embed->webview &&
-        block->embed->webview->mode == WEBVIEW_MODE_WINDOW) {
+    if (block->embed && block->embedp()->webview &&
+        block->embedp()->webview->mode == WEBVIEW_MODE_WINDOW) {
         float bx = evcon->block.x, by = evcon->block.y;
         MousePositionEvent* mev = &evcon->event.mouse_position;
         if (bx <= mev->x && mev->x < bx + block->width &&
@@ -1102,7 +1101,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // Positioned content paints after a custom layout's local signed-z sequence.
     // Hit testing must consume those same layers in exact reverse paint order.
-    if (block->custom_layout_paint) {
+    if (block->custom_layout_paint_prop()) {
         target_positioned_children(evcon, block);
         if (evcon->target) goto RETURN;
         target_custom_layout_children(evcon, block);
@@ -1118,9 +1117,9 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // Layer-mode webview: Radiant owns events but forwards them to the offscreen web view.
     // Set target to the webview block and inject the mouse event.
-    if (block->embed && block->embed->webview &&
-        block->embed->webview->mode == WEBVIEW_MODE_LAYER &&
-        block->embed->webview->handle) {
+    if (block->embed && block->embedp()->webview &&
+        block->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
+        block->embedp()->webview->handle) {
         float bx = evcon->block.x, by = evcon->block.y;
         MousePositionEvent* mev = &evcon->event.mouse_position;
         if (bx <= mev->x && mev->x < bx + block->width &&
@@ -1134,7 +1133,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             float local_x = mev->x - bx;
             float local_y = mev->y - by;
             // mouse type: 2=mousemove for hover, 3=click for press (injected on actual click)
-            webview_layer_platform_inject_mouse(block->embed->webview->handle,
+            webview_layer_platform_inject_mouse(block->embedp()->webview->handle,
                 2, local_x, local_y, 0, 0);
             goto RETURN;
         }
@@ -1142,8 +1141,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     // Check if this block contains an embedded iframe document
     // If so, target into the iframe's document instead of treating it as a normal block
-    if (block->embed && block->embed->doc) {
-        DomDocument* iframe_doc = block->embed->doc;
+    if (block->embed && block->embedp()->doc) {
+        DomDocument* iframe_doc = block->embedp()->doc;
         if (iframe_doc->view_tree && iframe_doc->view_tree->root) {
             log_debug("targeting into iframe embedded document: %s", block->node_name());
 
@@ -1173,7 +1172,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
 
     // target static positioned children
-    view = block->custom_layout_paint ? nullptr : block->first_child;
+    view = block->custom_layout_paint_prop() ? nullptr : block->first_child;
     if (view) {
         target_children(evcon, view);
         bool rich_host_margin_hit_allowed = event_inside_block(evcon, block);
@@ -1299,8 +1298,8 @@ void fire_text_event(EventContext* evcon, ViewText* text) {
 
 void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     log_debug("fire inline event");
-    if (span->in_line && span->in_line->cursor) {
-        evcon->new_cursor = span->in_line->cursor;
+    if (span->in_line && span->inl()->cursor) {
+        evcon->new_cursor = span->inl()->cursor;
     }
     uintptr_t name = span->tag();
     log_debug("fired at view %s", span->node_name());
@@ -1335,9 +1334,9 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     log_debug("fire block event");
     // fire as inline view first
     fire_inline_event(evcon, lam::view_require_element(block));
-    if (block->scroller && block->scroller->pane) {
+    if (block->scroller && block->scroll_mut()->pane) {
         if (evcon->event.type == RDT_EVENT_SCROLL) {
-            if (scrollpane_scroll(evcon, block, block->scroller->pane)) {
+            if (scrollpane_scroll(evcon, block, block->scroll()->pane)) {
                 // Native wheel scrolling mutates the pane outside JS; dispatch
                 // the non-bubbling element scroll event that virtualizers observe.
                 radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
@@ -1681,7 +1680,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
             int val_len = 0;
             if (target && target->is_element()) {
                 DomElement* el = lam::dom_require_element(target);
-                if (el->item_prop_type == DomElement::ITEM_PROP_FORM && el->form) {
+                if (el->form_control()) {
                     val = el->form->value;
                     val_len = val ? (int)strlen(val) : 0;
                     if (val && byte_off > 0) {
@@ -1936,7 +1935,7 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
     DomDocument* doc = g_emit_handler_ctx->doc;
     if (!doc->root) return ItemNull;
 
-    // find the DomElement whose native_element matches result_node.element
+    // find the DomElement whose embedded Lambda backing matches result_node.element
     // by walking from the original click target upward
     DomNode* node = static_cast<DomNode*>(g_emit_handler_ctx->target);
     bool found_self = false;
@@ -1944,9 +1943,9 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* dom_elem = lam::dom_require_element(node);
-            if (dom_elem->native_element) {
+            if (!dom_elem->is_synthetic()) {
                 Item item;
-                item.element = dom_elem->native_element;
+                item.element = dom_element_to_element(dom_elem);
 
                 // skip the current handler's template (we want PARENT)
                 RenderMapLookup lookup;
@@ -2021,7 +2020,7 @@ extern "C" Item dispatch_set_selection(Item selection) {
 /**
  * Dispatch a Lambda template event handler for a clicked element.
  * Walks up the DOM ancestry from `target` to find a DomElement whose
- * native_element was produced by a template with a matching handler.
+ * Lambda backing was produced by a template with a matching handler.
  *
  * @param evcon     Event context
  * @param target    The hit-tested View/DomNode target
@@ -2045,10 +2044,10 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* dom_elem = lam::dom_require_element(node);
-            if (dom_elem->native_element) {
+            if (!dom_elem->is_synthetic()) {
                 // construct Item from native element pointer
                 Item result_item;
-                result_item.element = dom_elem->native_element;
+                result_item.element = dom_element_to_element(dom_elem);
 
                 // reverse lookup: which template produced this element?
                 RenderMapLookup lookup;
@@ -4036,20 +4035,23 @@ static void clear_dom_view_pool_pointers(DomNode* node) {
             elem->position = nullptr;
             elem->transform = nullptr;
             elem->filter = nullptr;
-            elem->backdrop_filter = nullptr;
-            elem->multicol = nullptr;
+            elem->set_backdrop_filter_prop(nullptr);
+            elem->set_multicol_prop(nullptr);
             elem->pseudo = nullptr;
-            elem->vpath = nullptr;
+            elem->set_vector_path(nullptr);
             elem->layout_cache = nullptr;
             elem->view_type = RDT_VIEW_NONE;
             elem->content_width = 0;
             elem->content_height = 0;
-            elem->has_cached_intrinsic_widths = false;
-            elem->styles_resolved = false;
-            elem->float_prelaid = false;
-            // Clear union (fi/gi/tb/td/form all share this slot)
+            elem->set_has_cached_intrinsic_widths(false);
+            elem->set_styles_resolved(false);
+            elem->set_float_prelaid(false);
+            elem->reset_view_ext();
+            // View teardown must invalidate both independent shorter-lived prop roles.
             elem->fi = nullptr;
-            elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+            elem->tb = nullptr;
+            elem->set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
+            elem->set_role_kind(DomElement::ROLE_NONE);
             if (elem->first_child) {
                 clear_dom_view_pool_pointers(elem->first_child);
             }
@@ -4084,11 +4086,11 @@ static const char* dom_js_mutation_kind_name(DomJsMutationKind kind) {
 
 static void dom_js_mutation_reset_records(DomDocument* doc) {
     if (!doc) return;
-    doc->js_mutation_count = 0;
-    doc->js_mutation_sequence = 0;
-    doc->js_mutation_kind_mask = 0;
-    doc->js_mutation_record_count = 0;
-    doc->js_mutation_record_overflow = 0;
+    doc->js.mutation_count = 0;
+    doc->js.mutation_sequence = 0;
+    doc->js.mutation_kind_mask = 0;
+    doc->js.mutation_record_count = 0;
+    doc->js.mutation_record_overflow = 0;
 }
 
 static void dom_js_mutation_log_records(DomDocument* doc) {
@@ -4096,14 +4098,14 @@ static void dom_js_mutation_log_records(DomDocument* doc) {
     if (!doc) return;
 
     log_info("html handler mutations: count=%d records=%d overflow=%d kind_mask=0x%08x",
-             doc->js_mutation_count,
-             doc->js_mutation_record_count,
-             doc->js_mutation_record_overflow,
-             doc->js_mutation_kind_mask);
+             doc->js.mutation_count,
+             doc->js.mutation_record_count,
+             doc->js.mutation_record_overflow,
+             doc->js.mutation_kind_mask);
 
-    int limit = doc->js_mutation_record_count < 8 ? doc->js_mutation_record_count : 8;
+    int limit = doc->js.mutation_record_count < 8 ? doc->js.mutation_record_count : 8;
     for (int i = 0; i < limit; i++) {
-        DomJsMutationRecord* record = &doc->js_mutation_records[i];
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
         log_debug("html handler mutation record: seq=%u kind=%s target=%u parent=%u",
                   record->sequence,
                   dom_js_mutation_kind_name(record->kind),
@@ -4126,18 +4128,18 @@ static void dom_js_record_reconcile(DomDocument* doc,
                                     const char* state_action,
                                     int state_pruned) {
     if (!doc) return;
-    doc->last_dom_reconcile_mode = mode;
-    doc->last_dom_reconcile_reason = reason ? reason : "none";
-    doc->last_dom_reconcile_mutations = mutations;
-    doc->last_dom_reconcile_records = records;
-    doc->last_dom_reconcile_record_overflow = overflow;
+    doc->reconcile.mode = mode;
+    doc->reconcile.reason = reason ? reason : "none";
+    doc->reconcile.mutations = mutations;
+    doc->reconcile.records = records;
+    doc->reconcile.record_overflow = overflow;
 
     // Keep the reconcile decision self-contained in logs: mutation details are
     // otherwise separated from the layout/state-retention decision.
     log_info("dom mutation reconcile: mode=%s reason=%s recascade=%s layout=%s state=%s pruned=%d "
              "mutations=%d records=%d overflow=%d kind_mask=0x%08x",
              dom_reconcile_mode_name(mode),
-             doc->last_dom_reconcile_reason,
+             doc->reconcile.reason,
              recascade_scope ? recascade_scope : "unknown",
              layout_scope ? layout_scope : "unknown",
              state_action ? state_action : "unknown",
@@ -4145,7 +4147,7 @@ static void dom_js_record_reconcile(DomDocument* doc,
              mutations,
              records,
              overflow,
-             doc->js_mutation_kind_mask);
+             doc->js.mutation_kind_mask);
 
     DocState* state = (DocState*)doc->state;
     if (!state || !event_state_log_enabled(state->active_event_log)) return;
@@ -4157,7 +4159,7 @@ static void dom_js_record_reconcile(DomDocument* doc,
     jw_key(&w, "data");
     jw_obj_begin(&w);
         jw_kv_str(&w, "mode", dom_reconcile_mode_name(mode));
-        jw_kv_str(&w, "reason", doc->last_dom_reconcile_reason);
+        jw_kv_str(&w, "reason", doc->reconcile.reason);
         jw_kv_int(&w, "mutations", mutations);
         jw_kv_int(&w, "records", records);
         jw_kv_int(&w, "record_overflow", overflow);
@@ -4382,13 +4384,13 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc, const char** reaso
         if (reason) *reason = "missing-layout-state";
         return false;
     }
-    if (doc->js_mutation_record_overflow || doc->js_mutation_record_count <= 0) {
-        if (reason) *reason = doc->js_mutation_record_overflow ? "record-overflow" : "no-records";
+    if (doc->js.mutation_record_overflow || doc->js.mutation_record_count <= 0) {
+        if (reason) *reason = doc->js.mutation_record_overflow ? "record-overflow" : "no-records";
         return false;
     }
 
-    for (int i = 0; i < doc->js_mutation_record_count; i++) {
-        DomJsMutationRecord* record = &doc->js_mutation_records[i];
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
             continue;
         }
@@ -4422,14 +4424,14 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
     if (kind == DOM_JS_MUTATION_STYLE ||
         kind == DOM_JS_MUTATION_STYLE_REPAINT ||
         kind == DOM_JS_MUTATION_TEXT) {
-        root->styles_resolved = false;
+        root->set_styles_resolved(false);
         return;
     }
 
     clear_cascaded_styles_recursive(static_cast<DomNode*>(root));
 
     Pool* pool = doc->pool;
-    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+    CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
     if (pool && css_engine && matcher) {
         for (int i = 0; i < doc->stylesheet_count; i++) {
             if (doc->stylesheets[i]) {
@@ -4439,8 +4441,8 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
         }
     }
 
-    if (root->native_element) {
-        apply_inline_styles_to_tree(root, root->native_element, pool);
+    if (!root->is_synthetic()) {
+        apply_inline_styles_to_tree(root, dom_element_to_element(root), pool);
     }
 }
 
@@ -4500,8 +4502,8 @@ static int dom_js_collect_repaint_roots(DomDocument* doc,
     if (!doc || !roots || capacity <= 0) return 0;
 
     int count = 0;
-    for (int i = 0; i < doc->js_mutation_record_count; i++) {
-        DomJsMutationRecord* record = &doc->js_mutation_records[i];
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
             continue;
         }
@@ -4606,8 +4608,8 @@ static bool post_html_handler_incremental_rebuild(
         }
     }
 
-    for (int i = 0; i < doc->js_mutation_record_count; i++) {
-        DomJsMutationRecord* record = &doc->js_mutation_records[i];
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
             continue;
         }
@@ -4675,15 +4677,15 @@ static bool post_html_handler_incremental_rebuild(
              duration<double, std::milli>(t3 - t2).count(),
              duration<double, std::milli>(t3 - t_start).count(),
              mutations,
-             doc->js_mutation_record_count,
+             doc->js.mutation_record_count,
              selective_dirty ? "dirty-rects" : "full",
              dirty_rect_count,
              repaint_reason ? repaint_reason : "none");
     // Tests read this structured result; timing logs alone cannot distinguish
     // incremental mutation handling from a broad fallback path.
     dom_js_record_reconcile(doc, DOM_RECONCILE_INCREMENTAL, "eligible",
-                            mutations, doc->js_mutation_record_count,
-                            doc->js_mutation_record_overflow,
+                            mutations, doc->js.mutation_record_count,
+                            doc->js.mutation_record_overflow,
                             "mutation-subtrees", "incremental-layout",
                             "retained", 0);
     return true;
@@ -4697,7 +4699,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     using namespace std::chrono;
     DomDocument* doc = event_context_target_document(evcon);
     if (!doc) return;
-    int mutations = doc->js_mutation_count;
+    int mutations = doc->js.mutation_count;
 
     if (mutations == 0) {
         log_info("[TIMING] html event handler: %.2fms (no DOM changes)",
@@ -4718,7 +4720,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Re-cascade CSS on the full tree (handles broad className changes, style writes, etc.)
     // Re-collect inline stylesheets in case JS added/removed/disabled <style> elements
     Pool* pool = doc->pool;
-    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+    CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
     SelectorMatcher* matcher = selector_matcher_create(pool);
     state_configure_selector_matcher((DocState*)doc->state, matcher);
 
@@ -4801,8 +4803,8 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // test-visible so state-retention fixtures do not have to scrape log.txt.
     dom_js_record_reconcile(doc, DOM_RECONCILE_RETAINED_FULL_LAYOUT,
                             fallback_reason ? fallback_reason : "unknown",
-                            mutations, doc->js_mutation_record_count,
-                            doc->js_mutation_record_overflow,
+                            mutations, doc->js.mutation_record_count,
+                            doc->js.mutation_record_overflow,
                             "full-document", "full-flow-retained",
                             "retained-pruned-after-reflow", state_pruned);
 
@@ -4811,7 +4813,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 }
 
 void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc) {
-    if (!uicon || !doc || doc->js_mutation_count == 0) return;
+    if (!uicon || !doc || doc->js.mutation_count == 0) return;
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = doc;
@@ -4863,13 +4865,13 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
     s->tmp_type_list = nullptr;
     s->doc = event_context_target_document(evcon);
-    if (!s->doc || !s->doc->js_mir_ctx || !s->doc->js_runtime_heap) return false;
+    if (!s->doc || !s->doc->js.mir_ctx || !s->doc->js.runtime_heap) return false;
     memset(&s->handler_ctx, 0, sizeof(s->handler_ctx));
-    Heap* heap = (Heap*)s->doc->js_runtime_heap;
+    Heap* heap = (Heap*)s->doc->js.runtime_heap;
     s->handler_ctx.heap = heap;
-    s->handler_ctx.name_pool = (NamePool*)s->doc->js_runtime_name_pool;
-    s->handler_ctx.pool = s->doc->js_runtime_pool ?
-        (Pool*)s->doc->js_runtime_pool : heap->pool;
+    s->handler_ctx.name_pool = (NamePool*)s->doc->js.runtime_name_pool;
+    s->handler_ctx.pool = s->doc->js.runtime_pool ?
+        (Pool*)s->doc->js.runtime_pool : heap->pool;
     // Allocate a per-dispatch type_list. C-level `js_create_event` callers
     // need a non-NULL type_list so map_rebuild_for_type_change can append
     // freshly-created TypeMaps. Compiled JS handlers swap to their own
@@ -5535,7 +5537,7 @@ static void clear_cascaded_styles_recursive(DomNode* node) {
     if (node->is_element()) {
         DomElement* e = lam::dom_require_element(node);
         dom_element_clear(e);
-        e->styles_resolved = false;
+        e->set_styles_resolved(false);
         for (DomNode* c = e->first_child; c; c = c->next_sibling) {
             clear_cascaded_styles_recursive(c);
         }
@@ -5620,7 +5622,7 @@ static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* stat
     if (!doc || !state) return;
 
     Pool* pool = doc->pool;
-    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+    CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
     if (pool && css_engine && doc->root) {
         // Pseudo-state changes can affect descendants through selectors like
         // `.parent:hover .child`, so clear and re-apply the full cascade once
@@ -6317,8 +6319,7 @@ bool is_view_focusable(View* view) {
         // disabled form elements are inert.
         DomElement* delem = lam::dom_require_element(view);
         DocState* state = delem->doc ? (DocState*)delem->doc->state : NULL;
-        if (delem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-            delem->form && form_control_is_disabled(state, static_cast<View*>(delem))) {
+        if (delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem))) {
             return false;
         }
 
@@ -6451,8 +6452,8 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         // path is traceable in `log.txt` and tests can observe activation.
         if (new_focus->is_element()) {
             DomElement* focus_elem = lam::dom_require_element(new_focus);
-            const char* im = dom_element_get_attribute(focus_elem, "inputmode");
-            const char* ek = dom_element_get_attribute(focus_elem, "enterkeyhint");
+            const char* im = focus_elem->get_attribute("inputmode");
+            const char* ek = focus_elem->get_attribute("enterkeyhint");
             if (im || ek) {
                 log_debug("CE-4 ime_hint_forward: target=%p inputmode='%s' enterkeyhint='%s'",
                           new_focus, im ? im : "", ek ? ek : "");
@@ -6543,7 +6544,7 @@ DomNode* set_iframe_src_by_name(DomElement *document, const char *target_name, c
     if (iframe_element) {
         log_debug("Found iframe with name='%s', setting src to: %s", target_name, new_src);
         // set the src attribute
-        if (!dom_element_set_attribute(iframe_element, "src", new_src)) {
+        if (!iframe_element->set_attribute("src", new_src)) {
             log_error("Failed to set src attribute");
             selector_matcher_destroy(matcher);
             return NULL;
@@ -6578,7 +6579,7 @@ View* find_view(View* view, DomNode* node) {
 // find a DomElement by its id attribute (for fragment navigation)
 static DomElement* find_element_by_id(DomElement* root, const char* id) {
     if (!root || !id) return nullptr;
-    const char* elem_id = dom_element_get_attribute(root, "id");
+    const char* elem_id = root->get_attribute("id");
     if (elem_id && strcmp(elem_id, id) == 0) return root;
     for (DomNode* child_node = root->first_child; child_node; child_node = child_node->next_sibling) {
         if (!child_node->is_element()) continue;
@@ -7232,7 +7233,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     while (node) {
                         if (node->node_type == DOM_NODE_ELEMENT) {
                             DomElement* elem = lam::dom_require_element(node);
-                            const char* dropzone = dom_element_get_attribute(elem, "dropzone");
+                            const char* dropzone = elem->get_attribute("dropzone");
                             if (dropzone && *dropzone) {
                                 new_drop_target = static_cast<View*>(elem);
                                 break;
@@ -7313,8 +7314,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Handle textarea form control drag selection
             if (anchor_view && anchor_view->is_element()) {
                 DomElement* anchor_elem = lam::dom_require_element(anchor_view);
-                if (anchor_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                    anchor_elem->form &&
+                if (anchor_elem->form_control() &&
                     anchor_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
                     uint32_t hit_offset = 0;
                     editing_geometry_text_control_offset_for_point(evcon.ui_context,
@@ -7337,8 +7337,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
 
                 // Single-line <input type="text"> drag selection
-                if (anchor_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                    anchor_elem->form &&
+                if (anchor_elem->form_control() &&
                     anchor_elem->form->control_type == FORM_CONTROL_TEXT) {
                     uint32_t hit_offset = 0;
                     editing_geometry_text_control_offset_for_point(evcon.ui_context,
@@ -7610,15 +7609,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Forward mouse button events to layer-mode webview
         if (evcon.target && evcon.target->is_element()) {
             ViewBlock* tblock = lam::view_require_block(evcon.target);
-            if (tblock->embed && tblock->embed->webview &&
-                tblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
-                tblock->embed->webview->handle) {
+            if (tblock->embed && tblock->embedp()->webview &&
+                tblock->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
+                tblock->embedp()->webview->handle) {
                 int mouse_type = (event->type == RDT_EVENT_MOUSE_DOWN) ? 0 : 1;
-                webview_layer_platform_inject_mouse(tblock->embed->webview->handle,
+                webview_layer_platform_inject_mouse(tblock->embedp()->webview->handle,
                     mouse_type, evcon.offset_x, evcon.offset_y,
                     btn_event->button, btn_event->mods);
                 if (event->type == RDT_EVENT_MOUSE_UP) {
-                    webview_layer_platform_inject_mouse(tblock->embed->webview->handle,
+                    webview_layer_platform_inject_mouse(tblock->embedp()->webview->handle,
                         3, evcon.offset_x, evcon.offset_y,
                         btn_event->button, btn_event->mods);
                 }
@@ -7922,8 +7921,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 DomElement* target_elem = lam::dom_require_element(evcon.target);
 
                 // Text input form controls: place caret inside the input
-                if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                    target_elem->form &&
+                if (target_elem->form_control() &&
                     target_elem->form->control_type == FORM_CONTROL_TEXT &&
                     !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
 
@@ -7965,8 +7963,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
 
-                } else if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                           target_elem->form &&
+                } else if (target_elem->form_control() &&
                            target_elem->form->control_type == FORM_CONTROL_TEXTAREA &&
                            !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
                     // Textarea form controls: click-to-position caret
@@ -8006,8 +8003,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                 } else if (target_elem->display.inner == RDT_DISPLAY_REPLACED) {
                     bool disabled_form_control =
-                        target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                        target_elem->form &&
+                        target_elem->form_control() &&
                         form_control_is_disabled(state, static_cast<View*>(target_elem));
                     if (disabled_form_control) {
                         if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
@@ -8039,7 +8035,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             while (node) {
                 if (node->node_type == DOM_NODE_ELEMENT) {
                     DomElement* elem = lam::dom_require_element(node);
-                    const char* draggable = dom_element_get_attribute(elem, "draggable");
+                    const char* draggable = elem->get_attribute("draggable");
                     bool is_draggable = draggable && strcmp(draggable, "true") == 0;
                     // Browser-faithful: <img> and <a href> are draggable by
                     // default (no draggable attr) unless draggable="false".
@@ -8048,7 +8044,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         const char* tag = elem->tag_name;
                         if (tag && (strcasecmp(tag, "img") == 0 ||
                                     (strcasecmp(tag, "a") == 0 &&
-                                     dom_element_get_attribute(elem, "href")))) {
+                                     elem->get_attribute("href")))) {
                             is_draggable = true;
                         }
                     }
@@ -8060,7 +8056,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 node = node->parent;
             }
             if (draggable_elem) {
-                const char* drag_data = dom_element_get_attribute(draggable_elem, "dragdata");
+                const char* drag_data = draggable_elem->get_attribute("dragdata");
                 DragTransitionArgs drag_args = {
                     .source = static_cast<View*>(draggable_elem),
                     .x = (float)btn_event->x,
@@ -8307,9 +8303,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     while (v) {
                         if (v->view_type == RDT_VIEW_BLOCK) {
                             ViewBlock* blk = lam::view_require_block(v);
-                            if (blk->embed && blk->embed->video) {
-                                RdtVideo* video = (RdtVideo*)blk->embed->video;
-                                bool has_controls = blk->embed->has_controls;
+                            if (blk->embed && blk->embedp()->video) {
+                                RdtVideo* video = (RdtVideo*)blk->embedp()->video;
+                                bool has_controls = blk->embedp()->has_controls;
 
                                 // compute absolute viewport position by walking parent chain
                                 float vid_x = 0, vid_y = 0;
@@ -8319,11 +8315,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                         ViewBlock* wb = lam::view_require_block(walk);
                                         vid_x += wb->x;
                                         vid_y += wb->y;
-                                        if (wb->scroller && wb->scroller->pane) {
+                                        if (wb->scroller && wb->scroll_mut()->pane) {
                                             DocState* scroll_state = wb->doc ? wb->doc->state : NULL;
                                             float scroll_x = 0.0f, scroll_y = 0.0f;
                                             scroll_state_get_position_for_view(scroll_state, static_cast<View*>(wb),
-                                                wb->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                                                wb->scroll()->pane, &scroll_x, &scroll_y, NULL, NULL);
                                             vid_x -= scroll_x;
                                             vid_y -= scroll_y;
                                         }
@@ -8459,8 +8455,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     if (target_view) {
                         // get root scroller and scroll to element's y position
                         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
-                        if (root_block && root_block->scroller && root_block->scroller->pane) {
-                            ScrollPane* pane = root_block->scroller->pane;
+                        if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
+                            ScrollPane* pane = root_block->scroll()->pane;
                             float target_y = target_view->y;
                             DocState* scroll_state = (DocState*)uicon->document->state;
                             float scroll_x = 0.0f, scroll_y = 0.0f;
@@ -8495,15 +8491,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         log_debug("updating doc of iframe view");
                         ViewBlock* block = lam::view_require_block(iframe);
                         // reset scroll position
-                        if (block->scroller && block->scroller->pane) {
-                            block->scroller->pane->reset();
+                        if (block->scroller && block->scroll_mut()->pane) {
+                            block->scroll()->pane->reset();
                             block->content_width = 0;  block->content_height = 0;
                         }
                         // load the new document
                         // Use iframe dimensions as viewport (already in CSS logical pixels)
                         int css_vw = (int)block->width;
                         int css_vh = (int)block->height;
-                        DomDocument* old_doc = block->embed->doc;
+                        DomDocument* old_doc = block->embedp()->doc;
                         DomDocument* new_doc = block->embed->doc =
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh,
                                           1.0f);  // Layout uses CSS pixels, pixel_ratio not needed
@@ -8511,8 +8507,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             radiant_document_ensure_state(new_doc, "iframe_target_navigation");
                             // Set scale for nested document
                             // Iframe content uses default scale (1.0), combined with display pixel_ratio
-                            new_doc->given_scale = 1.0f;
-                            new_doc->scale = new_doc->given_scale * evcon.ui_context->pixel_ratio;
+                            new_doc->viewport.given_scale = 1.0f;
+                            new_doc->viewport.scale = new_doc->viewport.given_scale * evcon.ui_context->pixel_ratio;
 
                             if (new_doc->html_root) {
                                 // HTML/Markdown/XML documents: need CSS layout
@@ -8575,9 +8571,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (session) {
                     // save current scroll position in history
                     ViewBlock* root_block = doc->view_tree ? lam::view_require_block(doc->view_tree->root) : nullptr;
-                    if (root_block && root_block->scroller && root_block->scroller->pane) {
+                    if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
                         float scroll_y = 0.0f;
-                        scroll_state_get_position_for_view(state, static_cast<View*>(root_block), root_block->scroller->pane,
+                        scroll_state_get_position_for_view(state, static_cast<View*>(root_block), root_block->scroll()->pane,
                                                            NULL, &scroll_y, NULL, NULL);
                         session_save_scroll_position(session, scroll_y);
                     }
@@ -8629,10 +8625,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Forward scroll to layer-mode webview
         if (evcon.target && evcon.target->is_element()) {
             ViewBlock* tblock = lam::view_require_block(evcon.target);
-            if (tblock->embed && tblock->embed->webview &&
-                tblock->embed->webview->mode == WEBVIEW_MODE_LAYER &&
-                tblock->embed->webview->handle) {
-                webview_layer_platform_inject_scroll(tblock->embed->webview->handle,
+            if (tblock->embed && tblock->embedp()->webview &&
+                tblock->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
+                tblock->embedp()->webview->handle) {
+                webview_layer_platform_inject_scroll(tblock->embedp()->webview->handle,
                     scroll->xoffset, scroll->yoffset, evcon.offset_x, evcon.offset_y);
                 break;  // consumed by webview
             }
@@ -8811,8 +8807,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             } else if (tag == HTM_TAG_BUTTON) {
                 // Disabled buttons are inert.
                 DomElement* delem = lam::dom_require_element(focused);
-                bool disabled = delem->item_prop_type == DomElement::ITEM_PROP_FORM
-                    && delem->form && form_control_is_disabled(state, static_cast<View*>(delem));
+                bool disabled = delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem));
                 if (!disabled) {
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
                         0, 0, 0, 0, false, false, false, false, 1);
@@ -8822,8 +8817,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Space / Enter on a focused <select> opens (or toggles)
                 // the dropdown popup, matching native browser behavior.
                 DomElement* delem = lam::dom_require_element(focused);
-                bool disabled = delem->item_prop_type == DomElement::ITEM_PROP_FORM
-                    && delem->form && form_control_is_disabled(state, static_cast<View*>(delem));
+                bool disabled = delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem));
                 if (!disabled) {
                     handled = handle_select_click(&evcon, focused);
                 }
@@ -8957,8 +8951,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         int form_caret_offset = 0;
         if (focused && focused->is_element() && caret_get_offset(state, &form_caret_offset)) {
             DomElement* focus_elem = lam::dom_require_element(focused);
-            if (focus_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                focus_elem->form &&
+            if (focus_elem->form_control() &&
                 focus_elem->form->control_type == FORM_CONTROL_TEXT) {
 
                 uint32_t live_value_len = 0;
@@ -9161,8 +9154,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         int textarea_caret_offset = 0;
         if (focused && focused->is_element() && caret_get_offset(state, &textarea_caret_offset)) {
             DomElement* focus_elem = lam::dom_require_element(focused);
-            if (focus_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                focus_elem->form &&
+            if (focus_elem->form_control() &&
                 focus_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
 
                 uint32_t live_value_len = 0;
@@ -9666,8 +9658,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         bool is_form_input = false;
         if (focused && focused->is_element()) {
             DomElement* elem = lam::dom_require_element(focused);
-            if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                elem->form &&
+            if (elem->form_control() &&
                 (elem->form->control_type == FORM_CONTROL_TEXT ||
                  elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
                 is_form_input = true;

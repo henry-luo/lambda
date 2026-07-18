@@ -214,24 +214,24 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         if (item->blk) {
             // Percentage sizes on grid items resolve against the final grid area,
             // which is only known after track sizing and placement.
-            if (!isnan(item->blk->given_width_percent)) {
-                float content_width = track_width * item->blk->given_width_percent / 100.0f;
+            if (!isnan(item->block()->given_width_percent)) {
+                float content_width = track_width * item->block()->given_width_percent / 100.0f;
                 item->blk->given_width = content_width;
                 item_width = layout_uses_border_box(item)
                     ? layout_floor_border_box_width(item, content_width)
                     : layout_border_width_from_content_box(item, content_width);
-            } else if (item->blk->given_width > 0) {
-                item_width = item->blk->given_width;
+            } else if (item->block()->given_width > 0) {
+                item_width = item->block()->given_width;
             }
 
-            if (!isnan(item->blk->given_height_percent)) {
-                float content_height = track_height * item->blk->given_height_percent / 100.0f;
+            if (!isnan(item->block()->given_height_percent)) {
+                float content_height = track_height * item->block()->given_height_percent / 100.0f;
                 item->blk->given_height = content_height;
                 item_height = layout_uses_border_box(item)
                     ? layout_floor_border_box_height(item, content_height)
                     : layout_border_height_from_content_box(item, content_height);
-            } else if (item->blk->given_height > 0) {
-                item_height = item->blk->given_height;
+            } else if (item->block()->given_height > 0) {
+                item_height = item->block()->given_height;
             }
         }
 
@@ -246,13 +246,13 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         float container_offset_y = 0;
 
         if (container->bound) {
-            container_offset_x += container->bound->padding.left;
-            container_offset_y += container->bound->padding.top;
+            container_offset_x += container->boundary()->padding.left;
+            container_offset_y += container->boundary()->padding.top;
         }
 
-        if (container->bound && container->bound->border) {
-            container_offset_x += container->bound->border->width.left;
-            container_offset_y += container->bound->border->width.top;
+        if (container->bound && container->boundary_mut()->border) {
+            container_offset_x += container->boundary()->border->width.left;
+            container_offset_y += container->boundary()->border->width.top;
         }
 
         // Set item position and size (relative to parent's border box, per Radiant coordinate system)
@@ -302,10 +302,10 @@ static float resolve_margin_side(ViewBlock* item, int side, float track_width) {
     float  bound_val  = 0.0f;
     CssEnum bound_type = CSS_VALUE__UNDEF;
     switch (side) {
-        case 0: bound_val = item->bound->margin.left;   bound_type = item->bound->margin.left_type;   break;
-        case 1: bound_val = item->bound->margin.right;  bound_type = item->bound->margin.right_type;  break;
-        case 2: bound_val = item->bound->margin.top;    bound_type = item->bound->margin.top_type;    break;
-        case 3: bound_val = item->bound->margin.bottom; bound_type = item->bound->margin.bottom_type; break;
+        case 0: bound_val = item->boundary()->margin.left;   bound_type = item->boundary()->margin.left_type;   break;
+        case 1: bound_val = item->boundary()->margin.right;  bound_type = item->boundary()->margin.right_type;  break;
+        case 2: bound_val = item->boundary()->margin.top;    bound_type = item->boundary()->margin.top_type;    break;
+        case 3: bound_val = item->boundary()->margin.bottom; bound_type = item->boundary()->margin.bottom_type; break;
     }
 
     if (bound_type == CSS_VALUE_AUTO) return 0.0f;
@@ -374,7 +374,7 @@ static float compute_grid_item_alignment_baseline(::LayoutContext* lycon, ViewBl
 static float compute_grid_item_baseline_alignment_height(GridContainerLayout* grid_layout,
                                                          ViewBlock* item) {
     if (!grid_layout || !item) return 0.0f;
-    if (item->blk && item->blk->given_height >= 0.0f) return item->height;
+    if (item->blk && item->block_mut()->given_height >= 0.0f) return item->height;
 
     IntrinsicSizes sizes = calculate_grid_item_intrinsic_sizes(
         grid_layout->lycon, item, true);
@@ -475,9 +475,9 @@ void align_grid_items(GridContainerLayout* grid_layout) {
                 ViewBlock* container = first_item->parent ? lam::view_as_block(first_item->parent) : NULL;
                 if (container) {
                     if (container->bound) {
-                        content_top_offset += container->bound->padding.top;
-                        if (container->bound->border)
-                            content_top_offset += container->bound->border->width.top;
+                        content_top_offset += container->boundary()->padding.top;
+                        if (container->boundary()->border)
+                            content_top_offset += container->boundary()->border->width.top;
                     }
                 }
             }
@@ -591,7 +591,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // CSS Box 4 §3.2 margin-trim for grid containers: trim margins of items
     // adjacent to the container edges.
     ViewBlock* grid_container = item->parent && item->parent->is_block() ? lam::view_require_block(item->parent) : NULL;
-    uint8_t grid_margin_trim = (grid_container && grid_container->blk) ? grid_container->blk->margin_trim : 0;
+    uint8_t grid_margin_trim = (grid_container && grid_container->blk) ? grid_container->block()->margin_trim : 0;
     if (grid_margin_trim) {
         int row_start = gi->computed_grid_row_start - 1;
         int row_end = gi->computed_grid_row_end - 1;
@@ -601,25 +601,25 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         if ((grid_margin_trim & MARGIN_TRIM_BLOCK_START) && row_start == 0) {
             log_debug("[MARGIN-TRIM] grid block-start: trimming margin_top=%f", margin_top);
             margin_top = 0;
-            if (item->bound) item->bound->margin.top = 0;
+            if (item->bound) item->boundary_mut()->margin.top = 0;
         }
         // block-end: last row items
         if ((grid_margin_trim & MARGIN_TRIM_BLOCK_END) && row_end >= grid_layout->computed_row_count) {
             log_debug("[MARGIN-TRIM] grid block-end: trimming margin_bottom=%f", margin_bottom);
             margin_bottom = 0;
-            if (item->bound) item->bound->margin.bottom = 0;
+            if (item->bound) item->boundary_mut()->margin.bottom = 0;
         }
         // inline-start: first column items
         if ((grid_margin_trim & MARGIN_TRIM_INLINE_START) && col_start == 0) {
             log_debug("[MARGIN-TRIM] grid inline-start: trimming margin_left=%f", margin_left);
             margin_left = 0;
-            if (item->bound) item->bound->margin.left = 0;
+            if (item->bound) item->boundary_mut()->margin.left = 0;
         }
         // inline-end: last column items
         if ((grid_margin_trim & MARGIN_TRIM_INLINE_END) && col_end >= grid_layout->computed_column_count) {
             log_debug("[MARGIN-TRIM] grid inline-end: trimming margin_right=%f", margin_right);
             margin_right = 0;
-            if (item->bound) item->bound->margin.right = 0;
+            if (item->bound) item->boundary_mut()->margin.right = 0;
         }
     }
 
@@ -638,7 +638,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     float aspect_ratio = 0;
 
     // First check fi (only valid for flex items)
-    if (item->item_prop_type == DomElement::ITEM_PROP_FLEX && item->fi && item->fi->aspect_ratio > 0) {
+    if (item->flex_item() && item->fi->aspect_ratio > 0) {
         aspect_ratio = item->fi->aspect_ratio;
     }
     // For grid items, check specified_style directly
@@ -683,12 +683,12 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                kw == CSS_VALUE_MIN_CONTENT ||
                kw == CSS_VALUE_MAX_CONTENT;
     };
-    bool has_explicit_width = (item->blk && (item->blk->given_width > 0 ||
-        is_intrinsic_keyword(item->blk->given_width_type)));
-    bool has_explicit_height = (item->blk && (item->blk->given_height > 0 ||
-        is_intrinsic_keyword(item->blk->given_height_type)));
-    float max_width = (item->blk && item->blk->given_max_width > 0) ? item->blk->given_max_width : 0;
-    float max_height = (item->blk && item->blk->given_max_height > 0) ? item->blk->given_max_height : 0;
+    bool has_explicit_width = (item->blk && (item->block()->given_width > 0 ||
+        is_intrinsic_keyword(item->block()->given_width_type)));
+    bool has_explicit_height = (item->blk && (item->block()->given_height > 0 ||
+        is_intrinsic_keyword(item->block()->given_height_type)));
+    float max_width = (item->blk && item->block_mut()->given_max_width > 0) ? item->block_mut()->given_max_width : 0;
+    float max_height = (item->blk && item->block_mut()->given_max_height > 0) ? item->block_mut()->given_max_height : 0;
 
     log_debug("align_grid_item: aspect_ratio=%.6f, available=%dx%d",
               aspect_ratio, available_width, available_height);
@@ -740,8 +740,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                 // and derive inline from it (height → width). This transfers the block constraint
                 // through the aspect-ratio to produce the correct minimum inline size.
                 // Otherwise use the inline axis first (width → height), per CSS Grid §6.6.
-                float min_h = (item->blk && item->blk->given_min_height > 0) ? item->blk->given_min_height : 0;
-                float min_w = (item->blk && item->blk->given_min_width > 0) ? item->blk->given_min_width : 0;
+                float min_h = (item->blk && item->block_mut()->given_min_height > 0) ? item->block_mut()->given_min_height : 0;
+                float min_w = (item->blk && item->block_mut()->given_min_width > 0) ? item->block_mut()->given_min_width : 0;
                 if (min_h > 0 && min_w == 0) {
                     // Block-axis minimum: anchor at available_height (stretch), derive width
                     item->height = (float)available_height;
@@ -768,8 +768,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             item->width = max_height * aspect_ratio;
         }
         // Apply min-width/min-height constraints (min wins over max per CSS spec)
-        float min_width = (item->blk && item->blk->given_min_width > 0) ? item->blk->given_min_width : 0;
-        float min_height = (item->blk && item->blk->given_min_height > 0) ? item->blk->given_min_height : 0;
+        float min_width = (item->blk && item->block_mut()->given_min_width > 0) ? item->block_mut()->given_min_width : 0;
+        float min_height = (item->blk && item->block_mut()->given_min_height > 0) ? item->block_mut()->given_min_height : 0;
         if (min_width > 0 && item->width < min_width) {
             item->width = min_width;
             item->height = min_width / aspect_ratio;
@@ -783,10 +783,10 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // P6: Auto margins override justify-self/align-self, consuming available free space (CSS Grid §8.1)
     bool applied_horiz_auto = false, applied_vert_auto = false;
     if (item->bound) {
-        bool left_auto  = (item->bound->margin.left_type   == CSS_VALUE_AUTO);
-        bool right_auto = (item->bound->margin.right_type  == CSS_VALUE_AUTO);
-        bool top_auto   = (item->bound->margin.top_type    == CSS_VALUE_AUTO);
-        bool bot_auto   = (item->bound->margin.bottom_type == CSS_VALUE_AUTO);
+        bool left_auto  = (item->boundary()->margin.left_type   == CSS_VALUE_AUTO);
+        bool right_auto = (item->boundary()->margin.right_type  == CSS_VALUE_AUTO);
+        bool top_auto   = (item->boundary()->margin.top_type    == CSS_VALUE_AUTO);
+        bool bot_auto   = (item->boundary()->margin.bottom_type == CSS_VALUE_AUTO);
         // CSS Grid §8.1: auto margins consume the free space between the item's margin box and the
         // grid area.  The item's actual (content) size must be used, not the stretch-assigned size.
         // Pass 3 sets content_width/content_height; fall back to current item->width/height if not set.
@@ -795,11 +795,11 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         // For items WITHOUT explicit size, content_height=0 is valid (empty element), so >= 0 is used
         // to correctly center empty elements at height=0 with margin:auto.
         float actual_item_width  = has_explicit_width
-                                   ? (float)item->blk->given_width
+                                   ? (float)item->block()->given_width
                                    : ((item->content_width > 0 && item->content_width < (float)available_width)
                                       ? item->content_width : item->width);
         float actual_item_height = has_explicit_height
-                                   ? (float)item->blk->given_height
+                                   ? (float)item->block()->given_height
                                    : ((item->content_height >= 0 && item->content_height < (float)available_height)
                                       ? item->content_height : item->height);
         float horiz_free = (float)available_width  - actual_item_width;
@@ -864,7 +864,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                     }
                     if (item->width > bb_max) item->width = bb_max;
                 }
-                float min_w = (item->blk && item->blk->given_min_width > 0) ? item->blk->given_min_width : 0;
+                float min_w = (item->blk && item->block_mut()->given_min_width > 0) ? item->block_mut()->given_min_width : 0;
                 if (min_w > 0) {
                     float bb_min = min_w;
                     bool is_border_box = layout_uses_border_box(item);
@@ -900,7 +900,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     // NOT be stretched even when align-self resolves to stretch.
     // Use content_height which was computed during Pass 3 content layout.
     bool has_intrinsic_height = item->blk &&
-        is_intrinsic_keyword(item->blk->given_height_type);
+        is_intrinsic_keyword(item->block()->given_height_type);
     if (!applied_vert_auto && has_intrinsic_height && item->content_height > 0) {
         actual_height = item->content_height;
         item->height = actual_height;
@@ -931,7 +931,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
                     }
                     if (item->height > bb_max) item->height = bb_max;
                 }
-                float min_h = (item->blk && item->blk->given_min_height > 0) ? item->blk->given_min_height : 0;
+                float min_h = (item->blk && item->block_mut()->given_min_height > 0) ? item->block_mut()->given_min_height : 0;
                 if (min_h > 0) {
                     float bb_min = min_h;
                     bool is_border_box = layout_uses_border_box(item);

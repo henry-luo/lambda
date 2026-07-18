@@ -98,10 +98,10 @@ static bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start
     // Logical start is right only in RTL; logical end is right only in LTR.
     bool use_right = start_edge == rtl;
     float border = 0.0f;
-    if (span->bound->border) {
-        border = use_right ? span->bound->border->width.right : span->bound->border->width.left;
+    if (span->boundary()->border) {
+        border = use_right ? span->boundary()->border->width.right : span->boundary()->border->width.left;
     }
-    float padding = use_right ? span->bound->padding.right : span->bound->padding.left;
+    float padding = use_right ? span->boundary()->padding.right : span->boundary()->padding.left;
     return border > 0.0f || padding > 0.0f;
 }
 
@@ -121,7 +121,7 @@ static bool span_has_direct_visible_text(ViewSpan* span) {
 
 static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span) {
     if (!text || !text->text || text->length == 0) return false;
-    CssEnum white_space = span && span->blk ? span->blk->white_space : CSS_VALUE_NORMAL;
+    CssEnum white_space = span && span->blk ? span->block()->white_space : CSS_VALUE_NORMAL;
     bool collapse_spaces = white_space == CSS_VALUE_NORMAL ||
         white_space == CSS_VALUE_NOWRAP ||
         white_space == CSS_VALUE_PRE_LINE ||
@@ -265,7 +265,7 @@ static View* inline_span_first_line_fragment_child(ViewSpan* span) {
 }
 
 static bool inline_fragment_union_extends_child_bounds(ViewSpan* span) {
-    if (!span || !span->has_inline_fragment_union) return false;
+    if (!span || !span->has_inline_fragment_union()) return false;
     bool found_child = false;
     float min_y = 0.0f;
     float max_y = 0.0f;
@@ -286,8 +286,8 @@ static bool inline_fragment_union_extends_child_bounds(ViewSpan* span) {
         }
     }
     return found_child &&
-        (span->inline_fragment_min_y < min_y ||
-         span->inline_fragment_max_y > max_y);
+        (span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y < min_y ||
+         span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y > max_y);
 }
 
 bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
@@ -315,13 +315,13 @@ bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
 
 static bool span_has_inline_axis_decoration(ViewSpan* span) {
     if (!span || !span->bound) return false;
-    if (span->bound->margin.left != 0.0f || span->bound->margin.right != 0.0f ||
-        span->bound->padding.left != 0.0f || span->bound->padding.right != 0.0f) {
+    if (span->boundary()->margin.left != 0.0f || span->boundary()->margin.right != 0.0f ||
+        span->boundary()->padding.left != 0.0f || span->boundary()->padding.right != 0.0f) {
         return true;
     }
-    return span->bound->border &&
-        (span->bound->border->width.left != 0.0f ||
-         span->bound->border->width.right != 0.0f);
+    return span->boundary()->border &&
+        (span->boundary()->border->width.left != 0.0f ||
+         span->boundary()->border->width.right != 0.0f);
 }
 
 static bool span_children_have_no_line_content(ViewSpan* span);
@@ -362,7 +362,7 @@ bool inline_span_float_continuation_x(
         if (!child_elem || !child_elem->position) {
             continue;
         }
-        CssEnum float_prop = child_elem->position->float_prop;
+        CssEnum float_prop = child_elem->positionp()->float_prop;
         if (float_prop != CSS_VALUE_LEFT && float_prop != CSS_VALUE_RIGHT) continue;
         found_float = true;
         if (float_prop != CSS_VALUE_LEFT) continue;
@@ -373,7 +373,7 @@ bool inline_span_float_continuation_x(
             layout_relative_position_offset(child_block, &dx, &dy);
         }
         float margin_right = child_block && child_block->bound ?
-            child_block->bound->margin.right : 0.0f;
+            child_block->boundary()->margin.right : 0.0f;
         // css 2.1 section 9.5: a direct left float is out of flow, but it still
         // intrudes at the inline-start side of this line. The inline parent's
         // zero-width continuation is therefore after the float margin box.
@@ -429,34 +429,34 @@ static void span_record_ancestor_fragment(ViewSpan* span, View* fragment) {
     float max_x = fragment->x + fragment->width;
     float min_y = fragment->y;
     float max_y = fragment->y + fragment->height;
-    if (!span->has_ancestor_fragment_union) {
-        span->has_ancestor_fragment_union = true;
-        span->ancestor_fragment_min_x = min_x;
-        span->ancestor_fragment_max_x = max_x;
-        span->ancestor_fragment_min_y = min_y;
-        span->ancestor_fragment_max_y = max_y;
+    if (!span->has_ancestor_fragment_union()) {
+        span->set_has_ancestor_fragment_union(true);
+        span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_x = min_x;
+        span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_x = max_x;
+        span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_y = min_y;
+        span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_y = max_y;
     } else {
-        if (min_x < span->ancestor_fragment_min_x) span->ancestor_fragment_min_x = min_x;
-        if (max_x > span->ancestor_fragment_max_x) span->ancestor_fragment_max_x = max_x;
-        if (min_y < span->ancestor_fragment_min_y) span->ancestor_fragment_min_y = min_y;
-        if (max_y > span->ancestor_fragment_max_y) span->ancestor_fragment_max_y = max_y;
+        if (min_x < span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_x) span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_x = min_x;
+        if (max_x > span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_x) span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_x = max_x;
+        if (min_y < span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_y) span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_y = min_y;
+        if (max_y > span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_y) span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_y = max_y;
     }
 }
 
 static void span_record_split_inline_fragment(ViewSpan* span, float min_x, float max_x,
                                               float min_y, float max_y) {
     if (!span || max_x < min_x || max_y < min_y) return;
-    if (!span->has_split_inline_fragment_union) {
-        span->has_split_inline_fragment_union = true;
-        span->split_inline_fragment_min_x = min_x;
-        span->split_inline_fragment_max_x = max_x;
-        span->split_inline_fragment_min_y = min_y;
-        span->split_inline_fragment_max_y = max_y;
+    if (!span->has_split_inline_fragment_union()) {
+        span->set_has_split_inline_fragment_union(true);
+        span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x = min_x;
+        span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x = max_x;
+        span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_y = min_y;
+        span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_y = max_y;
     } else {
-        if (min_x < span->split_inline_fragment_min_x) span->split_inline_fragment_min_x = min_x;
-        if (max_x > span->split_inline_fragment_max_x) span->split_inline_fragment_max_x = max_x;
-        if (min_y < span->split_inline_fragment_min_y) span->split_inline_fragment_min_y = min_y;
-        if (max_y > span->split_inline_fragment_max_y) span->split_inline_fragment_max_y = max_y;
+        if (min_x < span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x) span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x = min_x;
+        if (max_x > span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x) span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x = max_x;
+        if (min_y < span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_y) span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_y = min_y;
+        if (max_y > span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_y) span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_y = max_y;
     }
 }
 
@@ -464,7 +464,7 @@ static void span_record_current_split_line_fragment(LayoutContext* lycon, ViewSp
                                                     float span_line_height) {
     if (!lycon || !span || lycon->line.is_line_start) return;
     FontProp* font = span->font ? span->font : lycon->font.style;
-    FontHandle* font_handle = span->font ? span->font->font_handle : lycon->font.font_handle;
+    FontHandle* font_handle = span->font ? span->fontp()->font_handle : lycon->font.font_handle;
     if (!font || !font_handle || span_line_height <= 0.0f) return;
 
     float line_height = 0.0f;
@@ -486,12 +486,12 @@ static void span_vertical_decoration_edges(ViewSpan* span, float* top_edge, floa
     float border_top = 0.0f, border_bottom = 0.0f;
     float pad_top = 0.0f, pad_bottom = 0.0f;
     if (span && span->bound) {
-        if (span->bound->border) {
-            border_top = span->bound->border->width.top;
-            border_bottom = span->bound->border->width.bottom;
+        if (span->boundary()->border) {
+            border_top = span->boundary()->border->width.top;
+            border_bottom = span->boundary()->border->width.bottom;
         }
-        pad_top = span->bound->padding.top > 0.0f ? span->bound->padding.top : 0.0f;
-        pad_bottom = span->bound->padding.bottom > 0.0f ? span->bound->padding.bottom : 0.0f;
+        pad_top = span->boundary()->padding.top > 0.0f ? span->boundary()->padding.top : 0.0f;
+        pad_bottom = span->boundary()->padding.bottom > 0.0f ? span->boundary()->padding.bottom : 0.0f;
     }
     if (top_edge) *top_edge = roundf(border_top) + roundf(pad_top);
     if (bottom_edge) *bottom_edge = roundf(border_bottom) + roundf(pad_bottom);
@@ -522,17 +522,17 @@ static void record_block_in_inline_split_chain(ViewSpan* span) {
 static void compute_span_from_collapsed_line_fragment(ViewSpan* span) {
     float border_top = 0.0f, border_right = 0.0f, border_bottom = 0.0f, border_left = 0.0f;
     float pad_left = 0.0f, pad_right = 0.0f, pad_top = 0.0f, pad_bottom = 0.0f;
-    if (span->bound && span->bound->border) {
-        border_top = span->bound->border->width.top;
-        border_right = span->bound->border->width.right;
-        border_bottom = span->bound->border->width.bottom;
-        border_left = span->bound->border->width.left;
+    if (span->bound && span->boundary_mut()->border) {
+        border_top = span->boundary()->border->width.top;
+        border_right = span->boundary()->border->width.right;
+        border_bottom = span->boundary()->border->width.bottom;
+        border_left = span->boundary()->border->width.left;
     }
     if (span->bound) {
-        pad_left = span->bound->padding.left > 0.0f ? span->bound->padding.left : 0.0f;
-        pad_right = span->bound->padding.right > 0.0f ? span->bound->padding.right : 0.0f;
-        pad_top = span->bound->padding.top > 0.0f ? span->bound->padding.top : 0.0f;
-        pad_bottom = span->bound->padding.bottom > 0.0f ? span->bound->padding.bottom : 0.0f;
+        pad_left = span->boundary()->padding.left > 0.0f ? span->boundary()->padding.left : 0.0f;
+        pad_right = span->boundary()->padding.right > 0.0f ? span->boundary()->padding.right : 0.0f;
+        pad_top = span->boundary()->padding.top > 0.0f ? span->boundary()->padding.top : 0.0f;
+        pad_bottom = span->boundary()->padding.bottom > 0.0f ? span->boundary()->padding.bottom : 0.0f;
     }
 
     float left_edge = border_left + pad_left;
@@ -540,21 +540,21 @@ static void compute_span_from_collapsed_line_fragment(ViewSpan* span) {
     float top_edge = roundf(border_top) + roundf(pad_top);
     float bottom_edge = roundf(border_bottom) + roundf(pad_bottom);
     float fragment_width =
-        span->collapsed_line_fragment_max_x - span->collapsed_line_fragment_min_x;
+        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x - span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x;
     float fragment_height =
-        span->collapsed_line_fragment_max_y - span->collapsed_line_fragment_min_y;
+        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_y - span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y;
     if (span->content_height > fragment_height) {
         fragment_height = span->content_height;
     }
 
-    span->x = span->collapsed_line_fragment_min_x - left_edge;
-    span->y = span->collapsed_line_fragment_min_y - top_edge;
+    span->x = span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x - left_edge;
+    span->y = span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y - top_edge;
     span->width = fragment_width + left_edge + right_edge;
     span->height = fragment_height + top_edge + bottom_edge;
 }
 
 static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback_fh) {
-    if (span->has_collapsed_line_fragment_union) {
+    if (span->has_collapsed_line_fragment_union()) {
         compute_span_from_collapsed_line_fragment(span);
         return;
     }
@@ -566,23 +566,23 @@ static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback
     float pad_top = 0.0f, pad_bottom = 0.0f;
     float margin_left = 0.0f, margin_right = 0.0f;
     if (span->bound) {
-        if (span->bound->border) {
-            border_left = span->bound->border->width.left;
-            border_right = span->bound->border->width.right;
-            border_top = span->bound->border->width.top;
-            border_bottom = span->bound->border->width.bottom;
+        if (span->boundary()->border) {
+            border_left = span->boundary()->border->width.left;
+            border_right = span->boundary()->border->width.right;
+            border_top = span->boundary()->border->width.top;
+            border_bottom = span->boundary()->border->width.bottom;
         }
-        pad_left = max(span->bound->padding.left, 0.0f);
-        pad_right = max(span->bound->padding.right, 0.0f);
-        pad_top = max(span->bound->padding.top, 0.0f);
-        pad_bottom = max(span->bound->padding.bottom, 0.0f);
-        margin_left = span->bound->margin.left;
-        margin_right = span->bound->margin.right;
+        pad_left = max(span->boundary()->padding.left, 0.0f);
+        pad_right = max(span->boundary()->padding.right, 0.0f);
+        pad_top = max(span->boundary()->padding.top, 0.0f);
+        pad_bottom = max(span->boundary()->padding.bottom, 0.0f);
+        margin_left = span->boundary()->margin.left;
+        margin_right = span->boundary()->margin.right;
     }
 
     float inline_size = border_left + pad_left + pad_right + border_right;
     if (inline_size > 0.0f || margin_left != 0.0f || margin_right != 0.0f) {
-        FontHandle* font = span->font ? span->font->font_handle : fallback_fh;
+        FontHandle* font = span->font ? span->fontp()->font_handle : fallback_fh;
         float font_content_height = font ? font_get_cell_height(font) : 0.0f;
         span->width = inline_size;
         span->height = roundf(font_content_height + border_top + pad_top +
@@ -639,9 +639,9 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         get_child_relative_offset(c, &dx, nullptr);
         float x = c->x - dx;
         if (ViewSpan* sp = lam::view_as<RDT_VIEW_INLINE>(c)) {
-            if (sp->has_ancestor_fragment_union &&
-                sp->ancestor_fragment_min_x < x) {
-                x = sp->ancestor_fragment_min_x;
+            if (sp->has_ancestor_fragment_union() &&
+                sp->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_x < x) {
+                x = sp->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_x;
             }
         }
         return x;
@@ -652,9 +652,9 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         get_child_relative_offset(c, &dx, nullptr);
         float right = c->x - dx + c->width;
         if (ViewSpan* sp = lam::view_as<RDT_VIEW_INLINE>(c)) {
-            if (sp->has_ancestor_fragment_union &&
-                sp->ancestor_fragment_max_x > right) {
-                right = sp->ancestor_fragment_max_x;
+            if (sp->has_ancestor_fragment_union() &&
+                sp->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_x > right) {
+                right = sp->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_x;
             }
         }
         return right;
@@ -663,13 +663,13 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     auto get_child_inline_margin = [](View* c, bool inline_start) -> float {
         if (ViewBlock* block = lam::view_as_block<RDT_VIEW_INLINE_BLOCK>(c)) {
             if (block->bound) {
-                return inline_start ? block->bound->margin.left
-                                    : block->bound->margin.right;
+                return inline_start ? block->boundary()->margin.left
+                                    : block->boundary()->margin.right;
             }
         } else if (ViewSpan* child_span = lam::view_as<RDT_VIEW_INLINE>(c)) {
             if (child_span->bound) {
-                return inline_start ? child_span->bound->margin.left
-                                    : child_span->bound->margin.right;
+                return inline_start ? child_span->boundary()->margin.left
+                                    : child_span->boundary()->margin.right;
             }
         }
         return 0.0f;
@@ -716,8 +716,8 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         if (ViewSpan* cs = lam::view_as<RDT_VIEW_INLINE>(c)) {
             float bt = 0, pt = 0;
             if (cs->bound) {
-                if (cs->bound->border) bt = cs->bound->border->width.top;
-                pt = cs->bound->padding.top > 0 ? cs->bound->padding.top : 0;
+                if (cs->boundary_mut()->border) bt = cs->boundary_mut()->border->width.top;
+                pt = cs->boundary()->padding.top > 0 ? cs->boundary()->padding.top : 0;
             }
             return get_child_static_y(c) + bt + pt;
         }
@@ -727,8 +727,8 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         if (ViewSpan* cs = lam::view_as<RDT_VIEW_INLINE>(c)) {
             float bb = 0, pb = 0;
             if (cs->bound) {
-                if (cs->bound->border) bb = cs->bound->border->width.bottom;
-                pb = cs->bound->padding.bottom > 0 ? cs->bound->padding.bottom : 0;
+                if (cs->boundary_mut()->border) bb = cs->boundary_mut()->border->width.bottom;
+                pb = cs->boundary()->padding.bottom > 0 ? cs->boundary()->padding.bottom : 0;
             }
             return get_child_static_bottom(c) - bb - pb;
         }
@@ -781,17 +781,17 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // Get border and padding widths
     float border_top = 0, border_right = 0, border_bottom = 0, border_left = 0;
     float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
-    if (span->bound && span->bound->border) {
-        border_top = span->bound->border->width.top;
-        border_right = span->bound->border->width.right;
-        border_bottom = span->bound->border->width.bottom;
-        border_left = span->bound->border->width.left;
+    if (span->bound && span->boundary_mut()->border) {
+        border_top = span->boundary()->border->width.top;
+        border_right = span->boundary()->border->width.right;
+        border_bottom = span->boundary()->border->width.bottom;
+        border_left = span->boundary()->border->width.left;
     }
     if (span->bound) {
-        pad_left = span->bound->padding.left > 0 ? span->bound->padding.left : 0;
-        pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
-        pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
-        pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+        pad_left = span->boundary()->padding.left > 0 ? span->boundary()->padding.left : 0;
+        pad_right = span->boundary()->padding.right > 0 ? span->boundary()->padding.right : 0;
+        pad_top = span->boundary()->padding.top > 0 ? span->boundary()->padding.top : 0;
+        pad_bottom = span->boundary()->padding.bottom > 0 ? span->boundary()->padding.bottom : 0;
     }
 
     // CSS 2.1 §9.4.2: If children have zero content extent AND the span has no
@@ -820,16 +820,16 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     float parent_border_bottom_y = content_max_y + roundf(border_bottom) + roundf(pad_bottom);
     // Only block-in-inline fragmentation promotes recorded descendant fragments
     // into the ancestor's own split border-box union.
-    float final_min_y = span->has_split_inline_fragment_union
+    float final_min_y = span->has_split_inline_fragment_union()
         ? min(visual_min_y, parent_border_top_y) : parent_border_top_y;
-    float final_max_y = span->has_split_inline_fragment_union
+    float final_max_y = span->has_split_inline_fragment_union()
         ? max(visual_max_y, parent_border_bottom_y) : parent_border_bottom_y;
-    if (span->has_split_inline_fragment_union && !span_has_direct_visible_text(span)) {
-        if (span->split_inline_fragment_min_x < min_x) min_x = span->split_inline_fragment_min_x;
-        if (span->split_inline_fragment_max_x > max_x) max_x = span->split_inline_fragment_max_x;
+    if (span->has_split_inline_fragment_union() && !span_has_direct_visible_text(span)) {
+        if (span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x < min_x) min_x = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x;
+        if (span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x > max_x) max_x = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x;
         content_width = max_x - min_x;
-        final_min_y = span->split_inline_fragment_min_y - roundf(border_top) - roundf(pad_top);
-        final_max_y = span->split_inline_fragment_max_y + roundf(border_bottom) + roundf(pad_bottom);
+        final_min_y = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_y - roundf(border_top) - roundf(pad_top);
+        final_max_y = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_y + roundf(border_bottom) + roundf(pad_bottom);
 
         // CSS 2.1 §9.2.1.1: split inline boxes expose the union of their own
         // anonymous fragments. Descendant inline borders do not enlarge an
@@ -840,11 +840,11 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         span->height = final_max_y - final_min_y;
         return;
     }
-    if (span->has_inline_fragment_union && span_has_direct_visible_text(span)) {
-        if (span->inline_fragment_min_y < final_min_y) final_min_y = span->inline_fragment_min_y;
-        if (span->inline_fragment_max_y > final_max_y) final_max_y = span->inline_fragment_max_y;
-        if (span->inline_fragment_min_x < min_x) min_x = span->inline_fragment_min_x;
-        if (span->inline_fragment_max_x > max_x) max_x = span->inline_fragment_max_x;
+    if (span->has_inline_fragment_union() && span_has_direct_visible_text(span)) {
+        if (span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y < final_min_y) final_min_y = span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y;
+        if (span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y > final_max_y) final_max_y = span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y;
+        if (span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x < min_x) min_x = span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x;
+        if (span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x > max_x) max_x = span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x;
         content_width = max_x - min_x;
     }
 
@@ -908,11 +908,11 @@ static int detect_math_element(DomElement* elem) {
     if (!elem) return 0;
 
     // check for class="math inline" or class="math display"
-    if (dom_element_has_class(elem, "math")) {
-        if (dom_element_has_class(elem, "inline")) {
+    if (elem->has_class("math")) {
+        if (elem->has_class("inline")) {
             return 1;  // inline math
         }
-        if (dom_element_has_class(elem, "display")) {
+        if (elem->has_class("display")) {
             return 2;  // display math
         }
         // just "math" class defaults to inline
@@ -1076,21 +1076,21 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                     // Only collapse when the container doesn't establish a BFC
                     // (table cells, overflow:hidden etc. prevent margin collapse)
                     if (container && !block_context_establishes_bfc(container)) {
-                        float cont_bt = container->bound && container->bound->border
-                            ? container->bound->border->width.top : 0;
-                        float cont_pt = container->bound ? container->bound->padding.top : 0;
+                        float cont_bt = container->bound && container->boundary_mut()->border
+                            ? container->boundary()->border->width.top : 0;
+                        float cont_pt = container->bound ? container->boundary()->padding.top : 0;
                         // Also check that the inline wrapper has no border/padding barrier
-                        float inline_bt = span->bound && span->bound->border
-                            ? span->bound->border->width.top : 0;
-                        float inline_pt = span->bound ? span->bound->padding.top : 0;
+                        float inline_bt = span->bound && span->boundary_mut()->border
+                            ? span->boundary()->border->width.top : 0;
+                        float inline_pt = span->bound ? span->boundary()->padding.top : 0;
 
                         // Top margin collapse: first block, no border/padding barrier
                         if (!had_block_child_before && !visible_inline_before_first_block &&
                             cont_bt == 0 && cont_pt == 0 &&
                             inline_bt == 0 && inline_pt == 0 &&
-                            child_block->bound->margin.top != 0) {
-                            float child_mt = child_block->bound->margin.top;
-                            float cont_mt = container->bound ? container->bound->margin.top : 0;
+                            child_block->boundary()->margin.top != 0) {
+                            float child_mt = child_block->boundary()->margin.top;
+                            float cont_mt = container->bound ? container->boundary()->margin.top : 0;
                             float collapsed = (child_mt >= 0 && cont_mt >= 0) ?
                                 (child_mt > cont_mt ? child_mt : cont_mt) :
                                 (child_mt < 0 && cont_mt < 0) ?
@@ -1099,12 +1099,11 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                             float y_delta = collapsed - cont_mt;
                             container->y += y_delta;
                             if (!container->bound) {
-                                container->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-                                memset(container->bound, 0, sizeof(BoundaryProp));
+                                container->ensure_boundary(lycon);
                             }
-                            container->bound->margin.top = collapsed;
+                            container->boundary_mut()->margin.top = collapsed;
                             child_block->y -= child_mt;
-                            child_block->bound->margin.top = 0;
+                            child_block->boundary_mut()->margin.top = 0;
                             lycon->block.advance_y -= child_mt;
                             log_debug("%s block-in-inline: top margin collapse: child_mt=%.1f, collapsed=%.1f, container y_delta=%.1f",
                                       inline_elem->source_loc(), child_mt, collapsed, y_delta);
@@ -1194,32 +1193,31 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             container_node->is_element()) {
             ViewBlock* container = layout_inline_as_block_view(container_node);
             if (container && !block_context_establishes_bfc(container)) {
-                float cont_bb = container->bound && container->bound->border
-                    ? container->bound->border->width.bottom : 0;
-                float cont_pb = container->bound ? container->bound->padding.bottom : 0;
-                float inline_bb = span->bound && span->bound->border
-                    ? span->bound->border->width.bottom : 0;
-                float inline_pb = span->bound ? span->bound->padding.bottom : 0;
+                float cont_bb = container->bound && container->boundary_mut()->border
+                    ? container->boundary()->border->width.bottom : 0;
+                float cont_pb = container->bound ? container->boundary()->padding.bottom : 0;
+                float inline_bb = span->bound && span->boundary_mut()->border
+                    ? span->boundary()->border->width.bottom : 0;
+                float inline_pb = span->bound ? span->boundary()->padding.bottom : 0;
                 // Check: container has auto height (no explicit height)
-                bool cont_auto_height = !container->blk || container->blk->given_height < 0;
+                bool cont_auto_height = !container->blk || container->block()->given_height < 0;
                 if (cont_bb == 0 && cont_pb == 0 && inline_bb == 0 && inline_pb == 0 &&
-                    cont_auto_height && last_blk->bound->margin.bottom != 0) {
+                    cont_auto_height && last_blk->boundary_mut()->margin.bottom != 0) {
                     // the split block can reach the container edge only when no later
                     // in-flow sibling makes its margin a sibling margin instead.
-                    float child_mb = last_blk->bound->margin.bottom;
-                    float cont_mb = container->bound ? container->bound->margin.bottom : 0;
+                    float child_mb = last_blk->boundary()->margin.bottom;
+                    float cont_mb = container->bound ? container->boundary()->margin.bottom : 0;
                     float collapsed = (child_mb >= 0 && cont_mb >= 0) ?
                         (child_mb > cont_mb ? child_mb : cont_mb) :
                         (child_mb < 0 && cont_mb < 0) ?
                         (child_mb < cont_mb ? child_mb : cont_mb) :
                         child_mb + cont_mb;
                     if (!container->bound) {
-                        container->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-                        memset(container->bound, 0, sizeof(BoundaryProp));
+                        container->ensure_boundary(lycon);
                     }
-                    container->bound->margin.bottom = collapsed;
+                    container->boundary_mut()->margin.bottom = collapsed;
                     lycon->block.advance_y -= child_mb;
-                    last_blk->bound->margin.bottom = 0;
+                    last_blk->boundary_mut()->margin.bottom = 0;
                     log_debug("%s block-in-inline: bottom margin collapse: child_mb=%.1f, collapsed=%.1f",
                               inline_elem->source_loc(), child_mb, collapsed);
                 }
@@ -1396,8 +1394,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (elmt->is_element()) {
         DomElement* elem = layout_inline_as_element(elmt);
         // debug: check what classes this element has
-        bool has_math = dom_element_has_class(elem, "math");
-        bool has_inline = dom_element_has_class(elem, "inline");
+        bool has_math = elem->has_class("math");
+        bool has_inline = elem->has_class("inline");
         log_debug("%s layout_inline: checking %s has_math=%d has_inline=%d", elmt->source_loc(),
                   elem->node_name(), has_math, has_inline);
         int math_type = detect_math_element(elem);
@@ -1450,22 +1448,22 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Apply counter operations for this inline element
     if (lycon->counter_context && span->blk && !is_before_pseudo) {
         // Apply counter-reset if specified
-        if (span->blk->counter_reset) {
-            log_debug("%s     [Inline] Applying counter-reset: %s", elmt->source_loc(), span->blk->counter_reset);
-            counter_reset(lycon->counter_context, span->blk->counter_reset);
+        if (span->block()->counter_reset) {
+            log_debug("%s     [Inline] Applying counter-reset: %s", elmt->source_loc(), span->block()->counter_reset);
+            counter_reset(lycon->counter_context, span->block()->counter_reset);
         }
 
         // Apply counter-increment if specified
-        if (span->blk->counter_increment) {
-            log_debug("%s     [Inline] Applying counter-increment: %s", elmt->source_loc(), span->blk->counter_increment);
-            counter_increment(lycon->counter_context, span->blk->counter_increment);
+        if (span->block()->counter_increment) {
+            log_debug("%s     [Inline] Applying counter-increment: %s", elmt->source_loc(), span->block()->counter_increment);
+            counter_increment(lycon->counter_context, span->block()->counter_increment);
         }
 
         // Apply counter-set if specified (CSS Lists 3)
         // Processed after counter-reset and counter-increment per spec
-        if (span->blk->counter_set) {
-            log_debug("%s     [Inline] Applying counter-set: %s", elmt->source_loc(), span->blk->counter_set);
-            counter_set(lycon->counter_context, span->blk->counter_set);
+        if (span->block()->counter_set) {
+            log_debug("%s     [Inline] Applying counter-set: %s", elmt->source_loc(), span->block()->counter_set);
+            counter_set(lycon->counter_context, span->block()->counter_set);
         }
 
         if (is_after_pseudo && elmt->parent && elmt->parent->is_element()) {
@@ -1527,9 +1525,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (span->font) {
         setup_font(lycon->ui_context, &lycon->font,  span->font);
     }
-    if (span->in_line && span->in_line->vertical_align) {
-        lycon->line.vertical_align = span->in_line->vertical_align;
-        lycon->line.vertical_align_offset = span->in_line->vertical_align_offset;
+    if (span->in_line && span->inl()->vertical_align) {
+        lycon->line.vertical_align = span->inl()->vertical_align;
+        lycon->line.vertical_align_offset = span->inl()->vertical_align_offset;
     }
 
     // CSS 2.1 §10.8.1: Each inline box uses its own 'line-height' property for
@@ -1579,10 +1577,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // so line_break() knows to respect the expanded line box height.
         if (lycon->block.line_height > pa_line_height) {
             lycon->line.has_expanded_inline_lh = true;
-            CssEnum span_valign = span->in_line && span->in_line->vertical_align ?
-                span->in_line->vertical_align : CSS_VALUE_BASELINE;
+            CssEnum span_valign = span->in_line && span->inl()->vertical_align ?
+                span->inl()->vertical_align : CSS_VALUE_BASELINE;
             float span_valign_offset = span->in_line ?
-                span->in_line->vertical_align_offset : 0.0f;
+                span->inl()->vertical_align_offset : 0.0f;
             if (span_valign == CSS_VALUE_BASELINE && span_valign_offset == 0.0f) {
                 lycon->line.max_inline_line_height = max(
                     lycon->line.max_inline_line_height, lycon->block.line_height);
@@ -1605,14 +1603,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float inline_right_edge = 0;
     if (span->bound) {
         // CSS 2.1 §8.3: horizontal margins apply to inline elements
-        inline_left_edge += span->bound->margin.left;
-        inline_right_edge += span->bound->margin.right;
-        if (span->bound->border) {
-            inline_left_edge += span->bound->border->width.left;
-            inline_right_edge += span->bound->border->width.right;
+        inline_left_edge += span->boundary()->margin.left;
+        inline_right_edge += span->boundary()->margin.right;
+        if (span->boundary()->border) {
+            inline_left_edge += span->boundary()->border->width.left;
+            inline_right_edge += span->boundary()->border->width.right;
         }
-        inline_left_edge += span->bound->padding.left;
-        inline_right_edge += span->bound->padding.right;
+        inline_left_edge += span->boundary()->padding.left;
+        inline_right_edge += span->boundary()->padding.right;
     }
     float saved_inline_pending = lycon->line.inline_start_edge_pending;
 
@@ -1695,7 +1693,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // override y with the flow position. compute_span_bounding_box uses
         // children's visual positions (after their own relative positioning),
         // which would contaminate the span's base position for its own offset.
-        if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
+        if (span->position && span->positionp()->position == CSS_VALUE_RELATIVE) {
             span->y = pre_split_advance_y;
         }
 
@@ -1709,10 +1707,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (has_inline_start) {
                 float border_top = 0, pad_top = 0;
                 if (span->bound) {
-                    if (span->bound->border)
-                        border_top = span->bound->border->width.top;
-                    if (span->bound->padding.top > 0)
-                        pad_top = span->bound->padding.top;
+                    if (span->boundary()->border)
+                        border_top = span->boundary()->border->width.top;
+                    if (span->boundary()->padding.top > 0)
+                        pad_top = span->boundary()->padding.top;
                 }
                 float strut_top = pre_split_advance_y - border_top - pad_top;
                 if (strut_top < span->y) {
@@ -1755,10 +1753,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 18.0f;
                     float border_bottom = 0, pad_bottom = 0;
                     if (span->bound) {
-                        if (span->bound->border)
-                            border_bottom = span->bound->border->width.bottom;
-                        if (span->bound->padding.bottom > 0)
-                            pad_bottom = span->bound->padding.bottom;
+                        if (span->boundary()->border)
+                            border_bottom = span->boundary()->border->width.bottom;
+                        if (span->boundary()->padding.bottom > 0)
+                            pad_bottom = span->boundary()->padding.bottom;
                     }
                     float trailing_extent = last_block_bottom + line_height + border_bottom + pad_bottom;
                     float span_bottom = span->y + span->height;
@@ -1774,10 +1772,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         record_block_in_inline_split_chain(span);
 
         // Apply CSS relative/sticky positioning after normal layout
-        if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
+        if (span->position && span->positionp()->position == CSS_VALUE_RELATIVE) {
             log_debug("%s Applying relative positioning to inline span (with block children)", elmt->source_loc());
             layout_relative_positioned(lycon, layout_inline_unsafe_block_api_span(span));
-        } else if (span->position && span->position->position == CSS_VALUE_STICKY) {
+        } else if (span->position && span->positionp()->position == CSS_VALUE_STICKY) {
             layout_sticky_positioned(lycon, layout_inline_unsafe_block_api_span(span));
         }
 
@@ -1906,23 +1904,23 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // this inline's resolved line-height for table-cell height measurement.
     span->content_height = span_resolved_line_height;
     if (had_children && has_inline_axis_decoration && span_children_have_no_line_content(span)) {
-        span->has_collapsed_line_fragment_union = true;
-        span->collapsed_line_fragment_min_x = collapsed_inline_fragment_x;
-        span->collapsed_line_fragment_max_x = collapsed_inline_fragment_x;
-        span->collapsed_line_fragment_min_y = lycon->block.advance_y;
-        span->collapsed_line_fragment_max_y = lycon->block.advance_y;
+        span->set_has_collapsed_line_fragment_union(true);
+        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x = collapsed_inline_fragment_x;
+        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x = collapsed_inline_fragment_x;
+        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y = lycon->block.advance_y;
+        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_y = lycon->block.advance_y;
     }
 
     // CSS 2.1 §10.8.1: vertical-align applies to the inline box generated by
     // this element. Text descendants contribute metrics through output_text(),
     // but an inline box with only atomic children still contributes its own
     // line-height to the parent line.
-    if (span->in_line && span->in_line->vertical_align &&
-        span->in_line->vertical_align != CSS_VALUE_BASELINE &&
+    if (span->in_line && span->inl()->vertical_align &&
+        span->inl()->vertical_align != CSS_VALUE_BASELINE &&
         span->content_height > 0.0f) {
         float asc_contribution = 0.0f;
         float desc_contribution = 0.0f;
-        CssEnum valign = span->in_line->vertical_align;
+        CssEnum valign = span->inl()->vertical_align;
         if (valign == CSS_VALUE_MIDDLE) {
             float x_height_half = lycon->font.current_font_size * 0.25f;
             if (lycon->line.parent_font_handle) {
@@ -1938,9 +1936,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, span->content_height);
             lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, span->content_height);
         } else {
-            float span_asc = span->font ? span->font->ascender :
+            float span_asc = span->font ? span->fontp()->ascender :
                 (lycon->font.style ? lycon->font.style->ascender : 0.0f);
-            float span_desc = span->font ? span->font->descender :
+            float span_desc = span->font ? span->fontp()->descender :
                 (lycon->font.style ? lycon->font.style->descender : 0.0f);
             float content_area = span_asc + span_desc;
             float half_leading = (span->content_height - content_area) / 2.0f;
@@ -1954,7 +1952,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 desc_contribution = lycon->line.parent_font_descender;
             }
             float baseline_shift = vertical_align_baseline_shift(
-                lycon, valign, span->in_line->vertical_align_offset);
+                lycon, valign, span->inl()->vertical_align_offset);
             // Placement and line metrics must use the same UA-defined super/sub shift.
             asc_contribution += baseline_shift;
             desc_contribution -= baseline_shift;
@@ -1972,10 +1970,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         float border_left = 0.0f;
         float padding_left = 0.0f;
         if (span->bound) {
-            if (span->bound->border) {
-                border_left = span->bound->border->width.left;
+            if (span->boundary()->border) {
+                border_left = span->boundary()->border->width.left;
             }
-            padding_left = span->bound->padding.left > 0.0f ? span->bound->padding.left : 0.0f;
+            padding_left = span->boundary()->padding.left > 0.0f ? span->boundary()->padding.left : 0.0f;
         }
         // Empty inline elements still have a border box; it starts after the
         // inline-start margin, while width excludes margins.
@@ -2011,26 +2009,26 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // inline-blocks) that extend beyond the font content area, cap the span's height.
     // Use font_get_cell_height() which matches the text rect height and browser behavior.
     if (span->height > 0) {
-        struct FontHandle* fh = span->font ? span->font->font_handle : lycon->font.font_handle;
+        struct FontHandle* fh = span->font ? span->fontp()->font_handle : lycon->font.font_handle;
         if (fh) {
             float content_area = font_get_cell_height(fh);
             float bt = 0, bb = 0, pt_val = 0, pb_val = 0;
             if (span->bound) {
-                if (span->bound->border) {
-                    bt = span->bound->border->width.top;
-                    bb = span->bound->border->width.bottom;
+                if (span->boundary()->border) {
+                    bt = span->boundary()->border->width.top;
+                    bb = span->boundary()->border->width.bottom;
                 }
-                pt_val = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
-                pb_val = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+                pt_val = span->boundary()->padding.top > 0 ? span->boundary()->padding.top : 0;
+                pb_val = span->boundary()->padding.bottom > 0 ? span->boundary()->padding.bottom : 0;
             }
             float expected_height = content_area + bt + pt_val + pb_val + bb;
             if (!span_is_multi_line &&
                 roundf(span->height) > roundf(expected_height)) {
                 // subpixel raster/content metrics can describe the same CSS-pixel
                 // box; re-anchoring it after a preserved newline moves it a line.
-                float span_asc = span->font ? span->font->ascender :
+                float span_asc = span->font ? span->fontp()->ascender :
                     (lycon->font.style ? lycon->font.style->ascender : 0.0f);
-                float span_desc = span->font ? span->font->descender :
+                float span_desc = span->font ? span->fontp()->descender :
                     (lycon->font.style ? lycon->font.style->descender : 0.0f);
                 float baseline_pos = line_baseline_position(lycon, nullptr);
                 span->y = layout_inline_font_box_y(
@@ -2045,7 +2043,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (!had_children && !lycon->block.line_height_is_normal) {
                 float ascender = 0;
                 if (span->font) {
-                    ascender = span->font->ascender;
+                    ascender = span->fontp()->ascender;
                 } else if (lycon->font.style) {
                     ascender = lycon->font.style->ascender;
                 }
@@ -2082,10 +2080,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // Apply CSS relative/sticky positioning after normal layout
     // CSS 2.1 §9.4.3: Relatively positioned inline elements are offset from their normal position
-    if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
+    if (span->position && span->positionp()->position == CSS_VALUE_RELATIVE) {
         log_debug("%s Applying relative positioning to inline span", elmt->source_loc());
         layout_relative_positioned(lycon, layout_inline_unsafe_block_api_span(span));
-    } else if (span->position && span->position->position == CSS_VALUE_STICKY) {
+    } else if (span->position && span->positionp()->position == CSS_VALUE_STICKY) {
         layout_sticky_positioned(lycon, layout_inline_unsafe_block_api_span(span));
     }
 

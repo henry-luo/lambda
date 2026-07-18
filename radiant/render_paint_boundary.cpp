@@ -221,7 +221,7 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
 
 bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* view,
                                               float x, float y) {
-    if (!paint_list || !view || !view->bound || !view->bound->box_shadow) {
+    if (!paint_list || !view || !view->bound || !view->boundary()->box_shadow) {
         return false;
     }
 
@@ -233,8 +233,8 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
     float r_tr = 0.0f;
     float r_br = 0.0f;
     float r_bl = 0.0f;
-    if (view->bound->border) {
-        BorderProp* border = view->bound->border;
+    if (view->boundary()->border) {
+        BorderProp* border = view->boundary()->border;
         r_tl = border->radius.top_left;
         r_tr = border->radius.top_right;
         r_br = border->radius.bottom_right;
@@ -242,13 +242,13 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
     }
 
     int shadow_count = 0;
-    for (BoxShadow* shadow = view->bound->box_shadow; shadow; shadow = shadow->next) {
+    for (BoxShadow* shadow = view->boundary()->box_shadow; shadow; shadow = shadow->next) {
         shadow_count++;
     }
 
     bool emitted = false;
     for (int shadow_index = shadow_count - 1; shadow_index >= 0; shadow_index--) {
-        BoxShadow* shadow = view->bound->box_shadow;
+        BoxShadow* shadow = view->boundary()->box_shadow;
         for (int i = 0; i < shadow_index && shadow; i++) {
             shadow = shadow->next;
         }
@@ -321,8 +321,8 @@ bool render_paint_boundary_build_linear_gradient(ViewBlock* view, float x, float
                                                  RdtGradientStop* stops,
                                                  int stop_capacity,
                                                  BoundaryLinearGradientPaint* out) {
-    if (!view || !view->bound || !view->bound->background || !out) return false;
-    BackgroundProp* bg = view->bound->background;
+    if (!view || !view->bound || !view->boundary()->background || !out) return false;
+    BackgroundProp* bg = view->boundary()->background;
     LinearGradient* gradient = bg->linear_gradient;
     if (bg->gradient_type != GRADIENT_LINEAR || !gradient) return false;
 
@@ -358,8 +358,8 @@ bool render_paint_boundary_build_radial_gradient(ViewBlock* view, float x, float
                                                  RdtGradientStop* stops,
                                                  int stop_capacity,
                                                  BoundaryRadialGradientPaint* out) {
-    if (!view || !view->bound || !view->bound->background || !out) return false;
-    BackgroundProp* bg = view->bound->background;
+    if (!view || !view->bound || !view->boundary()->background || !out) return false;
+    BackgroundProp* bg = view->boundary()->background;
     RadialGradient* gradient = bg->radial_gradient;
     if (bg->gradient_type != GRADIENT_RADIAL || !gradient) return false;
 

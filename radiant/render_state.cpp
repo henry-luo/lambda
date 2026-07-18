@@ -13,27 +13,27 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
         rdcon->perspective_origin_y,
         false
     };
-    if (block->transform && block->transform->perspective > 0.0f) {
+    if (block->transform && block->transformp()->perspective > 0.0f) {
         float elem_x = parent_block->x + block->x;
         float elem_y = parent_block->y + block->y;
-        rdcon->perspective_distance = block->transform->perspective;
-        rdcon->perspective_origin_x = elem_x + block->transform->perspective_origin_x;
-        rdcon->perspective_origin_y = elem_y + block->transform->perspective_origin_y;
+        rdcon->perspective_distance = block->transformp()->perspective;
+        rdcon->perspective_origin_x = elem_x + block->transformp()->perspective_origin_x;
+        rdcon->perspective_origin_y = elem_y + block->transformp()->perspective_origin_y;
         scope.active = true;
         log_debug("[TRANSFORM] Element %s: perspective active, distance=%.1f",
             block->node_name(), rdcon->perspective_distance);
     }
 
-    if (!block->transform || !block->transform->functions) {
+    if (!block->transform || !block->transformp()->functions) {
         return scope;
     }
 
-    float origin_x = block->transform->origin_x_percent
-        ? (block->transform->origin_x / 100.0f) * block->width
-        : block->transform->origin_x;
-    float origin_y = block->transform->origin_y_percent
-        ? (block->transform->origin_y / 100.0f) * block->height
-        : block->transform->origin_y;
+    float origin_x = block->transformp()->origin_x_percent
+        ? (block->transformp()->origin_x / 100.0f) * block->width
+        : block->transformp()->origin_x;
+    float origin_y = block->transformp()->origin_y_percent
+        ? (block->transformp()->origin_y / 100.0f) * block->height
+        : block->transformp()->origin_y;
 
     float elem_x = parent_block->x + block->x;
     float elem_y = parent_block->y + block->y;
@@ -41,7 +41,7 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
     origin_y += elem_y;
 
     RdtMatrix next_transform = radiant::compute_transform_matrix(
-        block->transform->functions, block->width, block->height, origin_x, origin_y,
+        block->transformp()->functions, block->width, block->height, origin_x, origin_y,
         rdcon->perspective_distance, rdcon->perspective_origin_x, rdcon->perspective_origin_y);
 
     if (scope.previous_has_transform) {

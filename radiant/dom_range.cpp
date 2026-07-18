@@ -1161,7 +1161,7 @@ DomNode* dom_node_clone(DomNode* node, bool deep) {
     }
     if (node->is_element()) {
         DomElement* e = node->as_element();
-        DomElement* clone = dom_element_create(doc, e->tag_name, e->native_element);
+        DomElement* clone = dom_element_create(doc, e->tag_name, dom_element_backing(e));
         if (!clone) return nullptr;
         if (e->id) dom_element_retain_id(clone, lam::borrow_const(lam::promote_to_arena(doc->arena, e->id)));
         if (e->class_names) dom_element_retain_class_names(clone, lam::PoolPtr<const char*>(e->class_names));
@@ -2019,8 +2019,8 @@ static bool elem_subtree_content_visibility_hidden(const DomElement* e) {
         // the DomElement's `style` attribute. If neither layout nor parser
         // populated this, the test won't be hit and the function returns
         // false — that's the correct conservative fallback.
-        if (e->native_element) {
-            const char* style = dom_element_get_attribute(const_cast<DomElement*>(e), "style");
+        if (!e->is_synthetic()) {
+            const char* style = const_cast<DomElement*>(e)->get_attribute("style");
             if (style) {
                 const char* p = style;
                 while ((p = strstr(p, "content-visibility")) != nullptr) {
@@ -2949,7 +2949,7 @@ static DomNode* child_at_offset(DomElement* e, uint32_t offset) {
 static bool node_is_atomic_caret_stop(DomNode* n) {
     if (!n || !n->is_element()) return false;
     DomElement* e = n->as_element();
-    const char* ce = dom_element_get_attribute(e, "contenteditable");
+    const char* ce = e->get_attribute("contenteditable");
     if (ce && tag_ieq(ce, "false")) return true;
     const char* tag = e->tag_name;
     return tag_ieq(tag, "img") ||
@@ -2969,7 +2969,7 @@ static bool node_is_selectable_atomic_caret_stop(DomNode* n,
     if (host && !node_is_descendant_of(n, host)) return false;
     if (node_is_false_island_for_host(n, host)) {
         if (!n->is_element()) return false;
-        const char* ce = dom_element_get_attribute(n->as_element(),
+        const char* ce = n->as_element()->get_attribute(
                                                    "contenteditable");
         if (!ce || !tag_ieq(ce, "false")) return false;
     }
@@ -3519,7 +3519,7 @@ static DomBoundary extend_one_visible_char(DomBoundary b, int dir) {
 static bool effective_dir_is_rtl(DomNode* n) {
     for (DomNode* cur = n && n->is_text() ? n->parent : n; cur; cur = cur->parent) {
         if (!cur->is_element()) continue;
-        const char* dir = dom_element_get_attribute(cur->as_element(), "dir");
+        const char* dir = cur->as_element()->get_attribute("dir");
         if (!dir) continue;
         if (strcasecmp(dir, "rtl") == 0) return true;
         if (strcasecmp(dir, "ltr") == 0) return false;
@@ -3588,8 +3588,8 @@ static DomBoundary subtree_edge_boundary(DomNode* root, int edge_dir,
 }
 
 static bool element_is_contenteditable_false(DomElement* e) {
-    if (!e || !dom_element_has_attribute(e, "contenteditable")) return false;
-    const char* ce = dom_element_get_attribute(e, "contenteditable");
+    if (!e || !e->has_attribute("contenteditable")) return false;
+    const char* ce = e->get_attribute("contenteditable");
     return ce && tag_ieq(ce, "false");
 }
 
@@ -3836,7 +3836,7 @@ static bool node_tag_is(DomNode* node, const char* tag) {
 
 static bool element_is_hidden_input(DomElement* elem) {
     if (!element_tag_is(elem, "input")) return false;
-    const char* type = dom_element_get_attribute(elem, "type");
+    const char* type = elem->get_attribute("type");
     return type && tag_ieq(type, "hidden");
 }
 

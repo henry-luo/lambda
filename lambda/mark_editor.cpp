@@ -20,7 +20,7 @@ static bool mark_editor_should_preserve_ui_dom_child(Item child) {
     if (type_id == LMD_TYPE_ELEMENT && child.element) {
         DomElement* elem = element_to_dom_element(child.element);
         return elem && elem->node_type == DOM_NODE_ELEMENT &&
-            elem->native_element == child.element;
+            !elem->is_synthetic() && dom_element_to_element(elem) == child.element;
     }
     if (type_id == LMD_TYPE_STRING) {
         String* s = child.get_safe_string();

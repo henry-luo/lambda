@@ -1486,35 +1486,35 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
     float width = view->width;
     float height = view->height;
 
-    if (ctx->effect_fallback.active && view->bound->box_shadow) {
+    if (ctx->effect_fallback.active && view->boundary_mut()->box_shadow) {
         render_paint_boundary_emit_outer_shadows(pdf_active_paint_list(ctx), view, abs_x, abs_y);
     }
 
     // Background
-    if (view->bound->background && view->bound->background->color.a > 0) {
-        if (pdf_has_border_radius(view->bound->border)) {
-            Corner background_radius = view->bound->border->radius;
+    if (view->boundary_mut()->background && view->boundary_mut()->background->color.a > 0) {
+        if (pdf_has_border_radius(view->boundary()->border)) {
+            Corner background_radius = view->boundary()->border->radius;
             constrain_corner_radii(&background_radius, width, height);
             Rect background_rect = {abs_x, abs_y, width, height};
             RdtPath* background_path =
                 render_path_create_rounded_rect(background_rect, &background_radius);
             if (background_path) {
                 bool owns_path =
-                    pdf_paint_fill_path(ctx, background_path, view->bound->background->color);
+                    pdf_paint_fill_path(ctx, background_path, view->boundary()->background->color);
                 if (!owns_path) rdt_path_free(background_path);
             } else {
-                pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->bound->background->color);
+                pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->boundary()->background->color);
             }
         } else {
-            pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->bound->background->color);
+            pdf_paint_fill_rect(ctx, abs_x, abs_y, width, height, view->boundary()->background->color);
         }
     }
 
-    if (view->bound->background &&
-        view->bound->background->gradient_type == GRADIENT_LINEAR &&
-        view->bound->background->linear_gradient &&
-        view->bound->background->linear_gradient->stop_count >= 2) {
-        int stop_count = view->bound->background->linear_gradient->stop_count;
+    if (view->boundary()->background &&
+        view->boundary()->background->gradient_type == GRADIENT_LINEAR &&
+        view->boundary()->background->linear_gradient &&
+        view->boundary()->background->linear_gradient->stop_count >= 2) {
+        int stop_count = view->boundary()->background->linear_gradient->stop_count;
         RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
             (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
         BoundaryLinearGradientPaint gradient = {};
@@ -1532,11 +1532,11 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
             stops = nullptr;
         }
         if (stops && !owns_payload) mem_free(stops);
-    } else if (view->bound->background &&
-               view->bound->background->gradient_type == GRADIENT_RADIAL &&
-               view->bound->background->radial_gradient &&
-               view->bound->background->radial_gradient->stop_count >= 2) {
-        int stop_count = view->bound->background->radial_gradient->stop_count;
+    } else if (view->boundary()->background &&
+               view->boundary()->background->gradient_type == GRADIENT_RADIAL &&
+               view->boundary()->background->radial_gradient &&
+               view->boundary()->background->radial_gradient->stop_count >= 2) {
+        int stop_count = view->boundary()->background->radial_gradient->stop_count;
         RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
             (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
         BoundaryRadialGradientPaint gradient = {};
@@ -1557,8 +1557,8 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
     }
 
     // Borders
-    if (view->bound->border) {
-        BorderProp* border = view->bound->border;
+    if (view->boundary()->border) {
+        BorderProp* border = view->boundary()->border;
         if (pdf_has_border_radius(border) && pdf_border_is_uniform_solid(border) &&
             width > border->width.top && height > border->width.top) {
             float border_width = border->width.top;
@@ -1599,8 +1599,8 @@ static void pdf_cb_render_text(void* vctx, ViewText* text, float abs_x, float ab
 
 static void pdf_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (!ctx || !block || !block->embed || !block->embed->img) return;
-    ImageSurface* img = block->embed->img;
+    if (!ctx || !block || !block->embed || !block->embedp()->img) return;
+    ImageSurface* img = block->embedp()->img;
 
     BlockBlot image_block = {};
     image_block.x = abs_x - block->x;
@@ -1615,7 +1615,7 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     if (!ctx || !block) return;
 
     DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(block));
-    if (!dom_elem || !dom_elem->native_element) {
+    if (!dom_elem || dom_elem->is_synthetic()) {
         log_debug("[PDF_SVG_SUBSCENE] inline SVG missing native element");
         return;
     }
@@ -1643,7 +1643,7 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     PaintSvgSubscene subscene = {};
     RdtMatrix identity = rdt_matrix_identity();
     render_svg_build_subscene(&subscene,
-                              dom_elem->native_element,
+                              dom_element_to_element(dom_elem),
                               content_rect.width,
                               content_rect.height,
                               pool,
@@ -1673,9 +1673,9 @@ static void pdf_cb_render_svg_subscene(void* vctx, const PaintSvgSubscene* subsc
 
 static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (!ctx || !block || !block->multicol) return;
+    if (!ctx || !block || !block->multicol_prop()) return;
 
-    MultiColumnProp* mc = block->multicol;
+    MultiColumnProp* mc = block->multicol_prop();
     int rule_column_count = mc->computed_used_column_count > 0
         ? mc->computed_used_column_count
         : mc->computed_column_count;
@@ -1696,8 +1696,8 @@ static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x
     float block_x = abs_x;
     float block_y = abs_y;
     if (block->bound) {
-        block_x += block->bound->padding.left;
-        block_y += block->bound->padding.top;
+        block_x += block->boundary()->padding.left;
+        block_y += block->boundary()->padding.top;
     }
 
     float rule_height = block->height;

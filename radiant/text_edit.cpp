@@ -852,17 +852,17 @@ void te_ime_cancel(DomElement* elem) {
 static void te_aria_set_or_clear(DomElement* elem, const char* name, bool on,
                                  const char* value) {
     if (on) {
-        dom_element_set_attribute(elem, name, value);
+        elem->set_attribute(name, value);
     } else {
         // Only clear if currently set; avoids churning the attribute table.
-        if (dom_element_get_attribute(elem, name)) {
-            dom_element_remove_attribute(elem, name);
+        if (elem->get_attribute(name)) {
+            elem->remove_attribute(name);
         }
     }
 }
 
 void te_aria_reflect(DomElement* elem) {
-    if (!elem || elem->item_prop_type != DomElement::ITEM_PROP_FORM) return;
+    if (!elem || elem->role_kind() != DomElement::ROLE_FORM) return;
     FormControlProp* f = elem->form;
     if (!f) return;
 
@@ -877,7 +877,7 @@ void te_aria_reflect(DomElement* elem) {
     // rather than removing — assistive tech treats the explicit "false"
     // value as "validation has run and the control is currently OK".
     bool invalid = state_get_pseudo_state(state, (View*)elem, PSEUDO_STATE_INVALID);
-    dom_element_set_attribute(elem, "aria-invalid", invalid ? "true" : "false");
+    elem->set_attribute("aria-invalid", invalid ? "true" : "false");
 
     // aria-valuenow / valuemin / valuemax for <input type="range">.
     if (f->control_type == FORM_CONTROL_RANGE) {
@@ -885,10 +885,10 @@ void te_aria_reflect(DomElement* elem) {
         float range_value = form_control_get_range_value(state, (View*)elem);
         float val = f->range_min + (f->range_max - f->range_min) * range_value;
         snprintf(buf, sizeof(buf), "%g", val);
-        dom_element_set_attribute(elem, "aria-valuenow", buf);
+        elem->set_attribute("aria-valuenow", buf);
         snprintf(buf, sizeof(buf), "%g", f->range_min);
-        dom_element_set_attribute(elem, "aria-valuemin", buf);
+        elem->set_attribute("aria-valuemin", buf);
         snprintf(buf, sizeof(buf), "%g", f->range_max);
-        dom_element_set_attribute(elem, "aria-valuemax", buf);
+        elem->set_attribute("aria-valuemax", buf);
     }
 }

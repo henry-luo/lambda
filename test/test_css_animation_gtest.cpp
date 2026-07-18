@@ -26,6 +26,62 @@ void radiant_dispatch_css_event(UiContext*, DomElement*, const char*,
     // links event.cpp, while this isolated target only verifies animation state.
 }
 
+static int g_computed_style_flushes = 0;
+
+extern "C" bool js_dom_force_layout_for_geometry(void* dom_doc) {
+    DomDocument* doc = (DomDocument*)dom_doc;
+    g_computed_style_flushes++;
+    if (doc) doc->js.mutation_count = 0;
+    if (doc && doc->root && doc->root->in_line) {
+        doc->root->in_line->opacity = 0.25f;
+    }
+    return doc != nullptr;
+}
+
+TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
+    size_t count = 0;
+    const CssPropAccessor* rows = css_prop_accessors(&count);
+    ASSERT_NE(rows, nullptr);
+    ASSERT_GT(count, 0u);
+
+    DomDocument doc = {};
+    DomElement element = {};
+    element.doc = &doc;
+    element.set_styles_resolved(true);
+    doc.root = &element;
+    for (size_t i = 0; i < count; i++) {
+        EXPECT_EQ(css_prop_accessor(rows[i].id), &rows[i]);
+        EXPECT_GT(rows[i].id, CSS_PROPERTY_UNKNOWN);
+        EXPECT_LT(rows[i].id, CSS_PROPERTY_COUNT);
+        EXPECT_NE(rows[i].serialize, nullptr);
+        for (size_t j = 0; j < i; j++) EXPECT_NE(rows[i].id, rows[j].id);
+
+        char value[512];
+        EXPECT_TRUE(css_prop_serialize_computed(
+            &element, rows[i].id, 0, value, sizeof(value))) << rows[i].id;
+    }
+}
+
+TEST(CssPropTable, DirtyMutationFlushesBeforeSerialization) {
+    DomDocument doc = {};
+    DomElement element = {};
+    InlineProp in_line = INLINE_PROP_DEFAULT;
+    in_line.opacity = 1.0f;
+    element.doc = &doc;
+    element.in_line = &in_line;
+    element.set_styles_resolved(true);
+    doc.root = &element;
+    doc.js.mutation_count = 1;
+    g_computed_style_flushes = 0;
+
+    char value[64];
+    ASSERT_TRUE(css_prop_serialize_computed(
+        &element, CSS_PROPERTY_OPACITY, 0, value, sizeof(value)));
+    EXPECT_STREQ(value, "0.25");
+    EXPECT_EQ(g_computed_style_flushes, 1);
+    EXPECT_EQ(doc.js.mutation_count, 0);
+}
+
 // Helper: set up a stylesheet with one @keyframes rule on a doc
 static void setup_keyframes_sheet(DomDocument* doc, CssStylesheet* sheet,
                                    CssRule* rule, CssRule** rule_ptr,

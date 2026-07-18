@@ -96,8 +96,8 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
         LayoutContextScope child_scope(lycon);
 
         if (child_block->blk) {
-            lycon->block.given_width = child_block->blk->given_width;
-            lycon->block.given_height = child_block->blk->given_height;
+            lycon->block.given_width = child_block->block()->given_width;
+            lycon->block.given_height = child_block->block()->given_height;
             if (ctx->resolve_percent_against_content_box) {
                 layout_resolve_percent_size_for_child(lycon, child_block,
                     state.containing_block, true, ctx->log_context);

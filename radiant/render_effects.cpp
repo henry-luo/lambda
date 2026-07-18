@@ -143,14 +143,14 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
         return group;
     }
 
-    group.mix_blend_mode = (block->in_line && block->in_line->mix_blend_mode &&
-                            block->in_line->mix_blend_mode != CSS_VALUE_NORMAL)
-                           ? block->in_line->mix_blend_mode : (CssEnum)0;
+    group.mix_blend_mode = (block->in_line && block->inl()->mix_blend_mode &&
+                            block->inl()->mix_blend_mode != CSS_VALUE_NORMAL)
+                           ? block->inl()->mix_blend_mode : (CssEnum)0;
     group.has_opacity_group = block->in_line &&
-        block->in_line->opacity < 1.0f && block->in_line->opacity >= 0.0f;
-    group.opacity = group.has_opacity_group ? block->in_line->opacity : 1.0f;
-    group.has_filter = block->filter && block->filter->functions;
-    group.has_backdrop_filter = block->backdrop_filter && block->backdrop_filter->functions;
+        block->inl()->opacity < 1.0f && block->inl()->opacity >= 0.0f;
+    group.opacity = group.has_opacity_group ? block->inl()->opacity : 1.0f;
+    group.has_filter = block->filter && block->filterp()->functions;
+    group.has_backdrop_filter = block->backdrop_filter_prop() && block->backdrop_filter_prop()->functions;
 
     float scale = rdcon->scale;
     float x0 = parent_block->x + block->x * scale;
@@ -214,7 +214,7 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
                         border_rect.y,
                         border_rect.width,
                         border_rect.height,
-                        block->backdrop_filter,
+                        block->backdrop_filter_prop(),
                         &rdcon->block.clip);
         log_debug("[BACKDROP-FILTER] Applied backdrop-filter to <%s> at (%.0f,%.0f) size %.0fx%.0f",
                   block->node_name(),

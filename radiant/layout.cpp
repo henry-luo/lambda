@@ -46,7 +46,7 @@ static DomElement* layout_positioned_containing_block(DomElement* elem) {
         if (!cur->is_element()) continue;
         DomElement* ancestor = cur->as_element();
         if (ancestor->position &&
-            ancestor->position->position != CSS_VALUE_STATIC) {
+            ancestor->positionp()->position != CSS_VALUE_STATIC) {
             return ancestor;
         }
     }
@@ -104,11 +104,11 @@ static void layout_reresolve_ua_em_margins(DomElement* dom_elem, float font_size
 
     // UA em margins are specified values; author font-size changes must update
     // their used pixels from the element's computed font, not from a stale pass.
-    if (dom_elem->bound->margin.top_specificity == -1) {
-        dom_elem->bound->margin.top = top_em * font_size;
+    if (dom_elem->boundary()->margin.top_specificity == -1) {
+        dom_elem->boundary_mut()->margin.top = top_em * font_size;
     }
-    if (dom_elem->bound->margin.bottom_specificity == -1) {
-        dom_elem->bound->margin.bottom = bottom_em * font_size;
+    if (dom_elem->boundary()->margin.bottom_specificity == -1) {
+        dom_elem->boundary_mut()->margin.bottom = bottom_em * font_size;
     }
 }
 
@@ -116,10 +116,10 @@ static float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
     if (!elem) return 0.0f;
     float value = x_axis ? elem->x : elem->y;
 
-    if (elem->position && elem->position->position == CSS_VALUE_FIXED) {
+    if (elem->position && elem->positionp()->position == CSS_VALUE_FIXED) {
         return value;
     }
-    if (elem->position && elem->position->position == CSS_VALUE_ABSOLUTE) {
+    if (elem->position && elem->positionp()->position == CSS_VALUE_ABSOLUTE) {
         DomElement* containing_block = layout_positioned_containing_block(elem);
         if (containing_block) {
             value += x_axis ? containing_block->x : containing_block->y;
@@ -138,9 +138,9 @@ static float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
 static float layout_scrollport_start(DomElement* elem, bool x_axis) {
     if (!elem) return 0.0f;
     float value = layout_scroll_document_coord(elem, x_axis);
-    if (elem->bound && elem->bound->border) {
-        value += x_axis ? elem->bound->border->width.left
-                        : elem->bound->border->width.top;
+    if (elem->bound && elem->boundary_mut()->border) {
+        value += x_axis ? elem->boundary()->border->width.left
+                        : elem->boundary()->border->width.top;
     }
     return value;
 }
@@ -152,7 +152,7 @@ static DomElement* layout_nearest_scroll_container(DomElement* target,
         if (!cur->is_element() || !cur->is_block()) continue;
         DomElement* ancestor = cur->as_element();
         if (ancestor == root) return nullptr;
-        if (ancestor->scroller && ancestor->scroller->pane) {
+        if (ancestor->scroller && ancestor->scroll_mut()->pane) {
             return ancestor;
         }
     }
@@ -178,7 +178,7 @@ static void layout_resolve_pending_scroll_into_view(DomDocument* doc,
         if (scroll_y < 0.0f) scroll_y = 0.0f;
         DocState* state = doc->state;
         scroll_state_set_position_for_view(state, static_cast<View*>(scroll_container),
-            scroll_container->scroller->pane, scroll_x, scroll_y, false);
+            scroll_container->scroll()->pane, scroll_x, scroll_y, false);
         log_info("layout_scrollIntoView: applied element scroll (%.1f, %.1f) on <%s>",
                  scroll_x, scroll_y,
                  scroll_container->tag_name ? scroll_container->tag_name : "?");
@@ -208,10 +208,10 @@ static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
         return false;
     }
 
-    float border_top = block->bound && block->bound->border ? block->bound->border->width.top : 0.0f;
-    float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0.0f;
-    float padding_top = block->bound ? block->bound->padding.top : 0.0f;
-    float padding_bottom = block->bound ? block->bound->padding.bottom : 0.0f;
+    float border_top = block->bound && block->boundary_mut()->border ? block->boundary_mut()->border->width.top : 0.0f;
+    float border_bottom = block->bound && block->boundary_mut()->border ? block->boundary_mut()->border->width.bottom : 0.0f;
+    float padding_top = block->bound ? block->boundary()->padding.top : 0.0f;
+    float padding_bottom = block->bound ? block->boundary()->padding.bottom : 0.0f;
     if (border_top > 0.0f || border_bottom > 0.0f ||
         padding_top > 0.0f || padding_bottom > 0.0f) {
         return false;
@@ -257,7 +257,7 @@ static float root_child_float_only_extent(ViewBlock* block, bool* has_float, boo
             if (abs_or_fixed) continue;
             if (child_block->position && element_has_float(child_block)) {
                 *has_float = true;
-                float margin_bottom = child_block->bound ? child_block->bound->margin.bottom : 0.0f;
+                float margin_bottom = child_block->bound ? child_block->boundary()->margin.bottom : 0.0f;
                 float child_extent = child_block->y + child_block->height + margin_bottom;
                 if (child_extent > extent) extent = child_extent;
                 continue;
@@ -278,23 +278,23 @@ static float root_child_float_only_extent(ViewBlock* block, bool* has_float, boo
 static void reset_non_inherited_style_cache(ViewSpan* view) {
     if (!view || !view->bound) return;
 
-    if (view->bound->outline) {
+    if (view->boundary()->outline) {
         // clear stale outline data from previous pseudo-class matches before
         // replaying the current cascaded declarations
-        view->bound->outline->width = 0.0f;
-        view->bound->outline->offset = 0.0f;
-        view->bound->outline->style = CSS_VALUE_NONE;
-        view->bound->outline->color.r = 0;
-        view->bound->outline->color.g = 0;
-        view->bound->outline->color.b = 0;
-        view->bound->outline->color.a = 0;
+        view->boundary_mut()->outline->width = 0.0f;
+        view->boundary_mut()->outline->offset = 0.0f;
+        view->boundary_mut()->outline->style = CSS_VALUE_NONE;
+        view->boundary_mut()->outline->color.r = 0;
+        view->boundary_mut()->outline->color.g = 0;
+        view->boundary_mut()->outline->color.b = 0;
+        view->boundary_mut()->outline->color.a = 0;
     }
 
-    if (view->bound->background) {
+    if (view->boundary()->background) {
         // background is not inherited; reset before applying HTML presentational
         // hints and CSS so stale pseudo-class fills are cleared without wiping
         // attributes such as table/td bgcolor.
-        BackgroundProp* bg = view->bound->background;
+        BackgroundProp* bg = view->boundary()->background;
         bg->color.r = 0;
         bg->color.g = 0;
         bg->color.b = 0;
@@ -399,8 +399,8 @@ static bool is_block_level_element(DomNode* node) {
 static bool parent_preserves_inter_element_whitespace(DomNode* text_node) {
     if (!text_node || !text_node->parent || !text_node->parent->is_element()) return false;
     DomElement* parent_elem = text_node->parent->as_element();
-    if (!parent_elem->blk || parent_elem->blk->white_space == 0) return false;
-    CssEnum ws = parent_elem->blk->white_space;
+    if (!parent_elem->blk || parent_elem->block()->white_space == 0) return false;
+    CssEnum ws = parent_elem->block()->white_space;
     return ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
         ws == CSS_VALUE_BREAK_SPACES;
 }
@@ -527,8 +527,8 @@ static DomNode* get_next_element_sibling(DomNode* node) {
             DomNode* parent = node->parent;
             if (parent && parent->is_element()) {
                 DomElement* parent_elem = parent->as_element();
-                if (parent_elem->blk && parent_elem->blk->white_space != 0) {
-                    CssEnum ws = parent_elem->blk->white_space;
+                if (parent_elem->blk && parent_elem->block_mut()->white_space != 0) {
+                    CssEnum ws = parent_elem->block()->white_space;
                     // white-space values that preserve whitespace
                     if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
                         ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES) {
@@ -715,8 +715,8 @@ float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* val
             ? calc_normal_line_height(lycon->font.font_handle) : 0.0f;
     }
 
-    float owner_font_size = owner && owner->font && owner->font->font_size > 0.0f
-        ? owner->font->font_size : target_font_size;
+    float owner_font_size = owner && owner->font && owner->fontp()->font_size > 0.0f
+        ? owner->fontp()->font_size : target_font_size;
     if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
         float resolved = 0.0f;
         return layout_resolve_percentage_value(value, owner_font_size, &resolved)
@@ -788,13 +788,13 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     ViewElement* parent = block->parent_view();
     if (parent) { // parent can be block or span
         // inherit the specified css value, not the resolved value
-        if (parent->blk && parent->blk->line_height) {
-            if (parent->blk->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
-                parent->blk->line_height->data.keyword == CSS_VALUE_INHERIT) {
+        if (parent->blk && parent->block_mut()->line_height) {
+            if (parent->block()->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
+                parent->block()->line_height->data.keyword == CSS_VALUE_INHERIT) {
                 block = lam::unsafe_view_block_api_span(parent);
                 goto INHERIT;
             }
-            CssValue value = *parent->blk->line_height;
+            CssValue value = *parent->block()->line_height;
             // CSS 2.1 §10.8.1: <length> and <percentage> line-height values are
             // computed at the declaring element and inherited as the computed px
             // value. Only unitless <number> inherits the multiplier.
@@ -803,7 +803,7 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
             if (value.type == CSS_VALUE_TYPE_LENGTH) {
                 CssUnit unit = value.data.length.unit;
                 if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
-                    float parent_fs = parent->font ? parent->font->font_size : 0;
+                    float parent_fs = parent->font ? parent->fontp()->font_size : 0;
                     if (parent_fs > 0) {
                         float multiplier = (float)value.data.length.value;
                         float computed_px;
@@ -823,7 +823,7 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
                     }
                 }
             } else if (value.type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float parent_fs = parent->font ? parent->font->font_size : 0;
+                float parent_fs = parent->font ? parent->fontp()->font_size : 0;
                 if (parent_fs > 0) {
                     float computed_px = (float)(value.data.percentage.value * parent_fs / 100.0);
                     log_debug("inherit line-height: resolved %.1f%% against parent font-size %.1f → %.2fpx",
@@ -858,13 +858,13 @@ static bool block_has_declared_line_height(ViewBlock* block) {
 
 void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
     CssValue value;
-    if (block->blk && block->blk->line_height) {
+    if (block->blk && block->block_mut()->line_height) {
         if (!block_has_declared_line_height(block) ||
-            (block->blk->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
-             block->blk->line_height->data.keyword == CSS_VALUE_INHERIT)) {
+            (block->block()->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
+             block->block()->line_height->data.keyword == CSS_VALUE_INHERIT)) {
             value = inherit_line_height(lycon, block);
         } else {
-            value = *block->blk->line_height;
+            value = *block->block()->line_height;
         }
     } else { // no explicit value → inherit from parent (line-height is an inherited property)
         value = inherit_line_height(lycon, block);
@@ -948,7 +948,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize)
             // because measurement passes should not permanently mark styles as resolved
             // and percentage values may need different containing block dimensions
-            if (dom_elem->styles_resolved && !dom_elem->needs_style_recompute &&
+            if (dom_elem->styles_resolved() && !dom_elem->needs_style_recompute() &&
                 !layout_context_is_measuring(lycon)) {
                 // Restore lycon->block dimensions from stored CSS values.
                 // layout_block resets lycon->block.given_width/height to -1 before
@@ -956,11 +956,11 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 // the block properties that were populated in the first pass.
                 ViewBlock* block = lam::unsafe_view_block_api_span(lam::view_require_element(static_cast<View*>(dom_elem)));
                 if (block->blk) {
-                    if (block->blk->given_width >= 0) {
-                        lycon->block.given_width = block->blk->given_width;
+                    if (block->block()->given_width >= 0) {
+                        lycon->block.given_width = block->block()->given_width;
                     }
-                    if (block->blk->given_height >= 0) {
-                        lycon->block.given_height = block->blk->given_height;
+                    if (block->block()->given_height >= 0) {
+                        lycon->block.given_height = block->block()->given_height;
                     }
                 }
                 g_style_resolve_count++;
@@ -1026,8 +1026,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
             if (dom_elem->bound) {
                 ViewSpan* span = lam::view_require_element(static_cast<View*>(dom_elem));
-                float css_font_size = (span->font && span->font->font_size > 0)
-                                      ? span->font->font_size
+                float css_font_size = (span->font && span->fontp()->font_size > 0)
+                                      ? span->fontp()->font_size
                                       : lycon->font.style->font_size;
                 layout_reresolve_ua_em_margins(dom_elem, css_font_size);
             }
@@ -1035,8 +1035,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // Mark as resolved for this layout pass
             // Don't mark as resolved during measurement mode - let the actual layout pass do that
             if (!layout_context_is_measuring(lycon)) {
-                dom_elem->styles_resolved = true;
-                dom_elem->needs_style_recompute = false;
+                dom_elem->set_styles_resolved(true);
+                dom_elem->set_needs_style_recompute(false);
             }
         } else {
             // No specified_style - still apply element default styles for HTML attributes
@@ -1050,37 +1050,34 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // We must fill in missing properties from parent in all cases.
             if (lycon->font.style) {
                 if (!dom_elem->font) {
-                    Pool* pool = lycon->doc ? lycon->doc->view_tree->pool : nullptr;
-                    if (pool) {
-                        dom_elem->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
-                    }
+                    dom_elem->ensure_font(lycon);
                 }
                 if (dom_elem->font) {
-                    if (!dom_elem->font->family)
+                    if (!dom_elem->fontp()->family)
                         radiant_retain_font_family(dom_elem->font, lam::PoolPtr<char>(lycon->font.style->family));
-                    if (dom_elem->font->font_size <= 0)
+                    if (dom_elem->fontp()->font_size <= 0)
                         dom_elem->font->font_size = lycon->font.style->font_size;
-                    if (dom_elem->font->font_style == 0 && lycon->font.style->font_style != 0)
+                    if (dom_elem->fontp()->font_style == 0 && lycon->font.style->font_style != 0)
                         dom_elem->font->font_style = lycon->font.style->font_style;
-                    if (dom_elem->font->font_weight == 0)
+                    if (dom_elem->fontp()->font_weight == 0)
                         dom_elem->font->font_weight = lycon->font.style->font_weight;
-                    if (dom_elem->font->font_weight_numeric == 0 && lycon->font.style->font_weight_numeric != 0)
+                    if (dom_elem->fontp()->font_weight_numeric == 0 && lycon->font.style->font_weight_numeric != 0)
                         dom_elem->font->font_weight_numeric = lycon->font.style->font_weight_numeric;
-                    if (dom_elem->font->font_variant == 0)
+                    if (dom_elem->fontp()->font_variant == 0)
                         dom_elem->font->font_variant = lycon->font.style->font_variant;
-                    if (dom_elem->font->text_deco == 0)
+                    if (dom_elem->fontp()->text_deco == 0)
                         dom_elem->font->text_deco = lycon->font.style->text_deco;
-                    if (dom_elem->font->text_deco_color.a == 0 && lycon->font.style->text_deco_color.a > 0)
+                    if (dom_elem->fontp()->text_deco_color.a == 0 && lycon->font.style->text_deco_color.a > 0)
                         dom_elem->font->text_deco_color = lycon->font.style->text_deco_color;
-                    if (dom_elem->font->text_deco_style == 0 && lycon->font.style->text_deco_style != 0)
+                    if (dom_elem->fontp()->text_deco_style == 0 && lycon->font.style->text_deco_style != 0)
                         dom_elem->font->text_deco_style = lycon->font.style->text_deco_style;
-                    if (dom_elem->font->text_deco_thickness == 0 && lycon->font.style->text_deco_thickness > 0)
+                    if (dom_elem->fontp()->text_deco_thickness == 0 && lycon->font.style->text_deco_thickness > 0)
                         dom_elem->font->text_deco_thickness = lycon->font.style->text_deco_thickness;
-                    if (dom_elem->font->text_underline_offset == 0 && lycon->font.style->text_underline_offset != 0)
+                    if (dom_elem->fontp()->text_underline_offset == 0 && lycon->font.style->text_underline_offset != 0)
                         dom_elem->font->text_underline_offset = lycon->font.style->text_underline_offset;
-                    if (dom_elem->font->letter_spacing == 0)
+                    if (dom_elem->fontp()->letter_spacing == 0)
                         dom_elem->font->letter_spacing = lycon->font.style->letter_spacing;
-                    if (dom_elem->font->word_spacing == 0)
+                    if (dom_elem->fontp()->word_spacing == 0)
                         dom_elem->font->word_spacing = lycon->font.style->word_spacing;
                 }
             }
@@ -1162,17 +1159,17 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 
 bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block) {
     bool has_inline_margins = block->bound &&
-        (block->bound->margin.top != 0.0f ||
-         block->bound->margin.right != 0.0f ||
-         block->bound->margin.bottom != 0.0f ||
-         block->bound->margin.left != 0.0f);
+        (block->boundary()->margin.top != 0.0f ||
+         block->boundary()->margin.right != 0.0f ||
+         block->boundary()->margin.bottom != 0.0f ||
+         block->boundary()->margin.left != 0.0f);
     if (block->width != 0.0f || block->height != 0.0f || has_inline_margins) return false;
 
     for (DomNode* node = block->parent; node; node = node->parent) {
         if (!node->is_element()) continue;
         ViewBlock* ancestor = lam::view_as_block(static_cast<View*>(node->as_element()));
-        if (!ancestor || !ancestor->embed || !ancestor->embed->flex) continue;
-        WritingMode mode = ancestor->embed->flex->writing_mode;
+        if (!ancestor || !ancestor->embed || !ancestor->embedp()->flex) continue;
+        WritingMode mode = ancestor->embedp()->flex->writing_mode;
         if (mode == WM_VERTICAL_LR) return true;
         if (mode == WM_VERTICAL_RL || mode == WM_HORIZONTAL_TB) return false;
     }
@@ -1259,9 +1256,9 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
         if (span->font) {
             setup_font(lycon->ui_context, &lycon->font, span->font);
         }
-        if (span->in_line && span->in_line->vertical_align) {
-            lycon->line.vertical_align = span->in_line->vertical_align;
-            lycon->line.vertical_align_offset = span->in_line->vertical_align_offset;
+        if (span->in_line && span->inl()->vertical_align) {
+            lycon->line.vertical_align = span->inl()->vertical_align;
+            lycon->line.vertical_align_offset = span->inl()->vertical_align_offset;
         }
         do {
             view_vertical_align(lycon, child);
@@ -1348,8 +1345,8 @@ static bool inline_span_is_in_anonymous_table_cell(ViewSpan* span) {
 }
 
 static bool inline_span_has_non_baseline_vertical_align(ViewSpan* span) {
-    return span && span->in_line && span->in_line->vertical_align &&
-        span->in_line->vertical_align != CSS_VALUE_BASELINE;
+    return span && span->in_line && span->inl()->vertical_align &&
+        span->inl()->vertical_align != CSS_VALUE_BASELINE;
 }
 
 static bool display_is_table_column_marker(DisplayValue display) {
@@ -1417,10 +1414,10 @@ static bool table_caption_has_box_contribution(DomElement* elem) {
 
     ViewBlock* block = lam::unsafe_view_block_element_storage(elem);
     if (!block || !block->blk) return false;
-    return block->blk->given_width >= 0.0f ||
-        block->blk->given_height >= 0.0f ||
-        block->blk->given_min_width > 0.0f ||
-        block->blk->given_min_height > 0.0f;
+    return block->block()->given_width >= 0.0f ||
+        block->block()->given_height >= 0.0f ||
+        block->block()->given_min_width > 0.0f ||
+        block->block()->given_min_height > 0.0f;
 }
 
 static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* elem,
@@ -1514,10 +1511,10 @@ float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float baseline_pos, float border_top, float padding_top) {
     float half_leading = (span_line_height - ascender - descender) / 2.0f;
     float item_baseline = ascender + half_leading;
-    CssEnum align = span->in_line && span->in_line->vertical_align
-        ? span->in_line->vertical_align : lycon->line.vertical_align;
-    float align_offset = span->in_line && span->in_line->vertical_align
-        ? span->in_line->vertical_align_offset : lycon->line.vertical_align_offset;
+    CssEnum align = span->in_line && span->inl()->vertical_align
+        ? span->inl()->vertical_align : lycon->line.vertical_align;
+    float align_offset = span->in_line && span->inl()->vertical_align
+        ? span->inl()->vertical_align_offset : lycon->line.vertical_align_offset;
     float line_height = max(lycon->block.line_height,
                             lycon->line.max_ascender + lycon->line.max_descender);
     float vertical_offset = calculate_vertical_align_offset(
@@ -1591,7 +1588,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             (block->display.outer == CSS_VALUE_INLINE ||
              block->display.outer == CSS_VALUE_INLINE_BLOCK);
         float item_height = block->height + (block->bound ?
-            block->bound->margin.top + block->bound->margin.bottom : 0);
+            block->boundary()->margin.top + block->boundary()->margin.bottom : 0);
         // CSS 2.1 §10.8.1: For inline-blocks, the baseline depends on content:
         // - Replaced elements / overflow != visible with no content: bottom margin edge
         // - Non-replaced with overflow:visible and in-flow line boxes: last line baseline
@@ -1603,35 +1600,35 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         if (is_inline_table) {
             float table_baseline = find_first_baseline_recursive(lycon, view, 0.0f, true);
             if (table_baseline >= 0.0f) {
-                item_baseline = (block->bound ? block->bound->margin.top : 0) +
+                item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
                     table_baseline;
             } else {
                 item_baseline = item_height;
             }
         } else if (block->display.inner == RDT_DISPLAY_REPLACED) {
             item_baseline = block->height +
-                (block->bound ? block->bound->margin.top : 0);
+                (block->bound ? block->boundary()->margin.top : 0);
         } else {
             item_baseline = item_height; // default: bottom margin edge
         }
-        if (block->blk && block->blk->last_line_max_ascender > 0) {
+        if (block->blk && block->block_mut()->last_line_max_ascender > 0) {
             bool is_replaced_elem = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
                 block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
                 (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
                 block->tag() == HTM_TAG_TEXTAREA);
             bool overflow_visible = !block->scroller ||
-                (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
-                 block->scroller->overflow_y == CSS_VALUE_VISIBLE);
+                (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
+                 block->scroll()->overflow_y == CSS_VALUE_VISIBLE);
             if (!is_replaced_elem && overflow_visible) {
                 // Combo selects expose a synthesized internal text baseline from the first pass.
-                item_baseline = (block->bound ? block->bound->margin.top : 0) +
-                    block->blk->last_line_max_ascender;
+                item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
+                    block->block()->last_line_max_ascender;
             }
         }
-        CssEnum align = block->in_line && block->in_line->vertical_align ?
-            block->in_line->vertical_align : lycon->line.vertical_align;
-        float valign_offset = block->in_line && block->in_line->vertical_align ?
-            block->in_line->vertical_align_offset : lycon->line.vertical_align_offset;
+        CssEnum align = block->in_line && block->inl()->vertical_align ?
+            block->inl()->vertical_align : lycon->line.vertical_align;
+        float valign_offset = block->in_line && block->inl()->vertical_align ?
+            block->inl()->vertical_align_offset : lycon->line.vertical_align_offset;
         // Ensure max_ascender accommodates raised inline-blocks before computing offset
         if (align == CSS_VALUE_BASELINE && valign_offset != 0) {
             float asc_contribution = item_baseline + valign_offset;
@@ -1643,7 +1640,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             replaced_baseline_pos : baseline_pos;
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, align_baseline_pos, item_baseline, valign_offset);
-        block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
+        block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->boundary()->margin.top : 0);
         if (layout_zero_sized_atomic_in_vertical_lr(block)) {
             // The second vertical-align pass must preserve the vertical-lr
             // inline-start static position chosen during inline-block placement.
@@ -1652,7 +1649,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // CSS 2.1 §9.4.3: Apply relative positioning to inline-blocks after vertical
         // alignment has set the final y position. This is deferred from layout_block()
         // because the vertical alignment second pass overwrites y.
-        if (block->position && block->position->position == CSS_VALUE_RELATIVE) {
+        if (block->position && block->positionp()->position == CSS_VALUE_RELATIVE) {
             layout_relative_positioned(lycon, block);
         }
         log_debug("vertical-adjusted-inline-block: y=%f, adv_y=%f, offset=%f, line=%f, blk=%f, max_asc=%f, max_desc=%f",
@@ -1668,7 +1665,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // have shifted (e.g., baseline alignment with half-leading offsets).
         // Block-in-inline spans keep their split anonymous block geometry from
         // layout_inline_with_block_children() instead of a generic child union.
-        struct FontHandle* span_fh = span->font ? span->font->font_handle : lycon->font.font_handle;
+        struct FontHandle* span_fh = span->font ? span->fontp()->font_handle : lycon->font.font_handle;
         if (!inline_span_has_in_flow_block_child(span)) {
             compute_span_bounding_box(span, false, span_fh);
         }
@@ -1693,8 +1690,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
         float span_asc = 0, span_desc = 0;
         if (span->font) {
-            span_asc = span->font->ascender;
-            span_desc = span->font->descender;
+            span_asc = span->fontp()->ascender;
+            span_desc = span->fontp()->descender;
         } else if (lycon->font.style) {
             span_asc = lycon->font.style->ascender;
             span_desc = lycon->font.style->descender;
@@ -1703,12 +1700,12 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             float content_area = font_get_cell_height(span_fh);
             float bt = 0, bb = 0, pt = 0, pb = 0;
             if (span->bound) {
-                if (span->bound->border) {
-                    bt = span->bound->border->width.top;
-                    bb = span->bound->border->width.bottom;
+                if (span->boundary()->border) {
+                    bt = span->boundary()->border->width.top;
+                    bb = span->boundary()->border->width.bottom;
                 }
-                pt = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
-                pb = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+                pt = span->boundary()->padding.top > 0 ? span->boundary()->padding.top : 0;
+                pb = span->boundary()->padding.bottom > 0 ? span->boundary()->padding.bottom : 0;
             }
             float expected_height = content_area + bt + pt + pb + bb;
             ViewBlock* anonymous_inline_table =
@@ -1814,7 +1811,7 @@ static bool shift_span_current_line_rects(float offset, int line_number, ViewSpa
         child = child->next();
     }
     if (shifted) {
-        FontHandle* fallback_fh = span->font ? span->font->font_handle : nullptr;
+        FontHandle* fallback_fh = span->font ? span->fontp()->font_handle : nullptr;
         // A multi-line inline exposes the union of its shifted line fragments,
         // not its old bounding box translated as a single rectangle.
         recompute_span_bounding_box_after_line_layout(
@@ -1865,7 +1862,7 @@ static void align_wrapped_continuation(LayoutContext* lycon, float offset, View*
         }
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(
             static_cast<View*>(parent));
-        FontHandle* fallback_fh = span->font ? span->font->font_handle : nullptr;
+        FontHandle* fallback_fh = span->font ? span->fontp()->font_handle : nullptr;
         recompute_span_bounding_box_after_line_layout(
             span, inline_span_has_multiple_line_fragments(span), fallback_fh);
         cursor = static_cast<View*>(span);
@@ -1900,17 +1897,17 @@ static bool view_is_wrapped_continuation(View* view, int line_number) {
 static void shift_span_line_fragment_unions(ViewSpan* span, float offset) {
     // Fragment unions cache absolute positions; translating only the span lets
     // later parent recomputation reintroduce pre-alignment coordinates.
-    if (span->has_inline_fragment_union) {
-        span->inline_fragment_min_x += offset;
-        span->inline_fragment_max_x += offset;
+    if (span->has_inline_fragment_union()) {
+        span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x += offset;
+        span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x += offset;
     }
-    if (span->has_ancestor_fragment_union) {
-        span->ancestor_fragment_min_x += offset;
-        span->ancestor_fragment_max_x += offset;
+    if (span->has_ancestor_fragment_union()) {
+        span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->min_x += offset;
+        span->ensure_fragment_union(FRAGMENT_UNION_ANCESTOR)->max_x += offset;
     }
-    if (span->has_collapsed_line_fragment_union) {
-        span->collapsed_line_fragment_min_x += offset;
-        span->collapsed_line_fragment_max_x += offset;
+    if (span->has_collapsed_line_fragment_union()) {
+        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x += offset;
+        span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x += offset;
     }
 }
 
@@ -2466,7 +2463,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
 
         // Skip floats that were pre-laid in the float pre-pass
-        if (elem->float_prelaid) {
+        if (elem->float_prelaid()) {
             log_debug("%s skipping pre-laid float: %s", node->source_loc(), node->node_name());
             lycon->depth--;
             return;
@@ -2481,7 +2478,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // First check if position is already resolved
         if (elem->position) {
-            float_value = elem->position->float_prop;
+            float_value = elem->positionp()->float_prop;
         } else {
             float_value = layout_specified_keyword(
                 elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
@@ -2510,7 +2507,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // are blockified - 'display: inline' becomes 'display: block', etc.
         CssEnum position_value = CSS_VALUE_STATIC;
         if (elem->position) {
-            position_value = elem->position->position;
+            position_value = elem->positionp()->position;
         } else {
             position_value = layout_specified_keyword(
                 elem, CSS_PROPERTY_POSITION, CSS_VALUE_STATIC);
@@ -2566,7 +2563,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             // Only set when the parent context allows wrapping (not in pre/nowrap).
             if (display.outer == CSS_VALUE_INLINE_BLOCK && node->parent && node->parent->is_element()) {
                 DomElement* parent_elem = node->parent->as_element();
-                CssEnum ws = (parent_elem->blk) ? parent_elem->blk->white_space : CSS_VALUE_NORMAL;
+                CssEnum ws = (parent_elem->blk) ? parent_elem->block()->white_space : CSS_VALUE_NORMAL;
                 if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
                     ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
                     lycon->line.wrap_opportunity_before_nowrap = true;
@@ -2582,7 +2579,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 layout_block(lycon, node, display);
                 if (node->parent && node->parent->is_element()) {
                     DomElement* pe = node->parent->as_element();
-                    CssEnum ws = (pe->blk) ? pe->blk->white_space : CSS_VALUE_NORMAL;
+                    CssEnum ws = (pe->blk) ? pe->block()->white_space : CSS_VALUE_NORMAL;
                     if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
                         ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
                         lycon->line.wrap_opportunity_before_nowrap = true;
@@ -2597,7 +2594,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 layout_block(lycon, node, display);
                 if (node->parent && node->parent->is_element()) {
                     DomElement* pe = node->parent->as_element();
-                    CssEnum ws = (pe->blk) ? pe->blk->white_space : CSS_VALUE_NORMAL;
+                    CssEnum ws = (pe->blk) ? pe->block()->white_space : CSS_VALUE_NORMAL;
                     if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
                         ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
                         lycon->line.wrap_opportunity_before_nowrap = true;
@@ -2718,7 +2715,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.given_width = physical_width;
     // Don't set given_height - let html use auto (content-based) height
     lycon->block.given_height = -1;  // -1 means auto height
-    html->position = alloc_position_prop(lycon);
+    html->ensure_position(lycon);
 
     // Create the initial Block Formatting Context for the root element
     // CSS 2.2: The root element establishes the initial BFC
@@ -2771,35 +2768,35 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // Detect if the root <html> element has explicit CSS width/height
     // or non-static positioning, and apply accordingly.
     bool root_is_abspos = layout_block_is_out_of_flow_positioned(html);
-    bool root_is_relative = html->position && (html->position->position == CSS_VALUE_RELATIVE ||
-                                                    html->position->position == CSS_VALUE_STICKY);
+    bool root_is_relative = html->position && (html->positionp()->position == CSS_VALUE_RELATIVE ||
+                                                    html->positionp()->position == CSS_VALUE_STICKY);
 
     // Compute border+padding dimensions for the root element
     float root_bp_left = 0, root_bp_right = 0, root_bp_top = 0, root_bp_bottom = 0;
     if (html->bound) {
-        if (html->bound->border) {
-            root_bp_left += html->bound->border->width.left;
-            root_bp_right += html->bound->border->width.right;
-            root_bp_top += html->bound->border->width.top;
-            root_bp_bottom += html->bound->border->width.bottom;
+        if (html->boundary()->border) {
+            root_bp_left += html->boundary()->border->width.left;
+            root_bp_right += html->boundary()->border->width.right;
+            root_bp_top += html->boundary()->border->width.top;
+            root_bp_bottom += html->boundary()->border->width.bottom;
         }
-        root_bp_left += html->bound->padding.left;
-        root_bp_right += html->bound->padding.right;
-        root_bp_top += html->bound->padding.top;
-        root_bp_bottom += html->bound->padding.bottom;
+        root_bp_left += html->boundary()->padding.left;
+        root_bp_right += html->boundary()->padding.right;
+        root_bp_top += html->boundary()->padding.top;
+        root_bp_bottom += html->boundary()->padding.bottom;
     }
 
     // Check for explicit CSS width on the root element
     bool root_has_explicit_width = false;
     float root_css_width = -1;  // content-box width from CSS
     if (html->blk) {
-        if (html->blk->given_width > 0) {
-            root_css_width = html->blk->given_width;
+        if (html->block()->given_width > 0) {
+            root_css_width = html->block()->given_width;
             root_has_explicit_width = true;
-        } else if (!isnan(html->blk->given_width_percent)) {
+        } else if (!isnan(html->block()->given_width_percent)) {
             // Percentage width should have been resolved against viewport in style resolution
             // but may have resolved to 0 if parent context was lost; re-resolve here
-            root_css_width = physical_width * html->blk->given_width_percent / 100.0f;
+            root_css_width = physical_width * html->block()->given_width_percent / 100.0f;
             root_has_explicit_width = (root_css_width > 0);
         }
     }
@@ -2808,11 +2805,11 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     bool root_has_explicit_height = false;
     float root_css_height = -1;  // content-box height from CSS
     if (html->blk) {
-        if (html->blk->given_height > 0) {
-            root_css_height = html->blk->given_height;
+        if (html->block()->given_height > 0) {
+            root_css_height = html->block()->given_height;
             root_has_explicit_height = true;
-        } else if (!isnan(html->blk->given_height_percent)) {
-            root_css_height = physical_height * html->blk->given_height_percent / 100.0f;
+        } else if (!isnan(html->block()->given_height_percent)) {
+            root_css_height = physical_height * html->block()->given_height_percent / 100.0f;
             root_has_explicit_height = (root_css_height > 0);
         }
     }
@@ -2846,18 +2843,18 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         // CSS 2.1 §10.3.7: Absolutely/fixed positioned root element.
         // Position from left/top offsets (containing block = initial containing block/viewport).
         // Margins do not reduce viewport width for abspos elements.
-        if (html->position->has_left) {
-            html->x = html->position->left;
+        if (html->positionp()->has_left) {
+            html->x = html->positionp()->left;
         }
-        if (html->position->has_top) {
-            html->y = html->position->top;
+        if (html->positionp()->has_top) {
+            html->y = html->positionp()->top;
         }
         // For abspos, margins shift position (if left/top not set, margins auto-resolve)
-        if (!html->position->has_left && html->bound && html->bound->margin.left != 0) {
-            html->x += html->bound->margin.left;
+        if (!html->positionp()->has_left && html->bound && html->boundary_mut()->margin.left != 0) {
+            html->x += html->boundary()->margin.left;
         }
-        if (!html->position->has_top && html->bound && html->bound->margin.top != 0) {
-            html->y += html->bound->margin.top;
+        if (!html->positionp()->has_top && html->bound && html->boundary_mut()->margin.top != 0) {
+            html->y += html->boundary()->margin.top;
         }
 
         // If no explicit width was set, use viewport width for abspos
@@ -2868,17 +2865,17 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         log_debug("[CSS] Root abspos: x=%.1f, y=%.1f", html->x, html->y);
     } else {
         // Static or relative positioning: apply margins normally
-        if (html->bound && html->bound->margin.left != 0) {
-            html->x = html->bound->margin.left;
+        if (html->bound && html->boundary_mut()->margin.left != 0) {
+            html->x = html->boundary()->margin.left;
         }
-        if (html->bound && html->bound->margin.top != 0) {
-            html->y = html->bound->margin.top;
+        if (html->bound && html->boundary_mut()->margin.top != 0) {
+            html->y = html->boundary()->margin.top;
         }
 
         if (!root_has_explicit_width) {
             // No explicit width: reduce by margins (existing behavior)
             float margin_h = 0;
-            if (html->bound) margin_h = html->bound->margin.left + html->bound->margin.right;
+            if (html->bound) margin_h = html->boundary()->margin.left + html->boundary()->margin.right;
             if (margin_h > 0) {
                 float new_width = physical_width - margin_h;
                 html->width = new_width;
@@ -2889,7 +2886,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                 lycon->block.float_right_edge = new_width;
                 line_init(lycon, 0, new_width);
                 log_debug("[CSS] Root element margins: left=%.1f right=%.1f, width adjusted to %.1f",
-                          html->bound->margin.left, html->bound->margin.right, new_width);
+                          html->boundary()->margin.left, html->boundary()->margin.right, new_width);
             }
         }
     }
@@ -2989,14 +2986,14 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
 
-    bool root_uses_vertical_writing = html->embed && html->embed->flex &&
-        (html->embed->flex->writing_mode == WM_VERTICAL_LR ||
-         html->embed->flex->writing_mode == WM_VERTICAL_RL);
+    bool root_uses_vertical_writing = html->embed && html->embedp()->flex &&
+        (html->embedp()->flex->writing_mode == WM_VERTICAL_LR ||
+         html->embedp()->flex->writing_mode == WM_VERTICAL_RL);
     if (!root_has_explicit_width && !root_has_explicit_height &&
         root_uses_vertical_writing && body_view) {
-        float body_margin_left = body_view->bound ? body_view->bound->margin.left : 0.0f;
-        float body_margin_right = body_view->bound ? body_view->bound->margin.right : 0.0f;
-        float body_margin_bottom = body_view->bound ? body_view->bound->margin.bottom : 0.0f;
+        float body_margin_left = body_view->bound ? body_view->boundary()->margin.left : 0.0f;
+        float body_margin_right = body_view->bound ? body_view->boundary()->margin.right : 0.0f;
+        float body_margin_bottom = body_view->bound ? body_view->boundary()->margin.bottom : 0.0f;
         float content_block_size = 0.0f;
         View* vc = body_view->first_placed_child();
         while (vc) {
@@ -3027,8 +3024,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                 ViewBlock* child_block = lam::view_require_block(root_child);
                 bool out_of_flow = layout_block_is_out_of_flow_positioned(child_block);
                 if (!out_of_flow) {
-                    float margin_top = child_block->bound ? child_block->bound->margin.top : 0.0f;
-                    float margin_bottom = child_block->bound ? child_block->bound->margin.bottom : 0.0f;
+                    float margin_top = child_block->bound ? child_block->boundary()->margin.top : 0.0f;
+                    float margin_bottom = child_block->bound ? child_block->boundary()->margin.bottom : 0.0f;
                     float child_extent = child_block->y + child_block->height + margin_bottom;
                     if (root_child_margins_are_self_collapsing(child_block)) {
                         float collapsed_margin = collapse_root_margins(margin_top, margin_bottom);
@@ -3083,8 +3080,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             if (vc->is_block()) {
                 ViewBlock* vb = lam::view_require_block(vc);
                 if (vb->tag() == HTM_TAG_BODY) {
-                    float body_margin_bottom = (vb->bound && vb->bound->margin.bottom > 0)
-                        ? vb->bound->margin.bottom : 0;
+                    float body_margin_bottom = (vb->bound && vb->boundary_mut()->margin.bottom > 0)
+                        ? vb->boundary()->margin.bottom : 0;
                     float body_available = physical_height - vb->y - body_margin_bottom;
                     if (vb->height < body_available) {
                         log_debug("  quirks viewport stretch: body height %.1f -> %.1f", vb->height, body_available);
@@ -3099,14 +3096,14 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     // CSS 2.1 §9.4.3: Apply position:relative offsets to root element after layout
     if (root_is_relative && html->position) {
-        if (html->position->position == CSS_VALUE_RELATIVE) {
-            if (html->position->has_left) {
-                html->x += html->position->left;
-                log_debug("[CSS] Root relative offset: x += %.1f = %.1f", html->position->left, html->x);
+        if (html->positionp()->position == CSS_VALUE_RELATIVE) {
+            if (html->positionp()->has_left) {
+                html->x += html->positionp()->left;
+                log_debug("[CSS] Root relative offset: x += %.1f = %.1f", html->positionp()->left, html->x);
             }
-            if (html->position->has_top) {
-                html->y += html->position->top;
-                log_debug("[CSS] Root relative offset: y += %.1f = %.1f", html->position->top, html->y);
+            if (html->positionp()->has_top) {
+                html->y += html->positionp()->top;
+                log_debug("[CSS] Root relative offset: y += %.1f = %.1f", html->positionp()->top, html->y);
             }
         }
         // sticky on root element: no scroll container above root, so no clamping applies
@@ -3119,24 +3116,23 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         float content_height = html->height;
         html->content_height = content_height;
         html->height = physical_height;   // constrain root block to viewport height
-        if (!html->scroller) {
-            html->scroller = alloc_scroll_prop(lycon);
-        }
+        html->ensure_scroll(lycon);
+
         html->scroller->overflow_y = CSS_VALUE_AUTO;
         html->scroller->has_vt_scroll = true;
         html->scroller->has_vt_overflow = true;
         html->scroller->has_clip = true;
-        html->scroller->clip.left = 0;
-        html->scroller->clip.top = 0;
-        html->scroller->clip.right = html->width;
-        html->scroller->clip.bottom = physical_height;
+        html->scroll_mut()->clip.left = 0;
+        html->scroll_mut()->clip.top = 0;
+        html->scroll_mut()->clip.right = html->width;
+        html->scroll_mut()->clip.bottom = physical_height;
         DocState* state = (DocState*)lycon->doc->state;
         float h_max = 0.0f, v_max = 0.0f;
-        scroll_state_get_position_for_view(state, (View*)html, html->scroller->pane,
+        scroll_state_get_position_for_view(state, (View*)html, html->scroll()->pane,
                                            NULL, NULL, &h_max, NULL);
-        scroll_state_set_max_for_view(state, (View*)html, html->scroller->pane,
+        scroll_state_set_max_for_view(state, (View*)html, html->scroll()->pane,
                                       h_max, content_height - physical_height);
-        scroll_state_get_position_for_view(state, (View*)html, html->scroller->pane,
+        scroll_state_get_position_for_view(state, (View*)html, html->scroll()->pane,
                                            NULL, NULL, NULL, &v_max);
         log_info("%s viewport scroll: content_height=%.1f, viewport_height=%.1f, v_max_scroll=%.1f", elmt->source_loc(),
             content_height, physical_height, v_max);
@@ -3160,7 +3156,7 @@ static void reset_styles_resolved_recursive(DomNode* node) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        elem->styles_resolved = false;
+        elem->set_styles_resolved(false);
 
         // Recursively process children
         DomNode* child = elem->first_child;
@@ -3197,13 +3193,13 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     // Apply <meta name="viewport"> width if present
     // Explicit pixel widths (e.g., width=320) override the window/default viewport
     // width=device-width (stored as 0) means "use device width" — no override needed
-    if (doc->viewport_width > 0) {
-        lycon->width = (float)doc->viewport_width;
-        log_info("layout_init: viewport meta override width=%d", doc->viewport_width);
+    if (doc->viewport.width > 0) {
+        lycon->width = (float)doc->viewport.width;
+        log_info("layout_init: viewport meta override width=%d", doc->viewport.width);
     }
-    if (doc->viewport_height > 0) {
-        lycon->height = (float)doc->viewport_height;
-        log_info("layout_init: viewport meta override height=%d", doc->viewport_height);
+    if (doc->viewport.height > 0) {
+        lycon->height = (float)doc->viewport.height;
+        log_info("layout_init: viewport meta override height=%d", doc->viewport.height);
     }
 
     log_debug("layout_init: uicon=%p, viewport=%.1fx%.1f (CSS logical pixels), pixel_ratio=%.2f",
@@ -3248,7 +3244,7 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
 
     // Initialize scratch allocator for scoped temporary buffers
     lycon->pool = doc->view_tree->pool;
-    mem_scratch_init((MemContext*)doc->mem_ctx, &lycon->scratch, doc->view_tree->arena, MEM_ROLE_LAYOUT, "layout.scratch");
+    mem_scratch_init((MemContext*)doc->services.mem_ctx, &lycon->scratch, doc->view_tree->arena, MEM_ROLE_LAYOUT, "layout.scratch");
 
     // BlockContext floats are already initialized to NULL in memset
 }
@@ -3300,8 +3296,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (init_view_pool && !doc->incremental_layout) {
         view_pool_init(doc->view_tree);
         // attribute the view-tree pool/arena to this document for grouped reporting
-        if (doc->mem_ctx && doc->view_tree->pool) {
-            uint32_t did = mem_context_doc_id((MemContext*)doc->mem_ctx);
+        if (doc->services.mem_ctx && doc->view_tree->pool) {
+            uint32_t did = mem_context_doc_id((MemContext*)doc->services.mem_ctx);
             mem_node_set_doc((MemNode*)pool_get_mem_node(doc->view_tree->pool), did);
             if (doc->view_tree->arena)
                 mem_node_set_doc((MemNode*)arena_get_mem_node(doc->view_tree->arena), did);
@@ -3338,8 +3334,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
         layout_finalize_static_positioned_abs_descendants(root_block);
         layout_resolve_pending_scroll_into_view(doc, root_block);
-        if (root_block->scroller && root_block->scroller->pane) {
-            ScrollPane* pane = root_block->scroller->pane;
+        if (root_block->scroller && root_block->scroll_mut()->pane) {
+            ScrollPane* pane = root_block->scroll()->pane;
             float target_x = doc->pending_viewport_scroll_x;
             float target_y = doc->pending_viewport_scroll_y;
             DocState* state = (DocState*)doc->state;

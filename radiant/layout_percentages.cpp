@@ -59,27 +59,27 @@ static void layout_apply_percentage_spacing_candidate(ViewBlock* block, int side
     float resolved = 0.0f;
     if (!layout_resolve_percentage_value(candidate->value, inline_base, &resolved)) return;
 
-    Spacing* spacing = margin ? (Spacing*)&block->bound->margin : &block->bound->padding;
+    Spacing* spacing = margin ? (Spacing*)&block->boundary_mut()->margin : &block->boundary_mut()->padding;
     switch (side) {
         case 0:
             spacing->top = resolved;
             spacing->top_specificity = candidate->priority;
-            if (margin) block->bound->margin.top_type = CSS_VALUE__PERCENTAGE;
+            if (margin) block->boundary_mut()->margin.top_type = CSS_VALUE__PERCENTAGE;
             break;
         case 1:
             spacing->right = resolved;
             spacing->right_specificity = candidate->priority;
-            if (margin) block->bound->margin.right_type = CSS_VALUE__PERCENTAGE;
+            if (margin) block->boundary_mut()->margin.right_type = CSS_VALUE__PERCENTAGE;
             break;
         case 2:
             spacing->bottom = resolved;
             spacing->bottom_specificity = candidate->priority;
-            if (margin) block->bound->margin.bottom_type = CSS_VALUE__PERCENTAGE;
+            if (margin) block->boundary_mut()->margin.bottom_type = CSS_VALUE__PERCENTAGE;
             break;
         case 3:
             spacing->left = resolved;
             spacing->left_specificity = candidate->priority;
-            if (margin) block->bound->margin.left_type = CSS_VALUE__PERCENTAGE;
+            if (margin) block->boundary_mut()->margin.left_type = CSS_VALUE__PERCENTAGE;
             break;
     }
 }
@@ -188,7 +188,7 @@ float layout_block_used_content_size(ViewBlock* block, bool horizontal, bool req
 
 float layout_block_given_content_size(ViewBlock* block, bool horizontal) {
     if (!block || !block->blk) return -1.0f;
-    float css_size = horizontal ? block->blk->given_width : block->blk->given_height;
+    float css_size = horizontal ? block->block()->given_width : block->block()->given_height;
     if (css_size < 0.0f) return -1.0f;
     float content_size = layout_css_size_to_content_box(
         block->bound, layout_box_sizing(block), css_size, horizontal);

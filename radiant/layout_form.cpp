@@ -171,9 +171,9 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
             line_h = css_normal_line_h;
         }
         if (form_control_has_specified_line_height(block) &&
-            block->blk && block->blk->line_height && font) {
+            block->blk && block->block_mut()->line_height && font) {
             float resolved_line_h = layout_resolve_line_height_value(
-                lycon, block->blk->line_height, block, font->font_size);
+                lycon, block->block()->line_height, block, font->font_size);
             // Native inputs reset inherited line-height, while an author line-height
             // sets the auto-height content box; glyph bounds alone are too short.
             if (resolved_line_h > 0.0f) line_h = resolved_line_h;
@@ -229,8 +229,8 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
         // Height: rows × line-height
         // Resolve line-height from the block's computed style (CSS 2.1 §10.8.1)
         float line_ht = 0;
-        if (block && block->blk && block->blk->line_height) {
-            const CssValue* lh = block->blk->line_height;
+        if (block && block->blk && block->block_mut()->line_height) {
+            const CssValue* lh = block->block()->line_height;
             if (lh->type == CSS_VALUE_TYPE_NUMBER) {
                 // e.g. line-height: 1.5 → 1.5 × font-size
                 line_ht = lh->data.number.value * font_size;
@@ -441,7 +441,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         if (block->bound) {
             BoxMetrics block_box = layout_box_metrics(block);
             pad_h = block_box.padding_h;
-            if (block->bound->border) {
+            if (block->boundary()->border) {
                 border_h = block_box.border_h;
                 // subtract the UA default 1px borders already implicit in the layout
                 border_h = border_h > 2.0f ? border_h - 2.0f : 0.0f;
@@ -472,7 +472,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     }
 
     // Update given_width only if CSS didn't specify an explicit width
-    if (block->blk && block->blk->given_width < 0) {
+    if (block->blk && block->block_mut()->given_width < 0) {
         block->blk->given_width = form->intrinsic_width;
     }
     // Always update given_height to match computed intrinsic height (may differ from default)
@@ -483,15 +483,15 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
 
 /**
  * Layout a form control element.
- * Called from layout_block when element has item_prop_type == ITEM_PROP_FORM.
+ * Called from layout_block when the element owns the form-control role.
  */
 void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     log_info("[FORM] layout_form_control ENTRY: block=%p, prop_type=%d, form=%p, tag=%s",
-             block, block ? block->item_prop_type : -1, block ? block->form : nullptr,
+             block, block ? block->item_prop_debug_kind() : -1, block ? block->form : nullptr,
              (block && block->tag_name) ? block->tag_name : "?");
-    if (!block || block->item_prop_type != DomElement::ITEM_PROP_FORM || !block->form) {
+    if (!block || block->role_kind() != DomElement::ROLE_FORM || !block->form) {
         log_info("[FORM] layout_form_control SKIP: block=%p, prop_type=%d, form=%p",
-                 block, block ? block->item_prop_type : -1, block ? block->form : nullptr);
+                 block, block ? block->item_prop_debug_kind() : -1, block ? block->form : nullptr);
         return;
     }
 
@@ -556,23 +556,23 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     float content_height = form->intrinsic_height;
     float width, height;
 
-    if (block->blk && block->blk->given_width >= 0) {
+    if (block->blk && block->block_mut()->given_width >= 0) {
         // CSS specifies width
         content_width = layout_css_size_to_content_box(
-            block->bound, layout_box_sizing(block), block->blk->given_width, true);
+            block->bound, layout_box_sizing(block), block->block()->given_width, true);
         width = layout_css_size_to_border_box(
-            block->bound, layout_box_sizing(block), block->blk->given_width, true);
+            block->bound, layout_box_sizing(block), block->block()->given_width, true);
     } else {
         // Use intrinsic content size + actual CSS border/padding
         width = layout_border_width_from_content_box(block, content_width);
     }
 
-    if (block->blk && block->blk->given_height >= 0) {
+    if (block->blk && block->block_mut()->given_height >= 0) {
         // CSS specifies height
         content_height = layout_css_size_to_content_box(
-            block->bound, layout_box_sizing(block), block->blk->given_height, false);
+            block->bound, layout_box_sizing(block), block->block()->given_height, false);
         height = layout_css_size_to_border_box(
-            block->bound, layout_box_sizing(block), block->blk->given_height, false);
+            block->bound, layout_box_sizing(block), block->block()->given_height, false);
     } else {
         // Use intrinsic content size + actual CSS border/padding
         height = layout_border_height_from_content_box(block, content_height);
@@ -580,7 +580,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
 
     log_debug("[FORM] layout: intrinsic=%.1fx%.1f, given=%.1fx%.1f, border=%.1f/%.1f, padding=%.1f/%.1f, box_sizing=%s",
               form->intrinsic_width, form->intrinsic_height,
-              block->blk ? block->blk->given_width : -1, block->blk ? block->blk->given_height : -1,
+              block->blk ? block->block()->given_width : -1, block->blk ? block->block()->given_height : -1,
               box.border_h, box.border_v, box.padding_h, box.padding_v, is_border_box ? "border-box" : "content-box");
 
     // Set final dimensions
@@ -621,8 +621,8 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
         form->control_type == FORM_CONTROL_TEXTAREA ||
         form->control_type == FORM_CONTROL_BUTTON ||
         is_single_line_select) {
-        float border_top = (block->bound && block->bound->border) ? block->bound->border->width.top : 0;
-        float pad_top = block->bound ? block->bound->padding.top : 0;
+        float border_top = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.top : 0;
+        float pad_top = block->bound ? block->boundary()->padding.top : 0;
         // Use the font ascender from font metrics (hhea_ascender).
         // This ensures the form control's internal text baseline aligns correctly
         // with surrounding inline text, keeping line box height minimal.
@@ -642,10 +642,10 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     if (block->is_element() && form->control_type == FORM_CONTROL_SELECT) {
         bool is_listbox = form->multiple || form->select_size > 1;
 
-        float border_left = (block->bound && block->bound->border) ? block->bound->border->width.left : 0;
-        float border_top  = (block->bound && block->bound->border) ? block->bound->border->width.top  : 0;
-        float border_right= (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
-        float option_width = block->width - border_left - border_right - block->bound->padding.left - block->bound->padding.right;
+        float border_left = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.left : 0;
+        float border_top  = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.top  : 0;
+        float border_right= (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.right : 0;
+        float option_width = block->width - border_left - border_right - block->boundary()->padding.left - block->boundary()->padding.right;
         if (option_width < 0) option_width = 0;
 
         // row_height matches Chrome's listbox option row (17px per CSS spec / Chrome UA)

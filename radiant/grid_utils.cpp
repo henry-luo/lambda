@@ -482,7 +482,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
     }
 
     if (is_row_axis &&
-        (!item->blk || item->blk->given_height < 0.0f) &&
+        (!item->blk || item->block()->given_height < 0.0f) &&
         item->display.inner != RDT_DISPLAY_REPLACED &&
         !grid_item_has_in_flow_content(item)) {
         BoxMetrics box = layout_box_metrics(item);
@@ -612,7 +612,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
     // CSS Grid §6.4: if the item has aspect-ratio and no explicit height,
     // use (effective_column_width / aspect_ratio) as the row contribution.
     if (is_row_axis && item->specified_style) {
-        bool has_explicit_height = (item->blk && item->blk->given_height > 0);
+        bool has_explicit_height = (item->blk && item->block_mut()->given_height > 0);
         if (!has_explicit_height) {
             float aspect_ratio = 0.0f;
             CssDeclaration* aspect_decl = style_tree_get_declaration(

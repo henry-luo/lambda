@@ -162,14 +162,14 @@ static bool target_range_join_block_pair_allowed(DomElement* prev_block,
     if (!prev_cell && !current_cell) return true;
     if (!prev_cell || !current_cell) return false;
     if (prev_block->parent != current_block->parent) return false;
-    return !dom_element_has_attribute(prev_block, "rowspan") &&
-        !dom_element_has_attribute(current_block, "rowspan");
+    return !prev_block->has_attribute("rowspan") &&
+        !current_block->has_attribute("rowspan");
 }
 
 static bool target_range_table_cell_without_span(DomElement* cell) {
     return cell && target_range_is_table_cell_tag(cell->tag()) &&
-        !dom_element_has_attribute(cell, "rowspan") &&
-        !dom_element_has_attribute(cell, "colspan");
+        !cell->has_attribute("rowspan") &&
+        !cell->has_attribute("colspan");
 }
 
 static DomElement* target_range_text_block_parent(DomText* text) {
@@ -245,7 +245,7 @@ static bool target_range_inline_fragment_node(DomNode* node) {
     if (!node->is_element()) return false;
     DomElement* elem = node->as_element();
     if (!elem || !target_range_is_simple_inline_tag(elem->tag()) ||
-        dom_element_has_attribute(elem, "contenteditable")) {
+        elem->has_attribute("contenteditable")) {
         return false;
     }
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
@@ -345,7 +345,7 @@ static bool target_range_can_cleanup_inline(DomElement* elem,
                                             const EditingSurface* surface) {
     if (!elem || !elem->parent || !elem->parent->is_element()) return false;
     if (surface && surface->owner == elem) return false;
-    if (dom_element_has_attribute(elem, "contenteditable")) return false;
+    if (elem->has_attribute("contenteditable")) return false;
     if (!target_range_is_simple_inline_tag(elem->tag())) return false;
     return elem->first_child && elem->first_child == elem->last_child &&
         elem->first_child->is_text();
@@ -442,7 +442,7 @@ static bool target_range_filler_br_block(DomElement* block) {
         }
         if (child->is_element() &&
             target_range_is_simple_inline_tag(child->as_element()->tag()) &&
-            !dom_element_has_attribute(child->as_element(), "contenteditable") &&
+            !child->as_element()->has_attribute("contenteditable") &&
             target_range_filler_br_block(child->as_element())) {
             br_count++;
             continue;

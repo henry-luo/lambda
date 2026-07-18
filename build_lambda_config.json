@@ -371,6 +371,8 @@
                 "lambda/input/css/dom_element.cpp",
                 "lambda/input/css/selector_matcher.cpp",
                 "radiant/layout_counters.cpp",
+                "radiant/view_prop_defaults.cpp",
+                "radiant/view_prop_ensure.cpp",
                 "lambda/input/html5/html5_tree_builder.cpp",
                 "lambda/input/html5/html5_tokenizer.cpp",
                 "lambda/input/html5/html5_parser.cpp",
@@ -2522,6 +2524,7 @@
                         "additional_sources": [
                             "radiant/animation.cpp",
                             "radiant/css_animation.cpp",
+                            "radiant/css_prop_table.cpp",
                             "lambda/input/css/css_value.cpp",
                             "lib/avl_tree.c"
                         ],

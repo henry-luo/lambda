@@ -127,14 +127,14 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("%s container->embed=%p", container->source_loc(), (void*)container->embed);
     if (container->embed) {
         log_debug("%s container->embed->grid=%p", container->source_loc(), (void*)container->embed->grid);
-        if (container->embed->grid) {
+        if (container->embedp()->grid) {
             log_debug("%s embed->grid values: row_gap=%.1f, column_gap=%.1f", container->source_loc(),
-                      container->embed->grid->row_gap, container->embed->grid->column_gap);
+                      container->embedp()->grid->row_gap, container->embedp()->grid->column_gap);
         }
     }
 
-    if (container->embed && container->embed->grid) {
-        memcpy(grid, container->embed->grid, sizeof(GridProp));
+    if (container->embed && container->embedp()->grid) {
+        memcpy(grid, container->embedp()->grid, sizeof(GridProp));
         grid->scratch_mark = mark;
         grid->lycon = lycon;  // Restore after memcpy
         log_debug("%s Copied grid props: row_gap=%.1f, column_gap=%.1f", container->source_loc(),
@@ -291,13 +291,13 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // or inline-grid which uses shrink-to-fit sizing)
     bool is_shrink_to_fit_width = false;
     if (container->display.outer == CSS_VALUE_INLINE_BLOCK &&
-        (!container->blk || container->blk->given_width < 0)) {
+        (!container->blk || container->block()->given_width < 0)) {
         is_shrink_to_fit_width = true;
     } else if (container->position &&
-        (container->position->position == CSS_VALUE_ABSOLUTE ||
-         container->position->position == CSS_VALUE_FIXED)) {
-        bool has_explicit_width = container->blk && container->blk->given_width > 0;
-        bool has_left_right = container->position->has_left && container->position->has_right;
+        (container->positionp()->position == CSS_VALUE_ABSOLUTE ||
+         container->positionp()->position == CSS_VALUE_FIXED)) {
+        bool has_explicit_width = container->blk && container->block_mut()->given_width > 0;
+        bool has_left_right = container->positionp()->has_left && container->positionp()->has_right;
         if (!has_explicit_width && !has_left_right) {
             is_shrink_to_fit_width = true;
         }
@@ -312,10 +312,10 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Determine if container has an explicit height (not auto)
     // This affects whether auto row tracks should stretch to fill the container
-    grid_layout->has_explicit_height = (container->blk && container->blk->given_height >= 0);
+    grid_layout->has_explicit_height = (container->blk && container->block_mut()->given_height >= 0);
     log_debug("%s GRID: has_explicit_height=%d (given_height=%.1f)", container->source_loc(),
               grid_layout->has_explicit_height,
-              container->blk ? container->blk->given_height : -1);
+              container->blk ? container->block()->given_height : -1);
 
     // Calculate content dimensions (excluding borders and padding)
     grid_layout->content_width = container->width;
@@ -505,8 +505,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
             // Check if item has orthogonal writing mode
             bool is_orthogonal = false;
-            if (item->embed && item->embed->flex) {
-                WritingMode wm = item->embed->flex->writing_mode;
+            if (item->embed && item->embedp()->flex) {
+                WritingMode wm = item->embedp()->flex->writing_mode;
                 is_orthogonal = (wm == WM_VERTICAL_LR || wm == WM_VERTICAL_RL);
             }
             if (!is_orthogonal) continue;
@@ -557,7 +557,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             // (physical height) by walking the item's text children.
             float font_size = 16.0f;
             if (item->font) {
-                font_size = item->font->font_size;
+                font_size = item->fontp()->font_size;
             } else if (lycon->font.style) {
                 font_size = lycon->font.style->font_size;
             }
@@ -663,31 +663,31 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
         if (!item || !item->position) continue;
-        if (item->position->position == CSS_VALUE_STICKY) {
+        if (item->positionp()->position == CSS_VALUE_STICKY) {
             layout_sticky_positioned(lycon, item);
             continue;
         }
-        if (item->position->position != CSS_VALUE_RELATIVE) continue;
+        if (item->positionp()->position != CSS_VALUE_RELATIVE) continue;
         float offset_x = 0, offset_y = 0;
         float parent_w = (float)container->width;
         float parent_h = (float)container->height;
-        if (item->position->has_left) {
-            offset_x = isnan(item->position->left_percent)
-                ? item->position->left
-                : item->position->left_percent * parent_w / 100.0f;
-        } else if (item->position->has_right) {
-            offset_x = isnan(item->position->right_percent)
-                ? -item->position->right
-                : -(item->position->right_percent * parent_w / 100.0f);
+        if (item->positionp()->has_left) {
+            offset_x = isnan(item->positionp()->left_percent)
+                ? item->positionp()->left
+                : item->positionp()->left_percent * parent_w / 100.0f;
+        } else if (item->positionp()->has_right) {
+            offset_x = isnan(item->positionp()->right_percent)
+                ? -item->positionp()->right
+                : -(item->positionp()->right_percent * parent_w / 100.0f);
         }
-        if (item->position->has_top) {
-            offset_y = isnan(item->position->top_percent)
-                ? item->position->top
-                : item->position->top_percent * parent_h / 100.0f;
-        } else if (item->position->has_bottom) {
-            offset_y = isnan(item->position->bottom_percent)
-                ? -item->position->bottom
-                : -(item->position->bottom_percent * parent_h / 100.0f);
+        if (item->positionp()->has_top) {
+            offset_y = isnan(item->positionp()->top_percent)
+                ? item->positionp()->top
+                : item->positionp()->top_percent * parent_h / 100.0f;
+        } else if (item->positionp()->has_bottom) {
+            offset_y = isnan(item->positionp()->bottom_percent)
+                ? -item->positionp()->bottom
+                : -(item->positionp()->bottom_percent * parent_h / 100.0f);
         }
         if (offset_x != 0 || offset_y != 0) {
             log_debug("%s Phase 7.5: grid item %d relative offset (%.0f, %.0f)", container->source_loc(), i, offset_x, offset_y);

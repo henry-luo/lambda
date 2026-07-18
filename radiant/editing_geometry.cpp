@@ -57,11 +57,11 @@ static void editing_geometry_block_scroll(ViewBlock* block, float* scroll_x,
                                           float* scroll_y) {
     *scroll_x = 0.0f;
     *scroll_y = 0.0f;
-    if (!block || !block->scroller || !block->scroller->pane) return;
+    if (!block || !block->scroller || !block->scroll()->pane) return;
 
     DocState* state = block->doc ? block->doc->state : NULL;
     scroll_state_get_position_for_view(state, static_cast<View*>(block),
-        block->scroller->pane, scroll_x, scroll_y, NULL, NULL);
+        block->scroll()->pane, scroll_x, scroll_y, NULL, NULL);
 }
 
 static void editing_geometry_viewport_xy(View* view, float* out_x, float* out_y) {
@@ -73,7 +73,7 @@ static void editing_geometry_viewport_xy(View* view, float* out_x, float* out_y)
         y += p->y;
         if (p != origin && p->is_block()) {
             ViewBlock* block = lam::view_require_block(p);
-            if (block->scroller && block->scroller->pane) {
+            if (block->scroller && block->scroll_mut()->pane) {
                 float scroll_x, scroll_y;
                 editing_geometry_block_scroll(block, &scroll_x, &scroll_y);
                 x -= scroll_x;
@@ -100,8 +100,8 @@ static bool editing_geometry_find_document_offset(View* view,
     if (view->is_block() &&
         view->is_element()) {
         ViewBlock* block = lam::view_require_block(view);
-        if (block->embed && block->embed->doc) {
-            DomDocument* embed_doc = block->embed->doc;
+        if (block->embed && block->embedp()->doc) {
+            DomDocument* embed_doc = block->embedp()->doc;
             if (embed_doc == target_doc) {
                 float scroll_x, scroll_y;
                 editing_geometry_block_scroll(block, &scroll_x, &scroll_y);
@@ -162,7 +162,7 @@ static void editing_geometry_text_block_abs_xy(ViewText* text, float* out_x, flo
                 x += p->x;
                 y += p->y;
                 ViewBlock* block = lam::view_require_block(p);
-                if (block->scroller && block->scroller->pane) {
+                if (block->scroller && block->scroll_mut()->pane) {
                     float scroll_x, scroll_y;
                     editing_geometry_block_scroll(block, &scroll_x, &scroll_y);
                     x -= scroll_x;
@@ -239,7 +239,7 @@ static bool editing_geometry_text_control_line_is_rtl(DomElement* elem,
             if (first != 0) return first > 0;
         }
     }
-    return block && block->blk && block->blk->direction == CSS_VALUE_RTL;
+    return block && block->blk && block->block_mut()->direction == CSS_VALUE_RTL;
 }
 
 typedef struct EditingTextControlMetrics {
@@ -252,14 +252,14 @@ typedef struct EditingTextControlMetrics {
 static EditingTextControlMetrics editing_geometry_text_control_metrics(
         DomElement* elem, ViewBlock* block) {
     EditingTextControlMetrics metrics;
-    metrics.border = (block->bound && block->bound->border)
-        ? block->bound->border->width.left : 1.0f;
-    metrics.padding = block->bound ? block->bound->padding.left
+    metrics.border = (block->bound && block->boundary_mut()->border)
+        ? block->boundary()->border->width.left : 1.0f;
+    metrics.padding = block->bound ? block->boundary()->padding.left
         : (elem->form->control_type == FORM_CONTROL_TEXTAREA
             ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
     metrics.content_width = block->width - 2.0f * (metrics.border + metrics.padding);
     if (metrics.content_width < 0.0f) metrics.content_width = 0.0f;
-    metrics.font_size = block->font ? block->font->font_size
+    metrics.font_size = block->font ? block->fontp()->font_size
         : (elem->form->control_type == FORM_CONTROL_TEXTAREA ? 13.333f : 16.0f);
     return metrics;
 }
@@ -473,7 +473,7 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
     if (rel_x < 0.0f) rel_x = 0.0f;
 
     if (elem->form->control_type == FORM_CONTROL_TEXTAREA) {
-        float font_size = block->font ? block->font->font_size : 13.333f;
+        float font_size = block->font ? block->fontp()->font_size : 13.333f;
         float line_height = font_size * 1.4f;
         float rel_y = vy - abs_y - border - padding + elem->form->scroll_y;
         if (rel_y < 0.0f) rel_y = 0.0f;

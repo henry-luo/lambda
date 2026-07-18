@@ -53,6 +53,7 @@ enum AvailableSizeType {
     AVAILABLE_SIZE_MAX_CONTENT
 };
 
+// tier-3: layout-transient, valid within pass
 struct AvailableSize {
     AvailableSizeType type;
     float value;
@@ -105,6 +106,7 @@ struct AvailableSize {
     }
 };
 
+// tier-3: layout-transient, valid within pass
 struct AvailableSpace {
     AvailableSize width;
     AvailableSize height;
@@ -174,6 +176,7 @@ inline float compute_shrink_to_fit_width(float min_content, float max_content, A
 // Intrinsic Sizing and Measurement
 // ============================================================================
 
+// tier-3: layout-transient, valid within pass
 struct TextIntrinsicWidths {
     float min_content;
     float max_content;
@@ -212,6 +215,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
                                                  bool content_only = false);
 
+// tier-3: layout-transient, valid within pass
 struct IntrinsicSizesBidirectional {
     float min_content_width;
     float max_content_width;
@@ -232,11 +236,13 @@ inline IntrinsicSizes intrinsic_sizes_for_axis(IntrinsicSizesBidirectional sizes
     return {sizes.min_content_height, sizes.max_content_height};
 }
 
+// tier-3: layout-transient, valid within pass
 struct CellIntrinsicWidths {
     float min_width;
     float max_width;
 };
 
+// tier-3: layout-transient, valid within pass
 typedef struct IntrinsicSize {
     float min_width;
     float max_width;
@@ -286,6 +292,7 @@ namespace radiant {
 
 #define LAYOUT_CACHE_SIZE 9
 
+// tier-3: layout-transient, valid within pass
 struct KnownDimensions {
     float width;
     float height;
@@ -297,6 +304,7 @@ inline KnownDimensions known_dimensions_none() {
     return {0.0f, 0.0f, false, false};
 }
 
+// tier-3: layout-transient, valid within pass
 struct SizeF {
     float width;
     float height;
@@ -310,6 +318,7 @@ inline SizeF size_f_zero() {
     return {0.0f, 0.0f};
 }
 
+// tier-3: layout-transient, valid within pass
 struct CacheEntry {
     KnownDimensions known_dimensions;
     AvailableSpace available_space;
@@ -317,9 +326,12 @@ struct CacheEntry {
     bool valid;
 };
 
+// tier-3: layout-transient, valid within pass
 struct LayoutCache {
     CacheEntry final_layout;
     CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
+    float intrinsic_min_content_width;
+    float intrinsic_max_content_width;
     bool is_empty;
 };
 
@@ -451,6 +463,7 @@ inline void layout_cache_store(
 // Box Metrics
 // ============================================================================
 
+// tier-3: layout-transient, valid within pass
 typedef struct BoxEdges {
     float left;
     float right;
@@ -458,6 +471,7 @@ typedef struct BoxEdges {
     float bottom;
 } BoxEdges;
 
+// tier-3: layout-transient, valid within pass
 typedef struct BoxMetrics {
     BoxEdges margin;
     BoxEdges padding;
@@ -494,7 +508,7 @@ float layout_floor_border_box_height(ViewBlock* block, float border_height);
 float layout_floor_border_box_axis(ViewBlock* block, float border_size, bool horizontal);
 
 static inline CssEnum layout_box_sizing(ViewBlock* block) {
-    return (block && block->blk) ? block->blk->box_sizing : CSS_VALUE_CONTENT_BOX;
+    return (block && block->blk) ? block->block()->box_sizing : CSS_VALUE_CONTENT_BOX;
 }
 
 static inline bool layout_uses_border_box(ViewBlock* block) {
@@ -510,24 +524,24 @@ float layout_clamp_min_max_height(ViewBlock* block, float height);
 static inline float layout_clamp_positive_min_max_width(ViewBlock* block, float width) {
     if (!block || !block->blk) return width;
     float constrained_width = width;
-    if (block->blk->given_max_width > 0.0f && constrained_width > block->blk->given_max_width) {
-        constrained_width = block->blk->given_max_width;
+    if (block->block()->given_max_width > 0.0f && constrained_width > block->block()->given_max_width) {
+        constrained_width = block->block()->given_max_width;
     }
-    if (block->blk->given_min_width > 0.0f && constrained_width < block->blk->given_min_width) {
-        constrained_width = block->blk->given_min_width;
+    if (block->block()->given_min_width > 0.0f && constrained_width < block->block()->given_min_width) {
+        constrained_width = block->block()->given_min_width;
     }
     return constrained_width;
 }
 
 static inline float layout_explicit_min_width_or(ViewBlock* block, float fallback) {
-    return (block && block->blk && block->blk->given_min_width >= 0.0f)
-        ? block->blk->given_min_width
+    return (block && block->blk && block->block()->given_min_width >= 0.0f)
+        ? block->block()->given_min_width
         : fallback;
 }
 
 static inline float layout_explicit_min_height_or(ViewBlock* block, float fallback) {
-    return (block && block->blk && block->blk->given_min_height >= 0.0f)
-        ? block->blk->given_min_height
+    return (block && block->blk && block->block()->given_min_height >= 0.0f)
+        ? block->block()->given_min_height
         : fallback;
 }
 
@@ -538,14 +552,14 @@ static inline float layout_explicit_min_axis_or(ViewBlock* block, bool horizonta
 }
 
 static inline float layout_explicit_max_width_or(ViewBlock* block, float fallback) {
-    return (block && block->blk && block->blk->given_max_width >= 0.0f)
-        ? block->blk->given_max_width
+    return (block && block->blk && block->block()->given_max_width >= 0.0f)
+        ? block->block()->given_max_width
         : fallback;
 }
 
 static inline float layout_explicit_max_height_or(ViewBlock* block, float fallback) {
-    return (block && block->blk && block->blk->given_max_height >= 0.0f)
-        ? block->blk->given_max_height
+    return (block && block->blk && block->block()->given_max_height >= 0.0f)
+        ? block->block()->given_max_height
         : fallback;
 }
 
@@ -590,31 +604,31 @@ static inline float layout_positive_max_axis_or(ViewBlock* block, bool horizonta
 }
 
 static inline float layout_floor_min_width(ViewBlock* block, float width) {
-    if (!block || !block->blk || block->blk->given_min_width < 0.0f) return width;
-    return width < block->blk->given_min_width ? block->blk->given_min_width : width;
+    if (!block || !block->blk || block->block()->given_min_width < 0.0f) return width;
+    return width < block->block()->given_min_width ? block->block()->given_min_width : width;
 }
 
 static inline float layout_floor_min_height(ViewBlock* block, float height) {
-    if (!block || !block->blk || block->blk->given_min_height < 0.0f) return height;
-    return height < block->blk->given_min_height ? block->blk->given_min_height : height;
+    if (!block || !block->blk || block->block()->given_min_height < 0.0f) return height;
+    return height < block->block()->given_min_height ? block->block()->given_min_height : height;
 }
 
 static inline void layout_apply_positive_min_max_contribution(ViewBlock* block, bool horizontal,
                                                               float* min_size, float* max_size) {
     if (!block || !block->blk) return;
     if (horizontal) {
-        if (min_size && block->blk->given_min_width > 0.0f && *min_size < block->blk->given_min_width) {
-            *min_size = block->blk->given_min_width;
+        if (min_size && block->block()->given_min_width > 0.0f && *min_size < block->block()->given_min_width) {
+            *min_size = block->block()->given_min_width;
         }
-        if (max_size && block->blk->given_max_width > 0.0f && *max_size > block->blk->given_max_width) {
-            *max_size = block->blk->given_max_width;
+        if (max_size && block->block()->given_max_width > 0.0f && *max_size > block->block()->given_max_width) {
+            *max_size = block->block()->given_max_width;
         }
     } else {
-        if (min_size && block->blk->given_min_height > 0.0f && *min_size < block->blk->given_min_height) {
-            *min_size = block->blk->given_min_height;
+        if (min_size && block->block()->given_min_height > 0.0f && *min_size < block->block()->given_min_height) {
+            *min_size = block->block()->given_min_height;
         }
-        if (max_size && block->blk->given_max_height > 0.0f && *max_size > block->blk->given_max_height) {
-            *max_size = block->blk->given_max_height;
+        if (max_size && block->block()->given_max_height > 0.0f && *max_size > block->block()->given_max_height) {
+            *max_size = block->block()->given_max_height;
         }
     }
 }
@@ -679,6 +693,7 @@ float adjust_border_padding_height(ViewBlock* block, float height);
 // Containing Blocks
 // ============================================================================
 
+// tier-3: layout-transient, valid within pass
 typedef struct LayoutContainingBlock {
     ViewBlock* view;
 
@@ -721,6 +736,7 @@ void layout_resolve_percent_offsets_for_child(ViewBlock* child,
 typedef struct Arena Arena;
 typedef struct DomElement DomElement;
 
+// tier-3: layout-transient, valid within pass
 typedef struct CounterValue {
     const char* name;
     int value;
@@ -728,11 +744,13 @@ typedef struct CounterValue {
     bool created_by_reset;
 } CounterValue;
 
+// tier-3: layout-transient, valid within pass
 typedef struct CounterScope {
     HashMap* counters;
     CounterScope* parent;
 } CounterScope;
 
+// tier-3: layout-transient, valid within pass
 typedef struct CounterContext {
     Arena* arena;
     CounterScope* current_scope;
@@ -779,6 +797,7 @@ enum LayoutDebugCategory : uint32_t {
     LAYOUT_DEBUG_ALL   = 0xffffffffu
 };
 
+// tier-3: layout-transient, valid within pass
 typedef struct LayoutDebugState {
     uint32_t enabled_categories;
     bool initialized;
@@ -797,12 +816,14 @@ enum LayoutProfileBucket : uint8_t {
     LAYOUT_PROFILE_BUCKET_COUNT
 };
 
+// tier-3: layout-transient, valid within pass
 typedef struct LayoutProfileNode {
     const DomNode* node;
     LayoutProfileBucket bucket;
     double elapsed_ms;
 } LayoutProfileNode;
 
+// tier-3: layout-transient, valid within pass
 typedef struct LayoutProfiler {
     double block_ms;
     double inline_ms;
@@ -841,6 +862,7 @@ void layout_profiler_set_cache(LayoutProfiler* profiler, int64_t hits, int64_t m
 void layout_profiler_report(LayoutContext* lycon);
 double layout_profiler_now_ms();
 
+// tier-3: layout-transient, valid within pass
 struct LayoutProfileScope {
     LayoutContext* lycon;
     const DomNode* node;
@@ -862,6 +884,7 @@ struct LayoutProfileScope {
 
 namespace radiant {
 
+// tier-3: layout-transient, valid within pass
 struct SpaceDistribution {
     float gap_before_first;
     float gap_between;
@@ -928,6 +951,7 @@ bool text_codepoint_has_zero_advance(uint32_t codepoint);
 // Table Metadata
 // ============================================================================
 
+// tier-3: layout-transient, valid within pass
 struct TableMetadata {
     int column_count;
     int row_count;
@@ -968,6 +992,7 @@ void table_metadata_destroy(TableMetadata* meta);
 // Custom Layout
 // ============================================================================
 
+// tier-3: layout-transient, valid within pass
 typedef struct VelmtBox {
     float x;
     float y;
@@ -975,6 +1000,7 @@ typedef struct VelmtBox {
     float height;
 } VelmtBox;
 
+// tier-3: layout-transient, valid within pass
 typedef struct VelmtEdges {
     float left;
     float right;
@@ -982,6 +1008,7 @@ typedef struct VelmtEdges {
     float bottom;
 } VelmtEdges;
 
+// tier-3: layout-transient, valid within pass
 typedef struct Velmt {
     View* view;
     DomElement* element;
@@ -992,6 +1019,7 @@ typedef struct Velmt {
     VelmtEdges padding;
 } Velmt;
 
+// tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutContext {
     LayoutContext* lycon;
     ViewBlock* parent;
@@ -1012,6 +1040,7 @@ typedef struct CustomLayoutContext {
     const char* writing_mode;
 } CustomLayoutContext;
 
+// tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPlacement {
     int child_index;
     float x;
@@ -1020,17 +1049,20 @@ typedef struct CustomLayoutPlacement {
     bool has_z;
 } CustomLayoutPlacement;
 
+// tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPaintLayer {
     Element* content;
     int z;
     int order;
 } CustomLayoutPaintLayer;
 
+// tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPaintState {
     CustomLayoutPaintLayer* layers;
     int layer_count;
 } CustomLayoutPaintState;
 
+// tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutResult {
     CustomLayoutPlacement* placements;
     int placement_count;
@@ -1085,6 +1117,7 @@ void calculate_multicol_dimensions(
 );
 void layout_multicol_content(LayoutContext* lycon, ViewBlock* block);
 
+// tier-3: layout-transient, valid within pass
 typedef struct StyleContext {
     struct StyleElement* parent;
     struct StyleNode* prev_node;
@@ -1096,6 +1129,7 @@ typedef struct StyleContext {
  * FloatBox - Represents a positioned floating element
  * Tracks both the element position and its margin box for proper space calculations.
  */
+// tier-3: layout-transient, valid within pass
 typedef struct FloatBox {
     ViewBlock* element;         // The floating element
 
@@ -1115,6 +1149,7 @@ typedef struct FloatBox {
 /**
  * FloatAvailableSpace - Result of space query at a given Y coordinate
  */
+// tier-3: layout-transient, valid within pass
 typedef struct FloatAvailableSpace {
     float left;                 // Left edge of available space
     float right;                // Right edge of available space
@@ -1140,6 +1175,7 @@ typedef struct FloatAvailableSpace {
  * - display: flow-root
  * - Flex/Grid items
  */
+// tier-3: layout-transient, valid within pass
 typedef struct BlockContext {
     // =========================================================================
     // Layout State (from BlockContext)
@@ -1264,6 +1300,7 @@ typedef enum BreakKind {
     BRK_IDEOGRAPHIC_SPACE,      // U+3000 (full-width space, hangable, break opportunity)
 } BreakKind;
 
+// tier-3: layout-transient, valid within pass
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
     float align_left, align_right;    // original alignment bounds when wrap measure differs
@@ -1396,6 +1433,7 @@ typedef enum {
     JUSTIFY_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
 } JustifyContent;
 
+// tier-3: layout-transient, valid within pass
 typedef struct FlexLineInfo {
     View** items;
     int item_count;
@@ -1408,6 +1446,7 @@ typedef struct FlexLineInfo {
     float baseline;
 } FlexLineInfo;
 
+// tier-3: layout-transient, valid within pass
 typedef struct FlexContainerLayout : FlexProp {
     // Layout state (computed during layout)
     View** flex_items;  // Array of child flex items
@@ -1557,6 +1596,7 @@ void cleanup_flex_container(LayoutContext* lycon);
 
 // Mirrors BlockContextScope: pass-local flex scratch and parent context must
 // unwind together, even when nested layout exits early.
+// tier-3: layout-transient, valid within pass
 struct FlexLayoutScope {
     LayoutContext* lycon;
     FlexContainerLayout* saved;
@@ -1597,6 +1637,7 @@ float get_item_flex_shrink(ViewElement* item);
 float find_max_baseline(FlexLineInfo* line, int container_align_items);
 float calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis);
 
+// tier-3: layout-transient, valid within pass
 typedef struct MeasurementCacheEntry {
     DomNode* node;
     float measured_width;
@@ -1662,6 +1703,7 @@ enum class CellOccupancyState : uint8_t {
     AutoPlaced = 2
 };
 
+// tier-3: layout-transient, valid within pass
 struct OriginZeroLine {
     int16_t value;
 
@@ -1693,6 +1735,7 @@ struct OriginZeroLine {
     constexpr bool operator>=(OriginZeroLine other) const { return value >= other.value; }
 };
 
+// tier-3: layout-transient, valid within pass
 struct GridLine {
     int16_t value;
 
@@ -1702,6 +1745,7 @@ struct GridLine {
     constexpr bool is_valid() const { return value != 0; }
 };
 
+// tier-3: layout-transient, valid within pass
 struct LineSpan {
     OriginZeroLine start;
     OriginZeroLine end;
@@ -1715,6 +1759,7 @@ struct LineSpan {
     }
 };
 
+// tier-3: layout-transient, valid within pass
 struct TrackCounts {
     uint16_t negative_implicit;
     uint16_t explicit_count;
@@ -1767,10 +1812,7 @@ constexpr AbsoluteAxis other_axis(AbsoluteAxis axis) {
 } // namespace radiant
 
 inline GridItemProp* grid_item_prop(ViewBlock* item) {
-    if (!item) return nullptr;
-    if (item->item_prop_type == DomElement::ITEM_PROP_GRID) return item->gi;
-    if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) return item->form->grid_item;
-    return nullptr;
+    return item ? item->grid_item() : nullptr;
 }
 
 typedef enum GridTrackSizeType {
@@ -1785,6 +1827,7 @@ typedef enum GridTrackSizeType {
     GRID_TRACK_SIZE_REPEAT
 } GridTrackSizeType;
 
+// tier-3: layout-transient, valid within pass
 typedef struct GridTrackSize {
     GridTrackSizeType type;
     int value;
@@ -1799,6 +1842,7 @@ typedef struct GridTrackSize {
     bool is_auto_fit;
 } GridTrackSize;
 
+// tier-3: layout-transient, valid within pass
 typedef struct GridTrackList {
     GridTrackSize** tracks;
     int track_count;
@@ -1809,6 +1853,7 @@ typedef struct GridTrackList {
     int repeat_count;
 } GridTrackList;
 
+// tier-3: layout-transient, valid within pass
 typedef struct GridArea {
     char* name;
     int row_start;
@@ -1817,12 +1862,14 @@ typedef struct GridArea {
     int column_end;
 } GridArea;
 
+// tier-3: layout-transient, valid within pass
 typedef struct GridLineName {
     char* name;
     int line_number;
     bool is_row;
 } GridLineName;
 
+// tier-3: layout-transient, valid within pass
 typedef struct GridContainerLayout : GridProp {
     radiant::grid::TrackArray* computed_rows;
     radiant::grid::TrackArray* computed_columns;
@@ -1862,6 +1909,7 @@ void cleanup_grid_container(LayoutContext* lycon);
 
 // Mirrors BlockContextScope: pass-local grid scratch and parent context must
 // unwind together, even when no-item or absolute-only grid paths return early.
+// tier-3: layout-transient, valid within pass
 struct GridLayoutScope {
     LayoutContext* lycon;
     GridContainerLayout* saved;
@@ -1906,6 +1954,7 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
 void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_layout);
 void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container);
 
+// tier-3: layout-transient, valid within pass
 typedef struct LayoutContext {
     View* view;  // current view
     DomNode* elmt;  // current dom element, used before the view is created
@@ -2026,6 +2075,7 @@ typedef enum AbsStaticContextKind {
 
 struct AbsStaticContext;
 
+// tier-3: layout-transient, valid within pass
 typedef struct AbsChildLayoutState {
     DomNode* child;
     ViewBlock* child_block;
@@ -2046,6 +2096,7 @@ typedef void (*AbsPrepareChildFn)(LayoutContext* lycon, ViewBlock* container,
 typedef void (*AbsAfterChildFn)(LayoutContext* lycon, ViewBlock* container,
     AbsStaticContext* ctx, AbsChildLayoutState* state);
 
+// tier-3: layout-transient, valid within pass
 typedef struct AbsStaticContext {
     AbsStaticContextKind kind;
     LayoutContainingBlock containing_block;
@@ -2062,6 +2113,7 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
 
 namespace radiant {
 
+// tier-3: layout-transient, valid within pass
 struct LayoutRunModeScope {
     ::LayoutContext* lycon;
     RunMode saved_run_mode;
@@ -2073,6 +2125,7 @@ struct LayoutRunModeScope {
     LayoutRunModeScope& operator=(const LayoutRunModeScope&) = delete;
 };
 
+// tier-3: layout-transient, valid within pass
 struct LayoutMeasureScope {
     ::LayoutContext* lycon;
     BlockContext saved_block;
@@ -2107,6 +2160,8 @@ bool layout_pass_cache_get_for_space(::LayoutContext* lycon, ::DomElement* eleme
 void layout_pass_cache_store_for_space(::LayoutContext* lycon, ::DomElement* element,
     KnownDimensions known_dimensions, AvailableSpace available_space,
     SizeF result, const char* label);
+
+LayoutCache* layout_pass_ensure_cache(::LayoutContext* lycon, ::DomElement* element);
 
 } // namespace radiant
 
@@ -2220,11 +2275,7 @@ static inline void position_prop_init_defaults(PositionProp* prop) {
 }
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
-InlineProp* alloc_inline_prop(LayoutContext* lycon);
 FontProp* alloc_font_prop(LayoutContext* lycon);
-BlockProp* alloc_block_prop(LayoutContext* lycon);
-ScrollProp* alloc_scroll_prop(LayoutContext* lycon);
-PositionProp* alloc_position_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
 void reset_flex_item_prop_for_style(LayoutContext* lycon, ViewSpan* block);
@@ -2359,7 +2410,7 @@ static inline bool layout_block_is_out_of_flow(const ViewBlock* block) {
 static inline bool layout_block_is_hidden_or_display_none(const ViewBlock* block) {
     return !block ||
            layout_block_is_display_none(block) ||
-           (block->in_line && block->in_line->visibility == VIS_HIDDEN);
+           (block->in_line && block->inl()->visibility == VIS_HIDDEN);
 }
 
 static inline bool layout_block_is_skipped_container_item(const ViewBlock* block) {
@@ -2383,6 +2434,7 @@ float layout_inline_font_box_y(LayoutContext* lycon, ViewSpan* span,
                                float baseline_pos, float border_top, float padding_top);
 
 // Structure for OS/2 sTypo metrics (shared across layout modules)
+// tier-3: layout-transient, valid within pass
 struct TypoMetrics {
     float ascender;      // sTypoAscender in CSS pixels
     float descender;     // sTypoDescender in CSS pixels (positive value)
@@ -2487,6 +2539,7 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
  *   BlockContextScope bscope(lycon);
  *   // ... layout child, context auto-restored when bscope goes out of scope ...
  */
+// tier-3: layout-transient, valid within pass
 struct BlockContextScope {
     LayoutContext* lycon;
     BlockContext saved;
@@ -2501,6 +2554,7 @@ struct BlockContextScope {
  * RAII guard that saves and restores lycon->block, lycon->line, and lycon->font.
  * Use when all three need to be preserved across a nested layout operation.
  */
+// tier-3: layout-transient, valid within pass
 struct LayoutContextScope {
     LayoutContext* lycon;
     BlockContext saved_block;
@@ -2525,6 +2579,7 @@ struct LayoutContextScope {
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon);
 void layout_cleanup(LayoutContext* lycon);
 
+// tier-3: layout-transient, valid within pass
 struct LayoutPassScope {
     LayoutContext* lycon;
     bool active;

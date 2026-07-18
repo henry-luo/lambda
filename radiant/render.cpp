@@ -61,11 +61,11 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     float content_bottom = rdcon->block.y + block->height * s;
 
     // Adjust for borders if present
-    if (block->bound && block->bound->border) {
-        content_left += block->bound->border->width.left * s;
-        content_top += block->bound->border->width.top * s;
-        content_right -= block->bound->border->width.right * s;
-        content_bottom -= block->bound->border->width.bottom * s;
+    if (block->bound && block->boundary_mut()->border) {
+        content_left += block->boundary()->border->width.left * s;
+        content_top += block->boundary()->border->width.top * s;
+        content_right -= block->boundary()->border->width.right * s;
+        content_bottom -= block->boundary()->border->width.bottom * s;
     }
 
     // Intersect with parent clip region
@@ -84,8 +84,8 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     RenderClipScope iframe_clip_scope = render_clip_push_rect_scope(rdcon, &rdcon->block.clip);
 
     // render the embedded doc
-    if (block->embed && block->embed->doc) {
-        DomDocument* doc = block->embed->doc;
+    if (block->embed && block->embedp()->doc) {
+        DomDocument* doc = block->embedp()->doc;
         // render html doc
         if (doc && doc->view_tree && doc->view_tree->root) {
             View* root_view = doc->view_tree->root;
@@ -115,13 +115,13 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 // intrinsic-sized box (often smaller than the iframe viewport,
                 // leaving white gaps below the body content).
                 if (root_block->tag_id != HTM_TAG_SVG &&
-                    !(root_block->embed && root_block->embed->img)) {
+                    !(root_block->embed && root_block->embedp()->img)) {
                     Color canvas_bg;
                     canvas_bg.c = 0;
-                    bool html_has_bg = root_block->bound && root_block->bound->background &&
-                                       root_block->bound->background->color.a > 0;
+                    bool html_has_bg = root_block->bound && root_block->boundary_mut()->background &&
+                                       root_block->boundary()->background->color.a > 0;
                     if (html_has_bg) {
-                        canvas_bg = root_block->bound->background->color;
+                        canvas_bg = root_block->boundary()->background->color;
                     } else {
                         // walk html children for body bg
                         View* c = root_block->first_child;
@@ -130,9 +130,9 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                                 ViewBlock* cb = lam::view_require_block(c);
                                 const char* nm = cb->node_name();
                                 if (nm && str_ieq_const(nm, strlen(nm), "body")) {
-                                    if (cb->bound && cb->bound->background &&
-                                        cb->bound->background->color.a > 0) {
-                                        canvas_bg = cb->bound->background->color;
+                                    if (cb->bound && cb->boundary_mut()->background &&
+                                        cb->boundary()->background->color.a > 0) {
+                                        canvas_bg = cb->boundary()->background->color;
                                     }
                                     break;
                                 }
@@ -154,7 +154,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 if (root_block->tag_id == HTM_TAG_SVG) {
                     log_debug("render embedded SVG document (no background)");
                     render_inline_svg(rdcon, root_block);
-                } else if (root_block->embed && root_block->embed->img) {
+                } else if (root_block->embed && root_block->embedp()->img) {
                     // Image/SVG document root — use render_image_view
                     render_image_view(rdcon, root_block);
                 } else {
@@ -191,7 +191,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     log_debug("render inline view");
 
-    bool self_hidden = view_span->in_line && view_span->in_line->visibility == VIS_HIDDEN;
+    bool self_hidden = view_span->in_line && view_span->inl()->visibility == VIS_HIDDEN;
 
     // Render border/outline for inline elements.
     // Background is rendered per-line-fragment in render_text_view so that
@@ -200,8 +200,8 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     // handled by the same text-fragment path so rounded inline decorations
     // break at line boundaries instead of enclosing the aggregate span box.
     if (!self_hidden && view_span->bound) {
-        BackgroundProp* saved_bg = view_span->bound->background;
-        BorderProp* saved_border = view_span->bound->border;
+        BackgroundProp* saved_bg = view_span->boundary()->background;
+        BorderProp* saved_border = view_span->boundary()->border;
         bool border_is_fragment_painted = saved_border &&
             inline_span_has_direct_text_fragment(view_span);
         view_span->bound->background = nullptr;
@@ -220,20 +220,20 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
         if (view_span->font) {
             setup_font(rdcon->ui_context, &rdcon->font, view_span->font);
         }
-        if (view_span->in_line && view_span->in_line->has_color) {
+        if (view_span->in_line && view_span->inl()->has_color) {
             if (render_inline_trace_enabled()) {
                 log_debug("[RENDER COLOR INLINE] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
                           view_span->node_name(),
-                          view_span->in_line->color.r, view_span->in_line->color.g, view_span->in_line->color.b,
+                          view_span->inl()->color.r, view_span->inl()->color.g, view_span->inl()->color.b,
                           pa_color.r, pa_color.g, pa_color.b,
-                          view_span->in_line->color.c);
+                          view_span->inl()->color.c);
             }
-            rdcon->color = view_span->in_line->color;
+            rdcon->color = view_span->inl()->color;
         } else {
             if (render_inline_trace_enabled()) {
                 log_debug("[RENDER COLOR INLINE] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
                           view_span->node_name(), pa_color.r, pa_color.g, pa_color.b,
-                          view_span->in_line, view_span->in_line ? view_span->in_line->color.c : 0);
+                          view_span->in_line, view_span->in_line ? view_span->inl()->color.c : 0);
             }
         }
         render_children(rdcon, view);

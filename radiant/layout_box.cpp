@@ -135,13 +135,13 @@ float layout_clamp_min_max_width(ViewBlock* block, float width) {
     if (!block || !block->blk) return width;
 
     float constrained_width = width;
-    if (block->blk->given_max_width >= 0 && constrained_width > block->blk->given_max_width) {
-        constrained_width = block->blk->given_max_width;
+    if (block->block()->given_max_width >= 0 && constrained_width > block->block()->given_max_width) {
+        constrained_width = block->block()->given_max_width;
         log_debug("[LAYOUT_BOX] width clamped to max: %.2f", constrained_width);
     }
     // given_min_width overrides given_max_width if both are specified
-    if (block->blk->given_min_width >= 0 && constrained_width < block->blk->given_min_width) {
-        constrained_width = block->blk->given_min_width;
+    if (block->block()->given_min_width >= 0 && constrained_width < block->block()->given_min_width) {
+        constrained_width = block->block()->given_min_width;
         log_debug("[LAYOUT_BOX] width clamped to min: %.2f", constrained_width);
     }
     return constrained_width;
@@ -151,12 +151,12 @@ float layout_clamp_min_max_height(ViewBlock* block, float height) {
     if (!block || !block->blk) return height;
 
     float constrained_height = height;
-    if (block->blk->given_max_height >= 0 && constrained_height > block->blk->given_max_height) {
-        constrained_height = block->blk->given_max_height;
+    if (block->block()->given_max_height >= 0 && constrained_height > block->block()->given_max_height) {
+        constrained_height = block->block()->given_max_height;
     }
     // given_min_height overrides given_max_height if both are specified
-    if (block->blk->given_min_height >= 0 && constrained_height < block->blk->given_min_height) {
-        constrained_height = block->blk->given_min_height;
+    if (block->block()->given_min_height >= 0 && constrained_height < block->block()->given_min_height) {
+        constrained_height = block->block()->given_min_height;
     }
     return constrained_height;
 }

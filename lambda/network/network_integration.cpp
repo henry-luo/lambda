@@ -175,11 +175,11 @@ static void discover_link_callback(DomElement* link, void* user_data) {
     DomDocument* doc = (DomDocument*)user_data;
 
     // Get rel attribute
-    const char* rel = dom_element_get_attribute(link, "rel");
+    const char* rel = link->get_attribute("rel");
     if (!rel) return;
 
     // Get href attribute
-    const char* href = dom_element_get_attribute(link, "href");
+    const char* href = link->get_attribute("href");
     if (!href) return;
 
     if (strcmp(rel, "stylesheet") == 0) {
@@ -200,7 +200,7 @@ static void discover_link_callback(DomElement* link, void* user_data) {
     }
     else if (strcmp(rel, "preload") == 0) {
         // <link rel="preload" href="..." as="...">
-        const char* as_type = dom_element_get_attribute(link, "as");
+        const char* as_type = link->get_attribute("as");
         if (!as_type) return;
 
         char* abs_url = resolve_url(href, doc);
@@ -234,7 +234,7 @@ static void discover_img_callback(DomElement* img, void* user_data) {
     DomDocument* doc = (DomDocument*)user_data;
 
     // Get src attribute
-    const char* src = dom_element_get_attribute(img, "src");
+    const char* src = img->get_attribute("src");
     if (!src) {
         log_debug("network: <img> without src attribute");
         return;
@@ -266,9 +266,9 @@ static void discover_use_callback(DomElement* use, void* user_data) {
     DomDocument* doc = (DomDocument*)user_data;
 
     // Get xlink:href or href attribute (SVG 2 uses href)
-    const char* href = dom_element_get_attribute(use, "xlink:href");
+    const char* href = use->get_attribute("xlink:href");
     if (!href) {
-        href = dom_element_get_attribute(use, "href");
+        href = use->get_attribute("href");
     }
 
     if (!href) {
@@ -300,12 +300,12 @@ static void discover_use_callback(DomElement* use, void* user_data) {
 static void discover_script_callback(DomElement* script, void* user_data) {
     DomDocument* doc = (DomDocument*)user_data;
 
-    const char* src = dom_element_get_attribute(script, "src");
+    const char* src = script->get_attribute("src");
     if (!src) return;  // inline script, no download needed
 
     // Determine priority: defer/async scripts are lower priority
-    const char* defer_attr = dom_element_get_attribute(script, "defer");
-    const char* async_attr = dom_element_get_attribute(script, "async");
+    const char* defer_attr = script->get_attribute("defer");
+    const char* async_attr = script->get_attribute("async");
     ResourcePriority priority = (defer_attr || async_attr) ? PRIORITY_NORMAL : PRIORITY_HIGH;
 
     char* abs_url = resolve_url(src, doc);

@@ -182,7 +182,7 @@ String* MarkBuilder::createDomTextString(const char* str, size_t len) {
     DomText* dt = (DomText*)arena_calloc(arena_, total);  // zeros DomText fields
     if (!dt) return nullptr;
     dt->node_type = DOM_NODE_TEXT;
-    dt->content_type = DOM_TEXT_STRING;
+    dt->set_symbol(false);
     String* s = dom_text_to_string(dt);
     s->len = (uint32_t)len;
     s->is_ascii = str_is_ascii(str, len) ? 1 : 0;

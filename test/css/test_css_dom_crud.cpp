@@ -140,29 +140,29 @@ protected:
 
 
 // NOTE: These tests now use MarkBuilder to create elements with backing Lambda Elements,
-// which allows dom_element_set_attribute() to work via MarkEditor.
+// which allows DomElement::set_attribute() to work via MarkEditor.
 
 TEST_F(DomIntegrationTest, DomElementAttributes) {
     DomElement* element = create_dom_element("div");
     ASSERT_NE(element, nullptr);
-    ASSERT_NE(element->native_element, nullptr);
+    ASSERT_NE(dom_element_to_element(element), nullptr);
     ASSERT_NE(element->doc->input, nullptr);
 
     // Set attribute
-    EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value1"));
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-test"), "value1");
+    EXPECT_TRUE(element->set_attribute("data-test", "value1"));
+    EXPECT_STREQ(element->get_attribute("data-test"), "value1");
 
     // Update attribute
-    EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value2"));
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-test"), "value2");
+    EXPECT_TRUE(element->set_attribute("data-test", "value2"));
+    EXPECT_STREQ(element->get_attribute("data-test"), "value2");
 
     // Check existence
-    EXPECT_TRUE(dom_element_has_attribute(element, "data-test"));
-    EXPECT_FALSE(dom_element_has_attribute(element, "nonexistent"));
+    EXPECT_TRUE(element->has_attribute("data-test"));
+    EXPECT_FALSE(element->has_attribute("nonexistent"));
 
     // Remove attribute
-    EXPECT_TRUE(dom_element_remove_attribute(element, "data-test"));
-    EXPECT_FALSE(dom_element_has_attribute(element, "data-test"));
+    EXPECT_TRUE(element->remove_attribute("data-test"));
+    EXPECT_FALSE(element->has_attribute("data-test"));
 }
 
 TEST_F(DomIntegrationTest, DomElementIdAttribute) {
@@ -170,9 +170,9 @@ TEST_F(DomIntegrationTest, DomElementIdAttribute) {
     ASSERT_NE(element, nullptr);
 
     // Set ID attribute
-    EXPECT_TRUE(dom_element_set_attribute(element, "id", "test-id"));
+    EXPECT_TRUE(element->set_attribute("id", "test-id"));
     EXPECT_STREQ(element->id, "test-id");
-    EXPECT_STREQ(dom_element_get_attribute(element, "id"), "test-id");
+    EXPECT_STREQ(element->get_attribute("id"), "test-id");
 }
 
 TEST_F(DomIntegrationTest, InlineMode_ElementPointerStability) {
@@ -181,34 +181,34 @@ TEST_F(DomIntegrationTest, InlineMode_ElementPointerStability) {
     DomElement* element = create_dom_element("div");
     ASSERT_NE(element, nullptr);
 
-    Element* original_native_ptr = element->native_element;
+    Element* original_native_ptr = dom_element_to_element(element);
     ASSERT_NE(original_native_ptr, nullptr);
 
     // Add a new attribute - should NOT change the element pointer in INLINE mode
-    EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value1"));
-    EXPECT_EQ(element->native_element, original_native_ptr)
+    EXPECT_TRUE(element->set_attribute("data-test", "value1"));
+    EXPECT_EQ(dom_element_to_element(element), original_native_ptr)
         << "Element pointer should NOT change in INLINE mode when adding new attribute";
 
     // Update existing attribute - should NOT change the element pointer
-    EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value2"));
-    EXPECT_EQ(element->native_element, original_native_ptr)
+    EXPECT_TRUE(element->set_attribute("data-test", "value2"));
+    EXPECT_EQ(dom_element_to_element(element), original_native_ptr)
         << "Element pointer should NOT change in INLINE mode when updating attribute";
 
     // Add multiple attributes - pointer should remain stable
-    EXPECT_TRUE(dom_element_set_attribute(element, "id", "test-id"));
-    EXPECT_EQ(element->native_element, original_native_ptr);
+    EXPECT_TRUE(element->set_attribute("id", "test-id"));
+    EXPECT_EQ(dom_element_to_element(element), original_native_ptr);
 
-    EXPECT_TRUE(dom_element_set_attribute(element, "class", "test-class"));
-    EXPECT_EQ(element->native_element, original_native_ptr);
+    EXPECT_TRUE(element->set_attribute("class", "test-class"));
+    EXPECT_EQ(dom_element_to_element(element), original_native_ptr);
 
-    EXPECT_TRUE(dom_element_set_attribute(element, "style", "color: red;"));
-    EXPECT_EQ(element->native_element, original_native_ptr);
+    EXPECT_TRUE(element->set_attribute("style", "color: red;"));
+    EXPECT_EQ(dom_element_to_element(element), original_native_ptr);
 
     // Verify all attributes are still accessible
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-test"), "value2");
-    EXPECT_STREQ(dom_element_get_attribute(element, "id"), "test-id");
-    EXPECT_STREQ(dom_element_get_attribute(element, "class"), "test-class");
-    EXPECT_STREQ(dom_element_get_attribute(element, "style"), "color: red;");
+    EXPECT_STREQ(element->get_attribute("data-test"), "value2");
+    EXPECT_STREQ(element->get_attribute("id"), "test-id");
+    EXPECT_STREQ(element->get_attribute("class"), "test-class");
+    EXPECT_STREQ(element->get_attribute("style"), "color: red;");
 }
 
 // ============================================================================
@@ -223,43 +223,43 @@ TEST_F(DomIntegrationTest, EdgeCase_VeryLongStrings) {
     memset(long_class, 'a', 1000);
     long_class[1000] = '\0';
 
-    EXPECT_TRUE(dom_element_add_class(element, long_class));
-    EXPECT_TRUE(dom_element_has_class(element, long_class));
+    EXPECT_TRUE(element->add_class(long_class));
+    EXPECT_TRUE(element->has_class(long_class));
 
     // Very long attribute value
     char long_value[1001];
     memset(long_value, 'b', 1000);
     long_value[1000] = '\0';
 
-    EXPECT_TRUE(dom_element_set_attribute(element, "data-long", long_value));
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-long"), long_value);
+    EXPECT_TRUE(element->set_attribute("data-long", long_value));
+    EXPECT_STREQ(element->get_attribute("data-long"), long_value);
 }
 
 TEST_F(DomIntegrationTest, EdgeCase_SpecialCharacters) {
     DomElement* element = create_dom_element("div");
 
     // Special characters in class names
-    EXPECT_TRUE(dom_element_add_class(element, "class-with-hyphen"));
-    EXPECT_TRUE(dom_element_add_class(element, "class_with_underscore"));
-    EXPECT_TRUE(dom_element_add_class(element, "class123"));
+    EXPECT_TRUE(element->add_class("class-with-hyphen"));
+    EXPECT_TRUE(element->add_class("class_with_underscore"));
+    EXPECT_TRUE(element->add_class("class123"));
 
-    EXPECT_TRUE(dom_element_has_class(element, "class-with-hyphen"));
-    EXPECT_TRUE(dom_element_has_class(element, "class_with_underscore"));
-    EXPECT_TRUE(dom_element_has_class(element, "class123"));
+    EXPECT_TRUE(element->has_class("class-with-hyphen"));
+    EXPECT_TRUE(element->has_class("class_with_underscore"));
+    EXPECT_TRUE(element->has_class("class123"));
 
     // Special characters in attribute values
-    dom_element_set_attribute(element, "data-json", "{\"key\": \"value\"}");
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-json"), "{\"key\": \"value\"}");
+    element->set_attribute("data-json", "{\"key\": \"value\"}");
+    EXPECT_STREQ(element->get_attribute("data-json"), "{\"key\": \"value\"}");
 
     // Unicode characters
-    dom_element_set_attribute(element, "data-unicode", "你好世界");
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-unicode"), "你好世界");
+    element->set_attribute("data-unicode", "你好世界");
+    EXPECT_STREQ(element->get_attribute("data-unicode"), "你好世界");
 }
 
 TEST_F(DomIntegrationTest, EdgeCase_CaseSensitivity) {
     DomElement* element = create_dom_element("DIV");
-    dom_element_add_class(element, "MyClass");
-    dom_element_set_attribute(element, "DATA-TEST", "VALUE");
+    element->add_class("MyClass");
+    element->set_attribute("DATA-TEST", "VALUE");
 
     // Tag names are case-insensitive
     CssSimpleSelector* lower_tag = create_type_selector("div");
@@ -268,9 +268,9 @@ TEST_F(DomIntegrationTest, EdgeCase_CaseSensitivity) {
     EXPECT_TRUE(selector_matcher_matches_simple(matcher, upper_tag, element));
 
     // Class names are case-sensitive
-    EXPECT_TRUE(dom_element_has_class(element, "MyClass"));
-    EXPECT_FALSE(dom_element_has_class(element, "myclass"));
-    EXPECT_FALSE(dom_element_has_class(element, "MYCLASS"));
+    EXPECT_TRUE(element->has_class("MyClass"));
+    EXPECT_FALSE(element->has_class("myclass"));
+    EXPECT_FALSE(element->has_class("MYCLASS"));
 
     // Attribute values are case-sensitive by default
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "DATA-TEST", "VALUE",
@@ -286,53 +286,53 @@ TEST_F(DomIntegrationTest, EdgeCase_AttributeOverwrite) {
     DomElement* element = create_dom_element("div");
 
     // Set attribute
-    dom_element_set_attribute(element, "data-test", "value1");
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-test"), "value1");
+    element->set_attribute("data-test", "value1");
+    EXPECT_STREQ(element->get_attribute("data-test"), "value1");
 
     // Overwrite with same key
-    dom_element_set_attribute(element, "data-test", "value2");
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-test"), "value2");
+    element->set_attribute("data-test", "value2");
+    EXPECT_STREQ(element->get_attribute("data-test"), "value2");
 
     // Should only have one instance
-    EXPECT_TRUE(dom_element_has_attribute(element, "data-test"));
+    EXPECT_TRUE(element->has_attribute("data-test"));
 }
 
 TEST_F(DomIntegrationTest, SetAttribute_SpaceSeparatedClasses) {
     DomElement* element = create_dom_element("div");
 
     // Test setting multiple space-separated classes
-    EXPECT_TRUE(dom_element_set_attribute(element, "class", "foo bar baz"));
+    EXPECT_TRUE(element->set_attribute("class", "foo bar baz"));
 
     // Verify all three classes were parsed and added
-    EXPECT_TRUE(dom_element_has_class(element, "foo"));
-    EXPECT_TRUE(dom_element_has_class(element, "bar"));
-    EXPECT_TRUE(dom_element_has_class(element, "baz"));
+    EXPECT_TRUE(element->has_class("foo"));
+    EXPECT_TRUE(element->has_class("bar"));
+    EXPECT_TRUE(element->has_class("baz"));
     EXPECT_EQ(element->class_count, 3);
 
     // Test with extra whitespace (spaces, tabs, newlines)
-    EXPECT_TRUE(dom_element_set_attribute(element, "class", "  alpha  \t\tbeta\n\ngamma  "));
+    EXPECT_TRUE(element->set_attribute("class", "  alpha  \t\tbeta\n\ngamma  "));
 
     // Verify all three classes were parsed correctly
-    EXPECT_TRUE(dom_element_has_class(element, "alpha"));
-    EXPECT_TRUE(dom_element_has_class(element, "beta"));
-    EXPECT_TRUE(dom_element_has_class(element, "gamma"));
+    EXPECT_TRUE(element->has_class("alpha"));
+    EXPECT_TRUE(element->has_class("beta"));
+    EXPECT_TRUE(element->has_class("gamma"));
     EXPECT_EQ(element->class_count, 3);
 
     // Old classes should be replaced
-    EXPECT_FALSE(dom_element_has_class(element, "foo"));
-    EXPECT_FALSE(dom_element_has_class(element, "bar"));
-    EXPECT_FALSE(dom_element_has_class(element, "baz"));
+    EXPECT_FALSE(element->has_class("foo"));
+    EXPECT_FALSE(element->has_class("bar"));
+    EXPECT_FALSE(element->has_class("baz"));
 
     // Test single class still works
-    EXPECT_TRUE(dom_element_set_attribute(element, "class", "single-class"));
-    EXPECT_TRUE(dom_element_has_class(element, "single-class"));
+    EXPECT_TRUE(element->set_attribute("class", "single-class"));
+    EXPECT_TRUE(element->has_class("single-class"));
     EXPECT_EQ(element->class_count, 1);
-    EXPECT_FALSE(dom_element_has_class(element, "alpha"));
+    EXPECT_FALSE(element->has_class("alpha"));
 
     // Test empty class attribute
-    EXPECT_TRUE(dom_element_set_attribute(element, "class", ""));
+    EXPECT_TRUE(element->set_attribute("class", ""));
     EXPECT_EQ(element->class_count, 0);
-    EXPECT_FALSE(dom_element_has_class(element, "single-class"));
+    EXPECT_FALSE(element->has_class("single-class"));
 }
 
 TEST_F(DomIntegrationTest, QuirksMode_CaseInsensitiveAttributes) {
@@ -340,7 +340,7 @@ TEST_F(DomIntegrationTest, QuirksMode_CaseInsensitiveAttributes) {
     selector_matcher_set_quirks_mode(matcher, true);
 
     DomElement* element = create_dom_element("div");
-    dom_element_set_attribute(element, "data-test", "ValueMixed");
+    element->set_attribute("data-test", "ValueMixed");
 
     // Test with quirks mode (should be case-insensitive now)
     // Even though we pass case_insensitive=false, quirks mode should override
@@ -356,29 +356,29 @@ TEST_F(DomIntegrationTest, AttributeStorage_ArrayMode_SmallCount) {
     DomElement* element = create_dom_element("div");
 
     // Add 5 attributes
-    dom_element_set_attribute(element, "attr1", "value1");
-    dom_element_set_attribute(element, "attr2", "value2");
-    dom_element_set_attribute(element, "attr3", "value3");
-    dom_element_set_attribute(element, "attr4", "value4");
-    dom_element_set_attribute(element, "attr5", "value5");
+    element->set_attribute("attr1", "value1");
+    element->set_attribute("attr2", "value2");
+    element->set_attribute("attr3", "value3");
+    element->set_attribute("attr4", "value4");
+    element->set_attribute("attr5", "value5");
 
     // Verify all attributes accessible
-    EXPECT_STREQ(dom_element_get_attribute(element, "attr1"), "value1");
-    EXPECT_STREQ(dom_element_get_attribute(element, "attr3"), "value3");
-    EXPECT_STREQ(dom_element_get_attribute(element, "attr5"), "value5");
+    EXPECT_STREQ(element->get_attribute("attr1"), "value1");
+    EXPECT_STREQ(element->get_attribute("attr3"), "value3");
+    EXPECT_STREQ(element->get_attribute("attr5"), "value5");
 
     // Verify has_attribute works
-    EXPECT_TRUE(dom_element_has_attribute(element, "attr2"));
-    EXPECT_FALSE(dom_element_has_attribute(element, "attr99"));
+    EXPECT_TRUE(element->has_attribute("attr2"));
+    EXPECT_FALSE(element->has_attribute("attr99"));
 
     // Update attribute
-    dom_element_set_attribute(element, "attr3", "new_value3");
-    EXPECT_STREQ(dom_element_get_attribute(element, "attr3"), "new_value3");
+    element->set_attribute("attr3", "new_value3");
+    EXPECT_STREQ(element->get_attribute("attr3"), "new_value3");
 
     // Remove attribute
-    EXPECT_TRUE(dom_element_remove_attribute(element, "attr2"));
-    EXPECT_FALSE(dom_element_has_attribute(element, "attr2"));
-    EXPECT_EQ(dom_element_get_attribute(element, "attr2"), nullptr);
+    EXPECT_TRUE(element->remove_attribute("attr2"));
+    EXPECT_FALSE(element->has_attribute("attr2"));
+    EXPECT_EQ(element->get_attribute("attr2"), nullptr);
 }
 
 TEST_F(DomIntegrationTest, AttributeStorage_HashMapMode_LargeCount) {
@@ -390,7 +390,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_HashMapMode_LargeCount) {
         char name[20], value[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(value, sizeof(value), "value%d", i);
-        dom_element_set_attribute(element, name, value);
+        element->set_attribute(name, value);
     }
 
     // Verify all attributes accessible
@@ -398,16 +398,16 @@ TEST_F(DomIntegrationTest, AttributeStorage_HashMapMode_LargeCount) {
         char name[20], expected[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(expected, sizeof(expected), "value%d", i);
-        EXPECT_STREQ(dom_element_get_attribute(element, name), expected);
+        EXPECT_STREQ(element->get_attribute(name), expected);
     }
 
     // Update an attribute
-    dom_element_set_attribute(element, "attr7", "updated7");
-    EXPECT_STREQ(dom_element_get_attribute(element, "attr7"), "updated7");
+    element->set_attribute("attr7", "updated7");
+    EXPECT_STREQ(element->get_attribute("attr7"), "updated7");
 
     // Remove an attribute
-    EXPECT_TRUE(dom_element_remove_attribute(element, "attr5"));
-    EXPECT_FALSE(dom_element_has_attribute(element, "attr5"));
+    EXPECT_TRUE(element->remove_attribute("attr5"));
+    EXPECT_FALSE(element->has_attribute("attr5"));
 }
 
 TEST_F(DomIntegrationTest, AttributeStorage_ConversionThreshold) {
@@ -419,21 +419,21 @@ TEST_F(DomIntegrationTest, AttributeStorage_ConversionThreshold) {
         char name[20], value[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(value, sizeof(value), "value%d", i);
-        dom_element_set_attribute(element, name, value);
+        element->set_attribute(name, value);
     }
 
     // All should be accessible
-    EXPECT_STREQ(dom_element_get_attribute(element, "attr5"), "value5");
+    EXPECT_STREQ(element->get_attribute("attr5"), "value5");
 
     // Add 10th attribute (triggers conversion to HashMap)
-    dom_element_set_attribute(element, "attr10", "value10");
+    element->set_attribute("attr10", "value10");
 
     // Verify all 10 attributes still accessible after conversion
     for (int i = 1; i <= 10; i++) {
         char name[20], expected[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(expected, sizeof(expected), "value%d", i);
-        EXPECT_STREQ(dom_element_get_attribute(element, name), expected);
+        EXPECT_STREQ(element->get_attribute(name), expected);
     }
 }
 
@@ -442,26 +442,26 @@ TEST_F(DomIntegrationTest, AttributeStorage_SVGElement_ManyAttributes) {
     DomElement* svg_path = create_dom_element("path");
 
     // Add typical SVG path attributes
-    dom_element_set_attribute(svg_path, "d", "M 10 10 L 100 100");
-    dom_element_set_attribute(svg_path, "stroke", "black");
-    dom_element_set_attribute(svg_path, "stroke-width", "2");
-    dom_element_set_attribute(svg_path, "fill", "none");
-    dom_element_set_attribute(svg_path, "stroke-linecap", "round");
-    dom_element_set_attribute(svg_path, "stroke-linejoin", "round");
-    dom_element_set_attribute(svg_path, "transform", "rotate(45)");
-    dom_element_set_attribute(svg_path, "opacity", "0.8");
-    dom_element_set_attribute(svg_path, "filter", "url(#blur)");
-    dom_element_set_attribute(svg_path, "clip-path", "url(#clip)");
-    dom_element_set_attribute(svg_path, "data-id", "path1");
-    dom_element_set_attribute(svg_path, "data-layer", "foreground");
-    dom_element_set_attribute(svg_path, "aria-label", "Diagonal line");
-    dom_element_set_attribute(svg_path, "role", "img");
+    svg_path->set_attribute("d", "M 10 10 L 100 100");
+    svg_path->set_attribute("stroke", "black");
+    svg_path->set_attribute("stroke-width", "2");
+    svg_path->set_attribute("fill", "none");
+    svg_path->set_attribute("stroke-linecap", "round");
+    svg_path->set_attribute("stroke-linejoin", "round");
+    svg_path->set_attribute("transform", "rotate(45)");
+    svg_path->set_attribute("opacity", "0.8");
+    svg_path->set_attribute("filter", "url(#blur)");
+    svg_path->set_attribute("clip-path", "url(#clip)");
+    svg_path->set_attribute("data-id", "path1");
+    svg_path->set_attribute("data-layer", "foreground");
+    svg_path->set_attribute("aria-label", "Diagonal line");
+    svg_path->set_attribute("role", "img");
 
     // Verify critical attributes
-    EXPECT_STREQ(dom_element_get_attribute(svg_path, "d"), "M 10 10 L 100 100");
-    EXPECT_STREQ(dom_element_get_attribute(svg_path, "stroke"), "black");
-    EXPECT_STREQ(dom_element_get_attribute(svg_path, "data-layer"), "foreground");
-    EXPECT_STREQ(dom_element_get_attribute(svg_path, "aria-label"), "Diagonal line");
+    EXPECT_STREQ(svg_path->get_attribute("d"), "M 10 10 L 100 100");
+    EXPECT_STREQ(svg_path->get_attribute("stroke"), "black");
+    EXPECT_STREQ(svg_path->get_attribute("data-layer"), "foreground");
+    EXPECT_STREQ(svg_path->get_attribute("aria-label"), "Diagonal line");
 
     // Test attribute matching using the function
     bool matches = selector_matcher_matches_attribute(
@@ -479,17 +479,17 @@ TEST_F(DomIntegrationTest, AttributeStorage_Performance_ManyAttributes) {
         char name[20], value[30];
         snprintf(name, sizeof(name), "data-attr-%d", i);
         snprintf(value, sizeof(value), "value-%d", i);
-        dom_element_set_attribute(element, name, value);
+        element->set_attribute(name, value);
     }
 
     // Verify random access is fast (HashMap should be O(1))
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-attr-1"), "value-1");
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-attr-25"), "value-25");
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-attr-50"), "value-50");
+    EXPECT_STREQ(element->get_attribute("data-attr-1"), "value-1");
+    EXPECT_STREQ(element->get_attribute("data-attr-25"), "value-25");
+    EXPECT_STREQ(element->get_attribute("data-attr-50"), "value-50");
 
     // Test lookups for non-existent attributes
-    EXPECT_EQ(dom_element_get_attribute(element, "nonexistent"), nullptr);
-    EXPECT_FALSE(dom_element_has_attribute(element, "nonexistent"));
+    EXPECT_EQ(element->get_attribute("nonexistent"), nullptr);
+    EXPECT_FALSE(element->has_attribute("nonexistent"));
 }
 
 TEST_F(DomIntegrationTest, AttributeStorage_Clone_ManyAttributes) {
@@ -501,7 +501,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_Clone_ManyAttributes) {
         char name[20], value[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(value, sizeof(value), "value%d", i);
-        dom_element_set_attribute(original, name, value);
+        original->set_attribute(name, value);
     }
 
     // Clone the element
@@ -513,7 +513,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_Clone_ManyAttributes) {
         char name[20], expected[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(expected, sizeof(expected), "value%d", i);
-        EXPECT_STREQ(dom_element_get_attribute(clone, name), expected);
+        EXPECT_STREQ(clone->get_attribute(name), expected);
     }
 }
 
@@ -526,18 +526,18 @@ TEST_F(DomIntegrationTest, AttributeStorage_UpdateAfterConversion) {
         char name[20], value[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(value, sizeof(value), "old%d", i);
-        dom_element_set_attribute(element, name, value);
+        element->set_attribute(name, value);
     }
 
     // Add 10th attribute (triggers conversion)
-    dom_element_set_attribute(element, "attr10", "old10");
+    element->set_attribute("attr10", "old10");
 
     // Now update attributes (should work in HashMap mode)
     for (int i = 1; i <= 10; i++) {
         char name[20], value[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(value, sizeof(value), "new%d", i);
-        dom_element_set_attribute(element, name, value);
+        element->set_attribute(name, value);
     }
 
     // Verify all updates
@@ -545,7 +545,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_UpdateAfterConversion) {
         char name[20], expected[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(expected, sizeof(expected), "new%d", i);
-        EXPECT_STREQ(dom_element_get_attribute(element, name), expected);
+        EXPECT_STREQ(element->get_attribute(name), expected);
     }
 }
 
@@ -558,25 +558,25 @@ TEST_F(DomIntegrationTest, AttributeStorage_RemoveAfterConversion) {
         char name[20], value[20];
         snprintf(name, sizeof(name), "attr%d", i);
         snprintf(value, sizeof(value), "value%d", i);
-        dom_element_set_attribute(element, name, value);
+        element->set_attribute(name, value);
     }
 
     // Remove every other attribute
     for (int i = 1; i <= 15; i += 2) {
         char name[20];
         snprintf(name, sizeof(name), "attr%d", i);
-        EXPECT_TRUE(dom_element_remove_attribute(element, name));
+        EXPECT_TRUE(element->remove_attribute(name));
     }
 
     // Verify removed attributes are gone
-    EXPECT_FALSE(dom_element_has_attribute(element, "attr1"));
-    EXPECT_FALSE(dom_element_has_attribute(element, "attr7"));
-    EXPECT_FALSE(dom_element_has_attribute(element, "attr15"));
+    EXPECT_FALSE(element->has_attribute("attr1"));
+    EXPECT_FALSE(element->has_attribute("attr7"));
+    EXPECT_FALSE(element->has_attribute("attr15"));
 
     // Verify remaining attributes still exist
-    EXPECT_TRUE(dom_element_has_attribute(element, "attr2"));
-    EXPECT_STREQ(dom_element_get_attribute(element, "attr6"), "value6");
-    EXPECT_STREQ(dom_element_get_attribute(element, "attr14"), "value14");
+    EXPECT_TRUE(element->has_attribute("attr2"));
+    EXPECT_STREQ(element->get_attribute("attr6"), "value6");
+    EXPECT_STREQ(element->get_attribute("attr14"), "value14");
 }
 
 // ============================================================================
@@ -594,12 +594,12 @@ TEST_F(DomIntegrationTest, Integration_QuirksModeWithManyAttributes) {
         char name[20], value[20];
         snprintf(name, sizeof(name), "data-attr-%d", i);
         snprintf(value, sizeof(value), "Value%d", i);
-        dom_element_set_attribute(element, name, value);
+        element->set_attribute(name, value);
     }
 
     // Add classes
-    dom_element_add_class(element, "BtnPrimary");
-    dom_element_add_class(element, "BtnLarge");
+    element->add_class("BtnPrimary");
+    element->add_class("BtnLarge");
 
     // Test case-insensitive class matching
     EXPECT_TRUE(selector_matcher_matches_simple(matcher, create_class_selector("btnprimary"), element));
@@ -618,20 +618,20 @@ TEST_F(DomIntegrationTest, Integration_SVGWithQuirksMode) {
     selector_matcher_set_quirks_mode(matcher, true);
 
     DomElement* svg = create_dom_element("svg");
-    dom_element_set_attribute(svg, "xmlns", "http://www.w3.org/2000/svg");
-    dom_element_set_attribute(svg, "viewBox", "0 0 100 100");
-    dom_element_set_attribute(svg, "width", "100");
-    dom_element_set_attribute(svg, "height", "100");
-    dom_element_set_attribute(svg, "preserveAspectRatio", "xMidYMid meet");
-    dom_element_set_attribute(svg, "class", "IconSVG");
-    dom_element_set_attribute(svg, "data-icon", "CheckMark");
-    dom_element_set_attribute(svg, "data-size", "Medium");
-    dom_element_set_attribute(svg, "aria-hidden", "true");
-    dom_element_set_attribute(svg, "role", "img");
-    dom_element_set_attribute(svg, "focusable", "false");
+    svg->set_attribute("xmlns", "http://www.w3.org/2000/svg");
+    svg->set_attribute("viewBox", "0 0 100 100");
+    svg->set_attribute("width", "100");
+    svg->set_attribute("height", "100");
+    svg->set_attribute("preserveAspectRatio", "xMidYMid meet");
+    svg->set_attribute("class", "IconSVG");
+    svg->set_attribute("data-icon", "CheckMark");
+    svg->set_attribute("data-size", "Medium");
+    svg->set_attribute("aria-hidden", "true");
+    svg->set_attribute("role", "img");
+    svg->set_attribute("focusable", "false");
 
     // Add class for matching
-    dom_element_add_class(svg, "IconSVG");
+    svg->add_class("IconSVG");
 
     // Test case-insensitive class
     EXPECT_TRUE(selector_matcher_matches_simple(matcher, create_class_selector("iconsvg"), svg));
@@ -652,12 +652,12 @@ TEST_F(DomIntegrationTest, Integration_PerformanceManyAttributesWithMatching) {
         char name[30], value[30];
         snprintf(name, sizeof(name), "data-test-attr-%d", i);
         snprintf(value, sizeof(value), "test-value-%d", i);
-        dom_element_set_attribute(element, name, value);
+        element->set_attribute(name, value);
     }
 
     // Add classes
-    dom_element_add_class(element, "test-class-1");
-    dom_element_add_class(element, "test-class-2");
+    element->add_class("test-class-1");
+    element->add_class("test-class-2");
 
     // Perform many selector matches (should be fast with HashMap)
     for (int i = 1; i <= 30; i++) {
@@ -684,7 +684,7 @@ TEST_F(DomIntegrationTest, InlineStyle_SingleProperty) {
     // Test: Single inline style property
     DomElement* element = create_dom_element("div");
 
-    dom_element_set_attribute(element, "style", "color: red");
+    element->set_attribute("style", "color: red");
 
     // Verify the declaration was applied
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
@@ -733,14 +733,14 @@ TEST_F(DomIntegrationTest, InlineStyle_MultipleProperties) {
 TEST_F(DomIntegrationTest, InlineStyle_OverridesStylesheet) {
     // Test: Inline style overrides stylesheet rules
     DomElement* element = create_dom_element("div");
-    dom_element_add_class(element, "box");
+    element->add_class("box");
 
     // Apply stylesheet rule with class selector (0,1,0)
     CssDeclaration* css_decl = create_declaration(CSS_PROPERTY_COLOR, "green", 0, 1, 0);
     dom_element_apply_declaration(element, css_decl);
 
     // Apply inline style (1,0,0,0) - should override
-    dom_element_set_attribute(element, "style", "color: red");
+    element->set_attribute("style", "color: red");
 
     // Inline style should win
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
@@ -753,14 +753,14 @@ TEST_F(DomIntegrationTest, InlineStyle_OverridesStylesheet) {
 TEST_F(DomIntegrationTest, InlineStyle_OverridesIDSelector) {
     // Test: Inline style overrides even ID selectors
     DomElement* element = create_dom_element("div");
-    dom_element_set_attribute(element, "id", "unique");
+    element->set_attribute("id", "unique");
 
     // Apply ID selector rule (1,0,0)
     CssDeclaration* id_decl = create_declaration(CSS_PROPERTY_WIDTH, "100px", 1, 0, 0);
     dom_element_apply_declaration(element, id_decl);
 
     // Apply inline style (1,0,0,0) - should override ID
-    dom_element_set_attribute(element, "style", "width: 200px");
+    element->set_attribute("style", "width: 200px");
 
     // Inline style should win (inline_style=1 beats ids=1)
     CssDeclaration* width = dom_element_get_specified_value(element, CSS_PROPERTY_WIDTH);
@@ -820,14 +820,14 @@ TEST_F(DomIntegrationTest, InlineStyle_UpdateAttribute) {
     DomElement* element = create_dom_element("div");
 
     // Set initial inline style
-    dom_element_set_attribute(element, "style", "color: red");
+    element->set_attribute("style", "color: red");
     CssDeclaration* color1 = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color1, nullptr);
     ASSERT_NE(color1->value, nullptr);
     EXPECT_EQ(color1->value->data.keyword, css_enum_by_name("red"));
 
     // Update with new inline style
-    dom_element_set_attribute(element, "style", "color: blue; font-size: 14px");
+    element->set_attribute("style", "color: blue; font-size: 14px");
 
     // Should have new values
     CssDeclaration* color2 = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
@@ -852,7 +852,7 @@ TEST_F(DomIntegrationTest, InlineStyle_GetInlineStyle) {
 
     // Set inline style
     const char* style_text = "color: red; font-size: 16px";
-    dom_element_set_attribute(element, "style", style_text);
+    element->set_attribute("style", style_text);
 
     // Should retrieve the same text
     const char* retrieved = dom_element_get_inline_style(element);
@@ -865,7 +865,7 @@ TEST_F(DomIntegrationTest, InlineStyle_RemoveInlineStyles) {
     DomElement* element = create_dom_element("div");
 
     // Set inline style
-    dom_element_set_attribute(element, "style", "color: red; font-size: 16px");
+    element->set_attribute("style", "color: red; font-size: 16px");
     EXPECT_NE(dom_element_get_inline_style(element), nullptr);
 
     // Remove inline styles
@@ -879,8 +879,8 @@ TEST_F(DomIntegrationTest, InlineStyle_RemoveInlineStyles) {
 TEST_F(DomIntegrationTest, InlineStyle_ComplexSpecificity) {
     // Test: Inline style in complex specificity scenario
     DomElement* element = create_dom_element("div");
-    dom_element_set_attribute(element, "id", "main");
-    dom_element_add_class(element, "container");
+    element->set_attribute("id", "main");
+    element->add_class("container");
 
     // Apply rules with different specificities
     // Element selector (0,0,1)
@@ -896,7 +896,7 @@ TEST_F(DomIntegrationTest, InlineStyle_ComplexSpecificity) {
         create_declaration(CSS_PROPERTY_MARGIN, "30px", 1, 0, 0));
 
     // Inline style (1,0,0,0) - should win over all
-    dom_element_set_attribute(element, "style", "margin: 40px");
+    element->set_attribute("style", "margin: 40px");
 
     CssDeclaration* margin = dom_element_get_specified_value(element, CSS_PROPERTY_MARGIN);
     ASSERT_NE(margin, nullptr);
@@ -913,9 +913,9 @@ TEST_F(DomIntegrationTest, InlineStyle_MultipleElements) {
     DomElement* elem2 = create_dom_element("span");
     DomElement* elem3 = create_dom_element("p");
 
-    dom_element_set_attribute(elem1, "style", "color: red");
-    dom_element_set_attribute(elem2, "style", "color: blue");
-    dom_element_set_attribute(elem3, "style", "color: green");
+    elem1->set_attribute("style", "color: red");
+    elem2->set_attribute("style", "color: blue");
+    elem3->set_attribute("style", "color: green");
 
     // Each element should have its own color
     CssDeclaration* color1 = dom_element_get_specified_value(elem1, CSS_PROPERTY_COLOR);
@@ -938,18 +938,18 @@ TEST_F(DomIntegrationTest, InlineStyle_MixedWithOtherAttributes) {
     // Test: Inline style works alongside other attributes
     DomElement* element = create_dom_element("div");
 
-    dom_element_set_attribute(element, "id", "box");
-    dom_element_set_attribute(element, "class", "container");
-    dom_element_set_attribute(element, "data-value", "123");
-    dom_element_set_attribute(element, "style", "color: red; width: 100px");
-    dom_element_set_attribute(element, "title", "Test Element");
+    element->set_attribute("id", "box");
+    element->set_attribute("class", "container");
+    element->set_attribute("data-value", "123");
+    element->set_attribute("style", "color: red; width: 100px");
+    element->set_attribute("title", "Test Element");
 
     // All attributes should be set
-    EXPECT_STREQ(dom_element_get_attribute(element, "id"), "box");
-    EXPECT_STREQ(dom_element_get_attribute(element, "class"), "container");
-    EXPECT_STREQ(dom_element_get_attribute(element, "data-value"), "123");
-    EXPECT_STREQ(dom_element_get_attribute(element, "style"), "color: red; width: 100px");
-    EXPECT_STREQ(dom_element_get_attribute(element, "title"), "Test Element");
+    EXPECT_STREQ(element->get_attribute("id"), "box");
+    EXPECT_STREQ(element->get_attribute("class"), "container");
+    EXPECT_STREQ(element->get_attribute("data-value"), "123");
+    EXPECT_STREQ(element->get_attribute("style"), "color: red; width: 100px");
+    EXPECT_STREQ(element->get_attribute("title"), "Test Element");
 
     // Inline styles should be applied
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
@@ -970,10 +970,10 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
     // Create parent element with backing
     DomElement* parent = create_dom_element("div");
     ASSERT_NE(parent, nullptr);
-    ASSERT_NE(parent->native_element, nullptr);
+    ASSERT_NE(dom_element_to_element(parent), nullptr);
 
     // Append backed text node
-    DomText* text = dom_element_append_text(parent, "Hello World");
+    DomText* text = parent->append_text("Hello World");
 
     ASSERT_NE(text, nullptr);
     EXPECT_NE(text->native_string, nullptr);
@@ -984,8 +984,8 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
     EXPECT_TRUE(dom_text_is_backed(text));
 
     // Verify Lambda backing
-    ASSERT_EQ(parent->native_element->length, 1);
-    Item child = parent->native_element->items[0];
+    ASSERT_EQ(dom_element_to_element(parent)->length, 1);
+    Item child = dom_element_to_element(parent)->items[0];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
     EXPECT_EQ(child.get_string(), text->native_string);
     EXPECT_STREQ(child.get_string()->chars, "Hello World");
@@ -993,7 +993,7 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
 
 TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("p");
-    DomText* text = dom_element_append_text(parent, "Original");
+    DomText* text = parent->append_text("Original");
     ASSERT_NE(text, nullptr);
 
     // Update text content
@@ -1006,7 +1006,7 @@ TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
     // Verify Lambda String updated
     int64_t idx = dom_text_get_child_index(text);
     ASSERT_GE(idx, 0);
-    Item child = parent->native_element->items[idx];
+    Item child = dom_element_to_element(parent)->items[idx];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
     EXPECT_STREQ(child.get_string()->chars, "Updated");
     EXPECT_EQ(child.get_string()->len, 7u);
@@ -1014,19 +1014,19 @@ TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
 
 TEST_F(DomIntegrationTest, DomText_RemoveBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("div");
-    DomText* text1 = dom_element_append_text(parent, "First");
-    DomText* text2 = dom_element_append_text(parent, "Second");
+    DomText* text1 = parent->append_text("First");
+    DomText* text2 = parent->append_text("Second");
     ASSERT_NE(text1, nullptr);
     ASSERT_NE(text2, nullptr);
 
-    EXPECT_EQ(parent->native_element->length, 2);
+    EXPECT_EQ(dom_element_to_element(parent)->length, 2);
 
     // Remove first text node
     EXPECT_TRUE(dom_text_remove(text1));
 
     // Verify Lambda updated
-    EXPECT_EQ(parent->native_element->length, 1);
-    Item remaining = parent->native_element->items[0];
+    EXPECT_EQ(dom_element_to_element(parent)->length, 1);
+    Item remaining = dom_element_to_element(parent)->items[0];
     EXPECT_EQ(get_type_id(remaining), LMD_TYPE_STRING);
     EXPECT_STREQ(remaining.get_string()->chars, "Second");
 
@@ -1038,29 +1038,29 @@ TEST_F(DomIntegrationTest, DomText_MultipleOperations_MaintainsSync) {
     DomElement* parent = create_dom_element("div");
 
     // Add multiple text nodes
-    DomText* text1 = dom_element_append_text(parent, "One");
-    DomText* text2 = dom_element_append_text(parent, "Two");
-    DomText* text3 = dom_element_append_text(parent, "Three");
+    DomText* text1 = parent->append_text("One");
+    DomText* text2 = parent->append_text("Two");
+    DomText* text3 = parent->append_text("Three");
     ASSERT_NE(text1, nullptr);
     ASSERT_NE(text2, nullptr);
     ASSERT_NE(text3, nullptr);
 
-    EXPECT_EQ(parent->native_element->length, 3);
+    EXPECT_EQ(dom_element_to_element(parent)->length, 3);
 
     // Update middle text
     EXPECT_TRUE(dom_text_set_content(text2, "TWO"));
 
     // Verify all strings
-    EXPECT_STREQ(parent->native_element->items[0].get_string()->chars, "One");
-    EXPECT_STREQ(parent->native_element->items[1].get_string()->chars, "TWO");
-    EXPECT_STREQ(parent->native_element->items[2].get_string()->chars, "Three");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[0].get_string()->chars, "One");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[1].get_string()->chars, "TWO");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[2].get_string()->chars, "Three");
 
     // Remove middle text
     EXPECT_TRUE(dom_text_remove(text2));
 
-    EXPECT_EQ(parent->native_element->length, 2);
-    EXPECT_STREQ(parent->native_element->items[0].get_string()->chars, "One");
-    EXPECT_STREQ(parent->native_element->items[1].get_string()->chars, "Three");
+    EXPECT_EQ(dom_element_to_element(parent)->length, 2);
+    EXPECT_STREQ(dom_element_to_element(parent)->items[0].get_string()->chars, "One");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[1].get_string()->chars, "Three");
 
     // Verify indices updated
     EXPECT_EQ(dom_text_get_child_index(text1), 0);
@@ -1086,10 +1086,10 @@ TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
     ASSERT_NE(parent, nullptr);
 
     // Verify structure in Lambda tree
-    EXPECT_EQ(parent->native_element->length, 3);
-    EXPECT_EQ(get_type_id(parent->native_element->items[0]), LMD_TYPE_STRING);
-    EXPECT_EQ(get_type_id(parent->native_element->items[1]), LMD_TYPE_ELEMENT);
-    EXPECT_EQ(get_type_id(parent->native_element->items[2]), LMD_TYPE_STRING);
+    EXPECT_EQ(dom_element_to_element(parent)->length, 3);
+    EXPECT_EQ(get_type_id(dom_element_to_element(parent)->items[0]), LMD_TYPE_STRING);
+    EXPECT_EQ(get_type_id(dom_element_to_element(parent)->items[1]), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(get_type_id(dom_element_to_element(parent)->items[2]), LMD_TYPE_STRING);
 
     // Get the text nodes from DOM
     DomText* text1 = static_cast<DomText*>(parent->first_child);
@@ -1111,16 +1111,16 @@ TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
     EXPECT_TRUE(dom_text_set_content(text2, "AFTER"));
 
     // Verify Lambda tree updated
-    EXPECT_STREQ(parent->native_element->items[0].get_string()->chars, "BEFORE");
-    EXPECT_STREQ(parent->native_element->items[2].get_string()->chars, "AFTER");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[0].get_string()->chars, "BEFORE");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[2].get_string()->chars, "AFTER");
 }
 
 TEST_F(DomIntegrationTest, DomText_ChildIndexTracking_WithRemoval) {
     DomElement* parent = create_dom_element("p");
 
-    DomText* t0 = dom_element_append_text(parent, "Zero");
-    DomText* t1 = dom_element_append_text(parent, "One");
-    DomText* t2 = dom_element_append_text(parent, "Two");
+    DomText* t0 = parent->append_text("Zero");
+    DomText* t1 = parent->append_text("One");
+    DomText* t2 = parent->append_text("Two");
     ASSERT_NE(t0, nullptr);
     ASSERT_NE(t1, nullptr);
     ASSERT_NE(t2, nullptr);
@@ -1140,7 +1140,7 @@ TEST_F(DomIntegrationTest, DomText_EmptyString_Backed) {
     DomElement* parent = create_dom_element("div");
 
     // start with non-empty string
-    DomText* text = dom_element_append_text(parent, "Initial");
+    DomText* text = parent->append_text("Initial");
     ASSERT_NE(text, nullptr);
     EXPECT_TRUE(dom_text_is_backed(text));
 
@@ -1152,7 +1152,7 @@ TEST_F(DomIntegrationTest, DomText_EmptyString_Backed) {
     EXPECT_EQ(text->length, 0u);
 
     // verify Lambda String updated
-    Item child = parent->native_element->items[0];
+    Item child = dom_element_to_element(parent)->items[0];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
     String* str = child.get_string();
     EXPECT_EQ(str->len, 0u);
@@ -1164,7 +1164,7 @@ TEST_F(DomIntegrationTest, DomText_LongString_Backed) {
                            "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
 
     DomElement* parent = create_dom_element("div");
-    DomText* text = dom_element_append_text(parent, long_text);
+    DomText* text = parent->append_text(long_text);
 
     ASSERT_NE(text, nullptr);
     EXPECT_STREQ(text->text, long_text);
@@ -1177,12 +1177,12 @@ TEST_F(DomIntegrationTest, DomText_LongString_Backed) {
 
     // Verify Lambda
     int64_t idx = dom_text_get_child_index(text);
-    EXPECT_STREQ(parent->native_element->items[idx].get_string()->chars, longer);
+    EXPECT_STREQ(dom_element_to_element(parent)->items[idx].get_string()->chars, longer);
 }
 
 TEST_F(DomIntegrationTest, DomText_SequentialUpdates_Backed) {
     DomElement* parent = create_dom_element("p");
-    DomText* text = dom_element_append_text(parent, "Version1");
+    DomText* text = parent->append_text("Version1");
     ASSERT_NE(text, nullptr);
 
     // Multiple sequential updates
@@ -1196,7 +1196,7 @@ TEST_F(DomIntegrationTest, DomText_SequentialUpdates_Backed) {
     EXPECT_STREQ(text->text, "Final");
 
     // Verify Lambda has latest
-    Item child = parent->native_element->items[0];
+    Item child = dom_element_to_element(parent)->items[0];
     EXPECT_STREQ(child.get_string()->chars, "Final");
 }
 
@@ -1207,21 +1207,21 @@ TEST_F(DomIntegrationTest, DomText_RemoveFromMiddle_UpdatesIndices) {
     for (int i = 0; i < 5; i++) {
         char buf[20];
         snprintf(buf, sizeof(buf), "Text%d", i);
-        texts[i] = dom_element_append_text(parent, buf);
+        texts[i] = parent->append_text(buf);
         ASSERT_NE(texts[i], nullptr);
     }
 
-    EXPECT_EQ(parent->native_element->length, 5);
+    EXPECT_EQ(dom_element_to_element(parent)->length, 5);
 
     // Remove text at index 2
     EXPECT_TRUE(dom_text_remove(texts[2]));
 
     // Verify structure
-    EXPECT_EQ(parent->native_element->length, 4);
-    EXPECT_STREQ(parent->native_element->items[0].get_string()->chars, "Text0");
-    EXPECT_STREQ(parent->native_element->items[1].get_string()->chars, "Text1");
-    EXPECT_STREQ(parent->native_element->items[2].get_string()->chars, "Text3");  // Shifted
-    EXPECT_STREQ(parent->native_element->items[3].get_string()->chars, "Text4");  // Shifted
+    EXPECT_EQ(dom_element_to_element(parent)->length, 4);
+    EXPECT_STREQ(dom_element_to_element(parent)->items[0].get_string()->chars, "Text0");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[1].get_string()->chars, "Text1");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[2].get_string()->chars, "Text3");  // Shifted
+    EXPECT_STREQ(dom_element_to_element(parent)->items[3].get_string()->chars, "Text4");  // Shifted
 
     // Verify indices updated
     EXPECT_EQ(dom_text_get_child_index(texts[0]), 0);
@@ -1234,7 +1234,7 @@ TEST_F(DomIntegrationTest, DomText_IsBacked_DetectsCorrectly) {
     DomElement* parent = create_dom_element("div");
 
     // Create backed text node
-    DomText* backed = dom_element_append_text(parent, "Backed");
+    DomText* backed = parent->append_text("Backed");
     ASSERT_NE(backed, nullptr);
     EXPECT_TRUE(dom_text_is_backed(backed));
 
@@ -1248,7 +1248,7 @@ TEST_F(DomIntegrationTest, DomText_IsBacked_DetectsCorrectly) {
 
 TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, " Test comment ");
+    DomComment* comment = parent->append_comment(" Test comment ");
 
     ASSERT_NE(comment, nullptr);
     EXPECT_NE(comment->native_element, nullptr);
@@ -1267,7 +1267,7 @@ TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
 
 TEST_F(DomIntegrationTest, DomComment_SetContentBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, "Original");
+    DomComment* comment = parent->append_comment("Original");
 
     ASSERT_NE(comment, nullptr);
     EXPECT_TRUE(dom_comment_set_content(comment, "Updated"));
@@ -1282,21 +1282,21 @@ TEST_F(DomIntegrationTest, DomComment_SetContentBacked_UpdatesLambda) {
 
 TEST_F(DomIntegrationTest, DomComment_RemoveBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment1 = dom_element_append_comment(parent, " First ");
-    DomComment* comment2 = dom_element_append_comment(parent, " Second ");
+    DomComment* comment1 = parent->append_comment(" First ");
+    DomComment* comment2 = parent->append_comment(" Second ");
 
     ASSERT_NE(comment1, nullptr);
     ASSERT_NE(comment2, nullptr);
-    EXPECT_EQ(parent->native_element->length, 2);
+    EXPECT_EQ(dom_element_to_element(parent)->length, 2);
 
     // Remove first comment
     EXPECT_TRUE(dom_comment_remove(comment1));
 
     // Verify Lambda updated
-    EXPECT_EQ(parent->native_element->length, 1);
-    TypeElmt* remaining_type = (TypeElmt*)parent->native_element->items[0].element->type;
+    EXPECT_EQ(dom_element_to_element(parent)->length, 1);
+    TypeElmt* remaining_type = (TypeElmt*)dom_element_to_element(parent)->items[0].element->type;
     EXPECT_STREQ(remaining_type->name.str, "!--");
-    EXPECT_STREQ(parent->native_element->items[0].element->items[0].get_string()->chars, " Second ");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[0].element->items[0].get_string()->chars, " Second ");
 }
 
 TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
@@ -1304,18 +1304,18 @@ TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
 
     // Add mixed children: comment, text, comment
     // (Note: We use only backed operations for this test)
-    DomComment* comment1 = dom_element_append_comment(parent, " Start ");
-    DomText* text = dom_element_append_text(parent, "Content");
-    DomComment* comment2 = dom_element_append_comment(parent, " End ");
+    DomComment* comment1 = parent->append_comment(" Start ");
+    DomText* text = parent->append_text("Content");
+    DomComment* comment2 = parent->append_comment(" End ");
 
     // Verify structure in Lambda (3 children: comment, text, comment)
-    EXPECT_EQ(parent->native_element->length, 3);
+    EXPECT_EQ(dom_element_to_element(parent)->length, 3);
 
     // Check types in Lambda tree
-    TypeElmt* type0 = (TypeElmt*)parent->native_element->items[0].element->type;
+    TypeElmt* type0 = (TypeElmt*)dom_element_to_element(parent)->items[0].element->type;
     EXPECT_STREQ(type0->name.str, "!--");
-    EXPECT_EQ(get_type_id(parent->native_element->items[1]), LMD_TYPE_STRING);
-    TypeElmt* type2 = (TypeElmt*)parent->native_element->items[2].element->type;
+    EXPECT_EQ(get_type_id(dom_element_to_element(parent)->items[1]), LMD_TYPE_STRING);
+    TypeElmt* type2 = (TypeElmt*)dom_element_to_element(parent)->items[2].element->type;
     EXPECT_STREQ(type2->name.str, "!--");
 
     // Verify content
@@ -1342,7 +1342,7 @@ TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
 
 TEST_F(DomIntegrationTest, DomComment_EmptyComment_Backed) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, "");
+    DomComment* comment = parent->append_comment("");
 
     ASSERT_NE(comment, nullptr);
     EXPECT_STREQ(comment->content, "");
@@ -1363,7 +1363,7 @@ TEST_F(DomIntegrationTest, DomComment_LongComment_Backed) {
                                "It should be handled correctly by the backing system.";
 
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, long_comment);
+    DomComment* comment = parent->append_comment(long_comment);
 
     ASSERT_NE(comment, nullptr);
     EXPECT_STREQ(comment->content, long_comment);
@@ -1375,7 +1375,7 @@ TEST_F(DomIntegrationTest, DomComment_LongComment_Backed) {
 
 TEST_F(DomIntegrationTest, DomComment_MultipleUpdates_Backed) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, "Version1");
+    DomComment* comment = parent->append_comment("Version1");
 
     ASSERT_NE(comment, nullptr);
 
@@ -1396,32 +1396,32 @@ TEST_F(DomIntegrationTest, DomComment_MultipleUpdates_Backed) {
 TEST_F(DomIntegrationTest, DomComment_RemoveFromMiddle_UpdatesStructure) {
     DomElement* parent = create_dom_element("div");
 
-    DomComment* comment1 = dom_element_append_comment(parent, " C1 ");
-    DomComment* comment2 = dom_element_append_comment(parent, " C2 ");
-    DomComment* comment3 = dom_element_append_comment(parent, " C3 ");
+    DomComment* comment1 = parent->append_comment(" C1 ");
+    DomComment* comment2 = parent->append_comment(" C2 ");
+    DomComment* comment3 = parent->append_comment(" C3 ");
 
-    EXPECT_EQ(parent->native_element->length, 3);
+    EXPECT_EQ(dom_element_to_element(parent)->length, 3);
 
     // Remove middle comment
     EXPECT_TRUE(dom_comment_remove(comment2));
 
     // Verify Lambda structure
-    EXPECT_EQ(parent->native_element->length, 2);
+    EXPECT_EQ(dom_element_to_element(parent)->length, 2);
 
-    TypeElmt* type0 = (TypeElmt*)parent->native_element->items[0].element->type;
+    TypeElmt* type0 = (TypeElmt*)dom_element_to_element(parent)->items[0].element->type;
     EXPECT_STREQ(type0->name.str, "!--");
-    EXPECT_STREQ(parent->native_element->items[0].element->items[0].get_string()->chars, " C1 ");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[0].element->items[0].get_string()->chars, " C1 ");
 
-    TypeElmt* type1 = (TypeElmt*)parent->native_element->items[1].element->type;
+    TypeElmt* type1 = (TypeElmt*)dom_element_to_element(parent)->items[1].element->type;
     EXPECT_STREQ(type1->name.str, "!--");
-    EXPECT_STREQ(parent->native_element->items[1].element->items[0].get_string()->chars, " C3 ");
+    EXPECT_STREQ(dom_element_to_element(parent)->items[1].element->items[0].get_string()->chars, " C3 ");
 }
 
 TEST_F(DomIntegrationTest, DomComment_IsBacked_DetectsCorrectly) {
     DomElement* parent = create_dom_element("div");
 
     // Create backed comment
-    DomComment* backed = dom_element_append_comment(parent, "Backed");
+    DomComment* backed = parent->append_comment("Backed");
     ASSERT_NE(backed, nullptr);
     EXPECT_TRUE(dom_comment_is_backed(backed));
 
@@ -1432,11 +1432,11 @@ TEST_F(DomIntegrationTest, DomComment_DOMTraversal_IncludesComments) {
     DomElement* parent = create_dom_element("div");
 
     // Build structure: comment -> text -> element -> comment
-    DomComment* comment1 = dom_element_append_comment(parent, " Start ");
-    DomText* text = dom_element_append_text(parent, "Text");
+    DomComment* comment1 = parent->append_comment(" Start ");
+    DomText* text = parent->append_text("Text");
     DomElement* span = create_dom_element("span");
-    dom_element_append_child(parent, span);
-    DomComment* comment2 = dom_element_append_comment(parent, " End ");
+    parent->append_child(span);
+    DomComment* comment2 = parent->append_comment(" End ");
 
     // Traverse via DOM sibling chain
     DomNode* child = parent->first_child;
@@ -1474,42 +1474,42 @@ TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) 
     // 1. CREATE: Build initial DOM element backed by Lambda
     DomElement* root = create_dom_element("div");
     ASSERT_NE(root, nullptr);
-    ASSERT_NE(root->native_element, nullptr);
+    ASSERT_NE(dom_element_to_element(root), nullptr);
     ASSERT_NE(root->doc->input, nullptr);
 
     // Set input root so we can format it
-    input->root = Item{.element = root->native_element};
+    input->root = Item{.element = dom_element_to_element(root)};
 
     // 2. SET ATTRIBUTES: Add various attributes
-    EXPECT_TRUE(dom_element_set_attribute(root, "id", "container"));
-    EXPECT_TRUE(dom_element_set_attribute(root, "data-test", "value1"));
-    EXPECT_TRUE(dom_element_set_attribute(root, "title", "Test Container"));
+    EXPECT_TRUE(root->set_attribute("id", "container"));
+    EXPECT_TRUE(root->set_attribute("data-test", "value1"));
+    EXPECT_TRUE(root->set_attribute("title", "Test Container"));
 
     // 3. INSERT TEXT: Add text content
-    DomText* text1 = dom_element_append_text(root, "Hello ");
+    DomText* text1 = root->append_text("Hello ");
     ASSERT_NE(text1, nullptr);
     EXPECT_TRUE(dom_text_is_backed(text1));
 
     // 4. INSERT MORE TEXT: Add more text
-    DomText* text2 = dom_element_append_text(root, "World");
+    DomText* text2 = root->append_text("World");
     ASSERT_NE(text2, nullptr);
 
     // 5. INSERT COMMENT: Add a comment
-    DomComment* comment = dom_element_append_comment(root, " test comment ");
+    DomComment* comment = root->append_comment(" test comment ");
     ASSERT_NE(comment, nullptr);
     EXPECT_TRUE(dom_comment_is_backed(comment));
 
     // 6. UPDATE OPERATIONS: Modify existing content
     EXPECT_TRUE(dom_text_set_content(text1, "Greetings "));
     EXPECT_TRUE(dom_text_set_content(text2, "Universe!"));
-    EXPECT_TRUE(dom_element_set_attribute(root, "data-test", "updated"));
+    EXPECT_TRUE(root->set_attribute("data-test", "updated"));
     EXPECT_TRUE(dom_comment_set_content(comment, " modified comment "));
 
     // 7. ADD MORE ATTRIBUTES: Test attribute addition after updates
-    EXPECT_TRUE(dom_element_set_attribute(root, "role", "main"));
+    EXPECT_TRUE(root->set_attribute("role", "main"));
 
     // 8. Format the underlying Lambda element to HTML
-    Item root_item = {.element = root->native_element};
+    Item root_item = {.element = dom_element_to_element(root)};
     String* html = format_html(pool, root_item);
     ASSERT_NE(html, nullptr);
     ASSERT_NE(html->chars, nullptr);
@@ -1539,20 +1539,20 @@ TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) 
         << "Missing updated comment in output";
 
     // 9. VERIFY LAMBDA TREE STRUCTURE: Ensure backing structure is correct
-    EXPECT_EQ(root->native_element->length, 3);  // text1, text2, comment
+    EXPECT_EQ(dom_element_to_element(root)->length, 3);  // text1, text2, comment
 
     // Verify first child is text1
-    Item child0 = root->native_element->items[0];
+    Item child0 = dom_element_to_element(root)->items[0];
     EXPECT_EQ(get_type_id(child0), LMD_TYPE_STRING);
     EXPECT_STREQ(child0.get_string()->chars, "Greetings ");
 
     // Verify second child is text2
-    Item child1 = root->native_element->items[1];
+    Item child1 = dom_element_to_element(root)->items[1];
     EXPECT_EQ(get_type_id(child1), LMD_TYPE_STRING);
     EXPECT_STREQ(child1.get_string()->chars, "Universe!");
 
     // Verify third child is comment
-    Item child2 = root->native_element->items[2];
+    Item child2 = dom_element_to_element(root)->items[2];
     EXPECT_EQ(get_type_id(child2), LMD_TYPE_ELEMENT);
     Element* comment_elem = child2.element;
     TypeElmt* comment_type = (TypeElmt*)comment_elem->type;
@@ -1586,10 +1586,10 @@ TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) 
         << "Greetings should remain after deletions in: " << output_after;
 
     // 12. Verify final Lambda tree structure
-    EXPECT_EQ(root->native_element->length, 1) << "Should have 1 child remaining";
+    EXPECT_EQ(dom_element_to_element(root)->length, 1) << "Should have 1 child remaining";
 
-    if (root->native_element->length > 0) {
-        Item remaining = root->native_element->items[0];
+    if (dom_element_to_element(root)->length > 0) {
+        Item remaining = dom_element_to_element(root)->items[0];
         EXPECT_EQ(get_type_id(remaining), LMD_TYPE_STRING);
         if (get_type_id(remaining) == LMD_TYPE_STRING) {
             EXPECT_STREQ(remaining.get_string()->chars, "Greetings ");
@@ -1606,19 +1606,19 @@ TEST_F(DomIntegrationTest, CRUD_InterleavedTextAndComments) {
     DomElement* root = create_dom_element("div");
 
     // Create pattern: T1 C1 T2 C2 T3
-    DomText* t1 = dom_element_append_text(root, "Text1");
-    DomComment* c1 = dom_element_append_comment(root, " Comment1 ");
-    DomText* t2 = dom_element_append_text(root, "Text2");
-    DomComment* c2 = dom_element_append_comment(root, " Comment2 ");
-    DomText* t3 = dom_element_append_text(root, "Text3");
+    DomText* t1 = root->append_text("Text1");
+    DomComment* c1 = root->append_comment(" Comment1 ");
+    DomText* t2 = root->append_text("Text2");
+    DomComment* c2 = root->append_comment(" Comment2 ");
+    DomText* t3 = root->append_text("Text3");
 
     // Verify Lambda tree structure
-    EXPECT_EQ(root->native_element->length, 5);
-    EXPECT_EQ(get_type_id(root->native_element->items[0]), LMD_TYPE_STRING);
-    EXPECT_EQ(get_type_id(root->native_element->items[1]), LMD_TYPE_ELEMENT);
-    EXPECT_EQ(get_type_id(root->native_element->items[2]), LMD_TYPE_STRING);
-    EXPECT_EQ(get_type_id(root->native_element->items[3]), LMD_TYPE_ELEMENT);
-    EXPECT_EQ(get_type_id(root->native_element->items[4]), LMD_TYPE_STRING);
+    EXPECT_EQ(dom_element_to_element(root)->length, 5);
+    EXPECT_EQ(get_type_id(dom_element_to_element(root)->items[0]), LMD_TYPE_STRING);
+    EXPECT_EQ(get_type_id(dom_element_to_element(root)->items[1]), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(get_type_id(dom_element_to_element(root)->items[2]), LMD_TYPE_STRING);
+    EXPECT_EQ(get_type_id(dom_element_to_element(root)->items[3]), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(get_type_id(dom_element_to_element(root)->items[4]), LMD_TYPE_STRING);
 
     // Verify DOM tree traversal
     DomNode* node = root->first_child;
@@ -1642,20 +1642,20 @@ TEST_F(DomIntegrationTest, CRUD_InterleavedTextAndComments) {
     EXPECT_TRUE(dom_text_set_content(t3, "UpdatedText3"));
 
     // Verify Lambda tree has all updates
-    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "UpdatedText1");
-    EXPECT_STREQ(root->native_element->items[1].element->items[0].get_string()->chars, " UpdatedComment1 ");
-    EXPECT_STREQ(root->native_element->items[2].get_string()->chars, "UpdatedText2");
-    EXPECT_STREQ(root->native_element->items[3].element->items[0].get_string()->chars, " UpdatedComment2 ");
-    EXPECT_STREQ(root->native_element->items[4].get_string()->chars, "UpdatedText3");
+    EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, "UpdatedText1");
+    EXPECT_STREQ(dom_element_to_element(root)->items[1].element->items[0].get_string()->chars, " UpdatedComment1 ");
+    EXPECT_STREQ(dom_element_to_element(root)->items[2].get_string()->chars, "UpdatedText2");
+    EXPECT_STREQ(dom_element_to_element(root)->items[3].element->items[0].get_string()->chars, " UpdatedComment2 ");
+    EXPECT_STREQ(dom_element_to_element(root)->items[4].get_string()->chars, "UpdatedText3");
     // Remove alternating nodes (c1, t2, c2)
     EXPECT_TRUE(dom_comment_remove(c1));
     EXPECT_TRUE(dom_text_remove(t2));
     EXPECT_TRUE(dom_comment_remove(c2));
 
     // Verify final structure: T1 T3
-    EXPECT_EQ(root->native_element->length, 2);
-    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "UpdatedText1");
-    EXPECT_STREQ(root->native_element->items[1].get_string()->chars, "UpdatedText3");
+    EXPECT_EQ(dom_element_to_element(root)->length, 2);
+    EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, "UpdatedText1");
+    EXPECT_STREQ(dom_element_to_element(root)->items[1].get_string()->chars, "UpdatedText3");
 
     // Verify DOM traversal
     node = root->first_child;
@@ -1671,8 +1671,8 @@ TEST_F(DomIntegrationTest, CRUD_NestedElements_WithMixedContent) {
     DomElement* root = create_dom_element("div");
 
     // Level 1: root with text and child element
-    DomText* root_text = dom_element_append_text(root, "Root text ");
-    DomComment* root_comment = dom_element_append_comment(root, " Root comment ");
+    DomText* root_text = root->append_text("Root text ");
+    DomComment* root_comment = root->append_comment(" Root comment ");
 
     // Create nested element
     MarkBuilder builder(input);
@@ -1682,22 +1682,22 @@ TEST_F(DomIntegrationTest, CRUD_NestedElements_WithMixedContent) {
     // Build DOM wrapper without parent (nullptr) so it doesn't link to root yet
     DomElement* child = build_dom_tree_from_element(child_item.element, doc, nullptr);
     // Now explicitly append child to root (updates both Lambda tree and DOM chain)
-    dom_element_append_child(root, child);
+    root->append_child(child);
 
     // Add content to nested element
-    DomText* child_text = dom_element_append_text(child, "Child text");
-    DomComment* child_comment = dom_element_append_comment(child, " Child comment ");
+    DomText* child_text = child->append_text("Child text");
+    DomComment* child_comment = child->append_comment(" Child comment ");
 
     // Verify root Lambda tree (text, comment, element)
-    EXPECT_EQ(root->native_element->length, 3);
-    EXPECT_EQ(get_type_id(root->native_element->items[0]), LMD_TYPE_STRING);
-    EXPECT_EQ(get_type_id(root->native_element->items[1]), LMD_TYPE_ELEMENT);
-    EXPECT_EQ(get_type_id(root->native_element->items[2]), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(dom_element_to_element(root)->length, 3);
+    EXPECT_EQ(get_type_id(dom_element_to_element(root)->items[0]), LMD_TYPE_STRING);
+    EXPECT_EQ(get_type_id(dom_element_to_element(root)->items[1]), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(get_type_id(dom_element_to_element(root)->items[2]), LMD_TYPE_ELEMENT);
 
     // Verify child Lambda tree
-    EXPECT_EQ(child->native_element->length, 2);
-    EXPECT_EQ(get_type_id(child->native_element->items[0]), LMD_TYPE_STRING);
-    EXPECT_EQ(get_type_id(child->native_element->items[1]), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(dom_element_to_element(child)->length, 2);
+    EXPECT_EQ(get_type_id(dom_element_to_element(child)->items[0]), LMD_TYPE_STRING);
+    EXPECT_EQ(get_type_id(dom_element_to_element(child)->items[1]), LMD_TYPE_ELEMENT);
 
     // Update content at both levels
     EXPECT_TRUE(dom_text_set_content(root_text, "Updated root text "));
@@ -1706,12 +1706,12 @@ TEST_F(DomIntegrationTest, CRUD_NestedElements_WithMixedContent) {
     EXPECT_TRUE(dom_comment_set_content(child_comment, " Updated child comment "));
 
     // Verify updates in Lambda tree
-    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "Updated root text ");
-    EXPECT_STREQ(child->native_element->items[0].get_string()->chars, "Updated child text");
+    EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, "Updated root text ");
+    EXPECT_STREQ(dom_element_to_element(child)->items[0].get_string()->chars, "Updated child text");
 
     // Remove content from child
     EXPECT_TRUE(dom_text_remove(child_text));
-    EXPECT_EQ(child->native_element->length, 1);
+    EXPECT_EQ(dom_element_to_element(child)->length, 1);
 
     // Verify DOM traversal still works
     DomNode* node = root->first_child;
@@ -1736,12 +1736,12 @@ TEST_F(DomIntegrationTest, CRUD_BulkOperations_ManyNodes) {
         snprintf(text_buf, sizeof(text_buf), "Item %d", i);
         snprintf(comment_buf, sizeof(comment_buf), " Comment %d ", i);
 
-        texts[i] = dom_element_append_text(root, text_buf);
-        comments[i] = dom_element_append_comment(root, comment_buf);
+        texts[i] = root->append_text(text_buf);
+        comments[i] = root->append_comment(comment_buf);
     }
 
     // Verify count: 20 texts + 20 comments = 40 children
-    EXPECT_EQ(root->native_element->length, COUNT * 2);
+    EXPECT_EQ(dom_element_to_element(root)->length, COUNT * 2);
 
     // Update every even-indexed text node
     for (int i = 0; i < COUNT; i += 2) {
@@ -1761,7 +1761,7 @@ TEST_F(DomIntegrationTest, CRUD_BulkOperations_ManyNodes) {
     for (int i = 0; i < COUNT; i += 2) {
         char expected[50];
         snprintf(expected, sizeof(expected), "Updated Item %d", i);
-        EXPECT_STREQ(root->native_element->items[i * 2].get_string()->chars, expected);
+        EXPECT_STREQ(dom_element_to_element(root)->items[i * 2].get_string()->chars, expected);
     }
 
     // Remove every third node (text or comment)
@@ -1776,7 +1776,7 @@ TEST_F(DomIntegrationTest, CRUD_BulkOperations_ManyNodes) {
     }
 
     // Verify count decreased
-    EXPECT_EQ(root->native_element->length, COUNT * 2 - removed_count);
+    EXPECT_EQ(dom_element_to_element(root)->length, COUNT * 2 - removed_count);
 
     // Verify DOM traversal integrity
     int traversal_count = 0;
@@ -1793,23 +1793,23 @@ TEST_F(DomIntegrationTest, CRUD_AttributeAndContent_Simultaneous) {
     DomElement* root = create_dom_element("article");
 
     // Set initial attributes
-    EXPECT_TRUE(dom_element_set_attribute(root, "id", "article1"));
-    EXPECT_TRUE(dom_element_set_attribute(root, "class", "featured"));
-    EXPECT_TRUE(dom_element_set_attribute(root, "data-priority", "high"));
+    EXPECT_TRUE(root->set_attribute("id", "article1"));
+    EXPECT_TRUE(root->set_attribute("class", "featured"));
+    EXPECT_TRUE(root->set_attribute("data-priority", "high"));
 
     // Add content
-    DomText* title = dom_element_append_text(root, "Title");
-    DomComment* separator = dom_element_append_comment(root, " --- ");
-    DomText* body = dom_element_append_text(root, "Body text");
+    DomText* title = root->append_text("Title");
+    DomComment* separator = root->append_comment(" --- ");
+    DomText* body = root->append_text("Body text");
 
     // Verify initial state
-    EXPECT_EQ(root->native_element->length, 3);
-    EXPECT_STREQ(dom_element_get_attribute(root, "id"), "article1");
+    EXPECT_EQ(dom_element_to_element(root)->length, 3);
+    EXPECT_STREQ(root->get_attribute("id"), "article1");
 
     // Update attributes
-    EXPECT_TRUE(dom_element_set_attribute(root, "id", "article2"));
-    EXPECT_TRUE(dom_element_set_attribute(root, "data-priority", "urgent"));
-    EXPECT_TRUE(dom_element_add_class(root, "highlighted"));
+    EXPECT_TRUE(root->set_attribute("id", "article2"));
+    EXPECT_TRUE(root->set_attribute("data-priority", "urgent"));
+    EXPECT_TRUE(root->add_class("highlighted"));
 
     // Update content
     EXPECT_TRUE(dom_text_set_content(title, "Updated Title"));
@@ -1817,24 +1817,24 @@ TEST_F(DomIntegrationTest, CRUD_AttributeAndContent_Simultaneous) {
     EXPECT_TRUE(dom_text_set_content(body, "Updated body text"));
 
     // Verify both attribute and content updates
-    EXPECT_STREQ(dom_element_get_attribute(root, "id"), "article2");
-    EXPECT_STREQ(dom_element_get_attribute(root, "data-priority"), "urgent");
-    EXPECT_TRUE(dom_element_has_class(root, "featured"));
-    EXPECT_TRUE(dom_element_has_class(root, "highlighted"));
+    EXPECT_STREQ(root->get_attribute("id"), "article2");
+    EXPECT_STREQ(root->get_attribute("data-priority"), "urgent");
+    EXPECT_TRUE(root->has_class("featured"));
+    EXPECT_TRUE(root->has_class("highlighted"));
 
-    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "Updated Title");
-    EXPECT_STREQ(root->native_element->items[1].element->items[0].get_string()->chars, " === ");
-    EXPECT_STREQ(root->native_element->items[2].get_string()->chars, "Updated body text");
+    EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, "Updated Title");
+    EXPECT_STREQ(dom_element_to_element(root)->items[1].element->items[0].get_string()->chars, " === ");
+    EXPECT_STREQ(dom_element_to_element(root)->items[2].get_string()->chars, "Updated body text");
 
     // Remove attributes and content
-    EXPECT_TRUE(dom_element_remove_attribute(root, "data-priority"));
+    EXPECT_TRUE(root->remove_attribute("data-priority"));
     EXPECT_TRUE(dom_text_remove(title));
     EXPECT_TRUE(dom_comment_remove(separator));
 
     // Verify removals
-    EXPECT_EQ(dom_element_get_attribute(root, "data-priority"), nullptr);
-    EXPECT_EQ(root->native_element->length, 1);
-    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "Updated body text");
+    EXPECT_EQ(root->get_attribute("data-priority"), nullptr);
+    EXPECT_EQ(dom_element_to_element(root)->length, 1);
+    EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, "Updated body text");
 }
 
 TEST_F(DomIntegrationTest, CRUD_EmptyToFull_FullToEmpty) {
@@ -1842,43 +1842,43 @@ TEST_F(DomIntegrationTest, CRUD_EmptyToFull_FullToEmpty) {
     DomElement* root = create_dom_element("div");
 
     // Start empty
-    EXPECT_EQ(root->native_element->length, 0);
+    EXPECT_EQ(dom_element_to_element(root)->length, 0);
     EXPECT_EQ(root->first_child, nullptr);
 
     // Add single text
-    DomText* t1 = dom_element_append_text(root, "First");
-    EXPECT_EQ(root->native_element->length, 1);
+    DomText* t1 = root->append_text("First");
+    EXPECT_EQ(dom_element_to_element(root)->length, 1);
     EXPECT_EQ(root->first_child, (DomNode*)t1);
 
     // Add more content
-    DomComment* c1 = dom_element_append_comment(root, " comment ");
-    DomText* t2 = dom_element_append_text(root, "Second");
-    EXPECT_EQ(root->native_element->length, 3);
+    DomComment* c1 = root->append_comment(" comment ");
+    DomText* t2 = root->append_text("Second");
+    EXPECT_EQ(dom_element_to_element(root)->length, 3);
 
     // Remove all content one by one
     EXPECT_TRUE(dom_text_remove(t1));
-    EXPECT_EQ(root->native_element->length, 2);
+    EXPECT_EQ(dom_element_to_element(root)->length, 2);
     EXPECT_EQ(root->first_child, (DomNode*)c1);
 
     EXPECT_TRUE(dom_comment_remove(c1));
-    EXPECT_EQ(root->native_element->length, 1);
+    EXPECT_EQ(dom_element_to_element(root)->length, 1);
     EXPECT_EQ(root->first_child, (DomNode*)t2);
 
     EXPECT_TRUE(dom_text_remove(t2));
-    EXPECT_EQ(root->native_element->length, 0);
+    EXPECT_EQ(dom_element_to_element(root)->length, 0);
     EXPECT_EQ(root->first_child, nullptr);
 
     // Add content again
-    DomText* t3 = dom_element_append_text(root, "Refilled");
-    EXPECT_EQ(root->native_element->length, 1);
+    DomText* t3 = root->append_text("Refilled");
+    EXPECT_EQ(dom_element_to_element(root)->length, 1);
     EXPECT_EQ(root->first_child, (DomNode*)t3);
-    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "Refilled");
+    EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, "Refilled");
 }
 
 TEST_F(DomIntegrationTest, CRUD_UpdateExistingTextMultipleTimes) {
     // Test multiple updates to same text node
     DomElement* root = create_dom_element("p");
-    DomText* text = dom_element_append_text(root, "Version1");
+    DomText* text = root->append_text("Version1");
 
     // Get initial String pointer
     String* original_string = text->native_string;
@@ -1894,7 +1894,7 @@ TEST_F(DomIntegrationTest, CRUD_UpdateExistingTextMultipleTimes) {
         EXPECT_STREQ(text->text, buf);
 
         // Verify Lambda String updated (new String created each time)
-        EXPECT_STREQ(root->native_element->items[0].get_string()->chars, buf);
+        EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, buf);
 
         // String pointer should change (new String allocated)
         EXPECT_NE(text->native_string, original_string);
@@ -1903,7 +1903,7 @@ TEST_F(DomIntegrationTest, CRUD_UpdateExistingTextMultipleTimes) {
 
     // Final verification
     EXPECT_STREQ(text->text, "Version10");
-    EXPECT_EQ(root->native_element->length, 1);
+    EXPECT_EQ(dom_element_to_element(root)->length, 1);
 }
 
 TEST_F(DomIntegrationTest, CRUD_RemoveFirstMiddleLast) {
@@ -1911,17 +1911,17 @@ TEST_F(DomIntegrationTest, CRUD_RemoveFirstMiddleLast) {
     DomElement* root = create_dom_element("div");
 
     // Create 5 text nodes
-    DomText* t0 = dom_element_append_text(root, "T0");
-    DomText* t1 = dom_element_append_text(root, "T1");
-    DomText* t2 = dom_element_append_text(root, "T2");
-    DomText* t3 = dom_element_append_text(root, "T3");
-    DomText* t4 = dom_element_append_text(root, "T4");
+    DomText* t0 = root->append_text("T0");
+    DomText* t1 = root->append_text("T1");
+    DomText* t2 = root->append_text("T2");
+    DomText* t3 = root->append_text("T3");
+    DomText* t4 = root->append_text("T4");
 
-    EXPECT_EQ(root->native_element->length, 5);
+    EXPECT_EQ(dom_element_to_element(root)->length, 5);
 
     // Remove last (T4)
     EXPECT_TRUE(dom_text_remove(t4));
-    EXPECT_EQ(root->native_element->length, 4);
+    EXPECT_EQ(dom_element_to_element(root)->length, 4);
     EXPECT_EQ(root->first_child, (DomNode*)t0);
 
     // Verify DOM chain
@@ -1938,16 +1938,16 @@ TEST_F(DomIntegrationTest, CRUD_RemoveFirstMiddleLast) {
 
     // Remove first (T0)
     EXPECT_TRUE(dom_text_remove(t0));
-    EXPECT_EQ(root->native_element->length, 3);
+    EXPECT_EQ(dom_element_to_element(root)->length, 3);
     EXPECT_EQ(root->first_child, (DomNode*)t1);
 
     // Remove middle (T2)
     EXPECT_TRUE(dom_text_remove(t2));
-    EXPECT_EQ(root->native_element->length, 2);
+    EXPECT_EQ(dom_element_to_element(root)->length, 2);
 
     // Verify final structure: T1, T3
-    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "T1");
-    EXPECT_STREQ(root->native_element->items[1].get_string()->chars, "T3");
+    EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, "T1");
+    EXPECT_STREQ(dom_element_to_element(root)->items[1].get_string()->chars, "T3");
 
     node = root->first_child;
     EXPECT_EQ(node, (DomNode*)t1);
@@ -1968,13 +1968,13 @@ TEST_F(DomIntegrationTest, CRUD_MixedOperations_StressTest) {
     for (int i = 0; i < 15; i++) {
         char buf[50];
         snprintf(buf, sizeof(buf), "Text%d", i);
-        texts.push_back(dom_element_append_text(root, buf));
+        texts.push_back(root->append_text(buf));
 
         snprintf(buf, sizeof(buf), " Comment%d ", i);
-        comments.push_back(dom_element_append_comment(root, buf));
+        comments.push_back(root->append_comment(buf));
     }
 
-    EXPECT_EQ(root->native_element->length, 30);
+    EXPECT_EQ(dom_element_to_element(root)->length, 30);
 
     // Phase 2: Random updates
     for (int i = 0; i < 15; i += 3) {
@@ -1990,7 +1990,7 @@ TEST_F(DomIntegrationTest, CRUD_MixedOperations_StressTest) {
     }
 
     // Phase 3: Random removals
-    int initial_count = root->native_element->length;
+    int initial_count = dom_element_to_element(root)->length;
     int removed = 0;
 
     for (int i = 0; i < 15; i += 2) {
@@ -2007,7 +2007,7 @@ TEST_F(DomIntegrationTest, CRUD_MixedOperations_StressTest) {
         }
     }
 
-    EXPECT_EQ(root->native_element->length, initial_count - removed);
+    EXPECT_EQ(dom_element_to_element(root)->length, initial_count - removed);
 
     // Phase 4: Verify DOM tree integrity
     int traverse_count = 0;
@@ -2023,5 +2023,5 @@ TEST_F(DomIntegrationTest, CRUD_MixedOperations_StressTest) {
         node = node->next_sibling;
     }
 
-    EXPECT_EQ(traverse_count, root->native_element->length);
+    EXPECT_EQ(traverse_count, dom_element_to_element(root)->length);
 }

@@ -150,7 +150,7 @@ bool DomDocument::init(Input* source_input) {
     // attributed to the same document (URL) as the parsed source. The whole
     // document subtree is reclaimed together at free_document() time.
     MemContext* dctx = source_input->mem_ctx ? (MemContext*)source_input->mem_ctx : NULL;
-    mem_ctx = dctx;
+    services.mem_ctx = dctx;
 
     // Create pool for arena chunks
     pool = mem_pool_create(dctx, MEM_ROLE_NODE, "dom.document");
@@ -182,6 +182,15 @@ void dom_document_destroy(DomDocument* document) {
 }
 
 void DomDocument::destroy() {
+    float ext_rate = services.element_count
+        ? 100.0f * (float)services.ext_allocations / (float)services.element_count
+        : 0.0f;
+    float cache_rate = services.element_count
+        ? 100.0f * (float)services.layout_cache_allocations / (float)services.element_count
+        : 0.0f;
+    log_debug("DOM_PROP_ALLOCATION_RATE elements=%u ext=%u ext_rate=%.1f%% layout_cache=%u cache_rate=%.1f%%",
+              services.element_count, services.ext_allocations, ext_rate,
+              services.layout_cache_allocations, cache_rate);
     if (html_root) {
         svg_unregister_image_resolvers_for_tree(html_root);
     }
@@ -286,21 +295,17 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     element->last_child = NULL;
     element->doc = doc;
 
-    // Copy Element data into the embedded field and redirect native_element
+    // A null input marks layout-only nodes; their embedded Element must never be
+    // mistaken for a member of the Lambda tree.
+    element->set_synthetic(native_element == nullptr);
     if (native_element && native_element != &element->elmt) {
         element->elmt = *native_element;  // shallow copy (items[], type, data pointers are shared)
-        element->native_element = &element->elmt;
-    } else if (native_element) {
-        // Self-reference (ui_mode: Element is already embedded in DomElement)
-        element->native_element = &element->elmt;
-    } else {
-        element->native_element = NULL;
     }
 
     // Explicitly initialize display to {0, 0} to ensure no garbage values
     // This is critical for table elements where display resolution depends on this field
     element->display = {CSS_VALUE__UNDEF, CSS_VALUE__UNDEF};
-    element->styles_resolved = false;
+    element->set_styles_resolved(false);
 
     // Copy tag name into document arena before retaining on the DOM element.
     lam::PoolPtr<char> tag_copy = lam::promote_to_arena(doc->arena, tag_name);
@@ -320,7 +325,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
 
     // Initialize version tracking
     element->style_version = 1;
-    element->needs_style_recompute = true;
+    element->set_needs_style_recompute(true);
 
     // Initialize arrays
     dom_element_clear_class_names(element);
@@ -374,6 +379,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
         }
     }
 
+    doc->services.element_count++;
     return true;
 }
 
@@ -388,7 +394,7 @@ void dom_element_clear(DomElement* element) {
     }
     // Reset version tracking
     element->style_version++;
-    element->needs_style_recompute = true;
+    element->set_needs_style_recompute(true);
 
     // Note: We don't free memory here since it's pool-allocated
     // The pool will handle cleanup
@@ -409,7 +415,7 @@ void dom_element_destroy(DomElement* element) {
     dom_element_clear_class_names(element);
     element->class_count = 0;
 
-    // Note: native_element is not freed here - managed by Input/Arena
+    // The embedded Lambda Element's storage is managed by Input/Arena.
     // Note: The element structure itself is pool-allocated,
     // so it will be freed when the pool is destroyed
 }
@@ -435,8 +441,9 @@ static bool dom_element_clear_inline_style_declarations(DomElement* element) {
     return style_tree_remove_inline_declarations(element->specified_style);
 }
 
-bool dom_element_set_attribute(DomElement* element, const char* name, const char* value) {
-    if (!element || !name || !value) {
+bool DomElement::set_attribute(const char* name, const char* value) {
+    DomElement* element = this;
+    if (!name || !value) {
         log_debug("dom_element_set_attribute: invalid parameters");
         return false;
     }
@@ -445,8 +452,8 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
     char lower_name[128];
     lowercase_attr_name(name, lower_name, sizeof(lower_name));
 
-    // If native_element exists, use MarkEditor for updates
-    if (element->native_element && element->doc) {
+    if (!element->is_synthetic() && element->doc) {
+        Element* backing = dom_element_to_element(element);
         MarkEditor editor(element->doc->input, EDIT_MODE_INLINE);
 
         // Create string value item
@@ -454,25 +461,27 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
 
         // Update attribute via MarkEditor
         Item result = editor.elmt_update_attr(
-            {.element = element->native_element},
+            {.element = backing},
             lower_name,
             value_item
         );
 
         // NOTE: a failed update returns ITEM_ERROR, whose raw bits are non-null
         // (0x19<<56), so a bare `if (result.element)` would treat the error as a
-        // valid pointer and corrupt native_element — later crashing any reader.
+        // valid pointer and corrupt the DOM backing identity.
         // Guard on the actual runtime type, mirroring the delete path below.
         if (get_type_id(result) == LMD_TYPE_ELEMENT && result.element) {
-            // In INLINE mode, element pointer remains the same (in-place mutation)
-            // In IMMUTABLE mode, a new element would be created
-            // Since we're using INLINE mode, this assignment is a no-op but kept for consistency
-            element->native_element = result.element;
+            // Inline editing must preserve the embedded Element address; storing a
+            // returned pointer would reintroduce a second, divergent identity.
+            if (result.element != backing) {
+                log_error("dom_element_set_attribute: inline editor changed backing identity");
+                return false;
+            }
 
             // Handle special attributes
             if (strcmp(lower_name, "id") == 0) {
                 // Cache ID for fast access
-                ElementReader reader(element->native_element);
+                ElementReader reader(backing);
                 const char* id_attr = reader.get_attr_string("id");
                 if (id_attr) {
                     dom_element_retain_id(element, lam::promote_to_arena(element->doc->arena, id_attr));
@@ -511,7 +520,7 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
 
             // Invalidate style cache
             element->style_version++;
-            element->needs_style_recompute = true;
+            element->set_needs_style_recompute(true);
 
             return true;
         }
@@ -521,12 +530,13 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
     }
 
     // No native element - log warning
-    log_warn("dom_element_set_attribute: element has no native_element or input context");
+    log_warn("dom_element_set_attribute: element is synthetic or has no input context");
     return false;
 }
 
-const char* dom_element_get_attribute(DomElement* element, const char* name) {
-    if (!element || !name || name[0] == '\0') {
+const char* DomElement::get_attribute(const char* name) {
+    DomElement* element = this;
+    if (!name || name[0] == '\0') {
         return nullptr;
     }
 
@@ -540,15 +550,16 @@ const char* dom_element_get_attribute(DomElement* element, const char* name) {
     lower_name[i] = '\0';
 
     // Use ElementReader for read-only access
-    if (element->native_element) {
+    if (!element->is_synthetic()) {
+        Element* backing = dom_element_to_element(element);
         // Try shape-typed fast path first (covers fields with compile-time LMD_TYPE_STRING)
-        ElementReader reader(element->native_element);
+        ElementReader reader(backing);
         const char* result = reader.get_attr_string(lower_name);
         if (result) return result;
 
         // Fallback: check runtime Item type (handles fields where compile-time type
         // differs from runtime type, e.g. state-bound template attributes)
-        ConstItem attr_value = element->native_element->get_attr(lower_name);
+        ConstItem attr_value = backing->get_attr(lower_name);
         String* string_value = attr_value.string();
         if (string_value) return string_value->chars;
     }
@@ -556,8 +567,9 @@ const char* dom_element_get_attribute(DomElement* element, const char* name) {
     return nullptr;
 }
 
-bool dom_element_remove_attribute(DomElement* element, const char* name) {
-    if (!element || !name) {
+bool DomElement::remove_attribute(const char* name) {
+    DomElement* element = this;
+    if (!name) {
         return false;
     }
 
@@ -565,19 +577,21 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
     char lower_name[128];
     lowercase_attr_name(name, lower_name, sizeof(lower_name));
 
-    if (element->native_element && element->doc) {
+    if (!element->is_synthetic() && element->doc) {
+        Element* backing = dom_element_to_element(element);
         MarkEditor editor(element->doc->input, EDIT_MODE_INLINE);
 
         // Delete attribute via MarkEditor
         Item result = editor.elmt_delete_attr(
-            {.element = element->native_element},
+            {.element = backing},
             lower_name
         );
 
         if (get_type_id(result) == LMD_TYPE_ELEMENT && result.element) {
-            // In INLINE mode, element pointer remains the same
-            // This assignment is a no-op but kept for consistency
-            element->native_element = result.element;
+            if (result.element != backing) {
+                log_error("dom_element_remove_attribute: inline editor changed backing identity");
+                return false;
+            }
 
             // Clear cached fields
             if (strcmp(lower_name, "id") == 0) {
@@ -591,7 +605,7 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
 
             // Invalidate style cache
             element->style_version++;
-            element->needs_style_recompute = true;
+            element->set_needs_style_recompute(true);
 
             return true;
         }
@@ -600,8 +614,9 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
     return false;
 }
 
-bool dom_element_has_attribute(DomElement* element, const char* name) {
-    if (!element || !name) {
+bool DomElement::has_attribute(const char* name) {
+    DomElement* element = this;
+    if (!name) {
         return false;
     }
 
@@ -609,24 +624,26 @@ bool dom_element_has_attribute(DomElement* element, const char* name) {
     char lower_name[128];
     lowercase_attr_name(name, lower_name, sizeof(lower_name));
 
-    if (element->native_element) {
-        ElementReader reader(element->native_element);
+    if (!element->is_synthetic()) {
+        ElementReader reader(dom_element_to_element(element));
         return reader.has_attr(lower_name);
     }
 
     return false;
 }
 
-const char** dom_element_get_attribute_names(DomElement* element, int* count) {
-    if (!element || !count) {
+const char** DomElement::attribute_names(int* count) {
+    DomElement* element = this;
+    if (!count) {
         if (count) *count = 0;
         return nullptr;
     }
 
     *count = 0;
-    if (!element->native_element) return nullptr;
+    if (element->is_synthetic()) return nullptr;
 
-    ElementReader reader(element->native_element);
+    Element* backing = dom_element_to_element(element);
+    ElementReader reader(backing);
     int attr_count = reader.attrCount();
     if (attr_count == 0) return nullptr;
 
@@ -638,7 +655,7 @@ const char** dom_element_get_attribute_names(DomElement* element, int* count) {
     if (!names) return nullptr;
 
     // Iterate through shape to collect names
-    const TypeElmt* type = (const TypeElmt*)element->native_element->type;
+    const TypeElmt* type = (const TypeElmt*)backing->type;
     if (!type || !type->shape) {
         *count = 0;
         return nullptr;
@@ -725,7 +742,7 @@ static bool dom_element_remove_cached_class(DomElement* element, const char* cla
 }
 
 static bool dom_element_sync_class_attribute(DomElement* element) {
-    if (!element || !element->native_element || !element->doc) {
+    if (!element || element->is_synthetic() || !element->doc) {
         return true;
     }
 
@@ -742,16 +759,17 @@ static bool dom_element_sync_class_attribute(DomElement* element) {
 
     // DOMTokenList mutates the content attribute; keeping only the selector cache
     // made classList and getAttribute()/native automation observe different DOMs.
-    bool updated = dom_element_set_attribute(element, "class", serialized->str);
+    bool updated = element->set_attribute("class", serialized->str);
     strbuf_free(serialized);
     return updated;
 }
 
-bool dom_element_add_class(DomElement* element, const char* class_name) {
-    if (!element || !class_name) {
+bool DomElement::add_class(const char* class_name) {
+    DomElement* element = this;
+    if (!class_name) {
         return false;
     }
-    if (dom_element_has_class(element, class_name)) {
+    if (has_class(class_name)) {
         return true;
     }
     if (!dom_element_add_cached_class(element, class_name)) {
@@ -760,15 +778,17 @@ bool dom_element_add_class(DomElement* element, const char* class_name) {
     return dom_element_sync_class_attribute(element);
 }
 
-bool dom_element_remove_class(DomElement* element, const char* class_name) {
+bool DomElement::remove_class(const char* class_name) {
+    DomElement* element = this;
     if (!dom_element_remove_cached_class(element, class_name)) {
         return false;
     }
     return dom_element_sync_class_attribute(element);
 }
 
-bool dom_element_has_class(DomElement* element, const char* class_name) {
-    if (!element || !class_name || class_name[0] == '\0') {
+bool DomElement::has_class(const char* class_name) const {
+    const DomElement* element = this;
+    if (!class_name || class_name[0] == '\0') {
         return false;  // Empty class names never match
     }
 
@@ -781,16 +801,16 @@ bool dom_element_has_class(DomElement* element, const char* class_name) {
     return false;
 }
 
-bool dom_element_toggle_class(DomElement* element, const char* class_name) {
-    if (!element || !class_name) {
+bool DomElement::toggle_class(const char* class_name) {
+    if (!class_name) {
         return false;
     }
 
-    if (dom_element_has_class(element, class_name)) {
-        dom_element_remove_class(element, class_name);
+    if (has_class(class_name)) {
+        remove_class(class_name);
         return false;
     } else {
-        dom_element_add_class(element, class_name);
+        add_class(class_name);
         return true;
     }
 }
@@ -940,7 +960,7 @@ const char* dom_element_get_inline_style(DomElement* element) {
         return NULL;
     }
 
-    return dom_element_get_attribute(element, "style");
+    return element->get_attribute("style");
 }
 
 /**
@@ -952,13 +972,13 @@ bool dom_element_remove_inline_styles(DomElement* element) {
         return false;
     }
 
-    bool removed_attr = dom_element_remove_attribute(element, "style");
+    bool removed_attr = element->remove_attribute("style");
     bool removed_decl = dom_element_clear_inline_style_declarations(element);
 
     if (removed_decl) {
         element->style_version++;
-        element->needs_style_recompute = true;
-        element->styles_resolved = false;
+        element->set_needs_style_recompute(true);
+        element->set_styles_resolved(false);
     }
 
     return removed_attr || removed_decl;
@@ -998,7 +1018,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
 
         // Increment style version to invalidate caches
         element->style_version++;
-        element->needs_style_recompute = true;
+        element->set_needs_style_recompute(true);
 
         return true;
     }
@@ -1016,7 +1036,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
 
     // Increment style version to invalidate caches
     element->style_version++;
-    element->needs_style_recompute = true;
+    element->set_needs_style_recompute(true);
 
     return true;
 }
@@ -1089,7 +1109,7 @@ bool dom_element_remove_property(DomElement* element, CssPropertyId property_id)
 
     if (removed) {
         element->style_version++;
-        element->needs_style_recompute = true;
+        element->set_needs_style_recompute(true);
     }
 
     return removed;
@@ -1114,19 +1134,19 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     const char* pseudo_name = nullptr;
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
-        target_style = &element->before_styles;
+        target_style = element->pseudo_style_slot(PSEUDO_STYLE_BEFORE);
         pseudo_name = "::before";
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
-        target_style = &element->after_styles;
+        target_style = element->pseudo_style_slot(PSEUDO_STYLE_AFTER);
         pseudo_name = "::after";
     } else if (pseudo_element == 4) {  // PSEUDO_ELEMENT_FIRST_LETTER
-        target_style = &element->first_letter_styles;
+        target_style = element->pseudo_style_slot(PSEUDO_STYLE_FIRST_LETTER);
         pseudo_name = "::first-letter";
     } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
-        target_style = &element->marker_styles;
+        target_style = element->pseudo_style_slot(PSEUDO_STYLE_MARKER);
         pseudo_name = "::marker";
     } else if (pseudo_element == 7) {  // PSEUDO_ELEMENT_PLACEHOLDER
-        target_style = &element->placeholder_styles;
+        target_style = element->pseudo_style_slot(PSEUDO_STYLE_PLACEHOLDER);
         pseudo_name = "::placeholder";
     } else {
         log_debug("[CSS] Unknown pseudo-element type: %d", pseudo_element);
@@ -1165,7 +1185,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
 
     if (applied_count > 0) {
         element->style_version++;
-        element->needs_style_recompute = true;
+        element->set_needs_style_recompute(true);
     }
 
     return applied_count;
@@ -1180,13 +1200,13 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
     StyleTree* style = nullptr;
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
-        style = element->before_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_BEFORE);
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
-        style = element->after_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_AFTER);
     } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
-        style = element->marker_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_MARKER);
     } else if (pseudo_element == 7) {  // PSEUDO_ELEMENT_PLACEHOLDER
-        style = element->placeholder_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_PLACEHOLDER);
     }
 
     if (!style) {
@@ -1197,12 +1217,12 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
 }
 
 bool dom_element_has_before_content(DomElement* element) {
-    if (!element || !element->before_styles) {
+    if (!element || !element->pseudo_style(PSEUDO_STYLE_BEFORE)) {
         return false;
     }
 
     CssDeclaration* content_decl = style_tree_get_declaration(
-        element->before_styles, CSS_PROPERTY_CONTENT);
+        element->pseudo_style(PSEUDO_STYLE_BEFORE), CSS_PROPERTY_CONTENT);
 
     if (!content_decl || !content_decl->value) {
         return false;
@@ -1221,12 +1241,12 @@ bool dom_element_has_before_content(DomElement* element) {
 }
 
 bool dom_element_has_after_content(DomElement* element) {
-    if (!element || !element->after_styles) {
+    if (!element || !element->pseudo_style(PSEUDO_STYLE_AFTER)) {
         return false;
     }
 
     CssDeclaration* content_decl = style_tree_get_declaration(
-        element->after_styles, CSS_PROPERTY_CONTENT);
+        element->pseudo_style(PSEUDO_STYLE_AFTER), CSS_PROPERTY_CONTENT);
 
     if (!content_decl || !content_decl->value) {
         return false;
@@ -1262,7 +1282,7 @@ static const char* resolve_quote_char(DomElement* element, bool is_open_quote, i
     while (cur) {
         quotes_decl = dom_element_get_specified_value(cur, CSS_PROPERTY_QUOTES);
         if (quotes_decl && quotes_decl->value) break;
-        cur = dom_element_get_parent(cur);
+        cur = cur->parent_element();
     }
 
     if (!quotes_decl || !quotes_decl->value) {
@@ -1333,13 +1353,13 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
     StyleTree* style = nullptr;
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
-        style = element->before_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_BEFORE);
         log_info("[PSEUDO CONTENT GET] before_styles=%p", (void*)style);
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
-        style = element->after_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_AFTER);
         log_info("[PSEUDO CONTENT GET] after_styles=%p", (void*)style);
     } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
-        style = element->marker_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_MARKER);
         log_info("[PSEUDO CONTENT GET] marker_styles=%p", (void*)style);
     }    if (!style) {
         log_info("[PSEUDO CONTENT GET] No style tree found");
@@ -1385,7 +1405,7 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
                 }
             }
             if (attr_name) {
-                const char* attr_value = dom_element_get_attribute(element, attr_name);
+                const char* attr_value = element->get_attribute(attr_name);
                 log_info("[PSEUDO CONTENT] attr(%s) => '%s'", attr_name, attr_value ? attr_value : "NULL");
                 return attr_value ? attr_value : "";
             }
@@ -1396,7 +1416,7 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
     if (value->type == CSS_VALUE_TYPE_ATTR) {
         CSSAttrRef* attr_ref = value->data.attr_ref;
         if (attr_ref && attr_ref->name) {
-            const char* attr_value = dom_element_get_attribute(element, attr_ref->name);
+            const char* attr_value = element->get_attribute(attr_ref->name);
             log_info("[PSEUDO CONTENT] attr(%s) => '%s'", attr_ref->name, attr_value ? attr_value : "NULL");
             return attr_value ? attr_value : "";
         }
@@ -1446,13 +1466,13 @@ const char* dom_element_get_pseudo_element_content_with_counters(
     StyleTree* style = nullptr;
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
-        style = element->before_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_BEFORE);
         log_info("[PSEUDO CONTENT WITH COUNTERS] before_styles=%p", (void*)style);
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
-        style = element->after_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_AFTER);
         log_info("[PSEUDO CONTENT WITH COUNTERS] after_styles=%p", (void*)style);
     } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
-        style = element->marker_styles;
+        style = element->pseudo_style(PSEUDO_STYLE_MARKER);
         log_info("[PSEUDO CONTENT WITH COUNTERS] marker_styles=%p", (void*)style);
     }
 
@@ -1484,7 +1504,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
     if (value->type == CSS_VALUE_TYPE_ATTR) {
         CSSAttrRef* attr_ref = value->data.attr_ref;
         if (attr_ref && attr_ref->name) {
-            const char* attr_value = dom_element_get_attribute(element, attr_ref->name);
+            const char* attr_value = element->get_attribute(attr_ref->name);
             log_info("[PSEUDO CONTENT WITH COUNTERS] attr(%s) => '%s'", attr_ref->name, attr_value ? attr_value : "NULL");
             return attr_value ? attr_value : "";
         }
@@ -1559,7 +1579,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                 // attr(attribute-name) in content property
                 const char* attr_name = css_value_extract_name(func->args[0]);
                 if (attr_name) {
-                    const char* attr_value = dom_element_get_attribute(element, attr_name);
+                    const char* attr_value = element->get_attribute(attr_name);
                     log_info("[PSEUDO CONTENT WITH COUNTERS] attr(%s) => '%s'", attr_name, attr_value ? attr_value : "NULL");
                     return attr_value ? attr_value : "";
                 }
@@ -1648,7 +1668,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                     // Handle attr() function in list
                     const char* attr_name = css_value_extract_name(func->args[0]);
                     if (attr_name) {
-                        const char* attr_value = dom_element_get_attribute(element, attr_name);
+                        const char* attr_value = element->get_attribute(attr_name);
                         if (attr_value) {
                             int attr_len = strlen(attr_value);
                             if (result_len + attr_len < (int)sizeof(result_buffer) - 1) {
@@ -1664,7 +1684,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                 // Handle attr() in list: content: "text" attr(class) "more text"
                 CSSAttrRef* attr_ref = item->data.attr_ref;
                 if (attr_ref && attr_ref->name) {
-                    const char* attr_value = dom_element_get_attribute(element, attr_ref->name);
+                    const char* attr_value = element->get_attribute(attr_ref->name);
                     if (attr_value) {
                         int attr_len = strlen(attr_value);
                         if (result_len + attr_len < (int)sizeof(result_buffer) - 1) {
@@ -1719,24 +1739,24 @@ const char* dom_element_get_pseudo_element_content_with_counters(
 // DOM Tree Navigation
 // ============================================================================
 
-DomElement* dom_element_get_parent(DomElement* element) {
-    return element ? static_cast<DomElement*>(element->parent) : NULL;
+DomElement* DomElement::parent_element() const {
+    return static_cast<DomElement*>(parent);
 }
 
-DomElement* dom_element_get_first_child(DomElement* element) {
-    return element ? static_cast<DomElement*>(element->first_child) : NULL;
+DomElement* DomElement::first_child_element() const {
+    return static_cast<DomElement*>(first_child);
 }
 
-DomElement* dom_element_get_last_child(DomElement* element) {
-    return element ? static_cast<DomElement*>(element->last_child) : NULL;
+DomElement* DomElement::last_child_element() const {
+    return static_cast<DomElement*>(last_child);
 }
 
-DomElement* dom_element_get_next_sibling(DomElement* element) {
-    return element ? static_cast<DomElement*>(element->next_sibling) : NULL;
+DomElement* DomElement::next_sibling_element() const {
+    return static_cast<DomElement*>(next_sibling);
 }
 
-DomElement* dom_element_get_prev_sibling(DomElement* element) {
-    return element ? static_cast<DomElement*>(element->prev_sibling) : NULL;
+DomElement* DomElement::prev_sibling_element() const {
+    return static_cast<DomElement*>(prev_sibling);
 }
 
 /**
@@ -1748,8 +1768,9 @@ DomElement* dom_element_get_prev_sibling(DomElement* element) {
  * @param child Child element to link (must already exist in parent's Lambda tree)
  * @return true on success, false on error
  */
-bool dom_element_link_child(DomElement* parent, DomElement* child) {
-    if (!parent || !child) {
+bool DomElement::link_child(DomElement* child) {
+    DomElement* parent = this;
+    if (!child) {
         log_error("dom_element_link_child: invalid arguments");
         return false;
     }
@@ -1766,31 +1787,38 @@ bool dom_element_link_child(DomElement* parent, DomElement* child) {
  * Use this when adding a NEW child that is NOT yet in the parent's Lambda tree.
  *
  * For children already in the Lambda tree (e.g., when building DOM wrappers from
- * existing Lambda structures), use dom_element_link_child() instead.
+ * existing Lambda structures), use link_child() instead.
  *
  * @param parent Parent element (must have Lambda backing)
  * @param child Child element (must have Lambda backing)
  * @return true on success, false on error
  */
-bool dom_element_append_child(DomElement* parent, DomElement* child) {
-    if (!parent || !child) {
+bool DomElement::append_child(DomElement* child) {
+    DomElement* parent = this;
+    if (!child) {
         log_error("dom_element_append_child: invalid arguments");
         return false;
     }
 
-    // Require Lambda backing for both parent and child
-    if (!parent->native_element || !child->native_element || !parent->doc) {
-        log_error("dom_element_append_child: parent and child must have Lambda backing");
+    if (parent->is_synthetic() || child->is_synthetic()) {
+        // Generated boxes have no Lambda tree to edit; method overload resolution
+        // still selects this DomElement overload, so preserve the DomNode chain path.
+        return DomNode::append_child(static_cast<DomNode*>(child));
+    }
+    if (!parent->doc || !parent->doc->input) {
+        log_error("dom_element_append_child: backed parent requires an input context");
         return false;
     }
 
-    log_debug("dom_element_append_child: appending to Lambda tree (length before=%lld)", parent->native_element->length);
+    Element* parent_backing = dom_element_to_element(parent);
+    Element* child_backing = dom_element_to_element(child);
+    log_debug("dom_element_append_child: appending to Lambda tree (length before=%lld)", parent_backing->length);
 
     // Append to Lambda tree using MarkEditor
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item result = editor.elmt_append_child(
-        {.element = parent->native_element},
-        {.element = child->native_element}
+        {.element = parent_backing},
+        {.element = child_backing}
     );
 
     if (!result.element) {
@@ -1798,9 +1826,11 @@ bool dom_element_append_child(DomElement* parent, DomElement* child) {
         return false;
     }
 
-    // Update parent element pointer (INLINE mode modifies in place, but update for consistency)
-    parent->native_element = result.element;
-    log_debug("dom_element_append_child: Lambda tree updated (length after=%lld)", parent->native_element->length);
+    if (result.element != parent_backing) {
+        log_error("dom_element_append_child: inline editor changed backing identity");
+        return false;
+    }
+    log_debug("dom_element_append_child: Lambda tree updated (length after=%lld)", parent_backing->length);
 
     // Update DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already linked)
     if (!parent->doc->input->ui_mode) {
@@ -1812,8 +1842,9 @@ bool dom_element_append_child(DomElement* parent, DomElement* child) {
     return true;
 }
 
-bool dom_element_remove_child(DomElement* parent, DomElement* child) {
-    if (!parent || !child || child->parent != parent) {
+bool DomElement::remove_child(DomElement* child) {
+    DomElement* parent = this;
+    if (!child || child->parent != parent) {
         return false;
     }
 
@@ -1840,14 +1871,15 @@ bool dom_element_remove_child(DomElement* parent, DomElement* child) {
     return true;
 }
 
-bool dom_element_insert_before(DomElement* parent, DomElement* new_child, DomElement* reference_child) {
-    if (!parent || !new_child) {
+bool DomElement::insert_before(DomElement* new_child, DomElement* reference_child) {
+    DomElement* parent = this;
+    if (!new_child) {
         return false;
     }
 
     // If no reference child, append at end
     if (!reference_child) {
-        return dom_element_append_child(parent, new_child);
+        return append_child(new_child);
     }
 
     // Verify reference child is actually a child of parent
@@ -1913,8 +1945,9 @@ bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode*
 // Structural Queries
 // ============================================================================
 
-bool dom_element_is_first_child(DomElement* element) {
-    if (!element || !element->parent) {
+bool DomElement::is_first_child() {
+    DomElement* element = this;
+    if (!element->parent) {
         return false;
     }
 
@@ -1931,8 +1964,9 @@ bool dom_element_is_first_child(DomElement* element) {
     return false;
 }
 
-bool dom_element_is_last_child(DomElement* element) {
-    if (!element || !element->parent) {
+bool DomElement::is_last_child() {
+    DomElement* element = this;
+    if (!element->parent) {
         return false;
     }
 
@@ -1948,18 +1982,20 @@ bool dom_element_is_last_child(DomElement* element) {
     return true;
 }
 
-bool dom_element_is_only_child(DomElement* element) {
-    if (!element || !element->parent) {
+bool DomElement::is_only_child() {
+    DomElement* element = this;
+    if (!element->parent) {
         return false;
     }
 
     // CSS Selectors §6.6.1.6: :only-child matches when the element is the
     // only child ELEMENT of its parent. Equivalent to :first-child:last-child.
-    return dom_element_is_first_child(element) && dom_element_is_last_child(element);
+    return is_first_child() && is_last_child();
 }
 
-int dom_element_get_child_index(DomElement* element) {
-    if (!element || !element->parent) {
+int DomElement::child_index() {
+    DomElement* element = this;
+    if (!element->parent) {
         return -1;
     }
 
@@ -1980,10 +2016,8 @@ int dom_element_get_child_index(DomElement* element) {
     return (sibling == element) ? index : -1;
 }
 
-int dom_element_child_count(DomElement* element) {
-    if (!element) {
-        return 0;
-    }
+int DomElement::child_count() {
+    DomElement* element = this;
 
     int count = 0;
     DomNode* child = element->first_child;
@@ -1996,10 +2030,8 @@ int dom_element_child_count(DomElement* element) {
     return count;
 }
 
-int dom_element_count_child_elements(DomElement* element) {
-    if (!element) {
-        return 0;
-    }
+int DomElement::count_child_elements() {
+    DomElement* element = this;
 
     int count = 0;
     DomNode* child = element->first_child;
@@ -2015,12 +2047,8 @@ int dom_element_count_child_elements(DomElement* element) {
     return count;
 }
 
-bool dom_element_matches_nth_child(DomElement* element, int a, int b) {
-    if (!element) {
-        return false;
-    }
-
-    int index = dom_element_get_child_index(element);
+bool DomElement::matches_nth_child(int a, int b) {
+    int index = child_index();
     if (index < 0) {
         return false;
     }
@@ -2073,14 +2101,14 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
     }
 
     // All DomElements must have backing Lambda element
-    if (!source->native_element || !source->doc) {
-        log_error("dom_element_clone: source element must have native_element and doc");
+    if (source->is_synthetic() || !source->doc) {
+        log_error("dom_element_clone: source element must have Lambda backing and doc");
         return NULL;
     }
 
     // Use MarkBuilder to deep copy the backing Lambda element
     MarkBuilder builder(source->doc->input);
-    Item cloned_elem = builder.deep_copy({.element = source->native_element});
+    Item cloned_elem = builder.deep_copy({.element = dom_element_to_element(source)});
 
     if (!cloned_elem.element) {
         log_error("dom_element_clone: MarkBuilder deep_copy failed");
@@ -2104,8 +2132,8 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
 
     // Copy classes (if not already copied by build_dom_tree_from_element)
     for (int i = 0; i < source->class_count; i++) {
-        if (!dom_element_has_class(clone, source->class_names[i])) {
-            dom_element_add_class(clone, source->class_names[i]);
+        if (!clone->has_class(source->class_names[i])) {
+            clone->add_class(source->class_names[i]);
         }
     }
 
@@ -2154,7 +2182,7 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element) {
     text_node->native_string = native_string;
     text_node->text = native_string->chars;  // Reference Lambda String's chars
     text_node->length = native_string->len;
-    text_node->content_type = DOM_TEXT_STRING;  // Plain text
+    text_node->set_symbol(false);
     text_node->parent = parent_element;
 
     log_debug("dom_text_create: created backed text node, text='%s'", native_string->chars);
@@ -2186,7 +2214,7 @@ DomText* dom_text_create_detached(String* native_string, DomDocument* doc) {
     text_node->native_string = native_string;
     text_node->text = native_string->chars;
     text_node->length = native_string->len;
-    text_node->content_type = DOM_TEXT_STRING;
+    text_node->set_symbol(false);
 
     log_debug("dom_text_create_detached: created text node, text='%s'", native_string->chars);
     return text_node;
@@ -2238,7 +2266,7 @@ DomText* dom_text_create_symbol(const char* name, size_t len, DomElement* parent
     text_node->native_string = nullptr;
     text_node->text = name;
     text_node->length = len;
-    text_node->content_type = DOM_TEXT_SYMBOL;
+    text_node->set_symbol(true);
     text_node->parent = parent_element;
 
     log_debug("dom_text_create_symbol: created symbol node, name='%.*s'", (int)len, name);
@@ -2294,7 +2322,7 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
 
     // Replace child in parent Element's items array
     Item result = editor.elmt_replace_child(
-        {.element = parent->native_element},
+        {.element = dom_element_to_element(parent)},
         child_idx,
         new_string_item
     );
@@ -2309,10 +2337,9 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
         String* new_string = new_string_item.get_string();
         DomText* new_dt = dom_text_from_fat_string(parent->doc, new_string);
         if (new_dt) {
-            new_dt->content_type = text_node->content_type;
+            new_dt->set_symbol(text_node->is_symbol());
             new_dt->rect = text_node->rect;
             new_dt->font = text_node->font;
-            new_dt->color = text_node->color;
             new_dt->parent = parent;
             new_dt->prev_sibling = saved_prev;
             new_dt->next_sibling = saved_next;
@@ -2338,8 +2365,10 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     text_node->text = text_node->native_string->chars;
     text_node->length = text_node->native_string->len;
 
-    // In INLINE mode, parent element pointer unchanged, but update for consistency
-    parent->native_element = result.element;
+    if (result.element != dom_element_to_element(parent)) {
+        log_error("dom_text_set_content: inline editor changed backing identity");
+        return false;
+    }
     log_debug("dom_text_set_content: updated text at index %lld to '%s'", child_idx, new_content);
     return true;
 }
@@ -2354,7 +2383,7 @@ int64_t dom_text_get_child_index(DomText* text_node) {
         return -1;
     }
 
-    Element* parent_elem = ((DomElement*)text_node->parent)->native_element;
+    Element* parent_elem = dom_element_backing((DomElement*)text_node->parent);
     if (!parent_elem) {
         log_error("dom_text_get_child_index: parent has no native_element");
         return -1;
@@ -2400,7 +2429,7 @@ bool dom_text_remove(DomText* text_node) {
     // Remove from Lambda parent Element's children array
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item result = editor.elmt_delete_child(
-        {.element = parent->native_element},
+        {.element = dom_element_to_element(parent)},
         child_idx
     );
 
@@ -2409,8 +2438,10 @@ bool dom_text_remove(DomText* text_node) {
         return false;
     }
 
-    // Update parent
-    parent->native_element = result.element;
+    if (result.element != dom_element_to_element(parent)) {
+        log_error("dom_text_remove: inline editor changed backing identity");
+        return false;
+    }
 
     // Remove from DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already rebuilt)
     if (!parent->doc->input->ui_mode) {
@@ -2439,13 +2470,14 @@ bool dom_text_remove(DomText* text_node) {
     return true;
 }
 
-DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
-    if (!parent || !text_content) {
+DomText* DomElement::append_text(const char* text_content) {
+    DomElement* parent = this;
+    if (!text_content) {
         log_error("dom_element_append_text: invalid parameters");
         return nullptr;
     }
 
-    if (!parent->native_element || !parent->doc) {
+    if (parent->is_synthetic() || !parent->doc) {
         log_error("dom_element_append_text: parent element must be backed");
         return nullptr;
     }
@@ -2462,7 +2494,7 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
 
     // Append to parent Element's children via MarkEditor
     Item result = editor.elmt_append_child(
-        {.element = parent->native_element},
+        {.element = dom_element_to_element(parent)},
         string_item
     );
 
@@ -2506,8 +2538,10 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
         dom_append_to_sibling_chain(parent, text_node);
     }
 
-    // Update parent element pointer (INLINE mode: no-op, but kept for consistency)
-    parent->native_element = result.element;
+    if (result.element != dom_element_to_element(parent)) {
+        log_error("dom_element_append_text: inline editor changed backing identity");
+        return nullptr;
+    }
 
     log_debug("dom_element_append_text: appended text '%s'", text_content);
 
@@ -2698,7 +2732,7 @@ int64_t dom_comment_get_child_index(DomComment* comment_node) {
         return -1;
     }
 
-    Element* parent_elem = ((DomElement*)comment_node->parent)->native_element;
+    Element* parent_elem = dom_element_backing((DomElement*)comment_node->parent);
     if (!parent_elem) {
         log_error("dom_comment_get_child_index: parent has no native_element");
         return -1;
@@ -2779,13 +2813,14 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
     return true;
 }
 
-DomComment* dom_element_append_comment(DomElement* parent, const char* comment_content) {
-    if (!parent || !comment_content) {
+DomComment* DomElement::append_comment(const char* comment_content) {
+    DomElement* parent = this;
+    if (!comment_content) {
         log_error("dom_element_append_comment: invalid arguments");
         return nullptr;
     }
 
-    if (!parent->native_element || !parent->doc) {
+    if (parent->is_synthetic() || !parent->doc) {
         log_error("dom_element_append_comment: parent not backed");
         return nullptr;
     }
@@ -2808,7 +2843,7 @@ DomComment* dom_element_append_comment(DomElement* parent, const char* comment_c
 
     // Append to parent Element's children
     Item result = editor.elmt_append_child(
-        {.element = parent->native_element},
+        {.element = dom_element_to_element(parent)},
         comment_item
     );
 
@@ -2817,8 +2852,10 @@ DomComment* dom_element_append_comment(DomElement* parent, const char* comment_c
         return nullptr;
     }
 
-    // Update parent element pointer (INLINE mode keeps it stable, but update for consistency)
-    parent->native_element = result.element;
+    if (result.element != dom_element_to_element(parent)) {
+        log_error("dom_element_append_comment: inline editor changed backing identity");
+        return nullptr;
+    }
 
     // Create DomComment wrapper
     DomComment* comment_node = dom_comment_create(
@@ -2863,7 +2900,7 @@ bool dom_comment_remove(DomComment* comment_node) {
     // Remove from Lambda parent Element's children array
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item result = editor.elmt_delete_child(
-        {.element = parent->native_element},
+        {.element = dom_element_to_element(parent)},
         child_idx
     );
 
@@ -2872,8 +2909,10 @@ bool dom_comment_remove(DomComment* comment_node) {
         return false;
     }
 
-    // Update parent
-    parent->native_element = result.element;
+    if (result.element != dom_element_to_element(parent)) {
+        log_error("dom_comment_remove: inline editor changed backing identity");
+        return false;
+    }
 
     // Remove from DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already rebuilt)
     if (!parent->doc->input->ui_mode) {
@@ -3079,12 +3118,12 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     if (str_ieq_const(tag_name, strlen(tag_name), "td") || str_ieq_const(tag_name, strlen(tag_name), "th")) {
         const char* rowspan_value = extract_element_attribute(elem, "rowspan", doc->arena);
         if (rowspan_value) {
-            dom_element_set_attribute(dom_elem, "rowspan", rowspan_value);
+            dom_elem->set_attribute("rowspan", rowspan_value);
         }
 
         const char* colspan_value = extract_element_attribute(elem, "colspan", doc->arena);
         if (colspan_value) {
-            dom_element_set_attribute(dom_elem, "colspan", colspan_value);
+            dom_elem->set_attribute("colspan", colspan_value);
         }
     }
 
@@ -3093,7 +3132,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     if (str_ieq_const(tag_name, strlen(tag_name), "a") || str_ieq_const(tag_name, strlen(tag_name), "area")) {
         const char* href_value = extract_element_attribute(elem, "href", doc->arena);
         if (href_value && strlen(href_value) > 0) {
-            dom_element_set_attribute(dom_elem, "href", href_value);
+            dom_elem->set_attribute("href", href_value);
         }
     }
 
@@ -3110,29 +3149,29 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         const char* val_attr = val_attr_src ? lam::promote_to_arena(doc->arena, val_attr_src).get() : nullptr;
         // Store the type attribute for later use
         if (type_value) {
-            dom_element_set_attribute(dom_elem, "type", type_value);
+            dom_elem->set_attribute("type", type_value);
         }
         // Store the name attribute for radio button grouping
         if (name_value) {
-            dom_element_set_attribute(dom_elem, "name", name_value);
+            dom_elem->set_attribute("name", name_value);
         }
         if (elem->has_attr("checked")) {
-            dom_element_set_attribute(dom_elem, "checked", "checked");
+            dom_elem->set_attribute("checked", "checked");
         }
         if (elem->has_attr("disabled")) {
-            dom_element_set_attribute(dom_elem, "disabled", "disabled");
+            dom_elem->set_attribute("disabled", "disabled");
         }
         if (elem->has_attr("required")) {
-            dom_element_set_attribute(dom_elem, "required", "required");
+            dom_elem->set_attribute("required", "required");
         }
         if (elem->has_attr("readonly")) {
-            dom_element_set_attribute(dom_elem, "readonly", "readonly");
+            dom_elem->set_attribute("readonly", "readonly");
         }
         if (ph_value) {
-            dom_element_set_attribute(dom_elem, "placeholder", ph_value);
+            dom_elem->set_attribute("placeholder", ph_value);
         }
         if (val_attr) {
-            dom_element_set_attribute(dom_elem, "value", val_attr);
+            dom_elem->set_attribute("value", val_attr);
         }
     }
     // :disabled also applies to <select>, <textarea>, <button>, <optgroup>, <option>,
@@ -3148,22 +3187,22 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         const char* val_attr_src = extract_element_attribute(elem, "value", doc->arena);
         const char* val_attr = val_attr_src ? lam::promote_to_arena(doc->arena, val_attr_src).get() : nullptr;
         if (elem->has_attr("disabled")) {
-            dom_element_set_attribute(dom_elem, "disabled", "disabled");
+            dom_elem->set_attribute("disabled", "disabled");
         }
         if (elem->has_attr("selected")) {
-            dom_element_set_attribute(dom_elem, "selected", "selected");
+            dom_elem->set_attribute("selected", "selected");
         }
         if (elem->has_attr("required")) {
-            dom_element_set_attribute(dom_elem, "required", "required");
+            dom_elem->set_attribute("required", "required");
         }
         if (elem->has_attr("readonly")) {
-            dom_element_set_attribute(dom_elem, "readonly", "readonly");
+            dom_elem->set_attribute("readonly", "readonly");
         }
         if (ph_value) {
-            dom_element_set_attribute(dom_elem, "placeholder", ph_value);
+            dom_elem->set_attribute("placeholder", ph_value);
         }
         if (val_attr) {
-            dom_element_set_attribute(dom_elem, "value", val_attr);
+            dom_elem->set_attribute("value", val_attr);
         }
     }
 
@@ -3171,7 +3210,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // Use link_child since the Lambda tree already contains this element
     // (we're building DOM wrappers from existing Lambda structure)
     if (parent) {
-        dom_element_link_child(parent, dom_elem);
+        parent->link_child(dom_elem);
     }
 
     // Process all children - including text nodes, comments, and elements
@@ -3232,7 +3271,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             log_debug("  Successfully built child <%s> with parent <%s>. child_dom=%p, child_dom->parent=%p",
                      child_tag_name, tag_name, (void*)child_dom, (void*)child_dom->parent);
 
-            // The dom_element_append_child was already called in the recursive call,
+            // append_child() already linked the node during the recursive call,
             // so the parent-child and sibling relationships are already established correctly.
             // No manual linking needed!
 

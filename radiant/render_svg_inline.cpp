@@ -5389,12 +5389,12 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     if (!rdcon || !view) return;
 
     DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(view));
-    if (!dom_elem->native_element) {
+    if (dom_elem->is_synthetic()) {
         log_debug("[SVG] render_inline_svg: no native element");
         return;
     }
 
-    Element* svg_elem = dom_elem->native_element;
+    Element* svg_elem = dom_element_to_element(dom_elem);
     float scale = rdcon->scale;
 
     log_debug("[SVG] render_inline_svg: view pos=(%.0f,%.0f) size=(%.0f,%.0f) pixel_ratio=%.2f",

@@ -125,7 +125,6 @@ extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_fou
 extern "C" Item js_get_prototype(Item object);
 extern "C" void js_set_prototype(Item object, Item prototype);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
-static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 void js_dom_register_named_elements(DomElement* root);
@@ -294,7 +293,7 @@ static void js_dom_mark_dirty_subtree(DomNode* root) {
     root->layout_dirty = true;
     if (root->is_element()) {
         DomElement* elem = root->as_element();
-        elem->styles_resolved = false;
+        elem->set_styles_resolved(false);
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
             js_dom_mark_dirty_subtree(child);
         }
@@ -305,7 +304,7 @@ static void js_dom_mark_dirty_ancestors(DomNode* node) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
         cur->layout_dirty = true;
         if (cur->is_element()) {
-            cur->as_element()->styles_resolved = false;
+            cur->as_element()->set_styles_resolved(false);
         }
     }
 }
@@ -357,13 +356,13 @@ static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
     if (!doc) return;
 
     if (sequence == 0) {
-        sequence = doc->js_mutation_sequence + 1;
+        sequence = doc->js.mutation_sequence + 1;
     }
-    doc->js_mutation_kind_mask |= js_dom_mutation_bit(kind);
+    doc->js.mutation_kind_mask |= js_dom_mutation_bit(kind);
 
-    if (doc->js_mutation_record_count < DOM_JS_MUTATION_RECORD_CAP) {
+    if (doc->js.mutation_record_count < DOM_JS_MUTATION_RECORD_CAP) {
         DomJsMutationRecord* record =
-            &doc->js_mutation_records[doc->js_mutation_record_count++];
+            &doc->js.mutation_records[doc->js.mutation_record_count++];
         record->sequence = sequence;
         record->kind = kind;
         record->target = target;
@@ -371,7 +370,7 @@ static inline void js_dom_record_mutation_detail(DomJsMutationKind kind,
         record->target_id = target ? target->id : 0;
         record->parent_id = parent ? parent->id : 0;
     } else {
-        doc->js_mutation_record_overflow++;
+        doc->js.mutation_record_overflow++;
     }
 
     if (target) {
@@ -393,24 +392,24 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
     DomDocument* doc = js_dom_mutation_document(target, parent);
     if (!doc) return;
 
-    doc->js_mutation_count++;
-    doc->js_mutation_sequence++;
+    doc->js.mutation_count++;
+    doc->js.mutation_sequence++;
 
     bool has_pending_structural_record = false;
-    if (doc->js_mutation_record_count > 0) {
-        DomJsMutationRecord* last = &doc->js_mutation_records[doc->js_mutation_record_count - 1];
+    if (doc->js.mutation_record_count > 0) {
+        DomJsMutationRecord* last = &doc->js.mutation_records[doc->js.mutation_record_count - 1];
         bool legacy_flush = kind == DOM_JS_MUTATION_UNKNOWN && !target && !parent;
         bool same_detail = last->kind == kind && last->target == target &&
                            last->parent == parent;
         // dom_pre_remove/dom_post_insert publish the precise structural shape
         // before the common notifier; do not record that same mutation twice.
         has_pending_structural_record =
-            last->sequence == doc->js_mutation_sequence &&
+            last->sequence == doc->js.mutation_sequence &&
             (legacy_flush || same_detail);
     }
 
     if (!has_pending_structural_record) {
-        js_dom_record_mutation_detail(kind, target, parent, doc->js_mutation_sequence);
+        js_dom_record_mutation_detail(kind, target, parent, doc->js.mutation_sequence);
     }
     js_dom_refresh_live_child_collections_for_mutation(target, parent);
     js_dom_refresh_live_form_collections_for_mutation(target, parent, doc);
@@ -444,11 +443,11 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* targ
 
 static void js_dom_reset_mutation_records(DomDocument* doc) {
     if (!doc) return;
-    doc->js_mutation_count = 0;
-    doc->js_mutation_sequence = 0;
-    doc->js_mutation_kind_mask = 0;
-    doc->js_mutation_record_count = 0;
-    doc->js_mutation_record_overflow = 0;
+    doc->js.mutation_count = 0;
+    doc->js.mutation_sequence = 0;
+    doc->js.mutation_kind_mask = 0;
+    doc->js.mutation_record_count = 0;
+    doc->js.mutation_record_overflow = 0;
 }
 
 static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
@@ -456,7 +455,7 @@ static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
     DocState* ds = doc->state ? (DocState*)doc->state : nullptr;
     if (ds && ds->lifecycle == DOC_LIFECYCLE_COMMITTED &&
         doc->view_tree && doc->view_tree->root &&
-        doc->js_mutation_count == 0) {
+        doc->js.mutation_count == 0) {
         return true;
     }
 
@@ -1143,7 +1142,7 @@ extern "C" void js_dom_shutdown() {
 
 extern "C" bool js_dom_evaluate_media_query(const char* query) {
     if (!query || !_js_current_document || !_js_current_ui_context) return false;
-    CssEngine* engine = (CssEngine*)_js_current_document->cached_css_engine;
+    CssEngine* engine = (CssEngine*)_js_current_document->services.cached_css_engine;
     if (!engine) return false;
     // matchMedia and @media must share one evaluator and the same live
     // viewport; otherwise JS and cascade disagree after a surface resize.
@@ -1416,7 +1415,7 @@ static SelectorMatcher* js_dom_create_selector_matcher(DomDocument* doc) {
 // "submit", "button", "text"). Falls back to "text" when missing.
 static const char* _input_type_lower(DomElement* elem) {
     static __thread char buf[24];
-    const char* raw = dom_element_get_attribute(elem, "type");
+    const char* raw = elem->get_attribute("type");
     if (!raw || !*raw) return "text";
     int n = 0;
     while (raw[n] && n < (int)sizeof(buf) - 1) {
@@ -1451,7 +1450,7 @@ static bool _get_checkedness(DomElement* elem) {
         if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
     }
     // not initialised yet — derive from content attribute.
-    return dom_element_has_attribute(elem, "checked");
+    return elem->has_attribute("checked");
 }
 
 static void _set_checkedness(DomElement* elem, bool v) {
@@ -1510,7 +1509,7 @@ extern "C" const char* js_dom_tag_name_raw(void* dom_elem) {
 }
 extern "C" bool js_dom_is_disabled(void* dom_elem) {
     DomElement* e = (DomElement*)dom_elem;
-    return e && dom_element_has_attribute(e, "disabled");
+    return e && e->has_attribute("disabled");
 }
 
 // Returns true when the element is "connected" to its owning document
@@ -1667,7 +1666,7 @@ static Item lookup_foreign_doc_wrapper(DomDocument* doc); // fwd decl
 extern "C" void* js_dom_get_or_create_doc_node(void* doc_v) {
     DomDocument* doc = (DomDocument*)doc_v;
     if (!doc) return nullptr;
-    if (doc->js_doc_node) return doc->js_doc_node;
+    if (doc->js.doc_node) return doc->js.doc_node;
     // build a DomElement with tag "#document". first_child is set to doc->root
     // so dom_node_boundary_length(stub) returns child count of the document
     // (e.g. 1 for HTML docs without doctype, 2 with doctype).
@@ -1711,7 +1710,7 @@ extern "C" void* js_dom_get_or_create_doc_node(void* doc_v) {
     }
     ((DomElement*)stub)->first_child = head_node;
     ((DomElement*)stub)->last_child  = tail_node;
-    doc->js_doc_node = stub;
+    doc->js.doc_node = stub;
     return stub;
 }
 
@@ -1744,10 +1743,10 @@ extern "C" void js_dom_initialize_node_wrapper(void* dom_elem) {
     if (!node || !node->is_element()) return;
     DomElement* elem = node->as_element();
     int attr_count = 0;
-    const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+    const char** attr_names = elem->attribute_names(&attr_count);
     for (int i = 0; attr_names && i < attr_count; i++) {
         const char* name = attr_names[i];
-        const char* value = dom_element_get_attribute(elem, name);
+        const char* value = elem->get_attribute(name);
         js_dom_compile_event_attr_to_expando(elem, name, value);
     }
 }
@@ -1785,7 +1784,7 @@ extern "C" Item js_dom_get_prototype_value(Item obj) {
     if (node && node->is_element()) {
         DomElement* elem = node->as_element();
         if (elem && elem->tag_name && strcmp(elem->tag_name, "#document-fragment") == 0) {
-            ctor_name = elem->shadow_host ? "ShadowRoot" : "DocumentFragment";
+            ctor_name = elem->shadow_host_element() ? "ShadowRoot" : "DocumentFragment";
         } else {
             // HTML DOM wrappers need HTMLElement as their immediate prototype so
             // browser-library instanceof checks walk HTMLElement -> Element -> Node.
@@ -2064,9 +2063,9 @@ static Item _collection_named_item(Item name_arg) {
         Item item = js_array_get_int(self, i);
         DomElement* elem = (DomElement*)js_dom_unwrap_element(item);
         if (!elem) continue;
-        const char* id = dom_element_get_attribute(elem, "id");
+        const char* id = elem->get_attribute("id");
         if (id && strcmp(id, name) == 0) return item;
-        const char* nm = dom_element_get_attribute(elem, "name");
+        const char* nm = elem->get_attribute("name");
         if (nm && strcmp(nm, name) == 0) return item;
     }
     return ItemNull;
@@ -2784,8 +2783,8 @@ static void js_dom_rebind_subtree_document(DomNode* node,
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         js_dom_rebind_subtree_document(child, destination);
     }
-    if (elem->shadow_root) {
-        js_dom_rebind_subtree_document((DomNode*)elem->shadow_root, destination);
+    if (elem->shadow_root_element()) {
+        js_dom_rebind_subtree_document((DomNode*)elem->shadow_root_element(), destination);
     }
 }
 
@@ -2935,7 +2934,7 @@ static void clear_element_children_for_navigation(DomElement* elem) {
 static void append_iframe_srcdoc_to_document(DomElement* iframe,
                                              DomDocument* doc) {
     if (!iframe || !doc || !doc->root) return;
-    const char* srcdoc = dom_element_get_attribute(iframe, "srcdoc");
+    const char* srcdoc = iframe->get_attribute("srcdoc");
     if (!srcdoc || !*srcdoc) return;
     DomElement* body = document_body_element(doc);
     if (!body || !doc->pool || !doc->arena || !doc->input) return;
@@ -3026,7 +3025,7 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
     if (!iframe) return ItemNull;
     IframeContentEntry* e = lookup_iframe_entry(iframe);
     if (!e) {
-        DomDocument* embedded_doc = iframe->embed ? iframe->embed->doc : nullptr;
+        DomDocument* embedded_doc = iframe->embed ? iframe->embedp()->doc : nullptr;
         if (embedded_doc) {
             js_doc_mark_has_browsing_context(embedded_doc);
             if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
@@ -3191,7 +3190,7 @@ static DomElement* js_dom_find_iframe_by_name(DomNode* node, const char* target_
         if (node->is_element()) {
             DomElement* elem = node->as_element();
             if (elem->tag_name && strcasecmp(elem->tag_name, "iframe") == 0) {
-                const char* name = dom_element_get_attribute(elem, "name");
+                const char* name = elem->get_attribute("name");
                 if (name && strcmp(name, target_name) == 0) {
                     return elem;
                 }
@@ -3262,11 +3261,11 @@ extern "C" Item js_image_construct(Item width_arg, Item height_arg, int argc) {
     if (!dom_elem) return ItemNull;
     if (argc >= 1) {
         const char* w = fn_to_cstr(width_arg);
-        if (w) dom_element_set_attribute(dom_elem, "width", w);
+        if (w) dom_elem->set_attribute("width", w);
     }
     if (argc >= 2) {
         const char* h = fn_to_cstr(height_arg);
-        if (h) dom_element_set_attribute(dom_elem, "height", h);
+        if (h) dom_elem->set_attribute("height", h);
     }
     return js_dom_wrap_element(dom_elem);
 }
@@ -3539,284 +3538,6 @@ struct JsComputedStyleHost {
     DomElement* elem;
     int pseudo_type;
 };
-
-static void format_alpha_component(char* buf, size_t buf_size, uint8_t alpha) {
-    if (!buf || buf_size == 0) return;
-    double value = alpha / 255.0;
-    snprintf(buf, buf_size, "%.2f", value);
-    size_t len = strlen(buf);
-    while (len > 0 && buf[len - 1] == '0') {
-        buf[--len] = '\0';
-    }
-    if (len > 0 && buf[len - 1] == '.') {
-        buf[--len] = '\0';
-    }
-}
-
-// Helper: serialize a CssValue to a string Item
-static Item css_value_to_string_item(CssValue* val, Pool* pool) {
-    if (!val) return (Item){.item = s2it(heap_create_name(""))};
-
-    switch (val->type) {
-        case CSS_VALUE_TYPE_KEYWORD: {
-            // resolve named color keywords to rgb() for getComputedStyle
-            uint8_t r, g, b, a;
-            if (css_named_color_to_rgba(val->data.keyword, &r, &g, &b, &a)) {
-                char buf[64];
-                if (a < 255) {
-                    snprintf(buf, sizeof(buf), "rgba(%d, %d, %d, %g)", r, g, b, a / 255.0);
-                } else {
-                    snprintf(buf, sizeof(buf), "rgb(%d, %d, %d)", r, g, b);
-                }
-                return (Item){.item = s2it(heap_create_name(buf))};
-            }
-            const CssEnumInfo* info = css_enum_info(val->data.keyword);
-            if (info && info->name) {
-                return (Item){.item = s2it(heap_create_name(info->name))};
-            }
-            break;
-        }
-        case CSS_VALUE_TYPE_LENGTH: {
-            char buf[64];
-            const char* unit_str = "px";
-            switch (val->data.length.unit) {
-                case CSS_UNIT_PX: unit_str = "px"; break;
-                case CSS_UNIT_EM: unit_str = "em"; break;
-                case CSS_UNIT_REM: unit_str = "rem"; break;
-                case CSS_UNIT_PERCENT: unit_str = "%"; break;
-                case CSS_UNIT_VW: unit_str = "vw"; break;
-                case CSS_UNIT_VH: unit_str = "vh"; break;
-                case CSS_UNIT_CM: unit_str = "cm"; break;
-                case CSS_UNIT_MM: unit_str = "mm"; break;
-                case CSS_UNIT_IN: unit_str = "in"; break;
-                case CSS_UNIT_PT: unit_str = "pt"; break;
-                case CSS_UNIT_PC: unit_str = "pc"; break;
-                default: unit_str = "px"; break;
-            }
-            double v = val->data.length.value;
-            if (v == (int)v) {
-                snprintf(buf, sizeof(buf), "%d%s", (int)v, unit_str);
-            } else {
-                snprintf(buf, sizeof(buf), "%g%s", v, unit_str);
-            }
-            return (Item){.item = s2it(heap_create_name(buf))};
-        }
-        case CSS_VALUE_TYPE_PERCENTAGE: {
-            char buf[64];
-            double v = val->data.percentage.value;
-            if (v == (int)v) {
-                snprintf(buf, sizeof(buf), "%d%%", (int)v);
-            } else {
-                snprintf(buf, sizeof(buf), "%g%%", v);
-            }
-            return (Item){.item = s2it(heap_create_name(buf))};
-        }
-        case CSS_VALUE_TYPE_NUMBER: {
-            char buf[64];
-            if (val->data.number.is_integer) {
-                snprintf(buf, sizeof(buf), "%d", (int)val->data.number.value);
-            } else {
-                snprintf(buf, sizeof(buf), "%g", val->data.number.value);
-            }
-            return (Item){.item = s2it(heap_create_name(buf))};
-        }
-        case CSS_VALUE_TYPE_STRING:
-            if (val->data.string) {
-                // for getComputedStyle, string values are returned with quotes
-                char buf[256];
-                snprintf(buf, sizeof(buf), "\"%s\"", val->data.string);
-                return (Item){.item = s2it(heap_create_name(buf))};
-            }
-            break;
-        case CSS_VALUE_TYPE_COLOR: {
-            char buf[64];
-            uint8_t r = val->data.color.data.rgba.r;
-            uint8_t g = val->data.color.data.rgba.g;
-            uint8_t b = val->data.color.data.rgba.b;
-            uint8_t a = val->data.color.data.rgba.a;
-            if (a < 255) {
-                char alpha[32];
-                format_alpha_component(alpha, sizeof(alpha), a);
-                snprintf(buf, sizeof(buf), "rgba(%d, %d, %d, %s)", r, g, b, alpha);
-            } else {
-                snprintf(buf, sizeof(buf), "rgb(%d, %d, %d)", r, g, b);
-            }
-            return (Item){.item = s2it(heap_create_name(buf))};
-        }
-        default:
-            break;
-    }
-    if (pool) {
-        CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
-        if (fmt) {
-            css_format_value(fmt, val);
-            String* result = stringbuf_to_string(fmt->output);
-            if (result) {
-                return (Item){.item = s2it(heap_create_name(result->chars))};
-            }
-        }
-    }
-    return (Item){.item = s2it(heap_create_name(""))};
-}
-
-static Item js_css_string_item(const char* value) {
-    return (Item){.item = s2it(heap_create_name(value ? value : ""))};
-}
-
-static bool css_value_is_keyword(CssValue* value, CssEnum keyword) {
-    return value && value->type == CSS_VALUE_TYPE_KEYWORD &&
-           value->data.keyword == keyword;
-}
-
-static DomElement* js_parent_element(DomElement* elem) {
-    if (!elem || !elem->parent || !elem->parent->is_element()) return nullptr;
-    return static_cast<DomElement*>(elem->parent);
-}
-
-static CssDeclaration* js_computed_style_find_decl(DomElement* elem,
-                                                   CssPropertyId prop_id,
-                                                   int pseudo_type) {
-    if (!elem) return nullptr;
-    CssDeclaration* decl = nullptr;
-    if (pseudo_type == 1) {
-        decl = dom_element_get_pseudo_element_value(elem, prop_id, 1); // ::before
-    } else if (pseudo_type == 2) {
-        decl = dom_element_get_pseudo_element_value(elem, prop_id, 2); // ::after
-    } else {
-        decl = dom_element_get_specified_value(elem, prop_id);
-    }
-    if (!decl) {
-        decl = js_match_element_property(elem, prop_id, pseudo_type);
-    }
-    return decl;
-}
-
-static Item js_computed_style_resolve_property(DomElement* elem,
-                                               CssPropertyId prop_id,
-                                               int pseudo_type,
-                                               int depth);
-
-static Item js_computed_style_initial_value(DomElement* elem,
-                                            CssPropertyId prop_id,
-                                            int pseudo_type,
-                                            int depth) {
-    if (prop_id == CSS_PROPERTY_CONTENT) {
-        return js_css_string_item((pseudo_type == 1 || pseudo_type == 2) ? "none" : "normal");
-    }
-
-    const CssProperty* prop = css_property_get_by_id(prop_id);
-    const char* initial = prop && prop->initial_value ? prop->initial_value : "";
-    if (strcmp(initial, "currentColor") == 0 && depth < 16) {
-        return js_computed_style_resolve_property(elem, CSS_PROPERTY_COLOR, 0, depth + 1);
-    }
-    return js_css_string_item(initial);
-}
-
-static Item js_computed_style_inherited_value(DomElement* elem,
-                                              CssPropertyId prop_id,
-                                              int depth) {
-    DomElement* parent = js_parent_element(elem);
-    if (parent && depth < 16) {
-        return js_computed_style_resolve_property(parent, prop_id, 0, depth + 1);
-    }
-    return js_computed_style_initial_value(elem, prop_id, 0, depth + 1);
-}
-
-static Item js_computed_style_resolve_property(DomElement* elem,
-                                               CssPropertyId prop_id,
-                                               int pseudo_type,
-                                               int depth) {
-    if (!elem || depth > 16) return js_css_string_item("");
-
-    if (pseudo_type == 0 && elem->doc &&
-        (prop_id == CSS_PROPERTY_TRANSITION_DURATION ||
-         prop_id == CSS_PROPERTY_TRANSITION_DELAY ||
-         prop_id == CSS_PROPERTY_TRANSITION_PROPERTY)) {
-        CssTransitionProp transition;
-        CssPropertyId properties[8];
-        CssDeclaration* shorthand = js_computed_style_find_decl(
-            elem, CSS_PROPERTY_TRANSITION, 0);
-        CssDeclaration* duration = js_computed_style_find_decl(
-            elem, CSS_PROPERTY_TRANSITION_DURATION, 0);
-        CssDeclaration* delay = js_computed_style_find_decl(
-            elem, CSS_PROPERTY_TRANSITION_DELAY, 0);
-        CssDeclaration* property = js_computed_style_find_decl(
-            elem, CSS_PROPERTY_TRANSITION_PROPERTY, 0);
-        CssDeclaration* timing = js_computed_style_find_decl(
-            elem, CSS_PROPERTY_TRANSITION_TIMING_FUNCTION, 0);
-        // On-demand stylesheet matches are not stored in specified_style; use
-        // their winning values so shorthand transition timing is not lost.
-        css_transition_resolve_values(
-            shorthand ? shorthand->value : nullptr,
-            duration ? duration->value : nullptr,
-            delay ? delay->value : nullptr,
-            property ? property->value : nullptr,
-            timing ? timing->value : nullptr,
-            &transition, properties, 8);
-        char value[128];
-        if (prop_id == CSS_PROPERTY_TRANSITION_DURATION ||
-            prop_id == CSS_PROPERTY_TRANSITION_DELAY) {
-            float seconds = prop_id == CSS_PROPERTY_TRANSITION_DURATION
-                ? transition.duration : transition.delay;
-            snprintf(value, sizeof(value), "%.6gs", (double)seconds);
-            return js_css_string_item(value);
-        }
-        if (transition.property_count < 0) return js_css_string_item("all");
-        if (transition.property_count == 0) return js_css_string_item("none");
-        StrBuf* names = strbuf_new_cap(64);
-        for (int i = 0; names && i < transition.property_count; i++) {
-            const CssProperty* property = css_property_get_by_id(transition.properties[i]);
-            if (!property || !property->name) continue;
-            if (names->length > 0) strbuf_append_str(names, ", ");
-            strbuf_append_str(names, property->name);
-        }
-        Item result = js_css_string_item(names && names->str ? names->str : "none");
-        if (names) strbuf_free(names);
-        return result;
-    }
-
-    CssDeclaration* decl = js_computed_style_find_decl(elem, prop_id, pseudo_type);
-    if (!decl && pseudo_type == 0 &&
-        (prop_id == CSS_PROPERTY_OVERFLOW_X || prop_id == CSS_PROPERTY_OVERFLOW_Y)) {
-        // The computed longhands inherit a single-value overflow shorthand;
-        // Bootstrap uses overflowY to choose the ScrollSpy observer root.
-        decl = js_computed_style_find_decl(elem, CSS_PROPERTY_OVERFLOW, 0);
-    }
-    if (!decl || !decl->value) {
-        if (css_property_is_inherited(prop_id)) {
-            return js_computed_style_inherited_value(elem, prop_id, depth);
-        }
-        return js_computed_style_initial_value(elem, prop_id, pseudo_type, depth);
-    }
-
-    CssValue* value = decl->value;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        CssEnum keyword = value->data.keyword;
-        // CSS-wide keywords are specified values; getComputedStyle must resolve
-        // them or WPT assertion failures can leave inline mutations behind.
-        if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT) {
-            return js_computed_style_initial_value(elem, prop_id, pseudo_type, depth);
-        }
-        if (keyword == CSS_VALUE_INHERIT) {
-            return js_computed_style_inherited_value(elem, prop_id, depth);
-        }
-        if (keyword == CSS_VALUE_UNSET) {
-            if (css_property_is_inherited(prop_id)) {
-                return js_computed_style_inherited_value(elem, prop_id, depth);
-            }
-            return js_computed_style_initial_value(elem, prop_id, pseudo_type, depth);
-        }
-    }
-
-    // CSS spec: for ::before/::after, content 'normal' computes to 'none'
-    if (prop_id == CSS_PROPERTY_CONTENT && (pseudo_type == 1 || pseudo_type == 2) &&
-        css_value_is_keyword(value, CSS_VALUE_NORMAL)) {
-        return js_css_string_item("none");
-    }
-
-    Pool* pool = elem->doc ? elem->doc->pool : nullptr;
-    return css_value_to_string_item(value, pool);
-}
 
 extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
     DomNode* node = (DomNode*)js_dom_unwrap_element(elem_item);
@@ -4324,10 +4045,6 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
     }
 
     if (!elem) return (Item){.item = s2it(heap_create_name(""))};
-    // CSSOM declarations are live; a class/style mutation in the same task must
-    // be cascaded before Bootstrap reads transitionDuration from this wrapper.
-    if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
-
     const char* js_prop = fn_to_cstr(prop_name);
     if (!js_prop) return (Item){.item = s2it(heap_create_name(""))};
 
@@ -4342,7 +4059,7 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
     js_camel_to_css_prop(js_prop, css_prop, sizeof(css_prop));
 
     if (strcmp(css_prop, "content-visibility") == 0) {
-        const char* hidden = dom_element_get_attribute(elem, "hidden");
+        const char* hidden = elem->get_attribute("hidden");
         if (hidden && strcasecmp(hidden, "until-found") == 0) {
             return (Item){.item = s2it(heap_create_name("hidden"))};
         }
@@ -4403,126 +4120,17 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
         return (Item){.item = s2it(heap_create_name(""))};
     }
 
-    return js_computed_style_resolve_property(elem, prop_id, pseudo_type, 0);
+    char computed[512];
+    if (css_prop_serialize_computed(elem, prop_id, pseudo_type,
+                                    computed, sizeof(computed))) {
+        return (Item){.item = s2it(heap_create_name(computed))};
+    }
+    return (Item){.item = s2it(heap_create_name(""))};
 }
 
 // ============================================================================
 // On-demand CSS selector matching for getComputedStyle
 // ============================================================================
-
-// check if a shorthand property covers the requested longhand
-static bool css_shorthand_covers_longhand(CssPropertyId shorthand_id, CssPropertyId longhand_id) {
-    switch (shorthand_id) {
-        case CSS_PROPERTY_BACKGROUND:
-            return longhand_id == CSS_PROPERTY_BACKGROUND_COLOR ||
-                   longhand_id == CSS_PROPERTY_BACKGROUND_IMAGE ||
-                   longhand_id == CSS_PROPERTY_BACKGROUND_POSITION ||
-                   longhand_id == CSS_PROPERTY_BACKGROUND_SIZE ||
-                   longhand_id == CSS_PROPERTY_BACKGROUND_REPEAT ||
-                   longhand_id == CSS_PROPERTY_BACKGROUND_ATTACHMENT ||
-                   longhand_id == CSS_PROPERTY_BACKGROUND_ORIGIN ||
-                   longhand_id == CSS_PROPERTY_BACKGROUND_CLIP;
-        default:
-            return false;
-    }
-}
-
-/**
- * Match an element against all parsed stylesheets to find a specific property.
- * Used when CSS cascade hasn't happened yet (JS runs before cascade).
- *
- * This performs a mini-cascade for a single element + property:
- * iterates all stylesheet rules, matches selectors, and returns the
- * declaration with highest specificity for the requested property.
- */
-static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type) {
-    if (!elem || !elem->doc) return nullptr;
-
-    DomDocument* doc = elem->doc;
-    if (!doc->stylesheets || doc->stylesheet_count <= 0) {
-        log_debug("js_match_element_property: no stylesheets available");
-        return nullptr;
-    }
-
-    SelectorMatcher* matcher = js_dom_create_selector_matcher(doc);
-    if (!matcher) return nullptr;
-
-    CssDeclaration* best_decl = nullptr;
-    CssSpecificity best_spec = {0, 0, 0, 0, false};
-
-    // map pseudo_type (0=none, 1=before, 2=after) to PseudoElementType
-    PseudoElementType target_pseudo = PSEUDO_ELEMENT_NONE;
-    if (pseudo_type == 1) target_pseudo = PSEUDO_ELEMENT_BEFORE;
-    else if (pseudo_type == 2) target_pseudo = PSEUDO_ELEMENT_AFTER;
-
-    for (int s = 0; s < doc->stylesheet_count; s++) {
-        CssStylesheet* sheet = doc->stylesheets[s];
-        if (!sheet) continue;
-
-        for (size_t r = 0; r < sheet->rule_count; r++) {
-            CssRule* rule = sheet->rules[r];
-            if (!rule || rule->type != CSS_RULE_STYLE) continue;
-            if (rule->data.style_rule.declaration_count == 0) continue;
-
-            // try matching selector(s) against element
-            bool matched = false;
-            CssSpecificity match_spec = {0, 0, 0, 0, false};
-            PseudoElementType matched_pseudo = PSEUDO_ELEMENT_NONE;
-
-            // handle selector group (comma-separated)
-            CssSelectorGroup* group = rule->data.style_rule.selector_group;
-            CssSelector* single_sel = rule->data.style_rule.selector;
-
-            if (group && group->selector_count > 0) {
-                for (size_t si = 0; si < group->selector_count; si++) {
-                    CssSelector* sel = group->selectors[si];
-                    if (!sel) continue;
-
-                    MatchResult result;
-                    if (selector_matcher_matches(matcher, sel, elem, &result)) {
-                        matched = true;
-                        match_spec = result.specificity;
-                        matched_pseudo = result.pseudo_element;
-                        break;
-                    }
-                }
-            } else if (single_sel) {
-                MatchResult result;
-                if (selector_matcher_matches(matcher, single_sel, elem, &result)) {
-                    matched = true;
-                    match_spec = result.specificity;
-                    matched_pseudo = result.pseudo_element;
-                }
-            }
-
-            if (!matched) continue;
-
-            // check pseudo-element type matches what we're looking for
-            if (matched_pseudo != target_pseudo) continue;
-
-            // find the requested property in this rule's declarations
-            for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
-                CssDeclaration* decl = rule->data.style_rule.declarations[d];
-                if (!decl) continue;
-                if (decl->property_id != prop_id &&
-                    !css_shorthand_covers_longhand(decl->property_id, prop_id)) continue;
-
-                // compare specificity — take highest
-                if (!best_decl || css_specificity_compare(match_spec, best_spec) >= 0) {
-                    best_decl = decl;
-                    best_spec = match_spec;
-                }
-            }
-        }
-    }
-
-    if (best_decl) {
-        log_debug("js_match_element_property: found property %d for <%s> pseudo=%d via on-demand matching",
-                  prop_id, elem->tag_name ? elem->tag_name : "?", pseudo_type);
-    }
-
-    return best_decl;
-}
 
 /**
  * On-demand matching for CSS custom properties (--variable-name).
@@ -4667,7 +4275,7 @@ static bool js_dom_autocapitalize_inherits_from_form(DomElement* elem) {
 
 static DomElement* js_dom_form_owner(DomElement* elem) {
     if (!elem) return nullptr;
-    const char* form_id = dom_element_get_attribute(elem, "form");
+    const char* form_id = elem->get_attribute("form");
     if (form_id && *form_id) {
         DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
         DomElement* root = doc ? doc->root : nullptr;
@@ -4686,12 +4294,12 @@ static DomElement* js_dom_form_owner(DomElement* elem) {
 
 static const char* js_dom_get_autocapitalize(DomElement* elem) {
     if (!elem) return "";
-    const char* own = dom_element_get_attribute(elem, "autocapitalize");
+    const char* own = elem->get_attribute("autocapitalize");
     if (own) return js_dom_autocapitalize_state(own, true);
     if (js_dom_autocapitalize_inherits_from_form(elem)) {
         DomElement* form = js_dom_form_owner(elem);
         if (form) {
-            const char* form_value = dom_element_get_attribute(form, "autocapitalize");
+            const char* form_value = form->get_attribute("autocapitalize");
             if (form_value && *form_value) return js_dom_autocapitalize_state(form_value, false);
         }
     }
@@ -4704,7 +4312,7 @@ static bool js_dom_autocorrect_attr_state(const char* value) {
 
 static bool js_dom_autocorrect_disabled_by_input_type(DomElement* elem) {
     if (!_is_tag(elem, "input")) return false;
-    const char* type = dom_element_get_attribute(elem, "type");
+    const char* type = elem->get_attribute("type");
     if (!type) return false;
     return strcasecmp(type, "password") == 0 ||
         strcasecmp(type, "email") == 0 ||
@@ -4714,14 +4322,14 @@ static bool js_dom_autocorrect_disabled_by_input_type(DomElement* elem) {
 static bool js_dom_get_autocorrect(DomElement* elem) {
     if (!elem) return true;
     if (js_dom_autocorrect_disabled_by_input_type(elem)) return false;
-    const char* own = dom_element_get_attribute(elem, "autocorrect");
-    if (own || dom_element_has_attribute(elem, "autocorrect"))
+    const char* own = elem->get_attribute("autocorrect");
+    if (own || elem->has_attribute("autocorrect"))
         return js_dom_autocorrect_attr_state(own ? own : "");
     if (js_dom_autocapitalize_inherits_from_form(elem)) {
         DomElement* form = js_dom_form_owner(elem);
         if (form) {
-            const char* form_value = dom_element_get_attribute(form, "autocorrect");
-            if (form_value || dom_element_has_attribute(form, "autocorrect"))
+            const char* form_value = form->get_attribute("autocorrect");
+            if (form_value || form->has_attribute("autocorrect"))
                 return js_dom_autocorrect_attr_state(form_value ? form_value : "");
         }
     }
@@ -4745,7 +4353,7 @@ static bool js_dom_get_spellcheck(DomElement* elem) {
     while (p) {
         if (p->is_element()) {
             DomElement* e = p->as_element();
-            const char* value = dom_element_get_attribute(e, "spellcheck");
+            const char* value = e->get_attribute("spellcheck");
             bool state = true;
             if (value && js_dom_spellcheck_state_from_value(value, &state)) return state;
         }
@@ -4765,9 +4373,9 @@ static const char* js_dom_get_writing_suggestions(DomElement* elem) {
     while (p) {
         if (p->is_element()) {
             DomElement* e = p->as_element();
-            if (dom_element_has_attribute(e, "writingsuggestions")) {
+            if (e->has_attribute("writingsuggestions")) {
                 return js_dom_writing_suggestions_attr_state(
-                    dom_element_get_attribute(e, "writingsuggestions"));
+                    e->get_attribute("writingsuggestions"));
             }
         }
         p = p->parent;
@@ -4798,7 +4406,7 @@ static bool js_dom_data_attr_to_dataset_key(const char* attr, char* out, size_t 
 
 static bool js_dom_has_valid_int_attr(DomElement* elem, const char* attr, long* out) {
     if (!elem || !attr) return false;
-    const char* value = dom_element_get_attribute(elem, attr);
+    const char* value = elem->get_attribute(attr);
     if (!value) return false;
     char* end = nullptr;
     long parsed = strtol(value, &end, 10);
@@ -4825,7 +4433,7 @@ static bool js_dom_is_first_summary_child(DomElement* elem) {
 
 static bool js_dom_is_disabled_for_focus(DomElement* elem) {
     if (!elem) return true;
-    if (dom_element_has_attribute(elem, "disabled") &&
+    if (elem->has_attribute("disabled") &&
         (_is_tag(elem, "button") || _is_tag(elem, "input") ||
          _is_tag(elem, "select") || _is_tag(elem, "textarea") ||
          _is_tag(elem, "fieldset") || _is_tag(elem, "option") ||
@@ -4836,7 +4444,7 @@ static bool js_dom_is_disabled_for_focus(DomElement* elem) {
     while (p) {
         if (p->is_element()) {
             DomElement* pe = p->as_element();
-            if (_is_tag(pe, "fieldset") && dom_element_has_attribute(pe, "disabled")) {
+            if (_is_tag(pe, "fieldset") && pe->has_attribute("disabled")) {
                 DomNode* first = pe->first_child;
                 while (first && !first->is_element()) first = first->next_sibling;
                 if (first && first->as_element() && _is_tag(first->as_element(), "legend") &&
@@ -4853,9 +4461,9 @@ static bool js_dom_is_disabled_for_focus(DomElement* elem) {
 }
 
 static bool js_dom_is_editing_host(DomElement* elem) {
-    if (!elem || !dom_element_has_attribute(elem, "contenteditable")) return false;
+    if (!elem || !elem->has_attribute("contenteditable")) return false;
     const char* state = js_dom_normalize_contenteditable(
-        dom_element_get_attribute(elem, "contenteditable"));
+        elem->get_attribute("contenteditable"));
     return state && (strcmp(state, "true") == 0 || strcmp(state, "plaintext-only") == 0);
 }
 
@@ -4873,13 +4481,13 @@ static int js_dom_default_tab_index(DomElement* elem) {
 
 static bool js_dom_is_script_focusable(DomElement* elem) {
     if (!elem || !js_dom_node_is_connected((DomNode*)elem)) return false;
-    if (dom_element_has_attribute(elem, "hidden")) return false;
+    if (elem->has_attribute("hidden")) return false;
     if (js_dom_is_disabled_for_focus(elem)) return false;
 
     long tabindex = 0;
     if (js_dom_has_valid_int_attr(elem, "tabindex", &tabindex)) return true;
     if (_is_tag(elem, "input")) {
-        const char* type = dom_element_get_attribute(elem, "type");
+        const char* type = elem->get_attribute("type");
         return !type || strcasecmp(type, "hidden") != 0;
     }
     if (_is_tag(elem, "button") || _is_tag(elem, "select") ||
@@ -4887,7 +4495,7 @@ static bool js_dom_is_script_focusable(DomElement* elem) {
         _is_tag(elem, "area")) {
         return true;
     }
-    if (_is_tag(elem, "a")) return dom_element_has_attribute(elem, "href");
+    if (_is_tag(elem, "a")) return elem->has_attribute("href");
     if (js_dom_is_first_summary_child(elem)) return true;
     if (js_dom_is_editing_host(elem)) return true;
     return false;
@@ -4927,7 +4535,7 @@ extern "C" void js_dom_after_disabled_attribute_set(void* elem_ptr) {
 }
 
 static bool js_dom_style_preserves_leading_ws(DomElement* elem, bool inherited) {
-    const char* style = elem ? dom_element_get_attribute(elem, "style") : nullptr;
+    const char* style = elem ? elem->get_attribute("style") : nullptr;
     if (!style) return inherited;
     const char* ws = strstr(style, "white-space");
     if (!ws) return inherited;
@@ -4981,9 +4589,9 @@ static bool js_dom_find_initial_editing_boundary(DomElement* elem,
         if (!child->is_element()) continue;
 
         DomElement* child_elem = child->as_element();
-        if (dom_element_has_attribute(child_elem, "contenteditable")) {
+        if (child_elem->has_attribute("contenteditable")) {
             const char* ce = js_dom_normalize_contenteditable(
-                dom_element_get_attribute(child_elem, "contenteditable"));
+                child_elem->get_attribute("contenteditable"));
             if (ce && strcmp(ce, "false") == 0) {
                 out_boundary->node = (DomNode*)elem;
                 out_boundary->offset = have_empty_prefix ? empty_prefix_index : index;
@@ -5116,7 +4724,7 @@ static void _collect_lookup_by_tag_rec(DomElement* root, const char* tag, Item c
 
 static void _collect_lookup_by_name_rec(DomElement* root, const char* name, Item collection) {
     if (!root || !name) return;
-    const char* attr = dom_element_get_attribute(root, "name");
+    const char* attr = root->get_attribute("name");
     if (attr && strcmp(attr, name) == 0) {
         js_array_push(collection, js_dom_wrap_element(root));
     }
@@ -5332,7 +4940,7 @@ static bool js_dom_update_inline_style_attribute(DomElement* elem,
 
     // The serialized attribute is the durable source for later recascade;
     // updating only specified_style loses CSSOM writes on the next subtree pass.
-    bool applied = dom_element_set_attribute(elem, "style",
+    bool applied = elem->set_attribute("style",
         updated->str ? updated->str : "");
     strbuf_free(updated);
     return applied;
@@ -5353,7 +4961,7 @@ static float js_dom_parse_positive_css_dimension(const char* value) {
 static float js_dom_inline_css_dimension(DomElement* elem,
                                          const char* prop_name) {
     if (!elem || !prop_name) return 0.0f;
-    const char* style = dom_element_get_attribute(elem, "style");
+    const char* style = elem->get_attribute("style");
     char value[64];
     if (!js_dom_style_decl_value(style, prop_name, value, sizeof(value))) {
         return 0.0f;
@@ -5420,11 +5028,11 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
         strbuf_append_str(sb, elem->tag_name ? elem->tag_name : "unknown");
 
         int attr_count = 0;
-        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+        const char** attr_names = elem->attribute_names(&attr_count);
         if (attr_names) {
             for (int i = 0; i < attr_count; i++) {
                 const char* name = attr_names[i];
-                const char* value = dom_element_get_attribute(elem, name);
+                const char* value = elem->get_attribute(name);
                 if (!name || !value) continue;
                 if (js_dom_is_internal_attr(name)) continue;
                 strbuf_append_char(sb, ' ');
@@ -5619,19 +5227,23 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
     elem->first_child = nullptr;
     elem->last_child = nullptr;
 
-    if (doc && doc->input && elem->native_element &&
-        elem->native_element->length > 0) {
-        if (elem->native_element->length > INT32_MAX) {
+    if (doc && doc->input && !elem->is_synthetic() &&
+        dom_element_to_element(elem)->length > 0) {
+        Element* backing = dom_element_to_element(elem);
+        if (backing->length > INT32_MAX) {
             log_error("js_dom_replace_inner_html: too many native children");
             return false;
         }
         MarkEditor editor(doc->input, EDIT_MODE_INLINE);
         Item cleared = editor.elmt_delete_children(
-            {.element = elem->native_element},
+            {.element = backing},
             0,
-            (int)elem->native_element->length);
+            (int)backing->length);
         if (get_type_id(cleared) == LMD_TYPE_ELEMENT) {
-            elem->native_element = cleared.element;
+            if (cleared.element != backing) {
+                log_error("js_dom_replace_inner_html: inline editor changed backing identity");
+                return false;
+            }
         } else {
             log_error("js_dom_replace_inner_html: native clear failed");
             return false;
@@ -5654,7 +5266,7 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
             if (type == LMD_TYPE_ELEMENT) {
                 DomElement* child_dom = build_dom_tree_from_element(
                     body_elem->items[i].element, doc, nullptr);
-                if (child_dom && dom_element_append_child(elem, child_dom)) {
+                if (child_dom && elem->append_child(child_dom)) {
                     dom_post_insert((DomNode*)elem, (DomNode*)child_dom);
                     js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
                                                      child_dom, elem,
@@ -5663,7 +5275,7 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
             } else if (type == LMD_TYPE_STRING) {
                 String* s = js_dom_fragment_text(body_elem->items[i]);
                 if (!s) continue;
-                DomText* text_dom = dom_element_append_text(elem, s->chars);
+                DomText* text_dom = elem->append_text(s->chars);
                 if (text_dom) {
                     dom_post_insert((DomNode*)elem, (DomNode*)text_dom);
                     js_dom_observers_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
@@ -5970,7 +5582,7 @@ static DomElement* js_dom_inline_offset_scope(DomElement* elem) {
         if (!current->is_element()) continue;
         DomElement* current_elem = current->as_element();
         const char* editable =
-            dom_element_get_attribute(current_elem, "contenteditable");
+            current_elem->get_attribute("contenteditable");
         if (editable) return current_elem;
         if (current_elem->tag_name &&
             strcasecmp(current_elem->tag_name, "body") == 0) {
@@ -6201,7 +5813,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         Element* elem = elem_item.element;
         DomElement* dom_elem = dom_element_create(doc, tag, elem);
         if (dom_elem && ns && ns[0] != '\0') {
-            dom_element_set_attribute(dom_elem, "__lambda_ns_uri", ns);
+            dom_elem->set_attribute("__lambda_ns_uri", ns);
         }
         return js_dom_wrap_element(dom_elem);
     }
@@ -6671,7 +6283,7 @@ extern "C" Item js_document_get_property(Item prop_name) {
     // readyState — legacy defaults to "complete"; the Phase 4 post-DOM
     // script scheduler updates this during modeled lifecycle transitions.
     if (strcmp(prop, "readyState") == 0) {
-        const char* ready_state = doc->js_ready_state ? doc->js_ready_state : "complete";
+        const char* ready_state = doc->js.ready_state ? doc->js.ready_state : "complete";
         return (Item){.item = s2it(heap_create_name(ready_state))};
     }
 
@@ -7238,7 +6850,7 @@ extern "C" Item js_dom_click_method_bridge(Item elem_item) {
             strcasecmp(tag, "select") == 0 ||
             strcasecmp(tag, "textarea") == 0 ||
             strcasecmp(tag, "fieldset") == 0;
-        if (is_form_ctrl && dom_element_has_attribute(elem, "disabled")) {
+        if (is_form_ctrl && elem->has_attribute("disabled")) {
             return make_js_undefined();
         }
     }
@@ -7418,7 +7030,7 @@ static bool _elem_is_barred(DomElement* elem) {
         return true;
     }
     // barred if disabled
-    if (dom_element_has_attribute(elem, "disabled")) return true;
+    if (elem->has_attribute("disabled")) return true;
     // barred if descendant of a disabled <fieldset>, except when descendant
     // of that fieldset's first <legend> child.
     {
@@ -7428,7 +7040,7 @@ static bool _elem_is_barred(DomElement* elem) {
             DomElement* pe = p->as_element();
             if (!pe->tag_name) continue;
             if (strcasecmp(pe->tag_name, "fieldset") == 0 &&
-                dom_element_has_attribute(pe, "disabled")) {
+                pe->has_attribute("disabled")) {
                 // Find first legend child of pe.
                 DomElement* first_legend = nullptr;
                 for (DomNode* c = pe->first_child; c; c = c->next_sibling) {
@@ -7446,7 +7058,7 @@ static bool _elem_is_barred(DomElement* elem) {
         }
     }
     // barred if readonly
-    if (dom_element_has_attribute(elem, "readonly")) return true;
+    if (elem->has_attribute("readonly")) return true;
     if (strcasecmp(tag, "input") == 0) {
         const char* type = js_dom_input_type_lower(elem);
         // Per HTML spec, input types hidden, reset, button are barred
@@ -7458,7 +7070,7 @@ static bool _elem_is_barred(DomElement* elem) {
     }
     if (strcasecmp(tag, "button") == 0) {
         // <button type=reset|button> is barred. Default and submit are not.
-        const char* btype = dom_element_get_attribute(elem, "type");
+        const char* btype = elem->get_attribute("type");
         if (btype && (strcasecmp(btype, "reset") == 0 || strcasecmp(btype, "button") == 0)) {
             return true;
         }
@@ -7485,7 +7097,7 @@ static const char* _elem_current_value(DomElement* elem) {
     const char* tag = elem->tag_name;
     if (strcasecmp(tag, "input") == 0) {
         RadiantInputValueKind kind = radiant_input_value_kind(
-            dom_element_get_attribute(elem, "type"));
+            elem->get_attribute("type"));
         if (kind != RADIANT_INPUT_VALUE_TEXT &&
             kind != RADIANT_INPUT_VALUE_UNSUPPORTED) {
             return radiant_input_live_value(elem);
@@ -7494,7 +7106,7 @@ static const char* _elem_current_value(DomElement* elem) {
             tc_ensure_init(elem);
             return (elem->form && elem->form->current_value) ? elem->form->current_value : "";
         }
-        const char* v = dom_element_get_attribute(elem, "value");
+        const char* v = elem->get_attribute("value");
         return v ? v : "";
     }
     if (strcasecmp(tag, "textarea") == 0) {
@@ -7585,7 +7197,7 @@ static bool _get_selectedness(DomElement* opt) {
         Item v = js_property_get(exp, key);
         if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
     }
-    return dom_element_has_attribute(opt, "selected");
+    return opt->has_attribute("selected");
 }
 
 // Returns true if the select's selectedness has been explicitly modified
@@ -7757,7 +7369,7 @@ extern "C" Item js_dom_text_control_set_default_value_bridge(void* dom_elem, Ite
         }
         return value;
     }
-    dom_element_set_attribute(elem, "value", s);
+    elem->set_attribute("value", s);
     if (!_value_is_dirty(elem)) {
         tc_set_value(elem, s, strlen(s));
     }
@@ -7816,7 +7428,7 @@ static void _select_select_only_option(DomElement* sel, DomElement* selected_opt
 
 static void _select_normalize_for_selected_options(DomElement* sel, Item options) {
     if (!sel || get_type_id(options) != LMD_TYPE_ARRAY) return;
-    if (dom_element_has_attribute(sel, "multiple")) return;
+    if (sel->has_attribute("multiple")) return;
     int64_t n = js_array_length(options);
     int selected_count = 0;
     int last_selected = -1;
@@ -7828,12 +7440,12 @@ static void _select_normalize_for_selected_options(DomElement* sel, Item options
             selected_count++;
             last_selected = (int)i; // INT_CAST_OK: option index
         }
-        if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled")) {
+        if (first_non_disabled < 0 && !opt->has_attribute("disabled")) {
             first_non_disabled = (int)i; // INT_CAST_OK: option index
         }
     }
     int size = 0;
-    const char* sz = dom_element_get_attribute(sel, "size");
+    const char* sz = sel->get_attribute("size");
     if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
     int chosen = -1;
     if (selected_count > 1) chosen = last_selected;
@@ -7871,18 +7483,18 @@ static int _select_effective_selected_index(DomElement* sel, Item options) {
         DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(options, i));
         if (!opt) continue;
         if (sel_idx < 0 && _get_selectedness(opt)) sel_idx = (int)i; // INT_CAST_OK: option index
-        if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled")) {
+        if (first_non_disabled < 0 && !opt->has_attribute("disabled")) {
             first_non_disabled = (int)i; // INT_CAST_OK: option index
         }
     }
     int size = 0;
-    const char* sz = dom_element_get_attribute(sel, "size");
+    const char* sz = sel->get_attribute("size");
     if (sz) {
         char* ep = nullptr;
         long v = strtol(sz, &ep, 10);
         if (ep != sz && v > 0) size = (int)v; // INT_CAST_OK: select display size attribute
     }
-    if (sel_idx < 0 && !dom_element_has_attribute(sel, "multiple") && size <= 1 &&
+    if (sel_idx < 0 && !sel->has_attribute("multiple") && size <= 1 &&
         !_select_is_dirty(sel)) {
         sel_idx = first_non_disabled;
     }
@@ -7970,8 +7582,8 @@ extern "C" void js_array_exotic_before_property_get(Item object, Item key) {
             Item candidate = js_array_get_int(object, i);
             DomElement* elem = (DomElement*)js_dom_unwrap_element(candidate);
             if (!elem) continue;
-            const char* name = dom_element_get_attribute(elem, "name");
-            const char* id = dom_element_get_attribute(elem, "id");
+            const char* name = elem->get_attribute("name");
+            const char* id = elem->get_attribute("id");
             if ((name && strlen(name) == (size_t)sk->len &&
                  strncmp(name, sk->chars, (size_t)sk->len) == 0) ||
                 (id && strlen(id) == (size_t)sk->len &&
@@ -8042,7 +7654,7 @@ extern "C" void js_dom_after_set_attribute(void* elem_ptr,
     js_dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
     if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
         DomElement* sel = _nearest_select_for_node((DomNode*)elem);
-        if (sel && !dom_element_has_attribute(sel, "multiple")) _select_ask_for_reset(sel);
+        if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
     }
     _select_refresh_cached_selected_options_for_node((DomNode*)elem);
 }
@@ -8084,7 +7696,7 @@ static DomElement* _option_owner_select(DomElement* opt) {
 // Return the option's effective value (`value` attribute, or text content
 // if absent). Heap-allocated cstring caller must mem_free.
 static char* _option_value(DomElement* opt) {
-    const char* v = dom_element_get_attribute(opt, "value");
+    const char* v = opt->get_attribute("value");
     if (v) return mem_strdup(v, MEM_CAT_JS_RUNTIME);
     return _option_text(opt);
 }
@@ -8103,12 +7715,12 @@ static char* _select_value(DomElement* elem) {
         if (!option) continue;
         if (_get_selectedness(option)) return _option_value(option);
         if (!first_non_disabled &&
-            !dom_element_has_attribute(option, "disabled")) {
+            !option->has_attribute("disabled")) {
             first_non_disabled = option;
         }
     }
 
-    const char* size_attr = dom_element_get_attribute(elem, "size");
+    const char* size_attr = elem->get_attribute("size");
     int size = 0;
     if (size_attr) {
         char* end = nullptr;
@@ -8117,7 +7729,7 @@ static char* _select_value(DomElement* elem) {
             size = (int)parsed; // INT_CAST_OK: HTML select size
         }
     }
-    if (!dom_element_has_attribute(elem, "multiple") && size <= 1 &&
+    if (!elem->has_attribute("multiple") && size <= 1 &&
         first_non_disabled && !_select_is_dirty(elem)) {
         return _option_value(first_non_disabled);
     }
@@ -8128,7 +7740,7 @@ static void _select_sync_native_selected_index(DomElement* sel,
                                                int selected_index,
                                                int option_count) {
     if (!sel || !_is_tag(sel, "select")) return;
-    if (sel->item_prop_type == DomElement::ITEM_PROP_FORM && sel->form) {
+    if (sel->form_control()) {
         // Script can reorder/add options without rebuilding the form control;
         // keep native option bounds aligned before storing live selectedness.
         sel->form->option_count = option_count;
@@ -8162,7 +7774,7 @@ static int _option_index_in_select(DomElement* opt) {
 // had selectedness, the first non-disabled option is selected.
 static void _select_ask_for_reset(DomElement* sel) {
     if (!sel) return;
-    if (dom_element_has_attribute(sel, "multiple")) return;
+    if (sel->has_attribute("multiple")) return;
     Item arr = js_array_new(0);
     _collect_options(sel->first_child, arr);
     int64_t n = js_array_length(arr);
@@ -8174,7 +7786,7 @@ static void _select_ask_for_reset(DomElement* sel) {
         DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
         if (!opt) continue;
         if (_get_selectedness(opt)) last_selected = (int)i; // INT_CAST_OK: option index
-        if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled")) {
+        if (first_non_disabled < 0 && !opt->has_attribute("disabled")) {
             first_non_disabled = (int)i; // INT_CAST_OK: option index
         }
     }
@@ -8182,7 +7794,7 @@ static void _select_ask_for_reset(DomElement* sel) {
         (first_non_disabled >= 0 ? first_non_disabled : 0);
     int size = 0;
     {
-        const char* sz = dom_element_get_attribute(sel, "size");
+        const char* sz = sel->get_attribute("size");
         if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
     }
     // For display-size <= 1 (the common dropdown), exactly one option
@@ -8331,7 +7943,7 @@ extern "C" void js_dom_set_option_selected_dirty(void* dom_elem, bool selected) 
     // Explicit option.selected wins in non-multiple selects, then refreshes
     // cached selectedOptions exactly as the fallback setter did.
     DomElement* sel = _option_owner_select(elem);
-    if (sel && selected && !dom_element_has_attribute(sel, "multiple")) {
+    if (sel && selected && !sel->has_attribute("multiple")) {
         _select_select_only_option(sel, elem);
     } else if (sel) {
         _select_ask_for_reset(sel);
@@ -8377,9 +7989,9 @@ static bool _select_value_missing(DomElement* sel) {
     int64_t n = js_array_length(arr);
     if (n == 0) return true;
     int size = 0;
-    const char* sz = dom_element_get_attribute(sel, "size");
+    const char* sz = sel->get_attribute("size");
     if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
-    bool is_listbox = dom_element_has_attribute(sel, "multiple") || size > 1;
+    bool is_listbox = sel->has_attribute("multiple") || size > 1;
     // Identify the placeholder option: the first option in the select's
     // option list, only if it is a direct child of the select and has empty
     // value. Options inside an optgroup don't qualify.
@@ -8408,7 +8020,7 @@ static bool _select_value_missing(DomElement* sel) {
     if (!any_selected && !is_listbox && !_select_is_dirty(sel)) {
         for (int64_t i = 0; i < n; i++) {
             DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
-            if (!opt || dom_element_has_attribute(opt, "disabled")) continue;
+            if (!opt || opt->has_attribute("disabled")) continue;
             any_selected = true;
             if (opt != placeholder) any_non_placeholder_selected = true;
             break;
@@ -8430,7 +8042,7 @@ static void _reset_form_control(DomElement* elem) {
         const char* itype = _input_type_lower(elem);
         if (strcmp(itype, "checkbox") == 0 || strcmp(itype, "radio") == 0) {
             // checked := defaultChecked (presence of "checked" content attr)
-            bool default_checked = dom_element_has_attribute(elem, "checked");
+            bool default_checked = elem->has_attribute("checked");
             _set_checkedness(elem, default_checked);
             // Clear dirty checkedness flag.
             Item exp = expando_get_map((DomNode*)elem);
@@ -8461,7 +8073,7 @@ static void _reset_form_control(DomElement* elem) {
         // Text-like input: value := defaultValue (= value attribute)
         if (tc_is_text_control_elem(elem)) {
             tc_ensure_init(elem);
-            const char* dv = dom_element_get_attribute(elem, "value");
+            const char* dv = elem->get_attribute("value");
             if (!dv) dv = "";
             tc_set_value(elem, dv, strlen(dv));
             _value_clear_dirty(elem);
@@ -8491,7 +8103,7 @@ static void _reset_form_control(DomElement* elem) {
             DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
             if (!opt) continue;
             // Default selectedness = presence of "selected" content attribute
-            _set_selectedness(opt, dom_element_has_attribute(opt, "selected"));
+            _set_selectedness(opt, opt->has_attribute("selected"));
             // Clear per-option dirty selectedness flag.
             Item oexp = expando_get_map((DomNode*)opt);
             if (oexp.item != ITEM_NULL) {
@@ -8506,7 +8118,7 @@ static void _reset_form_control(DomElement* elem) {
             Item key = (Item){.item = s2it(heap_create_name("__selDirty"))};
             js_property_set(exp, key, (Item){.item = ITEM_NULL});
         }
-        if (!dom_element_has_attribute(elem, "multiple")) {
+        if (!elem->has_attribute("multiple")) {
             _select_ask_for_reset(elem);
         }
         return;
@@ -8551,7 +8163,7 @@ static void _run_form_reset(DomElement* form_elem) {
                         strcasecmp(ce->tag_name, "select") == 0 ||
                         strcasecmp(ce->tag_name, "output") == 0;
                     if (is_ctrl) {
-                        const char* fa = dom_element_get_attribute(ce, "form");
+                        const char* fa = ce->get_attribute("form");
                         DomElement* owner = nullptr;
                         if (fa && *fa) {
                             owner = doc_root ? dom_find_by_id(doc_root, fa) : nullptr;
@@ -8590,7 +8202,7 @@ static void _run_form_reset(DomElement* form_elem) {
                             strcasecmp(ce->tag_name, "select") == 0 ||
                             strcasecmp(ce->tag_name, "output") == 0;
                         if (is_ctrl) {
-                            const char* fa = dom_element_get_attribute(ce, "form");
+                            const char* fa = ce->get_attribute("form");
                             if (fa && *fa) {
                                 DomElement* owner = dom_find_by_id(doc_root, fa);
                                 if (owner == form_elem) _reset_form_control(ce);
@@ -8664,9 +8276,9 @@ static Item _build_validity_state(DomElement* elem) {
             const char* itype0 = js_dom_input_type_lower(elem);
             if (strcmp(itype0, "radio") == 0) {
                 radio_handled = true;
-                const char* rname = dom_element_get_attribute(elem, "name");
+                const char* rname = elem->get_attribute("name");
                 bool elem_connected = js_dom_is_connected(elem);
-                bool own_required = dom_element_has_attribute(elem, "required");
+                bool own_required = elem->has_attribute("required");
                 if (!rname || !*rname) {
                     // Empty/missing name → no group. WPT expects
                     // valueMissing=false even if required.
@@ -8695,7 +8307,7 @@ static Item _build_validity_state(DomElement* elem) {
                                 if (ce->tag_name && strcasecmp(ce->tag_name, "input") == 0) {
                                     const char* tt = js_dom_input_type_lower(ce);
                                     if (strcmp(tt, "radio") == 0) {
-                                        const char* nm = dom_element_get_attribute(ce, "name");
+                                        const char* nm = ce->get_attribute("name");
                                         if (nm && strcmp(nm, rname) == 0) {
                                             DomElement* ce_form = nullptr;
                                             for (DomNode* pp = ce->parent; pp; pp = pp->parent) {
@@ -8708,7 +8320,7 @@ static Item _build_validity_state(DomElement* elem) {
                                             }
                                             if (ce_form == form_scope) {
                                                 if (js_dom_get_checkedness(ce)) any_checked = true;
-                                                if (dom_element_has_attribute(ce, "required")) any_required = true;
+                                                if (ce->has_attribute("required")) any_required = true;
                                             }
                                         }
                                     }
@@ -8726,7 +8338,7 @@ static Item _build_validity_state(DomElement* elem) {
             }
         }
 
-        if (!radio_handled && dom_element_has_attribute(elem, "required")) {
+        if (!radio_handled && elem->has_attribute("required")) {
             if (strcasecmp(tag, "input") == 0) {
                 const char* itype = js_dom_input_type_lower(elem);
                 if (strcmp(itype, "checkbox") == 0) {
@@ -8767,7 +8379,7 @@ static Item _build_validity_state(DomElement* elem) {
 
         // patternMismatch: pattern attr + non-empty value + regex doesn't match
         if (!val_empty && !type_mismatch && strcasecmp(tag, "input") == 0) {
-            const char* pattern = dom_element_get_attribute(elem, "pattern");
+            const char* pattern = elem->get_attribute("pattern");
             if (pattern && *pattern) {
                 // HTML pattern anchors the whole value (^(?:pattern)$)
                 // Build anchored pattern
@@ -8791,9 +8403,9 @@ static Item _build_validity_state(DomElement* elem) {
             const char* itype = js_dom_input_type_lower(elem);
             RadiantInputValidity typed = {};
             radiant_input_value_validate(itype, val,
-                dom_element_get_attribute(elem, "min"),
-                dom_element_get_attribute(elem, "max"),
-                dom_element_get_attribute(elem, "step"), &typed);
+                elem->get_attribute("min"),
+                elem->get_attribute("max"),
+                elem->get_attribute("step"), &typed);
             range_overflow = typed.range_overflow;
             range_underflow = typed.range_underflow;
             step_mismatch = typed.step_mismatch;
@@ -9163,7 +8775,7 @@ static void _collect_document_forms_rec(DomNode* node, Item forms) {
 // Return the lowercased name/id key used to look up a form control by name.
 // Returns nullptr if the element has neither.
 static const char* _form_control_name_or_id(DomElement* e) {
-    const char* n = dom_element_get_attribute(e, "name");
+    const char* n = e->get_attribute("name");
     if (n && *n) return n;
     if (e->id && *e->id) return e->id;
     return nullptr;
@@ -9411,7 +9023,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // reserved internal attribute); otherwise HTML elements live in the XHTML
     // namespace. See createElementNS in js_document_method.
     if (strcmp(prop, "namespaceURI") == 0) {
-        const char* ns = dom_element_get_attribute(elem, "__lambda_ns_uri");
+        const char* ns = elem->get_attribute("__lambda_ns_uri");
         if (ns && ns[0] != '\0') {
             return (Item){.item = s2it(heap_create_name(ns))};
         }
@@ -9560,11 +9172,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         arr->capacity = 0;
         Item arr_item = (Item){.array = arr};
         int attr_count = 0;
-        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+        const char** attr_names = elem->attribute_names(&attr_count);
         for (int i = 0; attr_names && i < attr_count; i++) {
             const char* name = attr_names[i];
             if (js_dom_is_internal_attr(name)) continue;
-            const char* value = dom_element_get_attribute(elem, name);
+            const char* value = elem->get_attribute(name);
             Item pair = js_new_object();
             Item name_item = (Item){.item = s2it(heap_create_name(name))};
             Item value_item = (Item){.item = s2it(heap_create_name(value ? value : ""))};
@@ -9730,15 +9342,15 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // clientWidth / clientHeight — border box minus borders
     if (strcmp(prop, "clientWidth") == 0) {
         float bw = 0;
-        if (elem->bound && elem->bound->border) {
-            bw = elem->bound->border->width.left + elem->bound->border->width.right;
+        if (elem->bound && elem->boundary()->border) {
+            bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
         }
         return (Item){.item = i2it((int64_t)(elem->width - bw))};
     }
     if (strcmp(prop, "clientHeight") == 0) {
         float bh = 0;
-        if (elem->bound && elem->bound->border) {
-            bh = elem->bound->border->width.top + elem->bound->border->width.bottom;
+        if (elem->bound && elem->boundary()->border) {
+            bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
         }
         return (Item){.item = i2it((int64_t)(elem->height - bh))};
     }
@@ -9785,20 +9397,20 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // scrollTop / scrollLeft — current scroll position
     if (strcmp(prop, "scrollTop") == 0) {
-        if (elem->scroller && elem->scroller->pane) {
-            return (Item){.item = i2it((int64_t)elem->scroller->pane->v_scroll_position)};
+        if (elem->scroller && elem->scroll()->pane) {
+            return (Item){.item = i2it((int64_t)elem->scroll()->pane->v_scroll_position)};
         }
-        if (elem->has_pending_element_scroll_y) {
-            return (Item){.item = i2it((int64_t)elem->pending_element_scroll_y)};
+        if (elem->has_pending_element_scroll_y()) {
+            return (Item){.item = i2it((int64_t)elem->pending_scroll_y())};
         }
         return (Item){.item = i2it(0)};
     }
     if (strcmp(prop, "scrollLeft") == 0) {
-        if (elem->scroller && elem->scroller->pane) {
-            return (Item){.item = i2it((int64_t)elem->scroller->pane->h_scroll_position)};
+        if (elem->scroller && elem->scroll()->pane) {
+            return (Item){.item = i2it((int64_t)elem->scroll()->pane->h_scroll_position)};
         }
-        if (elem->has_pending_element_scroll_x) {
-            return (Item){.item = i2it((int64_t)elem->pending_element_scroll_x)};
+        if (elem->has_pending_element_scroll_x()) {
+            return (Item){.item = i2it((int64_t)elem->pending_scroll_x())};
         }
         return (Item){.item = i2it(0)};
     }
@@ -9869,15 +9481,15 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                 DomElement* opt = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
                 if (!opt) continue;
                 if (_get_selectedness(opt)) return (Item){.item = i2it(i)};
-                if (first_non_disabled < 0 && !dom_element_has_attribute(opt, "disabled"))
+                if (first_non_disabled < 0 && !opt->has_attribute("disabled"))
                     first_non_disabled = (int)i; // INT_CAST_OK: option index
             }
             // Default-selected behavior: non-multiple, size<=1 select with
             // no explicit selectedness picks the first non-disabled option.
             int size = 0;
-            const char* sz = dom_element_get_attribute(elem, "size");
+            const char* sz = elem->get_attribute("size");
             if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
-            if (!dom_element_has_attribute(elem, "multiple") && size <= 1
+            if (!elem->has_attribute("multiple") && size <= 1
                 && first_non_disabled >= 0 && !_select_is_dirty(elem)) {
                 return (Item){.item = i2it(first_non_disabled)};
             }
@@ -9890,7 +9502,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = s2it(result)};
         }
         if (strcmp(prop, "type") == 0) {
-            const char* t = dom_element_has_attribute(elem, "multiple")
+            const char* t = elem->has_attribute("multiple")
                 ? "select-multiple" : "select-one";
             return (Item){.item = s2it(heap_create_name(t))};
         }
@@ -9907,7 +9519,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         if (strcmp(prop, "text") == 0 || strcmp(prop, "label") == 0) {
             // label IDL: returns label attribute, falling back to text.
             if (strcmp(prop, "label") == 0) {
-                const char* lab = dom_element_get_attribute(elem, "label");
+                const char* lab = elem->get_attribute("label");
                 if (lab && *lab) return (Item){.item = s2it(heap_create_name(lab))};
             }
             char* t = _option_text(elem);
@@ -9922,9 +9534,9 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             // direct-child option counts as selected.
             DomElement* sel = _option_owner_select(elem);
             if (!sel || _select_is_dirty(sel)) return (Item){.item = b2it(false)};
-            if (dom_element_has_attribute(sel, "multiple")) return (Item){.item = b2it(false)};
+            if (sel->has_attribute("multiple")) return (Item){.item = b2it(false)};
             int size = 0;
-            const char* sz = dom_element_get_attribute(sel, "size");
+            const char* sz = sel->get_attribute("size");
             if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
             if (size > 1) return (Item){.item = b2it(false)};
             // Walk options of sel; check none has selectedness; find first
@@ -9937,7 +9549,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                 DomElement* o = (DomElement*)js_dom_unwrap_element(js_array_get_int(arr, i));
                 if (!o) continue;
                 if (_get_selectedness(o)) return (Item){.item = b2it(false)};
-                if (first_nd < 0 && !dom_element_has_attribute(o, "disabled"))
+                if (first_nd < 0 && !o->has_attribute("disabled"))
                     first_nd = (int)i; // INT_CAST_OK: option index
             }
             if (first_nd < 0) return (Item){.item = b2it(false)};
@@ -9975,10 +9587,10 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
          _is_tag(elem, "select") || _is_tag(elem, "textarea") ||
          _is_tag(elem, "fieldset") || _is_tag(elem, "optgroup") ||
          _is_tag(elem, "option"))) {
-        return (Item){.item = b2it(dom_element_has_attribute(elem, "disabled"))};
+        return (Item){.item = b2it(elem->has_attribute("disabled"))};
     }
     if (strcmp(prop, "value") == 0 && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
-        const char* v = dom_element_get_attribute(elem, "value");
+        const char* v = elem->get_attribute("value");
         return (Item){.item = s2it(heap_create_name(v ? v : ""))};
     }
 
@@ -10004,7 +9616,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                 strbuf_free(sb);
                 return (Item){.item = s2it(s)};
             }
-            const char* v = dom_element_get_attribute(elem, "value");
+            const char* v = elem->get_attribute("value");
             return (Item){.item = s2it(heap_create_name(v ? v : ""))};
         }
         if (strcmp(prop, "selectionStart") == 0) {
@@ -10060,7 +9672,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // Helper: read a non-negative integer attr; return default_val if absent/invalid
     auto _reflect_int_attr = [&](const char* attr_name, int default_val) -> int {
-        const char* v = dom_element_get_attribute(elem, attr_name);
+        const char* v = elem->get_attribute(attr_name);
         if (!v) return default_val;
         char* end = nullptr;
         long n = strtol(v, &end, 10);
@@ -10070,33 +9682,33 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // Boolean reflection: required, multiple, readOnly/readonly, noValidate
     if (strcmp(prop, "required") == 0 &&
         (_is_tag(elem, "input") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
-        return (Item){.item = b2it(dom_element_has_attribute(elem, "required"))};
+        return (Item){.item = b2it(elem->has_attribute("required"))};
     }
     if (strcmp(prop, "multiple") == 0 &&
         (_is_tag(elem, "input") || _is_tag(elem, "select"))) {
-        return (Item){.item = b2it(dom_element_has_attribute(elem, "multiple"))};
+        return (Item){.item = b2it(elem->has_attribute("multiple"))};
     }
     if ((strcmp(prop, "readOnly") == 0 || strcmp(prop, "readonly") == 0) &&
         (_is_tag(elem, "input") || _is_tag(elem, "textarea"))) {
-        return (Item){.item = b2it(dom_element_has_attribute(elem, "readonly"))};
+        return (Item){.item = b2it(elem->has_attribute("readonly"))};
     }
     if (strcmp(prop, "noValidate") == 0 && _is_tag(elem, "form")) {
-        return (Item){.item = b2it(dom_element_has_attribute(elem, "novalidate"))};
+        return (Item){.item = b2it(elem->has_attribute("novalidate"))};
     }
     if (strcmp(prop, "open") == 0 && _is_tag(elem, "details")) {
-        return (Item){.item = b2it(dom_element_has_attribute(elem, "open"))};
+        return (Item){.item = b2it(elem->has_attribute("open"))};
     }
     // name attribute (all listed form controls and form/fieldset)
     if (strcmp(prop, "name") == 0 &&
         (_is_tag(elem, "input") || _is_tag(elem, "button") || _is_tag(elem, "select") ||
          _is_tag(elem, "textarea") || _is_tag(elem, "form") || _is_tag(elem, "fieldset") ||
          _is_tag(elem, "output") || _is_tag(elem, "object"))) {
-        const char* v = dom_element_get_attribute(elem, "name");
+        const char* v = elem->get_attribute("name");
         return (Item){.item = s2it(heap_create_name(v ? v : ""))};
     }
     // type for button (default "submit"; only valid values: "submit","reset","button")
     if (strcmp(prop, "type") == 0 && _is_tag(elem, "button")) {
-        const char* v = dom_element_get_attribute(elem, "type");
+        const char* v = elem->get_attribute("type");
         if (v && (strcasecmp(v, "submit") == 0 || strcasecmp(v, "reset") == 0 || strcasecmp(v, "button") == 0)) {
             char buf[8];
             for (int i = 0; v[i] && i < 7; i++) buf[i] = (char)tolower((unsigned char)v[i]), buf[i+1] = '\0';
@@ -10107,26 +9719,26 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // placeholder (input, textarea)
     if (strcmp(prop, "placeholder") == 0 &&
         (_is_tag(elem, "input") || _is_tag(elem, "textarea"))) {
-        const char* v = dom_element_get_attribute(elem, "placeholder");
+        const char* v = elem->get_attribute("placeholder");
         return (Item){.item = s2it(heap_create_name(v ? v : ""))};
     }
     // autocomplete (form, input, select, textarea)
     if (strcmp(prop, "autocomplete") == 0 &&
         (_is_tag(elem, "form") || _is_tag(elem, "input") || _is_tag(elem, "select") || _is_tag(elem, "textarea"))) {
-        const char* v = dom_element_get_attribute(elem, "autocomplete");
+        const char* v = elem->get_attribute("autocomplete");
         return (Item){.item = s2it(heap_create_name(v ? v : ""))};
     }
     // pattern, min, max, step, accept (input only — simple string reflection)
     if (_is_tag(elem, "input") &&
         (strcmp(prop, "pattern") == 0 || strcmp(prop, "min") == 0 || strcmp(prop, "max") == 0 ||
          strcmp(prop, "step") == 0 || strcmp(prop, "accept") == 0)) {
-        const char* v = dom_element_get_attribute(elem, prop);
+        const char* v = elem->get_attribute(prop);
         return (Item){.item = s2it(heap_create_name(v ? v : ""))};
     }
     // HTMLFormElement: action, method, enctype/encoding, acceptCharset, target
     if (_is_tag(elem, "form")) {
         if (strcmp(prop, "action") == 0) {
-            const char* v = dom_element_get_attribute(elem, "action");
+            const char* v = elem->get_attribute("action");
             if (v && *v) return (Item){.item = s2it(heap_create_name(v))};
             // Empty/missing action falls back to document URL per HTML spec.
             DomDocument* doc = elem->doc;
@@ -10138,26 +9750,26 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = s2it(heap_create_name(doc_url))};
         }
         if (strcmp(prop, "target") == 0) {
-            const char* v = dom_element_get_attribute(elem, prop);
+            const char* v = elem->get_attribute(prop);
             return (Item){.item = s2it(heap_create_name(v ? v : ""))};
         }
         if (strcmp(prop, "method") == 0) {
-            const char* v = dom_element_get_attribute(elem, "method");
+            const char* v = elem->get_attribute("method");
             return (Item){.item = s2it(heap_create_name(_normalise_method(v)))};
         }
         if (strcmp(prop, "enctype") == 0 || strcmp(prop, "encoding") == 0) {
-            const char* v = dom_element_get_attribute(elem, "enctype");
+            const char* v = elem->get_attribute("enctype");
             return (Item){.item = s2it(heap_create_name(_normalise_enctype(v)))};
         }
         if (strcmp(prop, "acceptCharset") == 0) {
-            const char* v = dom_element_get_attribute(elem, "accept-charset");
+            const char* v = elem->get_attribute("accept-charset");
             return (Item){.item = s2it(heap_create_name(v ? v : ""))};
         }
     }
     // HTMLTextAreaElement: wrap (default "soft"), rows (default 2), cols (default 20)
     if (_is_tag(elem, "textarea")) {
         if (strcmp(prop, "wrap") == 0) {
-            const char* v = dom_element_get_attribute(elem, "wrap");
+            const char* v = elem->get_attribute("wrap");
             return (Item){.item = s2it(heap_create_name(v ? v : "soft"))};
         }
         if (strcmp(prop, "rows") == 0) {
@@ -10167,7 +9779,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(_reflect_int_attr("cols", 20))};
         }
         if (strcmp(prop, "maxLength") == 0) {
-            const char* v = dom_element_get_attribute(elem, "maxlength");
+            const char* v = elem->get_attribute("maxlength");
             if (!v) return (Item){.item = i2it(-1)};
             char* end = nullptr; long n = strtol(v, &end, 10);
             return (Item){.item = i2it((end != v && n >= 0) ? n : -1)};
@@ -10185,7 +9797,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = i2it(_reflect_int_attr("height", 0))};
         }
         if (strcmp(prop, "maxLength") == 0) {
-            const char* v = dom_element_get_attribute(elem, "maxlength");
+            const char* v = elem->get_attribute("maxlength");
             if (!v) return (Item){.item = i2it(-1)};
             char* end = nullptr; long n = strtol(v, &end, 10);
             return (Item){.item = i2it((end != v && n >= 0) ? n : -1)};
@@ -10203,22 +9815,22 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     const char* string_attr = nullptr;
     if (_is_string_reflected(elem, prop, &string_attr)) {
-        const char* v = dom_element_get_attribute(elem, string_attr);
+        const char* v = elem->get_attribute(string_attr);
         return (Item){.item = s2it(heap_create_name(v ? v : ""))};
     }
 
     // HTMLInputElement.defaultChecked — reflects `checked` content attribute
     if (strcmp(prop, "defaultChecked") == 0 && _is_tag(elem, "input")) {
-        return (Item){.item = b2it(dom_element_has_attribute(elem, "checked"))};
+        return (Item){.item = b2it(elem->has_attribute("checked"))};
     }
     // HTMLOptionElement.defaultSelected — reflects `selected` content attribute
     if (strcmp(prop, "defaultSelected") == 0 && _is_tag(elem, "option")) {
-        return (Item){.item = b2it(dom_element_has_attribute(elem, "selected"))};
+        return (Item){.item = b2it(elem->has_attribute("selected"))};
     }
     // HTMLLabelElement.htmlFor / HTMLOutputElement.htmlFor — reflects `for`
     if (strcmp(prop, "htmlFor") == 0 &&
         (_is_tag(elem, "label") || _is_tag(elem, "output"))) {
-        const char* v = dom_element_get_attribute(elem, "for");
+        const char* v = elem->get_attribute("for");
         return (Item){.item = s2it(heap_create_name(v ? v : ""))};
     }
     // HTMLOutputElement.defaultValue — descendant text content if no override
@@ -10256,7 +9868,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // values" semantics. These are hints to the IME / on-screen keyboard;
     // the focus-time forwarding stub in update_focus_state() reads them.
     if (strcmp(prop, "inputMode") == 0) {
-        const char* v = dom_element_get_attribute(elem, "inputmode");
+        const char* v = elem->get_attribute("inputmode");
         if (!v) return (Item){.item = s2it(heap_create_name(""))};
         // Canonicalise to lowercase and validate against the spec keyword set.
         char buf[16]; size_t i = 0;
@@ -10274,7 +9886,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = s2it(heap_create_name(out))};
     }
     if (strcmp(prop, "enterKeyHint") == 0) {
-        const char* v = dom_element_get_attribute(elem, "enterkeyhint");
+        const char* v = elem->get_attribute("enterkeyhint");
         if (!v) return (Item){.item = s2it(heap_create_name(""))};
         char buf[16]; size_t i = 0;
         for (; v[i] && i < sizeof(buf) - 1; i++)
@@ -10294,11 +9906,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // isContentEditable is the computed property — walks ancestors honouring
     // inheritance and ="false" islands.
     if (strcmp(prop, "contentEditable") == 0) {
-        if (!dom_element_has_attribute(elem, "contenteditable")) {
+        if (!elem->has_attribute("contenteditable")) {
             return (Item){.item = s2it(heap_create_name("inherit"))};
         }
         const char* out = js_dom_normalize_contenteditable(
-            dom_element_get_attribute(elem, "contenteditable"));
+            elem->get_attribute("contenteditable"));
         return (Item){.item = s2it(heap_create_name(out ? out : "inherit"))};
     }
     if (strcmp(prop, "isContentEditable") == 0) {
@@ -10310,8 +9922,8 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         while (p) {
             if (p->node_type == DOM_NODE_ELEMENT) {
                 DomElement* e = (DomElement*)p;
-                if (dom_element_has_attribute(e, "contenteditable")) {
-                    const char* v = dom_element_get_attribute(e, "contenteditable");
+                if (e->has_attribute("contenteditable")) {
+                    const char* v = e->get_attribute("contenteditable");
                     if (!v || *v == '\0' || strcasecmp(v, "true") == 0 ||
                         strcasecmp(v, "plaintext-only") == 0) {
                         return (Item){.item = b2it(!saw_false)};
@@ -10340,11 +9952,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (strcmp(prop, "dataset") == 0) {
         Item dataset = js_new_object();
         int attr_count = 0;
-        const char** names = dom_element_get_attribute_names(elem, &attr_count);
+        const char** names = elem->attribute_names(&attr_count);
         for (int i = 0; i < attr_count; i++) {
             char key_buf[128];
             if (!js_dom_data_attr_to_dataset_key(names[i], key_buf, sizeof(key_buf))) continue;
-            const char* value = dom_element_get_attribute(elem, names[i]);
+            const char* value = elem->get_attribute(names[i]);
             js_property_set(dataset,
                 (Item){.item = s2it(heap_create_name(key_buf))},
                 (Item){.item = s2it(heap_create_name(value ? value : ""))});
@@ -10353,7 +9965,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     // autofocus boolean reflection (HTML global attribute).
     if (strcmp(prop, "autofocus") == 0) {
-        return (Item){.item = b2it(dom_element_has_attribute(elem, "autofocus"))};
+        return (Item){.item = b2it(elem->has_attribute("autofocus"))};
     }
 
     // formAction / formMethod / formEnctype / formTarget / formNoValidate
@@ -10361,7 +9973,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     // returns the document's URL when the attribute is missing or empty.
     if (_is_tag(elem, "input") || _is_tag(elem, "button")) {
         if (strcmp(prop, "formAction") == 0) {
-            const char* v = dom_element_get_attribute(elem, "formaction");
+            const char* v = elem->get_attribute("formaction");
             if (v && *v) return (Item){.item = s2it(heap_create_name(v))};
             // fall back to document URL
             DomDocument* doc = elem->doc;
@@ -10373,19 +9985,19 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
             return (Item){.item = s2it(heap_create_name(doc_url))};
         }
         if (strcmp(prop, "formMethod") == 0) {
-            const char* v = dom_element_get_attribute(elem, "formmethod");
+            const char* v = elem->get_attribute("formmethod");
             return (Item){.item = s2it(heap_create_name(_normalise_method(v)))};
         }
         if (strcmp(prop, "formEnctype") == 0) {
-            const char* v = dom_element_get_attribute(elem, "formenctype");
+            const char* v = elem->get_attribute("formenctype");
             return (Item){.item = s2it(heap_create_name(_normalise_enctype(v)))};
         }
         if (strcmp(prop, "formTarget") == 0) {
-            const char* v = dom_element_get_attribute(elem, "formtarget");
+            const char* v = elem->get_attribute("formtarget");
             return (Item){.item = s2it(heap_create_name(v ? v : ""))};
         }
         if (strcmp(prop, "formNoValidate") == 0) {
-            return (Item){.item = b2it(dom_element_has_attribute(elem, "formnovalidate"))};
+            return (Item){.item = b2it(elem->has_attribute("formnovalidate"))};
         }
     }
 
@@ -10480,8 +10092,8 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     }
 
     // fall back to native element attribute access
-    if (elem->native_element) {
-        const char* attr_val = dom_element_get_attribute(elem, prop);
+    if (!elem->is_synthetic()) {
+        const char* attr_val = elem->get_attribute(prop);
         if (attr_val) {
             return (Item){.item = s2it(heap_create_name(attr_val))};
         }
@@ -10676,7 +10288,7 @@ static void parse_class_names(DomElement* elem, const char* class_str) {
 
     elem->class_names = names;
     elem->class_count = count;
-    elem->styles_resolved = false;  // mark for re-cascading
+    elem->set_styles_resolved(false);  // mark for re-cascading
 }
 
 extern "C" Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value);
@@ -10724,8 +10336,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
     if (strcmp(prop, "style") == 0) {
         const char* style_text = fn_to_cstr(value);
-        dom_element_set_attribute(elem, "style", style_text ? style_text : "");
-        elem->styles_resolved = false;
+        elem->set_attribute("style", style_text ? style_text : "");
+        elem->set_styles_resolved(false);
         js_dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
         log_debug("js_dom_set_property: set style='%.50s' on <%s>",
                   style_text ? style_text : "", elem->tag_name ? elem->tag_name : "?");
@@ -10760,20 +10372,20 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             return value;
         }
 
-        if (elem->scroller && elem->scroller->pane) {
+        if (elem->scroller && elem->scroll()->pane) {
             float current_x = 0.0f;
             float current_y = 0.0f;
             DocState* state = elem->doc ? elem->doc->state : nullptr;
             scroll_state_get_position_for_view(state, static_cast<View*>(elem),
-                elem->scroller->pane, &current_x, &current_y, NULL, NULL);
+                elem->scroll()->pane, &current_x, &current_y, NULL, NULL);
             if (is_vertical) {
                 scroll_state_set_position_for_view(state, static_cast<View*>(elem),
-                    elem->scroller->pane, current_x, scroll_value, false);
-                elem->has_pending_element_scroll_y = false;
+                    elem->scroll()->pane, current_x, scroll_value, false);
+                elem->set_has_pending_element_scroll_y(false);
             } else {
                 scroll_state_set_position_for_view(state, static_cast<View*>(elem),
-                    elem->scroller->pane, scroll_value, current_y, false);
-                elem->has_pending_element_scroll_x = false;
+                    elem->scroll()->pane, scroll_value, current_y, false);
+                elem->set_has_pending_element_scroll_x(false);
             }
             log_debug("js_dom_set_property: set %s=%.1f on <%s>",
                       prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
@@ -10781,11 +10393,11 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         }
 
         if (is_vertical) {
-            elem->pending_element_scroll_y = scroll_value;
-            elem->has_pending_element_scroll_y = true;
+            elem->set_pending_scroll_y(scroll_value);
+            elem->set_has_pending_element_scroll_y(true);
         } else {
-            elem->pending_element_scroll_x = scroll_value;
-            elem->has_pending_element_scroll_x = true;
+            elem->set_pending_scroll_x(scroll_value);
+            elem->set_has_pending_element_scroll_x(true);
         }
         log_debug("js_dom_set_property: pending element %s=%.1f on <%s>",
                   prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
@@ -10794,7 +10406,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
     if (strcmp(prop, "srcdoc") == 0 && _is_tag(elem, "iframe")) {
         const char* srcdoc = fn_to_cstr(value);
-        dom_element_set_attribute(elem, "srcdoc", srcdoc ? srcdoc : "");
+        elem->set_attribute("srcdoc", srcdoc ? srcdoc : "");
         _schedule_iframe_load(elem);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
@@ -10806,7 +10418,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         if (class_str) {
             parse_class_names(elem, class_str);
             // also update the native element attribute
-            dom_element_set_attribute(elem, "class", class_str);
+            elem->set_attribute("class", class_str);
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("js_dom_set_property: set className='%s' on <%s>",
                       class_str, elem->tag_name ? elem->tag_name : "?");
@@ -10828,7 +10440,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         }
         if (!s) s = "";
         if (*s == '\0') {
-            dom_element_remove_attribute(elem, "contenteditable");
+            elem->remove_attribute("contenteditable");
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
@@ -10839,24 +10451,24 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             return value;
         }
         if (strcmp(normalized, "inherit") == 0) {
-            dom_element_remove_attribute(elem, "contenteditable");
+            elem->remove_attribute("contenteditable");
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
-        dom_element_set_attribute(elem, "contenteditable", normalized);
+        elem->set_attribute("contenteditable", normalized);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
     if (strcmp(prop, "autocapitalize") == 0) {
         const char* s = js_dom_to_attr_cstr(value);
-        dom_element_set_attribute(elem, "autocapitalize", s);
+        elem->set_attribute("autocapitalize", s);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
 
     if (strcmp(prop, "autocorrect") == 0) {
-        dom_element_set_attribute(elem, "autocorrect", js_is_truthy(value) ? "on" : "off");
+        elem->set_attribute("autocorrect", js_is_truthy(value) ? "on" : "off");
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
@@ -10868,7 +10480,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             const char* raw = fn_to_cstr(value);
             s = raw ? raw : "";
         }
-        dom_element_set_attribute(elem, "spellcheck", s);
+        elem->set_attribute("spellcheck", s);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
@@ -10879,7 +10491,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         if (vt == LMD_TYPE_STRING || vt == LMD_TYPE_SYMBOL) {
             s = js_dom_to_attr_cstr(value);
         }
-        dom_element_set_attribute(elem, "writingsuggestions", s);
+        elem->set_attribute("writingsuggestions", s);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
     }
@@ -10893,7 +10505,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             memcpy(id_copy, id_str, len);
             id_copy[len] = '\0';
             elem->id = id_copy;
-            dom_element_set_attribute(elem, "id", id_str);
+            elem->set_attribute("id", id_str);
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("js_dom_set_property: set id='%s' on <%s>",
                       id_str, elem->tag_name ? elem->tag_name : "?");
@@ -11031,8 +10643,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // updates to match the new default.
     if (strcmp(prop, "defaultChecked") == 0 && _is_tag(elem, "input")) {
         bool t = js_is_truthy(value);
-        if (t) dom_element_set_attribute(elem, "checked", "");
-        else   dom_element_remove_attribute(elem, "checked");
+        if (t) elem->set_attribute("checked", "");
+        else   elem->remove_attribute("checked");
         Item exp = expando_get_map((DomNode*)elem);
         bool dirty = false;
         if (exp.item != ITEM_NULL) {
@@ -11095,7 +10707,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             // The option explicitly being selected wins for non-multiple
             // selects; do not let a later selected option in tree order undo it.
             DomElement* sel = _option_owner_select(elem);
-            if (sel && selected && !dom_element_has_attribute(sel, "multiple")) {
+            if (sel && selected && !sel->has_attribute("multiple")) {
                 _select_select_only_option(sel, elem);
             } else if (sel) {
                 _select_ask_for_reset(sel);
@@ -11108,8 +10720,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         // updates to match the new default.
         if (strcmp(prop, "defaultSelected") == 0) {
             bool t = js_is_truthy(value);
-            if (t) dom_element_set_attribute(elem, "selected", "");
-            else   dom_element_remove_attribute(elem, "selected");
+            if (t) elem->set_attribute("selected", "");
+            else   elem->remove_attribute("selected");
             Item exp = expando_get_map((DomNode*)elem);
             bool dirty = false;
             if (exp.item != ITEM_NULL) {
@@ -11126,7 +10738,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         }
         if (strcmp(prop, "value") == 0) {
             const char* sv = fn_to_cstr(value);
-            dom_element_set_attribute(elem, "value", sv ? sv : "");
+            elem->set_attribute("value", sv ? sv : "");
             return value;
         }
         if (strcmp(prop, "text") == 0) {
@@ -11135,17 +10747,17 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             return value;
         }
         if (strcmp(prop, "defaultSelected") == 0) {
-            if (js_is_truthy(value)) dom_element_set_attribute(elem, "selected", "");
-            else dom_element_remove_attribute(elem, "selected");
+            if (js_is_truthy(value)) elem->set_attribute("selected", "");
+            else elem->remove_attribute("selected");
             return value;
         }
     }
     if (strcmp(prop, "value") == 0 && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
         const char* s = fn_to_cstr(value);
         if (!s) s = "";
-        dom_element_set_attribute(elem, "value", s);
+        elem->set_attribute("value", s);
         if (elem->form) {
-            elem->form->value = dom_element_get_attribute(elem, "value");
+            elem->form->value = elem->get_attribute("value");
         }
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return value;
@@ -11193,12 +10805,12 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             // in lowercase form via the mapping table.
             bool truthy = js_is_truthy(value);
             if (truthy) {
-                dom_element_set_attribute(elem, attr, "");
+                elem->set_attribute(attr, "");
                 if (strcmp(attr, "disabled") == 0) {
                     js_dom_clear_focus_if_disabled_now(elem);
                 }
             } else {
-                dom_element_remove_attribute(elem, attr);
+                elem->remove_attribute(attr);
                 if (_is_tag(elem, "select") && strcmp(attr, "multiple") == 0) {
                     _select_ask_for_reset(elem);
                 }
@@ -11230,7 +10842,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             if (n < 0) n = int_default;  // negative → reset to default
             char buf[32];
             snprintf(buf, sizeof(buf), "%ld", n);
-            dom_element_set_attribute(elem, int_attr, buf);
+            elem->set_attribute(int_attr, buf);
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
@@ -11241,9 +10853,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         if (mapped_attr) {
             const char* s = fn_to_cstr(value);
             if (s) {
-                dom_element_set_attribute(elem, mapped_attr, s);
+                elem->set_attribute(mapped_attr, s);
             } else {
-                dom_element_remove_attribute(elem, mapped_attr);
+                elem->remove_attribute(mapped_attr);
             }
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
@@ -11252,7 +10864,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         const char* string_attr = nullptr;
         if (_is_string_reflected(elem, prop, &string_attr)) {
             const char* s = js_dom_to_attr_cstr(value);
-            dom_element_set_attribute(elem, string_attr, s);
+            elem->set_attribute(string_attr, s);
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
         }
@@ -11266,9 +10878,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
                 for (; s[i] && i < sizeof(buf) - 1; i++)
                     buf[i] = (char)tolower((unsigned char)s[i]);
                 buf[i] = '\0';
-                dom_element_set_attribute(elem, "type", buf);
+                elem->set_attribute("type", buf);
             } else {
-                dom_element_set_attribute(elem, "type", "text");
+                elem->set_attribute("type", "text");
             }
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             return value;
@@ -11328,7 +10940,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
 
     // handle cssText special case: replace entire inline style
     if (strcmp(css_prop, "cssText") == 0) {
-        dom_element_set_attribute(elem, "style", val_str);
+        elem->set_attribute("style", val_str);
         js_dom_mutation_notify(DOM_JS_MUTATION_STYLE, (DomNode*)elem, elem->parent);
         log_debug("js_dom_set_style_property: set cssText='%.50s' on <%s>",
                   val_str, elem->tag_name ? elem->tag_name : "?");
@@ -11340,7 +10952,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
         CssPropertyId prop_id = css_property_id_from_name(css_prop);
         if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
             js_dom_update_inline_style_attribute(elem, css_prop, "", nullptr);
-            elem->styles_resolved = false;
+            elem->set_styles_resolved(false);
             js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
                                    (DomNode*)elem, elem->parent);
         }
@@ -11366,7 +10978,7 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
 
     // apply as inline style (highest cascade priority)
     js_dom_update_inline_style_attribute(elem, css_prop, val_str, nullptr);
-    elem->styles_resolved = false;  // mark for re-cascading
+    elem->set_styles_resolved(false);  // mark for re-cascading
     CssPropertyId prop_id = css_property_id_from_name(css_prop);
     js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
                            (DomNode*)elem, elem->parent);
@@ -11601,7 +11213,7 @@ static DomElement* js_dom_offset_parent_element(DomElement* elem) {
                  strcasecmp(pe->tag_name, "th") == 0)) {
                 return pe;
             }
-            if (pe->position && pe->position->position != CSS_VALUE_STATIC)
+            if (pe->position && pe->positionp()->position != CSS_VALUE_STATIC)
                 return pe;
         }
         p = p->parent;
@@ -11640,9 +11252,9 @@ static void js_dom_scroll_offset_for_node(DomNode* node,
         return;
     }
     DomElement* elem = node->as_element();
-    if (!elem || !elem->scroller || !elem->scroller->pane) return;
-    if (out_x) *out_x = elem->scroller->pane->h_scroll_position;
-    if (out_y) *out_y = elem->scroller->pane->v_scroll_position;
+    if (!elem || !elem->scroller || !elem->scroll()->pane) return;
+    if (out_x) *out_x = elem->scroll()->pane->h_scroll_position;
+    if (out_y) *out_y = elem->scroll()->pane->v_scroll_position;
 }
 
 static void js_dom_viewport_node_position(DomNode* node,
@@ -11786,9 +11398,9 @@ static DomElement* js_dom_element_from_point_walk(DomNode* node,
 
     DomElement* elem = node->as_element();
     if (js_dom_element_from_point_skips_subtree(elem)) return nullptr;
-    if (elem->shadow_root) {
+    if (elem->shadow_root_element()) {
         DomElement* shadow_hit = js_dom_shadow_element_from_point_walk(
-            (DomNode*)elem->shadow_root, node_x, node_y, px, py);
+            (DomNode*)elem->shadow_root_element(), node_x, node_y, px, py);
         if (shadow_hit) return shadow_hit;
     }
 
@@ -11833,19 +11445,19 @@ static DomElement* js_dom_shadow_element_from_document_point_walk(DomNode* node,
             px, py);
         if (hit) return hit;
     }
-    if (!elem->shadow_root) return nullptr;
+    if (!elem->shadow_root_element()) return nullptr;
 
     float host_x = 0.0f;
     float host_y = 0.0f;
     js_dom_viewport_node_position((DomNode*)elem, &host_x, &host_y);
-    DomElement* hit = js_dom_shadow_element_from_point_walk((DomNode*)elem->shadow_root,
+    DomElement* hit = js_dom_shadow_element_from_point_walk((DomNode*)elem->shadow_root_element(),
         host_x, host_y, px, py);
     if (hit) return hit;
     if (host_x != 0.0f || host_y != 0.0f) {
         // Shadow descendants in headless editing tests expose synthetic
         // offsetLeft/offsetTop before Radiant has real shadow layout boxes.
         return js_dom_shadow_element_from_point_walk(
-            (DomNode*)elem->shadow_root, 0.0f, 0.0f, px, py);
+            (DomNode*)elem->shadow_root_element(), 0.0f, 0.0f, px, py);
     }
     return nullptr;
 }
@@ -12437,13 +12049,13 @@ extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has
     Item _clean_elem = _clone_builder.element(elem->tag_name).final();
     DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
     if (!clone) return ItemNull;
-    if (elem->native_element) {
+    if (!elem->is_synthetic()) {
         int attr_count = 0;
-        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+        const char** attr_names = elem->attribute_names(&attr_count);
         for (int _ai = 0; _ai < attr_count; _ai++) {
             const char* aname = attr_names[_ai];
-            const char* aval  = dom_element_get_attribute(elem, aname);
-            if (aval) dom_element_set_attribute(clone, aname, aval);
+            const char* aval  = elem->get_attribute(aname);
+            if (aval) clone->set_attribute(aname, aval);
         }
     }
     Item orig_expando = expando_get_map((DomNode*)elem);
@@ -12696,7 +12308,7 @@ extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int a
             if (elem->tag() == HTM_TAG_SELECT && child_node->is_element() &&
                 child_node->as_element()->tag() == HTM_TAG_OPTION) {
                 DomElement* child_elem = child_node->as_element();
-                if (_get_selectedness(child_elem) && !dom_element_has_attribute(elem, "multiple")) {
+                if (_get_selectedness(child_elem) && !elem->has_attribute("multiple")) {
                     _select_select_only_option(elem, child_elem);
                 } else {
                     _select_ask_for_reset(elem);
@@ -12850,8 +12462,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         Item frag_item = builder.element("#document-fragment").final();
         Element* frag_elem = frag_item.element;
         DomElement* frag = dom_element_create(elem->doc, "#document-fragment", frag_elem);
-        frag->shadow_host = elem;
-        elem->shadow_root = frag;
+        frag->set_shadow_host_element(elem);
+        elem->set_shadow_root_element(frag);
         Item root = js_dom_wrap_element(frag);
 
         js_property_set(root, (Item){.item = s2it(heap_create_name("host"))}, elem_item);
@@ -12879,9 +12491,9 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
         if (js_dom_is_internal_attr(attr_name)) return ItemNull;
-        const char* val = dom_element_get_attribute(elem, attr_name);
+        const char* val = elem->get_attribute(attr_name);
         if (val) return (Item){.item = s2it(heap_create_name(val))};
-        if (dom_element_has_attribute(elem, attr_name))
+        if (elem->has_attribute(attr_name))
             return (Item){.item = s2it(heap_create_name(""))};
         return ItemNull;
     }
@@ -12893,12 +12505,12 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         const char* attr_val = js_dom_to_attr_cstr(args[1]);
         if (!attr_name || !attr_val) return ItemNull;
         if (js_dom_is_internal_attr(attr_name)) return ItemNull;
-        const char* old_value = dom_element_get_attribute(elem, attr_name);
-        dom_element_set_attribute(elem, attr_name, attr_val);
+        const char* old_value = elem->get_attribute(attr_name);
+        elem->set_attribute(attr_name, attr_val);
         js_dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
         if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
             DomElement* sel = _nearest_select_for_node((DomNode*)elem);
-            if (sel && !dom_element_has_attribute(sel, "multiple")) _select_ask_for_reset(sel);
+            if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
         }
         _select_refresh_cached_selected_options_for_node((DomNode*)elem);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
@@ -12912,7 +12524,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return (Item){.item = ITEM_FALSE};
         if (js_dom_is_internal_attr(attr_name)) return (Item){.item = ITEM_FALSE};
-        bool has = dom_element_has_attribute(elem, attr_name);
+        bool has = elem->has_attribute(attr_name);
         return (Item){.item = b2it(has ? 1 : 0)};
     }
 
@@ -12925,7 +12537,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         arr->capacity = 0;
         Item arr_item = (Item){.array = arr};
         int attr_count = 0;
-        const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+        const char** attr_names = elem->attribute_names(&attr_count);
         for (int i = 0; attr_names && i < attr_count; i++) {
             if (js_dom_is_internal_attr(attr_names[i])) continue;
             js_array_push(arr_item, (Item){.item = s2it(heap_create_name(attr_names[i]))});
@@ -12938,8 +12550,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (argc < 1) return ItemNull;
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return ItemNull;
-        const char* old_value = dom_element_get_attribute(elem, attr_name);
-        dom_element_remove_attribute(elem, attr_name);
+        const char* old_value = elem->get_attribute(attr_name);
+        elem->remove_attribute(attr_name);
         js_dom_clear_event_attr_expando(elem, attr_name);
         if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
             _select_ask_for_reset(elem);
@@ -13220,8 +12832,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
     // cloneNode(deep) — clone element (and optionally children)
     if (strcmp(method, "cloneNode") == 0) {
         bool deep = (argc > 0) ? js_is_truthy(args[0]) : false;
-        // create a new element with its own independent native_element.
-        // Passing elem->native_element causes a shallow copy that shares the
+        // create a new element with its own independent Lambda backing.
+        // Passing the embedded backing causes a shallow copy that shares the
         // data buffer; a subsequent removeAttribute on the clone would free
         // that shared buffer and leave the original with a dangling pointer.
         // Instead, create a clean element via MarkBuilder (same approach as
@@ -13231,17 +12843,17 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
         if (!clone) return ItemNull;
         // copy all content attributes from original to clone (per DOM spec §4.6)
-        if (elem->native_element) {
+        if (!elem->is_synthetic()) {
             int attr_count = 0;
-            const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+            const char** attr_names = elem->attribute_names(&attr_count);
             for (int _ai = 0; _ai < attr_count; _ai++) {
                 const char* aname = attr_names[_ai];
-                const char* aval  = dom_element_get_attribute(elem, aname);
-                if (aval) dom_element_set_attribute(clone, aname, aval);
+                const char* aval  = elem->get_attribute(aname);
+                if (aval) clone->set_attribute(aname, aval);
             }
         }
         // also copy IDL-set attributes stored in expando that may not be in
-        // native_element yet (e.g. ele.type="url" on a fresh createElement)
+        // Lambda backing yet (e.g. ele.type="url" on a fresh createElement)
         {
             Item orig_expando = expando_get_map((DomNode*)elem);
             if (orig_expando.item != ITEM_NULL) {
@@ -13382,7 +12994,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         const char* attr_name = fn_to_cstr(args[0]);
         if (!attr_name) return (Item){.item = ITEM_FALSE};
 
-        bool has = dom_element_has_attribute(elem, attr_name);
+        bool has = elem->has_attribute(attr_name);
         bool should_have;
         if (argc >= 2) {
             should_have = js_is_truthy(args[1]);
@@ -13391,9 +13003,9 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         }
 
         if (should_have && !has) {
-            dom_element_set_attribute(elem, attr_name, "");
+            elem->set_attribute(attr_name, "");
         } else if (!should_have && has) {
-            dom_element_remove_attribute(elem, attr_name);
+            elem->remove_attribute(attr_name);
             if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
                 _select_ask_for_reset(elem);
             }
@@ -13613,7 +13225,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                 if (elem->tag() == HTM_TAG_SELECT && child_node->is_element() &&
                     child_node->as_element()->tag() == HTM_TAG_OPTION) {
                     DomElement* child_elem = child_node->as_element();
-                    if (_get_selectedness(child_elem) && !dom_element_has_attribute(elem, "multiple")) {
+                    if (_get_selectedness(child_elem) && !elem->has_attribute("multiple")) {
                         _select_select_only_option(elem, child_elem);
                     } else {
                         _select_ask_for_reset(elem);
@@ -13748,9 +13360,9 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
             Item item = js_array_get_int(arr, i);
             DomElement* opt = (DomElement*)js_dom_unwrap_element(item);
             if (!opt) continue;
-            const char* id = dom_element_get_attribute(opt, "id");
+            const char* id = opt->get_attribute("id");
             if (id && strcmp(id, name) == 0) return item;
-            const char* nm = dom_element_get_attribute(opt, "name");
+            const char* nm = opt->get_attribute("name");
             if (nm && strcmp(nm, name) == 0) return item;
         }
         return ItemNull;
@@ -13879,7 +13491,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
     if (strcmp(method, "add") == 0) {
         for (int i = 0; i < argc; i++) {
             const char* cls = fn_to_cstr(args[i]);
-            if (cls) dom_element_add_class(elem, cls);
+            if (cls) elem->add_class(cls);
         }
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return ItemNull;
@@ -13889,7 +13501,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
     if (strcmp(method, "remove") == 0) {
         for (int i = 0; i < argc; i++) {
             const char* cls = fn_to_cstr(args[i]);
-            if (cls) dom_element_remove_class(elem, cls);
+            if (cls) elem->remove_class(cls);
         }
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return ItemNull;
@@ -13905,17 +13517,17 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
             // force parameter: add if truthy, remove if falsy
             bool force = js_is_truthy(args[1]);
             if (force) {
-                dom_element_add_class(elem, cls);
+                elem->add_class(cls);
                 js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
                 return (Item){.item = ITEM_TRUE};
             } else {
-                dom_element_remove_class(elem, cls);
+                elem->remove_class(cls);
                 js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
                 return (Item){.item = ITEM_FALSE};
             }
         }
         // no force: toggle
-        bool result = dom_element_toggle_class(elem, cls);
+        bool result = elem->toggle_class(cls);
         js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
         return (Item){.item = b2it(result ? 1 : 0)};
     }
@@ -13925,7 +13537,7 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
         if (argc < 1) return (Item){.item = ITEM_FALSE};
         const char* cls = fn_to_cstr(args[0]);
         if (!cls) return (Item){.item = ITEM_FALSE};
-        bool has = dom_element_has_class(elem, cls);
+        bool has = elem->has_class(cls);
         return (Item){.item = b2it(has ? 1 : 0)};
     }
 
@@ -13943,9 +13555,9 @@ extern "C" Item js_classlist_method(Item elem_item, Item method_name, Item* args
         const char* old_cls = fn_to_cstr(args[0]);
         const char* new_cls = fn_to_cstr(args[1]);
         if (!old_cls || !new_cls) return (Item){.item = ITEM_FALSE};
-        if (!dom_element_has_class(elem, old_cls)) return (Item){.item = ITEM_FALSE};
-        dom_element_remove_class(elem, old_cls);
-        dom_element_add_class(elem, new_cls);
+        if (!elem->has_class(old_cls)) return (Item){.item = ITEM_FALSE};
+        elem->remove_class(old_cls);
+        elem->add_class(new_cls);
         js_dom_mutation_notify();
         return (Item){.item = ITEM_TRUE};
     }
@@ -14019,7 +13631,7 @@ extern "C" Item js_dataset_get_property(Item elem_item, Item prop_name) {
     char attr_name[256];
     camel_to_data_attr(prop, attr_name, sizeof(attr_name));
 
-    const char* val = dom_element_get_attribute(elem, attr_name);
+    const char* val = elem->get_attribute(attr_name);
     if (val) {
         return (Item){.item = s2it(heap_create_name(val))};
     }
@@ -14037,7 +13649,7 @@ extern "C" Item js_dataset_set_property(Item elem_item, Item prop_name, Item val
     char attr_name[256];
     camel_to_data_attr(prop, attr_name, sizeof(attr_name));
 
-    dom_element_set_attribute(elem, attr_name, val_str);
+    elem->set_attribute(attr_name, val_str);
     return value;
 }
 
@@ -14181,7 +13793,7 @@ static Item js_dom_style_set_property_for_elem(DomElement* elem, Item prop_arg,
     }
     int applied = js_dom_update_inline_style_attribute(
         elem, css_prop, val_str, priority) ? 1 : 0;
-    elem->styles_resolved = false;
+    elem->set_styles_resolved(false);
     if (applied) {
         CssPropertyId prop_id = css_property_id_from_name(css_prop);
         js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
@@ -14220,7 +13832,7 @@ static Item js_dom_style_remove_property_for_elem(DomElement* elem, Item prop_ar
         js_dom_mutation_notify(js_dom_style_mutation_kind(prop_id),
                                (DomNode*)elem, elem->parent);
     }
-    elem->styles_resolved = false;
+    elem->set_styles_resolved(false);
     log_debug("js_dom_style_method: removeProperty '%s' on <%s>",
               css_prop, elem->tag_name ? elem->tag_name : "?");
     return old_val;
@@ -14321,7 +13933,7 @@ static bool _xpath_element_matches(Item expression_item, DomElement* elem) {
     const char* expression = fn_to_cstr(expression_item);
     if (!expression || !elem) return false;
     int attr_count = 0;
-    const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+    const char** attr_names = elem->attribute_names(&attr_count);
     for (int i = 0; attr_names && i < attr_count; i++) {
         if (_xpath_attr_name_matches(expression, attr_names[i])) return true;
     }
@@ -14514,12 +14126,12 @@ static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item s
     // value attr — only set if value_arg is provided AND not undefined.
     if (value_arg.item != ITEM_NULL && !is_js_undefined(value_arg)) {
         const char* v = fn_to_cstr(value_arg);
-        dom_element_set_attribute(opt, "value", v ? v : "");
+        opt->set_attribute("value", v ? v : "");
     }
     // defaultSelected → `selected` content attribute.
     if (def_sel_arg.item != ITEM_NULL && !is_js_undefined(def_sel_arg) &&
         js_is_truthy(def_sel_arg)) {
-        dom_element_set_attribute(opt, "selected", "");
+        opt->set_attribute("selected", "");
     }
     // selected → live selectedness flag.
     if (sel_arg.item != ITEM_NULL && !is_js_undefined(sel_arg)) {

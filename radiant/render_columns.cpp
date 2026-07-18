@@ -5,9 +5,9 @@
 #include "../lib/log.h"
 
 void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
-    if (!block->multicol) return;
+    if (!block->multicol_prop()) return;
 
-    MultiColumnProp* mc = block->multicol;
+    MultiColumnProp* mc = block->multicol_prop();
 
     int rule_column_count = mc->computed_used_column_count > 0
         ? mc->computed_used_column_count
@@ -23,8 +23,8 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
     float block_x = rdcon->block.x;
     float block_y = rdcon->block.y;
     if (block->bound) {
-        block_x += block->bound->padding.left;
-        block_y += block->bound->padding.top;
+        block_x += block->boundary()->padding.left;
+        block_y += block->boundary()->padding.top;
     }
 
     float rule_height = block->height;

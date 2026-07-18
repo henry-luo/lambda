@@ -5,6 +5,8 @@
 **Parent design:** `vibe/radiant/Radiant_Design_Dom_View_Struct.md` — decisions DV1–DV15, findings F1–F8, target sketch (§4). This doc turns those into execution-grade tasks.
 **Related:** `vibe/radiant/Radiant_Imp_Code_Dedup.md` (header consolidation), `vibe/radiant/Radiant_Design_Robustness.md` (T7 stale-View), `vibe/Lambda_Jube_DOM3.md` (property-table dispatch), `doc/dev/C_Plus_Convention.md`.
 
+**Campaign status:** complete. All implementation phases and refactor-specific acceptance gates are complete; repository-wide baseline defects encountered by the aggregate gate are isolated and recorded in §16.
+
 ---
 
 ## 0. Ground rules (apply to every task)
@@ -191,13 +193,13 @@ Order chosen so each task's measurement is attributable. Run `size_probe` + reco
 | Milestone | `DomNode` | `DomText` | `DomElement` | net LOC | Notes |
 |---|---|---|---|---|---|
 | Baseline `019f47214` | 80 | 136 | 584 | 0 | measured 2026-07-18 |
-| after P1 | 80 | 136 | 584 | expect ≤ 0 | null-check collapse should already pay for the defaults file |
-| after P2.1 | 80 | 136 | ≤592 | ↓ | +8 B second union slot (transient) |
-| after P3.1 `ext` | 80 | 136 | ~412 | ↓ | target |
-| after P3.2+P3.3 | 80 | 136 | ~396 | ↓ | target |
-| after P3.4 | 80 | 120 (104 w/ OQ2) | ~396 | ↓ | target |
-| after P4 | 80 | — | — | expect flat-to-↓ | table rows retire ad hoc code batch-by-batch |
-| campaign end | 80 | ≤120 | ≤400 (stretch 384) | expect −1500 or better | ratchets set in P3.5 from measurements |
+| after P1 | 80 | 136 | 584 | not snapshotted | canonical defaults, read accessors, and ensure writers landed |
+| after P2.1 | 80 | 136 | 552 | not snapshotted | flag consolidation absorbed the second union slot |
+| after P3.1 `ext` | 80 | 136 | 384 | not snapshotted | cold state moved behind the extension |
+| after P3.2+P3.3 | 80 | 136 | 368 | not snapshotted | intrinsic widths folded into `LayoutCache`; synthetic flag replaced pointer |
+| after P3.4 | 80 | 120 | 368 | not snapshotted | OQ2 rejected: symbols and first-letter slices intentionally use non-mirroring text/length |
+| after P4 | 80 | 120 | 368 | not snapshotted | 78-row table replaced the JS computed-style switch |
+| campaign end | 80 | 120 | 368 | +329 | final exact ratchets; LOC is the non-blocking production-source check from rule 7 |
 
 ## 8. Sequencing & risk register
 
@@ -216,4 +218,91 @@ Order chosen so each task's measurement is attributable. Run `size_probe` + reco
 | `DomElement` (t1) | `font/bound/blk/...` (t2) | t2 | sanctioned: unified tree; props rebuilt per relayout (DV9b) |
 | `DomElement` (t1) | `transition_state` | t1 (doc pool) | correct; the header comment moves to the tier tag |
 | `DomNode` (t1) | `view_state_ref` | t1 (DocState) | weak ref; document invalidation on epoch bump |
-| … | | | |
+| `DomElementExt` (t1) | `layout_fragments` | t2 (view pool) | sanctioned: extension slot is reset and rebuilt on every relayout |
+| `DomElement` (t1) | `layout_cache` | t2 (view pool) | sanctioned: reset with the view pool; never durable style authority |
+| `DomElementExt` (t1) | `pseudo` / `vpath` / `multicol` / `backdrop_filter` | t2 (view pool) | sanctioned: cold view data is grouped behind `ext` and rebuilt |
+| `DomElement` (t1) | `shadow_host` / `shadow_root` | t1 (doc pool) | correct; DOM ownership links survive relayout |
+
+## 10. Campaign completion matrix
+
+| Phase | Status | Result |
+|---|---|---|
+| P0 | complete | Lifetime-tier tags and ledger, consolidated flags/tags, and exact size ratchets are in place. |
+| P1 | complete | Canonical CSS-initial defaults, null-tolerant read accessors, and centralized ensure writers cover the tree-side property groups. Direct allocation residue was reduced to the documented pre-ViewTree async image seam. |
+| P2 | complete | Parent-item and element-role unions are independent. Table/form collision workarounds and the shadow flex/grid fields in `FormControlProp` were removed. Four layout fixtures cover table flex/grid, form flex/grid, and nested table-in-flex-in-grid cases. |
+| P3 | complete | Cold extension, intrinsic-cache move, synthetic flag, and `DomText` slimming landed. Exact final sizes are 80/120/368 B. |
+| P4 | complete | The immutable 78-row computed-style table, flush entry, JS routing, unsupported-property logging, gtests, and live mutation UI fixture landed. |
+| P5 | complete | Tree/attribute operations are methods and obsolete wrappers have zero callers. Scratch fields were moved where a stable owner exists; the explicitly allowed tagged deferrals are recorded in §14. |
+| P6 | complete | JS runtime, viewport, reconcile, and opaque service state are grouped under named `DomDocument` sub-structures. |
+
+## 11. P1 shared-group alias ledger
+
+The final pointer-assignment sweep found no live `DomElement`-to-`DomElement` alias of `font`, `in_line`, `bound`, `blk`, `position`, `embed`, or `scroller`.
+
+| Site/category | Result | Decision |
+|---|---|---|
+| anonymous table boxes (`layout_table.cpp`) | inheritable font/inline fields are copied through shared helpers; only the pool-owned family string is retained | element-owned and mutable after cascade |
+| generated pseudo-elements (`layout_block.cpp`) | font/boundary/inline pointers are deliberately left null and independently ensured | element-owned; comments protect the no-sharing invariant |
+| `DomText::font = lycon->font.style` | pass-context association for text layout, not an element group alias | valid tier-2 association |
+| replacement text node font copy | preserves the same text-run font during node replacement | valid text-node lifecycle copy |
+| canonical defaults | returned only as `const*`; writers must call an ensure method | immutable process-wide defaults |
+
+## 12. P3 measurements and decisions
+
+- Final size probe: `DomNode=80`, `DomText=120`, `DomElement=368`; supporting sizes were `FontProp=96`, `BoundaryProp=160`, `InlineProp=52`, `BlockProp=256`, `FlexItemProp=96`, `GridItemProp=144`, `TableCellProp=64`, and `LayoutCache=412` bytes.
+- OQ1 representative corpus: 2,187 elements, 328 extension allocations (15.0%), and 124 layout-cache allocations (5.7%). The overall extension rate is half the 30% reconsideration threshold, so the unified document-pool `DomElementExt` remains the selected split.
+- OQ2 was rejected: symbol text and first-letter slices intentionally permit `text`/`length` views that do not mirror the backing `String`, so those fields remain.
+- The synthetic backing regression exposed by full baselines was fixed at allocation: pool-created anonymous DOM elements start with `ELMT_FLAG_SYNTHETIC`. Backed element access therefore never infers backing identity from zero-filled flags.
+
+## 13. P4 query census and coverage
+
+The pre-table census found 42 `getComputedStyle` call sites across the UI/WPT harnesses and bundled framework/library fixtures. They cluster around geometry, box edges, typography/color, overflow, flex/grid alignment, animation/transition, transform/filter, direction, and generated content.
+
+The table contains 78 unique property rows. The UI fixture asserts 11 initial reads (`display`, `position`, width/height, margin/padding, color/font size, opacity, overflow, and box sizing) and three fresh reads after mutation. Unit tests verify unique IDs, direct offsets/default groups, serialization, and mutation-triggered freshness. `content-visibility` remains an explicit special case because the CSS property enum has no row ID; unsupported enumerated properties return an empty string and log once.
+
+## 14. P5 scratch and method audit
+
+- Flex/grid multipass fields that cannot yet move without inventing a second synchronization structure carry `// tier-3 scratch` tags. Their algorithms enter through separate measurement/finalization APIs and do not expose a stable pass-keyed owner across those entry points.
+- `TableCellProp::col_index`, `row_index`, and intrinsic width remain tagged scratch because collapsed-border/render consumers outlive the readily reachable `TableMetadata` lookup window. Moving them now would replace a direct lifetime contract with repeated table-tree searches.
+- The methodization sweep covers parent/child traversal, attributes, classes, and child mutation. `js_dom`, the Radiant bridge, Jube registry, and system registry have no live references to the deleted `dom_element_*`/`dom_node_*` wrapper symbols; remaining old spellings are log labels only.
+
+## 15. LOC consciousness check
+
+The final scoped check against `019f47214` is **+329 production LOC**: tracked production files are −485 lines and the three new production files add 814 lines. Tests, goldens, and this plan are excluded per rule 7. This missed the optimistic reduction estimate, but the rule explicitly makes the check non-blocking. The positive balance is the new 78-row table/serializers and canonical default/ensure infrastructure; the audit nevertheless found and removed real residue: duplicated anonymous-table inheritance blocks, the form-control flex/grid shadow storage, the table-vs-flex serializer workaround, and direct property-group allocation sites. No superseded computed-style switch, collision path, or C-ABI wrapper path remains.
+
+## 16. Final verification ledger
+
+### Refactor-specific gates
+
+- `make build`, `make build-test`, and `make release` pass.
+- The targeted DOM/CSS/layout suites pass: 11 custom role-collision fixtures, 17 CSS animation/property-table tests, 15 CSS style-application tests, 63 CSS DOM CRUD tests, 102 CSS DOM integration tests, 49 HTML/CSS tests, and 39 Lambda `DomNode` tests. Declared skips remain skips.
+- `make layout suite=baseline` passes **4,379/4,379** comparisons with six declared skips. The dedicated table/form flex/grid fixtures also match their goldens exactly.
+- The release benchmark used 11 alternating rounds, each containing 30 layout invocations over the ten-page corpus. Median time changed from **1.44 s** at `019f47214` to **1.42 s** after the refactor (about 1.4% faster), satisfying the no-more-than-1% regression budget.
+- The Radiant integer-cast lint rule passes. The implementation briefly introduced a per-file property-table header; the declarations were consolidated into `view.hpp`, and no implementation-added header violates the header-consolidation rule.
+
+### Repository-wide aggregate baseline defects
+
+`make run-radiant-baseline RADIANT_RENDER_JOBS=1` exercised all aggregate suites but does not return green for three defects outside this refactor. They were isolated instead of being hidden or worked around:
+
+- The release UI rich-text-editor test exits with signal 11 at the same assertion point with both the final binary and a binary built from `019f47214`; the final debug binary passes all 27 assertions. Symbolized inspection places the failure in the pre-existing release JIT event-handler path, where `js_args_push(1)` supplies an invalid address, rather than in DOM/View storage.
+- The WPT CSS-syntax aggregate reports 18 passes against a hard-coded threshold of 25. The failures concern existing syntax coverage and do not touch the DOM/View refactor.
+- The render Node process reports its completed test summary (all 211 baseline render tests pass, with the expected failures/skips) and then hangs in Node/V8 worker shutdown. This is post-test process teardown rather than a render-content failure.
+
+Full `make lint` likewise remains red only because the untouched, baseline-present `radiant/resource_resolver.hpp` is not in the existing per-file-header allowlist. The lint output confirms that this campaign adds no new violation. These defects are recorded as baseline conditions rather than addressed with unrelated scope expansion.
+
+## 17. DOM/View arena memory profile
+
+The final implementation and baseline `019f47214` were profiled with release builds across all 46 HTML files in `test/layout/data/page/`. An identical temporary diagnostic hook captured the memory-context allocator graph immediately after `layout_html_doc()` and before rendering, excluding paint surfaces, renderer allocations, JIT memory, and framework RSS. Each page ran in a fresh process. The hook was removed after capture; raw per-page results are retained in `temp/dom_view_memory_comparison.csv` and the aggregate report in `temp/dom_view_memory_summary.json`.
+
+| Post-layout metric, summed across 46 independent page runs | Baseline | Final | Delta | Page outcomes |
+|---|---:|---:|---:|---:|
+| DOM arena used | 3,639,424 B | 3,193,344 B | **−446,080 B (−12.26%)** | 46 improved / 0 unchanged / 0 regressed |
+| View arena used | 490,544 B | 490,544 B | 0 B (0%) | 0 / 46 / 0 |
+| Combined arena used | 4,129,968 B | 3,683,888 B | **−446,080 B (−10.80%)** | 46 / 0 / 0 |
+| Combined arena reserved | 5,431,392 B | 4,956,256 B | **−475,136 B (−8.75%)** | 9 / 37 / 0 |
+
+Median combined arena use per page fell from 31,240 B to 28,192 B (−9.76%). Median reserved capacity fell from 65,536 B to 40,960 B; only nine pages crossed an arena chunk boundary, which is why most pages have lower used bytes but unchanged reserved capacity.
+
+Largest absolute DOM-arena reductions were `underscorejs` (−139,104 B), `cnn_lite` (−29,936 B), `linuxmint` (−26,128 B), `flex` (−26,000 B), and `html5-kitchen-sink` (−24,288 B). `cnn_lite` had the largest reduction among those pages by percentage at 20.4%.
+
+The arena result does not describe every allocation owned by the trees. `ViewTree::alloc_prop()` and cold document extensions allocate directly from their backing pools. Including the complete `dom.document` and `view_tree.pool` cumulative allocation counters gives 28,277,476 B at baseline and 28,325,328 B after the refactor: **+47,852 B (+0.17%)** in aggregate, while the median page falls from 292,688 B to 283,350 B (−3.19%). The near-flat aggregate includes the intentional cost of independently coexisting item/role props, lazy layout caches, and cold extensions; unlike arena used bytes, rpmalloc-backed pool counters are cumulative allocation upper bounds rather than exact live-byte measurements.

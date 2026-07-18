@@ -20,6 +20,58 @@
 #include <math.h>
 #include <string.h>
 
+// ===== computed CSS property access =====
+
+enum PropGroupKind : uint8_t {
+    PROP_GROUP_NONE = 0,
+    PROP_GROUP_BLOCK,
+    PROP_GROUP_BOUNDARY,
+    PROP_GROUP_FONT,
+    PROP_GROUP_INLINE,
+    PROP_GROUP_SCROLL,
+    PROP_GROUP_POSITION,
+    PROP_GROUP_FLEX_ITEM,
+    PROP_GROUP_GRID_ITEM,
+};
+
+enum CssPropValueKind : uint8_t {
+    CSS_PROP_VALUE_SPECIAL = 0,
+    CSS_PROP_VALUE_ENUM,
+    CSS_PROP_VALUE_PX,
+    CSS_PROP_VALUE_NUMBER,
+    CSS_PROP_VALUE_INTEGER,
+    CSS_PROP_VALUE_COLOR,
+    CSS_PROP_VALUE_STRING,
+};
+
+enum CssPropAccessorFlags : uint8_t {
+    CSS_PROP_ACCESSOR_USED_VALUE = 1u << 0,
+};
+
+struct CssPropAccessor;
+typedef bool (*CssPropSerializeFn)(const CssPropAccessor* accessor,
+                                   DomElement* element, int pseudo_type,
+                                   char* out, size_t out_size);
+typedef CssPropSerializeFn CssPropDeriveFn;
+
+// The row shape is intentionally plain and pointer-free apart from callbacks so
+// Jube's record dispatch can index the same immutable descriptors.
+struct CssPropAccessor {
+    CssPropertyId id;
+    PropGroupKind group_kind;
+    uint16_t offset;
+    CssPropValueKind value_kind;
+    uint8_t flags;
+    CssPropSerializeFn serialize;
+    CssPropDeriveFn derive;
+};
+
+const CssPropAccessor* css_prop_accessor(CssPropertyId id);
+const CssPropAccessor* css_prop_accessors(size_t* count);
+bool css_prop_serialize_computed(DomElement* element, CssPropertyId id,
+                                 int pseudo_type, char* out, size_t out_size);
+bool dom_ensure_computed(DomElement* element, bool needs_used_value = false);
+
 // ===== animation =====
 
 struct DirtyTracker;
@@ -67,6 +119,7 @@ typedef enum StepPosition {
     STEP_JUMP_NONE,
 } StepPosition;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct TimingFunction {
     TimingFunctionType type;
     union {
@@ -96,6 +149,7 @@ typedef void (*AnimTickFn)(AnimationInstance* anim, float t);
 typedef void (*AnimFinishFn)(AnimationInstance* anim);
 typedef void (*AnimCancelFn)(AnimationInstance* anim);
 
+// tier-2: view-pool, rebuilt each relayout
 struct AnimationInstance {
     AnimationInstance* next;
     AnimationInstance* prev;
@@ -124,6 +178,7 @@ struct AnimationInstance {
     double pause_time;
 };
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct AnimationScheduler {
     AnimationInstance* first;
     AnimationInstance* last;
@@ -150,6 +205,7 @@ void animation_instance_resume(AnimationInstance* anim, double now);
 
 // 3x3 affine transform matrix shared by view transforms and render backends.
 // The layout matches ThorVG's Tvg_Matrix, but the type itself is Radiant-owned.
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     float e11, e12, e13;   // row 1: scale-x, shear-x, translate-x
     float e21, e22, e23;   // row 2: shear-y, scale-y, translate-y
@@ -521,11 +577,13 @@ typedef enum AlignType {
 //     return (ia & 0x003FFFFF) == CSS_VALUE_AUTO;
 // }
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct Rect {
     float x, y;
     float width, height;
 } Rect;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct Bound {
     float left, top, right, bottom;
 } Bound;
@@ -544,6 +602,7 @@ typedef enum {
     SCALE_MODE_LINEAR_WRAP,  // Bilinear with wrap-around for tiled backgrounds
 } ScaleMode;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct ImageSurface {
     ImageFormat format;
     int width;             // the intrinsic width of the surface/image (used for layout/intrinsic sizing)
@@ -591,6 +650,7 @@ extern bool is_space(char c);
 typedef struct ViewBlock ViewBlock;
 typedef struct TextShadow TextShadow;
 
+// tier-2: view-pool, rebuilt each relayout
 struct FontProp {
     char* family;  // font family name
     float font_size;  // font size in pixels, scaled by pixel_ratio
@@ -639,6 +699,7 @@ inline FontStyleDesc font_style_desc_from_prop(const FontProp* fp) {
     return sd;
 }
 
+// tier-2: view-pool, rebuilt each relayout
 struct GridItemProp {
     // Grid item properties (following flex pattern)
     int grid_row_start;          // Grid row start line
@@ -655,6 +716,9 @@ struct GridItemProp {
     int align_self_grid;         // Item-specific align alignment for grid (CSS_VALUE_*)
     int order;                   // CSS order property (affects placement order)
 
+    // tier-3 scratch, valid within layout pass: grid placement, track geometry,
+    // and measurement are shared by distinct multipass entry points that do not
+    // retain one common GridItemBox owner yet.
     // Grid item computed properties
     int computed_grid_row_start;
     int computed_grid_row_end;
@@ -689,6 +753,7 @@ struct GridItemProp {
 };
 
 // Intrinsic size type (shared by flex and grid layout)
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     float min_content;  // Minimum content width (longest word/element)
     float max_content;  // Maximum content width (no wrapping)
@@ -711,6 +776,7 @@ typedef struct {
 } IntrinsicSizes;
 
 // FlexItemProp definition (needed by flex.hpp)
+// tier-2: view-pool, rebuilt each relayout
 typedef struct FlexItemProp {
     float flex_basis;  // -1 for auto
     float flex_grow;
@@ -720,6 +786,9 @@ typedef struct FlexItemProp {
     float aspect_ratio;
     float baseline_offset;
 
+    // tier-3 scratch, valid within layout pass: intrinsic measurement and the
+    // flex sizing/alignment passes are separate entry points, so this state must
+    // remain reachable until FlexContainerLayout owns a stable item-keyed map.
     // Intrinsic sizing cache (computed during measurement phase)
     IntrinsicSizes intrinsic_width;   // min_content and max_content widths
     IntrinsicSizes intrinsic_height;  // min_content and max_content heights
@@ -749,6 +818,7 @@ typedef struct FlexItemProp {
     uint8_t main_size_from_flex : 1;   // True if parent flex grew/shrank this item's main-axis size
 } FlexItemProp;
 
+// tier-2: view-pool, rebuilt each relayout
 struct InlineProp {
     CssEnum cursor;
     CssEnum caret_shape;
@@ -771,15 +841,18 @@ struct InlineProp {
     float svg_stroke_width;
 };
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct Spacing {
     struct { float top, right, bottom, left; };  // for margin, padding, border
     int64_t top_specificity, right_specificity, bottom_specificity, left_specificity;
 } Spacing;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct Margin : Spacing {
     CssEnum top_type, right_type, bottom_type, left_type;   // for CSS enum values, like 'auto'
 } Margin;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct Corner {
     struct { float top_left, top_right, bottom_right, bottom_left; };  // horizontal border radius
     struct { float top_left_y, top_right_y, bottom_right_y, bottom_left_y; };  // vertical border radius
@@ -798,6 +871,7 @@ typedef enum {
 
 typedef struct LinearGradient LinearGradient;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     Spacing width;
     CssEnum top_style, right_style, bottom_style, left_style;
@@ -813,12 +887,14 @@ typedef struct {
 } BorderProp;
 
 // Color stop for gradients
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     Color color;
     float position;  // 0.0 to 1.0, or -1 for auto
 } GradientStop;
 
 // Linear gradient data
+// tier-2: view-pool, rebuilt each relayout
 struct LinearGradient {
     float angle;           // in degrees, 0 = to top, 90 = to right
     GradientStop* stops;   // array of color stops
@@ -842,6 +918,7 @@ typedef enum {
 } RadialSize;
 
 // Radial gradient data
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     RadialShape shape;     // circle or ellipse
     RadialSize size;       // size keyword
@@ -852,6 +929,7 @@ typedef struct {
 } RadialGradient;
 
 // Conic gradient data
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     float from_angle;      // starting angle in degrees (default 0)
     float cx, cy;          // center position (0.0-1.0 relative to box, default 0.5,0.5)
@@ -860,6 +938,7 @@ typedef struct {
     int stop_count;
 } ConicGradient;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     Color color; // background color
     char* image; // background image path
@@ -899,6 +978,7 @@ typedef struct {
     CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct MaskProp {
     bool has_radial_gradient;
     float cx, cy;           // 0.0-1.0 relative to border box
@@ -911,6 +991,7 @@ typedef struct MaskProp {
  * Supports multiple shadows via linked list (shadows render bottom-to-top)
  * Syntax: box-shadow: [inset] <offset-x> <offset-y> [blur-radius] [spread-radius] [color]
  */
+// tier-2: view-pool, rebuilt each relayout
 typedef struct BoxShadow {
     float offset_x;              // Horizontal offset (positive = right)
     float offset_y;              // Vertical offset (positive = down)
@@ -925,6 +1006,7 @@ typedef struct BoxShadow {
  * OutlineProp - CSS outline property (CSS UI Level 3)
  * Outlines are drawn outside the border-box and don't affect layout.
  */
+// tier-2: view-pool, rebuilt each relayout
 typedef struct OutlineProp {
     float width;                 // outline-width in pixels
     float offset;                // outline-offset in pixels (can be negative)
@@ -936,6 +1018,7 @@ typedef struct OutlineProp {
  * TextShadow - CSS text-shadow property
  * Supports multiple shadows via linked list
  */
+// tier-2: view-pool, rebuilt each relayout
 typedef struct TextShadow {
     float offset_x;
     float offset_y;
@@ -975,6 +1058,7 @@ typedef enum TransformFunctionType {
     TRANSFORM_MATRIX3D,         // matrix3d(16 values)
 } TransformFunctionType;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct TransformFunction {
     TransformFunctionType type;
     union {
@@ -1000,6 +1084,7 @@ typedef struct TransformFunction {
  * TransformProp - CSS transform properties
  * Contains transform origin and list of transform functions
  */
+// tier-2: view-pool, rebuilt each relayout
 typedef struct TransformProp {
     TransformFunction* functions;    // Linked list of transform functions (applied in order)
     float origin_x;                  // transform-origin X (default: 50%)
@@ -1033,6 +1118,7 @@ typedef enum FilterFunctionType {
     FILTER_URL,               // url(<string>) - SVG filter reference
 } FilterFunctionType;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct FilterFunction {
     FilterFunctionType type;
     union {
@@ -1052,6 +1138,7 @@ typedef struct FilterFunction {
 /**
  * FilterProp - CSS filter properties
  */
+// tier-2: view-pool, rebuilt each relayout
 typedef struct FilterProp {
     FilterFunction* functions;       // Linked list of filter functions (applied in order)
 } FilterProp;
@@ -1076,6 +1163,7 @@ typedef enum ColumnWrap {
     COLUMN_WRAP_WRAP,        // Continue columns in the next row
 } ColumnWrap;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct MultiColumnProp {
     // Column sizing
     int column_count;            // Number of columns (0 = auto)
@@ -1100,6 +1188,7 @@ typedef struct MultiColumnProp {
     float computed_column_width; // Actual column width after layout
 } MultiColumnProp;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct BoundaryProp {
     Margin margin;
     Spacing padding;
@@ -1130,6 +1219,7 @@ typedef struct BoundaryProp {
 
 // Vector path segment for PDF/SVG path rendering
 // Stores pre-transformed coordinates ready for ThorVG rendering
+// tier-2: view-pool, rebuilt each relayout
 typedef struct VectorPathSegment {
     enum { VPATH_MOVETO, VPATH_LINETO, VPATH_CURVETO, VPATH_CLOSE } type;
     float x, y;                     // End point
@@ -1138,6 +1228,7 @@ typedef struct VectorPathSegment {
 } VectorPathSegment;
 
 // Vector path property for complex path rendering
+// tier-2: view-pool, rebuilt each relayout
 typedef struct VectorPathProp {
     VectorPathSegment* segments;    // Linked list of path segments
     Color stroke_color;             // Stroke color
@@ -1149,6 +1240,7 @@ typedef struct VectorPathProp {
     int dash_pattern_length;        // Length of dash pattern
 } VectorPathProp;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct PositionProp {
     CssEnum position;     // static, relative, absolute, fixed, sticky
     float top, right, bottom, left;  // offset values in pixels
@@ -1174,6 +1266,7 @@ typedef struct PositionProp {
  * MarkerProp - Stores list marker (bullet) properties
  * Used for ::marker pseudo-element rendering with fixed width and vector graphics
  */
+// tier-2: view-pool, rebuilt each relayout
 typedef struct MarkerProp {
     CssEnum marker_type;     // CSS_VALUE_DISC, CSS_VALUE_CIRCLE, CSS_VALUE_SQUARE, CSS_VALUE_DECIMAL, etc.
     float width;             // Fixed marker width (typically ~1.4em = 22px at 16px font)
@@ -1209,6 +1302,7 @@ enum ContentType {
     CONTENT_TYPE_CLOSE_QUOTE = 7
 };
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct PseudoContentProp {
     DomElement* before;    // ::before pseudo-element (NULL if none)
     DomElement* after;     // ::after pseudo-element (NULL if none)
@@ -1228,6 +1322,7 @@ typedef struct PseudoContentProp {
     bool marker_generated;         // True if marker element created
 } PseudoContentProp;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct BlockProp {
     CssEnum text_align;
     CssEnum text_align_last;  // CSS text-align-last (auto, start, end, left, right, center, justify)
@@ -1303,12 +1398,14 @@ typedef struct BlockProp {
     float line_clamp_last_line_max_descender;
 } BlockProp;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct FontBox {
     FontProp *style;  // current font style
     struct FontHandle* font_handle; // unified font handle (opaque, ref-counted)
     float current_font_size;  // font size of current element
 } FontBox;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct TextRect {
     float x, y, width, height;
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
@@ -1319,6 +1416,7 @@ typedef struct TextRect {
     TextRect* next;
 } TextRect;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct ViewText : DomText {
     // TextRect *rect;  // first text rect
     // FontProp *font;  // font for this text
@@ -1329,9 +1427,11 @@ typedef struct ViewText : DomText {
  * ViewMarker - Represents a list marker (bullet or number)
  * Fixed-width element that renders bullets using vector graphics
  */
+// tier-2: view-pool, rebuilt each relayout
 typedef struct ViewMarker : DomElement {
 } ViewMarker;
 
+// tier-2: view-pool, rebuilt each relayout
 struct ViewElement : DomElement {
     // exclude those skipped text nodes
     View* first_placed_child() {
@@ -1357,6 +1457,7 @@ struct ViewElement : DomElement {
 
 typedef ViewElement ViewSpan;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     // Fast-read pointer to centralized state owner. Writers must use state_store APIs.
     DocState* state_ref;
@@ -1368,6 +1469,7 @@ typedef struct {
     void reset();
 } ScrollPane;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct ScrollProp {
     CssEnum overflow_x, overflow_y;
     ScrollPane* pane;
@@ -1378,6 +1480,7 @@ typedef struct ScrollProp {
     bool has_clip;
 } ScrollProp;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct FlexProp {
     // CSS properties (using int to allow both enum and Lexbor constants)
     int direction;      // FlexDirection or CSS_VALUE_*
@@ -1399,6 +1502,7 @@ typedef struct FlexProp {
 
 typedef struct GridTrackList GridTrackList;
 typedef struct GridArea GridArea;
+// tier-2: view-pool, rebuilt each relayout
 typedef struct GridProp {
     // Grid alignment properties (using Lexbor CSS constants)
     int justify_content;         // CSS_VALUE_START, etc.
@@ -1432,6 +1536,7 @@ typedef struct GridProp {
     bool is_dense_packing;       // grid-auto-flow: dense
 } GridProp;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct EmbedProp {
     ImageSurface* img;  // image surface
     float content_image_resolution; // CSS image-set() density for intrinsic sizing, 0 means 1x
@@ -1451,6 +1556,7 @@ typedef struct EmbedProp {
     bool broken_alt_fallback; // true when an unloaded <img> is rendered as alt text
 } EmbedProp;
 
+// tier-2: view-pool, rebuilt each relayout
 struct ViewBlock : ViewSpan {
     // float content_width, content_height;  // width and height of the child content including padding
     // BlockProp* blk;  // block specific style properties
@@ -1462,6 +1568,7 @@ struct ViewBlock : ViewSpan {
     // ViewBlock* last_child;
 };
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct TableProp {
     // Table layout algorithm mode
     enum {
@@ -1506,7 +1613,9 @@ struct ViewTableRow;
 struct ViewTableCell;
 struct ViewTableRowGroup;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct ViewTable : ViewBlock {
+    TableProp* table() const { return role_kind() == ROLE_TABLE ? tb : nullptr; }
     // Navigation helpers that respect anonymous box flags (CSS 2.1 Section 17.2.1)
 
     // Get first logical row (may be in a row group or directly under table if is_annoy_tbody)
@@ -1540,6 +1649,7 @@ enum TableSectionType {
     TABLE_SECTION_TFOOT = 2    // Footer group - renders last
 };
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct ViewTableRowGroup : ViewBlock {
     // NOTE: Do NOT add fields here - views share memory with DomElement!
     // Section type is determined at runtime via get_section_type() method.
@@ -1554,6 +1664,7 @@ typedef struct ViewTableRowGroup : ViewBlock {
     ViewTableRow* next_row(ViewTableRow* current);
 } ViewTableRowGroup;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct ViewTableRow : ViewBlock {
     // Minimal metadata may be added later (e.g., computed baseline)
 
@@ -1570,6 +1681,7 @@ typedef struct ViewTableRow : ViewBlock {
 // Border-collapse resolved border structure (CSS 2.1 §17.6.2)
 // Stores the winning border after conflict resolution between
 // cell, row, rowgroup, column, colgroup, and table borders
+// tier-2: view-pool, rebuilt each relayout
 struct CollapsedBorder {
     float width;
     CssEnum style;      // CSS_VALUE_NONE, CSS_VALUE_HIDDEN, CSS_VALUE_SOLID, etc.
@@ -1581,6 +1693,7 @@ struct CollapsedBorder {
     }
 };
 
+// tier-2: view-pool, rebuilt each relayout
 struct TableCellProp {
     // Vertical alignment
     enum {
@@ -1593,6 +1706,8 @@ struct TableCellProp {
     // Cell spanning metadata
     int col_span;  // Number of columns this cell spans (default: 1)
     int row_span;  // Number of rows this cell spans (default: 1)
+    // tier-3 scratch, valid within layout pass: TableMetadata is column/row keyed
+    // and has no cell-key lookup, while later border-collapse phases revisit cells.
     int col_index; // Starting column index (computed during layout)
     int row_index; // Starting row index (computed during layout)
     uint8_t is_annoy_tr:1;       // whether this element is doubled as an anonymous tr
@@ -1601,6 +1716,7 @@ struct TableCellProp {
     uint8_t is_empty:1;          // whether this cell has no content (for empty-cells: hide)
     uint8_t hide_empty:1;        // combined flag: is_empty && table has empty-cells: hide
 
+    // tier-3 scratch, valid within layout pass for the same multiphase table lifetime.
     // Intrinsic width (content + padding) measured during column sizing
     // Used in border-collapse mode to re-compute column widths with per-cell border halves
     float intrinsic_width;
@@ -1615,8 +1731,13 @@ struct TableCellProp {
     CollapsedBorder* left_resolved;
 };
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct ViewTableCell : ViewBlock {
+    TableCellProp* cell() const { return role_kind() == ROLE_CELL ? td : nullptr; }
 } ViewTableCell;
+
+// Direct fi/gi/tb/td/form reads outside these tag-checking accessors are invalid;
+// parent-item role and the element's own role occupy separate tagged unions.
 
 // Radiant view wrappers are static_cast/reinterpret_cast overlays on DOM storage
 // (see lib/tagged.hpp unsafe_* helpers), so adding fields here corrupts nodes.
@@ -1630,6 +1751,9 @@ static_assert(sizeof(ViewTable) == sizeof(DomElement), "ViewTable must not add f
 static_assert(sizeof(ViewTableRowGroup) == sizeof(DomElement), "ViewTableRowGroup must not add fields");
 static_assert(sizeof(ViewTableRow) == sizeof(DomElement), "ViewTableRow must not add fields");
 static_assert(sizeof(ViewTableCell) == sizeof(DomElement), "ViewTableCell must not add fields");
+static_assert(sizeof(DomElement) <= 368, "DomElement size ratchet regressed");
+static_assert(sizeof(DomText) <= 120, "DomText size ratchet regressed");
+static_assert(sizeof(DomNode) <= 80, "DomNode size ratchet regressed");
 
 typedef enum HtmlVersion {
     HTML5 = 1,              // HTML5
@@ -1650,6 +1774,7 @@ inline bool is_quirks_mode(HtmlVersion v) {
 
 struct MeasurementCacheEntry;
 
+// tier-2: view-pool, rebuilt each relayout
 struct ViewTree {
     Pool *pool;
     Arena *arena;  // bump allocator for view allocations (O(1) alloc, bulk free)
@@ -1685,6 +1810,7 @@ struct StateStore;
 typedef struct StateStore StateStore;
 
 // rendering context structs
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     float x, y;  // abs x, y relative to entire canvas/screen
     Bound clip;  // clipping rect
@@ -1692,6 +1818,7 @@ typedef struct {
     bool has_clip_radius;  // true if clip_radius should be applied
 } BlockBlot;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     CssEnum list_style_type;
     int item_index;
@@ -1734,6 +1861,7 @@ typedef enum {
 /**
  * Result of symbol resolution
  */
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     SymbolType type;
     const char* utf8;           // UTF-8 string representation (static, do not free)
@@ -1794,6 +1922,7 @@ struct UiContext;
 #define FONT_FACE_MAX_SRC 8
 
 // Individual src entry with path and format
+// tier-2: view-pool, rebuilt each relayout
 typedef struct FontFaceSrc {
     char* path;                  // Resolved local path
     char* format;                // Format string: "woff", "truetype", "opentype", etc.
@@ -1803,6 +1932,7 @@ typedef struct FontFaceSrc {
 // Descriptors are registered with the unified font module (lib/font) via
 // font_face_register(). Actual font loading is handled entirely by the
 // unified module; this struct only stores the CSS @font-face metadata.
+// tier-2: view-pool, rebuilt each relayout
 typedef struct FontFaceDescriptor {
     char* family_name;           // font-family value
     char* src_local_path;        // local font file path (no web URLs) - first/fallback
@@ -1884,6 +2014,7 @@ enum ClipShapeType {
     CLIP_SHAPE_ROUNDED_RECT
 };
 
+// tier-2: view-pool, rebuilt each relayout
 struct ClipShape {
     ClipShapeType type;
     union {
@@ -2045,6 +2176,7 @@ namespace FormDefaults {
 /**
  * FormControlProp - Properties for form control elements
  */
+// tier-2: view-pool, rebuilt each relayout
 struct FormControlProp {
     // Fast-read pointer to centralized state owner. Writers must use state_store APIs.
     struct DocState* state_ref;
@@ -2100,18 +2232,6 @@ struct FormControlProp {
     uint8_t placeholder_has_color : 1;
     uint8_t placeholder_has_opacity : 1;
     uint8_t heap_allocated : 1;
-
-    // Flex item properties (when form control is a flex item)
-    // These are needed because form controls use FormControlProp instead of FlexItemProp
-    float flex_grow;
-    float flex_shrink;
-    float flex_basis;
-    uint8_t flex_basis_is_percent : 1;
-
-    // Grid item properties (when form control is a grid item). The view's item
-    // property union can hold only one pointer, so form controls preserve the
-    // original GridItemProp here after switching item_prop_type to FORM.
-    GridItemProp* grid_item;
 
     // ------------------------------------------------------------------
     // Text-control selection state (input text-types and textarea only)
@@ -2271,6 +2391,7 @@ typedef enum CssAnimValueType {
 // Forward declaration from view.hpp
 struct TransformFunction;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct CssAnimatedProp {
     CssPropertyId property_id;
     CssAnimValueType value_type;
@@ -2290,6 +2411,7 @@ typedef struct CssAnimatedProp {
 // ============================================================================
 
 // A single keyframe stop (e.g., "50% { opacity: 0.5; transform: scale(1.2); }")
+// tier-2: view-pool, rebuilt each relayout
 typedef struct CssKeyframeStop {
     float offset;               // 0.0 (from) to 1.0 (to)
     CssAnimatedProp* properties;
@@ -2298,6 +2420,7 @@ typedef struct CssKeyframeStop {
 } CssKeyframeStop;
 
 // A parsed @keyframes rule
+// tier-2: view-pool, rebuilt each relayout
 typedef struct CssKeyframes {
     const char* name;           // animation name (e.g., "fadeIn")
     CssKeyframeStop* stops;     // sorted by offset ascending
@@ -2308,6 +2431,7 @@ typedef struct CssKeyframes {
 // Keyframe Registry (per document)
 // ============================================================================
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct KeyframeRegistry {
     CssKeyframes** entries;
     int count;
@@ -2325,6 +2449,7 @@ CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* nam
 // CSS Animation Configuration (per element, populated during style resolution)
 // ============================================================================
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct CssAnimProp {
     const char* name;           // animation-name (keyframes reference)
     float duration;             // animation-duration in seconds
@@ -2340,6 +2465,7 @@ typedef struct CssAnimProp {
 // CSS Transition Configuration (per element)
 // ============================================================================
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct CssTransitionProp {
     CssPropertyId* properties;  // transitioned property IDs (NULL = all)
     int property_count;         // -1 = "all"
@@ -2365,6 +2491,7 @@ bool css_transition_resolve_values(const CssValue* shorthand_value,
 // CSS Animation Runtime State (attached to AnimationInstance.state)
 // ============================================================================
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct CssAnimState {
     CssKeyframes* keyframes;
     DomElement* element;
@@ -2384,6 +2511,7 @@ typedef struct CssAnimState {
 
 // One tracked transitionable property: its last-applied used value (the
 // snapshot) plus the currently running transition instance (if any).
+// tier-2: view-pool, rebuilt each relayout
 typedef struct CssTransitionTrack {
     CssPropertyId property_id;
     CssAnimValueType value_type;
@@ -2395,12 +2523,14 @@ typedef struct CssTransitionTrack {
 } CssTransitionTrack;
 
 // Persistent per-element transition state (pointed to by DomElement.transition_state).
+// tier-2: view-pool, rebuilt each relayout
 typedef struct CssTransitionElemState {
     CssTransitionTrack tracks[CSS_TRANSITION_MAX_TRACKED];
     int track_count;
 } CssTransitionElemState;
 
 // Per-instance transition state (attached to AnimationInstance.state).
+// tier-2: view-pool, rebuilt each relayout
 typedef struct CssTransitionState {
     DomElement* element;
     UiContext* ui_context;
@@ -2502,7 +2632,7 @@ struct LayoutContext;
 
 float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
                                    CssPropertyId prop_id);
-Color resolve_color_value(const CssValue* value);
+Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 Color color_name_to_rgb(CssEnum color_name);
 int64_t get_cascade_priority(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
@@ -2629,6 +2759,7 @@ extern void transform_point(float& x, float& y, const RdtMatrix& m);
 
 
 #ifndef LAMBDA_HEADLESS
+// tier-2: view-pool, rebuilt each relayout
 typedef struct {
     bool is_mouse_down;
     float down_x, down_y;  // mouse position when mouse down
@@ -2636,6 +2767,7 @@ typedef struct {
     GLFWcursor* sys_cursor;
 } MouseState;
 
+// tier-2: view-pool, rebuilt each relayout
 typedef struct UiContext {
     GLFWwindow *window;    // current window
     float window_width;    // window pixel width (actual framebuffer size, physical pixels)

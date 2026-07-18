@@ -10,7 +10,7 @@
 //     Kept separate from the main render_map so we don't widen the
 //     RenderMapEntry struct or churn its hashing.
 //   * `source_pos_from_dom_boundary`: walks DOM ancestors from a boundary
-//     point, finds the first DomElement whose native_element is registered
+//     point, finds the first DomElement whose Lambda backing is registered
 //     in render_map, retrieves its recorded source path, and (for text
 //     hits) converts the boundary's UTF-16 code-unit offset to a UTF-8
 //     byte offset matching the editor's internal storage.
@@ -265,7 +265,7 @@ bool render_map_reverse_lookup_with_path(Item result_node,
 // DOM → source position
 // ---------------------------------------------------------------------------
 // Walk up DOM ancestry from `boundary->node` until a DomElement is found
-// whose native_element is registered in render_map. The recorded path
+// whose Lambda backing is registered in render_map. The recorded path
 // becomes the SourcePos path; the offset is:
 //   * for a text-node boundary: the UTF-8 byte offset within that text
 //     leaf, with the path extended by the text node's child index in its
@@ -295,7 +295,7 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
     }
 
     // Walk upward until we find a DomElement registered in the render map.
-    // Literal wrappers generated inside a template can have native_element
+    // Literal wrappers generated inside a template can have Lambda backing
     // without their own render-map entry, so keep climbing through them.
     RenderMapLookup lookup;
     SourcePathC base;
@@ -303,9 +303,9 @@ bool source_pos_from_dom_boundary(const DomBoundary* boundary,
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* de = lam::dom_require_element(node);
-            if (de->native_element) {
+            if (!de->is_synthetic()) {
                 Item result_item;
-                result_item.element = de->native_element;
+                result_item.element = dom_element_to_element(de);
                 if (render_map_reverse_lookup_with_path(result_item, &lookup, &base)) {
                     found_base = true;
                     break;
@@ -408,9 +408,9 @@ static DomText* first_text_descendant(DomNode* node) {
 // recorded source path; on a match, fills `*out` and returns true.
 static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
                                    DomBoundary* out) {
-    if (!de || !de->native_element) return false;
+    if (!de || de->is_synthetic()) return false;
     Item result_item;
-    result_item.element = de->native_element;
+    result_item.element = dom_element_to_element(de);
     RenderMapLookup lookup;
     SourcePathC recorded;
     if (!render_map_reverse_lookup_with_path(result_item, &lookup, &recorded)) {

@@ -130,7 +130,7 @@ TEST_F(DomNodeBaseTest, CreateDomText) {
     ASSERT_NE(parent, nullptr);
 
     // Append text to the parent element
-    DomText* text = dom_element_append_text(parent, "Hello World");
+    DomText* text = parent->append_text("Hello World");
     ASSERT_NE(text, nullptr);
 
     // Verify text node properties
@@ -451,9 +451,9 @@ TEST_F(DomNodeBaseTest, AttributeManipulation) {
     elem->doc->input = test_input;  // Set input context for attribute operations
 
     // Set attributes
-    EXPECT_TRUE(dom_element_set_attribute(elem, "id", "test-id"));
-    EXPECT_TRUE(dom_element_set_attribute(elem, "class", "container"));
-    EXPECT_TRUE(dom_element_set_attribute(elem, "data-value", "42"));
+    EXPECT_TRUE(elem->set_attribute("id", "test-id"));
+    EXPECT_TRUE(elem->set_attribute("class", "container"));
+    EXPECT_TRUE(elem->set_attribute("data-value", "42"));
 
     // Get attributes
     EXPECT_STREQ(elem->get_attribute("id"), "test-id");
@@ -461,14 +461,14 @@ TEST_F(DomNodeBaseTest, AttributeManipulation) {
     EXPECT_STREQ(elem->get_attribute("data-value"), "42");
 
     // Has attribute
-    EXPECT_TRUE(dom_element_has_attribute(elem, "id"));
-    EXPECT_TRUE(dom_element_has_attribute(elem, "class"));
-    EXPECT_TRUE(dom_element_has_attribute(elem, "data-value"));
-    EXPECT_FALSE(dom_element_has_attribute(elem, "missing"));
+    EXPECT_TRUE(elem->has_attribute("id"));
+    EXPECT_TRUE(elem->has_attribute("class"));
+    EXPECT_TRUE(elem->has_attribute("data-value"));
+    EXPECT_FALSE(elem->has_attribute("missing"));
 
     // Remove attribute
-    EXPECT_TRUE(dom_element_remove_attribute(elem, "class"));
-    EXPECT_FALSE(dom_element_has_attribute(elem, "class"));
+    EXPECT_TRUE(elem->remove_attribute("class"));
+    EXPECT_FALSE(elem->has_attribute("class"));
     EXPECT_EQ(elem->get_attribute("class"), nullptr);
 
     // Other attributes should still exist
@@ -481,29 +481,29 @@ TEST_F(DomNodeBaseTest, ClassManagement) {
     ASSERT_NE(elem, nullptr);
 
     // Add classes
-    EXPECT_TRUE(dom_element_add_class(elem, "container"));
-    EXPECT_TRUE(dom_element_add_class(elem, "active"));
-    EXPECT_TRUE(dom_element_add_class(elem, "primary"));
+    EXPECT_TRUE(elem->add_class("container"));
+    EXPECT_TRUE(elem->add_class("active"));
+    EXPECT_TRUE(elem->add_class("primary"));
 
     // Has class
-    EXPECT_TRUE(dom_element_has_class(elem, "container"));
-    EXPECT_TRUE(dom_element_has_class(elem, "active"));
-    EXPECT_TRUE(dom_element_has_class(elem, "primary"));
-    EXPECT_FALSE(dom_element_has_class(elem, "missing"));
+    EXPECT_TRUE(elem->has_class("container"));
+    EXPECT_TRUE(elem->has_class("active"));
+    EXPECT_TRUE(elem->has_class("primary"));
+    EXPECT_FALSE(elem->has_class("missing"));
 
     // Class count
     EXPECT_EQ(elem->class_count, 3);
 
     // Remove class
-    EXPECT_TRUE(dom_element_remove_class(elem, "active"));
-    EXPECT_FALSE(dom_element_has_class(elem, "active"));
+    EXPECT_TRUE(elem->remove_class("active"));
+    EXPECT_FALSE(elem->has_class("active"));
     EXPECT_EQ(elem->class_count, 2);
 
     // Toggle class
-    EXPECT_TRUE(dom_element_toggle_class(elem, "highlight"));  // Add
-    EXPECT_TRUE(dom_element_has_class(elem, "highlight"));
-    EXPECT_FALSE(dom_element_toggle_class(elem, "highlight")); // Remove
-    EXPECT_FALSE(dom_element_has_class(elem, "highlight"));
+    EXPECT_TRUE(elem->toggle_class("highlight"));  // Add
+    EXPECT_TRUE(elem->has_class("highlight"));
+    EXPECT_FALSE(elem->toggle_class("highlight")); // Remove
+    EXPECT_FALSE(elem->has_class("highlight"));
 }
 
 TEST_F(DomNodeBaseTest, EmptyAndNullHandling) {
@@ -512,7 +512,7 @@ TEST_F(DomNodeBaseTest, EmptyAndNullHandling) {
     ASSERT_NE(elem, nullptr);
 
     // Empty class name
-    EXPECT_FALSE(dom_element_has_class(elem, ""));
+    EXPECT_FALSE(elem->has_class(""));
 
     // Get non-existent attribute
     EXPECT_EQ(elem->get_attribute("nonexistent"), nullptr);
@@ -653,7 +653,7 @@ TEST_F(DomNodeBaseTest, TextNodeManipulation) {
     ASSERT_NE(parent, nullptr);
 
     // Create text node via parent
-    DomText* text = dom_element_append_text(parent, "Original text");
+    DomText* text = parent->append_text("Original text");
     ASSERT_NE(text, nullptr);
 
     // Initial state
@@ -775,10 +775,10 @@ TEST_F(DomNodeBaseTest, ComplexAttributeValues) {
     elem->doc->input = test_input;  // Set input context for attribute operations
 
     // Various attribute value types
-    dom_element_set_attribute(elem, "data-json", "{\"key\": \"value\"}");
-    dom_element_set_attribute(elem, "data-url", "https://example.com/path?query=1");
-    dom_element_set_attribute(elem, "data-number", "12345");
-    dom_element_set_attribute(elem, "data-special", "special!@#$%^&*()chars");
+    elem->set_attribute("data-json", "{\"key\": \"value\"}");
+    elem->set_attribute("data-url", "https://example.com/path?query=1");
+    elem->set_attribute("data-number", "12345");
+    elem->set_attribute("data-special", "special!@#$%^&*()chars");
 
     EXPECT_STREQ(elem->get_attribute("data-json"), "{\"key\": \"value\"}");
     EXPECT_STREQ(elem->get_attribute("data-url"), "https://example.com/path?query=1");
@@ -1086,7 +1086,7 @@ TEST_F(DomNodeBaseTest, LastChildMixedContent) {
 
 /**
  * Test Last Child Getter Function
- * Verifies that dom_element_get_last_child() returns the correct element
+ * Verifies that DomElement::last_child_element() returns the correct element
  */
 TEST_F(DomNodeBaseTest, LastChildGetterFunction) {
     const char* html = "<ul><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul>";
@@ -1094,7 +1094,7 @@ TEST_F(DomNodeBaseTest, LastChildGetterFunction) {
     ASSERT_NE(root, nullptr);
 
     // Use getter function
-    DomElement* last = dom_element_get_last_child(root);
+    DomElement* last = root->last_child_element();
     ASSERT_NE(last, nullptr);
     EXPECT_STREQ(last->tag_name, "li");
 
@@ -1127,19 +1127,19 @@ TEST_F(DomNodeBaseTest, LastChildAfterAppend) {
     EXPECT_EQ(parent->last_child, nullptr);
 
     // Append first child
-    DomText* text1 = dom_element_append_text(parent, "First");
+    DomText* text1 = parent->append_text("First");
     ASSERT_NE(text1, nullptr);
     EXPECT_EQ(parent->first_child, text1);
     EXPECT_EQ(parent->last_child, text1);
 
     // Append second child
-    DomText* text2 = dom_element_append_text(parent, "Second");
+    DomText* text2 = parent->append_text("Second");
     ASSERT_NE(text2, nullptr);
     EXPECT_EQ(parent->first_child, text1);
     EXPECT_EQ(parent->last_child, text2);
 
     // Append third child
-    DomText* text3 = dom_element_append_text(parent, "Third");
+    DomText* text3 = parent->append_text("Third");
     ASSERT_NE(text3, nullptr);
     EXPECT_EQ(parent->first_child, text1);
     EXPECT_EQ(parent->last_child, text3);
@@ -1163,9 +1163,9 @@ TEST_F(DomNodeBaseTest, LastChildAfterRemove) {
     DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
     ASSERT_NE(parent, nullptr);
 
-    DomText* text1 = dom_element_append_text(parent, "First");
-    DomText* text2 = dom_element_append_text(parent, "Second");
-    DomText* text3 = dom_element_append_text(parent, "Third");
+    DomText* text1 = parent->append_text("First");
+    DomText* text2 = parent->append_text("Second");
+    DomText* text3 = parent->append_text("Third");
 
     ASSERT_NE(text1, nullptr);
     ASSERT_NE(text2, nullptr);
@@ -1244,7 +1244,7 @@ TEST_F(DomNodeBaseTest, LastChildEmptyElement) {
     EXPECT_EQ(root->last_child, nullptr);
 
     // Getter should also return NULL
-    EXPECT_EQ(dom_element_get_last_child(root), nullptr);
+    EXPECT_EQ(root->last_child_element(), nullptr);
 }
 
 /**

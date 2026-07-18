@@ -3879,7 +3879,7 @@ void source_pos_free(SourcePosC* p);
 // DOM → source position
 // ---------------------------------------------------------------------------
 // Walk up DOM ancestry from `node` until a DomElement is found whose
-// native_element is registered in render_map; convert UTF-16 → UTF-8 if
+// Lambda backing is registered in render_map; convert UTF-16 → UTF-8 if
 // the hit is a DomText. Writes into `*out` and returns true on success.
 //
 // Today: returns false unconditionally (path-recording in render_map is

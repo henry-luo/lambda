@@ -679,9 +679,9 @@ inline ContribArray collect_item_contributions(
             // the border-box size which already respects max-width at the content level
             // while preserving padding+border. Capping by given_max_width would strip
             // out padding/border from the contribution (e.g. padding_border_overrides_max_size).
-            if (item->blk && item->blk->given_min_width > 0) {
+            if (item->blk && item->block()->given_min_width > 0) {
                 contrib.min_content_contribution = grid_max_value(contrib.min_content_contribution,
-                                                            item->blk->given_min_width);
+                                                            item->block()->given_min_width);
                 contrib.max_content_contribution = grid_max_value(contrib.max_content_contribution,
                                                             contrib.min_content_contribution);
             }
@@ -692,12 +692,12 @@ inline ContribArray collect_item_contributions(
             // Percentage margins are excluded: in an indefinite intrinsic sizing context,
             // percentage margins resolve to 0 per CSS Sizing §3.
             if (item->bound) {
-                bool left_is_auto    = (item->bound->margin.left_type  == CSS_VALUE_AUTO);
-                bool right_is_auto   = (item->bound->margin.right_type == CSS_VALUE_AUTO);
-                bool left_is_pct     = (item->bound->margin.left_type  == CSS_VALUE__PERCENTAGE);
-                bool right_is_pct    = (item->bound->margin.right_type == CSS_VALUE__PERCENTAGE);
-                float ml = (left_is_auto  || left_is_pct)  ? 0.0f : item->bound->margin.left;
-                float mr = (right_is_auto || right_is_pct) ? 0.0f : item->bound->margin.right;
+                bool left_is_auto    = (item->boundary()->margin.left_type  == CSS_VALUE_AUTO);
+                bool right_is_auto   = (item->boundary()->margin.right_type == CSS_VALUE_AUTO);
+                bool left_is_pct     = (item->boundary()->margin.left_type  == CSS_VALUE__PERCENTAGE);
+                bool right_is_pct    = (item->boundary()->margin.right_type == CSS_VALUE__PERCENTAGE);
+                float ml = (left_is_auto  || left_is_pct)  ? 0.0f : item->boundary()->margin.left;
+                float mr = (right_is_auto || right_is_pct) ? 0.0f : item->boundary()->margin.right;
                 contrib.min_content_contribution += ml + mr;
                 contrib.max_content_contribution += ml + mr;
             }
@@ -706,7 +706,7 @@ inline ContribArray collect_item_contributions(
             // inline axis have automatic minimum size = 0. The min-content contribution
             // (actual text content) is preserved for Phase 2 (content-based minimums) and
             // Phase 5 (growth limits). Only Phase 1 uses the automatic minimum (= 0).
-            if (item->scroller && item->scroller->overflow_x != CSS_VALUE_VISIBLE) {
+            if (item->scroller && item->scroll()->overflow_x != CSS_VALUE_VISIBLE) {
                 contrib.is_scroll_container = true;
             }
         } else {
@@ -733,17 +733,17 @@ inline ContribArray collect_item_contributions(
             // to concrete pixel values and must be included in the row-axis contribution.
             // Only exclude percentage margins when the inline size itself is indefinite.
             if (item->bound) {
-                bool top_is_auto = (item->bound->margin.top_type    == CSS_VALUE_AUTO);
-                bool bot_is_auto = (item->bound->margin.bottom_type == CSS_VALUE_AUTO);
-                bool top_is_pct  = (item->bound->margin.top_type    == CSS_VALUE__PERCENTAGE);
-                bool bot_is_pct  = (item->bound->margin.bottom_type == CSS_VALUE__PERCENTAGE);
+                bool top_is_auto = (item->boundary()->margin.top_type    == CSS_VALUE_AUTO);
+                bool bot_is_auto = (item->boundary()->margin.bottom_type == CSS_VALUE_AUTO);
+                bool top_is_pct  = (item->boundary()->margin.top_type    == CSS_VALUE__PERCENTAGE);
+                bool bot_is_pct  = (item->boundary()->margin.bottom_type == CSS_VALUE__PERCENTAGE);
                 bool inline_is_definite = (grid_layout->content_width > 0);
                 float mt = top_is_auto ? 0.0f :
                            (top_is_pct && !inline_is_definite) ? 0.0f :
-                           item->bound->margin.top;
+                           item->boundary()->margin.top;
                 float mb = bot_is_auto ? 0.0f :
                            (bot_is_pct && !inline_is_definite) ? 0.0f :
-                           item->bound->margin.bottom;
+                           item->boundary()->margin.bottom;
                 contrib.min_content_contribution += mt + mb;
                 contrib.max_content_contribution += mt + mb;
             }
@@ -751,7 +751,7 @@ inline ContribArray collect_item_contributions(
             // CSS Grid §6.6 / CSS Sizing §4.5: Grid items with non-visible overflow in the
             // block axis have automatic minimum size = 0. Preserve the real min-content for
             // Phase 2; only Phase 1 uses the automatic minimum (= 0) via is_scroll_container.
-            if (item->scroller && item->scroller->overflow_y != CSS_VALUE_VISIBLE) {
+            if (item->scroller && item->scroll()->overflow_y != CSS_VALUE_VISIBLE) {
                 contrib.is_scroll_container = true;
             }
         }

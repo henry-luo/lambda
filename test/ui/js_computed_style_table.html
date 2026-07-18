@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Computed style property table</title>
+<style>
+  body { margin: 0; }
+  #box {
+    display: flex;
+    position: relative;
+    width: 120px;
+    height: 30px;
+    margin-left: 7px;
+    padding-right: 9px;
+    color: rgb(10, 20, 30);
+    font-size: 18px;
+    opacity: 0.75;
+    overflow-y: hidden;
+    box-sizing: border-box;
+  }
+  #box.changed { width: 140px; color: rgb(40, 50, 60); opacity: 0.5; }
+</style>
+</head>
+<body>
+  <div id="box"><span>item</span></div>
+  <div id="readout">pending</div>
+  <button id="run" onclick="readStyles()">read</button>
+  <script>
+    function readStyles() {
+    var box = document.getElementById('box');
+    var style = getComputedStyle(box);
+    var result = style.display + '|' + style.position + '|' + style.width + '|' +
+      style.height + '|' + style.marginLeft + '|' + style.paddingRight + '|' +
+      style.color + '|' + style.fontSize + '|' + style.opacity + '|' +
+      style.overflowY + '|' + style.boxSizing;
+    box.style.width = '140px';
+    box.style.color = 'rgb(40, 50, 60)';
+    box.style.opacity = '0.5';
+    result += '|' + style.width + '|' + style.color + '|' + style.opacity;
+    document.getElementById('readout').textContent = result;
+    }
+  </script>
+</body>
+</html>

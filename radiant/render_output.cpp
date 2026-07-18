@@ -145,8 +145,8 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
 
     // Every file exporter must lay out and measure the same scaled document before encoding.
     session->ui_context->document = session->document;
-    session->document->given_scale = session->scale;
-    session->document->scale = session->scale;
+    session->document->viewport.given_scale = session->scale;
+    session->document->viewport.scale = session->scale;
     process_document_font_faces(session->ui_context, session->document);
     layout_html_doc(session->ui_context, session->document, false);
 
@@ -301,10 +301,10 @@ static uint32_t render_output_canvas_background(View* root_view) {
     }
 
     ViewBlock* html_block = lam::view_require_block(root_view);
-    bool html_has_bg = html_block->bound && html_block->bound->background &&
-                       html_block->bound->background->color.a > 0;
+    bool html_has_bg = html_block->bound && html_block->boundary_mut()->background &&
+                       html_block->boundary()->background->color.a > 0;
     if (html_has_bg) {
-        return html_block->bound->background->color.c;
+        return html_block->boundary()->background->color.c;
     }
 
     View* child = html_block->first_child;
@@ -313,11 +313,11 @@ static uint32_t render_output_canvas_background(View* root_view) {
             ViewBlock* child_block = lam::view_require_block(child);
             const char* name = child_block->node_name();
             if (name && str_ieq_const(name, strlen(name), "body")) {
-                if (child_block->bound && child_block->bound->background &&
-                    child_block->bound->background->color.a > 0) {
+                if (child_block->bound && child_block->boundary_mut()->background &&
+                    child_block->boundary()->background->color.a > 0) {
                     log_debug("[RENDER] Propagating body background #%08x to canvas",
-                              child_block->bound->background->color.c);
-                    return child_block->bound->background->color.c;
+                              child_block->boundary()->background->color.c);
+                    return child_block->boundary()->background->color.c;
                 }
                 break;
             }

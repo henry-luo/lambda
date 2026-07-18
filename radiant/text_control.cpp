@@ -10,8 +10,6 @@
 #include <strings.h>    // strcasecmp
 #include <string.h>
 
-// dom_element_get_attribute is declared with C++ linkage in dom_element.hpp.
-
 // Phase 8E: per-text-control selectionchange dispatch. Strong impl lives in
 // lambda/js/js_dom_selection.cpp (queues a coalesced setTimeout(0) drain).
 // Headless/no-JS builds get the no-op weak fallback below.
@@ -50,13 +48,13 @@ static void tc_collect_text(DomNode* n, StrBuf* sb) {
 
 bool tc_is_text_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
-    if (elem->item_prop_type == DomElement::ITEM_PROP_FORM && elem->form) {
+    if (elem->form_control()) {
         return elem->form->control_type == FORM_CONTROL_TEXT
             || elem->form->control_type == FORM_CONTROL_TEXTAREA;
     }
     if (strcasecmp(elem->tag_name, "textarea") == 0) return true;
     if (strcasecmp(elem->tag_name, "input") == 0) {
-        const char* t = dom_element_get_attribute(elem, "type");
+        const char* t = elem->get_attribute("type");
         if (!t || !*t) return true;
         return strcasecmp(t, "text") == 0
             || strcasecmp(t, "password") == 0
@@ -83,8 +81,6 @@ void form_control_prop_init(FormControlProp* f) {
     f->selected_index = -1;
     f->hover_index = -1;
     f->placeholder_opacity = 1.0f;
-    f->flex_shrink = 1;
-    f->flex_basis = -1;
     f->caret_on = 1;
 }
 
@@ -98,7 +94,7 @@ void form_control_prop_release(FormControlProp* f) {
 }
 
 FormControlProp* tc_get_or_create_form(DomElement* elem) {
-    if (elem->form && elem->item_prop_type == DomElement::ITEM_PROP_FORM)
+    if (elem->form && elem->role_kind() == DomElement::ROLE_FORM)
         return elem->form;
     FormControlProp* f = (FormControlProp*)mem_calloc(1, sizeof(FormControlProp), MEM_CAT_LAYOUT);
     if (!f) return nullptr;
@@ -111,12 +107,12 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
         f->control_type = FORM_CONTROL_TEXT;
     }
     elem->form = f;
-    elem->item_prop_type = DomElement::ITEM_PROP_FORM;
+    elem->set_role_kind(DomElement::ROLE_FORM);
     return f;
 }
 
 void form_control_release_prop(DomElement* elem) {
-    if (!elem || elem->item_prop_type != DomElement::ITEM_PROP_FORM || !elem->form) {
+    if (!elem || elem->role_kind() != DomElement::ROLE_FORM || !elem->form) {
         return;
     }
 
@@ -130,7 +126,7 @@ void form_control_release_prop(DomElement* elem) {
         mem_free(form);
     }
     elem->form = nullptr;
-    elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+    elem->set_role_kind(DomElement::ROLE_NONE);
 }
 
 // ---- internal: initial value resolution --------------------------------
@@ -144,7 +140,7 @@ static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
         size_t len = sb->str ? strlen(sb->str) : 0;
         const char* attr_value = nullptr;
         if (len == 0) {
-            attr_value = dom_element_get_attribute(elem, "value");
+            attr_value = elem->get_attribute("value");
             if (attr_value) len = strlen(attr_value);
         }
         char* out = (char*)mem_alloc(len + 1, MEM_CAT_DOM);
@@ -155,7 +151,7 @@ static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
         *out_len = (uint32_t)len;
         return out;
     }
-    const char* v = dom_element_get_attribute(elem, "value");
+    const char* v = elem->get_attribute("value");
     if (!v) v = "";
     size_t len = strlen(v);
     char* out = (char*)mem_alloc(len + 1, MEM_CAT_DOM);

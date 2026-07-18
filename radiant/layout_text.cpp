@@ -115,7 +115,7 @@ static inline bool has_small_caps(LayoutContext* lycon) {
     while (node) {
         if (node->is_element()) {
             DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
-            if (elem->font && elem->font->font_variant == CSS_VALUE_SMALL_CAPS) {
+            if (elem->font && elem->fontp()->font_variant == CSS_VALUE_SMALL_CAPS) {
                 return true;
             }
         }
@@ -522,8 +522,8 @@ static inline CssEnum get_text_spacing_trim(LayoutContext* lycon, DomNode* text_
     while (node) {
         if (node->is_element()) {
             DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
-            if (elem->blk && elem->blk->text_spacing_trim != 0) {
-                CssEnum value = elem->blk->text_spacing_trim;
+            if (elem->blk && elem->block_mut()->text_spacing_trim != 0) {
+                CssEnum value = elem->block()->text_spacing_trim;
                 if (value != CSS_VALUE_INHERIT && value != CSS_VALUE_UNSET &&
                     value != CSS_VALUE_REVERT && value != CSS_VALUE_INITIAL) {
                     return value;
@@ -557,8 +557,8 @@ static CssEnum get_inherited_text_enum(
     while (node) {
         if (node->is_element()) {
             DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(node);
-            if (elem->blk && elem->blk->*member != 0) {
-                return elem->blk->*member;
+            if (elem->blk && elem->block_mut()->*member != 0) {
+                return elem->block()->*member;
             }
         }
         node = node->parent;
@@ -1119,17 +1119,17 @@ static void record_soft_hyphen_inline_fragment(DomNode* text_node, LayoutContext
             break;
         }
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
-        if (!span->has_inline_fragment_union) {
-            span->has_inline_fragment_union = true;
-            span->inline_fragment_min_x = fragment_min_x;
-            span->inline_fragment_max_x = fragment_max_x;
-            span->inline_fragment_min_y = fragment_min_y;
-            span->inline_fragment_max_y = fragment_max_y;
+        if (!span->has_inline_fragment_union()) {
+            span->set_has_inline_fragment_union(true);
+            span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x = fragment_min_x;
+            span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x = fragment_max_x;
+            span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y = fragment_min_y;
+            span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y = fragment_max_y;
         } else {
-            if (fragment_min_x < span->inline_fragment_min_x) span->inline_fragment_min_x = fragment_min_x;
-            if (fragment_max_x > span->inline_fragment_max_x) span->inline_fragment_max_x = fragment_max_x;
-            if (fragment_min_y < span->inline_fragment_min_y) span->inline_fragment_min_y = fragment_min_y;
-            if (fragment_max_y > span->inline_fragment_max_y) span->inline_fragment_max_y = fragment_max_y;
+            if (fragment_min_x < span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x) span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_x = fragment_min_x;
+            if (fragment_max_x > span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x) span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_x = fragment_max_x;
+            if (fragment_min_y < span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y) span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->min_y = fragment_min_y;
+            if (fragment_max_y > span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y) span->ensure_fragment_union(FRAGMENT_UNION_INLINE)->max_y = fragment_max_y;
         }
         ancestor = ancestor->parent;
     }
@@ -1281,8 +1281,8 @@ CssEnum get_white_space_value(DomNode* node) {
         }
         DomElement* elem = lam::dom_require_element(current);
         // Check resolved BlockProp first (fastest path for blocks)
-        if (elem->blk && elem->blk->white_space != 0) {
-            CssEnum ws = elem->blk->white_space;
+        if (elem->blk && elem->block_mut()->white_space != 0) {
+            CssEnum ws = elem->block()->white_space;
             // Skip INHERIT/INITIAL/UNSET/REVERT - continue walking up
             if (is_concrete_white_space_value(ws)) {
                 return ws;
@@ -1523,10 +1523,10 @@ static void propagate_text_trim(ViewText* text_view, float trim_amount) {
         // border+padding, so the content ends before those decorations.
         float content_right = span_right;
         if (parent->bound) {
-            if (parent->bound->border)
-                content_right -= parent->bound->border->width.right;
-            if (parent->bound->padding.right > 0)
-                content_right -= parent->bound->padding.right;
+            if (parent->boundary()->border)
+                content_right -= parent->boundary()->border->width.right;
+            if (parent->boundary()->padding.right > 0)
+                content_right -= parent->boundary()->padding.right;
         }
         float old_text_right = text_view->x + text_view->width + trim_amount;
         // The text was at the right edge of the span before trimming — the span
@@ -1730,12 +1730,12 @@ static bool fixup_span_children_have_no_line_content(ViewSpan* span) {
 static float fixup_inline_vertical_decoration_height(ViewSpan* span) {
     if (!span || !span->bound) return 0.0f;
     float border_top = 0.0f, border_bottom = 0.0f;
-    if (span->bound->border) {
-        border_top = span->bound->border->width.top;
-        border_bottom = span->bound->border->width.bottom;
+    if (span->boundary()->border) {
+        border_top = span->boundary()->border->width.top;
+        border_bottom = span->boundary()->border->width.bottom;
     }
-    float padding_top = span->bound->padding.top > 0.0f ? span->bound->padding.top : 0.0f;
-    float padding_bottom = span->bound->padding.bottom > 0.0f ? span->bound->padding.bottom : 0.0f;
+    float padding_top = span->boundary()->padding.top > 0.0f ? span->boundary()->padding.top : 0.0f;
+    float padding_bottom = span->boundary()->padding.bottom > 0.0f ? span->boundary()->padding.bottom : 0.0f;
     return border_top + padding_top + padding_bottom + border_bottom;
 }
 
@@ -1799,24 +1799,24 @@ static void record_collapsed_line_fragment_for_inline_ancestors(
     while (ancestor && ancestor->is_element()) {
         if (ancestor->view_type != RDT_VIEW_INLINE) break;
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
-        if (!span->has_collapsed_line_fragment_union) {
-            span->has_collapsed_line_fragment_union = true;
-            span->collapsed_line_fragment_min_x = fragment_min_x;
-            span->collapsed_line_fragment_max_x = fragment_max_x;
-            span->collapsed_line_fragment_min_y = fragment_min_y;
-            span->collapsed_line_fragment_max_y = fragment_max_y;
+        if (!span->has_collapsed_line_fragment_union()) {
+            span->set_has_collapsed_line_fragment_union(true);
+            span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x = fragment_min_x;
+            span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x = fragment_max_x;
+            span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y = fragment_min_y;
+            span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_y = fragment_max_y;
         } else {
-            if (fragment_min_x < span->collapsed_line_fragment_min_x) {
-                span->collapsed_line_fragment_min_x = fragment_min_x;
+            if (fragment_min_x < span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x) {
+                span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_x = fragment_min_x;
             }
-            if (fragment_max_x > span->collapsed_line_fragment_max_x) {
-                span->collapsed_line_fragment_max_x = fragment_max_x;
+            if (fragment_max_x > span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x) {
+                span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_x = fragment_max_x;
             }
-            if (fragment_min_y < span->collapsed_line_fragment_min_y) {
-                span->collapsed_line_fragment_min_y = fragment_min_y;
+            if (fragment_min_y < span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y) {
+                span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->min_y = fragment_min_y;
             }
-            if (fragment_max_y > span->collapsed_line_fragment_max_y) {
-                span->collapsed_line_fragment_max_y = fragment_max_y;
+            if (fragment_max_y > span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_y) {
+                span->ensure_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE)->max_y = fragment_max_y;
             }
         }
         if (lycon->block.line_height > span->content_height) {
@@ -2623,10 +2623,10 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
             ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
             float right_edge = 0;
             if (sp->bound) {
-                right_edge += sp->bound->margin.right;
-                if (sp->bound->border)
-                    right_edge += sp->bound->border->width.right;
-                right_edge += sp->bound->padding.right;
+                right_edge += sp->boundary()->margin.right;
+                if (sp->boundary()->border)
+                    right_edge += sp->boundary()->border->width.right;
+                right_edge += sp->boundary()->padding.right;
             }
             lycon->line.advance_x += right_edge;
             float line_right = lycon->line.has_float_intrusion ?
@@ -3353,8 +3353,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 while (ancestor) {
                     if (ancestor->is_element()) {
                         DomElement* elem = lam::dom_require_element(ancestor);
-                        if (elem->blk && elem->blk->tab_size >= 0) {
-                            ts = elem->blk->tab_size;
+                        if (elem->blk && elem->block_mut()->tab_size >= 0) {
+                            ts = elem->block()->tab_size;
                             break;
                         }
                     }

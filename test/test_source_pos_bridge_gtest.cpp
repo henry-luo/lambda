@@ -232,8 +232,8 @@ TEST(SourcePosBridgePathTable, MissOnUnknownResultItem) {
 // Source tree (modeled, not built):  doc [ para [ "hello" ], hr ]
 // DOM tree:                          div [ p   [ "hello" ], b  ]
 //
-// The DomElements get stand-in `native_element` Item values that are
-// recorded in render_map alongside their source paths via
+// The DomElements' embedded Lambda Elements are recorded in render_map
+// alongside their source paths via
 // render_map_record_path. `source_pos_from_dom_boundary` and
 // `dom_boundary_from_source_pos` should be exact inverses.
 // ---------------------------------------------------------------------------
@@ -249,8 +249,7 @@ protected:
     DomElement* hr    = nullptr;  // models doc.content[1]
     DomText*    hello = nullptr;  // text leaf inside para
 
-    // Stand-in Items: we never dereference these as real Elements; only the
-    // 64-bit Item bits matter for render_map keying.
+    // Backing Items are used only for render-map identity in this fixture.
     Item root_item{};
     Item para_item{};
     Item hr_item{};
@@ -270,13 +269,14 @@ protected:
         ASSERT_TRUE(root->append_child(hr));
         ASSERT_TRUE(para->append_child(hello));
 
-        // Distinct synthetic Item bits per element, plant in native_element.
-        root_item.item = 0xA0001ULL;
-        para_item.item = 0xA0002ULL;
-        hr_item.item   = 0xA0003ULL;
-        root->native_element = (Element*)(uintptr_t)root_item.item;
-        para->native_element = (Element*)(uintptr_t)para_item.item;
-        hr->native_element   = (Element*)(uintptr_t)hr_item.item;
+        // These test nodes participate in the modeled Lambda tree, so their
+        // embedded Elements—not synthetic stand-ins—define stable identity.
+        root->set_synthetic(false);
+        para->set_synthetic(false);
+        hr->set_synthetic(false);
+        root_item.element = dom_element_to_element(root);
+        para_item.element = dom_element_to_element(para);
+        hr_item.element = dom_element_to_element(hr);
 
         // Source items used as render_map keys; values don't matter beyond
         // uniqueness. Use the same bits as the result items.

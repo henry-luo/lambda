@@ -55,11 +55,11 @@ static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float 
     *group = {};
     float opacity = render_walk_css_opacity(block->in_line);
     CssEnum blend = (block->in_line &&
-                     render_walk_blend_mode_effective(block->in_line->mix_blend_mode))
-                    ? block->in_line->mix_blend_mode : (CssEnum)0;
+                     render_walk_blend_mode_effective(block->inl()->mix_blend_mode))
+                    ? block->inl()->mix_blend_mode : (CssEnum)0;
     bool has_filter = render_walk_filter_effective(block->filter);
-    bool has_backdrop_filter = render_walk_filter_effective(block->backdrop_filter);
-    bool has_shadow = block->bound && block->bound->box_shadow;
+    bool has_backdrop_filter = render_walk_filter_effective(block->backdrop_filter_prop());
+    bool has_shadow = block->bound && block->boundary_mut()->box_shadow;
     if (opacity >= 0.9995f && !blend && !has_filter &&
         !has_backdrop_filter && !has_shadow) {
         return false;
@@ -74,7 +74,7 @@ static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float 
     group->blend_mode = (int)blend; // INT_CAST_OK: CssEnum is serialized through PaintIR as an integer enum value.
     group->filter = has_filter ? block->filter : NULL;
     group->backdrop = has_backdrop_filter;
-    group->backdrop_filter = has_backdrop_filter ? block->backdrop_filter : NULL;
+    group->backdrop_filter = has_backdrop_filter ? block->backdrop_filter_prop() : NULL;
     group->shadow = has_shadow;
     return true;
 }
@@ -84,10 +84,10 @@ static bool render_walk_inline_effect_group(ViewSpan* span, PaintEffectGroup* gr
     *group = {};
     float opacity = render_walk_css_opacity(span->in_line);
     CssEnum blend = (span->in_line &&
-                     render_walk_blend_mode_effective(span->in_line->mix_blend_mode))
-                    ? span->in_line->mix_blend_mode : (CssEnum)0;
+                     render_walk_blend_mode_effective(span->inl()->mix_blend_mode))
+                    ? span->inl()->mix_blend_mode : (CssEnum)0;
     bool has_filter = render_walk_filter_effective(span->filter);
-    bool has_backdrop_filter = render_walk_filter_effective(span->backdrop_filter);
+    bool has_backdrop_filter = render_walk_filter_effective(span->backdrop_filter_prop());
     if (opacity >= 0.9995f && !blend && !has_filter && !has_backdrop_filter) {
         return false;
     }
@@ -96,7 +96,7 @@ static bool render_walk_inline_effect_group(ViewSpan* span, PaintEffectGroup* gr
     group->blend_mode = (int)blend; // INT_CAST_OK: CssEnum is serialized through PaintIR as an integer enum value.
     group->filter = has_filter ? span->filter : NULL;
     group->backdrop = has_backdrop_filter;
-    group->backdrop_filter = has_backdrop_filter ? span->backdrop_filter : NULL;
+    group->backdrop_filter = has_backdrop_filter ? span->backdrop_filter_prop() : NULL;
     return true;
 }
 
@@ -123,7 +123,7 @@ static bool render_walk_block_begin(void* ctx, ViewBlock* block, void** phase) {
     state->x = p->pa_x + block->x;
     state->y = p->pa_y + block->y;
 
-    bool has_transform = block->transform && block->transform->functions;
+    bool has_transform = block->transform && block->transformp()->functions;
     p->opened_transform = has_transform && backend->begin_transform && backend->end_transform;
     if (p->opened_transform) {
         backend->begin_transform(backend->ctx, block, state->x, state->y);
@@ -153,8 +153,8 @@ static bool render_walk_block_paint_self(void* ctx, ViewBlock* block, void* phas
         backend->render_bound(backend->ctx, block, state->x, state->y);
     }
 
-    if (block->in_line && block->in_line->has_color) {
-        state->color = block->in_line->color;
+    if (block->in_line && block->inl()->has_color) {
+        state->color = block->inl()->color;
     }
 
     if (block->tag_id == HTM_TAG_SVG) {
@@ -166,13 +166,13 @@ static bool render_walk_block_paint_self(void* ctx, ViewBlock* block, void* phas
         return false;
     }
 
-    if (block->embed && block->embed->img && backend->render_image) {
+    if (block->embed && block->embedp()->img && backend->render_image) {
         backend->render_image(backend->ctx, block, state->x, state->y);
     }
 
-    if (block->embed && block->embed->webview &&
-        block->embed->webview->mode == WEBVIEW_MODE_LAYER &&
-        block->embed->webview->surface && block->embed->webview->surface->pixels &&
+    if (block->embed && block->embedp()->webview &&
+        block->embedp()->webview->mode == WEBVIEW_MODE_LAYER &&
+        block->embedp()->webview->surface && block->embedp()->webview->surface->pixels &&
         backend->render_image) {
         backend->render_image(backend->ctx, block, state->x, state->y);
     }
@@ -187,12 +187,12 @@ static double render_walk_block_paint_children(void* ctx, ViewBlock* block, void
 
     RenderBackend* backend = driver->backend;
     RenderWalkState* state = driver->state;
-    if (block->first_child || block->custom_layout_paint) {
+    if (block->first_child || block->custom_layout_paint_prop()) {
         if (backend->begin_block_children) {
             backend->begin_block_children(backend->ctx, block);
         }
 
-        if (block->custom_layout_paint) {
+        if (block->custom_layout_paint_prop()) {
             RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
             for (int i = 0; i < paint.count; i++) {
                 RadiantStackPaintEntry* entry = &paint.entries[i];
@@ -224,7 +224,7 @@ static double render_walk_block_paint_children(void* ctx, ViewBlock* block, void
         if (block->position) {
             render_walk_positioned_children(backend, state, block);
         }
-        if (!block->custom_layout_paint) {
+        if (!block->custom_layout_paint_prop()) {
             render_walk_positive_z_descendants(backend, state, block->first_child);
         }
 
@@ -244,7 +244,7 @@ static void render_walk_block_finish(void* ctx, ViewBlock* block, void* phase) {
     RenderWalkState* state = driver->state;
 
     if (!p->stop_after_self &&
-        block->multicol && block->multicol->computed_column_count > 1) {
+        block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
         if (backend->render_column_rules) {
             backend->render_column_rules(backend->ctx, block, state->x, state->y);
         }
@@ -293,8 +293,8 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
         }
     }
 
-    if (span->in_line && span->in_line->has_color) {
-        state->color = span->in_line->color;
+    if (span->in_line && span->inl()->has_color) {
+        state->color = span->inl()->color;
     }
 
     if (span->first_child) {

@@ -54,21 +54,23 @@ static void layout_measure_snapshot_append(::LayoutContext* lycon,
         ::DomElement* element = node->as_element();
         snapshot->content_width = element->content_width;
         snapshot->content_height = element->content_height;
-        snapshot->cached_min_content_width = element->cached_min_content_width;
-        snapshot->cached_max_content_width = element->cached_max_content_width;
-        snapshot->has_cached_intrinsic_widths = element->has_cached_intrinsic_widths;
-        snapshot->measuring_intrinsic_width = element->measuring_intrinsic_width;
-        snapshot->has_form = element->item_prop_type == ::DomElement::ITEM_PROP_FORM && element->form;
+        snapshot->cached_min_content_width = element->layout_cache
+            ? element->layout_cache->intrinsic_min_content_width : 0.0f;
+        snapshot->cached_max_content_width = element->layout_cache
+            ? element->layout_cache->intrinsic_max_content_width : 0.0f;
+        snapshot->has_cached_intrinsic_widths = element->has_cached_intrinsic_widths();
+        snapshot->measuring_intrinsic_width = element->measuring_intrinsic_width();
+        snapshot->has_form = element->form_control();
         if (snapshot->has_form) {
             snapshot->form_intrinsic_width = element->form->intrinsic_width;
             snapshot->form_intrinsic_height = element->form->intrinsic_height;
         }
         snapshot->has_block_prop = element->blk != nullptr;
         if (snapshot->has_block_prop) {
-            snapshot->block_given_width = element->blk->given_width;
-            snapshot->block_given_height = element->blk->given_height;
-            snapshot->block_given_width_type = element->blk->given_width_type;
-            snapshot->block_given_height_type = element->blk->given_height_type;
+            snapshot->block_given_width = element->block()->given_width;
+            snapshot->block_given_height = element->block()->given_height;
+            snapshot->block_given_width_type = element->block()->given_width_type;
+            snapshot->block_given_height_type = element->block()->given_height_type;
         }
     }
 
@@ -107,12 +109,14 @@ static void layout_measure_snapshot_restore(::LayoutContext* lycon, ArrayList* s
             ::DomElement* element = node->as_element();
             element->content_width = snapshot->content_width;
             element->content_height = snapshot->content_height;
-            element->cached_min_content_width = snapshot->cached_min_content_width;
-            element->cached_max_content_width = snapshot->cached_max_content_width;
-            element->has_cached_intrinsic_widths = snapshot->has_cached_intrinsic_widths;
-            element->measuring_intrinsic_width = snapshot->measuring_intrinsic_width;
+            if (element->layout_cache) {
+                element->layout_cache->intrinsic_min_content_width = snapshot->cached_min_content_width;
+                element->layout_cache->intrinsic_max_content_width = snapshot->cached_max_content_width;
+            }
+            element->set_has_cached_intrinsic_widths(snapshot->has_cached_intrinsic_widths);
+            element->set_measuring_intrinsic_width(snapshot->measuring_intrinsic_width);
             if (snapshot->has_form &&
-                element->item_prop_type == ::DomElement::ITEM_PROP_FORM && element->form) {
+                element->form_control()) {
                 element->form->intrinsic_width = snapshot->form_intrinsic_width;
                 element->form->intrinsic_height = snapshot->form_intrinsic_height;
             }
@@ -183,12 +187,12 @@ LayoutMeasureScope::~LayoutMeasureScope() {
 
 KnownDimensions layout_known_dimensions_from_block(::ViewBlock* block) {
     KnownDimensions known = known_dimensions_none();
-    if (block && block->blk && block->blk->given_width > 0.0f) {
-        known.width = block->blk->given_width;
+    if (block && block->blk && block->block_mut()->given_width > 0.0f) {
+        known.width = block->block()->given_width;
         known.has_width = true;
     }
-    if (block && block->blk && block->blk->given_height > 0.0f) {
-        known.height = block->blk->given_height;
+    if (block && block->blk && block->block_mut()->given_height > 0.0f) {
+        known.height = block->block()->given_height;
         known.has_height = true;
     }
     return known;
@@ -253,20 +257,27 @@ bool layout_pass_cache_get_for_space(::LayoutContext* lycon, ::DomElement* eleme
     return false;
 }
 
-void layout_pass_cache_store_for_space(::LayoutContext* lycon, ::DomElement* element,
-    KnownDimensions known_dimensions, AvailableSpace available_space,
-    SizeF result, const char* label) {
-    if (!lycon || !element) return;
-    if (lycon->run_mode != RunMode::ComputeSize) return;
-
+LayoutCache* layout_pass_ensure_cache(::LayoutContext* lycon, ::DomElement* element) {
+    if (!lycon || !element) return nullptr;
     LayoutCache* cache = element->layout_cache;
     if (!cache && lycon->pool) {
         cache = (LayoutCache*)pool_calloc(lycon->pool, sizeof(LayoutCache));
         if (cache) {
             layout_cache_init(cache);
             element->layout_cache = cache;
+            if (element->doc) element->doc->services.layout_cache_allocations++;
         }
     }
+    return cache;
+}
+
+void layout_pass_cache_store_for_space(::LayoutContext* lycon, ::DomElement* element,
+    KnownDimensions known_dimensions, AvailableSpace available_space,
+    SizeF result, const char* label) {
+    if (!lycon || !element) return;
+    if (lycon->run_mode != RunMode::ComputeSize) return;
+
+    LayoutCache* cache = layout_pass_ensure_cache(lycon, element);
     if (!cache) return;
 
     layout_cache_store(cache, known_dimensions, available_space, lycon->run_mode, result);

@@ -6,8 +6,8 @@
 
 bool layout_view_is_abs_or_fixed(ViewBlock* block) {
     return block && block->position &&
-        (block->position->position == CSS_VALUE_ABSOLUTE ||
-         block->position->position == CSS_VALUE_FIXED);
+        (block->positionp()->position == CSS_VALUE_ABSOLUTE ||
+         block->positionp()->position == CSS_VALUE_FIXED);
 }
 
 ViewBlock* layout_nearest_block_ancestor(ViewElement* view) {
@@ -40,8 +40,8 @@ LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block) {
     cb.content_width = max(cb.border_width - box.pad_border_h, 0.0f);
     cb.content_height = max(cb.border_height - box.pad_border_v, 0.0f);
 
-    cb.has_definite_width = block->blk && block->blk->given_width >= 0.0f;
-    cb.has_definite_height = block->blk && block->blk->given_height >= 0.0f;
+    cb.has_definite_width = block->blk && block->block_mut()->given_width >= 0.0f;
+    cb.has_definite_height = block->blk && block->block_mut()->given_height >= 0.0f;
     return cb;
 }
 
@@ -98,17 +98,17 @@ void layout_resolve_percent_size_for_child(LayoutContext* lycon, ViewBlock* chil
     float height_base = use_content_box ? cb.content_height : cb.padding_height;
     const char* context = log_context ? log_context : "child";
 
-    if (!isnan(child->blk->given_width_percent) && width_base > 0.0f) {
-        float width = width_base * child->blk->given_width_percent / 100.0f;
+    if (!isnan(child->block()->given_width_percent) && width_base > 0.0f) {
+        float width = width_base * child->block()->given_width_percent / 100.0f;
         log_debug("[LAYOUT_CB] %s width %.1f%% of %.1f = %.1f (was %.1f)",
-                  context, child->blk->given_width_percent, width_base, width, lycon->block.given_width);
+                  context, child->block()->given_width_percent, width_base, width, lycon->block.given_width);
         lycon->block.given_width = width;
         child->blk->given_width = width;
     }
-    if (!isnan(child->blk->given_height_percent) && height_base > 0.0f) {
-        float height = height_base * child->blk->given_height_percent / 100.0f;
+    if (!isnan(child->block()->given_height_percent) && height_base > 0.0f) {
+        float height = height_base * child->block()->given_height_percent / 100.0f;
         log_debug("[LAYOUT_CB] %s height %.1f%% of %.1f = %.1f (was %.1f)",
-                  context, child->blk->given_height_percent, height_base, height, lycon->block.given_height);
+                  context, child->block()->given_height_percent, height_base, height, lycon->block.given_height);
         lycon->block.given_height = height;
         child->blk->given_height = height;
     }

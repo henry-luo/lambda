@@ -43,6 +43,10 @@ enum DomNodeType {
     DOM_NODE_DOCTYPE = 10     // DOCTYPE declaration
 };
 
+enum DomNodeFlag : uint8_t {
+    DOM_NODE_FLAG_TEXT_SYMBOL = 1u << 0,
+};
+
 typedef enum {
     RDT_VIEW_NONE = 0,
     RDT_VIEW_TEXT,
@@ -71,6 +75,7 @@ typedef struct ViewElement ViewElement;
  * Provides common tree structure and node operations
  * Note: This is a plain C++ struct, not a polymorphic class (no virtual methods)
  */
+// tier-1: doc-pool, survives relayout
 struct DomNode {
     uint32_t id;             // event/state log id, monotonic per document epoch
     DomNodeType node_type;   // Node type discriminator
@@ -83,13 +88,15 @@ struct DomNode {
     // view always has x, y, wd, hg;  otherwise, it is a property group
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
     int inline_line_number;     // block-local line containing an atomic inline; -1 for other boxes
-    ViewState* view_state_ref;  // weak pointer to canonical per-view state owned by DocState
+    // Tier-1 weak reference: state-store teardown clears it before the document epoch advances.
+    ViewState* view_state_ref;  // canonical per-view state owned by DocState
 
     // source line number in the original HTML file (0 = not tracked)
     int source_line;
 
     // Phase 16: incremental layout support
     bool layout_dirty;                // marked for relayout in incremental mode
+    uint8_t node_flags;               // compact subtype state; use node accessors
     float layout_height_contribution; // advance_y delta from this node during parent's layout
 
     // node_name() is for all nodes, including text and comment nodes
@@ -180,7 +187,7 @@ protected:
         next_sibling(nullptr), prev_sibling(nullptr), view_type(RDT_VIEW_NONE),
         x(0), y(0), width(0), height(0), inline_line_number(-1),
         view_state_ref(nullptr), source_line(0),
-        layout_dirty(false), layout_height_contribution(0) {}
+        layout_dirty(false), node_flags(0), layout_height_contribution(0) {}
 };
 
 // ============================================================================
@@ -213,6 +220,7 @@ enum DomTextContentType {
  * Always backed by Lambda String (references chars, no copy).
  * Maintains synchronization with Lambda tree via MarkEditor through parent element.
  */
+// tier-1: doc-pool, survives relayout
 struct DomText : public DomNode {
     // Text-specific fields (reference to Lambda String)
     const char* text;            // Text content or symbol name (references native_string->chars)
@@ -220,23 +228,20 @@ struct DomText : public DomNode {
     // Lambda backing (required)
     String* native_string;       // Pointer to backing Lambda String
 
-    // Content type (string vs symbol)
-    DomTextContentType content_type;
-
     // view related fields
     TextRect *rect;  // first text rect
     FontProp *font;  // font for this text
 
-    // PDF rendering related
-    Color color;     // text color (for PDF text fill color)
-
     // Constructor
     DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
-        native_string(nullptr), content_type(DOM_TEXT_STRING), rect(nullptr),
-        font(nullptr), color({0}) {}
+        native_string(nullptr), rect(nullptr), font(nullptr) {}
 
     // Check if this is a symbol node
-    bool is_symbol() const { return content_type == DOM_TEXT_SYMBOL; }
+    bool is_symbol() const { return (node_flags & DOM_NODE_FLAG_TEXT_SYMBOL) != 0; }
+    void set_symbol(bool value) {
+        if (value) node_flags |= DOM_NODE_FLAG_TEXT_SYMBOL;
+        else node_flags &= ~DOM_NODE_FLAG_TEXT_SYMBOL;
+    }
 };
 
 // ============================================================================
@@ -350,14 +355,6 @@ int64_t dom_text_get_child_index(DomText* text_node);
  */
 bool dom_text_remove(DomText* text_node);
 
-/**
- * Append a text node to a parent element (updates Lambda tree)
- * @param parent Parent DomElement
- * @param text_content Text content string
- * @return New DomText or NULL on failure
- */
-DomText* dom_element_append_text(DomElement* parent, const char* text_content);
-
 // ============================================================================
 // DOM Comment/DOCTYPE Node API
 // ============================================================================
@@ -367,6 +364,7 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content);
  * Represents comments (<!-- -->), DOCTYPE declarations, and XML declarations
  * Always backed by Lambda Element (tag "!--" or "!DOCTYPE")
  */
+// tier-1: doc-pool, survives relayout
 struct DomComment : public DomNode {
     // Comment-specific fields
     const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
@@ -408,14 +406,6 @@ int64_t dom_comment_get_child_index(DomComment* comment_node);
  * @return true on success, false on failure
  */
 bool dom_comment_set_content(DomComment* comment_node, const char* new_content);
-
-/**
- * Append a comment to a parent element (updates Lambda tree)
- * @param parent Parent DomElement
- * @param comment_content Comment content string
- * @return New DomComment or NULL on failure
- */
-DomComment* dom_element_append_comment(DomElement* parent, const char* comment_content);
 
 /**
  * Remove a comment node (updates Lambda tree)

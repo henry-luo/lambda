@@ -42,12 +42,12 @@ static bool custom_layout_child_is_in_flow(View* child) {
 
     ViewBlock* block = lam::view_as_block(child);
     if (!block || !block->position) return true;
-    if (block->position->position == CSS_VALUE_ABSOLUTE ||
-        block->position->position == CSS_VALUE_FIXED) {
+    if (block->positionp()->position == CSS_VALUE_ABSOLUTE ||
+        block->positionp()->position == CSS_VALUE_FIXED) {
         return false;
     }
-    if (block->position->float_prop == CSS_VALUE_LEFT ||
-        block->position->float_prop == CSS_VALUE_RIGHT) {
+    if (block->positionp()->float_prop == CSS_VALUE_LEFT ||
+        block->positionp()->float_prop == CSS_VALUE_RIGHT) {
         return false;
     }
     return true;
@@ -113,31 +113,12 @@ static void custom_layout_clear_child_z(const Velmt* child) {
     element->position->custom_layout_z_index = 0;
 }
 
-static PositionProp* custom_layout_alloc_position_prop(LayoutContext* lycon) {
-    if (!lycon) return nullptr;
-    Pool* pool = nullptr;
-    if (lycon->doc && lycon->doc->view_tree) {
-        pool = lycon->doc->view_tree->pool;
-    }
-    if (!pool) {
-        pool = lycon->pool;
-    }
-    if (!pool) return nullptr;
-
-    PositionProp* prop = (PositionProp*)pool_calloc(pool, sizeof(PositionProp));
-    if (!prop) return nullptr;
-    // Custom z can be attached to otherwise unpositioned children, so use the
-    // shared static-position defaults before applying the pass-scoped overlay.
-    position_prop_init_defaults(prop);
-    return prop;
-}
-
 static bool custom_layout_apply_child_z(LayoutContext* lycon, const Velmt* child, int z) {
     if (!lycon || !child || !child->view) return false;
     ViewElement* element = lam::view_as_element(child->view);
     if (!element) return false;
     if (!element->position) {
-        element->position = custom_layout_alloc_position_prop(lycon);
+        element->ensure_position(lycon);
     }
     if (!element->position) {
         log_error("CUSTOM_LAYOUT_Z_ALLOC_FAILED child_index=%d", child->index);
@@ -155,13 +136,13 @@ static bool custom_layout_child_has_percent_size(const Velmt* child, bool horizo
     ViewBlock* block = lam::view_as_block(child->view);
     if (!block || !block->blk) return false;
     if (horizontal) {
-        return !isnan(block->blk->given_width_percent) ||
-            !isnan(block->blk->given_min_width_percent) ||
-            !isnan(block->blk->given_max_width_percent);
+        return !isnan(block->block()->given_width_percent) ||
+            !isnan(block->block()->given_min_width_percent) ||
+            !isnan(block->block()->given_max_width_percent);
     }
-    return !isnan(block->blk->given_height_percent) ||
-        !isnan(block->blk->given_min_height_percent) ||
-        !isnan(block->blk->given_max_height_percent);
+    return !isnan(block->block()->given_height_percent) ||
+        !isnan(block->block()->given_min_height_percent) ||
+        !isnan(block->block()->given_max_height_percent);
 }
 
 static void custom_layout_warn_auto_axis_percent_children(const CustomLayoutContext* context,
@@ -335,10 +316,10 @@ static void custom_layout_apply_parent_size(ViewBlock* block,
     if (result->has_width) content_width = result->width;
     if (result->has_height) content_height = result->height;
 
-    if (!block->blk || block->blk->given_width < 0.0f) {
+    if (!block->blk || block->block()->given_width < 0.0f) {
         custom_layout_apply_parent_axis(block, content_width, true);
     }
-    if (!block->blk || block->blk->given_height < 0.0f) {
+    if (!block->blk || block->block()->given_height < 0.0f) {
         custom_layout_apply_parent_axis(block, content_height, false);
     }
 }
@@ -477,10 +458,10 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
     context.child_count = child_count;
     context.available_width = block->content_width;
     context.available_height = block->content_height;
-    context.css_width = block->blk ? block->blk->given_width : -1.0f;
-    context.css_height = block->blk ? block->blk->given_height : -1.0f;
-    context.direction = (block->blk && block->blk->direction) ?
-        block->blk->direction : lycon->block.direction;
+    context.css_width = block->blk ? block->block()->given_width : -1.0f;
+    context.css_height = block->blk ? block->block()->given_height : -1.0f;
+    context.direction = (block->blk && block->block_mut()->direction) ?
+        block->block()->direction : lycon->block.direction;
     context.writing_mode = "horizontal-tb";
     custom_layout_set_child_constraints(&context);
     custom_layout_warn_auto_axis_percent_children(&context, true);

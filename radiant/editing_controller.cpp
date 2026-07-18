@@ -261,9 +261,9 @@ static float editing_controller_text_control_content_extent(ViewBlock* block,
                                                             bool horizontal) {
     if (!block || !elem || !elem->form) return 0.0f;
     bool is_textarea = elem->form->control_type == FORM_CONTROL_TEXTAREA;
-    float border = (block->bound && block->bound->border)
-        ? block->bound->border->width.left : 1.0f;
-    float padding = block->bound ? block->bound->padding.left :
+    float border = (block->bound && block->boundary_mut()->border)
+        ? block->boundary()->border->width.left : 1.0f;
+    float padding = block->bound ? block->boundary()->padding.left :
         (is_textarea ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
     float extent = (horizontal ? block->width : block->height) -
         2.0f * (border + padding);
@@ -290,9 +290,9 @@ static float editing_controller_text_control_max_line_width(UiContext* uicon,
     if (!value) value = "";
 
     bool is_textarea = elem->form->control_type == FORM_CONTROL_TEXTAREA;
-    float border = (block->bound && block->bound->border)
-        ? block->bound->border->width.left : 1.0f;
-    float padding = block->bound ? block->bound->padding.left :
+    float border = (block->bound && block->boundary_mut()->border)
+        ? block->boundary()->border->width.left : 1.0f;
+    float padding = block->bound ? block->boundary()->padding.left :
         (is_textarea ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
 
     float max_width = 0.0f;
@@ -318,7 +318,7 @@ static float editing_controller_textarea_content_height(DomElement* elem) {
     tc_ensure_init(elem);
     const char* value = elem->form->current_value ? elem->form->current_value : elem->form->value;
     uint32_t value_len = elem->form->current_value_len;
-    float font_size = block->font ? block->font->font_size : 13.333f;
+    float font_size = block->font ? block->fontp()->font_size : 13.333f;
     float line_height = font_size * 1.4f;
     uint32_t lines = 1;
     if (value) {
@@ -399,9 +399,9 @@ static bool editing_controller_text_control_drag_autoscroll(
     float abs_y = 0.0f;
     editing_controller_view_abs_xy(static_cast<View*>(block), &abs_x, &abs_y);
 
-    bool has_css_border = block->bound && block->bound->border;
-    float border = has_css_border ? block->bound->border->width.left : 1.0f;
-    float padding = block->bound ? block->bound->padding.left :
+    bool has_css_border = block->bound && block->boundary_mut()->border;
+    float border = has_css_border ? block->boundary()->border->width.left : 1.0f;
+    float padding = block->bound ? block->boundary()->padding.left :
         (is_textarea ? FormDefaults::TEXTAREA_PADDING : FormDefaults::TEXT_PADDING_H);
     float content_x = abs_x + border + padding;
     float content_y = abs_y + border + padding;
@@ -484,13 +484,13 @@ static ViewBlock* editing_controller_nearest_scroll_block(DocState* state,
             continue;
         }
         ViewBlock* block = lam::view_require_block(cur);
-        if (!block || block == root_block || !block->scroller || !block->scroller->pane) {
+        if (!block || block == root_block || !block->scroller || !block->scroll()->pane) {
             continue;
         }
         float h_max = 0.0f;
         float v_max = 0.0f;
         scroll_state_get_position_for_view(state, static_cast<View*>(block),
-            block->scroller->pane, nullptr, nullptr, &h_max, &v_max);
+            block->scroll()->pane, nullptr, nullptr, &h_max, &v_max);
         if (h_max > 0.0f || v_max > 0.0f) return block;
     }
     return root_block;
@@ -557,7 +557,7 @@ bool editing_controller_drag_autoscroll(EventContext* evcon,
 
     ViewBlock* scroll_block = editing_controller_nearest_scroll_block(
         state, surface_target, root_block);
-    if (!scroll_block || !scroll_block->scroller || !scroll_block->scroller->pane) {
+    if (!scroll_block || !scroll_block->scroller || !scroll_block->scroll()->pane) {
         return false;
     }
 
@@ -593,7 +593,7 @@ bool editing_controller_drag_autoscroll(EventContext* evcon,
 
     float h = 0.0f, v = 0.0f, h_max = 0.0f, v_max = 0.0f;
     scroll_state_get_position_for_view(state, static_cast<View*>(scroll_block),
-                                       scroll_block->scroller->pane,
+                                       scroll_block->scroll()->pane,
                                        &h, &v, &h_max, &v_max);
     float next_h = h + vx;
     float next_v = v + vy;
@@ -623,7 +623,7 @@ bool editing_controller_drag_autoscroll(EventContext* evcon,
     }
 
     scroll_state_set_position_for_view(state, static_cast<View*>(scroll_block),
-                                       scroll_block->scroller->pane,
+                                       scroll_block->scroll()->pane,
                                        next_h, next_v, is_viewport);
     if (is_viewport) doc_state_sync_viewport_scroll(state, doc, next_h, next_v);
     editing_controller_extend_selection_after_scroll(evcon, state, surface_target,

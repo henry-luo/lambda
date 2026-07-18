@@ -142,7 +142,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     // CSS 2.1 §11.2: text inherits visibility from parent element
     if (text_view->parent && text_view->parent->is_element()) {
         DomElement* parent_elem = lam::dom_require_element(text_view->parent);
-        if (parent_elem->in_line && parent_elem->in_line->visibility == VIS_HIDDEN) {
+        if (parent_elem->in_line && parent_elem->inl()->visibility == VIS_HIDDEN) {
             log_debug("text hidden by parent visibility:hidden");
             return;
         }
@@ -177,9 +177,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
     // Apply text color from text_view if set (PDF text uses this for fill color)
     Color saved_color = rdcon->color;
-    if (text_view->color.c != 0) {
-        rdcon->color = text_view->color;
-    }
 
     // Setup font from text_view if set (PDF text has font property directly on ViewText)
     FontBox saved_font = rdcon->font;
@@ -224,8 +221,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
     // Get text-shadow from parent element's font property
     TextShadow* text_shadow = nullptr;
-    if (parent_elem && parent_elem->font && parent_elem->font->text_shadow) {
-        text_shadow = parent_elem->font->text_shadow;
+    if (parent_elem && parent_elem->font && parent_elem->fontp()->text_shadow) {
+        text_shadow = parent_elem->fontp()->text_shadow;
     }
 
     while (text_rect) {
@@ -492,14 +489,14 @@ static void render_text_inline_background(RenderContext* rdcon, ViewText* text_v
     }
 
     float s = rdcon->scale;
-    BackgroundProp* bg = parent_elem->bound->background;
+    BackgroundProp* bg = parent_elem->boundary()->background;
     Color* bg_color = bg ? &bg->color : nullptr;
-    float bg_pad_top = parent_elem->bound->padding.top * s;
-    float bg_pad_right = parent_elem->bound->padding.right * s;
-    float bg_pad_bottom = parent_elem->bound->padding.bottom * s;
-    float bg_pad_left = parent_elem->bound->padding.left * s;
-    float bg_radius = parent_elem->bound->border ?
-        parent_elem->bound->border->radius.top_left * s : 0;
+    float bg_pad_top = parent_elem->boundary()->padding.top * s;
+    float bg_pad_right = parent_elem->boundary()->padding.right * s;
+    float bg_pad_bottom = parent_elem->boundary()->padding.bottom * s;
+    float bg_pad_left = parent_elem->boundary()->padding.left * s;
+    float bg_radius = parent_elem->boundary()->border ?
+        parent_elem->boundary()->border->radius.top_left * s : 0;
 
     Rect bg_rect = {
         x - bg_pad_left,
@@ -549,12 +546,12 @@ static void render_text_inline_border(RenderContext* rdcon, ViewText* text_view,
     (void)y;
     if (!rdcon || !text_view || !text_rect || !parent_elem ||
         parent_elem->view_type != RDT_VIEW_INLINE ||
-        !parent_elem->bound || !parent_elem->bound->border || !bg_rect) {
+        !parent_elem->bound || !parent_elem->boundary()->border || !bg_rect) {
         return;
     }
 
     float s = rdcon->scale;
-    BorderProp* border = parent_elem->bound->border;
+    BorderProp* border = parent_elem->boundary()->border;
     Rect border_rect = *bg_rect;
     border_rect.x -= border->width.left * s;
     border_rect.y -= border->width.top * s;
@@ -757,12 +754,12 @@ static bool render_text_background_clip_linear_text(RenderContext* rdcon,
     if (out_gradient) *out_gradient = nullptr;
     if (out_gradient_rect) *out_gradient_rect = {};
     if (!rdcon || !parent_elem || !parent_elem->bound ||
-        !parent_elem->bound->background || !text_rect ||
+        !parent_elem->boundary()->background || !text_rect ||
         !out_gradient || !out_gradient_rect) {
         return false;
     }
 
-    BackgroundProp* bg = parent_elem->bound->background;
+    BackgroundProp* bg = parent_elem->boundary()->background;
     if (bg->bg_clip != CSS_VALUE_TEXT ||
         bg->gradient_type != GRADIENT_LINEAR ||
         !bg->linear_gradient ||

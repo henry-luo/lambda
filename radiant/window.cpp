@@ -46,18 +46,18 @@ extern UiContext ui_context;
 
 bool radiant_pump_js_event_loop(UiContext* uicon, int wait_ms) {
     DomDocument* doc = uicon ? uicon->document : nullptr;
-    if (!doc || !doc->js_runtime_heap || !doc->js_runtime_name_pool) {
+    if (!doc || !doc->js.runtime_heap || !doc->js.runtime_name_pool) {
         if (wait_ms >= 0) return js_event_loop_pump_wait(wait_ms);
         js_event_loop_pump_nowait();
         return true;
     }
 
-    Heap* heap = (Heap*)doc->js_runtime_heap;
+    Heap* heap = (Heap*)doc->js.runtime_heap;
     EvalContext pump_ctx = {};
     pump_ctx.heap = heap;
-    pump_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
-    pump_ctx.type_list = (ArrayList*)doc->js_runtime_type_list;
-    pump_ctx.pool = doc->js_runtime_pool ? (Pool*)doc->js_runtime_pool : heap->pool;
+    pump_ctx.name_pool = (NamePool*)doc->js.runtime_name_pool;
+    pump_ctx.type_list = (ArrayList*)doc->js.runtime_type_list;
+    pump_ctx.pool = doc->js.runtime_pool ? (Pool*)doc->js.runtime_pool : heap->pool;
 
     EvalContext* saved_ctx = context;
     Context* saved_input_ctx = input_context;
@@ -381,7 +381,7 @@ static void view_attach_event_log(DomDocument* doc, const char* doc_name) {
         if (ui_context.event_log) {
             event_state_log_session_start(ui_context.event_log,
                 (int)ui_context.viewport_width, (int)ui_context.viewport_height,
-                doc->scale > 0 ? doc->scale : 1.0);
+                doc->viewport.scale > 0 ? doc->viewport.scale : 1.0);
             event_state_log_document(ui_context.event_log, "load_start");
             event_state_log_document(ui_context.event_log, "load_complete");
         }
@@ -409,8 +409,8 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     if (!doc) return nullptr;
 
     // Set scale for window display: given_scale = 1.0, scale = pixel_ratio
-    doc->given_scale = 1.0f;
-    doc->scale = doc->given_scale * ui_context.pixel_ratio;
+    doc->viewport.given_scale = 1.0f;
+    doc->viewport.scale = doc->viewport.given_scale * ui_context.pixel_ratio;
 
     // BrowsingSession owns replacement of the previously presented document;
     // this presentation helper only publishes the newly loaded document.
@@ -451,11 +451,11 @@ void reflow_html_doc(DomDocument* doc) {
 static void window_save_document_scroll(BrowsingSession* session, DomDocument* doc) {
     ViewBlock* root = doc && doc->view_tree
         ? lam::view_require_block(doc->view_tree->root) : nullptr;
-    if (!root || !root->scroller || !root->scroller->pane) return;
+    if (!root || !root->scroller || !root->scroll()->pane) return;
 
     float scroll_y = 0.0f;
     scroll_state_get_position_for_view(doc->state, static_cast<View*>(root),
-        root->scroller->pane, NULL, &scroll_y, NULL, NULL);
+        root->scroll()->pane, NULL, &scroll_y, NULL, NULL);
     session_save_scroll_position(session, scroll_y);
 }
 
@@ -484,13 +484,13 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
             if (new_doc) {
                 // restore saved scroll position for this history entry
                 ViewBlock* root = new_doc->view_tree ? lam::view_require_block(new_doc->view_tree->root) : nullptr;
-                if (root && root->scroller && root->scroller->pane) {
+                if (root && root->scroller && root->scroll_mut()->pane) {
                     float saved_y = session_get_scroll_position(session);
                     float scroll_x = 0.0f;
                     scroll_state_get_position_for_view((DocState*)new_doc->state, static_cast<View*>(root),
-                        root->scroller->pane, &scroll_x, NULL, NULL, NULL);
+                        root->scroll()->pane, &scroll_x, NULL, NULL, NULL);
                     scroll_state_set_position_for_view((DocState*)new_doc->state, static_cast<View*>(root),
-                        root->scroller->pane, scroll_x, saved_y, true);
+                        root->scroll()->pane, scroll_x, saved_y, true);
                 }
                 // update title
                 const char* page_title = session_current_title(session);
@@ -1099,8 +1099,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         // For HTML documents, this updates the default; for PDF/SVG/Image, this was already set in loader
         if (doc->html_root) {
             // HTML documents need scale set for display (layout is in CSS pixels)
-            doc->given_scale = 1.0f;
-            doc->scale = doc->given_scale * ui_context.pixel_ratio;
+            doc->viewport.given_scale = 1.0f;
+            doc->viewport.scale = doc->viewport.given_scale * ui_context.pixel_ratio;
         }
         // Note: PDF/SVG/Image documents already have scale set in their respective loaders
 
@@ -1328,8 +1328,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             float scroll_y = 0;
             if (ui_context.document && ui_context.document->view_tree && ui_context.document->view_tree->root) {
                 ViewBlock* root = lam::view_require_block(ui_context.document->view_tree->root);
-                if (root->scroller && root->scroller->pane) {
-                    scroll_state_get_position_for_view(state, static_cast<View*>(root), root->scroller->pane,
+                if (root->scroller && root->scroll_mut()->pane) {
+                    scroll_state_get_position_for_view(state, static_cast<View*>(root), root->scroll()->pane,
                         NULL, &scroll_y, NULL, NULL);
                 }
             }

@@ -1590,7 +1590,7 @@ static Item execute_js_module_source(Runtime* runtime, const char* source, size_
 static void script_runner_set_ready_state(Runtime* runtime, const char* ready_state) {
     DomDocument* doc = runtime ? (DomDocument*)runtime->dom_doc : nullptr;
     if (doc) {
-        doc->js_ready_state = ready_state ? ready_state : "complete";
+        doc->js.ready_state = ready_state ? ready_state : "complete";
     }
 }
 
@@ -2203,7 +2203,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     Runtime runtime = {};
     runtime.dom_doc = (void*)dom_doc;
     // create fresh tracked mmap pool for this JS execution
-    runtime.reuse_pool = mem_pool_create_mmap((MemContext*)dom_doc->mem_ctx,
+    runtime.reuse_pool = mem_pool_create_mmap((MemContext*)dom_doc->services.mem_ctx,
                                               MEM_ROLE_RUNTIME_HEAP,
                                               "script.js.reuse");
     EvalContext* saved_js_context = context;
@@ -2363,12 +2363,12 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         // MIR setup consumes runtime.reuse_pool into the fresh heap. Restore the
         // owner pointer so document cleanup can release that per-document pool.
         if (!runtime.reuse_pool && runtime.heap) runtime.reuse_pool = runtime.heap->pool;
-        dom_doc->js_preamble_state = preamble;
-        dom_doc->js_mir_ctx = preamble->mir_ctx;
-        dom_doc->js_runtime_heap = runtime.heap;
-        dom_doc->js_runtime_name_pool = runtime.name_pool;
-        dom_doc->js_runtime_type_list = runtime.type_list;
-        dom_doc->js_runtime_pool = runtime.reuse_pool;
+        dom_doc->js.preamble_state = preamble;
+        dom_doc->js.mir_ctx = preamble->mir_ctx;
+        dom_doc->js.runtime_heap = runtime.heap;
+        dom_doc->js.runtime_name_pool = runtime.name_pool;
+        dom_doc->js.runtime_type_list = runtime.type_list;
+        dom_doc->js.runtime_pool = runtime.reuse_pool;
         if (s_retain_js_state) {
             log_info("execute_document_scripts: retained MIR context for event handlers");
             // Do NOT destroy heap/pool — they're retained on the document
@@ -2543,7 +2543,7 @@ static void collect_handlers_recursive(DomElement* elem,
     if (!elem || depth > 100) return;
 
     for (int i = 0; EVENT_HANDLER_ATTRS[i].attr_name; i++) {
-        const char* attr_val = dom_element_get_attribute(elem, EVENT_HANDLER_ATTRS[i].attr_name);
+        const char* attr_val = elem->get_attribute(EVENT_HANDLER_ATTRS[i].attr_name);
         if (attr_val && attr_val[0]) {
             // Allocate handler entry from the transient collection pool.
             InlineHandlerInstallEntry* handler =
@@ -2604,12 +2604,12 @@ static void collect_handlers_recursive(DomElement* elem,
 }
 
 extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
-    if (!dom_doc || !dom_doc->root || !dom_doc->js_mir_ctx) {
+    if (!dom_doc || !dom_doc->root || !dom_doc->js.mir_ctx) {
         return;
     }
 
     // Create a transient collection used only during compile/install.
-    Pool* handlers_pool = mem_pool_create_mmap((MemContext*)dom_doc->mem_ctx,
+    Pool* handlers_pool = mem_pool_create_mmap((MemContext*)dom_doc->services.mem_ctx,
                                                MEM_ROLE_TEMP,
                                                "script.inline_handlers");
     InlineHandlerInstallCollection* handlers =
@@ -2639,13 +2639,13 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     // functions (clicked(), toggle(), etc.). We need the thread-local EvalContext
     // set up with the retained heap so the transpiler reuses it (reusing_context=true),
     // which causes the new MIR context to be deferred rather than destroyed.
-    JsPreambleState* preamble = (JsPreambleState*)dom_doc->js_preamble_state;
+    JsPreambleState* preamble = (JsPreambleState*)dom_doc->js.preamble_state;
     Runtime runtime = {};
     runtime.dom_doc = dom_doc;
-    runtime.heap = (Heap*)dom_doc->js_runtime_heap;
-    runtime.name_pool = (NamePool*)dom_doc->js_runtime_name_pool;
-    runtime.type_list = (ArrayList*)dom_doc->js_runtime_type_list;
-    runtime.reuse_pool = (Pool*)dom_doc->js_runtime_pool;
+    runtime.heap = (Heap*)dom_doc->js.runtime_heap;
+    runtime.name_pool = (NamePool*)dom_doc->js.runtime_name_pool;
+    runtime.type_list = (ArrayList*)dom_doc->js.runtime_type_list;
+    runtime.reuse_pool = (Pool*)dom_doc->js.runtime_pool;
 
     // Set up thread-local eval context so transpiler sees reusing_context=true.
     // This prevents the new MIR context from being destroyed — it gets deferred instead.
@@ -2718,9 +2718,9 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
              installed, handlers->count);
 
     // Update retained state after compilation.
-    dom_doc->js_runtime_heap = runtime.heap;
-    dom_doc->js_runtime_name_pool = runtime.name_pool;
-    dom_doc->js_runtime_type_list = runtime.type_list;
+    dom_doc->js.runtime_heap = runtime.heap;
+    dom_doc->js.runtime_name_pool = runtime.name_pool;
+    dom_doc->js.runtime_type_list = runtime.type_list;
 
     hashmap_free(handlers->element_map);
     mem_pool_destroy(handlers_pool);
@@ -2734,16 +2734,16 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (!dom_doc) return;
 
     // Destroy retained MIR context via preamble_state_destroy
-    if (dom_doc->js_preamble_state) {
-        JsPreambleState* preamble = (JsPreambleState*)dom_doc->js_preamble_state;
+    if (dom_doc->js.preamble_state) {
+        JsPreambleState* preamble = (JsPreambleState*)dom_doc->js.preamble_state;
         preamble_state_destroy(preamble);
         mem_free(preamble);
-        dom_doc->js_preamble_state = nullptr;
-        dom_doc->js_mir_ctx = nullptr;
+        dom_doc->js.preamble_state = nullptr;
+        dom_doc->js.mir_ctx = nullptr;
     }
     // Destroy retained heap and GC metadata.
-    if (dom_doc->js_runtime_heap) {
-        Heap* heap = (Heap*)dom_doc->js_runtime_heap;
+    if (dom_doc->js.runtime_heap) {
+        Heap* heap = (Heap*)dom_doc->js.runtime_heap;
         if (heap->gc) {
             heap_finalize_gc_objects(heap->gc);
             heap->gc->pool = nullptr; // prevent gc_heap_destroy from destroying pool
@@ -2751,21 +2751,21 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
             // pool is destroyed separately below
         }
         mem_free(heap);
-        dom_doc->js_runtime_heap = nullptr;
+        dom_doc->js.runtime_heap = nullptr;
     }
 
-    if (dom_doc->js_runtime_type_list) {
-        arraylist_free((ArrayList*)dom_doc->js_runtime_type_list);
-        dom_doc->js_runtime_type_list = nullptr;
+    if (dom_doc->js.runtime_type_list) {
+        arraylist_free((ArrayList*)dom_doc->js.runtime_type_list);
+        dom_doc->js.runtime_type_list = nullptr;
     }
 
     // Destroy retained mmap pool (native code pages, etc.)
-    if (dom_doc->js_runtime_pool) {
-        pool_destroy((Pool*)dom_doc->js_runtime_pool);
-        dom_doc->js_runtime_pool = nullptr;
+    if (dom_doc->js.runtime_pool) {
+        pool_destroy((Pool*)dom_doc->js.runtime_pool);
+        dom_doc->js.runtime_pool = nullptr;
     }
 
-    dom_doc->js_runtime_name_pool = nullptr;
+    dom_doc->js.runtime_name_pool = nullptr;
 
     log_debug("script_runner_cleanup_js_state: cleaned up JS state");
 }

@@ -51,7 +51,7 @@ static bool render_media_view_has_dom_element(ViewBlock* view) {
 
 static uint8_t render_media_content_opacity(ViewBlock* view) {
     if (!view || !view->in_line) return 255;
-    float opacity = view->in_line->opacity;
+    float opacity = view->inl()->opacity;
     if (opacity >= 1.0f) return 255;
     if (opacity <= 0.0f) return 0;
     return (uint8_t)(opacity * 255.0f + 0.5f);
@@ -112,16 +112,16 @@ bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
 }
 
 static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
-    if (!view->embed || !view->embed->img) return;
+    if (!view->embed || !view->embedp()->img) return;
 
     log_debug("render image content");
-    ImageSurface* img = view->embed->img;
+    ImageSurface* img = view->embedp()->img;
     Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->scale);
     Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->scale);
     float s = rdcon->scale;
 
     // Apply object-fit: compute actual image render rect
-    CssEnum object_fit = view->embed->object_fit;
+    CssEnum object_fit = view->embedp()->object_fit;
     Rect img_rect = rect;  // default: fill (stretch to container)
     // SVG images with a viewBox implicitly use preserveAspectRatio="xMidYMid meet"
     // (equivalent to object-fit: contain) unless object-fit is explicitly set.
@@ -156,11 +156,11 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         float pos_y = 50.0f;
         bool pos_x_is_percent = true;
         bool pos_y_is_percent = true;
-        if (view->embed->object_position_set) {
-            pos_x = view->embed->object_position_x;
-            pos_y = view->embed->object_position_y;
-            pos_x_is_percent = view->embed->object_position_x_is_percent;
-            pos_y_is_percent = view->embed->object_position_y_is_percent;
+        if (view->embedp()->object_position_set) {
+            pos_x = view->embedp()->object_position_x;
+            pos_y = view->embedp()->object_position_y;
+            pos_x_is_percent = view->embedp()->object_position_x_is_percent;
+            pos_y_is_percent = view->embedp()->object_position_y_is_percent;
         }
         img_rect.x = rect.x + render_media_object_position_offset(
             box_w, rendered_w, pos_x, pos_x_is_percent, s);
@@ -278,13 +278,13 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
 }
 
 bool render_media_is_webview_layer(ViewBlock* view) {
-    return view && view->embed && view->embed->webview &&
-           view->embed->webview->mode == WEBVIEW_MODE_LAYER;
+    return view && view->embed && view->embedp()->webview &&
+           view->embedp()->webview->mode == WEBVIEW_MODE_LAYER;
 }
 
 void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
-    if (!view->embed || !view->embed->webview) return;
-    WebViewProp* wv = view->embed->webview;
+    if (!view->embed || !view->embedp()->webview) return;
+    WebViewProp* wv = view->embedp()->webview;
     if (wv->mode != WEBVIEW_MODE_LAYER || !wv->surface || !wv->surface->pixels) return;
     if (!wv->visible) return;
 
@@ -305,21 +305,21 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
 }
 
 void render_video_content(RenderContext* rdcon, ViewBlock* view) {
-    if (!view->embed || !view->embed->video) return;
+    if (!view->embed || !view->embedp()->video) return;
 
     float s = rdcon->scale;
     float dst_x = rdcon->block.x + view->x * s;
     float dst_y = rdcon->block.y + view->y * s;
     float dst_w = view->width * s;
     float dst_h = view->height * s;
-    int object_fit_flags = (int)view->embed->object_fit; // INT_CAST_OK: enum packing for display-list placeholder flags
+    int object_fit_flags = (int)view->embedp()->object_fit; // INT_CAST_OK: enum packing for display-list placeholder flags
     // pack has_controls into bit 8
-    if (view->embed->has_controls) object_fit_flags |= 0x100;
+    if (view->embedp()->has_controls) object_fit_flags |= 0x100;
 
     log_debug("[VIDEO RENDER] placeholder at (%.0f,%.0f) size %.0fx%.0f controls=%d",
-              dst_x, dst_y, dst_w, dst_h, view->embed->has_controls);
+              dst_x, dst_y, dst_w, dst_h, view->embedp()->has_controls);
 
-    rc_video_placeholder(rdcon, view->embed->video,
+    rc_video_placeholder(rdcon, view->embedp()->video,
                          dst_x, dst_y, dst_w, dst_h,
                          object_fit_flags, &rdcon->block.clip,
                          rdcon->ui_context && rdcon->ui_context->document &&

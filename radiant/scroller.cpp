@@ -108,26 +108,26 @@ void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     float s = rdcon->scale;
-    if (block->scroller->has_clip) {
+    if (block->scroll()->has_clip) {
         // Inset clip by border widths for padding-box clipping (CSS spec: overflow clips to padding edge)
         float bl = 0, bt = 0, br = 0, bb = 0;
-        if (block->bound && block->bound->border) {
-            BorderProp* border = block->bound->border;
+        if (block->bound && block->boundary_mut()->border) {
+            BorderProp* border = block->boundary()->border;
             bl = border->width.left;
             bt = border->width.top;
             br = border->width.right;
             bb = border->width.bottom;
         }
         log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
-            block->scroller->clip.left, block->scroller->clip.top, block->scroller->clip.right, block->scroller->clip.bottom);
-        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + (block->scroller->clip.left + bl) * s);
-        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + (block->scroller->clip.top + bt) * s);
-        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + (block->scroller->clip.right - br) * s);
-        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + (block->scroller->clip.bottom - bb) * s);
+            block->scroll()->clip.left, block->scroll()->clip.top, block->scroll()->clip.right, block->scroll()->clip.bottom);
+        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + (block->scroll()->clip.left + bl) * s);
+        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + (block->scroll()->clip.top + bt) * s);
+        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + (block->scroll()->clip.right - br) * s);
+        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + (block->scroll()->clip.bottom - bb) * s);
 
         // Copy border-radius for rounded corner clipping when overflow:hidden (scale radius)
-        if (block->bound && block->bound->border) {
-            BorderProp* border = block->bound->border;
+        if (block->bound && block->boundary_mut()->border) {
+            BorderProp* border = block->boundary()->border;
             // resolve percentage border-radius if not yet resolved
             resolve_border_radius_percentages(&border->radius, block->width, block->height);
             if (corner_has_radius(&border->radius)) {
@@ -150,10 +150,10 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
             }
         }
     }
-    if (block->scroller->pane) {
+    if (block->scroll()->pane) {
         DocState* state = block->doc ? block->doc->state : NULL;
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroller->pane,
+        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
                                            &scroll_x, &scroll_y, NULL, NULL);
         rdcon->block.x -= scroll_x * s;
         rdcon->block.y -= scroll_y * s;
@@ -165,21 +165,21 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
     // need to reset block.x and y, which was changed by the scroller
     float s = rdcon->scale;
     rdcon->block.x = pa_block->x + block->x * s;  rdcon->block.y = pa_block->y + block->y * s;
-    if (block->scroller->has_hz_scroll || block->scroller->has_vt_scroll) {
+    if (block->scroll()->has_hz_scroll || block->scroll()->has_vt_scroll) {
         Rect rect = {rdcon->block.x, rdcon->block.y, block->width * s, block->height * s};
-        if (block->bound && block->bound->border) {
+        if (block->bound && block->boundary_mut()->border) {
             BoxMetrics block_box = layout_box_metrics(block);
-            rect.x += block->bound->border->width.left * s;
-            rect.y += block->bound->border->width.top * s;
+            rect.x += block->boundary()->border->width.left * s;
+            rect.y += block->boundary()->border->width.top * s;
             rect.width -= block_box.border_h * s;
             rect.height -= block_box.border_v * s;
         }
-        if (block->scroller->pane) {
+        if (block->scroll()->pane) {
             DocState* state = block->doc ? block->doc->state : NULL;
-            scrollpane_render(rdcon, block->scroller->pane, &rect,
+            scrollpane_render(rdcon, block->scroll()->pane, &rect,
                 block->content_width * s, block->content_height * s, &rdcon->block.clip, s,
                 state, static_cast<View*>(block),
-                block->scroller->has_hz_scroll, block->scroller->has_vt_scroll);
+                block->scroll()->has_hz_scroll, block->scroll()->has_vt_scroll);
         } else {
             log_error("scroller has no scroll pane");
         }
@@ -187,10 +187,10 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
 }
 
 void scroll_apply_pending_element_scroll(ViewBlock* block) {
-    if (!block || !block->scroller || !block->scroller->pane) return;
+    if (!block || !block->scroller || !block->scroll()->pane) return;
     DomElement* elem = static_cast<DomElement*>(block);
-    if (!elem->has_pending_element_scroll_x &&
-        !elem->has_pending_element_scroll_y) {
+    if (!elem->has_pending_element_scroll_x() &&
+        !elem->has_pending_element_scroll_y()) {
         return;
     }
 
@@ -198,16 +198,16 @@ void scroll_apply_pending_element_scroll(ViewBlock* block) {
     float current_x = 0.0f;
     float current_y = 0.0f;
     scroll_state_get_position_for_view(state, static_cast<View*>(block),
-        block->scroller->pane, &current_x, &current_y, NULL, NULL);
-    float target_x = elem->has_pending_element_scroll_x
-        ? elem->pending_element_scroll_x : current_x;
-    float target_y = elem->has_pending_element_scroll_y
-        ? elem->pending_element_scroll_y : current_y;
+        block->scroll()->pane, &current_x, &current_y, NULL, NULL);
+    float target_x = elem->has_pending_element_scroll_x()
+        ? elem->pending_scroll_x() : current_x;
+    float target_y = elem->has_pending_element_scroll_y()
+        ? elem->pending_scroll_y() : current_y;
 
     scroll_state_set_position_for_view(state, static_cast<View*>(block),
-        block->scroller->pane, target_x, target_y, false);
-    elem->has_pending_element_scroll_x = false;
-    elem->has_pending_element_scroll_y = false;
+        block->scroll()->pane, target_x, target_y, false);
+    elem->set_has_pending_element_scroll_x(false);
+    elem->set_has_pending_element_scroll_y(false);
 }
 
 bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
@@ -256,14 +256,14 @@ static DocState* scrollpane_doc_state(EventContext* evcon, ViewBlock* block) {
 
 bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
     MousePositionEvent *event = &evcon->event.mouse_position;
-    ScrollPane* sp = block->scroller->pane;
+    ScrollPane* sp = block->scroll()->pane;
     DocState* state = scrollpane_doc_state(evcon, block);
     float bottom = evcon->block.y + block->height;  float right = evcon->block.x + block->width;
     // sc.SCROLLBAR_SIZE is in physical pixels; convert to CSS pixels for event-coordinate comparisons
     float pixel_ratio = evcon->ui_context->pixel_ratio;
     float scrollbar_css = sc.SCROLLBAR_SIZE / pixel_ratio;
     bool h_hovered = false, v_hovered = false;
-    if (block->scroller->has_hz_scroll) {
+    if (block->scroll()->has_hz_scroll) {
         if (evcon->block.x <= event->x && event->x < right &&
             bottom - scrollbar_css <= event->y && event->y < bottom) {
             h_hovered = true;
@@ -271,7 +271,7 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
             return true;
         }
     }
-    if (block->scroller->has_vt_scroll) {
+    if (block->scroll()->has_vt_scroll) {
         if (evcon->block.y <= event->y && event->y < bottom &&
             right - scrollbar_css <= event->x && event->x < right) {
             v_hovered = true;
@@ -285,7 +285,7 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
 
 void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
     MouseButtonEvent *event = &evcon->event.mouse_button;
-    ScrollPane* sp = block->scroller->pane;
+    ScrollPane* sp = block->scroll()->pane;
     DocState* state = scrollpane_doc_state(evcon, block);
     ScrollInteractionState interaction;
     scroll_state_get_interaction_for_view(state, (View*)block, &interaction);
@@ -330,7 +330,7 @@ void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
 }
 
 void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block) {
-    ScrollPane* sp = block->scroller->pane;
+    ScrollPane* sp = block->scroll()->pane;
     DocState* state = scrollpane_doc_state(evcon, block);
     if (scroll_state_is_dragging_for_view(state, (View*)block)) {
         scroll_state_clear_drag_for_view(state, (View*)block, sp);
@@ -341,7 +341,7 @@ void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block) {
 
 void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
     MousePositionEvent *event = &evcon->event.mouse_position;
-    ScrollPane* sp = block->scroller->pane;
+    ScrollPane* sp = block->scroll()->pane;
     DocState* state = scrollpane_doc_state(evcon, block);
     ScrollInteractionState interaction;
     scroll_state_get_interaction_for_view(state, (View*)block, &interaction);
@@ -398,13 +398,13 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     block->scroller->has_clip = false;
 
     // Update scroll pane max values through centralized API.
-    if (block->scroller->pane) {
+    if (block->scroll()->pane) {
         DocState* state = block->doc ? (DocState*)block->doc->state : nullptr;
         float h_max = content_width > block->width ? content_width - block->width : 0.0f;
         float v_max = content_height > block->height ? content_height - block->height : 0.0f;
-        scroll_state_set_max_for_view(state, (View*)block, block->scroller->pane, h_max, v_max);
+        scroll_state_set_max_for_view(state, (View*)block, block->scroll()->pane, h_max, v_max);
         scroll_apply_pending_element_scroll(block);
-        scroll_state_get_position_for_view(state, (View*)block, block->scroller->pane,
+        scroll_state_get_position_for_view(state, (View*)block, block->scroll()->pane,
                                            NULL, NULL, &h_max, &v_max);
         log_debug("update_scroller: h_max_scroll=%.1f, v_max_scroll=%.1f",
             h_max, v_max);
@@ -412,14 +412,14 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
 
     if (content_width > block->width) { // hz overflow
         block->scroller->has_hz_overflow = true;
-        if (block->scroller->overflow_x == CSS_VALUE_VISIBLE) {}
-        else if (block->scroller->overflow_x == CSS_VALUE_SCROLL ||
-            block->scroller->overflow_x == CSS_VALUE_AUTO) {
+        if (block->scroll()->overflow_x == CSS_VALUE_VISIBLE) {}
+        else if (block->scroll()->overflow_x == CSS_VALUE_SCROLL ||
+            block->scroll()->overflow_x == CSS_VALUE_AUTO) {
             block->scroller->has_hz_scroll = true;
         }
-        if (block->scroller->has_hz_scroll ||
-            block->scroller->overflow_x == CSS_VALUE_CLIP ||
-            block->scroller->overflow_x == CSS_VALUE_HIDDEN) {
+        if (block->scroll()->has_hz_scroll ||
+            block->scroll()->overflow_x == CSS_VALUE_CLIP ||
+            block->scroll()->overflow_x == CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
         }
     }
@@ -429,13 +429,13 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     // handle vertical overflow and determine block->height
     if (content_height > block->height) { // vt overflow
         block->scroller->has_vt_overflow = true;
-        if (block->scroller->overflow_y == CSS_VALUE_VISIBLE) { }
-        else if (block->scroller->overflow_y == CSS_VALUE_SCROLL || block->scroller->overflow_y == CSS_VALUE_AUTO) {
+        if (block->scroll()->overflow_y == CSS_VALUE_VISIBLE) { }
+        else if (block->scroll()->overflow_y == CSS_VALUE_SCROLL || block->scroll()->overflow_y == CSS_VALUE_AUTO) {
             block->scroller->has_vt_scroll = true;
         }
-        if (block->scroller->has_vt_scroll ||
-            block->scroller->overflow_y == CSS_VALUE_CLIP ||
-            block->scroller->overflow_y == CSS_VALUE_HIDDEN) {
+        if (block->scroll()->has_vt_scroll ||
+            block->scroll()->overflow_y == CSS_VALUE_CLIP ||
+            block->scroll()->overflow_y == CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
         }
     }
@@ -444,16 +444,16 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     }
     // Always clip when overflow is hidden/clip, even without actual overflow
     // This is needed for border-radius clipping to work correctly
-    bool should_clip = block->scroller->has_vt_overflow || block->scroller->has_hz_overflow ||
-                       block->scroller->overflow_x == CSS_VALUE_HIDDEN ||
-                       block->scroller->overflow_x == CSS_VALUE_CLIP ||
-                       block->scroller->overflow_y == CSS_VALUE_HIDDEN ||
-                       block->scroller->overflow_y == CSS_VALUE_CLIP;
+    bool should_clip = block->scroll()->has_vt_overflow || block->scroll()->has_hz_overflow ||
+                       block->scroll()->overflow_x == CSS_VALUE_HIDDEN ||
+                       block->scroll()->overflow_x == CSS_VALUE_CLIP ||
+                       block->scroll()->overflow_y == CSS_VALUE_HIDDEN ||
+                       block->scroll()->overflow_y == CSS_VALUE_CLIP;
     if (should_clip) {
         block->scroller->has_clip = true;
-        block->scroller->clip.left = block->bound->border ? block->bound->border->width.left : 0;
-        block->scroller->clip.top = block->bound->border ? block->bound->border->width.top : 0;
-        block->scroller->clip.right = block->width - (block->bound->border ? block->bound->border->width.right : 0);
-        block->scroller->clip.bottom = block->height - (block->bound->border ? block->bound->border->width.bottom : 0);
+        block->scroll_mut()->clip.left = block->boundary()->border ? block->boundary()->border->width.left : 0;
+        block->scroll_mut()->clip.top = block->boundary()->border ? block->boundary()->border->width.top : 0;
+        block->scroll_mut()->clip.right = block->width - (block->boundary()->border ? block->boundary()->border->width.right : 0);
+        block->scroll_mut()->clip.bottom = block->height - (block->boundary()->border ? block->boundary()->border->width.bottom : 0);
     }
 }

@@ -64,12 +64,12 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
         ctx->origin_y = element->y;
 
         if (element->bound) {
-            if (element->bound->border) {
-                ctx->origin_x += element->bound->border->width.left;
-                ctx->origin_y += element->bound->border->width.top;
+            if (element->boundary()->border) {
+                ctx->origin_x += element->boundary()->border->width.left;
+                ctx->origin_y += element->boundary()->border->width.top;
             }
-            ctx->origin_x += element->bound->padding.left;
-            ctx->origin_y += element->bound->padding.top;
+            ctx->origin_x += element->boundary()->padding.left;
+            ctx->origin_y += element->boundary()->padding.top;
         }
 
         // Content area bounds for float calculations
@@ -145,15 +145,15 @@ bool block_context_establishes_bfc(ViewBlock* block) {
     // Note: Check for explicit float values, not just != CSS_VALUE_NONE,
     // because uninitialized float_prop is CSS_VALUE__UNDEF (0) which is != CSS_VALUE_NONE
     if (block->position &&
-        (block->position->float_prop == CSS_VALUE_LEFT ||
-         block->position->float_prop == CSS_VALUE_RIGHT)) {
+        (block->positionp()->float_prop == CSS_VALUE_LEFT ||
+         block->positionp()->float_prop == CSS_VALUE_RIGHT)) {
         return true;
     }
 
     // 3. Absolutely positioned elements (position: absolute/fixed)
     if (block->position &&
-        (block->position->position == CSS_VALUE_ABSOLUTE ||
-         block->position->position == CSS_VALUE_FIXED)) {
+        (block->positionp()->position == CSS_VALUE_ABSOLUTE ||
+         block->positionp()->position == CSS_VALUE_FIXED)) {
         return true;
     }
 
@@ -179,14 +179,14 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         block->parent->tag() == HTM_TAG_HTML;
     ViewBlock* html_block = is_viewport_body ? lam::view_require_block(block->parent) : nullptr;
     bool html_overflow_visible = !html_block || !html_block->scroller ||
-        (html_block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
-         html_block->scroller->overflow_y == CSS_VALUE_VISIBLE);
+        (html_block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
+         html_block->scroll()->overflow_y == CSS_VALUE_VISIBLE);
     bool body_overflow_propagates = is_viewport_body && html_overflow_visible;
 
     // 6. Overflow != visible (creates BFC)
     if (block->scroller &&
-        (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
-         block->scroller->overflow_y != CSS_VALUE_VISIBLE)) {
+        (block->scroll()->overflow_x != CSS_VALUE_VISIBLE ||
+         block->scroll()->overflow_y != CSS_VALUE_VISIBLE)) {
         // Root body overflow propagates only when the root html overflow is visible.
         if (body_overflow_propagates) return false;
         return true;
@@ -210,8 +210,8 @@ bool block_context_establishes_bfc(ViewBlock* block) {
     }
 
     // 9. Multi-column containers establish BFC (CSS Multicol §3)
-    if (block->multicol &&
-        (block->multicol->column_count > 1 || block->multicol->column_width > 0)) {
+    if (block->multicol_prop() &&
+        (block->multicol_prop()->column_count > 1 || block->multicol_prop()->column_width > 0)) {
         return true;
     }
 
@@ -288,7 +288,7 @@ FloatBox* block_context_alloc_float_box(BlockContext* ctx) {
 void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
     if (!float_elem || !float_elem->position) return;
 
-    CssEnum side = float_elem->position->float_prop;
+    CssEnum side = float_elem->positionp()->float_prop;
     if (side != CSS_VALUE_LEFT && side != CSS_VALUE_RIGHT) return;
 
     FloatBox* box = block_context_alloc_float_box(ctx);
@@ -299,10 +299,10 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
     box->next = nullptr;
 
     // Get margins
-    float margin_l = float_elem->bound ? float_elem->bound->margin.left : 0;
-    float margin_r = float_elem->bound ? float_elem->bound->margin.right : 0;
-    float margin_t = float_elem->bound ? float_elem->bound->margin.top : 0;
-    float margin_b = float_elem->bound ? float_elem->bound->margin.bottom : 0;
+    float margin_l = float_elem->bound ? float_elem->boundary()->margin.left : 0;
+    float margin_r = float_elem->bound ? float_elem->boundary()->margin.right : 0;
+    float margin_t = float_elem->bound ? float_elem->boundary()->margin.top : 0;
+    float margin_b = float_elem->bound ? float_elem->boundary()->margin.bottom : 0;
 
     // Store border box (parent-relative coords)
     box->x = float_elem->x;

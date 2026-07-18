@@ -128,27 +128,27 @@ static bool selector_matcher_get_pseudo_state(SelectorMatcher* matcher,
 
     switch (pseudo_state) {
         case PSEUDO_STATE_LINK:
-            return dom_element_has_attribute(element, "href");
+            return element->has_attribute("href");
         case PSEUDO_STATE_CHECKED:
-            return dom_element_has_attribute(element, "checked");
+            return element->has_attribute("checked");
         case PSEUDO_STATE_DISABLED:
-            return dom_element_has_attribute(element, "disabled");
+            return element->has_attribute("disabled");
         case PSEUDO_STATE_ENABLED:
-            return !dom_element_has_attribute(element, "disabled");
+            return !element->has_attribute("disabled");
         case PSEUDO_STATE_REQUIRED:
-            return dom_element_has_attribute(element, "required");
+            return element->has_attribute("required");
         case PSEUDO_STATE_OPTIONAL:
-            return !dom_element_has_attribute(element, "required");
+            return !element->has_attribute("required");
         case PSEUDO_STATE_READ_ONLY:
-            return dom_element_has_attribute(element, "readonly");
+            return element->has_attribute("readonly");
         case PSEUDO_STATE_READ_WRITE:
-            return !dom_element_has_attribute(element, "readonly");
+            return !element->has_attribute("readonly");
         case PSEUDO_STATE_SELECTED:
-            return dom_element_has_attribute(element, "selected");
+            return element->has_attribute("selected");
         case PSEUDO_STATE_PLACEHOLDER_SHOWN:
             {
-                const char* placeholder = dom_element_get_attribute(element, "placeholder");
-                const char* value = dom_element_get_attribute(element, "value");
+                const char* placeholder = element->get_attribute("placeholder");
+                const char* value = element->get_attribute("value");
                 return placeholder && placeholder[0] && (!value || !value[0]);
             }
         default:
@@ -492,7 +492,7 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
 
         case CSS_SELECTOR_ATTR_EXISTS:
             // Attribute exists
-            return dom_element_has_attribute(element, simple_selector->attribute.name);
+            return element->has_attribute(simple_selector->attribute.name);
 
         case CSS_SELECTOR_ATTR_EXACT:
         case CSS_SELECTOR_ATTR_CONTAINS:
@@ -639,15 +639,15 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
     // For existence check (no value specified), use has_attribute
     // This handles the case where attribute exists but has empty value (stored as null)
     if (!attr_value || attr_type == CSS_SELECTOR_ATTR_EXISTS) {
-        return dom_element_has_attribute(element, attr_name);
+        return element->has_attribute(attr_name);
     }
 
-    const char* element_attr = dom_element_get_attribute(element, attr_name);
+    const char* element_attr = element->get_attribute(attr_name);
     if (!element_attr) {
         // Empty attributes may be stored without a value pointer; exact-empty
         // selectors must still distinguish them from absent attributes.
         if (attr_type == CSS_SELECTOR_ATTR_EXACT && attr_value[0] == '\0') {
-            return dom_element_has_attribute(element, attr_name);
+            return element->has_attribute(attr_name);
         }
         return false;
     }
@@ -847,13 +847,13 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
             return element->first_child == NULL;
 
         case CSS_SELECTOR_PSEUDO_FIRST_CHILD:
-            return dom_element_is_first_child(element);
+            return element->is_first_child();
 
         case CSS_SELECTOR_PSEUDO_LAST_CHILD:
-            return dom_element_is_last_child(element);
+            return element->is_last_child();
 
         case CSS_SELECTOR_PSEUDO_ONLY_CHILD:
-            return dom_element_is_only_child(element);
+            return element->is_only_child();
 
         case CSS_SELECTOR_PSEUDO_FIRST_OF_TYPE:
             // First of its type among siblings
@@ -928,8 +928,10 @@ bool selector_matcher_matches_nth_child(SelectorMatcher* matcher,
     // Handle general an+b formula (including special odd/even cases)
     if (from_end) {
         // For nth-last-child, we need to count from the end
-        int total_children = element->parent ? dom_element_count_child_elements(static_cast<DomElement*>(element->parent)) : 1;
-        int index = dom_element_get_child_index(element);
+        int total_children = element->parent
+            ? static_cast<DomElement*>(element->parent)->count_child_elements()
+            : 1;
+        int index = element->child_index();
         int reverse_index = total_children - index;
 
         // Handle special cases with reverse counting
@@ -953,12 +955,12 @@ bool selector_matcher_matches_nth_child(SelectorMatcher* matcher,
     } else {
         // For nth-child, use forward counting
         if (formula->odd) {
-            return dom_element_matches_nth_child(element, 2, 1);
+            return element->matches_nth_child(2, 1);
         }
         if (formula->even) {
-            return dom_element_matches_nth_child(element, 2, 0);
+            return element->matches_nth_child(2, 0);
         }
-        return dom_element_matches_nth_child(element, formula->a, formula->b);
+        return element->matches_nth_child(formula->a, formula->b);
     }
 }
 

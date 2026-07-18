@@ -37,8 +37,7 @@ static bool extract_aspect_ratio_number_for_positioned(const char* text, double*
 
 static float get_preferred_aspect_ratio_for_positioned(ViewBlock* block) {
     if (!block) return 0.0f;
-    if (block->item_prop_type == DomElement::ITEM_PROP_FLEX &&
-        block->fi && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
+    if (block->flex_item() && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
     DomElement* element = block->as_element();
     if (!element) return 0.0f;
     CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_ASPECT_RATIO);
@@ -181,7 +180,7 @@ void layout_relative_position_offset(ViewBlock* block, float* offset_x_out, floa
     float offset_x = 0.0f;
     float offset_y = 0.0f;
     if (!block || !block->position ||
-        block->position->position != CSS_VALUE_RELATIVE) {
+        block->positionp()->position != CSS_VALUE_RELATIVE) {
         if (offset_x_out) *offset_x_out = offset_x;
         if (offset_y_out) *offset_y_out = offset_y;
         return;
@@ -216,52 +215,52 @@ void layout_relative_position_offset(ViewBlock* block, float* offset_x_out, floa
     // CSS spec: If both left and right are not 'auto':
     // - If direction is 'ltr', left wins and right is ignored
     // - If direction is 'rtl', right wins and left is ignored (but equal values cancel in RTL)
-    bool both_horizontal = block->position->has_left && block->position->has_right;
+    bool both_horizontal = block->positionp()->has_left && block->positionp()->has_right;
 
     if (both_horizontal) {
         if (parent_direction == TD_RTL) {
             // CSS 2.1 §9.4.3: RTL — right wins, left becomes -right
-            if (!isnan(block->position->right_percent)) {
-                offset_x = -(block->position->right_percent * cb_width / 100.0f);
+            if (!isnan(block->positionp()->right_percent)) {
+                offset_x = -(block->positionp()->right_percent * cb_width / 100.0f);
             } else {
-                offset_x = -block->position->right;
+                offset_x = -block->positionp()->right;
             }
             log_debug("Over-constrained relative positioning (RTL): right wins, left ignored");
         } else {
             // LTR: left takes precedence (always, even if equal to right)
-            if (!isnan(block->position->left_percent)) {
-                offset_x = block->position->left_percent * cb_width / 100.0f;
+            if (!isnan(block->positionp()->left_percent)) {
+                offset_x = block->positionp()->left_percent * cb_width / 100.0f;
             } else {
-                offset_x = block->position->left;
+                offset_x = block->positionp()->left;
             }
             log_debug("Over-constrained relative positioning (LTR): left wins, right ignored");
         }
-    } else if (block->position->has_left) {
-        if (!isnan(block->position->left_percent)) {
-            offset_x = block->position->left_percent * cb_width / 100.0f;
+    } else if (block->positionp()->has_left) {
+        if (!isnan(block->positionp()->left_percent)) {
+            offset_x = block->positionp()->left_percent * cb_width / 100.0f;
         } else {
-            offset_x = block->position->left;
+            offset_x = block->positionp()->left;
         }
-    } else if (block->position->has_right) {
-        if (!isnan(block->position->right_percent)) {
-            offset_x = -(block->position->right_percent * cb_width / 100.0f);
+    } else if (block->positionp()->has_right) {
+        if (!isnan(block->positionp()->right_percent)) {
+            offset_x = -(block->positionp()->right_percent * cb_width / 100.0f);
         } else {
-            offset_x = -block->position->right;
+            offset_x = -block->positionp()->right;
         }
     }
     // vertical offset: top takes precedence over bottom
     // CSS 2.1 §10.6.5: if containing block height is auto, percentage top/bottom = 0
-    if (block->position->has_top) {
-        if (!isnan(block->position->top_percent)) {
-            offset_y = block->position->top_percent * cb_height / 100.0f;
+    if (block->positionp()->has_top) {
+        if (!isnan(block->positionp()->top_percent)) {
+            offset_y = block->positionp()->top_percent * cb_height / 100.0f;
         } else {
-            offset_y = block->position->top;
+            offset_y = block->positionp()->top;
         }
-    } else if (block->position->has_bottom) {
-        if (!isnan(block->position->bottom_percent)) {
-            offset_y = -(block->position->bottom_percent * cb_height / 100.0f);
+    } else if (block->positionp()->has_bottom) {
+        if (!isnan(block->positionp()->bottom_percent)) {
+            offset_y = -(block->positionp()->bottom_percent * cb_height / 100.0f);
         } else {
-            offset_y = -block->position->bottom;
+            offset_y = -block->positionp()->bottom;
         }
     }
 
@@ -320,8 +319,8 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
         if (!p->is_block()) continue;
         ViewBlock* pb = lam::view_require_block(p);
         if (pb->scroller &&
-            (pb->scroller->overflow_x != CSS_VALUE_VISIBLE ||
-             pb->scroller->overflow_y != CSS_VALUE_VISIBLE)) {
+            (pb->scroll()->overflow_x != CSS_VALUE_VISIBLE ||
+             pb->scroll()->overflow_y != CSS_VALUE_VISIBLE)) {
             scroll_ancestor = p;
             break;
         }
@@ -356,11 +355,11 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
             offset_to_scroller_y += (float)pb->y;
             offset_to_scroller_x += (float)pb->x;
             if (pb->bound) {
-                offset_to_scroller_y += pb->bound->padding.top;
-                offset_to_scroller_x += pb->bound->padding.left;
-                if (pb->bound->border) {
-                    offset_to_scroller_y += pb->bound->border->width.top;
-                    offset_to_scroller_x += pb->bound->border->width.left;
+                offset_to_scroller_y += pb->boundary()->padding.top;
+                offset_to_scroller_x += pb->boundary()->padding.left;
+                if (pb->boundary()->border) {
+                    offset_to_scroller_y += pb->boundary()->border->width.top;
+                    offset_to_scroller_x += pb->boundary()->border->width.left;
                 }
             }
         }
@@ -378,20 +377,20 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     float offset_x = 0, offset_y = 0;
 
     // vertical sticky constraints
-    if (block->position->has_top && block->position->has_bottom) {
-        float inset = block->position->top;
+    if (block->positionp()->has_top && block->positionp()->has_bottom) {
+        float inset = block->positionp()->top;
         float min_top = sp_top + inset;
         if (elem_top < min_top) {
             offset_y = min_top - elem_top;
         }
-    } else if (block->position->has_top) {
-        float inset = block->position->top;
+    } else if (block->positionp()->has_top) {
+        float inset = block->positionp()->top;
         float min_top = sp_top + inset;
         if (elem_top < min_top) {
             offset_y = min_top - elem_top;
         }
-    } else if (block->position->has_bottom) {
-        float inset = block->position->bottom;
+    } else if (block->positionp()->has_bottom) {
+        float inset = block->positionp()->bottom;
         float max_bottom = sp_bottom - inset;
         if (elem_bottom > max_bottom) {
             offset_y = max_bottom - elem_bottom;
@@ -399,20 +398,20 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     }
 
     // horizontal sticky constraints
-    if (block->position->has_left && block->position->has_right) {
-        float inset = block->position->left;
+    if (block->positionp()->has_left && block->positionp()->has_right) {
+        float inset = block->positionp()->left;
         float min_left = sp_left + inset;
         if (elem_left < min_left) {
             offset_x = min_left - elem_left;
         }
-    } else if (block->position->has_left) {
-        float inset = block->position->left;
+    } else if (block->positionp()->has_left) {
+        float inset = block->positionp()->left;
         float min_left = sp_left + inset;
         if (elem_left < min_left) {
             offset_x = min_left - elem_left;
         }
-    } else if (block->position->has_right) {
-        float inset = block->position->right;
+    } else if (block->positionp()->has_right) {
+        float inset = block->positionp()->right;
         float max_right = sp_right - inset;
         if (elem_right > max_right) {
             offset_x = max_right - elem_right;
@@ -489,13 +488,13 @@ ViewBlock* find_positioned_containing_block(ViewElement* view) {
         if (ancestor->view_type == RDT_VIEW_INLINE) {
             ViewSpan* ancestor_span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
             if (ancestor_span->position &&
-                ancestor_span->position->position != CSS_VALUE_STATIC) {
+                ancestor_span->positionp()->position != CSS_VALUE_STATIC) {
                 return lam::unsafe_view_block_api_span(ancestor_span);
             }
         } else if (ancestor->is_block()) {
             ViewBlock* ancestor_block = lam::view_require_block(ancestor);
             if (ancestor_block->position &&
-                ancestor_block->position->position != CSS_VALUE_STATIC) {
+                ancestor_block->positionp()->position != CSS_VALUE_STATIC) {
                 return ancestor_block;
             }
         }
@@ -554,23 +553,23 @@ static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containin
             parent_to_cb_offset_x += p->x;
             parent_to_cb_offset_y += p->y;
 
-            if (p->position && p->position->position == CSS_VALUE_FIXED) {
+            if (p->position && p->positionp()->position == CSS_VALUE_FIXED) {
                 break;
             }
-            if (p->position && p->position->position == CSS_VALUE_ABSOLUTE) {
+            if (p->position && p->positionp()->position == CSS_VALUE_ABSOLUTE) {
                 ViewElement* ancestor = p->parent_view();
                 ViewBlock* p_cb = nullptr;
                 while (ancestor) {
                     if (ancestor->view_type == RDT_VIEW_INLINE) {
                         ViewSpan* ancestor_span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
                         if (ancestor_span->position &&
-                            ancestor_span->position->position != CSS_VALUE_STATIC) {
+                            ancestor_span->positionp()->position != CSS_VALUE_STATIC) {
                             p_cb = lam::unsafe_view_block_api_span(ancestor_span);
                             break;
                         }
                     } else if (ancestor->is_block()) {
                         ViewBlock* ab = lam::view_require_block(ancestor);
-                        if (ab->position && ab->position->position != CSS_VALUE_STATIC) {
+                        if (ab->position && ab->positionp()->position != CSS_VALUE_STATIC) {
                             p_cb = ab;
                             break;
                         }
@@ -598,8 +597,8 @@ static void calculate_parent_to_cb_offset(ViewBlock* block, ViewBlock* containin
 
     if (containing_block && containing_block->parent_view() == nullptr &&
         block->position &&
-        (block->position->position == CSS_VALUE_ABSOLUTE ||
-         block->position->position == CSS_VALUE_FIXED)) {
+        (block->positionp()->position == CSS_VALUE_ABSOLUTE ||
+         block->positionp()->position == CSS_VALUE_FIXED)) {
         parent_to_cb_offset_x += containing_block->x;
         parent_to_cb_offset_y += containing_block->y;
     }
@@ -612,7 +611,7 @@ static TextDirection get_static_position_direction(ViewElement* parent) {
     TextDirection static_direction = TD_LTR;
     if (parent && parent->is_element()) {
         DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(parent);
-        if (parent_elem->blk && parent_elem->blk->direction == CSS_VALUE_RTL) {
+        if (parent_elem->blk && parent_elem->block_mut()->direction == CSS_VALUE_RTL) {
             static_direction = TD_RTL;
         } else if (parent_elem->specified_style) {
             CssValue* direction = (CssValue*)style_tree_get_computed_value(
@@ -631,7 +630,7 @@ static TextDirection get_static_position_direction(ViewElement* parent) {
 static bool positioned_element_is_replaced(ViewBlock* block) {
     if (!block) return false;
     bool is_form_control =
-        block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form;
+        block->form_control();
     return block->display.inner == RDT_DISPLAY_REPLACED ||
         block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
         block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
@@ -651,8 +650,8 @@ static bool positioned_height_is_auto(ViewBlock* block) {
 
 static float positioned_inset_stretch_css_height(ViewBlock* block, float cb_height,
     float margin_top, float margin_bottom, float* border_box_height_out) {
-    float border_box_height = max(cb_height - block->position->top -
-        block->position->bottom - margin_top - margin_bottom, 0.0f);
+    float border_box_height = max(cb_height - block->positionp()->top -
+        block->positionp()->bottom - margin_top - margin_bottom, 0.0f);
     if (border_box_height_out) *border_box_height_out = border_box_height;
     return layout_uses_border_box(block) ? border_box_height :
         layout_content_height_from_border_box(block, border_box_height);
@@ -693,8 +692,8 @@ static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
 }
 
 static float containing_block_padding_width(ViewBlock* cb, float* border_left_out) {
-    float border_left = (cb->bound && cb->bound->border) ? cb->bound->border->width.left : 0.0f;
-    float border_right = (cb->bound && cb->bound->border) ? cb->bound->border->width.right : 0.0f;
+    float border_left = (cb->bound && cb->boundary_mut()->border) ? cb->boundary_mut()->border->width.left : 0.0f;
+    float border_right = (cb->bound && cb->boundary_mut()->border) ? cb->boundary_mut()->border->width.right : 0.0f;
     if (border_left_out) *border_left_out = border_left;
     return cb->width - border_left - border_right;
 }
@@ -703,12 +702,12 @@ static void recalculate_right_positioned_x(ViewBlock* block, ViewBlock* cb,
                                            const char* reason) {
     float border_left = 0.0f;
     float padding_width = containing_block_padding_width(cb, &border_left);
-    float margin_right = block->bound ? block->bound->margin.right : 0.0f;
-    block->x = border_left + padding_width - block->position->right -
+    float margin_right = block->bound ? block->boundary()->margin.right : 0.0f;
+    block->x = border_left + padding_width - block->positionp()->right -
         margin_right - block->width;
     // Position offsets stay float through logging; an integer format here corrupts varargs.
     log_debug("right-positioned X recalculated: reason=%s x=%.1f padding=%.1f right=%.1f width=%.1f",
-              reason, block->x, padding_width, block->position->right, block->width);
+              reason, block->x, padding_width, block->positionp()->right, block->width);
 }
 
 // calculate absolute position based on containing block and offset properties
@@ -782,27 +781,27 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     //   padding-right + border-right + margin-right + right = cb_width
     // =========================================================================
     log_debug("given_width=%f, given_height=%f, width_type=%d", lycon->block.given_width, lycon->block.given_height,
-              block->blk ? block->blk->given_width_type : -1);
+              block->blk ? block->block()->given_width_type : -1);
 
     // Check if width uses intrinsic sizing keywords (max-content, min-content, fit-content)
     bool is_intrinsic_width = block->blk &&
-        (block->blk->given_width_type == CSS_VALUE_MAX_CONTENT ||
-         block->blk->given_width_type == CSS_VALUE_MIN_CONTENT ||
-         block->blk->given_width_type == CSS_VALUE_FIT_CONTENT);
+        (block->block()->given_width_type == CSS_VALUE_MAX_CONTENT ||
+         block->block()->given_width_type == CSS_VALUE_MIN_CONTENT ||
+         block->block()->given_width_type == CSS_VALUE_FIT_CONTENT);
 
     // CSS 2.1 §10.3.8 / §10.6.5: Absolutely positioned REPLACED elements
     // use intrinsic dimensions for auto width/height, not the constraint equation.
     // Form controls are semi-replaced in modern layout: their intrinsic sizes are
     // the auto fallback, but auto sizes with both insets stretch like non-replaced boxes.
     bool is_form_control_replaced =
-        block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form;
+        block->form_control();
     bool is_replaced = positioned_element_is_replaced(block);
 
     float h_border_padding = layout_padding_border_width(block);
 
     // CSS 2.1 §10.3.7: Detect containing block's direction for auto margin resolution
     TextDirection cb_direction = TD_LTR;
-    if (containing_block->blk && containing_block->blk->direction == CSS_VALUE_RTL) {
+    if (containing_block->blk && containing_block->block_mut()->direction == CSS_VALUE_RTL) {
         cb_direction = TD_RTL;
     } else if (containing_block->specified_style) {
         CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
@@ -815,11 +814,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         }
     }
 
-    bool has_auto_margin_left = block->bound && block->bound->margin.left_type == CSS_VALUE_AUTO;
-    bool has_auto_margin_right = block->bound && block->bound->margin.right_type == CSS_VALUE_AUTO;
-    bool width_is_auto = block->blk && block->blk->given_width_type == CSS_VALUE_AUTO;
+    bool has_auto_margin_left = block->bound && block->boundary_mut()->margin.left_type == CSS_VALUE_AUTO;
+    bool has_auto_margin_right = block->bound && block->boundary_mut()->margin.right_type == CSS_VALUE_AUTO;
+    bool width_is_auto = block->blk && block->block_mut()->given_width_type == CSS_VALUE_AUTO;
     bool stretch_form_width = is_form_control_replaced && width_is_auto &&
-        block->position->has_left && block->position->has_right && !is_intrinsic_width;
+        block->positionp()->has_left && block->positionp()->has_right && !is_intrinsic_width;
     bool has_width = (lycon->block.given_width >= 0 && !is_intrinsic_width && !width_is_auto);
     ViewElement* parent = block->parent_view();
     TextDirection static_direction = get_static_position_direction(parent);
@@ -836,38 +835,37 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // First determine content_width: use CSS width if specified, otherwise calculate from constraints
     if (has_width) {
         content_width = lycon->block.given_width;
-    } else if (block->position->has_left && block->position->has_right &&
+    } else if (block->positionp()->has_left && block->positionp()->has_right &&
                !is_intrinsic_width && (!is_replaced || stretch_form_width)) {
         // CSS 2.1 §10.3.7: width is auto, both left and right specified.
         // Replaced elements use intrinsic width, except form controls stretch
         // when their CSS width is still auto.
         // Auto margins are treated as 0 when width is auto
-        float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->bound->margin.left : 0);
-        float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->bound->margin.right : 0);
-        float left_edge = block->position->left + margin_left;
-        float right_edge = cb_width - block->position->right - margin_right;
+        float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->boundary()->margin.left : 0);
+        float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->boundary()->margin.right : 0);
+        float left_edge = block->positionp()->left + margin_left;
+        float right_edge = cb_width - block->positionp()->right - margin_right;
         float border_box_width = max(right_edge - left_edge, 0.0f);
         bool is_border_box = layout_uses_border_box(block);
         content_width = is_border_box ? border_box_width :
             layout_content_width_from_border_box(block, border_box_width);
         // CRITICAL: Store constraint-calculated width so finalize_block_flow knows width is fixed
         lycon->block.given_width = content_width;
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->ensure_block(lycon);
         block->blk->given_width = content_width;
         // When width is derived from constraints, auto margins become 0
-        if (has_auto_margin_left && block->bound) block->bound->margin.left = 0;
-        if (has_auto_margin_right && block->bound) block->bound->margin.right = 0;
+        if (has_auto_margin_left && block->bound) block->boundary_mut()->margin.left = 0;
+        if (has_auto_margin_right && block->bound) block->boundary_mut()->margin.right = 0;
         log_debug("[ABS POS] width from constraints: left_edge=%.1f, right_edge=%.1f, border_box=%.1f, content_width=%.1f (stored in given_width)",
                   left_edge, right_edge, border_box_width, content_width);
     } else if (is_intrinsic_width) {
         content_width = 0;
         log_debug("Using intrinsic sizing for absolutely positioned element: content_width=0 (shrink-to-fit)");
-    } else if (block->item_prop_type == DomElement::ITEM_PROP_FLEX &&
-               block->fi && block->fi->aspect_ratio > 0 &&
-               !(lycon->block.given_height >= 0) && block->blk && block->blk->given_max_height > 0) {
+    } else if (block->flex_item() && block->fi->aspect_ratio > 0 &&
+               !(lycon->block.given_height >= 0) && block->blk && block->block_mut()->given_max_height > 0) {
         // CSS Sizing Level 4: abs-pos with aspect-ratio, auto width/height, and max-height
         // Derive width from max-height * aspect-ratio
-        float max_h = block->blk->given_max_height;
+        float max_h = block->block()->given_max_height;
         float content_h = layout_css_size_to_content_box(
             block->bound, layout_box_sizing(block), max_h, false);
         float derived_width = content_h * block->fi->aspect_ratio;
@@ -878,7 +876,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         }
         log_debug("[ABS POS] width from aspect-ratio + max-height: max_h=%.1f, content_h=%.1f, ratio=%.3f, content_width=%.1f",
                   max_h, content_h, block->fi->aspect_ratio, content_width);
-    } else if (is_replaced && block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
+    } else if (is_replaced && block->form_control() &&
                block->form->intrinsic_width > 0) {
         // CSS 2.1 §10.3.8: replaced form control with auto width → use intrinsic width
         IntrinsicSize form_size = layout_measure_form_control(lycon, block, lycon->available_space);
@@ -890,11 +888,11 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         // where preferred_minimum_width = min-content, preferred_width = max-content,
         // available_width is the remaining containing-block padding-box width after
         // substituting the used static inset for auto left/right.
-        float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->bound->margin.left : 0);
-        float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->bound->margin.right : 0);
-        float used_left = block->position->has_left ? block->position->left : 0.0f;
-        float used_right = block->position->has_right ? block->position->right : 0.0f;
-        if (!block->position->has_left && !block->position->has_right) {
+        float margin_left = has_auto_margin_left ? 0 : (block->bound ? block->boundary()->margin.left : 0);
+        float margin_right = has_auto_margin_right ? 0 : (block->bound ? block->boundary()->margin.right : 0);
+        float used_left = block->positionp()->has_left ? block->positionp()->left : 0.0f;
+        float used_right = block->positionp()->has_right ? block->positionp()->right : 0.0f;
+        if (!block->positionp()->has_left && !block->positionp()->has_right) {
             if (static_direction == TD_LTR) {
                 used_left = static_left;
             } else {
@@ -947,13 +945,13 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // CSS 2.1 §10.3.7: Solve auto margins for horizontal axis
     // When left, right, and width are all NOT auto, the equation is over-constrained.
     // Auto margins absorb the remaining space; if both are auto, they split it equally (centering).
-    if (has_width && block->position->has_left && block->position->has_right) {
+    if (has_width && block->positionp()->has_left && block->positionp()->has_right) {
         // For box-sizing: border-box, content_width is already the border-box width
         float used_width = content_width + h_border_padding;
         if (layout_uses_border_box(block)) {
             used_width = content_width;  // already includes padding+border
         }
-        float remaining = cb_width - block->position->left - block->position->right - used_width;
+        float remaining = cb_width - block->positionp()->left - block->positionp()->right - used_width;
         if (has_auto_margin_left && has_auto_margin_right) {
             // CSS 2.1 §10.3.7: Both margins auto → equal values, unless negative.
             // If negative: LTR → margin-left=0, solve margin-right;
@@ -961,36 +959,36 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
             float each = remaining / 2.0f;
             if (each < 0) {
                 if (cb_direction == TD_RTL) {
-                    if (block->bound) { block->bound->margin.right = 0; block->bound->margin.left = remaining; }
+                    if (block->bound) { block->boundary_mut()->margin.right = 0; block->boundary_mut()->margin.left = remaining; }
                     log_debug("[ABS POS] auto margins negative (RTL): margin-left=%.1f, margin-right=0", remaining);
                 } else {
-                    if (block->bound) { block->bound->margin.left = 0; block->bound->margin.right = remaining; }
+                    if (block->bound) { block->boundary_mut()->margin.left = 0; block->boundary_mut()->margin.right = remaining; }
                     log_debug("[ABS POS] auto margins negative (LTR): margin-left=0, margin-right=%.1f", remaining);
                 }
             } else {
                 if (block->bound) {
-                    block->bound->margin.left = each;
-                    block->bound->margin.right = each;
+                    block->boundary_mut()->margin.left = each;
+                    block->boundary_mut()->margin.right = each;
                 }
                 log_debug("[ABS POS] auto margin centering horizontal: remaining=%.1f, each=%.1f", remaining, each);
             }
         } else if (has_auto_margin_left) {
             // CSS 2.1 §10.3.7: Exactly one auto value → follows from equality
-            float margin_right = block->bound ? block->bound->margin.right : 0;
+            float margin_right = block->bound ? block->boundary()->margin.right : 0;
             float auto_margin = remaining - margin_right;
-            if (block->bound) block->bound->margin.left = auto_margin;
+            if (block->bound) block->boundary_mut()->margin.left = auto_margin;
             log_debug("[ABS POS] auto margin-left=%.1f", auto_margin);
         } else if (has_auto_margin_right) {
             // CSS 2.1 §10.3.7: Exactly one auto value → follows from equality
-            float margin_left = block->bound ? block->bound->margin.left : 0;
+            float margin_left = block->bound ? block->boundary()->margin.left : 0;
             float auto_margin = remaining - margin_left;
-            if (block->bound) block->bound->margin.right = auto_margin;
+            if (block->bound) block->boundary_mut()->margin.right = auto_margin;
             log_debug("[ABS POS] auto margin-right=%.1f", auto_margin);
         }
     } else {
         // When not all three (left, right, width) are specified, auto margins become 0
-        if (has_auto_margin_left && block->bound) block->bound->margin.left = 0;
-        if (has_auto_margin_right && block->bound) block->bound->margin.right = 0;
+        if (has_auto_margin_left && block->bound) block->boundary_mut()->margin.left = 0;
+        if (has_auto_margin_right && block->bound) block->boundary_mut()->margin.right = 0;
     }
 
     // Now determine x position (relative to padding box, then add border offset)
@@ -1001,15 +999,15 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     if (layout_uses_border_box(block)) {
         h_border_box_width = content_width;  // CSS width is already the border-box width
     }
-    if (block->position->has_left) {
-        block->x = border_offset_x + block->position->left + (block->bound ? block->bound->margin.left : 0);
-    } else if (block->position->has_right) {
-        block->x = border_offset_x + cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0) - h_border_box_width;
+    if (block->positionp()->has_left) {
+        block->x = border_offset_x + block->positionp()->left + (block->bound ? block->boundary()->margin.left : 0);
+    } else if (block->positionp()->has_right) {
+        block->x = border_offset_x + cb_width - block->positionp()->right - (block->bound ? block->boundary()->margin.right : 0) - h_border_box_width;
     } else {
         // neither left nor right specified - use static position (with margin offset)
         // Note: this is a preliminary value; layout_abs_block will override with
         // the correct static position (including RTL adjustment) after this call.
-        block->x = border_offset_x + (block->bound ? block->bound->margin.left : 0);
+        block->x = border_offset_x + (block->bound ? block->boundary()->margin.left : 0);
     }
     assert(content_width >= 0);
 
@@ -1018,16 +1016,16 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     //   top + margin-top + border-top + padding-top + height +
     //   padding-bottom + border-bottom + margin-bottom + bottom = cb_height
     // =========================================================================
-    bool has_auto_margin_top = block->bound && block->bound->margin.top_type == CSS_VALUE_AUTO;
-    bool has_auto_margin_bottom = block->bound && block->bound->margin.bottom_type == CSS_VALUE_AUTO;
+    bool has_auto_margin_top = block->bound && block->boundary_mut()->margin.top_type == CSS_VALUE_AUTO;
+    bool has_auto_margin_bottom = block->bound && block->boundary_mut()->margin.bottom_type == CSS_VALUE_AUTO;
 
     float v_border_padding = layout_padding_border_height(block);
 
     log_debug("[ABS POS] height calc: given_height=%.1f, has_top=%d, has_bottom=%d, cb_height=%.1f",
-              lycon->block.given_height, block->position->has_top, block->position->has_bottom, cb_height);
+              lycon->block.given_height, block->positionp()->has_top, block->positionp()->has_bottom, cb_height);
     bool height_is_auto = positioned_height_is_auto(block);
     bool stretch_form_height = is_form_control_replaced && height_is_auto &&
-        block->position->has_top && block->position->has_bottom;
+        block->positionp()->has_top && block->positionp()->has_bottom;
     bool has_height = (lycon->block.given_height >= 0 && !height_is_auto);
 
     if (has_height) {
@@ -1039,31 +1037,31 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float aspect_ratio = get_preferred_aspect_ratio_for_positioned(block);
         content_height = content_width / aspect_ratio;
         lycon->block.given_height = content_height;
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->ensure_block(lycon);
         block->blk->given_height = content_height;
         log_debug("[ABS POS] height from aspect-ratio: width=%.1f / ratio=%.3f -> height=%.1f",
                   content_width, aspect_ratio, content_height);
-    } else if (block->position->has_top && block->position->has_bottom &&
+    } else if (block->positionp()->has_top && block->positionp()->has_bottom &&
                (!is_replaced || stretch_form_height)) {
         // CSS 2.1 §10.6.4: height is auto, both top and bottom specified
         // Auto margins are treated as 0 when height is auto
-        float margin_top = has_auto_margin_top ? 0 : (block->bound ? block->bound->margin.top : 0);
-        float margin_bottom = has_auto_margin_bottom ? 0 : (block->bound ? block->bound->margin.bottom : 0);
-        float top_edge = block->position->top + margin_top;
-        float bottom_edge = cb_height - block->position->bottom - margin_bottom;
+        float margin_top = has_auto_margin_top ? 0 : (block->bound ? block->boundary()->margin.top : 0);
+        float margin_bottom = has_auto_margin_bottom ? 0 : (block->bound ? block->boundary()->margin.bottom : 0);
+        float top_edge = block->positionp()->top + margin_top;
+        float bottom_edge = cb_height - block->positionp()->bottom - margin_bottom;
         float border_box_height = 0.0f;
         content_height = positioned_inset_stretch_css_height(block, cb_height,
             margin_top, margin_bottom, &border_box_height);
         // CRITICAL: Store constraint-calculated height so finalize_block_flow knows height is fixed
         lycon->block.given_height = content_height;
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->ensure_block(lycon);
         block->blk->given_height = content_height;
         // When height is derived from constraints, auto margins become 0
-        if (has_auto_margin_top && block->bound) block->bound->margin.top = 0;
-        if (has_auto_margin_bottom && block->bound) block->bound->margin.bottom = 0;
+        if (has_auto_margin_top && block->bound) block->boundary_mut()->margin.top = 0;
+        if (has_auto_margin_bottom && block->bound) block->boundary_mut()->margin.bottom = 0;
         log_debug("[ABS POS] height from constraints: top_edge=%.1f, bottom_edge=%.1f, border_box=%.1f, content_height=%.1f (stored in given_height)",
                   top_edge, bottom_edge, border_box_height, content_height);
-    } else if (is_replaced && block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
+    } else if (is_replaced && block->form_control() &&
                block->form->intrinsic_height > 0) {
         // CSS 2.1 §10.6.5: replaced form control with auto height → use intrinsic height
         IntrinsicSize form_size = layout_measure_form_control(lycon, block, lycon->available_space);
@@ -1081,7 +1079,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     float preferred_aspect_ratio = get_preferred_aspect_ratio_for_positioned(block);
     if (!has_width && preferred_aspect_ratio > 0.0f && content_height > 0.0f &&
-        !(block->position->has_left && block->position->has_right && !is_intrinsic_width && !is_replaced)) {
+        !(block->positionp()->has_left && block->positionp()->has_right && !is_intrinsic_width && !is_replaced)) {
         float aspect_width = content_height * preferred_aspect_ratio;
         if (aspect_width > content_width) {
             content_width = aspect_width;
@@ -1092,36 +1090,36 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     // CSS 2.1 §10.6.4: Solve auto margins for vertical axis
     // When top, bottom, and height are all NOT auto, auto margins absorb remaining space.
-    if (has_height && block->position->has_top && block->position->has_bottom) {
+    if (has_height && block->positionp()->has_top && block->positionp()->has_bottom) {
         // For box-sizing: border-box, content_height is already the border-box height
         float used_height = content_height + v_border_padding;
         if (layout_uses_border_box(block)) {
             used_height = content_height;  // already includes padding+border
         }
-        float remaining = cb_height - block->position->top - block->position->bottom - used_height;
+        float remaining = cb_height - block->positionp()->top - block->positionp()->bottom - used_height;
         if (has_auto_margin_top && has_auto_margin_bottom) {
             // Both margins auto → center vertically
             float each = max(remaining / 2.0f, 0.0f);
             if (block->bound) {
-                block->bound->margin.top = each;
-                block->bound->margin.bottom = each;
+                block->boundary_mut()->margin.top = each;
+                block->boundary_mut()->margin.bottom = each;
             }
             log_debug("[ABS POS] auto margin centering vertical: remaining=%.1f, each=%.1f", remaining, each);
         } else if (has_auto_margin_top) {
-            float margin_bottom = block->bound ? block->bound->margin.bottom : 0;
+            float margin_bottom = block->bound ? block->boundary()->margin.bottom : 0;
             float auto_margin = max(remaining - margin_bottom, 0.0f);
-            if (block->bound) block->bound->margin.top = auto_margin;
+            if (block->bound) block->boundary_mut()->margin.top = auto_margin;
             log_debug("[ABS POS] auto margin-top=%.1f", auto_margin);
         } else if (has_auto_margin_bottom) {
-            float margin_top = block->bound ? block->bound->margin.top : 0;
+            float margin_top = block->bound ? block->boundary()->margin.top : 0;
             float auto_margin = max(remaining - margin_top, 0.0f);
-            if (block->bound) block->bound->margin.bottom = auto_margin;
+            if (block->bound) block->boundary_mut()->margin.bottom = auto_margin;
             log_debug("[ABS POS] auto margin-bottom=%.1f", auto_margin);
         }
     } else {
         // When not all three (top, bottom, height) are specified, auto margins become 0
-        if (has_auto_margin_top && block->bound) block->bound->margin.top = 0;
-        if (has_auto_margin_bottom && block->bound) block->bound->margin.bottom = 0;
+        if (has_auto_margin_top && block->bound) block->boundary_mut()->margin.top = 0;
+        if (has_auto_margin_bottom && block->bound) block->boundary_mut()->margin.bottom = 0;
     }
 
     // Now determine y position (relative to padding box, then add border offset)
@@ -1132,16 +1130,16 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         border_box_height += layout_box_metrics(block).pad_border_v;
     }
 
-    if (block->position->has_top) {
-        block->y = border_offset_y + block->position->top + (block->bound ? block->bound->margin.top : 0);
-    } else if (block->position->has_bottom) {
+    if (block->positionp()->has_top) {
+        block->y = border_offset_y + block->positionp()->top + (block->bound ? block->boundary()->margin.top : 0);
+    } else if (block->positionp()->has_bottom) {
         // Use border_box_height for bottom positioning to account for padding and border
-        block->y = border_offset_y + cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0) - border_box_height;
+        block->y = border_offset_y + cb_height - block->positionp()->bottom - (block->bound ? block->boundary()->margin.bottom : 0) - border_box_height;
         log_debug("[ABS POS] bottom positioning: y=%.1f (cb_height=%.1f, bottom=%.1f, border_box_height=%.1f, is_border_box=%d)",
-                  block->y, cb_height, block->position->bottom, border_box_height, is_border_box);
+                  block->y, cb_height, block->positionp()->bottom, border_box_height, is_border_box);
     } else {
         // neither top nor bottom specified - use static position (with margin offset)
-        block->y = border_offset_y + (block->bound ? block->bound->margin.top : 0);
+        block->y = border_offset_y + (block->bound ? block->boundary()->margin.top : 0);
     }
     assert(content_height >= 0);
 
@@ -1180,20 +1178,20 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 // Abs children are laid out eagerly in DOM order, so their percentage heights
 // initially resolve against 0. This function corrects them after the final height is known.
 void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
-    if (!containing_block->position || !containing_block->position->first_abs_child) return;
+    if (!containing_block->position || !containing_block->positionp()->first_abs_child) return;
 
     // Compute containing block's padding box height (CSS 2.1 §10.1)
     LayoutContainingBlock cb = layout_containing_block_for_view(containing_block);
     float cb_height = cb.padding_height;
     if (cb_height <= 0) return;
 
-    ViewBlock* child = containing_block->position->first_abs_child;
+    ViewBlock* child = containing_block->positionp()->first_abs_child;
     while (child) {
         // Re-resolve percentage height against the containing block's final used
         // height. The previous value may be positive but stale when the containing
         // block itself had a deferred percentage height.
-        if (child->blk && !isnan(child->blk->given_height_percent)) {
-            float new_given_height = child->blk->given_height_percent * cb_height / 100.0f;
+        if (child->blk && !isnan(child->block()->given_height_percent)) {
+            float new_given_height = child->block()->given_height_percent * cb_height / 100.0f;
             new_given_height = adjust_min_max_height(child, new_given_height);
             child->blk->given_height = new_given_height;
 
@@ -1209,33 +1207,33 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
                 child->height = content_height;
             }
             log_debug("[ABS RE-RESOLVE] height for %s: %.1f%% of %.1f = %.1f, block->height=%.1f",
-                child->node_name(), child->blk->given_height_percent, cb_height, new_given_height, child->height);
+                child->node_name(), child->block()->given_height_percent, cb_height, new_given_height, child->height);
         }
 
         // Re-resolve percentage top
-        if (child->position && child->position->has_top && !isnan(child->position->top_percent)) {
-            float old_top = child->position->top;
+        if (child->position && child->positionp()->has_top && !isnan(child->positionp()->top_percent)) {
+            float old_top = child->positionp()->top;
             child->position->top = child->position->top_percent * cb_height / 100.0f;
-            if (child->position->top != old_top) {
-                child->y = cb.padding_y + child->position->top + (child->bound ? child->bound->margin.top : 0);
+            if (child->positionp()->top != old_top) {
+                child->y = cb.padding_y + child->positionp()->top + (child->bound ? child->boundary()->margin.top : 0);
                 log_debug("[ABS RE-RESOLVE] top for %s: %.1f%% of %.1f = %.1f, y=%.1f",
-                    child->node_name(), child->position->top_percent, cb_height, child->position->top, child->y);
+                    child->node_name(), child->positionp()->top_percent, cb_height, child->positionp()->top, child->y);
             }
         }
 
         // Re-resolve percentage bottom
-        if (child->position && child->position->has_bottom && !isnan(child->position->bottom_percent)) {
+        if (child->position && child->positionp()->has_bottom && !isnan(child->positionp()->bottom_percent)) {
             child->position->bottom = child->position->bottom_percent * cb_height / 100.0f;
         }
 
-        bool is_form_control = child->item_prop_type == DomElement::ITEM_PROP_FORM && child->form;
-        if (child->position && child->position->has_top && child->position->has_bottom &&
+        bool is_form_control = child->form_control();
+        if (child->position && child->positionp()->has_top && child->positionp()->has_bottom &&
             positioned_height_is_auto(child) &&
             (!positioned_element_is_replaced(child) || is_form_control)) {
-            float margin_top = child->bound && child->bound->margin.top_type != CSS_VALUE_AUTO
-                ? child->bound->margin.top : 0.0f;
-            float margin_bottom = child->bound && child->bound->margin.bottom_type != CSS_VALUE_AUTO
-                ? child->bound->margin.bottom : 0.0f;
+            float margin_top = child->bound && child->boundary_mut()->margin.top_type != CSS_VALUE_AUTO
+                ? child->boundary()->margin.top : 0.0f;
+            float margin_bottom = child->bound && child->boundary_mut()->margin.bottom_type != CSS_VALUE_AUTO
+                ? child->boundary()->margin.bottom : 0.0f;
             bool is_border_box = layout_uses_border_box(child);
             float css_height = positioned_inset_stretch_css_height(child, cb_height,
                 margin_top, margin_bottom, nullptr);
@@ -1244,7 +1242,7 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
                 ? adjust_border_padding_height(child, css_height) : css_height;
             float pad_border = child->bound ? layout_box_metrics(child).pad_border_v : 0.0f;
             child->height = content_height + pad_border;
-            child->y = cb.padding_y + child->position->top + margin_top;
+            child->y = cb.padding_y + child->positionp()->top + margin_top;
             if (child->blk) child->blk->given_height = css_height;
             // an auto-height containing block defers inset stretching until its used height exists.
             log_debug("[ABS RE-RESOLVE] inset-stretched height for %s: cb=%.1f, height=%.1f, y=%.1f",
@@ -1255,17 +1253,17 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
         // This must be unconditional: this function runs after an auto-height
         // containing block is finalized, so cb_height changed for ALL children,
         // not just those with percentage values.
-        if (child->position && child->position->has_bottom && !child->position->has_top) {
-            child->y = cb.padding_y + cb_height - child->position->bottom
-                - (child->bound ? child->bound->margin.bottom : 0) - child->height;
+        if (child->position && child->positionp()->has_bottom && !child->positionp()->has_top) {
+            child->y = cb.padding_y + cb_height - child->positionp()->bottom
+                - (child->bound ? child->boundary()->margin.bottom : 0) - child->height;
             log_debug("[ABS RE-RESOLVE] bottom-positioned y for %s: y=%.1f", child->node_name(), child->y);
         }
 
-        if (child->position && child->position->first_abs_child) {
+        if (child->position && child->positionp()->first_abs_child) {
             re_resolve_abs_children_vertical(child);
         }
 
-        child = child->position ? child->position->next_abs_sibling : nullptr;
+        child = child->position ? child->positionp()->next_abs_sibling : nullptr;
     }
 }
 
@@ -1284,13 +1282,13 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
 
     // find containing block
-    ViewBlock* cb = find_containing_block(block, block->position->position);
+    ViewBlock* cb = find_containing_block(block, block->positionp()->position);
     if (!cb) { log_error("Missing containing block");  lycon->depth--;  log_leave();  return; }
     log_debug("found containing block: %p, width=%d, height=%d, content_width=%d, content_height=%d",
         cb, cb->width, cb->height, cb->content_width, cb->content_height);
     // link to containing block's float context
     if (cb->position) {
-        if (!cb->position->first_abs_child) {
+        if (!cb->positionp()->first_abs_child) {
             cb->position->last_abs_child = cb->position->first_abs_child = block;
         } else {
             cb->position->last_abs_child->position->next_abs_sibling = block;
@@ -1316,16 +1314,16 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             strbuf_append_str_n(src, value, value_len);
             log_debug("[ABS IMG] image src: %s", src->str);
             if (!block->embed) {
-                block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                block->ensure_embed(lycon);
             }
             block->embed->img = load_image(lycon->ui_context, src->str);
             strbuf_free(src);
-            if (!block->embed->img) {
+            if (!block->embedp()->img) {
                 log_debug("[ABS IMG] Failed to load image");
             }
         }
-        if (block->embed && block->embed->img) {
-            ImageSurface* img = block->embed->img;
+        if (block->embed && block->embedp()->img) {
+            ImageSurface* img = block->embedp()->img;
             // Image intrinsic dimensions are in CSS logical pixels
             float w = img->width;
             float h = img->height;
@@ -1336,7 +1334,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             if (lycon->block.given_width < 0 && lycon->block.given_height < 0) {
                 // Neither width nor height specified - use intrinsic dimensions
                 // But respect max-width if set
-                float max_w = block->blk ? block->blk->given_max_width : -1;
+                float max_w = block->blk ? block->block()->given_max_width : -1;
                 if (max_w >= 0 && w > max_w) {
                     lycon->block.given_width = max_w;
                     lycon->block.given_height = max_w * h / w;
@@ -1374,65 +1372,65 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             // calculate_absolute_position computed x/y using the pre-image width/height
             // (shrink-to-fit or 0 for auto), but the IMG sizing code may have changed
             // the dimensions via aspect ratio. Re-derive x/y from the new block size.
-            if (block->position->has_right && !block->position->has_left) {
+            if (block->positionp()->has_right && !block->positionp()->has_left) {
                 recalculate_right_positioned_x(block, cb, "replaced-size");
             }
-            if (block->position->has_bottom && !block->position->has_top) {
-                float cb_border_top = (cb->bound && cb->bound->border) ? cb->bound->border->width.top : 0;
-                float cb_border_bottom = (cb->bound && cb->bound->border) ? cb->bound->border->width.bottom : 0;
+            if (block->positionp()->has_bottom && !block->positionp()->has_top) {
+                float cb_border_top = (cb->bound && cb->boundary_mut()->border) ? cb->boundary_mut()->border->width.top : 0;
+                float cb_border_bottom = (cb->bound && cb->boundary_mut()->border) ? cb->boundary_mut()->border->width.bottom : 0;
                 float cb_padding_height = cb->height - cb_border_top - cb_border_bottom;
-                float margin_bottom = (block->bound) ? block->bound->margin.bottom : 0;
-                block->y = cb_border_top + cb_padding_height - block->position->bottom - margin_bottom - block->height;
+                float margin_bottom = (block->bound) ? block->boundary()->margin.bottom : 0;
+                block->y = cb_border_top + cb_padding_height - block->positionp()->bottom - margin_bottom - block->height;
                 log_debug("[ABS IMG] bottom-positioned Y recalc: y=%.1f (cb_pad_h=%.1f, bottom=%.1f, height=%.1f)",
-                          block->y, cb_padding_height, block->position->bottom, block->height);
+                          block->y, cb_padding_height, block->positionp()->bottom, block->height);
             }
 
             // CSS 2.1 §10.6.5: Re-resolve vertical auto margins for replaced elements
             // now that we know the intrinsic height. calculate_absolute_position
             // skipped this because has_height was false (given_height=-1 for images).
-            if (block->position->has_top && block->position->has_bottom && block->bound) {
-                bool has_auto_mt = block->bound->margin.top_type == CSS_VALUE_AUTO;
-                bool has_auto_mb = block->bound->margin.bottom_type == CSS_VALUE_AUTO;
+            if (block->positionp()->has_top && block->positionp()->has_bottom && block->bound) {
+                bool has_auto_mt = block->boundary()->margin.top_type == CSS_VALUE_AUTO;
+                bool has_auto_mb = block->boundary()->margin.bottom_type == CSS_VALUE_AUTO;
                 if (has_auto_mt || has_auto_mb) {
-                    float cb_border_top = (cb->bound && cb->bound->border) ? cb->bound->border->width.top : 0;
-                    float cb_border_bottom = (cb->bound && cb->bound->border) ? cb->bound->border->width.bottom : 0;
+                    float cb_border_top = (cb->bound && cb->boundary_mut()->border) ? cb->boundary_mut()->border->width.top : 0;
+                    float cb_border_bottom = (cb->bound && cb->boundary_mut()->border) ? cb->boundary_mut()->border->width.bottom : 0;
                     float cb_pad_height = cb->height - cb_border_top - cb_border_bottom;
                     float v_bp = layout_box_metrics(block).pad_border_v;
                     float used_height = block->height + v_bp;
-                    float remaining = cb_pad_height - block->position->top - block->position->bottom - used_height;
+                    float remaining = cb_pad_height - block->positionp()->top - block->positionp()->bottom - used_height;
                     if (has_auto_mt && has_auto_mb) {
                         float each = remaining / 2.0f;
-                        block->bound->margin.top = each;
-                        block->bound->margin.bottom = each;
+                        block->boundary_mut()->margin.top = each;
+                        block->boundary_mut()->margin.bottom = each;
                         log_debug("[ABS IMG] vertical auto margin centering: remaining=%.1f, each=%.1f", remaining, each);
                     } else if (has_auto_mt) {
-                        float auto_margin = remaining - block->bound->margin.bottom;
-                        block->bound->margin.top = auto_margin;
+                        float auto_margin = remaining - block->boundary()->margin.bottom;
+                        block->boundary_mut()->margin.top = auto_margin;
                         log_debug("[ABS IMG] auto margin-top=%.1f", auto_margin);
                     } else {
-                        float auto_margin = remaining - block->bound->margin.top;
-                        block->bound->margin.bottom = auto_margin;
+                        float auto_margin = remaining - block->boundary()->margin.top;
+                        block->boundary_mut()->margin.bottom = auto_margin;
                         log_debug("[ABS IMG] auto margin-bottom=%.1f", auto_margin);
                     }
                     // Recalculate y with the resolved margins
-                    block->y = cb_border_top + block->position->top + block->bound->margin.top;
+                    block->y = cb_border_top + block->positionp()->top + block->boundary()->margin.top;
                     log_debug("[ABS IMG] y after margin resolution: %.1f", block->y);
                 }
             }
 
             // CSS 2.1 §10.3.8: Re-resolve horizontal auto margins for replaced elements
-            if (block->position->has_left && block->position->has_right && block->bound) {
-                bool has_auto_ml = block->bound->margin.left_type == CSS_VALUE_AUTO;
-                bool has_auto_mr = block->bound->margin.right_type == CSS_VALUE_AUTO;
+            if (block->positionp()->has_left && block->positionp()->has_right && block->bound) {
+                bool has_auto_ml = block->boundary()->margin.left_type == CSS_VALUE_AUTO;
+                bool has_auto_mr = block->boundary()->margin.right_type == CSS_VALUE_AUTO;
                 if (has_auto_ml || has_auto_mr) {
                     float cb_border_left = 0.0f;
                     float cb_pad_width = containing_block_padding_width(cb, &cb_border_left);
                     float h_bp = layout_box_metrics(block).pad_border_h;
                     float used_width = block->width + h_bp;
-                    float remaining = cb_pad_width - block->position->left - block->position->right - used_width;
+                    float remaining = cb_pad_width - block->positionp()->left - block->positionp()->right - used_width;
                     // Determine containing block direction for negative margin handling
                     TextDirection cb_dir = TD_LTR;
-                    if (cb->blk && cb->blk->direction == CSS_VALUE_RTL) {
+                    if (cb->blk && cb->block_mut()->direction == CSS_VALUE_RTL) {
                         cb_dir = TD_RTL;
                     } else if (cb->specified_style) {
                         CssValue* dir_val = (CssValue*)style_tree_get_computed_value(
@@ -1449,30 +1447,30 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                         float each = remaining / 2.0f;
                         if (each < 0) {
                             if (cb_dir == TD_RTL) {
-                                block->bound->margin.right = 0;
-                                block->bound->margin.left = remaining;
+                                block->boundary_mut()->margin.right = 0;
+                                block->boundary_mut()->margin.left = remaining;
                             } else {
-                                block->bound->margin.left = 0;
-                                block->bound->margin.right = remaining;
+                                block->boundary_mut()->margin.left = 0;
+                                block->boundary_mut()->margin.right = remaining;
                             }
                             log_debug("[ABS IMG] horizontal auto margins negative (%s): ml=%.1f, mr=%.1f",
                                       cb_dir == TD_RTL ? "RTL" : "LTR",
-                                      block->bound->margin.left, block->bound->margin.right);
+                                      block->boundary()->margin.left, block->boundary()->margin.right);
                         } else {
-                            block->bound->margin.left = each;
-                            block->bound->margin.right = each;
+                            block->boundary_mut()->margin.left = each;
+                            block->boundary_mut()->margin.right = each;
                             log_debug("[ABS IMG] horizontal auto margin centering: remaining=%.1f, each=%.1f", remaining, each);
                         }
                     } else if (has_auto_ml) {
-                        float auto_margin = remaining - block->bound->margin.right;
-                        block->bound->margin.left = auto_margin;
+                        float auto_margin = remaining - block->boundary()->margin.right;
+                        block->boundary_mut()->margin.left = auto_margin;
                         log_debug("[ABS IMG] auto margin-left=%.1f", auto_margin);
                     } else {
-                        float auto_margin = remaining - block->bound->margin.left;
-                        block->bound->margin.right = auto_margin;
+                        float auto_margin = remaining - block->boundary()->margin.left;
+                        block->boundary_mut()->margin.right = auto_margin;
                         log_debug("[ABS IMG] auto margin-right=%.1f", auto_margin);
                     }
-                    block->x = cb_border_left + block->position->left + block->bound->margin.left;
+                    block->x = cb_border_left + block->positionp()->left + block->boundary()->margin.left;
                     log_debug("[ABS IMG] x after margin resolution: %.1f", block->x);
                 }
             }
@@ -1504,11 +1502,11 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     float parent_to_cb_offset_x = 0, parent_to_cb_offset_y = 0;
     ViewElement* parent = block->parent_view();
     calculate_parent_to_cb_offset(block, cb, &parent_to_cb_offset_x, &parent_to_cb_offset_y);
-    if (!block->position->has_left && !block->position->has_right) {
+    if (!block->positionp()->has_left && !block->positionp()->has_right) {
         block->position->has_static_parent_offset_x = true;
         block->position->static_parent_offset_x = parent_to_cb_offset_x;
     }
-    if (!block->position->has_top && !block->position->has_bottom) {
+    if (!block->positionp()->has_top && !block->positionp()->has_bottom) {
         block->position->has_static_parent_offset_y = true;
         block->position->static_parent_offset_y = parent_to_cb_offset_y;
     }
@@ -1520,20 +1518,20 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     TextDirection static_direction = get_static_position_direction(parent);
     log_debug("[STATIC POS] static-position direction: %s", static_direction == TD_RTL ? "RTL" : "LTR");
 
-    if (!block->position->has_top && !block->position->has_bottom) {
+    if (!block->positionp()->has_top && !block->positionp()->has_bottom) {
         // Calculate static position: pa_block->advance_y is relative to parent's content area
         // Add offset to convert to containing block coordinates
         float static_y = parent_to_cb_offset_y + pa_block->advance_y;
         // Add margin.top (if not already included)
-        if (block->bound && block->bound->margin.top > 0) {
-            static_y += block->bound->margin.top;
+        if (block->bound && block->boundary_mut()->margin.top > 0) {
+            static_y += block->boundary()->margin.top;
         }
         log_debug("[STATIC POS] Using static Y position: %.1f (pa_block->advance_y=%.1f, offset=%.1f)",
                   static_y, pa_block->advance_y, parent_to_cb_offset_y);
         block->y = static_y;
     }
     // Similarly for X when neither left nor right specified
-    if (!block->position->has_left && !block->position->has_right) {
+    if (!block->positionp()->has_left && !block->positionp()->has_right) {
         // CSS 2.1 §10.3.7: Use the static position — where the element would
         // be in normal flow.
         // For originally-inline elements (blockified by §9.7), the static X is
@@ -1550,16 +1548,16 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
         if (static_direction == TD_RTL) {
             float static_x = parent_to_cb_offset_x + line_x;
-            if (block->bound && block->bound->margin.left > 0) {
-                static_x += block->bound->margin.left;
+            if (block->bound && block->boundary_mut()->margin.left > 0) {
+                static_x += block->boundary()->margin.left;
             }
             block->x = static_x;
             log_debug("[STATIC POS] RTL: temporary X position: %.1f (will adjust after width known)", block->x);
         } else {
             // CSS 2.1 §10.3.7: When direction is LTR, set 'left' to the static position.
             float static_x = parent_to_cb_offset_x + line_x;
-            if (block->bound && block->bound->margin.left > 0) {
-                static_x += block->bound->margin.left;
+            if (block->bound && block->boundary_mut()->margin.left > 0) {
+                static_x += block->boundary()->margin.left;
             }
             log_debug("[STATIC POS] LTR: Using static X position: %.1f (line_x=%.1f, offset=%.1f, was_inline=%d)",
                       static_x, line_x, parent_to_cb_offset_x, was_inline);
@@ -1576,16 +1574,16 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
     // Check if width uses intrinsic sizing keywords (max-content, min-content, fit-content)
     bool is_intrinsic_width = block->blk &&
-        (block->blk->given_width_type == CSS_VALUE_MAX_CONTENT ||
-         block->blk->given_width_type == CSS_VALUE_MIN_CONTENT ||
-         block->blk->given_width_type == CSS_VALUE_FIT_CONTENT);
+        (block->block()->given_width_type == CSS_VALUE_MAX_CONTENT ||
+         block->block()->given_width_type == CSS_VALUE_MIN_CONTENT ||
+         block->block()->given_width_type == CSS_VALUE_FIT_CONTENT);
 
     // Set available space for intrinsic sizing if needed
     if (is_intrinsic_width) {
-        if (block->blk->given_width_type == CSS_VALUE_MAX_CONTENT) {
+        if (block->block()->given_width_type == CSS_VALUE_MAX_CONTENT) {
             lycon->available_space = AvailableSpace::make_max_content();
             log_debug("[ABS] Setting max-content intrinsic sizing mode");
-        } else if (block->blk->given_width_type == CSS_VALUE_MIN_CONTENT) {
+        } else if (block->block()->given_width_type == CSS_VALUE_MIN_CONTENT) {
             lycon->available_space = AvailableSpace::make_min_content();
             log_debug("[ABS] Setting min-content intrinsic sizing mode");
         } else {
@@ -1618,7 +1616,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
 
     // Apply CSS clear property after float layout
-    if (block->position && block->position->clear != CSS_VALUE_NONE) {
+    if (block->position && block->positionp()->clear != CSS_VALUE_NONE) {
         log_debug("Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);
     }
@@ -1651,7 +1649,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // adjust block width and height based on content
     log_debug("block position: x=%f, y=%f, width=%f, height=%f, advance_y=%f, max_width=%f, given_height=%f, has_top=%d, has_bottom=%d",
         block->x, block->y, block->width, block->height, lycon->block.advance_y, lycon->block.max_width,
-        lycon->block.given_height, block->position->has_top, block->position->has_bottom);
+        lycon->block.given_height, block->positionp()->has_top, block->positionp()->has_bottom);
     // CRITICAL: Check if this is a flex/grid container that already calculated its dimensions
     bool is_flex_container = (block->display.inner == CSS_VALUE_FLEX);
     bool is_grid_container = (block->display.inner == CSS_VALUE_GRID);
@@ -1664,11 +1662,10 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     bool has_grid_calculated_width = is_grid_container;
     // Form controls (checkbox, radio, etc.) have intrinsic sizes set by layout_form_control.
     // Don't overwrite with flow-based auto-sizing (void elements have 0 flow content).
-    bool has_form_intrinsic_width = block->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                                    block->form && block->width > 0;
+    bool has_form_intrinsic_width = block->form_control() && block->width > 0;
 
     // Width is auto-sized when no explicit width AND neither left+right constraints
-    if (!(lycon->block.given_width >= 0 || (block->position->has_left && block->position->has_right))) {
+    if (!(lycon->block.given_width >= 0 || (block->positionp()->has_left && block->positionp()->has_right))) {
         // Don't override flex/grid/form calculated width with flow-based auto-sizing
         if (has_flex_calculated_width || has_grid_calculated_width || has_form_intrinsic_width) {
             log_debug("auto-sizing width: SKIPPED - %s already has calculated width %.1f",
@@ -1683,7 +1680,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 if (!ch->is_element()) continue;
                 ViewBlock* child_block = lam::view_as_block(ch);
                 if (!child_block) continue;
-                if (child_block->blk && !isnan(child_block->blk->given_width_percent)) {
+                if (child_block->blk && !isnan(child_block->block()->given_width_percent)) {
                     has_child_pct_width = true;
                 }
                 if (view_tree_has_table_flow(child_block)) {
@@ -1693,8 +1690,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
             float final_width = pre_layout_width;
             if (!has_child_pct_width && lycon->block.max_width > 0.0f) {
-                float padding_right = block->bound ? block->bound->padding.right : 0;
-                float border_right = (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
+                float padding_right = block->bound ? block->boundary()->padding.right : 0;
+                float border_right = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.right : 0;
                 float post_layout_flow_width = lycon->block.max_width + padding_right + border_right;
                 if (post_layout_flow_width > final_width) {
                     final_width = post_layout_flow_width;
@@ -1713,8 +1710,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             // Note: max_width already includes left border + left padding from setup_inline
             // So we only need to add right padding and right border
             float flow_width = lycon->block.max_width;
-            float padding_right = block->bound ? block->bound->padding.right : 0;
-            float border_right = (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
+            float padding_right = block->bound ? block->boundary()->padding.right : 0;
+            float border_right = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.right : 0;
 
             // flow_width includes left pad+border from setup_inline
             float border_box_width = flow_width + padding_right + border_right;
@@ -1746,7 +1743,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                     if (ch->is_element()) {
                         ViewBlock* cb = lam::view_as_block(ch);
                         if (!cb) continue;
-                        if (cb->blk && !isnan(cb->blk->given_width_percent)) {
+                        if (cb->blk && !isnan(cb->block()->given_width_percent)) {
                             has_child_pct_width = true;
                             break;
                         }
@@ -1775,7 +1772,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                         TextRect* rect = text->rect;
                         while (rect) {
                             float line_width = rect->width;
-                            float padding_left = block->bound ? block->bound->padding.left : 0;
+                            float padding_left = block->bound ? block->boundary()->padding.left : 0;
                             float current_offset_in_content = rect->x - padding_left;
                             float target_offset_in_content;
                             if (lycon->block.text_align == CSS_VALUE_CENTER) {
@@ -1803,7 +1800,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // set 'right' to the static position, then solve for 'left'.
     // The hypothetical box's right margin edge determines the static 'right' value.
     // For inline-level elements, account for float avoidance and text-align.
-    if (static_direction == TD_RTL && !block->position->has_left && !block->position->has_right) {
+    if (static_direction == TD_RTL && !block->positionp()->has_left && !block->positionp()->has_right) {
         bool was_inline_rtl = false;
         if (elmt->is_element()) {
             DomElement* elem = elmt->as_element();
@@ -1843,7 +1840,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             }
         }
 
-        float margin_right = (block->bound) ? block->bound->margin.right : 0;
+        float margin_right = (block->bound) ? block->boundary()->margin.right : 0;
         block->x = parent_to_cb_offset_x + line_right - block->width - margin_right;
         log_debug("[STATIC POS] RTL adjustment: x=%.1f (parent_offset=%.1f, line_right=%.1f, block_w=%.1f, mr=%.1f)",
                   block->x, parent_to_cb_offset_x, line_right, block->width, margin_right);
@@ -1853,8 +1850,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // but 'left' is auto, recalculate x after width is finalized.
     // The initial x from calculate_absolute_position used the available width,
     // not the final shrink-to-fit width.
-    if (block->position->has_right && !block->position->has_left &&
-        !(lycon->block.given_width >= 0 || (block->position->has_left && block->position->has_right))) {
+    if (block->positionp()->has_right && !block->positionp()->has_left &&
+        !(lycon->block.given_width >= 0 || (block->positionp()->has_left && block->positionp()->has_right))) {
         recalculate_right_positioned_x(block, cb, "shrink-to-fit");
     }
 
@@ -1866,16 +1863,16 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // for auto height. The image-loading code above already set block->height
     // from intrinsic dimensions; don't overwrite it with flow-based auto-sizing.
     bool has_replaced_intrinsic_height = ((block->display.inner == RDT_DISPLAY_REPLACED) ||
-        (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form)) && block->height > 0;
+        (block->form_control())) && block->height > 0;
 
-    // CRITICAL: Use block->blk->given_height (canonical CSS value) instead of lycon->block.given_height
+    // CRITICAL: Use block->block()->given_height (canonical CSS value) instead of lycon->block.given_height
     // here, because lycon->block.given_height can be corrupted by child CSS style resolution
     // inside layout_block_inner_content (children's dom_node_resolve_style writes their own
-    // given_height into lycon->block). block->blk->given_height is set once from CSS parsing
+    // given_height into lycon->block). block->block()->given_height is set once from CSS parsing
     // and from calculate_absolute_position for top+bottom constraints; it is not corrupted.
     // This mirrors the same pattern used in finalize_block_flow.
-    float abs_block_given_height = (block->blk && block->blk->given_height >= 0) ? block->blk->given_height : -1;
-    if (!(abs_block_given_height >= 0 || (block->position->has_top && block->position->has_bottom))) {
+    float abs_block_given_height = (block->blk && block->block_mut()->given_height >= 0) ? block->block_mut()->given_height : -1;
+    if (!(abs_block_given_height >= 0 || (block->positionp()->has_top && block->positionp()->has_bottom))) {
         // Don't override flex/grid calculated height with flow-based auto-sizing
         if (has_flex_calculated_height || has_grid_calculated_height || has_replaced_intrinsic_height) {
             log_debug("auto-sizing height: SKIPPED - %s already has calculated height %.1f",
@@ -1884,10 +1881,10 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             float flow_height = lycon->block.advance_y;
             // Note: advance_y already includes top border + top padding from setup_inline
             // So we only need to add bottom padding and bottom border
-            float padding_top = block->bound ? block->bound->padding.top : 0;
-            float border_top = (block->bound && block->bound->border) ? block->bound->border->width.top : 0;
-            float padding_bottom = block->bound ? block->bound->padding.bottom : 0;
-            float border_bottom = (block->bound && block->bound->border) ? block->bound->border->width.bottom : 0;
+            float padding_top = block->bound ? block->boundary()->padding.top : 0;
+            float border_top = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.top : 0;
+            float padding_bottom = block->bound ? block->boundary()->padding.bottom : 0;
+            float border_bottom = (block->bound && block->boundary_mut()->border) ? block->boundary_mut()->border->width.bottom : 0;
 
             float pad_border_height = padding_top + padding_bottom + border_top + border_bottom;
             if (layout_uses_border_box(block)) {
@@ -1912,7 +1909,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         }
 
         // BFC height expansion: if floats extend beyond flow content, expand height
-        bool has_text_box_trim = block->blk && block->blk->text_box_trim;
+        bool has_text_box_trim = block->blk && block->block_mut()->text_box_trim;
         if (!has_text_box_trim && max_float_bottom > block->height) {
             log_debug("[ABS BFC] Expanding height from %.1f to %.1f to contain floats",
                       block->height, max_float_bottom);
@@ -1921,15 +1918,15 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
         // CRITICAL: Recalculate Y position when has_bottom without has_top and height is auto
         // The initial y was calculated with content_height=0, now we have the actual height
-        if (block->position->has_bottom && !block->position->has_top) {
+        if (block->positionp()->has_bottom && !block->positionp()->has_top) {
             LayoutContainingBlock used_cb = layout_absolute_containing_block(lycon, cb);
             float cb_height = used_cb.padding_height;
             float border_offset_y = used_cb.padding_y;
-            float margin_bottom = block->bound ? block->bound->margin.bottom : 0;
+            float margin_bottom = block->bound ? block->boundary()->margin.bottom : 0;
 
-            float new_y = border_offset_y + cb_height - block->position->bottom - margin_bottom - block->height;
+            float new_y = border_offset_y + cb_height - block->positionp()->bottom - margin_bottom - block->height;
             log_debug("[ABS POS] Recalculating Y for bottom-positioned auto-height element: old_y=%.1f, new_y=%.1f (cb_height=%.1f, bottom=%.1f, height=%.1f)",
-                      block->y, new_y, cb_height, block->position->bottom, block->height);
+                      block->y, new_y, cb_height, block->positionp()->bottom, block->height);
             block->y = new_y;
         }
     }
@@ -1941,43 +1938,43 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
 static void finalize_static_positioned_abs_descendant(ViewBlock* block) {
     if (!block || !block->position) return;
-    if (block->position->position != CSS_VALUE_ABSOLUTE &&
-        block->position->position != CSS_VALUE_FIXED) return;
+    if (block->positionp()->position != CSS_VALUE_ABSOLUTE &&
+        block->positionp()->position != CSS_VALUE_FIXED) return;
 
-    bool needs_offset_delta_x = block->position->has_static_parent_offset_x &&
-        !block->position->has_left && !block->position->has_right;
-    bool needs_offset_delta_y = block->position->has_static_parent_offset_y &&
-        !block->position->has_top && !block->position->has_bottom;
-    if (!block->position->static_x_needs_parent_offset &&
-        !block->position->static_y_needs_parent_offset &&
+    bool needs_offset_delta_x = block->positionp()->has_static_parent_offset_x &&
+        !block->positionp()->has_left && !block->positionp()->has_right;
+    bool needs_offset_delta_y = block->positionp()->has_static_parent_offset_y &&
+        !block->positionp()->has_top && !block->positionp()->has_bottom;
+    if (!block->positionp()->static_x_needs_parent_offset &&
+        !block->positionp()->static_y_needs_parent_offset &&
         !needs_offset_delta_x && !needs_offset_delta_y) return;
 
-    ViewBlock* cb = find_containing_block(block, block->position->position);
+    ViewBlock* cb = find_containing_block(block, block->positionp()->position);
     if (!cb) return;
 
     float offset_x = 0;
     float offset_y = 0;
     calculate_parent_to_cb_offset(block, cb, &offset_x, &offset_y);
 
-    if (block->position->static_x_needs_parent_offset) {
+    if (block->positionp()->static_x_needs_parent_offset) {
         block->x += offset_x;
         block->position->static_x_needs_parent_offset = false;
         block->position->static_parent_offset_x = offset_x;
         block->position->has_static_parent_offset_x = true;
     } else if (needs_offset_delta_x) {
-        float delta_x = offset_x - block->position->static_parent_offset_x;
+        float delta_x = offset_x - block->positionp()->static_parent_offset_x;
         if (fabs(delta_x) > 0.01f) {
             block->x += delta_x;
         }
         block->position->static_parent_offset_x = offset_x;
     }
-    if (block->position->static_y_needs_parent_offset) {
+    if (block->positionp()->static_y_needs_parent_offset) {
         block->y += offset_y;
         block->position->static_y_needs_parent_offset = false;
         block->position->static_parent_offset_y = offset_y;
         block->position->has_static_parent_offset_y = true;
     } else if (needs_offset_delta_y) {
-        float delta_y = offset_y - block->position->static_parent_offset_y;
+        float delta_y = offset_y - block->positionp()->static_parent_offset_y;
         if (fabs(delta_y) > 0.01f) {
             block->y += delta_y;
         }
@@ -2017,22 +2014,22 @@ void layout_shift_static_positioned_abs_descendants(ViewElement* root, float del
         ViewBlock* child_block = lam::view_as_block(child);
         if (child_block) {
             bool is_abs_fixed = child_block->position &&
-                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
-                 child_block->position->position == CSS_VALUE_FIXED);
+                (child_block->positionp()->position == CSS_VALUE_ABSOLUTE ||
+                 child_block->positionp()->position == CSS_VALUE_FIXED);
             if (is_abs_fixed) {
                 if (delta_x != 0.0f &&
-                    !child_block->position->has_left &&
-                    !child_block->position->has_right) {
+                    !child_block->positionp()->has_left &&
+                    !child_block->positionp()->has_right) {
                     child_block->x += delta_x;
-                    if (child_block->position->has_static_parent_offset_x) {
+                    if (child_block->positionp()->has_static_parent_offset_x) {
                         child_block->position->static_parent_offset_x += delta_x;
                     }
                 }
                 if (delta_y != 0.0f &&
-                    !child_block->position->has_top &&
-                    !child_block->position->has_bottom) {
+                    !child_block->positionp()->has_top &&
+                    !child_block->positionp()->has_bottom) {
                     child_block->y += delta_y;
-                    if (child_block->position->has_static_parent_offset_y) {
+                    if (child_block->positionp()->has_static_parent_offset_y) {
                         child_block->position->static_parent_offset_y += delta_y;
                     }
                 }
@@ -2053,12 +2050,12 @@ void layout_shift_static_positioned_abs_descendants(ViewElement* root, float del
 bool element_has_float(ViewBlock* block) {
     if (!block || !block->position) return false;
     // Float is ignored for absolutely positioned or fixed elements
-    if (block->position->position == CSS_VALUE_ABSOLUTE ||
-        block->position->position == CSS_VALUE_FIXED) {
+    if (block->positionp()->position == CSS_VALUE_ABSOLUTE ||
+        block->positionp()->position == CSS_VALUE_FIXED) {
         return false;
     }
-    return (block->position->float_prop == CSS_VALUE_LEFT ||
-            block->position->float_prop == CSS_VALUE_RIGHT);
+    return (block->positionp()->float_prop == CSS_VALUE_LEFT ||
+            block->positionp()->float_prop == CSS_VALUE_RIGHT);
 }
 
 // ============================================================================
@@ -2089,7 +2086,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     }
 
     log_debug("[FLOAT_LAYOUT] Applying float layout to element %s (float_prop=%d)",
-              block->node_name(), block->position->float_prop);
+              block->node_name(), block->positionp()->float_prop);
 
     // Get the parent's BlockContext - floats are positioned relative to their BFC container
     BlockContext* parent_ctx = lycon->block.parent;
@@ -2116,24 +2113,24 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     // makes same-line floats appear too wide to fit.
     ViewBlock* containing_block = layout_nearest_block_ancestor(parent_view);
     if (containing_block && containing_block->bound) {
-        if (containing_block->bound->border) {
-            content_offset_x += containing_block->bound->border->width.left;
+        if (containing_block->boundary()->border) {
+            content_offset_x += containing_block->boundary()->border->width.left;
 #ifndef NDEBUG
-            content_offset_y += containing_block->bound->border->width.top;
+            content_offset_y += containing_block->boundary()->border->width.top;
 #endif
         }
-        content_offset_x += containing_block->bound->padding.left;
+        content_offset_x += containing_block->boundary()->padding.left;
 #ifndef NDEBUG
-        content_offset_y += containing_block->bound->padding.top;
+        content_offset_y += containing_block->boundary()->padding.top;
 #endif
     }
     log_debug("[FLOAT_LAYOUT] Float parent: %s, content_offset=(%.1f, %.1f)",
               parent_view ? parent_view->node_name() : "null", content_offset_x, content_offset_y);
 
-    float margin_left = block->bound ? block->bound->margin.left : 0;
-    float margin_right = block->bound ? block->bound->margin.right : 0;
-    float margin_top = block->bound ? block->bound->margin.top : 0;
-    float margin_bottom = block->bound ? block->bound->margin.bottom : 0;
+    float margin_left = block->bound ? block->boundary()->margin.left : 0;
+    float margin_right = block->bound ? block->boundary()->margin.right : 0;
+    float margin_top = block->bound ? block->boundary()->margin.top : 0;
+    float margin_bottom = block->bound ? block->boundary()->margin.bottom : 0;
 
     // Get the parent block's content width for positioning
     float parent_content_width = parent_ctx->content_width;
@@ -2167,9 +2164,9 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     // float's margin-bottom. When querying available space, use the border edge (not margin
     // edge) so the overlap doesn't cause horizontal displacement.
     bool has_clear = block->position &&
-        (block->position->clear == CSS_VALUE_LEFT ||
-         block->position->clear == CSS_VALUE_RIGHT ||
-         block->position->clear == CSS_VALUE_BOTH);
+        (block->positionp()->clear == CSS_VALUE_LEFT ||
+         block->positionp()->clear == CSS_VALUE_RIGHT ||
+         block->positionp()->clear == CSS_VALUE_BOTH);
     float initial_y_local;
     if (has_clear) {
         // Use border edge: block->y is the cleared position (border edge)
@@ -2248,7 +2245,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         // may be narrower than the containing block when intermediate elements
         // use negative margins (e.g., Bootstrap .row { margin: 0 -15px }).
         float effective_left, effective_right;
-        if (block->position->float_prop == CSS_VALUE_LEFT) {
+        if (block->positionp()->float_prop == CSS_VALUE_LEFT) {
             effective_left = space.has_left_float
                 ? max(space.left, containing_block_left_bfc)
                 : containing_block_left_bfc;
@@ -2286,7 +2283,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         // float wraps to the next line. Browsers avoid this via fixed-point math.
         if (available_width >= float_total_width - 0.001f) {
             // Float fits here - determine X position
-            if (block->position->float_prop == CSS_VALUE_LEFT) {
+            if (block->positionp()->float_prop == CSS_VALUE_LEFT) {
                 // Left float: position at left edge of available space
                 float new_x;
                 if (space.has_left_float) {
@@ -2320,7 +2317,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         // If the float is wider than its containing block AND it's at its leftmost/rightmost
         // possible position (no same-direction float blocking it), place it here and overflow.
         if (float_wider_than_cb) {
-            if (block->position->float_prop == CSS_VALUE_LEFT) {
+            if (block->positionp()->float_prop == CSS_VALUE_LEFT) {
                 bool at_leftmost = !space.has_left_float || (space.left <= containing_block_left_bfc + 0.5f);
                 if (at_leftmost) {
                     log_debug("[FLOAT_LAYOUT] Left float wider than CB, at leftmost, overflow at Y=%.1f", final_y_bfc);
@@ -2364,7 +2361,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
             log_debug("[FLOAT_LAYOUT] No more float boundaries, positioning at Y=%.1f", final_y_bfc);
 
             // Position float at the edge even if it doesn't fit perfectly
-            if (block->position->float_prop == CSS_VALUE_LEFT) {
+            if (block->positionp()->float_prop == CSS_VALUE_LEFT) {
                 FloatAvailableSpace space = block_context_space_at_y(bfc, final_y_bfc, float_total_height);
                 float new_x = space.has_left_float ?
                     (space.left - parent_x_in_bfc + margin_left) :
@@ -2391,7 +2388,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
 
     // Convert final Y position back to parent-relative coordinates and apply
     float final_y_local = final_y_bfc - parent_y_in_bfc;
-    bool clearance_applied = has_clear && block->bound && block->bound->has_clearance;
+    bool clearance_applied = has_clear && block->bound && block->boundary_mut()->has_clearance;
     // Uncleared clear floats already include margin-top in block->y; when clearance
     // moves the float to a clear edge, the margin applies after that edge.
     float new_y = (has_clear && !clearance_applied) ? final_y_local : final_y_local + margin_top;
@@ -2523,14 +2520,14 @@ void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
     // Check for actual clear values: LEFT, RIGHT, or BOTH
     // Note: We can't use "!= CSS_VALUE_NONE" because uninitialized clear is 0 (CSS_VALUE__UNDEF)
     if (!block->position ||
-        (block->position->clear != CSS_VALUE_LEFT &&
-         block->position->clear != CSS_VALUE_RIGHT &&
-         block->position->clear != CSS_VALUE_BOTH)) {
+        (block->positionp()->clear != CSS_VALUE_LEFT &&
+         block->positionp()->clear != CSS_VALUE_RIGHT &&
+         block->positionp()->clear != CSS_VALUE_BOTH)) {
         return;
     }
 
     log_debug("Applying clear property (clear=%d) to element %s",
-              block->position->clear, block->node_name());
+              block->positionp()->clear, block->node_name());
 
     // Find BFC using the PARENT's BlockContext
     // The current lycon->block is for the element being cleared, but floats are tracked
@@ -2549,7 +2546,7 @@ void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
 
     // Find the Y position where clear can be satisfied using BlockContext API
     // clear_y is in BFC coordinates (relative to BFC establishing element's content area)
-    float clear_y_bfc = block_context_clear_y(bfc, block->position->clear);
+    float clear_y_bfc = block_context_clear_y(bfc, block->positionp()->clear);
 
     // Convert clear_y from BFC coords to parent's coordinate system
     // block->y is relative to block's parent, not the BFC

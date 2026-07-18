@@ -631,10 +631,7 @@ static TransformFunction* interpolate_transform_list(TransformFunction* a, Trans
 static InlineProp* ensure_inline_prop(ViewSpan* span) {
     if (!span->in_line) {
         DomElement* el = lam::dom_require_element(span);
-        if (el->doc && el->doc->view_tree && el->doc->view_tree->pool) {
-            span->in_line = (InlineProp*)pool_calloc(el->doc->view_tree->pool, sizeof(InlineProp));
-            if (span->in_line) span->in_line->opacity = 1.0f;
-        }
+        if (el->doc && el->doc->view_tree) span->ensure_inline(el->doc->view_tree);
     }
     return span->in_line;
 }
@@ -645,13 +642,11 @@ static BackgroundProp* ensure_background_prop(ViewSpan* span) {
     DomElement* el = lam::dom_require_element(span);
     Pool* pool = (el->doc && el->doc->view_tree) ? el->doc->view_tree->pool : NULL;
     if (!pool) return NULL;
-    if (!span->bound) {
-        span->bound = (BoundaryProp*)pool_calloc(pool, sizeof(BoundaryProp));
-    }
-    if (span->bound && !span->bound->background) {
+    if (!span->bound) span->ensure_boundary(el->doc->view_tree);
+    if (span->bound && !span->boundary()->background) {
         span->bound->background = (BackgroundProp*)pool_calloc(pool, sizeof(BackgroundProp));
     }
-    return span->bound ? span->bound->background : NULL;
+    return span->bound ? span->boundary()->background : NULL;
 }
 
 // Apply an interpolated property value to a DomElement
@@ -666,15 +661,8 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
         }
         case CSS_PROPERTY_TRANSFORM: {
             if (!span->transform) {
-                // allocate TransformProp if not present
-                // use element's doc arena for allocation
-                if (element->doc && element->doc->arena) {
-                    span->transform = (TransformProp*)arena_calloc(element->doc->arena, sizeof(TransformProp));
-                    span->transform->origin_x = 50.0f;
-                    span->transform->origin_y = 50.0f;
-                    span->transform->origin_x_percent = true;
-                    span->transform->origin_y_percent = true;
-                }
+                if (element->doc && element->doc->view_tree)
+                    span->ensure_transform(element->doc->view_tree);
             }
             if (span->transform) {
                 span->transform->functions = prop->value.transform;
@@ -989,12 +977,12 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     }
 
     // build keyframe registry if not yet built
-    if (!doc->keyframe_registry) {
-        doc->keyframe_registry = keyframe_registry_create(doc, doc->pool);
+    if (!doc->services.keyframe_registry) {
+        doc->services.keyframe_registry = keyframe_registry_create(doc, doc->pool);
     }
 
     CssKeyframes* keyframes = keyframe_registry_find(
-        (KeyframeRegistry*)doc->keyframe_registry, anim_name);
+        (KeyframeRegistry*)doc->services.keyframe_registry, anim_name);
     if (!keyframes) {
         log_debug("css-anim: no @keyframes found for '%s'", anim_name);
         return;
@@ -1150,23 +1138,23 @@ static bool css_transition_read_used_value(DomElement* element,
         case CSS_PROPERTY_OPACITY: {
             *out_type = ANIM_VAL_FLOAT;
             // opacity defaults to 1.0 when no InlineProp/opacity has been set.
-            *out_f = (span->in_line) ? span->in_line->opacity : 1.0f;
+            *out_f = (span->in_line) ? span->inl()->opacity : 1.0f;
             return true;
         }
         case CSS_PROPERTY_COLOR: {
             // Only snapshot color once it has an explicitly resolved used value;
             // otherwise the "from" would be an arbitrary zero-initialized color.
-            if (span->in_line && span->in_line->has_color) {
+            if (span->in_line && span->inl()->has_color) {
                 *out_type = ANIM_VAL_COLOR;
-                *out_color = span->in_line->color;
+                *out_color = span->inl()->color;
                 return true;
             }
             return false;
         }
         case CSS_PROPERTY_BACKGROUND_COLOR: {
-            if (span->bound && span->bound->background) {
+            if (span->bound && span->boundary_mut()->background) {
                 *out_type = ANIM_VAL_COLOR;
-                *out_color = span->bound->background->color;
+                *out_color = span->boundary()->background->color;
                 return true;
             }
             return false;

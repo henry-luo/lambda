@@ -276,7 +276,7 @@ float compute_element_first_baseline(
     }
     if (has_text_content && element->font) {
         BoxMetrics box = layout_box_metrics(element);
-        float fallback = element->font->font_size * 0.8f;
+        float fallback = element->fontp()->font_size * 0.8f;
         return box.padding.top + box.border.top +
             compute_font_baseline_ascender(lycon, element->font, false, fallback);
     }

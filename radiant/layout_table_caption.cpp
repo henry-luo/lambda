@@ -38,12 +38,12 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
 
     float inner_left = 0;
     if (cap->bound) {
-        if (cap->bound->border) {
-            inner_left += cap->bound->border->width.left;
-            lycon->block.advance_y += cap->bound->border->width.top;
+        if (cap->boundary()->border) {
+            inner_left += cap->boundary()->border->width.left;
+            lycon->block.advance_y += cap->boundary()->border->width.top;
         }
-        inner_left += cap->bound->padding.left;
-        lycon->block.advance_y += cap->bound->padding.top;
+        inner_left += cap->boundary()->padding.left;
+        lycon->block.advance_y += cap->boundary()->padding.top;
     }
     lycon->line.left = inner_left;
     lycon->line.right = inner_left + content_width;
@@ -55,10 +55,10 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     layout_setup_block_font_metrics(lycon);
 
     if (cap->blk) {
-        if (!isnan(cap->blk->text_indent_percent)) {
-            lycon->block.text_indent = content_width * cap->blk->text_indent_percent / 100.0f;
+        if (!isnan(cap->block()->text_indent_percent)) {
+            lycon->block.text_indent = content_width * cap->block()->text_indent_percent / 100.0f;
         } else {
-            lycon->block.text_indent = cap->blk->text_indent;
+            lycon->block.text_indent = cap->block()->text_indent;
         }
         if (lycon->block.text_indent != 0.0f) {
             lycon->block.is_first_line = true;
@@ -67,11 +67,11 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
 
     line_reset(lycon);
 
-    if (cap->blk && cap->blk->text_align) {
-        lycon->block.text_align = cap->blk->text_align;
+    if (cap->blk && cap->block_mut()->text_align) {
+        lycon->block.text_align = cap->block()->text_align;
     }
-    if (cap->blk && cap->blk->direction) {
-        lycon->block.direction = cap->blk->direction;
+    if (cap->blk && cap->block_mut()->direction) {
+        lycon->block.direction = cap->block()->direction;
     }
 
     if (dom_elem) {
@@ -82,17 +82,17 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     }
 
     float caption_content_height = lycon->block.advance_y;
-    float caption_given_height = (cap->blk && cap->blk->given_height >= 0)
-        ? cap->blk->given_height : -1;
+    float caption_given_height = (cap->blk && cap->block_mut()->given_height >= 0)
+        ? cap->block()->given_height : -1;
     if (caption_given_height >= 0) {
         cap->height = caption_given_height;
         cap->height += cap_box.pad_border_v;
     } else {
         cap->height = caption_content_height;
         if (cap->bound) {
-            cap->height += cap->bound->padding.bottom;
-            if (cap->bound->border) {
-                cap->height += cap->bound->border->width.bottom;
+            cap->height += cap->boundary()->padding.bottom;
+            if (cap->boundary()->border) {
+                cap->height += cap->boundary()->border->width.bottom;
             }
         }
     }
@@ -114,25 +114,25 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
 
     float margin_v = 0;
     if (cap->bound) {
-        float mt = cap->bound->margin.top > 0 ? cap->bound->margin.top : 0;
-        float mb = cap->bound->margin.bottom > 0 ? cap->bound->margin.bottom : 0;
+        float mt = cap->boundary()->margin.top > 0 ? cap->boundary()->margin.top : 0;
+        float mb = cap->boundary()->margin.bottom > 0 ? cap->boundary()->margin.bottom : 0;
         margin_v = mt + mb;
     }
     return cap->height + margin_v;
 }
 
 float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width) {
-    if (cap->blk && cap->blk->given_width > 0) {
+    if (cap->blk && cap->block_mut()->given_width > 0) {
         cap->width = layout_css_size_to_border_box(
-            cap->bound, layout_box_sizing(cap), cap->blk->given_width, true);
+            cap->bound, layout_box_sizing(cap), cap->block()->given_width, true);
     } else {
         // caption is a block child of the table wrapper.
         float cap_margin_h = 0;
         if (cap->bound) {
-            if (cap->bound->margin.left_type != CSS_VALUE_AUTO && cap->bound->margin.left > 0)
-                cap_margin_h += cap->bound->margin.left;
-            if (cap->bound->margin.right_type != CSS_VALUE_AUTO && cap->bound->margin.right > 0)
-                cap_margin_h += cap->bound->margin.right;
+            if (cap->boundary_mut()->margin.left_type != CSS_VALUE_AUTO && cap->boundary_mut()->margin.left > 0)
+                cap_margin_h += cap->boundary()->margin.left;
+            if (cap->boundary_mut()->margin.right_type != CSS_VALUE_AUTO && cap->boundary_mut()->margin.right > 0)
+                cap_margin_h += cap->boundary()->margin.right;
         }
         cap->width = wrapper_content_width - cap_margin_h;
     }

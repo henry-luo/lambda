@@ -94,11 +94,11 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* 
         js_dom_set_document(doc);
         return true;
     }
-    if (!doc->js_runtime_heap || !doc->js_runtime_name_pool) return false;
-    scope->runtime_ctx.heap = (Heap*)doc->js_runtime_heap;
-    scope->runtime_ctx.name_pool = (NamePool*)doc->js_runtime_name_pool;
-    scope->runtime_ctx.pool = doc->js_runtime_pool ?
-        (Pool*)doc->js_runtime_pool : scope->runtime_ctx.heap->pool;
+    if (!doc->js.runtime_heap || !doc->js.runtime_name_pool) return false;
+    scope->runtime_ctx.heap = (Heap*)doc->js.runtime_heap;
+    scope->runtime_ctx.name_pool = (NamePool*)doc->js.runtime_name_pool;
+    scope->runtime_ctx.pool = doc->js.runtime_pool ?
+        (Pool*)doc->js.runtime_pool : scope->runtime_ctx.heap->pool;
     scope->type_list = arraylist_new(16);
     scope->runtime_ctx.type_list = scope->type_list;
     scope->saved_context = context;
@@ -381,14 +381,14 @@ static bool node_in_selection_doc(DomNode* n, DomSelection* s) {
     }
     if (!sel_doc) sel_doc = (DomDocument*)js_dom_get_document();
     if (!sel_doc) return false;
-    DomNode* doc_stub = (DomNode*)sel_doc->js_doc_node;
+    DomNode* doc_stub = (DomNode*)sel_doc->js.doc_node;
     DomNode* root = (DomNode*)sel_doc->root;
     DomNode* cur = n;
     while (cur) {
         if (node_is_document_fragment(cur)) {
             DomElement* frag = cur->as_element();
-            if (frag && frag->shadow_host && frag->doc == sel_doc) {
-                cur = (DomNode*)frag->shadow_host;
+            if (frag && frag->shadow_host_element() && frag->doc == sel_doc) {
+                cur = (DomNode*)frag->shadow_host_element();
                 continue;
             }
             return false;

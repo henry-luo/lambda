@@ -3,7 +3,7 @@
 #include "../lib/log.h"
 
 void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
-    VectorPathProp* vpath = block->vpath;
+    VectorPathProp* vpath = block->vector_path();
     if (!vpath || !vpath->segments) return;
 
     log_info("[VPATH] Rendering vector path for block at (%.1f, %.1f)", block->x, block->y);

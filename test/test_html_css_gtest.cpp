@@ -140,7 +140,7 @@ std::string extract_css_from_html(Element* root) {
 DomElement* find_element_by_id(DomElement* root, const char* id) {
     if (!root || !id) return nullptr;
 
-    const char* elem_id = dom_element_get_attribute(root, "id");
+    const char* elem_id = root->get_attribute("id");
     if (elem_id && strcmp(elem_id, id) == 0) {
         return root;
     }
@@ -158,7 +158,7 @@ DomElement* find_element_by_id(DomElement* root, const char* id) {
 DomElement* find_element_by_class(DomElement* root, const char* class_name) {
     if (!root || !class_name) return nullptr;
 
-    if (dom_element_has_class(root, class_name)) {
+    if (root->has_class(class_name)) {
         return root;
     }
 
@@ -372,12 +372,12 @@ protected:
         }
 
         DomElement* div = dom_element_create(doc, "div", nullptr);
-        dom_element_set_attribute(div, "id", "main");
-        dom_element_set_attribute(div, "class", "container");
+        div->set_attribute("id", "main");
+        div->set_attribute("class", "container");
 
         DomElement* p = dom_element_create(doc, "p", nullptr);
-        dom_element_set_attribute(p, "class", "text");
-        dom_element_append_child(div, p);
+        p->set_attribute("class", "text");
+        div->append_child(p);
 
         return div;
     }
@@ -404,12 +404,12 @@ TEST_F(HtmlCssIntegrationTest, ParseSimpleHTML) {
     EXPECT_STREQ(dom_root->tag_name, "div");
 
     // Check attributes
-    const char* id_attr = dom_element_get_attribute(dom_root, "id");
+    const char* id_attr = dom_root->get_attribute("id");
     if (id_attr) {
         EXPECT_STREQ(id_attr, "main");
     }
 
-    const char* class_attr = dom_element_get_attribute(dom_root, "class");
+    const char* class_attr = dom_root->get_attribute("class");
     if (class_attr) {
         EXPECT_NE(strstr(class_attr, "container"), nullptr);
     }
@@ -430,9 +430,9 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithAttributes) {
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
     // Check attributes (with more lenient checks since parsing may vary)
-    const char* id_attr = dom_element_get_attribute(dom_root, "id");
-    const char* class_attr = dom_element_get_attribute(dom_root, "class");
-    const char* style_attr = dom_element_get_attribute(dom_root, "style");
+    const char* id_attr = dom_root->get_attribute("id");
+    const char* class_attr = dom_root->get_attribute("class");
+    const char* style_attr = dom_root->get_attribute("style");
 
     printf("Parsed attributes - id: %s, class: %s, style: %s\n",
            id_attr ? id_attr : "NULL",
@@ -465,7 +465,7 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithInlineStyles) {
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
     // Check if style attribute was parsed
-    const char* style_attr = dom_element_get_attribute(dom_root, "style");
+    const char* style_attr = dom_root->get_attribute("style");
     printf("Style attribute: %s\n", style_attr ? style_attr : "NULL");
 
     // If inline styles were parsed, verify they were applied
@@ -536,7 +536,7 @@ TEST_F(HtmlCssIntegrationTest, ApplySimpleCSSRule) {
 
     // Create a simple DOM element
     DomElement* div = dom_element_create(doc, "div", nullptr);
-    dom_element_add_class(div, "box");
+    div->add_class("box");
 
     // Create CSS declaration for .box { color: blue; }
     CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
@@ -598,8 +598,8 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
     doc = dom_document_create(input);
 
     DomElement* div = dom_element_create(doc, "div", nullptr);
-    dom_element_set_attribute(div, "id", "main");
-    dom_element_add_class(div, "box");
+    div->set_attribute("id", "main");
+    div->add_class("box");
 
     // Apply class rule: .box { color: blue; }
     CssDeclaration* class_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
@@ -697,7 +697,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_WithInlineStyle) {
     ASSERT_NE(dom_root, nullptr) << "DOM conversion failed";
 
     // Step 3: Check if inline style was applied during conversion
-    const char* style_attr = dom_element_get_attribute(dom_root, "style");
+    const char* style_attr = dom_root->get_attribute("style");
     printf("Style attribute: %s\n", style_attr ? style_attr : "NULL");
 
     if (style_attr && strlen(style_attr) > 0) {
@@ -881,7 +881,7 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
             converted++;
 
             // Count children
-            int child_count = dom_element_count_child_elements(dom_root);
+            int child_count = dom_root->count_child_elements();
             printf("    Child count: %d\n", child_count);
 
             // Extract CSS if present
@@ -974,12 +974,12 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_AllPageFiles) {
                 has_css++;
                 printf("  ✓ %s: %d children, %zu bytes CSS\n",
                        filepath.c_str(),
-                       dom_element_count_child_elements(dom_root),
+                       dom_root->count_child_elements(),
                        css.length());
             } else {
                 printf("  ✓ %s: %d children, no CSS\n",
                        filepath.c_str(),
-                       dom_element_count_child_elements(dom_root));
+                       dom_root->count_child_elements());
             }
         } else {
             printf("  ✗ Convert failed: %s\n", filepath.c_str());
@@ -1549,12 +1549,12 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
                 has_css++;
                 printf("  ✓ %s: %d children, %zu bytes CSS\n",
                        layout_files[i],
-                       dom_element_count_child_elements(dom_root),
+                       dom_root->count_child_elements(),
                        css.length());
             } else {
                 printf("  ✓ %s: %d children, no CSS\n",
                        layout_files[i],
-                       dom_element_count_child_elements(dom_root));
+                       dom_root->count_child_elements());
             }
         } else {
             printf("  ✗ Convert failed: %s\n", layout_files[i]);

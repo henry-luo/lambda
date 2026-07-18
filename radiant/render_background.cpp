@@ -46,7 +46,7 @@ static Corner background_corner_scaled(const Corner* radius, float scale) {
 }
 
 static bool background_rounded_radius(ViewBlock* view, Rect rect, Corner* out_radius) {
-    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
+    BorderProp* border = (view && view->bound) ? view->boundary()->border : nullptr;
     if (!border || !corner_has_radius(&border->radius)) return false;
     *out_radius = border->radius;
     constrain_corner_radii(out_radius, rect.width, rect.height);
@@ -68,7 +68,7 @@ static RdtPath* background_rounded_rect_path(ViewBlock* view, Rect rect) {
 }
 
 static RdtPath* background_border_rect_path(ViewBlock* view, Rect rect) {
-    BorderProp* border = (view && view->bound) ? view->bound->border : nullptr;
+    BorderProp* border = (view && view->bound) ? view->boundary()->border : nullptr;
     if (border && corner_has_radius(&border->radius)) {
         constrain_border_radii(border, rect.width, rect.height);
         return render_path_create_rounded_rect(rect, &border->radius);
@@ -107,9 +107,9 @@ static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
 }
 
 void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
-    if (!view->bound || !view->bound->background) return;
+    if (!view->bound || !view->boundary()->background) return;
 
-    BackgroundProp* bg = view->bound->background;
+    BackgroundProp* bg = view->boundary()->background;
 
     log_debug("[RENDER BG] Element <%s>: color=#%08x gradient_type=%d linear=%p radial=%p",
               view->node_name(), bg->color.c, bg->gradient_type,
@@ -121,8 +121,8 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     float s = rdcon->scale;
-    BorderProp* border  = view->bound->border;
-    Spacing*    padding = &view->bound->padding;
+    BorderProp* border  = view->boundary()->border;
+    Spacing*    padding = &view->boundary_mut()->padding;
 
     // Determine positioning area (bg-origin, default: padding-box)
     // Controls where background-position and background-size are calculated relative to.
@@ -241,8 +241,8 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 static void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color, Rect rect) {
     bool has_radius = false;
     BorderProp* border = nullptr;
-    if (view->bound && view->bound->border) {
-        border = view->bound->border;
+    if (view->bound && view->boundary_mut()->border) {
+        border = view->boundary()->border;
         has_radius = corner_has_radius(&border->radius);
     }
 
@@ -1212,11 +1212,11 @@ static uint32_t* render_outer_shadow_blur_image(
  * 2. Inset shadows are rendered after background (inside the element)
  */
 void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
-    if (!view->bound || !view->bound->box_shadow) return;
+    if (!view->bound || !view->boundary()->box_shadow) return;
 
     // Count shadows and collect into array for reverse iteration
     int shadow_count = 0;
-    BoxShadow* shadow = view->bound->box_shadow;
+    BoxShadow* shadow = view->boundary()->box_shadow;
     while (shadow) {
         shadow_count++;
         shadow = shadow->next;
@@ -1230,7 +1230,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         log_error("[BOX-SHADOW] failed to allocate shadow list for %d shadow(s)", shadow_count);
         return;
     }
-    shadow = view->bound->box_shadow;
+    shadow = view->boundary()->box_shadow;
     for (int i = 0; i < shadow_count; i++) {
         shadows[i] = shadow;
         shadow = shadow->next;
@@ -1242,8 +1242,8 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     // Get border radius if present (scaled to physical pixels)
     float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
-    if (view->bound && view->bound->border) {
-        BorderProp* border = view->bound->border;
+    if (view->bound && view->boundary_mut()->border) {
+        BorderProp* border = view->boundary()->border;
         r_tl = border->radius.top_left * sc;
         r_tr = border->radius.top_right * sc;
         r_br = border->radius.bottom_right * sc;
@@ -1393,11 +1393,11 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
  *    rect back to the surface.  This avoids edge-clamping artifacts.
  */
 void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
-    if (!view->bound || !view->bound->box_shadow) return;
+    if (!view->bound || !view->boundary()->box_shadow) return;
 
     // Count inset shadows
     int shadow_count = 0;
-    BoxShadow* shadow = view->bound->box_shadow;
+    BoxShadow* shadow = view->boundary()->box_shadow;
     while (shadow) {
         if (shadow->inset) shadow_count++;
         shadow = shadow->next;
@@ -1410,7 +1410,7 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         log_error("[BOX-SHADOW INSET] failed to allocate shadow list for %d shadow(s)", shadow_count);
         return;
     }
-    shadow = view->bound->box_shadow;
+    shadow = view->boundary()->box_shadow;
     int idx = 0;
     while (shadow) {
         if (shadow->inset) shadows[idx++] = shadow;
@@ -1423,11 +1423,11 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     // Get border radius if present (scaled to physical pixels)
     float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
-    if (view->bound->border) {
-        r_tl = view->bound->border->radius.top_left * sc;
-        r_tr = view->bound->border->radius.top_right * sc;
-        r_br = view->bound->border->radius.bottom_right * sc;
-        r_bl = view->bound->border->radius.bottom_left * sc;
+    if (view->boundary()->border) {
+        r_tl = view->boundary()->border->radius.top_left * sc;
+        r_tr = view->boundary()->border->radius.top_right * sc;
+        r_br = view->boundary()->border->radius.bottom_right * sc;
+        r_bl = view->boundary()->border->radius.bottom_left * sc;
     }
 
     const RdtMatrix* xform = render_state_current_transform(rdcon);
@@ -1594,8 +1594,8 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             // color instead of the parent's background.
             Color bg;
             bg.r = 255; bg.g = 255; bg.b = 255; bg.a = 255;  // default white
-            if (view->bound && view->bound->background) {
-                bg = view->bound->background->color;
+            if (view->bound && view->boundary_mut()->background) {
+                bg = view->boundary()->background->color;
             }
             // Convert to surface pixel format (ABGR8888)
             uint32_t bg_pixel = ((uint32_t)bg.a << 24) | ((uint32_t)bg.b << 16) |

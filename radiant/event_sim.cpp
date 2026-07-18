@@ -593,7 +593,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     // position
     if (strcmp(property, "position") == 0) {
         if (elem->position) {
-            strbuf_append_str(buf, serialize_css_enum(elem->position->position));
+            strbuf_append_str(buf, serialize_css_enum(elem->positionp()->position));
         } else {
             strbuf_append_str(buf, "static");
         }
@@ -602,7 +602,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     // font-size
     if (strcmp(property, "font-size") == 0) {
         if (elem->font) {
-            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->font->font_size);
+            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->fontp()->font_size);
             strbuf_append_str(buf, tmp);
         } else {
             strbuf_append_str(buf, "16px");
@@ -612,11 +612,11 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     // font-weight
     if (strcmp(property, "font-weight") == 0) {
         if (elem->font) {
-            if (elem->font->font_weight_numeric > 0) {
-                snprintf(tmp, sizeof(tmp), "%d", (int)elem->font->font_weight_numeric);
+            if (elem->fontp()->font_weight_numeric > 0) {
+                snprintf(tmp, sizeof(tmp), "%d", (int)elem->fontp()->font_weight_numeric);
                 strbuf_append_str(buf, tmp);
             } else {
-                strbuf_append_str(buf, serialize_css_enum(elem->font->font_weight));
+                strbuf_append_str(buf, serialize_css_enum(elem->fontp()->font_weight));
             }
         } else {
             strbuf_append_str(buf, "400");
@@ -625,15 +625,15 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     }
     // font-family
     if (strcmp(property, "font-family") == 0) {
-        if (elem->font && elem->font->family) {
-            strbuf_append_str(buf, elem->font->family);
+        if (elem->font && elem->fontp()->family) {
+            strbuf_append_str(buf, elem->fontp()->family);
         }
         return true;
     }
     // font-style
     if (strcmp(property, "font-style") == 0) {
         if (elem->font) {
-            strbuf_append_str(buf, serialize_css_enum(elem->font->font_style));
+            strbuf_append_str(buf, serialize_css_enum(elem->fontp()->font_style));
         } else {
             strbuf_append_str(buf, "normal");
         }
@@ -641,8 +641,8 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     }
     // color (text color)
     if (strcmp(property, "color") == 0) {
-        if (elem->in_line && elem->in_line->has_color) {
-            serialize_color(elem->in_line->color, buf);
+        if (elem->in_line && elem->inl()->has_color) {
+            serialize_color(elem->inl()->color, buf);
         } else {
             strbuf_append_str(buf, "rgb(0, 0, 0)");
         }
@@ -650,8 +650,8 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     }
     // background-color
     if (strcmp(property, "background-color") == 0) {
-        if (elem->bound && elem->bound->background) {
-            serialize_color(elem->bound->background->color, buf);
+        if (elem->bound && elem->boundary_mut()->background) {
+            serialize_color(elem->boundary()->background->color, buf);
         } else {
             strbuf_append_str(buf, "rgba(0, 0, 0, 0)");
         }
@@ -660,7 +660,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     // text-align
     if (strcmp(property, "text-align") == 0) {
         if (elem->blk) {
-            strbuf_append_str(buf, serialize_css_enum(elem->blk->text_align));
+            strbuf_append_str(buf, serialize_css_enum(elem->block()->text_align));
         } else {
             strbuf_append_str(buf, "start");
         }
@@ -669,7 +669,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     // box-sizing
     if (strcmp(property, "box-sizing") == 0) {
         if (elem->blk) {
-            strbuf_append_str(buf, serialize_css_enum(elem->blk->box_sizing));
+            strbuf_append_str(buf, serialize_css_enum(elem->block()->box_sizing));
         } else {
             strbuf_append_str(buf, "content-box");
         }
@@ -678,7 +678,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     // opacity
     if (strcmp(property, "opacity") == 0) {
         if (elem->in_line) {
-            snprintf(tmp, sizeof(tmp), "%.4g", elem->in_line->opacity);
+            snprintf(tmp, sizeof(tmp), "%.4g", elem->inl()->opacity);
             strbuf_append_str(buf, tmp);
         } else {
             strbuf_append_str(buf, "1");
@@ -687,8 +687,8 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     }
     // z-index
     if (strcmp(property, "z-index") == 0) {
-        if (elem->position && elem->position->position != CSS_VALUE_STATIC) {
-            snprintf(tmp, sizeof(tmp), "%d", elem->position->z_index);
+        if (elem->position && elem->positionp()->position != CSS_VALUE_STATIC) {
+            snprintf(tmp, sizeof(tmp), "%d", elem->positionp()->z_index);
             strbuf_append_str(buf, tmp);
         } else {
             strbuf_append_str(buf, "auto");
@@ -698,7 +698,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     // overflow-x / overflow-y / overflow
     if (strcmp(property, "overflow") == 0 || strcmp(property, "overflow-x") == 0) {
         if (elem->scroller) {
-            strbuf_append_str(buf, serialize_css_enum(elem->scroller->overflow_x));
+            strbuf_append_str(buf, serialize_css_enum(elem->scroll()->overflow_x));
         } else {
             strbuf_append_str(buf, "visible");
         }
@@ -706,7 +706,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     }
     if (strcmp(property, "overflow-y") == 0) {
         if (elem->scroller) {
-            strbuf_append_str(buf, serialize_css_enum(elem->scroller->overflow_y));
+            strbuf_append_str(buf, serialize_css_enum(elem->scroll()->overflow_y));
         } else {
             strbuf_append_str(buf, "visible");
         }
@@ -723,48 +723,48 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
         "border-bottom-width", "border-left-width"
     };
     if (serialize_spacing_side(property, margin_names,
-                               elem->bound ? &elem->bound->margin : nullptr, buf) ||
+                               elem->bound ? &elem->boundary_mut()->margin : nullptr, buf) ||
         serialize_spacing_side(property, padding_names,
-                               elem->bound ? &elem->bound->padding : nullptr, buf) ||
+                               elem->bound ? &elem->boundary_mut()->padding : nullptr, buf) ||
         serialize_spacing_side(property, border_width_names,
-                               elem->bound && elem->bound->border
-                                   ? &elem->bound->border->width : nullptr,
+                               elem->bound && elem->boundary_mut()->border
+                                   ? &elem->boundary_mut()->border->width : nullptr,
                                buf)) {
         return true;
     }
     // border-*-color
     if (strcmp(property, "border-top-color") == 0) {
-        if (elem->bound && elem->bound->border) serialize_color(elem->bound->border->top_color, buf);
+        if (elem->bound && elem->boundary_mut()->border) serialize_color(elem->boundary_mut()->border->top_color, buf);
         else strbuf_append_str(buf, "rgb(0, 0, 0)");
         return true;
     }
     if (strcmp(property, "border-right-color") == 0) {
-        if (elem->bound && elem->bound->border) serialize_color(elem->bound->border->right_color, buf);
+        if (elem->bound && elem->boundary_mut()->border) serialize_color(elem->boundary_mut()->border->right_color, buf);
         else strbuf_append_str(buf, "rgb(0, 0, 0)");
         return true;
     }
     if (strcmp(property, "border-bottom-color") == 0) {
-        if (elem->bound && elem->bound->border) serialize_color(elem->bound->border->bottom_color, buf);
+        if (elem->bound && elem->boundary_mut()->border) serialize_color(elem->boundary_mut()->border->bottom_color, buf);
         else strbuf_append_str(buf, "rgb(0, 0, 0)");
         return true;
     }
     if (strcmp(property, "border-left-color") == 0) {
-        if (elem->bound && elem->bound->border) serialize_color(elem->bound->border->left_color, buf);
+        if (elem->bound && elem->boundary_mut()->border) serialize_color(elem->boundary_mut()->border->left_color, buf);
         else strbuf_append_str(buf, "rgb(0, 0, 0)");
         return true;
     }
     // outline-* 
     if (strcmp(property, "outline-style") == 0) {
-        if (elem->bound && elem->bound->outline) {
-            strbuf_append_str(buf, serialize_css_enum(elem->bound->outline->style));
+        if (elem->bound && elem->boundary_mut()->outline) {
+            strbuf_append_str(buf, serialize_css_enum(elem->boundary()->outline->style));
         } else {
             strbuf_append_str(buf, "none");
         }
         return true;
     }
     if (strcmp(property, "outline-width") == 0) {
-        if (elem->bound && elem->bound->outline) {
-            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->bound->outline->width);
+        if (elem->bound && elem->boundary_mut()->outline) {
+            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->boundary()->outline->width);
             strbuf_append_str(buf, tmp);
         } else {
             strbuf_append_str(buf, "0px");
@@ -772,8 +772,8 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
         return true;
     }
     if (strcmp(property, "outline-color") == 0) {
-        if (elem->bound && elem->bound->outline) {
-            serialize_color(elem->bound->outline->color, buf);
+        if (elem->bound && elem->boundary_mut()->outline) {
+            serialize_color(elem->boundary()->outline->color, buf);
         } else {
             strbuf_append_str(buf, "rgba(0, 0, 0, 0)");
         }
@@ -792,14 +792,14 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     }
     // white-space
     if (strcmp(property, "white-space") == 0) {
-        if (elem->blk) strbuf_append_str(buf, serialize_css_enum(elem->blk->white_space));
+        if (elem->blk) strbuf_append_str(buf, serialize_css_enum(elem->block()->white_space));
         else strbuf_append_str(buf, "normal");
         return true;
     }
     // letter-spacing
     if (strcmp(property, "letter-spacing") == 0) {
-        if (elem->font && elem->font->letter_spacing != 0) {
-            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->font->letter_spacing);
+        if (elem->font && elem->fontp()->letter_spacing != 0) {
+            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->fontp()->letter_spacing);
             strbuf_append_str(buf, tmp);
         } else {
             strbuf_append_str(buf, "normal");
@@ -808,8 +808,8 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     }
     // word-spacing
     if (strcmp(property, "word-spacing") == 0) {
-        if (elem->font && elem->font->word_spacing != 0) {
-            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->font->word_spacing);
+        if (elem->font && elem->fontp()->word_spacing != 0) {
+            snprintf(tmp, sizeof(tmp), "%.4gpx", elem->fontp()->word_spacing);
             strbuf_append_str(buf, tmp);
         } else {
             strbuf_append_str(buf, "normal");
@@ -819,7 +819,7 @@ static bool get_computed_style(View* view, const char* property, StrBuf* buf) {
     // vertical-align
     if (strcmp(property, "vertical-align") == 0) {
         if (elem->in_line) {
-            strbuf_append_str(buf, serialize_css_enum(elem->in_line->vertical_align));
+            strbuf_append_str(buf, serialize_css_enum(elem->inl()->vertical_align));
         } else {
             strbuf_append_str(buf, "baseline");
         }
@@ -3762,13 +3762,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // draggable="false" — mirror the native drag-initiation check.
             DomElement* src_dom = src_view->as_element();
             if (src_dom) {
-                const char* draggable = dom_element_get_attribute(src_dom, "draggable");
+                const char* draggable = src_dom->get_attribute("draggable");
                 bool ok = draggable && strcmp(draggable, "true") == 0;
                 if (!ok && !(draggable && strcmp(draggable, "false") == 0)) {
                     const char* tag = src_dom->tag_name;
                     if (tag && (strcasecmp(tag, "img") == 0 ||
                                 (strcasecmp(tag, "a") == 0 &&
-                                 dom_element_get_attribute(src_dom, "href")))) {
+                                 src_dom->get_attribute("href")))) {
                         ok = true;
                     }
                 }
@@ -3954,7 +3954,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     bool has_inline_click_handler = false;
                     if (form_elem->is_element()) {
                         DomElement* elem = lam::dom_require_element(form_elem);
-                        has_inline_click_handler = dom_element_has_attribute(elem, "onclick");
+                        has_inline_click_handler = elem->has_attribute("onclick");
                     }
                     // State didn't change — coordinate click may have missed the
                     // element. Do not synthesize a fallback toggle when an inline
@@ -4107,7 +4107,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             int idx = 0;
             for (DomElement* option = dom_select_next_option(select, nullptr); option;
                  option = dom_select_next_option(select, option), idx++) {
-                const char* value_attr = dom_element_get_attribute(option, "value");
+                const char* value_attr = option->get_attribute("value");
                 const char* label = dom_option_text(option);
                 if ((ev->option_value && value_attr && strcmp(value_attr, ev->option_value) == 0) ||
                     (ev->option_label && label && strcmp(label, ev->option_label) == 0)) {
@@ -4386,7 +4386,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            dom_element_set_attribute(owner, "value", text);
+            owner->set_attribute("value", text);
             state_store_caret_collapse_to_view_offset((DocState*)doc->state, surface.view, (int)text_len);
             log_info("event_sim: set_editing_value len=%u", text_len);
             doc_state_request_repaint((DocState*)doc->state);
@@ -4538,7 +4538,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             View* elem = resolve_assert_element(ctx, uicon, ev, "assert_class");
             if (!elem) break;
             DomElement* dom_elem = lam::dom_require_element(elem);
-            bool present = dom_elem && dom_element_has_class(dom_elem, ev->assert_equals);
+            bool present = dom_elem && dom_elem->has_class(ev->assert_equals);
             if (present == ev->expected_state_value) {
                 log_info("event_sim: assert_class PASS class='%s' present=%s",
                          ev->assert_equals, present ? "true" : "false");
@@ -4603,17 +4603,16 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                      option;
                      option = dom_select_next_option(dom_elem, option), option_index++) {
                     if (option_index != selected_index) continue;
-                    actual = dom_element_get_attribute(option, "value");
+                    actual = option->get_attribute("value");
                     if (!actual) actual = dom_option_text(option);
                     break;
                 }
                 if (!actual) actual = "";
-            } else if (dom_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-                dom_elem->form && dom_elem->form->current_value) {
+            } else if (dom_elem->form_control() && dom_elem->form->current_value) {
                 actual = dom_elem->form->current_value;
             }
             if (!actual) {
-                const char* val = dom_element_get_attribute(dom_elem, "value");
+                const char* val = dom_elem->get_attribute("value");
                 actual = val ? val : "";
             }
             bool passed = true;
@@ -4789,9 +4788,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Read scroll position from root block's scroller (the actual scroll source)
             float actual_x = 0, actual_y = 0;
             ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
-            if (root_block && root_block->scroller && root_block->scroller->pane) {
+            if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
                 scroll_state_get_position_for_view((DocState*)doc->state, static_cast<View*>(root_block),
-                    root_block->scroller->pane, &actual_x, &actual_y, NULL, NULL);
+                    root_block->scroll()->pane, &actual_x, &actual_y, NULL, NULL);
             }
             float tol = ev->scroll_tolerance;
             bool pass_x = (ev->expected_scroll_x == 0 && !ev->expected_scroll_y) ||
@@ -5092,7 +5091,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            const char* actual = dom_element_get_attribute(dom_elem, ev->attribute_name);
+            const char* actual = dom_elem->get_attribute(ev->attribute_name);
             if (ev->has_expected_attribute_presence) {
                 bool present = actual != nullptr;
                 if (present == ev->expected_attribute_present) {
@@ -5378,7 +5377,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 } else {
                     ViewBlock* block = lam::view_require_block(elem);
                     float actual_x = 0.0f, actual_y = 0.0f;
-                    void* pane = block->scroller ? (void*)block->scroller->pane : NULL;
+                    void* pane = block->scroller ? (void*)block->scroll()->pane : NULL;
                     scroll_state_get_position_for_view(state, elem, pane, &actual_x, &actual_y, NULL, NULL);
                     if (ev->has_expected_view_scroll_x &&
                         (actual_x < ev->expected_view_scroll_x - tol || actual_x > ev->expected_view_scroll_x + tol)) {
@@ -5446,9 +5445,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_error("event_sim: assert_reconcile_mode FAIL - no document");
                 passed = false;
             } else {
-                const char* actual_mode = dom_reconcile_mode_name(doc->last_dom_reconcile_mode);
-                const char* actual_reason = doc->last_dom_reconcile_reason
-                    ? doc->last_dom_reconcile_reason : "none";
+                const char* actual_mode = dom_reconcile_mode_name(doc->reconcile.mode);
+                const char* actual_reason = doc->reconcile.reason
+                    ? doc->reconcile.reason : "none";
                 if (strcmp(actual_mode, ev->expected_reconcile_mode) != 0) {
                     log_error("event_sim: assert_reconcile_mode FAIL - mode expected '%s', got '%s'",
                               ev->expected_reconcile_mode, actual_mode);
@@ -5461,24 +5460,24 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     passed = false;
                 }
                 if (ev->has_expected_reconcile_mutations &&
-                    doc->last_dom_reconcile_mutations != ev->expected_reconcile_mutations) {
+                    doc->reconcile.mutations != ev->expected_reconcile_mutations) {
                     log_error("event_sim: assert_reconcile_mode FAIL - mutations expected %d, got %d",
                               ev->expected_reconcile_mutations,
-                              doc->last_dom_reconcile_mutations);
+                              doc->reconcile.mutations);
                     passed = false;
                 }
                 if (ev->has_expected_reconcile_records &&
-                    doc->last_dom_reconcile_records != ev->expected_reconcile_records) {
+                    doc->reconcile.records != ev->expected_reconcile_records) {
                     log_error("event_sim: assert_reconcile_mode FAIL - records expected %d, got %d",
                               ev->expected_reconcile_records,
-                              doc->last_dom_reconcile_records);
+                              doc->reconcile.records);
                     passed = false;
                 }
                 if (ev->has_expected_reconcile_record_overflow &&
-                    doc->last_dom_reconcile_record_overflow != ev->expected_reconcile_record_overflow) {
+                    doc->reconcile.record_overflow != ev->expected_reconcile_record_overflow) {
                     log_error("event_sim: assert_reconcile_mode FAIL - record_overflow expected %d, got %d",
                               ev->expected_reconcile_record_overflow,
-                              doc->last_dom_reconcile_record_overflow);
+                              doc->reconcile.record_overflow);
                     passed = false;
                 }
             }
@@ -5531,8 +5530,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             log_info("event_sim: scroll_to (%.1f, %.1f)", target_x, target_y);
             // Set scroll position through centralized API
             ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
-            if (root_block && root_block->scroller && root_block->scroller->pane) {
-                ScrollPane* pane = root_block->scroller->pane;
+            if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
+                ScrollPane* pane = root_block->scroll()->pane;
                 DocState* state = (DocState*)doc->state;
                 scroll_state_set_position_for_view(state, static_cast<View*>(root_block), pane,
                                                    target_x, target_y, true);
@@ -5647,7 +5646,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             DomElement* iframe_elem = lam::dom_require_element(iframe_view);
-            if (!iframe_elem->embed || !iframe_elem->embed->doc) {
+            if (!iframe_elem->embed || !iframe_elem->embedp()->doc) {
                 log_error("event_sim: switch_frame - '%s' has no embedded document", ev->frame_selector);
                 ctx->fail_count++;
                 break;
@@ -5658,7 +5657,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             ctx->frame_stack[ctx->frame_stack_depth++] = cur_doc;
-            uicon->document = iframe_elem->embed->doc;
+            uicon->document = iframe_elem->embedp()->doc;
             log_info("event_sim: switch_frame to '%s'", ev->frame_selector);
             break;
         }
@@ -5714,11 +5713,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             ViewBlock* block = lam::view_require_block(view);
-            if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embed->webview || !block->embed->webview->handle) {
+            if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embedp()->webview || !block->embedp()->webview->handle) {
                 log_warn("event_sim: webview_eval_js - '%s' has no active webview handle (headless?), skipped", ev->target_selector);
                 break;
             }
-            webview_eval_js(block->embed->webview->handle, ev->js_code);
+            webview_eval_js(block->embedp()->webview->handle, ev->js_code);
             log_info("event_sim: webview_eval_js on '%s': %s", ev->target_selector, ev->js_code);
             break;
         }
@@ -5733,7 +5732,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             ViewBlock* block = lam::view_require_block(view);
-            if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embed->webview) {
+            if (block->tag_id != HTM_TAG_WEBVIEW || !block->embed || !block->embedp()->webview) {
                 log_warn("event_sim: webview_wait_load - '%s' has no active webview (headless?), skipped", ev->target_selector);
                 break;
             }

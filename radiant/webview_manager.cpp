@@ -162,7 +162,7 @@ void webview_set_visible(WebViewHandle* handle, bool visible) {
 static bool tree_has_webview(View* view) {
     ViewElement* elem = lam::view_as_element(view);
     if (!elem) return false;
-    if (elem->tag_id == HTM_TAG_WEBVIEW && elem->embed && elem->embed->webview) {
+    if (elem->tag_id == HTM_TAG_WEBVIEW && elem->embed && elem->embedp()->webview) {
         return true;
     }
     DomNode* child = elem->first_child;
@@ -186,17 +186,17 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
 
     // handle scroll offset if this block is a scroll container
     float scroll_dx = 0, scroll_dy = 0;
-    if (block->scroller && block->scroller->pane) {
+    if (block->scroller && block->scroll_mut()->pane) {
         DocState* state = block->doc ? block->doc->state : NULL;
         float scroll_x = 0.0f, scroll_y = 0.0f;
-        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroller->pane,
+        scroll_state_get_position_for_view(state, static_cast<View*>(block), block->scroll()->pane,
                                            &scroll_x, &scroll_y, NULL, NULL);
         scroll_dx = -scroll_x;
         scroll_dy = -scroll_y;
     }
 
-    if (block->tag_id == HTM_TAG_WEBVIEW && block->embed && block->embed->webview) {
-        WebViewProp* wv = block->embed->webview;
+    if (block->tag_id == HTM_TAG_WEBVIEW && block->embed && block->embedp()->webview) {
+        WebViewProp* wv = block->embedp()->webview;
 
         if (wv->mode == WEBVIEW_MODE_LAYER) {
             // --- Layer mode: offscreen rendering ---
@@ -337,8 +337,8 @@ static bool poll_dirty_walk(ViewBlock* block) {
     if (!block) return false;
     bool any_dirty = false;
 
-    if (block->tag_id == HTM_TAG_WEBVIEW && block->embed && block->embed->webview) {
-        WebViewProp* wv = block->embed->webview;
+    if (block->tag_id == HTM_TAG_WEBVIEW && block->embed && block->embedp()->webview) {
+        WebViewProp* wv = block->embedp()->webview;
         if (wv->mode == WEBVIEW_MODE_LAYER && wv->handle && wv->surface) {
             // check the platform dirty flag (set by navigation delegate / mutation observer)
             if (webview_layer_platform_is_dirty(wv->handle)) {

@@ -81,8 +81,8 @@ Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
     Rect rect = render_geometry_block_border_rect(parent_block, block, scale);
     if (!block || !block->bound) return rect;
     return render_geometry_adjust_box_rect(rect, CSS_VALUE_CONTENT_BOX, scale,
-                                           block->bound->border,
-                                           &block->bound->padding);
+                                           block->boundary()->border,
+                                           &block->boundary()->padding);
 }
 
 Rect render_geometry_expand_rect(Rect rect, float expand) {
@@ -138,8 +138,8 @@ float render_geometry_block_visual_overflow(const ViewBlock* block) {
         float filter_overflow = render_geometry_filter_effect_expand(block->filter);
         if (filter_overflow > overflow) overflow = filter_overflow;
     }
-    if (block->bound && block->bound->box_shadow) {
-        BoxShadow* shadow = block->bound->box_shadow;
+    if (block->bound && block->boundary()->box_shadow) {
+        BoxShadow* shadow = block->boundary()->box_shadow;
         while (shadow) {
             if (!shadow->inset) {
                 float shadow_overflow =
@@ -151,8 +151,8 @@ float render_geometry_block_visual_overflow(const ViewBlock* block) {
             shadow = shadow->next;
         }
     }
-    if (block->bound && block->bound->outline) {
-        float outline_overflow = block->bound->outline->width + block->bound->outline->offset + 2.0f;
+    if (block->bound && block->boundary()->outline) {
+        float outline_overflow = block->boundary()->outline->width + block->boundary()->outline->offset + 2.0f;
         if (outline_overflow > overflow) overflow = outline_overflow;
     }
     return overflow;

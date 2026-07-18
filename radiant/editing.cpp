@@ -14,7 +14,7 @@ static bool element_is_password_text_control(DomElement* elem) {
     if (!elem || !elem->tag_name || strcasecmp(elem->tag_name, "input") != 0) {
         return false;
     }
-    const char* type = dom_element_get_attribute(elem, "type");
+    const char* type = elem->get_attribute("type");
     return type && strcasecmp(type, "password") == 0;
 }
 

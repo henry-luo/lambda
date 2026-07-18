@@ -222,9 +222,9 @@ static void radiant_custom_paint_destroy(void* data) {
 static RadiantCustomPaintResource* radiant_custom_paint_resource(
     const CustomLayoutContext* context) {
     if (!context || !context->parent || !context->parent->doc) return nullptr;
-    if (context->parent->custom_layout_paint) {
+    if (context->parent->custom_layout_paint_prop()) {
         CustomLayoutPaintState* paint =
-            (CustomLayoutPaintState*)context->parent->custom_layout_paint;
+            (CustomLayoutPaintState*)context->parent->custom_layout_paint_prop();
         return (RadiantCustomPaintResource*)paint;
     }
 
@@ -241,7 +241,7 @@ static RadiantCustomPaintResource* radiant_custom_paint_resource(
         mem_free(resource);
         return nullptr;
     }
-    context->parent->custom_layout_paint = &resource->paint;
+    context->parent->set_custom_layout_paint_prop(&resource->paint);
     return resource;
 }
 
@@ -249,11 +249,11 @@ static bool radiant_custom_layout_parse_paint_layers(const CustomLayoutContext* 
                                                      Item result_item) {
     Item layers_item = radiant_obj_get(result_item, "paint_layers");
     if (radiant_item_is_missing(layers_item)) {
-        if (context && context->parent && context->parent->custom_layout_paint) {
+        if (context && context->parent && context->parent->custom_layout_paint_prop()) {
             // A later reflow may stop returning generated paint; clear the prior
             // result so stale subscenes cannot survive merely because the field is absent.
             radiant_custom_paint_clear((RadiantCustomPaintResource*)
-                context->parent->custom_layout_paint);
+                context->parent->custom_layout_paint_prop());
         }
         return true;
     }
@@ -405,11 +405,11 @@ static Item radiant_layout_attrs_item(DomElement* elem) {
     if (!radiant_host_api || !radiant_host_api->value || !elem) return ItemNull;
     Item attrs = radiant_obj_new();
     int attr_count = 0;
-    const char** names = dom_element_get_attribute_names(elem, &attr_count);
+    const char** names = elem->attribute_names(&attr_count);
     for (int i = 0; names && i < attr_count; i++) {
         const char* name = names[i];
         if (!name) continue;
-        const char* value = dom_element_get_attribute(elem, name);
+        const char* value = elem->get_attribute(name);
         radiant_obj_set(attrs, name, radiant_string_item(value ? value : ""));
     }
     return attrs;
@@ -1042,7 +1042,7 @@ RADIANT_C_API Item fn_radiant_attr(Item node_item, Item name_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "ATTR");
     const char* name = fn_to_cstr(name_item);
     if (!elem || !name || !name[0]) return ItemNull;
-    return radiant_string_item(dom_element_get_attribute(elem, name));
+    return radiant_string_item(elem->get_attribute(name));
 }
 
 RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item value_item) {
@@ -1079,8 +1079,8 @@ RADIANT_C_API Item fn_radiant_layout(Item node_item) {
         return radiant_bool_item(false);
     }
 
-    int viewport_width = doc->viewport_width > 0 ? doc->viewport_width : 800;
-    int viewport_height = doc->viewport_height > 0 ? doc->viewport_height : 600;
+    int viewport_width = doc->viewport.width > 0 ? doc->viewport.width : 800;
+    int viewport_height = doc->viewport.height > 0 ? doc->viewport.height : 600;
     RadiantLayoutResource* resource = radiant_layout_resource_for_document(doc, "LAYOUT");
     if (!resource) return radiant_bool_item(false);
     // View-tree font handles borrow allocations from UiContext, so retained
@@ -1146,8 +1146,8 @@ RADIANT_C_API Item fn_radiant_poc_attr(Item path_item) {
     DomDocument* doc = radiant_load_html_document(fn_to_cstr(path_item), "POC");
     if (!doc || !doc->root) return ItemNull;
 
-    dom_element_set_attribute(doc->root, "data-poc", "ok");
-    Item result = radiant_string_item(dom_element_get_attribute(doc->root, "data-poc"));
+    doc->root->set_attribute("data-poc", "ok");
+    Item result = radiant_string_item(doc->root->get_attribute("data-poc"));
     free_document(doc);
     return result;
 }

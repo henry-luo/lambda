@@ -73,9 +73,9 @@ static void rel_to_abs(View* view, float rel_x, float rel_y,
             ViewBlock* block = lam::view_require_block(p);
             x += block->x;
             y += block->y;
-            if (block->scroller && block->scroller->pane) {
-                x -= block->scroller->pane->h_scroll_position;
-                y -= block->scroller->pane->v_scroll_position;
+            if (block->scroller && block->scroll_mut()->pane) {
+                x -= block->scroll()->pane->h_scroll_position;
+                y -= block->scroll()->pane->v_scroll_position;
             }
         }
         p = p->parent;
@@ -95,9 +95,9 @@ static void child_content_origin_for_view(View* node,
         ViewBlock* block = lam::view_require_block(node);
         cx += block->x;
         cy += block->y;
-        if (block->scroller && block->scroller->pane) {
-            cx -= block->scroller->pane->h_scroll_position;
-            cy -= block->scroller->pane->v_scroll_position;
+        if (block->scroller && block->scroll_mut()->pane) {
+            cx -= block->scroll()->pane->h_scroll_position;
+            cy -= block->scroll()->pane->v_scroll_position;
         }
     }
     if (out_x) *out_x = cx;
@@ -394,8 +394,8 @@ static CssEnum caret_shape_for_boundary(const DomBoundary* boundary) {
     for (DomNode* current = node; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* elem = lam::dom_require_element(current);
-        if (elem && elem->in_line && elem->in_line->caret_shape) {
-            return elem->in_line->caret_shape;
+        if (elem && elem->in_line && elem->inl()->caret_shape) {
+            return elem->inl()->caret_shape;
         }
     }
     return CSS_VALUE_AUTO;
@@ -453,9 +453,9 @@ static CssEnum effective_direction_for_node(DomNode* node) {
         if (!current->is_element()) continue;
         DomElement* elem = lam::dom_require_element(current);
         if (!elem || !elem->blk) continue;
-        if (elem->blk->direction == CSS_VALUE_RTL ||
-            elem->blk->direction == CSS_VALUE_LTR) {
-            return elem->blk->direction;
+        if (elem->block()->direction == CSS_VALUE_RTL ||
+            elem->block()->direction == CSS_VALUE_LTR) {
+            return elem->block()->direction;
         }
     }
     return CSS_VALUE_LTR;

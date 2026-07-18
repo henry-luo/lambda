@@ -49,6 +49,7 @@ protected:
     Pool* pool = nullptr;
     Arena* arena = nullptr;
     LayoutContext lycon = {};
+    DomDocument doc = {};
     BlockProp parent_blk = {};
 
     void SetUp() override {
@@ -57,6 +58,8 @@ protected:
         ASSERT_NE(pool, nullptr);
         arena = arena_create_default(pool);
         ASSERT_NE(arena, nullptr);
+        doc.pool = pool;
+        doc.arena = arena;
         lycon.pool = pool;
         scratch_init(&lycon.scratch, arena);
         lycon.block.direction = CSS_VALUE_LTR;
@@ -96,6 +99,8 @@ protected:
 
     void init_parent(ViewBlock* parent, float width, float height) {
         init_block(parent, "div", width, height);
+        // Cold element extensions require the document pool used in production.
+        parent->doc = &doc;
         parent->blk = &parent_blk;
     }
 };
@@ -346,7 +351,7 @@ TEST_F(CustomLayoutTest, GeneratedPaintAndChildrenShareSignedStackingOrder) {
     layers[2].z = -1;
     layers[2].order = 2;
     CustomLayoutPaintState paint = {layers, 3};
-    parent.custom_layout_paint = &paint;
+    parent.set_custom_layout_paint_prop(&paint);
 
     RadiantStackPaintList list = radiant_stack_collect_custom_layout_paint(&parent);
     ASSERT_EQ(list.count, 6);
@@ -374,7 +379,7 @@ TEST_F(CustomLayoutTest, GeneratedPaintAndChildrenShareSignedStackingOrder) {
     EXPECT_EQ(list.entries[5].z, 5);
 
     radiant_stack_free_custom_layout_paint(&list);
-    parent.custom_layout_paint = nullptr;
+    parent.set_custom_layout_paint_prop(nullptr);
 }
 
 TEST_F(CustomLayoutTest, MissingPlacementZClearsPreviousCustomStackingOverlay) {

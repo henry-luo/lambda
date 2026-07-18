@@ -210,7 +210,7 @@ void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     log_debug("view list:%s", list->node_name());
     ListBlot pa_list = rdcon->list;
     rdcon->list.item_index = 0;
-    rdcon->list.list_style_type = list->blk->list_style_type;
+    rdcon->list.list_style_type = list->block()->list_style_type;
     render_block_view(rdcon, list);
     rdcon->list = pa_list;
 }

@@ -538,9 +538,9 @@ static inline bool needs_vector_rendering(CssEnum style) {
  * Main border rendering dispatch
  */
 void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
-    if (!view->bound || !view->bound->border) return;
+    if (!view->bound || !view->boundary()->border) return;
 
-    BorderProp* border = view->bound->border;
+    BorderProp* border = view->boundary()->border;
     float s = rdcon->scale;
 
     Corner scaled_radius = corner_scaled(&border->radius, s);
@@ -654,7 +654,7 @@ static bool render_border_image_gradient(RenderContext* rdcon, BorderProp* borde
  * Render straight borders (optimized path for rectangular borders)
  */
 static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
-    BorderProp* border = view->bound->border;
+    BorderProp* border = view->boundary()->border;
     ImageSurface* surface = rdcon->ui_context->surface;
 
     if (border->width.left > 0 && border->left_style != CSS_VALUE_NONE &&
@@ -692,7 +692,7 @@ static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect r
  * Render border with vector rendering (supports rounded corners and styled borders)
  */
 static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
-    BorderProp* border = view->bound->border;
+    BorderProp* border = view->boundary()->border;
     const RdtMatrix* xform = render_state_current_transform(rdcon);
 
     // For uniform borders, we can render as a single shape
@@ -831,9 +831,9 @@ static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect re
  * Does not affect layout. Uses border-radius if present.
  */
 void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
-    if (!view->bound || !view->bound->outline) return;
+    if (!view->bound || !view->boundary()->outline) return;
 
-    OutlineProp* outline = view->bound->outline;
+    OutlineProp* outline = view->boundary()->outline;
     if (outline->width <= 0 || outline->style == CSS_VALUE_NONE || outline->style == CSS_VALUE_HIDDEN) return;
     if (outline->color.a == 0) return;
 
@@ -853,10 +853,10 @@ void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     RdtPath* p = nullptr;
 
     // If border-radius exists, use rounded outline path
-    bool has_radius = view->bound->border && corner_has_radius(&view->bound->border->radius);
+    bool has_radius = view->boundary_mut()->border && corner_has_radius(&view->boundary_mut()->border->radius);
 
     if (has_radius) {
-        BorderProp* border = view->bound->border;
+        BorderProp* border = view->boundary()->border;
         Corner scaled_radius = corner_scaled(&border->radius, s);
         Corner outline_radius = corner_expand(&scaled_radius, expand, expand);
         constrain_corner_radii(&outline_radius, outline_rect.width, outline_rect.height);

@@ -246,7 +246,7 @@ unsigned char* DomNode::text_data() const {
     if (!text) return nullptr;
 
     // For symbol nodes, resolve to UTF-8 representation
-    if (text->content_type == DOM_TEXT_SYMBOL && text->text) {
+    if (text->is_symbol() && text->text) {
         SymbolResolution resolved = resolve_symbol(text->text, text->length);
         if (resolved.type != SYMBOL_UNKNOWN && resolved.utf8) {
             return (unsigned char*)resolved.utf8;
@@ -259,12 +259,12 @@ unsigned char* DomNode::text_data() const {
 
 const char* DomNode::get_attribute(const char* attr_name) const {
     const DomElement* elem = as_element();
-    return elem ? dom_element_get_attribute(const_cast<DomElement*>(elem), attr_name) : nullptr;
+    return elem ? const_cast<DomElement*>(elem)->get_attribute(attr_name) : nullptr;
 }
 
 bool DomNode::has_attribute(const char* attr_name) const {
     const DomElement* elem = as_element();
-    return elem ? dom_element_has_attribute(const_cast<DomElement*>(elem), attr_name) : false;
+    return elem ? const_cast<DomElement*>(elem)->has_attribute(attr_name) : false;
 }
 
 const char* DomNode::node_name() const {
@@ -591,11 +591,11 @@ void DomNode::print(StrBuf* buf, int indent) const {
 
         // Print other attributes
         int attr_count = 0;
-        const char** attr_names = dom_element_get_attribute_names((DomElement*)element, &attr_count);
+        const char** attr_names = ((DomElement*)element)->attribute_names(&attr_count);
         if (attr_names) {
             for (int i = 0; i < attr_count; i++) {
                 const char* name = attr_names[i];
-                const char* value = dom_element_get_attribute((DomElement*)element, name);
+                const char* value = ((DomElement*)element)->get_attribute(name);
 
                 // Skip id and class as they're already printed above
                 if (strcmp(name, "id") != 0 && strcmp(name, "class") != 0 && value) {

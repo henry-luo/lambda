@@ -93,11 +93,11 @@ static const char* js_dom_pick_submit_attr(DomElement* submitter, DomElement* fo
                                            const char* submitter_attr,
                                            const char* form_attr) {
     if (submitter) {
-        const char* submitter_val = dom_element_get_attribute(submitter, submitter_attr);
+        const char* submitter_val = submitter->get_attribute(submitter_attr);
         if (submitter_val && *submitter_val) return submitter_val;
     }
     if (form) {
-        const char* form_val = dom_element_get_attribute(form, form_attr);
+        const char* form_val = form->get_attribute(form_attr);
         if (form_val && *form_val) return form_val;
     }
     return "";
@@ -228,7 +228,7 @@ static DomElement* js_dom_find_element_by_id(DomNode* node, const char* id) {
     while (node) {
         if (node->is_element()) {
             DomElement* elem = node->as_element();
-            const char* elem_id = dom_element_get_attribute(elem, "id");
+            const char* elem_id = elem->get_attribute("id");
             if (elem_id && strcmp(elem_id, id) == 0) return elem;
             DomElement* found = js_dom_find_element_by_id(elem->first_child, id);
             if (found) return found;
@@ -240,7 +240,7 @@ static DomElement* js_dom_find_element_by_id(DomNode* node, const char* id) {
 
 static DomElement* js_dom_find_form_owner(DomElement* control) {
     if (!control) return nullptr;
-    const char* form_id = dom_element_get_attribute(control, "form");
+    const char* form_id = control->get_attribute("form");
     if (form_id && *form_id) {
         DomDocument* doc = control->doc;
         if (doc && doc->root) return js_dom_find_element_by_id((DomNode*)doc->root, form_id);
@@ -303,8 +303,8 @@ static DomElement* js_dom_resolve_request_submitter(DomElement* form,
 }
 
 static bool js_dom_should_validate_submit(DomElement* form, DomElement* submitter) {
-    if (form && dom_element_has_attribute(form, "novalidate")) return false;
-    if (submitter && dom_element_has_attribute(submitter, "formnovalidate")) return false;
+    if (form && form->has_attribute("novalidate")) return false;
+    if (submitter && submitter->has_attribute("formnovalidate")) return false;
     return true;
 }
 
@@ -2453,7 +2453,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
             DomElement* owner = nullptr;
             // Per HTML spec, a form-associated element's owner is determined
             // by the `form` attribute first; otherwise the nearest ancestor.
-            const char* fa = dom_element_get_attribute(el, "form");
+            const char* fa = el->get_attribute("form");
             if (fa && *fa) {
                 DomDocument* doc = (DomDocument*)js_dom_get_document();
                 if (doc && doc->root) {
@@ -2463,7 +2463,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
                         while (node) {
                             if (node->is_element()) {
                                 DomElement* ce = (DomElement*)node;
-                                const char* eid = dom_element_get_attribute(ce, "id");
+                                const char* eid = ce->get_attribute("id");
                                 if (eid && strcmp(eid, fa) == 0) return ce;
                                 DomElement* r = find_id(ce->first_child);
                                 if (r) return r;

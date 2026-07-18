@@ -181,7 +181,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_MatchesElementWithClass) {
 
     // Element with matching class
     DomElement* div = dom_element_create(doc, "div", nullptr);
-    dom_element_add_class(div, "box");
+    div->add_class("box");
 
     EXPECT_TRUE(selector_matcher_matches_simple(matcher, selector, div))
         << "Class selector .box should match <div class='box'>";
@@ -204,7 +204,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_AppliesMargin) {
 
     // Create element with class
     DomElement* div = dom_element_create(doc, "div", nullptr);
-    dom_element_add_class(div, "box");
+    div->add_class("box");
 
     // Apply declaration
     ASSERT_TRUE(dom_element_apply_declaration(div, margin_decl));
@@ -225,7 +225,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_OverridesUniversalSelector) {
 
     // Create element with class
     DomElement* div = dom_element_create(doc, "div", nullptr);
-    dom_element_add_class(div, "box");
+    div->add_class("box");
 
     // Apply both declarations
     ASSERT_TRUE(dom_element_apply_declaration(div, universal_margin));
@@ -259,8 +259,8 @@ TEST_F(CssStyleApplicationTest, Baseline803_UniversalAndClassSelectors) {
     // Create DOM: <body><div class="box"></div></body>
     DomElement* body = dom_element_create(doc, "body", nullptr);
     DomElement* div_box = dom_element_create(doc, "div", nullptr);
-    dom_element_add_class(div_box, "box");
-    dom_element_append_child(body, div_box);
+    div_box->add_class("box");
+    body->append_child(div_box);
 
     // Apply rules to body
     ASSERT_TRUE(dom_element_apply_declaration(body, universal_margin));
@@ -300,7 +300,7 @@ TEST_F(CssStyleApplicationTest, CascadeOrder_LaterRuleSameSpecificity) {
     CssDeclaration* margin2 = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 1, 0);
 
     DomElement* div = dom_element_create(doc, "div", nullptr);
-    dom_element_add_class(div, "box");
+    div->add_class("box");
 
     // Apply first declaration
     ASSERT_TRUE(dom_element_apply_declaration(div, margin1));
@@ -326,7 +326,7 @@ TEST_F(CssStyleApplicationTest, CascadeOrder_SpecificityOverridesSourceOrder) {
     CssDeclaration* universal_margin = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 0, 0);
 
     DomElement* div = dom_element_create(doc, "div", nullptr);
-    dom_element_add_class(div, "box");
+    div->add_class("box");
 
     // Apply class declaration first (higher specificity)
     ASSERT_TRUE(dom_element_apply_declaration(div, class_margin));
@@ -397,10 +397,10 @@ TEST_F(CssStyleApplicationTest, MultipleElements_UniversalSelectorAffectsAll) {
     DomElement* div2 = dom_element_create(doc, "div", nullptr);
     DomElement* span = dom_element_create(doc, "span", nullptr);
 
-    dom_element_append_child(html, body);
-    dom_element_append_child(body, div1);
-    dom_element_append_child(body, div2);
-    dom_element_append_child(div1, span);
+    html->append_child(body);
+    body->append_child(div1);
+    body->append_child(div2);
+    div1->append_child(span);
 
     // Apply universal selector declaration to all elements
     DomElement* elements[] = { html, body, div1, div2, span };
@@ -431,12 +431,12 @@ TEST_F(CssStyleApplicationTest, MultipleClasses_SelectiveApplication) {
 
     // Create elements, some with .highlight class
     DomElement* div1 = dom_element_create(doc, "div", nullptr);
-    dom_element_add_class(div1, "highlight");
+    div1->add_class("highlight");
 
     DomElement* div2 = dom_element_create(doc, "div", nullptr);
 
     DomElement* span = dom_element_create(doc, "span", nullptr);
-    dom_element_add_class(span, "highlight");
+    span->add_class("highlight");
 
     // Apply universal selector to all
     DomElement* elements[] = { div1, div2, span };

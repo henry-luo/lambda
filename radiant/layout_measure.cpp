@@ -50,9 +50,9 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
 
     float width = block->width > 0.0f ? block->width : 0.0f;
     float height = block->height > 0.0f ? block->height : 0.0f;
-    if (block->embed && block->embed->img) {
-        if (block->embed->img->width > 0) width = (float)block->embed->img->width;
-        if (block->embed->img->height > 0) height = (float)block->embed->img->height;
+    if (block->embed && block->embedp()->img) {
+        if (block->embedp()->img->width > 0) width = (float)block->embedp()->img->width;
+        if (block->embedp()->img->height > 0) height = (float)block->embedp()->img->height;
     }
     uintptr_t tag = block->tag();
     if (width <= 0.0f || height <= 0.0f) {

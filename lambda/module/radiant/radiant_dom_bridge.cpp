@@ -346,7 +346,7 @@ static const char* radiant_dom_item_to_html_bool_string(Item value) {
 
 static int64_t radiant_dom_reflected_int_value(DomElement* elem, const char* attr_name,
                                                int default_value) {
-    const char* raw = dom_element_get_attribute(elem, attr_name);
+    const char* raw = elem->get_attribute(attr_name);
     if (!raw) return default_value;
     char* end = nullptr;
     long value = strtol(raw, &end, 10);
@@ -378,7 +378,7 @@ static long radiant_dom_item_to_reflected_int(Item value, int default_value) {
 
 static const char* radiant_dom_canonical_token_attr(DomElement* elem, const char* attr_name,
                                                     const char* const* keywords) {
-    const char* value = dom_element_get_attribute(elem, attr_name);
+    const char* value = elem->get_attribute(attr_name);
     if (!value) return "";
 
     char lowered[32];
@@ -410,9 +410,9 @@ static bool radiant_dom_is_content_editable(DomElement* elem) {
     while (node) {
         if (node->is_element()) {
             DomElement* current = node->as_element();
-            if (dom_element_has_attribute(current, "contenteditable")) {
+            if (current->has_attribute("contenteditable")) {
                 const char* normalized = radiant_dom_normalize_contenteditable(
-                    dom_element_get_attribute(current, "contenteditable"));
+                    current->get_attribute("contenteditable"));
                 if (!normalized) normalized = "inherit";
                 if (strcmp(normalized, "true") == 0 || strcmp(normalized, "plaintext-only") == 0) {
                     return !saw_false;
@@ -612,11 +612,11 @@ static Item radiant_dom_attributes_item(DomElement* elem) {
     Array* arr = arr_item.array;
 
     int attr_count = 0;
-    const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+    const char** attr_names = elem->attribute_names(&attr_count);
     for (int i = 0; attr_names && i < attr_count; i++) {
         const char* name = attr_names[i];
         if (radiant_dom_is_internal_attr(name)) continue;
-        const char* value = dom_element_get_attribute(elem, name);
+        const char* value = elem->get_attribute(name);
         Item pair = radiant_host_api->value->new_object();
         Item name_item = radiant_dom_string_item(name);
         Item value_item = radiant_dom_string_item(value);
@@ -638,7 +638,7 @@ static Item radiant_dom_attributes_item(DomElement* elem) {
 static bool radiant_dom_is_listed_form_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     if (radiant_dom_is_tag(elem, "input")) {
-        const char* type = dom_element_get_attribute(elem, "type");
+        const char* type = elem->get_attribute("type");
         return !type || strcasecmp(type, "image") != 0;
     }
     return radiant_dom_is_tag(elem, "button") ||
@@ -671,7 +671,7 @@ static Item radiant_dom_form_controls_item(DomElement* form) {
 }
 
 static const char* radiant_dom_form_control_name_or_id(DomElement* elem) {
-    const char* name = dom_element_get_attribute(elem, "name");
+    const char* name = elem->get_attribute("name");
     if (name && name[0] != '\0') return name;
     return elem && elem->id && elem->id[0] != '\0' ? elem->id : nullptr;
 }
@@ -911,7 +911,7 @@ static bool radiant_dom_get_aria_element_reflection(Item receiver,
     const RadiantAriaElementReflection* reflection =
         radiant_dom_aria_element_reflection(prop, false);
     if (!reflection || !elem || !out) return false;
-    const char* idrefs = dom_element_get_attribute(elem, reflection->attr_name);
+    const char* idrefs = elem->get_attribute(reflection->attr_name);
     if (!idrefs) {
         *out = ItemNull;
     } else if (idrefs[0] == '\0') {
@@ -947,15 +947,15 @@ static bool radiant_dom_set_aria_element_reflection(Item receiver,
         cached = radiant_dom_node_item(target);
     }
 
-    const char* old_value = dom_element_get_attribute(elem, reflection->attr_name);
+    const char* old_value = elem->get_attribute(reflection->attr_name);
     if (clear) {
-        dom_element_remove_attribute(elem, reflection->attr_name);
+        elem->remove_attribute(reflection->attr_name);
         radiant_dom_aria_cache_reference(receiver, reflection,
                                          radiant_dom_undefined_item());
     } else {
         // The empty content attribute is the specified marker for an explicit
         // element association; the actual node identity stays in the wrapper.
-        dom_element_set_attribute(elem, reflection->attr_name, "");
+        elem->set_attribute(reflection->attr_name, "");
         radiant_dom_aria_cache_reference(receiver, reflection, cached);
     }
     js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
@@ -1153,7 +1153,7 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
     DomNode* node = (DomNode*)dom_elem;
     if (node->is_element()) {
         DomElement* e = node->as_element();
-        if (e->doc && e->doc->js_doc_node == (void*)e) {
+        if (e->doc && e->doc->js.doc_node == (void*)e) {
             Item proxy = js_dom_document_proxy_for_doc_bridge(e->doc);
             if (proxy.item != ITEM_NULL) return proxy;
         }
@@ -1327,7 +1327,7 @@ RADIANT_MEMBER_GET(radiant_dom_member_local_name,
 RADIANT_C_API int radiant_dom_member_namespace_uri(Item receiver, Item* out) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    const char* ns = dom_element_get_attribute(elem, "__lambda_ns_uri");
+    const char* ns = elem->get_attribute("__lambda_ns_uri");
     *out = radiant_dom_string_item((ns && ns[0] != '\0') ? ns : "http://www.w3.org/1999/xhtml");
     return 1;
 }
@@ -1479,17 +1479,17 @@ RADIANT_C_API int radiant_dom_guard_lblout(Item receiver) {
 RADIANT_C_API int radiant_dom_m4b_disabled_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "disabled") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("disabled") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_disabled_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     if (js_is_truthy(v)) {
-        dom_element_set_attribute(elem, "disabled", "");
+        elem->set_attribute("disabled", "");
         js_dom_after_disabled_attribute_set((void*)elem);
     } else {
-        dom_element_remove_attribute(elem, "disabled");
+        elem->remove_attribute("disabled");
     }
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
@@ -1498,14 +1498,14 @@ RADIANT_C_API int radiant_dom_m4b_disabled_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_required_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "required") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("required") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_required_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) dom_element_set_attribute(elem, "required", "");
-    else dom_element_remove_attribute(elem, "required");
+    if (js_is_truthy(v)) elem->set_attribute("required", "");
+    else elem->remove_attribute("required");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1513,14 +1513,14 @@ RADIANT_C_API int radiant_dom_m4b_required_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_multiple_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "multiple") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("multiple") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_multiple_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) dom_element_set_attribute(elem, "multiple", "");
-    else dom_element_remove_attribute(elem, "multiple");
+    if (js_is_truthy(v)) elem->set_attribute("multiple", "");
+    else elem->remove_attribute("multiple");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1528,15 +1528,15 @@ RADIANT_C_API int radiant_dom_m4b_multiple_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_multiple2_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "multiple") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("multiple") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_multiple2_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     bool truthy = js_is_truthy(v);
-    if (truthy) dom_element_set_attribute(elem, "multiple", "");
-    else dom_element_remove_attribute(elem, "multiple");
+    if (truthy) elem->set_attribute("multiple", "");
+    else elem->remove_attribute("multiple");
     // live checked/selected invariants remain centralized in js_dom.cpp
     if (!truthy) js_dom_after_select_multiple_removed((void*)elem);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
@@ -1546,14 +1546,14 @@ RADIANT_C_API int radiant_dom_m4b_multiple2_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_read_only_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "readonly") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("readonly") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_read_only_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) dom_element_set_attribute(elem, "readonly", "");
-    else dom_element_remove_attribute(elem, "readonly");
+    if (js_is_truthy(v)) elem->set_attribute("readonly", "");
+    else elem->remove_attribute("readonly");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1561,14 +1561,14 @@ RADIANT_C_API int radiant_dom_m4b_read_only_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_readonly_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "readonly") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("readonly") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_readonly_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) dom_element_set_attribute(elem, "readonly", "");
-    else dom_element_remove_attribute(elem, "readonly");
+    if (js_is_truthy(v)) elem->set_attribute("readonly", "");
+    else elem->remove_attribute("readonly");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1576,14 +1576,14 @@ RADIANT_C_API int radiant_dom_m4b_readonly_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_no_validate_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "novalidate") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("novalidate") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_no_validate_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) dom_element_set_attribute(elem, "novalidate", "");
-    else dom_element_remove_attribute(elem, "novalidate");
+    if (js_is_truthy(v)) elem->set_attribute("novalidate", "");
+    else elem->remove_attribute("novalidate");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1591,14 +1591,14 @@ RADIANT_C_API int radiant_dom_m4b_no_validate_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_form_no_validate_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "formnovalidate") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("formnovalidate") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_form_no_validate_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) dom_element_set_attribute(elem, "formnovalidate", "");
-    else dom_element_remove_attribute(elem, "formnovalidate");
+    if (js_is_truthy(v)) elem->set_attribute("formnovalidate", "");
+    else elem->remove_attribute("formnovalidate");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1606,14 +1606,14 @@ RADIANT_C_API int radiant_dom_m4b_form_no_validate_set(Item r, Item v, Item* out
 RADIANT_C_API int radiant_dom_m4b_open_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "open") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("open") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_open_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) dom_element_set_attribute(elem, "open", "");
-    else dom_element_remove_attribute(elem, "open");
+    if (js_is_truthy(v)) elem->set_attribute("open", "");
+    else elem->remove_attribute("open");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1621,15 +1621,15 @@ RADIANT_C_API int radiant_dom_m4b_open_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_default_checked_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "checked") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("checked") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_default_checked_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     bool truthy = js_is_truthy(v);
-    if (truthy) dom_element_set_attribute(elem, "checked", "");
-    else dom_element_remove_attribute(elem, "checked");
+    if (truthy) elem->set_attribute("checked", "");
+    else elem->remove_attribute("checked");
     // live checked/selected invariants remain centralized in js_dom.cpp
     js_dom_after_default_checked_set((void*)elem, truthy);
     *out = v;
@@ -1638,15 +1638,15 @@ RADIANT_C_API int radiant_dom_m4b_default_checked_set(Item r, Item v, Item* out)
 RADIANT_C_API int radiant_dom_m4b_default_selected_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "selected") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("selected") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_default_selected_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     bool truthy = js_is_truthy(v);
-    if (truthy) dom_element_set_attribute(elem, "selected", "");
-    else dom_element_remove_attribute(elem, "selected");
+    if (truthy) elem->set_attribute("selected", "");
+    else elem->remove_attribute("selected");
     // live checked/selected invariants remain centralized in js_dom.cpp
     js_dom_after_default_selected_set((void*)elem, truthy);
     *out = v;
@@ -1655,14 +1655,14 @@ RADIANT_C_API int radiant_dom_m4b_default_selected_set(Item r, Item v, Item* out
 RADIANT_C_API int radiant_dom_m4b_autofocus_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    *out = (Item){.item = b2it(dom_element_has_attribute(elem, "autofocus") ? 1 : 0)};
+    *out = (Item){.item = b2it(elem->has_attribute("autofocus") ? 1 : 0)};
     return 1;
 }
 RADIANT_C_API int radiant_dom_m4b_autofocus_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (js_is_truthy(v)) dom_element_set_attribute(elem, "autofocus", "");
-    else dom_element_remove_attribute(elem, "autofocus");
+    if (js_is_truthy(v)) elem->set_attribute("autofocus", "");
+    else elem->remove_attribute("autofocus");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1679,7 +1679,7 @@ RADIANT_C_API int radiant_dom_m4b_max_length_set(Item r, Item v, Item* out) {
     long reflected = radiant_dom_item_to_reflected_int(v, -1);
     char buf[32];
     snprintf(buf, sizeof(buf), "%ld", reflected);
-    dom_element_set_attribute(elem, "maxlength", buf);
+    elem->set_attribute("maxlength", buf);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1696,7 +1696,7 @@ RADIANT_C_API int radiant_dom_m4b_min_length_set(Item r, Item v, Item* out) {
     long reflected = radiant_dom_item_to_reflected_int(v, 0);
     char buf[32];
     snprintf(buf, sizeof(buf), "%ld", reflected);
-    dom_element_set_attribute(elem, "minlength", buf);
+    elem->set_attribute("minlength", buf);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1713,7 +1713,7 @@ RADIANT_C_API int radiant_dom_m4b_size_set(Item r, Item v, Item* out) {
     long reflected = radiant_dom_item_to_reflected_int(v, 20);
     char buf[32];
     snprintf(buf, sizeof(buf), "%ld", reflected);
-    dom_element_set_attribute(elem, "size", buf);
+    elem->set_attribute("size", buf);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1730,7 +1730,7 @@ RADIANT_C_API int radiant_dom_m4b_size2_set(Item r, Item v, Item* out) {
     long reflected = radiant_dom_item_to_reflected_int(v, 0);
     char buf[32];
     snprintf(buf, sizeof(buf), "%ld", reflected);
-    dom_element_set_attribute(elem, "size", buf);
+    elem->set_attribute("size", buf);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1747,7 +1747,7 @@ RADIANT_C_API int radiant_dom_m4b_width_set(Item r, Item v, Item* out) {
     long reflected = radiant_dom_item_to_reflected_int(v, 0);
     char buf[32];
     snprintf(buf, sizeof(buf), "%ld", reflected);
-    dom_element_set_attribute(elem, "width", buf);
+    elem->set_attribute("width", buf);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1764,7 +1764,7 @@ RADIANT_C_API int radiant_dom_m4b_height_set(Item r, Item v, Item* out) {
     long reflected = radiant_dom_item_to_reflected_int(v, 0);
     char buf[32];
     snprintf(buf, sizeof(buf), "%ld", reflected);
-    dom_element_set_attribute(elem, "height", buf);
+    elem->set_attribute("height", buf);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1781,7 +1781,7 @@ RADIANT_C_API int radiant_dom_m4b_rows_set(Item r, Item v, Item* out) {
     long reflected = radiant_dom_item_to_reflected_int(v, 2);
     char buf[32];
     snprintf(buf, sizeof(buf), "%ld", reflected);
-    dom_element_set_attribute(elem, "rows", buf);
+    elem->set_attribute("rows", buf);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1798,7 +1798,7 @@ RADIANT_C_API int radiant_dom_m4b_cols_set(Item r, Item v, Item* out) {
     long reflected = radiant_dom_item_to_reflected_int(v, 20);
     char buf[32];
     snprintf(buf, sizeof(buf), "%ld", reflected);
-    dom_element_set_attribute(elem, "cols", buf);
+    elem->set_attribute("cols", buf);
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1806,7 +1806,7 @@ RADIANT_C_API int radiant_dom_m4b_cols_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_src_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "src");
+    const char* value = elem->get_attribute("src");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -1814,7 +1814,7 @@ RADIANT_C_API int radiant_dom_m4b_src_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "src", text ? text : "");
+    elem->set_attribute("src", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1822,7 +1822,7 @@ RADIANT_C_API int radiant_dom_m4b_src_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_href_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "href");
+    const char* value = elem->get_attribute("href");
     if (radiant_dom_is_tag(elem, "a") || radiant_dom_is_tag(elem, "area")) {
         Url* resolved = elem->doc && elem->doc->url
             ? url_parse_with_base(value ? value : "", elem->doc->url)
@@ -1838,7 +1838,7 @@ RADIANT_C_API int radiant_dom_m4b_href_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "href", text ? text : "");
+    elem->set_attribute("href", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1850,7 +1850,7 @@ static int radiant_dom_anchor_component(Item receiver, Item* out,
                                         RadiantUrlGetter getter) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out || !getter) return 0;
-    const char* href = dom_element_get_attribute(elem, "href");
+    const char* href = elem->get_attribute("href");
     Url* resolved = elem->doc && elem->doc->url
         ? url_parse_with_base(href ? href : "", elem->doc->url)
         : url_parse(href ? href : "");
@@ -1874,7 +1874,7 @@ RADIANT_ANCHOR_COMPONENT_GETTER(radiant_dom_anchor_origin_get, url_get_origin)
 RADIANT_C_API int radiant_dom_anchor_hash_get(Item receiver, Item* out) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !out) return 0;
-    const char* href = dom_element_get_attribute(elem, "href");
+    const char* href = elem->get_attribute("href");
     // Fragment-only references are valid URL references even when the host
     // parser has no base-path component; their hash is still the raw suffix.
     const char* hash = href ? strchr(href, '#') : nullptr;
@@ -1886,7 +1886,7 @@ RADIANT_C_API int radiant_dom_anchor_hash_get(Item receiver, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_alt_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "alt");
+    const char* value = elem->get_attribute("alt");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -1894,7 +1894,7 @@ RADIANT_C_API int radiant_dom_m4b_alt_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "alt", text ? text : "");
+    elem->set_attribute("alt", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1902,7 +1902,7 @@ RADIANT_C_API int radiant_dom_m4b_alt_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_name_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "name");
+    const char* value = elem->get_attribute("name");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -1910,7 +1910,7 @@ RADIANT_C_API int radiant_dom_m4b_name_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "name", text ? text : "");
+    elem->set_attribute("name", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1918,7 +1918,7 @@ RADIANT_C_API int radiant_dom_m4b_name_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_placeholder_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "placeholder");
+    const char* value = elem->get_attribute("placeholder");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -1926,7 +1926,7 @@ RADIANT_C_API int radiant_dom_m4b_placeholder_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "placeholder", text ? text : "");
+    elem->set_attribute("placeholder", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1934,7 +1934,7 @@ RADIANT_C_API int radiant_dom_m4b_placeholder_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_autocomplete_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "autocomplete");
+    const char* value = elem->get_attribute("autocomplete");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -1942,7 +1942,7 @@ RADIANT_C_API int radiant_dom_m4b_autocomplete_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "autocomplete", text ? text : "");
+    elem->set_attribute("autocomplete", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1950,7 +1950,7 @@ RADIANT_C_API int radiant_dom_m4b_autocomplete_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_pattern_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "pattern");
+    const char* value = elem->get_attribute("pattern");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -1958,7 +1958,7 @@ RADIANT_C_API int radiant_dom_m4b_pattern_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "pattern", text ? text : "");
+    elem->set_attribute("pattern", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1966,7 +1966,7 @@ RADIANT_C_API int radiant_dom_m4b_pattern_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_min_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "min");
+    const char* value = elem->get_attribute("min");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -1974,7 +1974,7 @@ RADIANT_C_API int radiant_dom_m4b_min_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "min", text ? text : "");
+    elem->set_attribute("min", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1982,7 +1982,7 @@ RADIANT_C_API int radiant_dom_m4b_min_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_max_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "max");
+    const char* value = elem->get_attribute("max");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -1990,7 +1990,7 @@ RADIANT_C_API int radiant_dom_m4b_max_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "max", text ? text : "");
+    elem->set_attribute("max", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -1998,7 +1998,7 @@ RADIANT_C_API int radiant_dom_m4b_max_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_step_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "step");
+    const char* value = elem->get_attribute("step");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -2006,7 +2006,7 @@ RADIANT_C_API int radiant_dom_m4b_step_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "step", text ? text : "");
+    elem->set_attribute("step", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -2014,7 +2014,7 @@ RADIANT_C_API int radiant_dom_m4b_step_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_accept_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "accept");
+    const char* value = elem->get_attribute("accept");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -2022,7 +2022,7 @@ RADIANT_C_API int radiant_dom_m4b_accept_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "accept", text ? text : "");
+    elem->set_attribute("accept", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -2030,7 +2030,7 @@ RADIANT_C_API int radiant_dom_m4b_accept_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_html_for_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "for");
+    const char* value = elem->get_attribute("for");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -2038,7 +2038,7 @@ RADIANT_C_API int radiant_dom_m4b_html_for_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "for", text ? text : "");
+    elem->set_attribute("for", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -2046,7 +2046,7 @@ RADIANT_C_API int radiant_dom_m4b_html_for_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_target_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "target");
+    const char* value = elem->get_attribute("target");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -2054,7 +2054,7 @@ RADIANT_C_API int radiant_dom_m4b_target_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "target", text ? text : "");
+    elem->set_attribute("target", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -2062,7 +2062,7 @@ RADIANT_C_API int radiant_dom_m4b_target_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_accept_charset_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "accept-charset");
+    const char* value = elem->get_attribute("accept-charset");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -2070,7 +2070,7 @@ RADIANT_C_API int radiant_dom_m4b_accept_charset_set(Item r, Item v, Item* out) 
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "accept-charset", text ? text : "");
+    elem->set_attribute("accept-charset", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -2078,7 +2078,7 @@ RADIANT_C_API int radiant_dom_m4b_accept_charset_set(Item r, Item v, Item* out) 
 RADIANT_C_API int radiant_dom_m4b_form_target_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "formtarget");
+    const char* value = elem->get_attribute("formtarget");
     *out = radiant_dom_string_item(value ? value : "");
     return 1;
 }
@@ -2086,7 +2086,7 @@ RADIANT_C_API int radiant_dom_m4b_form_target_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "formtarget", text ? text : "");
+    elem->set_attribute("formtarget", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -2094,7 +2094,7 @@ RADIANT_C_API int radiant_dom_m4b_form_target_set(Item r, Item v, Item* out) {
 RADIANT_C_API int radiant_dom_m4b_wrap_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* value = dom_element_get_attribute(elem, "wrap");
+    const char* value = elem->get_attribute("wrap");
     *out = radiant_dom_string_item(value ? value : "soft");
     return 1;
 }
@@ -2102,7 +2102,7 @@ RADIANT_C_API int radiant_dom_m4b_wrap_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "wrap", text ? text : "");
+    elem->set_attribute("wrap", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -2118,7 +2118,7 @@ RADIANT_C_API int radiant_dom_m4b_input_mode_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "inputmode", text ? text : "");
+    elem->set_attribute("inputmode", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -2134,7 +2134,7 @@ RADIANT_C_API int radiant_dom_m4b_enter_key_hint_set(Item r, Item v, Item* out) 
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = js_dom_to_attribute_cstr(v);
-    dom_element_set_attribute(elem, "enterkeyhint", text ? text : "");
+    elem->set_attribute("enterkeyhint", text ? text : "");
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
     return 1;
@@ -2142,12 +2142,12 @@ RADIANT_C_API int radiant_dom_m4b_enter_key_hint_set(Item r, Item v, Item* out) 
 RADIANT_C_API int radiant_dom_m4b_content_editable_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (!dom_element_has_attribute(elem, "contenteditable")) {
+    if (!elem->has_attribute("contenteditable")) {
         *out = radiant_dom_string_item("inherit");
         return 1;
     }
     const char* normalized = radiant_dom_normalize_contenteditable(
-        dom_element_get_attribute(elem, "contenteditable"));
+        elem->get_attribute("contenteditable"));
     *out = radiant_dom_string_item(normalized ? normalized : "inherit");
     return 1;
 }
@@ -2162,7 +2162,7 @@ RADIANT_C_API int radiant_dom_m4b_content_editable_set(Item r, Item v, Item* out
     }
     if (!text) text = "";
     if (*text == '\0') {
-        dom_element_remove_attribute(elem, "contenteditable");
+        elem->remove_attribute("contenteditable");
     } else {
         const char* normalized = radiant_dom_normalize_contenteditable(text);
         if (!normalized) {
@@ -2171,9 +2171,9 @@ RADIANT_C_API int radiant_dom_m4b_content_editable_set(Item r, Item v, Item* out
             return 1;
         }
         if (strcmp(normalized, "inherit") == 0) {
-            dom_element_remove_attribute(elem, "contenteditable");
+            elem->remove_attribute("contenteditable");
         } else {
-            dom_element_set_attribute(elem, "contenteditable", normalized);
+            elem->set_attribute("contenteditable", normalized);
         }
     }
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
@@ -2201,7 +2201,7 @@ RADIANT_C_API int radiant_dom_guard_input_nontc(Item receiver) {
 RADIANT_C_API int radiant_dom_guard_input_typed_value(Item receiver) {
     DomElement* elem = radiant_dom_member_elem(receiver);
     if (!elem || !radiant_dom_is_tag(elem, "input")) return 0;
-    const char* type = dom_element_get_attribute(elem, "type");
+    const char* type = elem->get_attribute("type");
     RadiantInputValueKind kind = radiant_input_value_kind(type);
     return kind != RADIANT_INPUT_VALUE_TEXT &&
            kind != RADIANT_INPUT_VALUE_UNSUPPORTED;
@@ -2220,7 +2220,7 @@ static Item radiant_dom_input_empty_file_list(void) {
 }
 
 static Item radiant_dom_input_files_get(DomElement* elem) {
-    if (radiant_input_value_kind(dom_element_get_attribute(elem, "type")) !=
+    if (radiant_input_value_kind(elem->get_attribute("type")) !=
         RADIANT_INPUT_VALUE_FILE) return ItemNull;
     Item files = radiant_input_files(elem);
     if (get_type_id(files) != LMD_TYPE_ARRAY) {
@@ -2242,7 +2242,7 @@ RADIANT_C_API int radiant_dom_input_type_get(Item r, Item* out) {
     if (!elem || !out) return 0;
     char normalized[32];
     *out = (Item){.item = s2it(heap_create_name(radiant_input_type_normalize(
-        dom_element_get_attribute(elem, "type"), normalized, sizeof(normalized))))};
+        elem->get_attribute("type"), normalized, sizeof(normalized))))};
     return 1;
 }
 
@@ -2252,7 +2252,7 @@ RADIANT_C_API int radiant_dom_input_type_set(Item r, Item v, Item* out) {
     char normalized[32];
     const char* type = radiant_input_type_normalize(fn_to_cstr(v), normalized,
                                                      sizeof(normalized));
-    dom_element_set_attribute(elem, "type", type);
+    elem->set_attribute("type", type);
     // The live value belongs to a value state, so a type transition must run
     // that state's sanitizer instead of leaving an impossible old value behind.
     radiant_input_type_changed(elem);
@@ -2266,7 +2266,7 @@ RADIANT_C_API int radiant_dom_input_typed_value_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     RadiantInputValueKind kind = radiant_input_value_kind(
-        dom_element_get_attribute(elem, "type"));
+        elem->get_attribute("type"));
     if (kind == RADIANT_INPUT_VALUE_FILE) {
         Item files = radiant_dom_input_files_get(elem);
         if (radiant_host_api->value->array_length(files) <= 0) {
@@ -2293,7 +2293,7 @@ RADIANT_C_API int radiant_dom_input_typed_value_set(Item r, Item v, Item* out) {
     const char* text = fn_to_cstr(v);
     if (!text) text = "";
     RadiantInputValueKind kind = radiant_input_value_kind(
-        dom_element_get_attribute(elem, "type"));
+        elem->get_attribute("type"));
     if (kind == RADIANT_INPUT_VALUE_FILE) {
         if (text[0]) {
             // File inputs cannot manufacture host paths from script-provided text.
@@ -2315,7 +2315,7 @@ RADIANT_C_API int radiant_dom_input_value_as_number_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     double number = NAN;
-    radiant_input_value_as_number(dom_element_get_attribute(elem, "type"),
+    radiant_input_value_as_number(elem->get_attribute("type"),
                                   radiant_input_live_value(elem), &number);
     *out = radiant_host_api->script->make_number(number);
     return 1;
@@ -2329,7 +2329,7 @@ RADIANT_C_API int radiant_dom_input_value_as_number_set(Item r, Item v, Item* ou
     if (!isfinite(number)) {
         radiant_dom_input_throw("TypeError", "valueAsNumber must be finite");
     } else if (!radiant_input_value_from_number(
-                   dom_element_get_attribute(elem, "type"), number,
+                   elem->get_attribute("type"), number,
                    formatted, sizeof(formatted))) {
         radiant_dom_input_throw("InvalidStateError",
                                 "This input type has no numeric value state");
@@ -2343,7 +2343,7 @@ RADIANT_C_API int radiant_dom_input_value_as_number_set(Item r, Item v, Item* ou
 RADIANT_C_API int radiant_dom_input_value_as_date_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* type = dom_element_get_attribute(elem, "type");
+    const char* type = elem->get_attribute("type");
     double number;
     if (!radiant_input_value_as_date_supported(type) ||
         !radiant_input_value_as_number(type, radiant_input_live_value(elem), &number)) {
@@ -2358,7 +2358,7 @@ RADIANT_C_API int radiant_dom_input_value_as_date_get(Item r, Item* out) {
 RADIANT_C_API int radiant_dom_input_value_as_date_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    const char* type = dom_element_get_attribute(elem, "type");
+    const char* type = elem->get_attribute("type");
     if (!radiant_input_value_as_date_supported(type)) {
         radiant_dom_input_throw("InvalidStateError",
                                 "This input type has no Date value state");
@@ -2391,7 +2391,7 @@ RADIANT_C_API int radiant_dom_input_files_get_member(Item r, Item* out) {
 RADIANT_C_API int radiant_dom_input_files_set_member(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
-    if (radiant_input_value_kind(dom_element_get_attribute(elem, "type")) !=
+    if (radiant_input_value_kind(elem->get_attribute("type")) !=
         RADIANT_INPUT_VALUE_FILE) {
         *out = v;
         return 1;
@@ -2415,9 +2415,9 @@ RADIANT_C_API int radiant_dom_input_step_up(Item r, Item* args, int argc, Item* 
     if (!elem || !out) return 0;
     int count = argc > 0 ? (int)radiant_host_api->script->get_number(args[0]) : 1;
     char stepped[128];
-    if (!radiant_input_value_step(dom_element_get_attribute(elem, "type"),
-            radiant_input_live_value(elem), dom_element_get_attribute(elem, "min"),
-            dom_element_get_attribute(elem, "max"), dom_element_get_attribute(elem, "step"),
+    if (!radiant_input_value_step(elem->get_attribute("type"),
+            radiant_input_live_value(elem), elem->get_attribute("min"),
+            elem->get_attribute("max"), elem->get_attribute("step"),
             count, stepped, sizeof(stepped))) {
         radiant_dom_input_throw("InvalidStateError", "Input value cannot be stepped");
     } else {
@@ -2470,9 +2470,9 @@ RADIANT_C_API int radiant_dom_m4c_value3_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = fn_to_cstr(v);
-    dom_element_set_attribute(elem, "value", text ? text : "");
+    elem->set_attribute("value", text ? text : "");
     if (elem->form) {
-        elem->form->value = dom_element_get_attribute(elem, "value");
+        elem->form->value = elem->get_attribute("value");
     }
     js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
     *out = v;
@@ -2482,7 +2482,7 @@ RADIANT_C_API int radiant_dom_m4c_value4_set(Item r, Item v, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
     const char* text = fn_to_cstr(v);
-    dom_element_set_attribute(elem, "value", text ? text : "");
+    elem->set_attribute("value", text ? text : "");
     *out = v;
     return 1;
 }
@@ -3163,7 +3163,7 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
         // setAttribute shortcut; after Phase 5 removes that shortcut, the DOM
         // named setter must own attr-name writes before JS property fallback.
         radiant_dom_aria_invalidate_attribute_cache(elem_item, prop);
-        dom_element_set_attribute(elem, prop, text ? text : "");
+        elem->set_attribute(prop, text ? text : "");
         js_dom_after_set_attribute((void*)elem, prop, text ? text : "");
         js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
@@ -3171,7 +3171,7 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
     }
     if (strcmp(prop, "id") == 0) {
         const char* id_str = fn_to_cstr(value);
-        if (id_str && dom_element_set_attribute(elem, "id", id_str)) {
+        if (id_str && elem->set_attribute("id", id_str)) {
             js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         }
         *out = value;
@@ -3179,7 +3179,7 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
     }
     if (strcmp(prop, "className") == 0) {
         const char* class_str = fn_to_cstr(value);
-        if (class_str && dom_element_set_attribute(elem, "class", class_str)) {
+        if (class_str && elem->set_attribute("class", class_str)) {
             js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         }
         *out = value;
@@ -3187,7 +3187,7 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
     }
     if (strcmp(prop, "srcdoc") == 0 && radiant_dom_is_tag(elem, "iframe")) {
         const char* text = fn_to_cstr(value);
-        dom_element_set_attribute(elem, "srcdoc", text ? text : "");
+        elem->set_attribute("srcdoc", text ? text : "");
         js_dom_after_srcdoc_set((void*)elem);
         js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
@@ -3195,25 +3195,25 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
     }
     if (strcmp(prop, "autocapitalize") == 0) {
         const char* text = js_dom_to_attribute_cstr(value);
-        dom_element_set_attribute(elem, "autocapitalize", text ? text : "");
+        elem->set_attribute("autocapitalize", text ? text : "");
         js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
         return true;
     }
     if (strcmp(prop, "autocorrect") == 0) {
-        dom_element_set_attribute(elem, "autocorrect", js_is_truthy(value) ? "on" : "off");
+        elem->set_attribute("autocorrect", js_is_truthy(value) ? "on" : "off");
         js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
         return true;
     }
     if (strcmp(prop, "spellcheck") == 0) {
-        dom_element_set_attribute(elem, "spellcheck", radiant_dom_item_to_html_bool_string(value));
+        elem->set_attribute("spellcheck", radiant_dom_item_to_html_bool_string(value));
         js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
         return true;
     }
     if (strcmp(prop, "writingSuggestions") == 0) {
-        dom_element_set_attribute(elem, "writingsuggestions", radiant_dom_item_to_html_bool_string(value));
+        elem->set_attribute("writingsuggestions", radiant_dom_item_to_html_bool_string(value));
         js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
         *out = value;
         return true;
@@ -3226,7 +3226,7 @@ static Item radiant_dom_attribute_names_item(DomElement* elem) {
     Array* arr = arr_item.array;
 
     int attr_count = 0;
-    const char** attr_names = dom_element_get_attribute_names(elem, &attr_count);
+    const char** attr_names = elem->attribute_names(&attr_count);
     for (int i = 0; attr_names && i < attr_count; i++) {
         if (radiant_dom_is_internal_attr(attr_names[i])) continue;
         array_push(arr, radiant_dom_string_item(attr_names[i]));
@@ -3331,12 +3331,12 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        const char* val = dom_element_get_attribute(elem, attr_name);
+        const char* val = elem->get_attribute(attr_name);
         if (val) {
             *out = radiant_dom_string_item(val);
             return true;
         }
-        *out = dom_element_has_attribute(elem, attr_name) ? radiant_dom_string_item("") : ItemNull;
+        *out = elem->has_attribute(attr_name) ? radiant_dom_string_item("") : ItemNull;
         return true;
     }
 
@@ -3347,7 +3347,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         }
         const char* attr_name = fn_to_cstr(args[0]);
         bool has = attr_name && !radiant_dom_is_internal_attr(attr_name) &&
-            dom_element_has_attribute(elem, attr_name);
+            elem->has_attribute(attr_name);
         *out = (Item){.item = b2it(has ? 1 : 0)};
         return true;
     }
@@ -3714,9 +3714,9 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        const char* old_value = dom_element_get_attribute(elem, attr_name);
+        const char* old_value = elem->get_attribute(attr_name);
         radiant_dom_aria_invalidate_attribute_cache(elem_item, attr_name);
-        dom_element_set_attribute(elem, attr_name, attr_val);
+        elem->set_attribute(attr_name, attr_val);
         js_dom_after_set_attribute((void*)elem, attr_name, attr_val);
         js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
             (void*)elem->parent, attr_name, old_value);
@@ -3734,9 +3734,9 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        const char* old_value = dom_element_get_attribute(elem, attr_name);
+        const char* old_value = elem->get_attribute(attr_name);
         radiant_dom_aria_invalidate_attribute_cache(elem_item, attr_name);
-        dom_element_remove_attribute(elem, attr_name);
+        elem->remove_attribute(attr_name);
         js_dom_after_remove_attribute((void*)elem, attr_name);
         js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
             (void*)elem->parent, attr_name, old_value);
@@ -3754,13 +3754,13 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = (Item){.item = b2it(0)};
             return true;
         }
-        bool has = dom_element_has_attribute(elem, attr_name);
-        const char* old_value = dom_element_get_attribute(elem, attr_name);
+        bool has = elem->has_attribute(attr_name);
+        const char* old_value = elem->get_attribute(attr_name);
         bool should_have = (argc >= 2) ? js_is_truthy(args[1]) : !has;
         if (should_have && !has) {
-            dom_element_set_attribute(elem, attr_name, "");
+            elem->set_attribute(attr_name, "");
         } else if (!should_have && has) {
-            dom_element_remove_attribute(elem, attr_name);
+            elem->remove_attribute(attr_name);
             js_dom_after_toggle_attribute_remove((void*)elem, attr_name);
         }
         if (should_have != has) {
@@ -4380,7 +4380,7 @@ RADIANT_C_API int radiant_dom_document_get_property(Item prop_name, Item* out) {
         return 1;
     }
     if (strcmp(prop, "readyState") == 0) {
-        *out = radiant_dom_string_item(doc->js_ready_state ? doc->js_ready_state : "complete");
+        *out = radiant_dom_string_item(doc->js.ready_state ? doc->js.ready_state : "complete");
         return 1;
     }
     if (strcmp(prop, "fonts") == 0) {
@@ -4681,7 +4681,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
         DomElement* elem = dom_element_create(doc, tag, elem_item.element);
         if (elem && ns && ns[0] != '\0') {
             // namespace reflection is stored as an internal attribute, hidden from scripts.
-            dom_element_set_attribute(elem, "__lambda_ns_uri", ns);
+            elem->set_attribute("__lambda_ns_uri", ns);
         }
         *out = radiant_dom_node_item((DomNode*)elem);
         return 1;

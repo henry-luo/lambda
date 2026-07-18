@@ -189,9 +189,9 @@ static bool render_png_resolve_auto_size(DomDocument* doc, float total_scale,
     View* root_view = doc->view_tree->root;
     if (root_view->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(root_view);
-        if (root_block->scroller && root_block->scroller->has_clip) {
-            if (auto_width) root_block->scroller->clip.right = (float)*content_max_x;
-            if (auto_height) root_block->scroller->clip.bottom = (float)*content_max_y;
+        if (root_block->scroller && root_block->scroll_mut()->has_clip) {
+            if (auto_width) root_block->scroll_mut()->clip.right = (float)*content_max_x;
+            if (auto_height) root_block->scroll_mut()->clip.bottom = (float)*content_max_y;
         }
     }
     return true;
@@ -267,8 +267,8 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
     // Set document scale for rendering
     // given_scale is the user zoom, scale is the combined total_scale for physical rendering
-    doc->given_scale = scale;
-    doc->scale = total_scale;  // Combined scale * pixel_ratio for physical output
+    doc->viewport.given_scale = scale;
+    doc->viewport.scale = total_scale;  // Combined scale * pixel_ratio for physical output
 
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);
@@ -413,8 +413,8 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     ui_context.document = doc;
 
     // Set document scale for rendering
-    doc->given_scale = scale;
-    doc->scale = total_scale;  // Combined scale * pixel_ratio
+    doc->viewport.given_scale = scale;
+    doc->viewport.scale = total_scale;  // Combined scale * pixel_ratio
 
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);
@@ -589,8 +589,8 @@ static bool render_batch_single(
     }
 
     ui_context->document = doc;
-    doc->given_scale = scale;
-    doc->scale = total_scale;
+    doc->viewport.given_scale = scale;
+    doc->viewport.scale = total_scale;
 
     process_document_font_faces(ui_context, doc);
 

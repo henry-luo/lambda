@@ -74,8 +74,7 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
 
     if (view->is_element()) {
         DomElement* elem = lam::dom_require_element(lam::view_dom_node(view));
-        if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-            elem->form &&
+        if (elem->form_control() &&
             (elem->form->control_type == FORM_CONTROL_TEXT ||
              elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
             return;
@@ -95,9 +94,9 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
     }
     float root_scroll_x = 0.0f;
     float root_scroll_y = 0.0f;
-    if (root_block && root_block->scroller && root_block->scroller->pane) {
+    if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
         DocState* root_state = root_block->doc ? root_block->doc->state : NULL;
-        scroll_state_get_position_for_view(root_state, static_cast<View*>(root_block), root_block->scroller->pane,
+        scroll_state_get_position_for_view(root_state, static_cast<View*>(root_block), root_block->scroll()->pane,
                                            &root_scroll_x, &root_scroll_y, NULL, NULL);
     }
     bool offset_covers_root_scroll_x = fabsf(iframe_offset_x + root_scroll_x) < 0.5f;
@@ -109,10 +108,10 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
             ViewBlock* block = lam::view_require_block(parent);
             x += block->x;
             y += block->y;
-            if (block->scroller && block->scroller->pane) {
+            if (block->scroller && block->scroll_mut()->pane) {
                 DocState* block_state = block->doc ? block->doc->state : NULL;
                 float scroll_x = 0.0f, scroll_y = 0.0f;
-                scroll_state_get_position_for_view(block_state, static_cast<View*>(block), block->scroller->pane,
+                scroll_state_get_position_for_view(block_state, static_cast<View*>(block), block->scroll()->pane,
                                                    &scroll_x, &scroll_y, NULL, NULL);
                 if (!(block == root_block && offset_covers_root_scroll_x)) {
                     x -= scroll_x;
@@ -126,7 +125,7 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
         parent = parent->parent;
     }
 
-    if (!applied_root_scroll && root_block && root_block->scroller && root_block->scroller->pane) {
+    if (!applied_root_scroll && root_block && root_block->scroller && root_block->scroll_mut()->pane) {
         if (!offset_covers_root_scroll_x) {
             x -= root_scroll_x;
         }
@@ -165,9 +164,9 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     DomDocument* doc = ctx->rdcon && ctx->rdcon->ui_context ? ctx->rdcon->ui_context->document : nullptr;
     if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root = lam::view_require_block(doc->view_tree->root);
-        if (root->scroller && root->scroller->pane) {
+        if (root->scroller && root->scroll_mut()->pane) {
             DocState* root_state = root->doc ? root->doc->state : NULL;
-            scroll_state_get_position_for_view(root_state, static_cast<View*>(root), root->scroller->pane,
+            scroll_state_get_position_for_view(root_state, static_cast<View*>(root), root->scroll()->pane,
                                                &scroll_x, &scroll_y, NULL, NULL);
         }
     }

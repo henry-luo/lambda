@@ -29,7 +29,7 @@ static bool render_block_clip_empty(const Bound* clip) {
 
 static bool render_block_fully_transparent(ViewBlock* block) {
     return block && block->in_line &&
-        block->in_line->opacity >= 0.0f && block->in_line->opacity <= 0.0005f;
+        block->inl()->opacity >= 0.0f && block->inl()->opacity <= 0.0005f;
 }
 
 bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
@@ -47,7 +47,7 @@ bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
         rdcon->dirty_union.bottom * s
     };
     bool has_transform = rdcon->has_transform ||
-        (block->transform && block->transform->functions);
+        (block->transform && block->transformp()->functions);
     return !has_transform &&
         !render_geometry_bounds_intersect(render_geometry_rect_to_bound(marker_rect), dirty);
 }
@@ -60,10 +60,10 @@ bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block) {
     if (block->tag_id == HTM_TAG_HTML || block->tag_id == HTM_TAG_BODY) return false;
 
     bool has_transform = rdcon->has_transform ||
-        (block->transform && block->transform->functions);
+        (block->transform && block->transformp()->functions);
     if (has_transform) return false;
 
-    if (block->position && block->position->first_abs_child) {
+    if (block->position && block->positionp()->first_abs_child) {
         return false;
     }
 
@@ -178,19 +178,19 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     rect.width = view->width * s;  rect.height = view->height * s;
 
     // Resolve percentage border-radius values against element's own dimensions (in CSS px)
-    if (view->bound->border) {
-        resolve_border_radius_percentages(&view->bound->border->radius, view->width, view->height);
+    if (view->boundary()->border) {
+        resolve_border_radius_percentages(&view->boundary_mut()->border->radius, view->width, view->height);
     }
 
     // Render box-shadow BEFORE background (shadows go underneath the element)
-    if (view->bound->box_shadow) {
+    if (view->boundary()->box_shadow) {
         render_box_shadow(rdcon, view, rect);
     }
 
     RdtPath* mask_clip_path = nullptr;
     bool mask_clip_active = false;
-    if (view->bound->mask && view->bound->mask->has_radial_gradient) {
-        MaskProp* mask = view->bound->mask;
+    if (view->boundary_mut()->mask && view->boundary_mut()->mask->has_radial_gradient) {
+        MaskProp* mask = view->boundary()->mask;
         float radius = mask->radius_is_percent
             ? mask->radius * (rect.width < rect.height ? rect.width : rect.height)
             : mask->radius * s;
@@ -205,17 +205,17 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     }
 
     // Render background (gradient, solid color, and background-image) using new rendering system
-    if (view->bound->background) {
+    if (view->boundary()->background) {
         render_background(rdcon, view, rect);
     }
 
     // Render inset box-shadow AFTER background (inside the element)
-    if (view->bound->box_shadow) {
+    if (view->boundary()->box_shadow) {
         render_box_shadow_inset(rdcon, view, rect);
     }
 
     // Render borders using new rendering system
-    if (view->bound->border) {
+    if (view->boundary()->border) {
         log_debug("render border");
 
         // CSS 2.1 17.6.2: Use resolved borders for border-collapse cells
@@ -289,7 +289,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
 }
 
 void render_outline_deferred(RenderContext* rdcon, ViewBlock* view) {
-    if (!view->bound || !view->bound->outline) return;
+    if (!view->bound || !view->boundary()->outline) return;
     float s = rdcon->scale;
     BlockBlot saved = rdcon->block;
     RenderTransformScope transform_scope = render_state_push_transform(rdcon, view, &saved);
@@ -298,8 +298,8 @@ void render_outline_deferred(RenderContext* rdcon, ViewBlock* view) {
     Rect rect;
     rect.x = rdcon->block.x;  rect.y = rdcon->block.y;
     rect.width = view->width * s;  rect.height = view->height * s;
-    if (view->bound->border) {
-        resolve_border_radius_percentages(&view->bound->border->radius, view->width, view->height);
+    if (view->boundary()->border) {
+        resolve_border_radius_percentages(&view->boundary_mut()->border->radius, view->width, view->height);
     }
     render_outline(rdcon, view, rect);
     render_state_pop_transform(&transform_scope);
@@ -422,7 +422,7 @@ static RenderBlockPhase render_block_begin_phase(RenderContext* rdcon, ViewBlock
 
     // CSS 2.1 11.2: visibility:hidden suppresses own rendering but children
     // with visibility:visible should still appear.
-    phase.self_hidden = block->in_line && block->in_line->visibility == VIS_HIDDEN;
+    phase.self_hidden = block->in_line && block->inl()->visibility == VIS_HIDDEN;
     phase.transform_scope = render_state_push_transform(rdcon, block, &phase.parent_block);
 
     render_block_setup_font(rdcon, block);
@@ -446,12 +446,12 @@ static void render_block_paint_self(RenderContext* rdcon, ViewBlock* block,
             std::chrono::duration<double, std::milli>(tb2 - tb1).count());
     }
 
-    if (block->vpath && block->vpath->segments) {
+    if (block->vector_path() && block->vector_path()->segments) {
         render_vector_path(rdcon, block);
     }
 
     if (!phase->self_hidden &&
-        block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
+        block->form_control()) {
         render_form_control(rdcon, block);
     }
 
@@ -461,19 +461,19 @@ static void render_block_paint_self(RenderContext* rdcon, ViewBlock* block,
 
     if (DEBUG_RENDER_BLOCK) {
         Rect rc;
-        rc.x = rdcon->block.x - (block->bound ? block->bound->margin.left * s : 0);
-        rc.y = rdcon->block.y - (block->bound ? block->bound->margin.top * s : 0);
+        rc.x = rdcon->block.x - (block->bound ? block->boundary()->margin.left * s : 0);
+        rc.y = rdcon->block.y - (block->bound ? block->boundary()->margin.top * s : 0);
         rc.width = block->width * s +
-            (block->bound ? (block->bound->margin.left + block->bound->margin.right) * s : 0);
+            (block->bound ? (block->boundary()->margin.left + block->boundary()->margin.right) * s : 0);
         rc.height = block->height * s +
-            (block->bound ? (block->bound->margin.top + block->bound->margin.bottom) * s : 0);
+            (block->bound ? (block->boundary()->margin.top + block->boundary()->margin.bottom) * s : 0);
         render_block_debug_rect(rdcon, rc, &rdcon->block.clip);
     }
 }
 
 static bool block_should_paint_children(ViewBlock* block) {
     if (!block) return false;
-    if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form &&
+    if (block->form_control() &&
         block->tag() != HTM_TAG_BUTTON) {
         return false;
     }
@@ -482,20 +482,20 @@ static bool block_should_paint_children(ViewBlock* block) {
 
 static void render_block_apply_inherited_color(RenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block) return;
-    if (block->in_line && block->in_line->has_color) {
+    if (block->in_line && block->inl()->has_color) {
         if (render_block_trace_enabled()) {
             log_debug("[RENDER COLOR] element=%s setting color: #%02x%02x%02x (was #%02x%02x%02x) color.c=0x%08x",
                       block->node_name(),
-                      block->in_line->color.r, block->in_line->color.g, block->in_line->color.b,
+                      block->inl()->color.r, block->inl()->color.g, block->inl()->color.b,
                       rdcon->color.r, rdcon->color.g, rdcon->color.b,
-                      block->in_line->color.c);
+                      block->inl()->color.c);
         }
-        rdcon->color = block->in_line->color;
+        rdcon->color = block->inl()->color;
     } else {
         if (render_block_trace_enabled()) {
             log_debug("[RENDER COLOR] element=%s inheriting color #%02x%02x%02x (in_line=%p, color.c=%u)",
                       block->node_name(), rdcon->color.r, rdcon->color.g, rdcon->color.b,
-                      block->in_line, block->in_line ? block->in_line->color.c : 0);
+                      block->in_line, block->in_line ? block->inl()->color.c : 0);
         }
     }
 }
@@ -507,7 +507,7 @@ static void render_block_deferred_child_outlines(RenderContext* rdcon, ViewBlock
         if (outline_view->view_type == RDT_VIEW_BLOCK ||
             outline_view->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* outline_block = lam::view_require_block(outline_view);
-            if (outline_block->bound && outline_block->bound->outline) {
+            if (outline_block->bound && outline_block->boundary_mut()->outline) {
                 render_outline_deferred(rdcon, outline_block);
             }
         }
@@ -520,7 +520,7 @@ static RenderBlockChildrenPhase render_block_begin_children_phase(RenderContext*
     RenderBlockChildrenPhase phase = {};
     phase.start_time = std::chrono::high_resolution_clock::now();
     View* view = block ? block->first_child : nullptr;
-    phase.has_children = view != nullptr || (block && block->custom_layout_paint);
+    phase.has_children = view != nullptr || (block && block->custom_layout_paint_prop());
     if (!phase.has_children) {
         log_debug("view has no child");
         return phase;
@@ -587,7 +587,7 @@ static void render_block_finish_phase(RenderContext* rdcon, ViewBlock* block,
         render_scroller(rdcon, block, &phase->parent_block);
     }
 
-    if (block->multicol && block->multicol->computed_column_count > 1) {
+    if (block->multicol_prop() && block->multicol_prop()->computed_column_count > 1) {
         render_column_rules(rdcon, block);
     }
 

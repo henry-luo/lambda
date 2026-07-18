@@ -343,11 +343,16 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
 
     // ensure element has embed property allocated
     if (!img_element->embed) {
-        // allocate from document pool if available
-        if (img_element->doc && img_element->doc->pool) {
+        if (img_element->doc && img_element->doc->view_tree) {
+            img_element->ensure_embed(img_element->doc->view_tree);
+        } else if (img_element->doc && img_element->doc->pool) {
+            // An async decode can finish before the first ViewTree exists; use
+            // the document pool only at that lifetime seam and seed CSS initials.
             img_element->embed = (EmbedProp*)pool_calloc(img_element->doc->pool, sizeof(EmbedProp));
+            if (img_element->embed) *img_element->embed = EMBED_PROP_DEFAULT;
         } else {
             img_element->embed = (EmbedProp*)mem_calloc(1, sizeof(EmbedProp), MEM_CAT_NETWORK);
+            if (img_element->embed) *img_element->embed = EMBED_PROP_DEFAULT;
         }
         if (!img_element->embed) {
             log_error("network: failed to allocate embed property");

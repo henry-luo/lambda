@@ -686,33 +686,33 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
             log_debug("[viewport] Key='%s' Value='%s'", key, value);
 
             if (str_ieq_const(key, strlen(key), "initial-scale")) {
-                doc->viewport_initial_scale = (float)str_to_double_default(value, strlen(value), 0.0);
-                log_info("[viewport] initial-scale=%.2f", doc->viewport_initial_scale);
+                doc->viewport.initial_scale = (float)str_to_double_default(value, strlen(value), 0.0);
+                log_info("[viewport] initial-scale=%.2f", doc->viewport.initial_scale);
             }
             else if (str_ieq_const(key, strlen(key), "minimum-scale")) {
-                doc->viewport_min_scale = (float)str_to_double_default(value, strlen(value), 0.0);
-                log_debug("[viewport] minimum-scale=%.2f", doc->viewport_min_scale);
+                doc->viewport.min_scale = (float)str_to_double_default(value, strlen(value), 0.0);
+                log_debug("[viewport] minimum-scale=%.2f", doc->viewport.min_scale);
             }
             else if (str_ieq_const(key, strlen(key), "maximum-scale")) {
-                doc->viewport_max_scale = (float)str_to_double_default(value, strlen(value), 0.0);
-                log_debug("[viewport] maximum-scale=%.2f", doc->viewport_max_scale);
+                doc->viewport.max_scale = (float)str_to_double_default(value, strlen(value), 0.0);
+                log_debug("[viewport] maximum-scale=%.2f", doc->viewport.max_scale);
             }
             else if (str_ieq_const(key, strlen(key), "width")) {
                 if (str_ieq_const(value, strlen(value), "device-width")) {
-                    doc->viewport_width = 0;  // 0 means device-width
+                    doc->viewport.width = 0;  // 0 means device-width
                     log_debug("[viewport] width=device-width");
                 } else {
-                    doc->viewport_width = (int)str_to_int64_default(value, strlen(value), 0);
-                    log_debug("[viewport] width=%d", doc->viewport_width);
+                    doc->viewport.width = (int)str_to_int64_default(value, strlen(value), 0);
+                    log_debug("[viewport] width=%d", doc->viewport.width);
                 }
             }
             else if (str_ieq_const(key, strlen(key), "height")) {
                 if (str_ieq_const(value, strlen(value), "device-height")) {
-                    doc->viewport_height = 0;  // 0 means device-height
+                    doc->viewport.height = 0;  // 0 means device-height
                     log_debug("[viewport] height=device-height");
                 } else {
-                    doc->viewport_height = (int)str_to_int64_default(value, strlen(value), 0);
-                    log_debug("[viewport] height=%d", doc->viewport_height);
+                    doc->viewport.height = (int)str_to_int64_default(value, strlen(value), 0);
+                    log_debug("[viewport] height=%d", doc->viewport.height);
                 }
             }
         }
@@ -978,7 +978,7 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
     if (transform_decl) {
         float scale = extract_transform_scale(transform_decl);
         if (scale != 1.0f) {
-            doc->body_transform_scale = scale;
+            doc->viewport.body_transform_scale = scale;
             log_info("[transform] Body transform scale=%.3f", scale);
         }
     }
@@ -1852,11 +1852,11 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
     // Check if this is a <style> element
     if (elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
         // Check disabled attribute — skip disabled stylesheets
-        if (dom_element_has_attribute(elem, "disabled")) {
+        if (elem->has_attribute("disabled")) {
             log_debug("[CSS] Skipping <style> element with disabled attribute");
         } else {
             // Check media attribute
-            const char* media = dom_element_get_attribute(elem, "media");
+            const char* media = elem->get_attribute("media");
             if (media && !css_evaluate_media_query(engine, media)) {
                 log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
             } else {
@@ -1911,10 +1911,10 @@ static bool dom_node_or_parent_is_tag(DomJsMutationRecord* record, const char* t
 
 static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) {
     if (!doc) return true;
-    if (doc->js_mutation_record_overflow > 0) return true;
+    if (doc->js.mutation_record_overflow > 0) return true;
 
-    for (int i = 0; i < doc->js_mutation_record_count; i++) {
-        DomJsMutationRecord* record = &doc->js_mutation_records[i];
+    for (int i = 0; i < doc->js.mutation_record_count; i++) {
+        DomJsMutationRecord* record = &doc->js.mutation_records[i];
         switch (record->kind) {
             case DOM_JS_MUTATION_CHILD_INSERT:
             case DOM_JS_MUTATION_CHILD_REMOVE:
@@ -2636,18 +2636,18 @@ static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
             style_tree_remove_non_inline_declarations(elem->specified_style)) {
             changed = true;
         }
-        if (elem->before_styles) { style_tree_clear(elem->before_styles); changed = true; }
-        if (elem->after_styles) { style_tree_clear(elem->after_styles); changed = true; }
-        if (elem->first_letter_styles) { style_tree_clear(elem->first_letter_styles); changed = true; }
-        if (elem->marker_styles) { style_tree_clear(elem->marker_styles); changed = true; }
-        if (elem->placeholder_styles) { style_tree_clear(elem->placeholder_styles); changed = true; }
+        if (elem->pseudo_style(PSEUDO_STYLE_BEFORE)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_BEFORE)); changed = true; }
+        if (elem->pseudo_style(PSEUDO_STYLE_AFTER)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_AFTER)); changed = true; }
+        if (elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER)); changed = true; }
+        if (elem->pseudo_style(PSEUDO_STYLE_MARKER)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_MARKER)); changed = true; }
+        if (elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER)); changed = true; }
         if (changed) {
             // Load-time scripts now run after an initial cascade; the recascade
             // must drop old selector matches without erasing JS inline styles.
             elem->style_version++;
-            elem->needs_style_recompute = true;
+            elem->set_needs_style_recompute(true);
         }
-        elem->styles_resolved = false;
+        elem->set_styles_resolved(false);
 
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
             clear_load_stylesheet_cascade_recursive(child);
@@ -3263,9 +3263,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // Extract viewport meta tag values before building DOM tree
     extract_viewport_meta(html_root, dom_doc);
     // If viewport initial-scale is set and given_scale is default (1.0), apply it
-    if (dom_doc->viewport_initial_scale != 1.0f && dom_doc->given_scale == 1.0f) {
-        dom_doc->given_scale = dom_doc->viewport_initial_scale;
-        log_info("[viewport] Applied initial-scale=%.2f to given_scale", dom_doc->given_scale);
+    if (dom_doc->viewport.initial_scale != 1.0f && dom_doc->viewport.given_scale == 1.0f) {
+        dom_doc->viewport.given_scale = dom_doc->viewport.initial_scale;
+        log_info("[viewport] Applied initial-scale=%.2f to given_scale", dom_doc->viewport.given_scale);
     }
 
     // Extract <base href="..."> and update document URL if found
@@ -3311,7 +3311,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         return nullptr;
     }
     // Cache for runtime re-cascade (e.g. on pseudo-state changes like :hover)
-    dom_doc->cached_css_engine = css_engine;
+    dom_doc->services.cached_css_engine = css_engine;
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
     // Load external CSS if provided
@@ -3426,9 +3426,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             }
         }
 
-        if (dom_doc->js_mutation_count > 0) {
+        if (dom_doc->js.mutation_count > 0) {
             log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve after scripts",
-                     dom_doc->js_mutation_count);
+                     dom_doc->js.mutation_count);
 
             if (dom_js_mutation_requires_inline_stylesheet_rescan(dom_doc)) {
                 // CSSOM edits mutate parsed CssStylesheet objects; only reparse when a <style> subtree changed.
@@ -3524,8 +3524,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Set scale fields for HTML documents
     // HTML layout is in CSS logical pixels, scale is set later based on display context
-    dom_doc->given_scale = 1.0f;
-    dom_doc->scale = 1.0f;  // Will be updated by caller (window or render) with pixel_ratio
+    dom_doc->viewport.given_scale = 1.0f;
+    dom_doc->viewport.scale = 1.0f;  // Will be updated by caller (window or render) with pixel_ratio
 
     // Step 9: Extract body transform scale from CSS (after cascade is complete)
     extract_body_transform_scale(dom_root, dom_doc);
@@ -5442,7 +5442,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         }
         dom_doc->cached_inline_sheets = inline_stylesheets;
         dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
-        dom_doc->cached_css_engine = css_engine;
+        dom_doc->services.cached_css_engine = css_engine;
         log_debug("[Lambda Script] Stored %d stylesheet(s) in DomDocument", dom_doc->stylesheet_count);
     }
 
@@ -5492,8 +5492,7 @@ static View* find_matching_input(View* root, const char* match_tag, const char* 
     if (!root) return nullptr;
     if (root->is_element()) {
         DomElement* elem = lam::dom_require_element(root);
-        if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
-            elem->form &&
+        if (elem->form_control() &&
             elem->form->control_type == FORM_CONTROL_TEXT) {
             bool tag_ok = (!match_tag || (elem->tag_name && strcmp(elem->tag_name, match_tag) == 0));
             bool class_ok = true;
@@ -5586,7 +5585,7 @@ static bool capture_lambda_focus_restore(DocState* state,
     View* focused = focus_get(state);
     if (!focused || !focused->is_element()) return false;
     DomElement* focused_elem = lam::dom_require_element(focused);
-    if (focused_elem->item_prop_type != DomElement::ITEM_PROP_FORM ||
+    if (focused_elem->role_kind() != DomElement::ROLE_FORM ||
         !focused_elem->form ||
         focused_elem->form->control_type != FORM_CONTROL_TEXT) {
         return true;
@@ -5600,8 +5599,8 @@ static bool capture_lambda_focus_restore(DocState* state,
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = lam::dom_require_element(node);
-            if (elem->native_element) {
-                Item item = {.element = elem->native_element};
+            if (!elem->is_synthetic()) {
+                Item item = {.element = dom_element_to_element(elem)};
                 RenderMapLookup lookup;
                 if (render_map_reverse_lookup(item, &lookup)) {
                     out->lookup = lookup;
@@ -5737,7 +5736,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     // apply cached CSS stylesheets (parse once, reuse on subsequent rebuilds)
     CssStylesheet** inline_sheets = doc->cached_inline_sheets;
     int inline_count = doc->cached_inline_sheet_count;
-    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+    CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
 
     if (!inline_sheets) {
         // first rebuild: parse and cache stylesheets
@@ -5747,7 +5746,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
                 html_elem, css_engine, nullptr, doc->pool, &inline_count);
             doc->cached_inline_sheets = inline_sheets;
             doc->cached_inline_sheet_count = inline_count;
-            doc->cached_css_engine = css_engine;
+            doc->services.cached_css_engine = css_engine;
             log_debug("rebuild_lambda_doc: cached %d inline stylesheet(s)", inline_count);
         }
     }
@@ -5909,7 +5908,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     // Get cached CSS (must already exist from prior full rebuild)
     CssStylesheet** inline_sheets = doc->cached_inline_sheets;
     int inline_count = doc->cached_inline_sheet_count;
-    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+    CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
 
     // Phase 12.3: Record old bounds of changed subtrees for dirty tracking
     // (Views ARE DomNodes — x/y/w/h from previous layout pass)
@@ -5956,7 +5955,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         DomNode* ancestor = static_cast<DomNode*>(parent_dom);
         while (ancestor) {
             if (ancestor->is_element()) {
-                (lam::dom_require_element(ancestor))->styles_resolved = false;
+                (lam::dom_require_element(ancestor))->set_styles_resolved(false);
             }
             ancestor->layout_dirty = true;
             ancestor = ancestor->parent;

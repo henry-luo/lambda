@@ -48,11 +48,11 @@ static Color form_text_color(ViewBlock* block, FormControlProp* form,
             if (alpha > 255.0f) alpha = 255.0f;
             text_color.a = (uint8_t)(alpha + 0.5f);
         }
-    } else if (block && block->in_line && block->in_line->has_color) {
-        text_color.r = block->in_line->color.r;
-        text_color.g = block->in_line->color.g;
-        text_color.b = block->in_line->color.b;
-        text_color.a = block->in_line->color.a;
+    } else if (block && block->in_line && block->inl()->has_color) {
+        text_color.r = block->inl()->color.r;
+        text_color.g = block->inl()->color.g;
+        text_color.b = block->inl()->color.b;
+        text_color.a = block->inl()->color.a;
     } else {
         text_color = make_color(0, 0, 0);
     }
@@ -63,8 +63,8 @@ static Color form_accent_color(ViewBlock* block, bool disabled) {
     if (disabled) {
         return make_color(128, 128, 128);
     }
-    if (block && block->in_line && block->in_line->has_accent_color) {
-        return block->in_line->accent_color;
+    if (block && block->in_line && block->inl()->has_accent_color) {
+        return block->inl()->accent_color;
     }
     return make_color(0, 0, 0);
 }
@@ -74,7 +74,7 @@ static float form_text_align_offset(ViewBlock* block, float content_w,
     if (!block || !block->blk || text_w <= 0.0f || text_w >= content_w) {
         return 0.0f;
     }
-    CssEnum align = block->blk->text_align;
+    CssEnum align = block->block()->text_align;
     if (align == CSS_VALUE_CENTER) {
         return (content_w - text_w) * 0.5f;
     }
@@ -216,8 +216,8 @@ static bool form_border_has_author_override(BorderProp* border) {
 
 static float form_control_border_left_width(ViewBlock* block, bool has_css_border,
                                             bool use_default_border) {
-    if (has_css_border && block->bound && block->bound->border) {
-        return block->bound->border->width.left;
+    if (has_css_border && block->bound && block->boundary_mut()->border) {
+        return block->boundary()->border->width.left;
     }
     return use_default_border ? 1.0f : 0.0f;
 }
@@ -245,8 +245,8 @@ static FormControlBox form_control_box(RenderContext* rdcon, ViewBlock* block) {
     box.h = block->height * box.s;
     box.state = rdcon->ui_context && rdcon->ui_context->document
         ? (DocState*)rdcon->ui_context->document->state : nullptr;
-    box.has_css_background = block->bound && block->bound->background;
-    box.css_border = block->bound ? block->bound->border : nullptr;
+    box.has_css_background = block->bound && block->boundary_mut()->background;
+    box.css_border = block->bound ? block->boundary()->border : nullptr;
     box.has_css_border = form_border_has_visible_side(box.css_border);
     box.use_default_border = !form_border_has_author_override(box.css_border);
     box.disabled = form_control_is_disabled(box.state, static_cast<View*>(block));
@@ -266,11 +266,11 @@ static void paint_default_text_control_box(RenderContext* rdcon, ViewBlock* bloc
     if (!box->has_css_background) {
         Color bg = make_color(255, 255, 255);
         float bx = box->x, by = box->y, bw = box->w, bh = box->h;
-        if (box->has_css_border && block->bound && block->bound->border) {
-            float bl = block->bound->border->width.left * box->s;
-            float br = block->bound->border->width.right * box->s;
-            float bt = block->bound->border->width.top * box->s;
-            float bb = block->bound->border->width.bottom * box->s;
+        if (box->has_css_border && block->bound && block->boundary_mut()->border) {
+            float bl = block->boundary()->border->width.left * box->s;
+            float br = block->boundary()->border->width.right * box->s;
+            float bt = block->boundary()->border->width.top * box->s;
+            float bb = block->boundary()->border->width.bottom * box->s;
             bx += bl; by += bt;
             bw -= bl + br; bh -= bt + bb;
         }
@@ -665,7 +665,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     FontProp* render_font = form_render_font(block, form, is_placeholder);
 
     // Compute text area position (shared by text rendering and caret)
-    float padding = (block->bound ? block->bound->padding.left : FormDefaults::TEXT_PADDING_H) * s;
+    float padding = (block->bound ? block->boundary()->padding.left : FormDefaults::TEXT_PADDING_H) * s;
     float border_w = form_control_border_left_width(block, has_css_border, use_default_border) * s;
     float text_x = x + border_w + padding;
     float font_size_scaled = render_font ? render_font->font_size * s : 16.0f * s;
@@ -696,7 +696,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
                 float border_css = form_control_border_left_width(block,
                     has_css_border, use_default_border);
                 float padding_css = block->bound
-                    ? block->bound->padding.left : FormDefaults::TEXT_PADDING_H;
+                    ? block->boundary()->padding.left : FormDefaults::TEXT_PADDING_H;
                 caret_x_logical = (caret_rect.x - block->x - border_css - padding_css) * s;
                 used_shared_geometry = true;
             }
@@ -754,7 +754,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
             paint.scroll_x = scroll_px;
             paint.border_css = form_control_border_left_width(block,
                 has_css_border, use_default_border);
-            paint.padding_css = block->bound ? block->bound->padding.left
+            paint.padding_css = block->bound ? block->boundary()->padding.left
                 : FormDefaults::TEXT_PADDING_H;
             paint.use_text_origin = true;
             used_shared_selection =
@@ -974,11 +974,11 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
     const char* label_text = form_button_label_text(block, form);
     if (!block->first_child && label_text && *label_text && block->font) {
         Color text_color = make_color(0, 0, 0);
-        if (block->in_line && block->in_line->has_color) {
-            text_color.r = block->in_line->color.r;
-            text_color.g = block->in_line->color.g;
-            text_color.b = block->in_line->color.b;
-            text_color.a = block->in_line->color.a;
+        if (block->in_line && block->inl()->has_color) {
+            text_color.r = block->inl()->color.r;
+            text_color.g = block->inl()->color.g;
+            text_color.b = block->inl()->color.b;
+            text_color.a = block->inl()->color.a;
         }
 
         // Measure text width for horizontal centering
@@ -986,7 +986,7 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
             rdcon, block->font, label_text,
             (int)strlen(label_text)) * s; // INT_CAST_OK: form text measurement API uses byte-count ints.
 
-        float font_size_scaled = block->font->font_size * s;
+        float font_size_scaled = block->fontp()->font_size * s;
         float text_x = x + (w - text_width) / 2;
         float text_y = y + (h - font_size_scaled) / 2;
         render_simple_string(rdcon, label_text, text_x, text_y, block->font, text_color);
@@ -1050,7 +1050,7 @@ static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlPro
         fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
     } else if (has_css_border) {
         // Use actual CSS border width for arrow area inset below
-        bw = block->bound->border->width.right * s;
+        bw = block->boundary()->border->width.right * s;
     } else {
         bw = 0.0f;
     }
@@ -1085,14 +1085,14 @@ static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlPro
             // or author chevron (e.g. ::after sibling).
             float pad_l, pad_r, bw_l, bw_r;
             if (block->bound) {
-                pad_l = block->bound->padding.left * s;
-                pad_r = block->bound->padding.right * s;
+                pad_l = block->boundary()->padding.left * s;
+                pad_r = block->boundary()->padding.right * s;
             } else {
                 pad_l = pad_r = FormDefaults::TEXT_PADDING_H * s;
             }
-            if (block->bound && block->bound->border) {
-                bw_l = block->bound->border->width.left * s;
-                bw_r = block->bound->border->width.right * s;
+            if (block->bound && block->boundary_mut()->border) {
+                bw_l = block->boundary()->border->width.left * s;
+                bw_r = block->boundary()->border->width.right * s;
             } else {
                 bw_l = bw_r = bw;
             }
@@ -1101,7 +1101,7 @@ static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlPro
             float content_w = content_right - text_x;
 
             // Calculate text top position (vertically centered)
-            float font_height_scaled = block->font->font_height * s;
+            float font_height_scaled = block->fontp()->font_height * s;
             float text_top = y + (h - font_height_scaled) / 2;
 
             // Text color: prefer CSS-resolved color (from `color` property),
@@ -1110,11 +1110,11 @@ static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlPro
             Color text_color;
             if (disabled) {
                 text_color = make_color(109, 109, 109);
-            } else if (block->in_line && block->in_line->has_color) {
-                text_color.r = block->in_line->color.r;
-                text_color.g = block->in_line->color.g;
-                text_color.b = block->in_line->color.b;
-                text_color.a = block->in_line->color.a;
+            } else if (block->in_line && block->inl()->has_color) {
+                text_color.r = block->inl()->color.r;
+                text_color.g = block->inl()->color.g;
+                text_color.b = block->inl()->color.b;
+                text_color.a = block->inl()->color.a;
             } else {
                 text_color = make_color(0, 0, 0);
             }
@@ -1158,11 +1158,11 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
         if (parent->is_block()) {
             ViewBlock* pblock = lam::view_require_block(parent);
             // Account for scroll in parent containers
-            if (pblock->scroller && pblock->scroller->pane) {
+            if (pblock->scroller && pblock->scroll_mut()->pane) {
                 DocState* scroll_state = pblock->doc ? pblock->doc->state : NULL;
                 float scroll_x = 0.0f, scroll_y = 0.0f;
                 scroll_state_get_position_for_view(scroll_state, static_cast<View*>(pblock),
-                    pblock->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                    pblock->scroll()->pane, &scroll_x, &scroll_y, NULL, NULL);
                 abs_y -= scroll_y;
                 abs_x -= scroll_x;
             }
@@ -1233,7 +1233,7 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
 
             // Calculate text top position (vertically centered in option)
             // font_height is in CSS pixels, need to scale for physical pixels
-            float font_height_scaled = select->font->font_height * s;
+            float font_height_scaled = select->fontp()->font_height * s;
             // Center text vertically: opt_y + (option_height - font_height) / 2
             float text_top = opt_y + (option_height - font_height_scaled) / 2;
 
@@ -1335,7 +1335,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
     FontProp* render_font = form_render_font(block, form, is_placeholder);
 
     // Compute internal metrics
-    float padding = (block->bound ? block->bound->padding.left : FormDefaults::TEXTAREA_PADDING) * s;
+    float padding = (block->bound ? block->boundary()->padding.left : FormDefaults::TEXTAREA_PADDING) * s;
     float border_w_px = form_control_border_left_width(block, has_css_border, use_default_border) * s;
     float content_x = x + border_w_px + padding;
     float content_y = y + border_w_px + padding;
@@ -1368,7 +1368,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
         paint.scale = s;
         paint.border_css = form_control_border_left_width(block,
             has_css_border, use_default_border);
-        paint.padding_css = block->bound ? block->bound->padding.left
+        paint.padding_css = block->bound ? block->boundary()->padding.left
             : FormDefaults::TEXTAREA_PADDING;
         paint.scroll_x = form ? form->scroll_x * s : 0.0f;
         paint.scroll_y = form ? form->scroll_y * s : 0.0f;
@@ -1509,7 +1509,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                     float border_css = form_control_border_left_width(block,
                         has_css_border, use_default_border);
                     float padding_css = block->bound
-                        ? block->bound->padding.left : FormDefaults::TEXTAREA_PADDING;
+                        ? block->boundary()->padding.left : FormDefaults::TEXTAREA_PADDING;
                     caret_x = content_x + (caret_rect.x - block->x - border_css - padding_css) * s
                         - (form ? form->scroll_x * s : 0.0f);
                     caret_y_pos = content_y + (caret_rect.y - block->y - border_css - padding_css) * s
@@ -1588,10 +1588,10 @@ static void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp
 
 /**
  * Main entry point for rendering form controls.
- * Called from render_block_view when block has item_prop_type == ITEM_PROP_FORM.
+ * Called from render_block_view when the block owns the form-control role.
  */
 void render_form_control(RenderContext* rdcon, ViewBlock* block) {
-    if (!block || block->item_prop_type != DomElement::ITEM_PROP_FORM || !block->form) {
+    if (!block || block->role_kind() != DomElement::ROLE_FORM || !block->form) {
         return;
     }
 

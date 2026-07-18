@@ -26,9 +26,9 @@ struct CeClass {
 static CeClass classify_ce_attr(DomElement* e) {
     CeClass c{};
     if (!e) return c;
-    if (!dom_element_has_attribute(e, "contenteditable")) return c;
+    if (!e->has_attribute("contenteditable")) return c;
     c.has_attr = true;
-    const char* v = dom_element_get_attribute(e, "contenteditable");
+    const char* v = e->get_attribute("contenteditable");
     // bool-style: <div contenteditable> -> v is "" or nullptr.
     if (!v || *v == '\0' || strcasecmp(v, "true") == 0) {
         c.is_host = true;
@@ -88,8 +88,8 @@ bool editing_host_lookup(const DomNode* node, EditingHost* out) {
 
 const char* html_element_get_contentEditable(DomElement* element) {
     if (!element) return "inherit";
-    if (!dom_element_has_attribute(element, "contenteditable")) return "inherit";
-    const char* v = dom_element_get_attribute(element, "contenteditable");
+    if (!element->has_attribute("contenteditable")) return "inherit";
+    const char* v = element->get_attribute("contenteditable");
     if (!v || *v == '\0' || strcasecmp(v, "true") == 0) return "true";
     if (strcasecmp(v, "false") == 0) return "false";
     if (strcasecmp(v, "plaintext-only") == 0) return "plaintext-only";
@@ -101,17 +101,17 @@ bool html_element_set_contentEditable(DomElement* element, const char* value) {
 
     // Empty string is treated as "inherit" per WHATWG HTML.
     if (*value == '\0' || strcasecmp(value, "inherit") == 0) {
-        dom_element_remove_attribute(element, "contenteditable");
+        element->remove_attribute("contenteditable");
         return true;
     }
     if (strcasecmp(value, "true") == 0) {
-        return dom_element_set_attribute(element, "contenteditable", "true");
+        return element->set_attribute("contenteditable", "true");
     }
     if (strcasecmp(value, "false") == 0) {
-        return dom_element_set_attribute(element, "contenteditable", "false");
+        return element->set_attribute("contenteditable", "false");
     }
     if (strcasecmp(value, "plaintext-only") == 0) {
-        return dom_element_set_attribute(element, "contenteditable", "plaintext-only");
+        return element->set_attribute("contenteditable", "plaintext-only");
     }
     // SyntaxError — log and refuse. Caller (JS bridge) is responsible for
     // raising the DOMException; the C surface returns false.

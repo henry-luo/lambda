@@ -562,8 +562,8 @@ static RadiantInputStateEntry* riv_entry_get(DomElement* element, bool create) {
         1, sizeof(RadiantInputStateEntry), MEM_CAT_JS_RUNTIME);
     if (!entry) return nullptr;
     entry->element = element;
-    const char* type = dom_element_get_attribute(element, "type");
-    const char* initial = dom_element_get_attribute(element, "value");
+    const char* type = element->get_attribute("type");
+    const char* initial = element->get_attribute("value");
     char sanitized[128];
     radiant_input_value_sanitize(type, initial ? initial : "", sanitized, sizeof(sanitized));
     entry->value = mem_strdup(sanitized, MEM_CAT_JS_RUNTIME);
@@ -582,7 +582,7 @@ extern "C" const char* radiant_input_live_value(DomElement* element) {
 extern "C" bool radiant_input_set_live_value(DomElement* element, const char* value) {
     RadiantInputStateEntry* entry = riv_entry_get(element, true);
     if (!entry) return false;
-    const char* type = dom_element_get_attribute(element, "type");
+    const char* type = element->get_attribute("type");
     char sanitized[128];
     if (!radiant_input_value_sanitize(type, value ? value : "", sanitized,
                                       sizeof(sanitized))) return false;
@@ -596,7 +596,7 @@ extern "C" bool radiant_input_set_live_value(DomElement* element, const char* va
 extern "C" void radiant_input_reset_live_value(DomElement* element) {
     if (!element) return;
     radiant_input_set_live_value(element,
-        dom_element_get_attribute(element, "value"));
+        element->get_attribute("value"));
 }
 
 extern "C" void radiant_input_type_changed(DomElement* element) {

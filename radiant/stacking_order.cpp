@@ -9,20 +9,20 @@ extern "C" {
 static int radiant_stack_view_z_index(View* view) {
     ViewElement* element = lam::view_as_element(view);
     if (!element || !element->position) return 0;
-    return element->position->has_custom_layout_z_index ?
-        element->position->custom_layout_z_index : element->position->z_index;
+    return element->positionp()->has_custom_layout_z_index ?
+        element->positionp()->custom_layout_z_index : element->positionp()->z_index;
 }
 
 bool radiant_stack_is_positive_z_positioned(View* view) {
     ViewElement* element = lam::view_as_element(view);
-    if (element && element->position && element->position->has_custom_layout_z_index) {
+    if (element && element->position && element->positionp()->has_custom_layout_z_index) {
         // custom layout places normal-flow children but may still request
         // paint/hit-test stacking without rewriting authored CSS position.
-        return element->position->custom_layout_z_index > 0;
+        return element->positionp()->custom_layout_z_index > 0;
     }
     return element && element->position &&
-        element->position->z_index > 0 &&
-        element->position->position != CSS_VALUE_STATIC;
+        element->positionp()->z_index > 0 &&
+        element->positionp()->position != CSS_VALUE_STATIC;
 }
 
 bool radiant_stack_is_out_of_flow_positioned(View* view) {
@@ -65,7 +65,7 @@ ArrayList* radiant_stack_collect_positive_z_descendants(View* first_child, const
 }
 
 ArrayList* radiant_stack_collect_positioned_children(ViewBlock* block, const char* log_prefix) {
-    if (!block || !block->position || !block->position->first_abs_child) return NULL;
+    if (!block || !block->position || !block->positionp()->first_abs_child) return NULL;
     if (!log_prefix) log_prefix = "[RAD_STACK]";
 
     ArrayList* views = arraylist_new(16);
@@ -74,13 +74,13 @@ ArrayList* radiant_stack_collect_positioned_children(ViewBlock* block, const cha
         return NULL;
     }
 
-    ViewBlock* child = block->position->first_abs_child;
+    ViewBlock* child = block->positionp()->first_abs_child;
     while (child) {
         if (!arraylist_append(views, child)) {
             log_warn("%s failed to grow positioned list", log_prefix);
             break;
         }
-        child = child->position ? child->position->next_abs_sibling : NULL;
+        child = child->position ? child->positionp()->next_abs_sibling : NULL;
     }
     return views;
 }
@@ -119,10 +119,10 @@ static bool radiant_stack_entry_after(const RadiantStackPaintEntry* left,
 
 RadiantStackPaintList radiant_stack_collect_custom_layout_paint(ViewBlock* block) {
     RadiantStackPaintList list = {};
-    if (!block || !block->custom_layout_paint) return list;
+    if (!block || !block->custom_layout_paint_prop()) return list;
 
     CustomLayoutPaintState* paint =
-        (CustomLayoutPaintState*)block->custom_layout_paint;
+        (CustomLayoutPaintState*)block->custom_layout_paint_prop();
     int child_count = 0;
     for (View* child = block->first_child; child; child = child->next()) {
         if (child->view_type != RDT_VIEW_NONE &&

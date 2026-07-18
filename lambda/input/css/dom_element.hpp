@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 #include "../../../lib/avl_tree.h"
 #include "../../../lib/arena.h"
 #include "../../../lib/ownership.hpp"
@@ -34,6 +35,7 @@ typedef struct Element Element;
 typedef struct Input Input;
 typedef struct Arena Arena;
 typedef struct ViewTree ViewTree;  // From radiant/view.hpp
+typedef struct LayoutContext LayoutContext;  // From radiant/layout.hpp
 typedef struct DocState DocState;  // From radiant/state_store.h
 typedef struct StateStore StateStore;  // From radiant/state_store.hpp
 typedef struct Url Url;  // From lib/url.h
@@ -57,6 +59,7 @@ typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_STYLE_REPAINT = 7
 } DomJsMutationKind;
 
+// tier-1: doc-pool, survives relayout
 typedef struct DomJsMutationRecord {
     uint32_t sequence;
     DomJsMutationKind kind;
@@ -77,6 +80,72 @@ typedef enum DomReconcileMode {
     DOM_RECONCILE_DOCUMENT_REBUILD = 5
 } DomReconcileMode;
 
+// tier-1: document-owned runtime state
+struct DomJsRuntime {
+    void* mir_ctx;
+    void* preamble_state;
+    void* runtime_heap;
+    void* runtime_name_pool;
+    void* runtime_type_list;
+    void* runtime_pool;
+    void* doc_node;
+    int mutation_count;
+    uint32_t mutation_sequence;
+    uint32_t mutation_kind_mask;
+    int mutation_record_count;
+    int mutation_record_overflow;
+    DomJsMutationRecord mutation_records[DOM_JS_MUTATION_RECORD_CAP];
+    const char* ready_state;
+
+    DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime_heap(nullptr),
+        runtime_name_pool(nullptr), runtime_type_list(nullptr), runtime_pool(nullptr),
+        doc_node(nullptr), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
+        mutation_record_count(0), mutation_record_overflow(0), mutation_records{},
+        ready_state("complete") {}
+};
+
+// tier-1: document-owned viewport and render scale inputs
+struct ViewportMeta {
+    float given_scale;
+    float scale;
+    float initial_scale;
+    float min_scale;
+    float max_scale;
+    int width;
+    int height;
+    float body_transform_scale;
+
+    ViewportMeta() : given_scale(1.0f), scale(1.0f), initial_scale(1.0f),
+        min_scale(0.0f), max_scale(0.0f), width(0), height(0),
+        body_transform_scale(1.0f) {}
+};
+
+// tier-1: last reconciliation result exposed to diagnostics and tests
+struct ReconcileLog {
+    DomReconcileMode mode;
+    const char* reason;
+    int mutations;
+    int records;
+    int record_overflow;
+
+    ReconcileLog() : mode(DOM_RECONCILE_NONE), reason("none"), mutations(0),
+        records(0), record_overflow(0) {}
+};
+
+// tier-1: opaque services kept out of the public document spine
+struct DomDocumentServices {
+    void* mem_ctx;
+    void* cached_css_engine;
+    void* keyframe_registry;
+    uint32_t element_count;
+    uint32_t ext_allocations;
+    uint32_t layout_cache_allocations;
+
+    DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
+        keyframe_registry(nullptr), element_count(0), ext_allocations(0),
+        layout_cache_allocations(0) {}
+};
+
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
     switch (mode) {
         case DOM_RECONCILE_INCREMENTAL: return "incremental";
@@ -94,12 +163,13 @@ static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
  * Manages memory (arena) and Lambda integration (Input*)
  * Unified document structure (replaces radiant/dom.hpp Document)
  */
+// tier-1: doc-pool, survives relayout
 struct DomDocument {
     // Lambda integration
     Input* input;                // Lambda Input context for MarkEditor operations
     Pool* pool;                  // Pool for arena chunks
     Arena* arena;                // Memory arena for all DOM node allocations
-    void* mem_ctx;               // per-document MemContext sub-context (nullable; memory attribution)
+    DomDocumentServices services;
 
     // Document content
     Url* url;                    // Document URL
@@ -118,20 +188,7 @@ struct DomDocument {
     StateStore* state_store;     // Per-document state store owner
     DocState* state;             // Compatibility pointer to state_store->doc_state
 
-    // Scale system for rendering
-    // Layout operates in CSS logical pixels; scaling applied only during rendering
-    float given_scale;           // User-specified scale factor (default 1.0), from CLI --scale
-    float scale;                 // Final render scale = given_scale × pixel_ratio
-
-    // Viewport meta tag values (from <meta name="viewport" content="...">)
-    float viewport_initial_scale;  // initial-scale from viewport meta (default 1.0)
-    float viewport_min_scale;      // minimum-scale from viewport meta (default 0.0 = not set)
-    float viewport_max_scale;      // maximum-scale from viewport meta (default 0.0 = not set)
-    int viewport_width;            // viewport width (0 = device-width, >0 = explicit pixels)
-    int viewport_height;           // viewport height (0 = device-height, >0 = explicit pixels)
-
-    // Body transform scale (from CSS transform: scale() on body element)
-    float body_transform_scale;    // transform: scale() value from body CSS (default 1.0)
+    ViewportMeta viewport;
 
     // Network support (Phase 4 integration)
     struct NetworkResourceManager* resource_manager;  // Network resource coordinator (nullptr for local-only docs)
@@ -147,11 +204,6 @@ struct DomDocument {
     // Reactive UI: cached CSS for rebuild_lambda_doc optimization
     struct CssStylesheet** cached_inline_sheets;  // Parsed inline <style> stylesheets (cached)
     int cached_inline_sheet_count;                // Number of cached inline stylesheets
-    void* cached_css_engine;                      // CssEngine* (void* to avoid header dep)
-
-    // JS document-as-Node stub (lazy DomElement with tag "#document").
-    // Used so JS Range/Selection APIs can accept `document` as a container.
-    void* js_doc_node;
 
     // Reactive UI: Element* → DomElement* map for incremental DOM rebuild
     struct hashmap* element_dom_map;              // maps Lambda Element* to its DomElement wrapper
@@ -162,37 +214,16 @@ struct DomDocument {
     // Phase 16: Incremental layout mode — skip pool recreate, skip clean subtrees
     bool incremental_layout;
 
-    // JS DOM mutation counter — incremented by js_dom.cpp on each DOM mutation
-    int js_mutation_count;
-    uint32_t js_mutation_sequence;
-    uint32_t js_mutation_kind_mask;
-    int js_mutation_record_count;
-    int js_mutation_record_overflow;
-    DomJsMutationRecord js_mutation_records[DOM_JS_MUTATION_RECORD_CAP];
+    DomJsRuntime js;
 
     // Last DOM reconcile result. Tests assert this instead of parsing log.txt,
     // so fallback/state-retention coverage can distinguish broad reflow from
     // destructive document rebuild.
-    DomReconcileMode last_dom_reconcile_mode;
-    const char* last_dom_reconcile_reason;
-    int last_dom_reconcile_mutations;
-    int last_dom_reconcile_records;
-    int last_dom_reconcile_record_overflow;
+    ReconcileLog reconcile;
 
     // JS/meta requested document navigation. The loader follows this after
     // load-time scripts and refresh metadata have been processed.
     char* pending_navigation_url;
-
-    // CSS @keyframes registry (parsed from stylesheets on first animation use)
-    void* keyframe_registry;        // KeyframeRegistry* (void* to avoid header dep)
-
-    // Retained JS compilation state for interactive event handler dispatch
-    void* js_mir_ctx;               // MIR_context_t — keeps compiled JS code pages alive
-    void* js_preamble_state;        // JsPreambleState* — full state for cleanup
-    void* js_runtime_heap;          // Heap* — retained GC heap for JS objects
-    void* js_runtime_name_pool;     // NamePool* — retained string interning pool
-    void* js_runtime_type_list;     // ArrayList* — retained dynamic map type registry
-    void* js_runtime_pool;          // Pool* — retained mmap pool for JS code
 
     // Document charset (from <meta charset> or HTTP Content-Type), for CSS fallback encoding
     const char* document_charset;     // e.g. "windows-1251", nullptr means UTF-8
@@ -203,46 +234,22 @@ struct DomDocument {
     float pending_viewport_scroll_y;
     DomElement* pending_scroll_into_view_target;
 
-    // Browser-like lifecycle state exposed by document.readyState.
-    const char* js_ready_state;
-
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
                     next_node_id(1),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
                     view_tree(nullptr), state_store(nullptr), state(nullptr),
-                    given_scale(1.0f), scale(1.0f),
-                    viewport_initial_scale(1.0f), viewport_min_scale(0.0f), viewport_max_scale(0.0f),
-                    viewport_width(0), viewport_height(0),
-                    body_transform_scale(1.0f),
                     resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
                     lambda_runtime(nullptr), resources(nullptr),
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
-                    cached_css_engine(nullptr),
-                    js_doc_node(nullptr),
                     element_dom_map(nullptr),
                     skip_style_reset(false),
                     incremental_layout(false),
-                    js_mutation_count(0),
-                    js_mutation_sequence(0), js_mutation_kind_mask(0),
-                    js_mutation_record_count(0), js_mutation_record_overflow(0),
-                    js_mutation_records{},
-                    last_dom_reconcile_mode(DOM_RECONCILE_NONE),
-                    last_dom_reconcile_reason("none"),
-                    last_dom_reconcile_mutations(0),
-                    last_dom_reconcile_records(0),
-                    last_dom_reconcile_record_overflow(0),
                     pending_navigation_url(nullptr),
-                    keyframe_registry(nullptr),
-                    js_mir_ctx(nullptr), js_preamble_state(nullptr),
-                    js_runtime_heap(nullptr),
-                    js_runtime_name_pool(nullptr), js_runtime_type_list(nullptr),
-                    js_runtime_pool(nullptr),
                     document_charset(nullptr),
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),
-                    pending_scroll_into_view_target(nullptr),
-                    js_ready_state("complete") {}
+                    pending_scroll_into_view_target(nullptr) {}
 
     bool init(Input* input);
     void destroy();
@@ -250,6 +257,7 @@ struct DomDocument {
 
 typedef void (*DomDocumentResourceDestroyFn)(void* data);
 
+// tier-1: doc-pool, survives relayout
 typedef struct DomDocumentResource {
     void* data;
     DomDocumentResourceDestroyFn destroy;
@@ -259,6 +267,7 @@ typedef struct DomDocumentResource {
 bool dom_document_add_resource(DomDocument* document, void* data,
                                DomDocumentResourceDestroyFn destroy);
 
+// tier-1: doc-pool, survives relayout
 typedef struct {
     CssEnum outer;
     CssEnum inner;
@@ -281,6 +290,23 @@ typedef struct TableProp TableProp;
 typedef struct FormControlProp FormControlProp;
 typedef struct ViewBlock ViewBlock;
 
+extern const BlockProp BLOCK_PROP_DEFAULT;
+extern const BoundaryProp BOUNDARY_PROP_DEFAULT;
+extern const FontProp FONT_PROP_DEFAULT;
+extern const InlineProp INLINE_PROP_DEFAULT;
+extern const ScrollProp SCROLL_PROP_DEFAULT;
+extern const PositionProp POSITION_PROP_DEFAULT;
+extern const EmbedProp EMBED_PROP_DEFAULT;
+extern const TransformProp TRANSFORM_PROP_DEFAULT;
+extern const FilterProp FILTER_PROP_DEFAULT;
+extern const MultiColumnProp MULTICOL_PROP_DEFAULT;
+extern const FlexItemProp FLEX_ITEM_PROP_DEFAULT;
+extern const GridItemProp GRID_ITEM_PROP_DEFAULT;
+extern const TableProp TABLE_PROP_DEFAULT;
+extern const TableCellProp TABLE_CELL_PROP_DEFAULT;
+extern const FormControlProp FORM_CONTROL_PROP_DEFAULT;
+
+// tier-1: doc-pool, survives relayout
 typedef struct LayoutFragmentBox {
     float x, y, width, height;
     int fragment_index;
@@ -293,12 +319,71 @@ typedef struct LayoutFragmentBox {
 namespace radiant { struct LayoutCache; }
 
 // CSS Custom Property (CSS Variable) storage
+// tier-1: doc-pool, survives relayout
 struct CssCustomProp {
     const char* name;       // Variable name (e.g., "--primary-color")
     const CssValue* value;  // Variable value
     const char* value_text; // Raw value text for faithful CSSOM serialization
     size_t value_text_len;  // Length of value_text
     CssCustomProp* next;    // Linked list for simple storage
+};
+
+enum DomElementFlag : uint32_t {
+    ELMT_FLAG_NEEDS_STYLE_RECOMPUTE = 1u << 0,
+    ELMT_FLAG_STYLES_RESOLVED = 1u << 1,
+    ELMT_FLAG_FLOAT_PRELAID = 1u << 2,
+    ELMT_FLAG_HAS_CACHED_INTRINSIC_WIDTHS = 1u << 3,
+    ELMT_FLAG_MEASURING_INTRINSIC_WIDTH = 1u << 4,
+    ELMT_FLAG_HAS_PENDING_SCROLL_X = 1u << 5,
+    ELMT_FLAG_HAS_PENDING_SCROLL_Y = 1u << 6,
+    ELMT_FLAG_HAS_INLINE_FRAGMENT_UNION = 1u << 7,
+    ELMT_FLAG_HAS_ANCESTOR_FRAGMENT_UNION = 1u << 8,
+    ELMT_FLAG_HAS_COLLAPSED_LINE_FRAGMENT_UNION = 1u << 9,
+    ELMT_FLAG_HAS_SPLIT_INLINE_FRAGMENT_UNION = 1u << 10,
+    ELMT_FLAG_PARENT_ITEM_KIND_SHIFT = 11,
+    ELMT_FLAG_PARENT_ITEM_KIND_MASK = 3u << ELMT_FLAG_PARENT_ITEM_KIND_SHIFT,
+    ELMT_FLAG_ROLE_KIND_SHIFT = 13,
+    ELMT_FLAG_ROLE_KIND_MASK = 7u << ELMT_FLAG_ROLE_KIND_SHIFT,
+    ELMT_FLAG_SYNTHETIC = 1u << 16,
+};
+
+enum FragmentUnionKind : uint8_t {
+    FRAGMENT_UNION_INLINE = 0,
+    FRAGMENT_UNION_ANCESTOR,
+    FRAGMENT_UNION_COLLAPSED_LINE,
+    FRAGMENT_UNION_SPLIT_INLINE,
+    FRAGMENT_UNION_COUNT,
+};
+
+enum PseudoStyleKind : uint8_t {
+    PSEUDO_STYLE_BEFORE = 0,
+    PSEUDO_STYLE_AFTER,
+    PSEUDO_STYLE_FIRST_LETTER,
+    PSEUDO_STYLE_MARKER,
+    PSEUDO_STYLE_PLACEHOLDER,
+    PSEUDO_STYLE_COUNT,
+};
+
+// tier-1: doc-pool, survives relayout
+struct FragmentUnion {
+    float min_x, max_x, min_y, max_y;
+};
+
+// tier-1: doc-pool, survives relayout
+struct DomElementExt {
+    FragmentUnion frags[FRAGMENT_UNION_COUNT];
+    uint8_t fragment_presence_mask;
+    StyleTree* pseudo_styles[PSEUDO_STYLE_COUNT];
+    MultiColumnProp* multicol;
+    VectorPathProp* vpath;
+    FilterProp* backdrop_filter;
+    void* custom_layout_paint;
+    LayoutFragmentBox* layout_fragments;
+    int layout_fragment_count;
+    DomElement* shadow_host;
+    DomElement* shadow_root;
+    float pending_element_scroll_x;
+    float pending_element_scroll_y;
 };
 
 /**
@@ -310,18 +395,15 @@ struct CssCustomProp {
  * - Version tracking for cache invalidation
  * - Parent/child relationships for inheritance
  */
+// tier-1: doc-pool, survives relayout
 struct DomElement : DomNode {
+    // Resolved props point into the shorter-lived view pool by unified-tree design;
+    // every relayout resets and rebuilds them before consumers may read the tree.
     // === Embedded Lambda Element (at known offset from DomNode base) ===
     // In UI mode, this IS the Lambda Element. In the current phase, data is copied
     // from the original Element during dom_element_init(). MarkEditor operates on
-    // native_element which points here, so mutations happen in-place.
+    // this embedded value, so mutations happen in-place.
     Element elmt;
-
-    // Convenience pointer into the embedded Element above.
-    // For backed elements: native_element == &elmt (set by dom_element_init)
-    // For anonymous/pseudo elements: native_element == nullptr
-    // TODO(Phase 4): Remove this field; use dom_element_to_element() instead.
-    Element* native_element;
 
     // Basic element information
     const char* tag_name;        // Element tag name (cached string)
@@ -336,22 +418,13 @@ struct DomElement : DomNode {
     const char** class_names;    // Array of class names (cached)
     int class_count;             // Number of classes
     StyleTree* specified_style;  // Specified values from CSS rules (AVL tree)
-    // Pseudo-element styles (::before and ::after)
-    StyleTree* before_styles;    // Styles for ::before pseudo-element
-    StyleTree* after_styles;     // Styles for ::after pseudo-element
-    StyleTree* first_letter_styles;  // Styles for ::first-letter pseudo-element
-    StyleTree* marker_styles;    // Styles for ::marker pseudo-element
-    StyleTree* placeholder_styles; // Styles for ::placeholder pseudo-element
+    DomElementExt* ext;          // rare DOM/view state, allocated lazily from doc pool
     // we do not store computed_style;
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
-    bool needs_style_recompute;  // Flag indicating computed values are stale
-    bool styles_resolved;        // Flag to track if styles resolved in current layout pass
-    bool float_prelaid;          // Flag to skip float during normal flow (pre-laid in float pass)
+    uint32_t elmt_flags;         // compact element state; use the accessors below
     // document reference (provides Arena and Input*)
     DomDocument* doc;            // Parent document (provides arena and input)
-    DomElement* shadow_host;     // Non-null when this document fragment is a shadow root
-    DomElement* shadow_root;     // Non-null when this element hosts a shadow root
 
     // CSS custom properties (CSS variables)
     struct CssCustomProp* css_variables;  // Hashmap of --var-name: value
@@ -366,50 +439,39 @@ struct DomElement : DomNode {
 
     // CSS Text soft hyphen fragments can contribute to an inline element's
     // border-box union without producing an additional DOM text rect.
-    bool has_inline_fragment_union;
-    float inline_fragment_min_x;
-    float inline_fragment_max_x;
-    float inline_fragment_min_y;
-    float inline_fragment_max_y;
 
     // collapsed text can create an anonymous line fragment that affects ancestor
     // inline decorations without contributing to this element's own DOMRect.
-    bool has_ancestor_fragment_union;
-    float ancestor_fragment_min_x;
-    float ancestor_fragment_max_x;
-    float ancestor_fragment_min_y;
-    float ancestor_fragment_max_y;
 
     // line-edge collapsible whitespace may leave a zero-width inline fragment
     // on a real line even though its text node has no visible rect.
-    bool has_collapsed_line_fragment_union;
-    float collapsed_line_fragment_min_x;
-    float collapsed_line_fragment_max_x;
-    float collapsed_line_fragment_min_y;
-    float collapsed_line_fragment_max_y;
 
     // block-in-inline splitting creates anonymous line fragments for every inline
     // ancestor in the split chain. These store the content-area union; each span's
     // own border/padding is applied when its DOMRect is computed.
-    bool has_split_inline_fragment_union;
-    float split_inline_fragment_min_x;
-    float split_inline_fragment_max_x;
-    float split_inline_fragment_min_y;
-    float split_inline_fragment_max_y;
 
-    // Item property type indicator (fi, gi, tb, td, form share union)
-    enum ItemPropType : uint8_t {
-        ITEM_PROP_NONE = 0,
-        ITEM_PROP_FLEX = 1,    // fi (FlexItemProp)
-        ITEM_PROP_GRID = 2,    // gi (GridItemProp)
-        ITEM_PROP_TABLE = 3,   // tb (TableProp)
-        ITEM_PROP_CELL = 4,    // td (TableCellProp)
-        ITEM_PROP_FORM = 5     // form (FormControlProp)
-    } item_prop_type = ITEM_PROP_NONE;
+    enum ParentItemKind : uint8_t {
+        PARENT_ITEM_NONE = 0,
+        PARENT_ITEM_FLEX = 1,
+        PARENT_ITEM_GRID = 2,
+    };
 
+    enum RoleKind : uint8_t {
+        ROLE_NONE = 0,
+        ROLE_TABLE = 1,
+        ROLE_CELL = 2,
+        ROLE_FORM = 3,
+    };
+
+    // Parent-item and own-role storage are independent because CSS permits a
+    // table or form control to participate in a flex/grid parent.
+    // Reads must enter through the tagged accessors below; direct members are
+    // reserved for mutation after the corresponding tag has been established.
     union {
         FlexItemProp* fi;
         GridItemProp* gi;
+    };
+    union {
         TableProp* tb;  // table specific properties
         TableCellProp* td;  // table cell specific properties
         FormControlProp* form;  // form control properties
@@ -419,10 +481,6 @@ struct DomElement : DomNode {
     float content_width, content_height;  // width and height of the child content including padding
     BlockProp* blk;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
-    float pending_element_scroll_x;
-    float pending_element_scroll_y;
-    bool has_pending_element_scroll_x;
-    bool has_pending_element_scroll_y;
     // block content related properties for flexbox, image, iframe
     EmbedProp* embed;
     // positioning properties for CSS positioning
@@ -438,62 +496,224 @@ struct DomElement : DomNode {
     // CSS filter properties
     FilterProp* filter;
     // CSS backdrop-filter properties
-    FilterProp* backdrop_filter;
-    // CSS multi-column layout properties
-    MultiColumnProp* multicol;
-    // CSS fragmentation: generated border-box fragments for a single element.
-    LayoutFragmentBox* layout_fragments;
-    int layout_fragment_count;
     // pseudo-element content and layout state (::before/::after)
     PseudoContentProp* pseudo;
     // vector path for PDF/SVG curve rendering
-    VectorPathProp* vpath;
-    // retained generated paint owned by a custom layout callback
-    void* custom_layout_paint;
     // Layout cache for avoiding redundant layout computations (Taffy-inspired)
     // Stores up to 9 measurement results + 1 final layout result
     radiant::LayoutCache* layout_cache;
 
-    // Intrinsic sizing cache for avoiding redundant measurement during layout
-    float cached_min_content_width;
-    float cached_max_content_width;
-    bool has_cached_intrinsic_widths;
-    bool measuring_intrinsic_width;  // re-entrancy guard to break measurement cycles
+    bool flag(DomElementFlag value) const { return (elmt_flags & value) != 0; }
+    void set_flag(DomElementFlag value, bool enabled) {
+        if (enabled) elmt_flags |= value;
+        else elmt_flags &= ~value;
+    }
+
+    bool needs_style_recompute() const { return flag(ELMT_FLAG_NEEDS_STYLE_RECOMPUTE); }
+    void set_needs_style_recompute(bool value) { set_flag(ELMT_FLAG_NEEDS_STYLE_RECOMPUTE, value); }
+    bool styles_resolved() const { return flag(ELMT_FLAG_STYLES_RESOLVED); }
+    void set_styles_resolved(bool value) { set_flag(ELMT_FLAG_STYLES_RESOLVED, value); }
+    bool float_prelaid() const { return flag(ELMT_FLAG_FLOAT_PRELAID); }
+    void set_float_prelaid(bool value) { set_flag(ELMT_FLAG_FLOAT_PRELAID, value); }
+    bool has_cached_intrinsic_widths() const { return flag(ELMT_FLAG_HAS_CACHED_INTRINSIC_WIDTHS); }
+    void set_has_cached_intrinsic_widths(bool value) { set_flag(ELMT_FLAG_HAS_CACHED_INTRINSIC_WIDTHS, value); }
+    bool measuring_intrinsic_width() const { return flag(ELMT_FLAG_MEASURING_INTRINSIC_WIDTH); }
+    void set_measuring_intrinsic_width(bool value) { set_flag(ELMT_FLAG_MEASURING_INTRINSIC_WIDTH, value); }
+    bool is_synthetic() const { return flag(ELMT_FLAG_SYNTHETIC); }
+    void set_synthetic(bool value) { set_flag(ELMT_FLAG_SYNTHETIC, value); }
+    bool has_pending_element_scroll_x() const { return flag(ELMT_FLAG_HAS_PENDING_SCROLL_X); }
+    void set_has_pending_element_scroll_x(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_X, value); }
+    bool has_pending_element_scroll_y() const { return flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y); }
+    void set_has_pending_element_scroll_y(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y, value); }
+    bool has_inline_fragment_union() const { return has_fragment_union(FRAGMENT_UNION_INLINE); }
+    void set_has_inline_fragment_union(bool value) { set_has_fragment_union(FRAGMENT_UNION_INLINE, value); }
+    bool has_ancestor_fragment_union() const { return has_fragment_union(FRAGMENT_UNION_ANCESTOR); }
+    void set_has_ancestor_fragment_union(bool value) { set_has_fragment_union(FRAGMENT_UNION_ANCESTOR, value); }
+    bool has_collapsed_line_fragment_union() const { return has_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE); }
+    void set_has_collapsed_line_fragment_union(bool value) { set_has_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE, value); }
+    bool has_split_inline_fragment_union() const { return has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE); }
+    void set_has_split_inline_fragment_union(bool value) { set_has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE, value); }
+
+    ParentItemKind parent_item_kind() const {
+        return (ParentItemKind)((elmt_flags & ELMT_FLAG_PARENT_ITEM_KIND_MASK) >>
+                                ELMT_FLAG_PARENT_ITEM_KIND_SHIFT);
+    }
+    void set_parent_item_kind(ParentItemKind kind) {
+        elmt_flags = (elmt_flags & ~ELMT_FLAG_PARENT_ITEM_KIND_MASK) |
+                     ((uint32_t)kind << ELMT_FLAG_PARENT_ITEM_KIND_SHIFT);
+    }
+    RoleKind role_kind() const {
+        return (RoleKind)((elmt_flags & ELMT_FLAG_ROLE_KIND_MASK) >> ELMT_FLAG_ROLE_KIND_SHIFT);
+    }
+    void set_role_kind(RoleKind kind) {
+        elmt_flags = (elmt_flags & ~ELMT_FLAG_ROLE_KIND_MASK) |
+                     ((uint32_t)kind << ELMT_FLAG_ROLE_KIND_SHIFT);
+    }
+    int item_prop_debug_kind() const {
+        return role_kind() != ROLE_NONE ? 2 + (int)role_kind() : (int)parent_item_kind();
+    }
+    FlexItemProp* flex_item() const { return parent_item_kind() == PARENT_ITEM_FLEX ? fi : nullptr; }
+    GridItemProp* grid_item() const { return parent_item_kind() == PARENT_ITEM_GRID ? gi : nullptr; }
+    TableProp* table_prop() const { return role_kind() == ROLE_TABLE ? tb : nullptr; }
+    TableCellProp* cell_prop() const { return role_kind() == ROLE_CELL ? td : nullptr; }
+    FormControlProp* form_control() const { return role_kind() == ROLE_FORM ? form : nullptr; }
+
+    const BlockProp* block() const;
+    const BoundaryProp* boundary() const;
+    const FontProp* fontp() const;
+    const InlineProp* inl() const;
+    const ScrollProp* scroll() const;
+    const PositionProp* positionp() const;
+    const EmbedProp* embedp() const;
+    const TransformProp* transformp() const;
+    const FilterProp* filterp() const;
+    BlockProp* block_mut();
+    BoundaryProp* boundary_mut();
+    FontProp* font_mut();
+    InlineProp* inline_mut();
+    ScrollProp* scroll_mut();
+    PositionProp* position_mut();
+    EmbedProp* embed_mut();
+    TransformProp* transform_mut();
+    FilterProp* filter_mut();
+
+    BlockProp* ensure_block(ViewTree* tree);
+    BoundaryProp* ensure_boundary(ViewTree* tree);
+    FontProp* ensure_font(ViewTree* tree);
+    InlineProp* ensure_inline(ViewTree* tree);
+    ScrollProp* ensure_scroll(ViewTree* tree);
+    PositionProp* ensure_position(ViewTree* tree);
+    EmbedProp* ensure_embed(ViewTree* tree);
+    TransformProp* ensure_transform(ViewTree* tree);
+    FilterProp* ensure_filter(ViewTree* tree);
+    MultiColumnProp* ensure_multicol(ViewTree* tree);
+    FlexItemProp* ensure_flex_item(ViewTree* tree);
+    GridItemProp* ensure_grid_item(ViewTree* tree);
+    TableProp* ensure_table(ViewTree* tree);
+    TableCellProp* ensure_cell(ViewTree* tree);
+    FormControlProp* ensure_form(ViewTree* tree);
+
+    BoundaryProp* ensure_boundary(LayoutContext* lycon);
+    BlockProp* ensure_block(LayoutContext* lycon);
+    FontProp* ensure_font(LayoutContext* lycon);
+    InlineProp* ensure_inline(LayoutContext* lycon);
+    ScrollProp* ensure_scroll(LayoutContext* lycon);
+    PositionProp* ensure_position(LayoutContext* lycon);
+    EmbedProp* ensure_embed(LayoutContext* lycon);
+    TransformProp* ensure_transform(LayoutContext* lycon);
+    FilterProp* ensure_filter(LayoutContext* lycon);
+    MultiColumnProp* ensure_multicol(LayoutContext* lycon);
+
+    bool set_attribute(const char* name, const char* value);
+    const char* get_attribute(const char* name);
+    bool remove_attribute(const char* name);
+    bool has_attribute(const char* name);
+    const char** attribute_names(int* count);
+    bool add_class(const char* class_name);
+    bool remove_class(const char* class_name);
+    bool has_class(const char* class_name) const;
+    bool toggle_class(const char* class_name);
+    DomElement* parent_element() const;
+    DomElement* first_child_element() const;
+    DomElement* last_child_element() const;
+    DomElement* next_sibling_element() const;
+    DomElement* prev_sibling_element() const;
+    using DomNode::append_child;
+    using DomNode::insert_before;
+    using DomNode::remove_child;
+    bool link_child(DomElement* child);
+    bool append_child(DomElement* child);
+    bool remove_child(DomElement* child);
+    bool insert_before(DomElement* new_child, DomElement* reference_child);
+    bool is_first_child();
+    bool is_last_child();
+    bool is_only_child();
+    int child_index();
+    int child_count();
+    int count_child_elements();
+    bool matches_nth_child(int a, int b);
+    DomText* append_text(const char* text_content);
+    DomComment* append_comment(const char* comment_content);
+
+    DomElementExt* ensure_ext() {
+        if (!ext && doc && doc->pool) {
+            ext = (DomElementExt*)pool_calloc(doc->pool, sizeof(DomElementExt));
+            if (ext) doc->services.ext_allocations++;
+        }
+        return ext;
+    }
+    StyleTree* pseudo_style(PseudoStyleKind kind) const { return ext ? ext->pseudo_styles[kind] : nullptr; }
+    StyleTree** pseudo_style_slot(PseudoStyleKind kind) {
+        DomElementExt* value = ensure_ext();
+        return value ? &value->pseudo_styles[kind] : nullptr;
+    }
+    void set_pseudo_style(PseudoStyleKind kind, StyleTree* style) {
+        if (style || ext) *pseudo_style_slot(kind) = style;
+    }
+    bool has_fragment_union(FragmentUnionKind kind) const {
+        return ext && (ext->fragment_presence_mask & (1u << kind));
+    }
+    void set_has_fragment_union(FragmentUnionKind kind, bool value) {
+        if (!value && !ext) return;
+        DomElementExt* data = ensure_ext();
+        if (value) data->fragment_presence_mask |= (1u << kind);
+        else data->fragment_presence_mask &= ~(1u << kind);
+    }
+    const FragmentUnion* fragment_union(FragmentUnionKind kind) const {
+        return ext ? &ext->frags[kind] : nullptr;
+    }
+    FragmentUnion* ensure_fragment_union(FragmentUnionKind kind) {
+        DomElementExt* data = ensure_ext();
+        return data ? &data->frags[kind] : nullptr;
+    }
+    MultiColumnProp* multicol_prop() const { return ext ? ext->multicol : nullptr; }
+    void set_multicol_prop(MultiColumnProp* value) { if (value || ext) ensure_ext()->multicol = value; }
+    VectorPathProp* vector_path() const { return ext ? ext->vpath : nullptr; }
+    void set_vector_path(VectorPathProp* value) { if (value || ext) ensure_ext()->vpath = value; }
+    FilterProp* backdrop_filter_prop() const { return ext ? ext->backdrop_filter : nullptr; }
+    FilterProp** backdrop_filter_slot() { return &ensure_ext()->backdrop_filter; }
+    void set_backdrop_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->backdrop_filter = value; }
+    void* custom_layout_paint_prop() const { return ext ? ext->custom_layout_paint : nullptr; }
+    void set_custom_layout_paint_prop(void* value) { if (value || ext) ensure_ext()->custom_layout_paint = value; }
+    LayoutFragmentBox* layout_fragment_list() const { return ext ? ext->layout_fragments : nullptr; }
+    void set_layout_fragment_list(LayoutFragmentBox* value) { if (value || ext) ensure_ext()->layout_fragments = value; }
+    int layout_fragments_count() const { return ext ? ext->layout_fragment_count : 0; }
+    int& layout_fragments_count_ref() { return ensure_ext()->layout_fragment_count; }
+    DomElement* shadow_host_element() const { return ext ? ext->shadow_host : nullptr; }
+    void set_shadow_host_element(DomElement* value) { if (value || ext) ensure_ext()->shadow_host = value; }
+    DomElement* shadow_root_element() const { return ext ? ext->shadow_root : nullptr; }
+    void set_shadow_root_element(DomElement* value) { if (value || ext) ensure_ext()->shadow_root = value; }
+    float pending_scroll_x() const { return ext ? ext->pending_element_scroll_x : 0.0f; }
+    void set_pending_scroll_x(float value) { ensure_ext()->pending_element_scroll_x = value; }
+    float pending_scroll_y() const { return ext ? ext->pending_element_scroll_y : 0.0f; }
+    void set_pending_scroll_y(float value) { ensure_ext()->pending_element_scroll_y = value; }
+    void reset_view_ext() {
+        if (!ext) return;
+        // Doc-pooled storage outlives view results, so every relayout must drop
+        // geometry and paint produced by the previous view-pool epoch.
+        ext->fragment_presence_mask = 0;
+        memset(ext->frags, 0, sizeof(ext->frags));
+        ext->layout_fragments = nullptr;
+        ext->layout_fragment_count = 0;
+        ext->custom_layout_paint = nullptr;
+    }
 
     // Constructor
-    DomElement() : DomNode(DOM_NODE_ELEMENT), elmt{}, native_element(nullptr),
+    DomElement() : DomNode(DOM_NODE_ELEMENT), elmt{},
         tag_name(nullptr), first_child(nullptr), last_child(nullptr),
         tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
-        before_styles(nullptr), after_styles(nullptr), first_letter_styles(nullptr),
-        marker_styles(nullptr), placeholder_styles(nullptr),
-        style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
-        doc(nullptr), shadow_host(nullptr), shadow_root(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
+        ext(nullptr), style_version(0),
+        // A constructed element has no Lambda backing until dom_element_init binds one.
+        elmt_flags(ELMT_FLAG_SYNTHETIC),
+        doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
         font(nullptr), bound(nullptr), in_line(nullptr),
-        has_inline_fragment_union(false),
-        inline_fragment_min_x(0), inline_fragment_max_x(0),
-        inline_fragment_min_y(0), inline_fragment_max_y(0),
-        has_ancestor_fragment_union(false),
-        ancestor_fragment_min_x(0), ancestor_fragment_max_x(0),
-        ancestor_fragment_min_y(0), ancestor_fragment_max_y(0),
-        has_collapsed_line_fragment_union(false),
-        collapsed_line_fragment_min_x(0), collapsed_line_fragment_max_x(0),
-        collapsed_line_fragment_min_y(0), collapsed_line_fragment_max_y(0),
-        has_split_inline_fragment_union(false),
-        split_inline_fragment_min_x(0), split_inline_fragment_max_x(0),
-        split_inline_fragment_min_y(0), split_inline_fragment_max_y(0),
-        item_prop_type(ITEM_PROP_NONE), fi(nullptr),
+        fi(nullptr), tb(nullptr),
         content_width(0), content_height(0),
         blk(nullptr), scroller(nullptr),
-        pending_element_scroll_x(0), pending_element_scroll_y(0),
-        has_pending_element_scroll_x(false), has_pending_element_scroll_y(false),
         embed(nullptr), position(nullptr),
         transform(nullptr), transition_state(nullptr),
-        filter(nullptr), backdrop_filter(nullptr), multicol(nullptr),
-        layout_fragments(nullptr), layout_fragment_count(0), pseudo(nullptr),
-        vpath(nullptr), custom_layout_paint(nullptr), layout_cache(nullptr),
-        cached_min_content_width(0), cached_max_content_width(0),
-        has_cached_intrinsic_widths(false), measuring_intrinsic_width(false) {}
+        filter(nullptr), pseudo(nullptr), layout_cache(nullptr) {}
 };
 
 // ============================================================================
@@ -508,6 +728,15 @@ struct DomElement : DomNode {
 // DomElement* → Element*: returns pointer to the embedded Element within DomElement
 inline Element* dom_element_to_element(DomElement* de) { return &de->elmt; }
 inline const Element* dom_element_to_element(const DomElement* de) { return &de->elmt; }
+
+// Synthetic layout-only nodes deliberately have no Lambda-tree identity even
+// though they carry the same embedded storage for a uniform object layout.
+inline Element* dom_element_backing(DomElement* de) {
+    return de && !de->is_synthetic() ? dom_element_to_element(de) : nullptr;
+}
+inline const Element* dom_element_backing(const DomElement* de) {
+    return de && !de->is_synthetic() ? dom_element_to_element(de) : nullptr;
+}
 
 // Element* → DomElement*: reverse conversion (caller must ensure Element is embedded in a DomElement)
 inline DomElement* element_to_dom_element(Element* e) {
@@ -612,7 +841,7 @@ void dom_document_destroy(DomDocument* document);
  * Create a new DomElement
  * @param doc Parent document (provides arena and input)
  * @param tag_name Element tag name (e.g., "div", "span")
- * @param native_element Pointer to backing Lambda Element (required)
+ * @param native_element Pointer to backing Lambda Element; null creates a synthetic node
  * @return New DomElement or NULL on failure
  */
 DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element);
@@ -628,7 +857,7 @@ void dom_element_destroy(DomElement* element);
  * @param element Element to initialize
  * @param doc Parent document (provides arena and input)
  * @param tag_name Element tag name
- * @param native_element Pointer to backing Lambda Element (required)
+ * @param native_element Pointer to backing Lambda Element; null creates a synthetic node
  * @return true on success, false on failure
  */
 bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_name, Element* native_element);
@@ -638,87 +867,6 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
  * @param element Element to clear
  */
 void dom_element_clear(DomElement* element);
-
-// ============================================================================
-// Attribute Management
-// ============================================================================
-
-/**
- * Set an element attribute
- * @param element Target element
- * @param name Attribute name
- * @param value Attribute value
- * @return true on success, false on failure
- */
-bool dom_element_set_attribute(DomElement* element, const char* name, const char* value);
-
-/**
- * Get an element attribute
- * @param element Target element
- * @param name Attribute name
- * @return Attribute value or NULL if not found
- */
-const char* dom_element_get_attribute(DomElement* element, const char* name);
-
-/**
- * Remove an element attribute
- * @param element Target element
- * @param name Attribute name
- * @return true if attribute was removed, false if not found
- */
-bool dom_element_remove_attribute(DomElement* element, const char* name);
-
-/**
- * Check if element has an attribute
- * @param element Target element
- * @param name Attribute name
- * @return true if attribute exists, false otherwise
- */
-bool dom_element_has_attribute(DomElement* element, const char* name);
-
-/**
- * Get all attribute names from element
- * @param element Target element
- * @param count Output parameter for number of attributes
- * @return Array of attribute names (from element's shape, pool-allocated)
- */
-const char** dom_element_get_attribute_names(DomElement* element, int* count);
-
-// ============================================================================
-// Class Management
-// ============================================================================
-
-/**
- * Add a CSS class to an element
- * @param element Target element
- * @param class_name Class name to add
- * @return true on success, false on failure
- */
-bool dom_element_add_class(DomElement* element, const char* class_name);
-
-/**
- * Remove a CSS class from an element
- * @param element Target element
- * @param class_name Class name to remove
- * @return true if class was removed, false if not found
- */
-bool dom_element_remove_class(DomElement* element, const char* class_name);
-
-/**
- * Check if element has a CSS class
- * @param element Target element
- * @param class_name Class name to check
- * @return true if class exists, false otherwise
- */
-bool dom_element_has_class(DomElement* element, const char* class_name);
-
-/**
- * Toggle a CSS class on an element
- * @param element Target element
- * @param class_name Class name to toggle
- * @return true if class is now present, false if removed
- */
-bool dom_element_toggle_class(DomElement* element, const char* class_name);
 
 // ============================================================================
 // Inline Style Support
@@ -838,150 +986,6 @@ const char* dom_element_get_pseudo_element_content_with_counters(
  * @return true if property was removed, false if not found
  */
 bool dom_element_remove_property(DomElement* element, CssPropertyId property_id);
-
-// ============================================================================
-// DOM Tree Navigation
-// ============================================================================
-
-/**
- * Get element parent
- * @param element Target element
- * @return Parent element or NULL if none
- */
-DomElement* dom_element_get_parent(DomElement* element);
-
-/**
- * Get first child element
- * @param element Target element
- * @return First child or NULL if none
- */
-DomElement* dom_element_get_first_child(DomElement* element);
-DomElement* dom_element_get_last_child(DomElement* element);
-
-/**
- * Get next sibling element
- * @param element Target element
- * @return Next sibling or NULL if none
- */
-DomElement* dom_element_get_next_sibling(DomElement* element);
-
-/**
- * Get previous sibling element
- * @param element Target element
- * @return Previous sibling or NULL if none
- */
-DomElement* dom_element_get_prev_sibling(DomElement* element);
-
-/**
- * Link child element to parent in DOM sibling chain only.
- * Use this when the child is ALREADY in the parent's Lambda tree.
- * Does NOT modify the Lambda tree - only updates DOM navigation pointers.
- *
- * Typical use case: Building DOM wrappers from existing Lambda tree structure
- * where parent-child relationships already exist in the Lambda data.
- *
- * @param parent Parent element
- * @param child Child element to link (must already exist in parent's Lambda tree)
- * @return true on success, false on error
- */
-bool dom_element_link_child(DomElement* parent, DomElement* child);
-
-/**
- * Append child element to parent, updating BOTH Lambda tree AND DOM sibling chain.
- * Use this when adding a NEW child that is NOT yet in the parent's Lambda tree.
- *
- * Requires both parent and child to have Lambda backing (native_element).
- * Creates a new parent-child relationship in both the Lambda tree structure
- * and the DOM navigation chain.
- *
- * For children already in the Lambda tree, use dom_element_link_child() instead.
- *
- * @param parent Parent element (must have Lambda backing)
- * @param child Child element (must have Lambda backing)
- * @return true on success, false on failure
- */
-bool dom_element_append_child(DomElement* parent, DomElement* child);
-
-/**
- * Append text content as backed DomText node
- * Creates Lambda String and adds to parent's children array via MarkEditor
- * @param parent Parent element (must be backed)
- * @param text Text content to append
- * @return New DomText node or NULL on failure
- */
-DomText* dom_element_append_text_backed(DomElement* parent, const char* text);
-
-/**
- * Remove a child element
- * @param parent Parent element
- * @param child Child element to remove
- * @return true on success, false if child not found
- */
-bool dom_element_remove_child(DomElement* parent, DomElement* child);
-
-/**
- * Insert a child element before another child
- * @param parent Parent element
- * @param new_child Child element to insert
- * @param reference_child Child before which to insert
- * @return true on success, false on failure
- */
-bool dom_element_insert_before(DomElement* parent, DomElement* new_child, DomElement* reference_child);
-
-// ============================================================================
-// Structural Queries
-// ============================================================================
-
-/**
- * Check if element matches a structural position
- * @param element Target element
- * @return true if element is first child of its parent
- */
-bool dom_element_is_first_child(DomElement* element);
-
-/**
- * Check if element is last child
- * @param element Target element
- * @return true if element is last child of its parent
- */
-bool dom_element_is_last_child(DomElement* element);
-
-/**
- * Check if element is only child
- * @param element Target element
- * @return true if element is only child of its parent
- */
-bool dom_element_is_only_child(DomElement* element);
-
-/**
- * Get element's index among siblings (0-based)
- * @param element Target element
- * @return Index among siblings, or -1 if no parent
- */
-int dom_element_get_child_index(DomElement* element);
-
-/**
- * Count all children (elements, text nodes, comments)
- * @param element Target element
- * @return Total number of child nodes
- */
-int dom_element_child_count(DomElement* element);
-
-/**
- * Count only element children (excludes text nodes and comments)
- * @param element Target element
- * @return Number of child elements
- */
-int dom_element_count_child_elements(DomElement* element);
-
-/**
- * Check if element matches nth-child formula
- * @param element Target element
- * @param a Coefficient in an+b formula
- * @param b Constant in an+b formula
- * @return true if element matches nth-child(an+b)
- */
-bool dom_element_matches_nth_child(DomElement* element, int a, int b);
 
 // ============================================================================
 // Utility Functions

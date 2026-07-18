@@ -65,8 +65,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             break;
         case RDT_VIEW_TABLE: {
             ViewTable* table = lam::unsafe_view_table_storage(node);
-            table->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
-            table->item_prop_type = DomElement::ITEM_PROP_TABLE;
+            table->ensure_table(lycon->doc->view_tree);
             // Initialize defaults
             table->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
             // CSS 2.1 Section 17.6.1: initial value for border-spacing is 0
@@ -83,8 +82,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         case RDT_VIEW_TABLE_CELL: {
             // Initialize rowspan/colspan from DOM attributes (for Lambda CSS support)
             ViewTableCell* cell = lam::unsafe_view_table_cell_storage(view);
-            cell->td = (TableCellProp*)alloc_prop(lycon, sizeof(TableCellProp));
-            cell->item_prop_type = DomElement::ITEM_PROP_CELL;
+            cell->ensure_cell(lycon->doc->view_tree);
             // Read colspan attribute
             const char* colspan_str = node->get_attribute("colspan");
             if (colspan_str && *colspan_str) {
@@ -178,13 +176,29 @@ DEFINE_VIEW_PROP_ACCESSORS(embed)
 DEFINE_VIEW_PROP_ACCESSORS(position)
 DEFINE_VIEW_PROP_ACCESSORS(transform)
 DEFINE_VIEW_PROP_ACCESSORS(filter)
-DEFINE_VIEW_PROP_ACCESSORS(backdrop_filter)
-DEFINE_VIEW_PROP_ACCESSORS(multicol)
 DEFINE_VIEW_PROP_ACCESSORS(pseudo)
-DEFINE_VIEW_PROP_ACCESSORS(vpath)
 DEFINE_VIEW_PROP_ACCESSORS(layout_cache)
 
 #undef DEFINE_VIEW_PROP_ACCESSORS
+
+static void* view_prop_get_backdrop_filter(DomElement* elem) {
+    return elem ? (void*)elem->backdrop_filter_prop() : nullptr;
+}
+static void view_prop_clear_backdrop_filter(DomElement* elem, ViewTree*) {
+    if (elem) elem->set_backdrop_filter_prop(nullptr);
+}
+static void* view_prop_get_multicol(DomElement* elem) {
+    return elem ? (void*)elem->multicol_prop() : nullptr;
+}
+static void view_prop_clear_multicol(DomElement* elem, ViewTree*) {
+    if (elem) elem->set_multicol_prop(nullptr);
+}
+static void* view_prop_get_vpath(DomElement* elem) {
+    return elem ? (void*)elem->vector_path() : nullptr;
+}
+static void view_prop_clear_vpath(DomElement* elem, ViewTree*) {
+    if (elem) elem->set_vector_path(nullptr);
+}
 
 static void release_font_prop(FontProp* font) {
     if (font) {
@@ -201,26 +215,26 @@ static void free_element_font_payload(DomElement* elem, ViewTree* tree) {
     // FontProp family is sometimes retained separately from the prop; the
     // teardown table owns both members so new font-owned pool pointers only
     // need to register in one place.
-    if (elem->font->family) {
-        view_pool_free_ptr(tree, elem->font->family);
+    if (elem->fontp()->family) {
+        view_pool_free_ptr(tree, elem->fontp()->family);
     }
 }
 
 static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->bound) return;
-    view_pool_free_ptr(tree, elem->bound->background);
-    view_pool_free_ptr(tree, elem->bound->border);
-    view_pool_free_ptr(tree, elem->bound->mask);
-    view_pool_free_ptr(tree, elem->bound->box_shadow);
-    view_pool_free_ptr(tree, elem->bound->outline);
+    view_pool_free_ptr(tree, elem->boundary()->background);
+    view_pool_free_ptr(tree, elem->boundary()->border);
+    view_pool_free_ptr(tree, elem->boundary()->mask);
+    view_pool_free_ptr(tree, elem->boundary()->box_shadow);
+    view_pool_free_ptr(tree, elem->boundary()->outline);
 }
 
 static void release_embedded_document(DomElement* elem) {
-    if (!elem || !elem->embed || !elem->embed->doc) {
+    if (!elem || !elem->embed || !elem->embedp()->doc) {
         return;
     }
 
-    DomDocument* embedded_doc = elem->embed->doc;
+    DomDocument* embedded_doc = elem->embedp()->doc;
     elem->embed->doc = nullptr;
     free_document(embedded_doc);
 }
@@ -278,12 +292,12 @@ void release_dom_owned_embed_images(DomElement* elem) {
 
     // Cached data URI SVGs have no URL, so ownership must come from the cache
     // marker rather than URL presence to avoid freeing a borrowed cache surface.
-    if (elem->embed->img && !elem->embed->img->url && !elem->embed->img->cache_owned) {
-        image_surface_destroy(elem->embed->img);
+    if (elem->embedp()->img && !elem->embedp()->img->url && !elem->embedp()->img->cache_owned) {
+        image_surface_destroy(elem->embedp()->img);
         elem->embed->img = nullptr;
     }
-    if (elem->embed->poster && !elem->embed->poster->url && !elem->embed->poster->cache_owned) {
-        image_surface_destroy(elem->embed->poster);
+    if (elem->embedp()->poster && !elem->embedp()->poster->url && !elem->embedp()->poster->cache_owned) {
+        image_surface_destroy(elem->embedp()->poster);
         elem->embed->poster = nullptr;
     }
 }
@@ -293,7 +307,7 @@ static void release_embed_prop(DomElement* elem) {
     release_dom_owned_embed_images(elem);
     release_media_prop(elem->embed);
     release_embedded_document(elem);
-    release_grid_prop(elem->embed->grid);
+    release_grid_prop(elem->embedp()->grid);
 }
 
 static void release_embed_prop_entry(DomElement* elem, ViewTree*) {
@@ -302,17 +316,17 @@ static void release_embed_prop_entry(DomElement* elem, ViewTree*) {
 
 static void free_embed_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
-    view_pool_free_ptr(tree, elem->embed->flex);
-    view_pool_free_ptr(tree, elem->embed->grid);
+    view_pool_free_ptr(tree, elem->embedp()->flex);
+    view_pool_free_ptr(tree, elem->embedp()->grid);
 }
 
 static void free_scroll_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->scroller) return;
-    view_pool_free_ptr(tree, elem->scroller->pane);
+    view_pool_free_ptr(tree, elem->scroll()->pane);
 }
 
 static void release_form_prop(DomElement* elem, ViewTree*) {
-    if (!elem || elem->item_prop_type != DomElement::ITEM_PROP_FORM || !elem->form) {
+    if (!elem || elem->role_kind() != DomElement::ROLE_FORM || !elem->form) {
         return;
     }
 
@@ -331,25 +345,31 @@ static void release_form_prop(DomElement* elem, ViewTree*) {
 static void clear_item_prop(DomElement* elem, ViewTree*) {
     if (!elem) return;
     elem->fi = nullptr;
-    elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+    elem->tb = nullptr;
+    elem->set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
+    elem->set_role_kind(DomElement::ROLE_NONE);
 }
 
 static void free_item_prop(DomElement* elem, ViewTree* tree) {
     if (!elem) return;
-    switch (elem->item_prop_type) {
-        case DomElement::ITEM_PROP_FLEX:
+    switch (elem->parent_item_kind()) {
+        case DomElement::PARENT_ITEM_FLEX:
             view_pool_free_ptr(tree, elem->fi);
             break;
-        case DomElement::ITEM_PROP_GRID:
+        case DomElement::PARENT_ITEM_GRID:
             view_pool_free_ptr(tree, elem->gi);
             break;
-        case DomElement::ITEM_PROP_TABLE:
+        default:
+            break;
+    }
+    switch (elem->role_kind()) {
+        case DomElement::ROLE_TABLE:
             view_pool_free_ptr(tree, elem->tb);
             break;
-        case DomElement::ITEM_PROP_CELL:
+        case DomElement::ROLE_CELL:
             view_pool_free_ptr(tree, elem->td);
             break;
-        case DomElement::ITEM_PROP_FORM:
+        case DomElement::ROLE_FORM:
             if (elem->form && !elem->form->heap_allocated) {
                 view_pool_free_ptr(tree, elem->form);
             }
@@ -358,7 +378,9 @@ static void free_item_prop(DomElement* elem, ViewTree* tree) {
             break;
     }
     elem->fi = nullptr;
-    elem->item_prop_type = DomElement::ITEM_PROP_NONE;
+    elem->tb = nullptr;
+    elem->set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
+    elem->set_role_kind(DomElement::ROLE_NONE);
 }
 
 static void view_prop_free_member(DomElement* elem, ViewTree* tree,
@@ -438,9 +460,10 @@ static void view_teardown_clear_element_scalars(DomElement* elem) {
     elem->view_type = RDT_VIEW_NONE;
     elem->content_width = 0.0f;
     elem->content_height = 0.0f;
-    elem->has_cached_intrinsic_widths = false;
-    elem->styles_resolved = false;
-    elem->float_prelaid = false;
+    elem->set_has_cached_intrinsic_widths(false);
+    elem->set_styles_resolved(false);
+    elem->set_float_prelaid(false);
+    elem->reset_view_ext();
 }
 
 static void view_teardown_clear_text(DomText* text) {
@@ -552,48 +575,6 @@ void* ViewTree::alloc_prop(size_t size) {
     }
 }
 
-InlineProp* alloc_inline_prop(LayoutContext* lycon) {
-    InlineProp* prop = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
-    prop->opacity = 1.0f;  // CSS default: fully opaque (pool_calloc zeros to 0.0f)
-    return prop;
-}
-
-ScrollProp* alloc_scroll_prop(LayoutContext* lycon) {
-    ScrollProp* prop = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-    prop->overflow_x = prop->overflow_y = CSS_VALUE_VISIBLE;   // initial value
-    prop->pane = (ScrollPane*)pool_calloc(lycon->doc->view_tree->pool, sizeof(ScrollPane));
-    return prop;
-}
-
-BlockProp* alloc_block_prop(LayoutContext* lycon) {
-    BlockProp* prop = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
-    prop->line_height = null;
-    prop->text_align = lycon->block.text_align;  // inherit from parent
-    prop->align_content = CSS_VALUE__UNDEF;  // not specified; normal block flow does not shift content
-    prop->direction = lycon->block.direction;  // inherit from parent (CSS 2.1 §9.2.1)
-    prop->text_transform = (CssEnum)0;  // 0 = not set, will be inherited if needed
-    prop->word_break = (CssEnum)0;      // 0 = not set, treat as CSS_VALUE_NORMAL
-    prop->overflow_wrap = (CssEnum)0;    // 0 = not set, treat as CSS_VALUE_NORMAL
-    prop->text_spacing_trim = CSS_VALUE_NORMAL;
-    prop->break_before = CSS_VALUE_AUTO;
-    prop->break_after = CSS_VALUE_AUTO;
-    prop->orphans = 2;                    // CSS initial value
-    prop->widows = 2;                     // CSS initial value
-    prop->tab_size = 8;                  // CSS default tab-size is 8
-    prop->given_min_height = prop->given_min_width = prop->given_max_height = prop->given_max_width = -1;  // -1 for undefined
-    prop->box_sizing = CSS_VALUE_CONTENT_BOX;  // default to content-box
-    prop->box_decoration_break = CSS_VALUE_SLICE;  // CSS initial value
-    prop->given_width = prop->given_height = -1;  // -1 for not specified
-    prop->given_width_percent = prop->given_height_percent = NAN;  // NAN for not percentage
-    prop->contain_intrinsic_width = prop->contain_intrinsic_height = -1;
-    prop->contain_size = false;
-    prop->given_min_width_percent = prop->given_max_width_percent = NAN;
-    prop->given_min_height_percent = prop->given_max_height_percent = NAN;
-    prop->text_indent = 0;  // default to 0
-    prop->text_indent_percent = NAN;  // NAN means not percentage (deferred resolution)
-    return prop;
-}
-
 FontProp* alloc_font_prop(LayoutContext* lycon) {
     FontProp* prop = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
     // inherit parent font styles
@@ -603,18 +584,12 @@ FontProp* alloc_font_prop(LayoutContext* lycon) {
     return prop;
 }
 
-PositionProp* alloc_position_prop(LayoutContext* lycon) {
-    PositionProp* prop = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
-    position_prop_init_defaults(prop);
-    return prop;
-}
-
 // alloc flex container blk
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block->embed) {
-        block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+        block->ensure_embed(lycon);
     }
-    if (!block->embed->flex) {
+    if (!block->embedp()->flex) {
         FlexProp* prop = (FlexProp*)alloc_prop(lycon, sizeof(FlexProp));
         prop->direction = DIR_ROW;
         prop->wrap = WRAP_NOWRAP;
@@ -629,58 +604,34 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
 
 static void init_flex_item_prop_defaults(FlexItemProp* prop) {
     if (!prop) return;
-    memset(prop, 0, sizeof(FlexItemProp));
-    prop->flex_basis = -1;  // -1 for auto
-    prop->flex_grow = 0;
-    prop->flex_shrink = 1;
-    prop->align_self = CSS_VALUE_AUTO;  // CSS initial value
-    prop->order = 0;
-    prop->aspect_ratio = 0;
+    memcpy(prop, &FLEX_ITEM_PROP_DEFAULT, sizeof(FlexItemProp));
 }
 
 void reset_flex_item_prop_for_style(LayoutContext* lycon, ViewSpan* span) {
     if (!span) return;
 
-    // form/grid/table item props share storage with fi; do not overwrite them.
-    if (span->item_prop_type == DomElement::ITEM_PROP_FORM ||
-        span->item_prop_type == DomElement::ITEM_PROP_GRID ||
-        span->item_prop_type == DomElement::ITEM_PROP_TABLE ||
-        span->item_prop_type == DomElement::ITEM_PROP_CELL) {
+    if (span->parent_item_kind() == DomElement::PARENT_ITEM_GRID) {
         return;
     }
 
-    if (span->item_prop_type != DomElement::ITEM_PROP_FLEX || !span->fi) {
-        FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
-        span->fi = prop;
-        span->item_prop_type = DomElement::ITEM_PROP_FLEX;
-    }
+    span->ensure_flex_item(lycon->doc->view_tree);
     init_flex_item_prop_defaults(span->fi);
 }
 
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
-    log_debug("alloc_flex_item_prop: span=%p, item_prop_type=%d, fi=%p, form=%p",
-              span, span ? span->item_prop_type : -1, span ? span->fi : nullptr, span ? span->form : nullptr);
-    // Don't overwrite form control properties - form controls store intrinsic size
-    // in form->intrinsic_width/height instead of fi->intrinsic_*
-    if (span->item_prop_type == DomElement::ITEM_PROP_FORM) {
-        log_debug("alloc_flex_item_prop: skipping form control");
-        return;  // Preserve form control properties
-    }
+    log_debug("alloc_flex_item_prop: span=%p, parent_kind=%d, role_kind=%d, fi=%p, form=%p",
+              span, span ? span->parent_item_kind() : -1, span ? span->role_kind() : -1,
+              span ? span->fi : nullptr, span ? span->form : nullptr);
     // Don't overwrite grid item properties - fi and gi share a union, so allocating
     // fi would destroy gi placement data. Flex properties (flex-grow, flex-shrink, etc.)
     // are irrelevant on grid items per CSS Grid spec.
-    if (span->item_prop_type == DomElement::ITEM_PROP_GRID) {
+    if (span->parent_item_kind() == DomElement::PARENT_ITEM_GRID) {
         log_debug("alloc_flex_item_prop: skipping grid item (fi/gi union)");
         return;  // Preserve grid item properties
     }
-    // IMPORTANT: fi and gi are in a union, so we must check item_prop_type
-    // not just whether fi is NULL. If gi was allocated, fi will be non-NULL
-    // but pointing to GridItemProp memory, which is wrong for flex items.
-    if (span->item_prop_type != DomElement::ITEM_PROP_FLEX) {
-        FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
-        span->fi = prop;
-        span->item_prop_type = DomElement::ITEM_PROP_FLEX;
-        init_flex_item_prop_defaults(prop);
+    // fi and gi remain exclusive because an element has only one parent formatting context.
+    if (span->parent_item_kind() != DomElement::PARENT_ITEM_FLEX) {
+        FlexItemProp* prop = span->ensure_flex_item(lycon->doc->view_tree);
         log_debug("alloc_flex_item_prop: allocated fi=%p for span=%p", prop, span);
     }
 }
@@ -688,9 +639,9 @@ void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
 // alloc grid container prop
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block->embed) {
-        block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+        block->ensure_embed(lycon);
     }
-    if (!block->embed->grid) {
+    if (!block->embedp()->grid) {
         GridProp* grid = (GridProp*)alloc_prop(lycon, sizeof(GridProp));
         // Set default values using enum names that align with Lexbor constants
         grid->justify_content = CSS_VALUE_START;
@@ -706,31 +657,9 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
 }
 
 void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
-    // IMPORTANT: fi and gi are in a union, so we must check item_prop_type
-    // not just whether gi is NULL. If fi was allocated, gi will be non-NULL
-    // but pointing to FlexItemProp memory, which is wrong for grid items.
-    if (span->item_prop_type != DomElement::ITEM_PROP_GRID) {
-        GridItemProp* prop = (GridItemProp*)alloc_prop(lycon, sizeof(GridItemProp));
-        span->gi = prop;
-        span->item_prop_type = DomElement::ITEM_PROP_GRID;
-        // Initialize with default values (auto placement)
-        prop->grid_row_start = 0;  // 0 means auto
-        prop->grid_row_end = 0;
-        prop->grid_column_start = 0;
-        prop->grid_column_end = 0;
-        prop->grid_area = nullptr;
-        prop->justify_self = CSS_VALUE_AUTO;
-        prop->align_self_grid = CSS_VALUE_AUTO;
-        prop->order = 0;  // Default order is 0
-        prop->computed_grid_row_start = 0;
-        prop->computed_grid_row_end = 0;
-        prop->computed_grid_column_start = 0;
-        prop->computed_grid_column_end = 0;
-        prop->has_explicit_grid_row_start = false;
-        prop->has_explicit_grid_row_end = false;
-        prop->has_explicit_grid_column_start = false;
-        prop->has_explicit_grid_column_end = false;
-        prop->is_grid_auto_placed = true;
+    // fi and gi remain exclusive because an element has only one parent formatting context.
+    if (span->parent_item_kind() != DomElement::PARENT_ITEM_GRID) {
+        span->ensure_grid_item(lycon->doc->view_tree);
     }
 }
 
@@ -814,23 +743,23 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
     if (span->in_line) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
-        if (span->in_line->cursor) {
+        if (span->inl()->cursor) {
             const char* cursor;
-            switch (span->in_line->cursor) {
+            switch (span->inl()->cursor) {
             case CSS_VALUE_POINTER:
                 cursor = "pointer";  break;
             case CSS_VALUE_TEXT:
                 cursor = "text";  break;
             default:
-                cursor = css_enum_info(span->in_line->cursor)->name;
+                cursor = css_enum_info(span->inl()->cursor)->name;
             }
             strbuf_append_format(buf, "cursor:%s ", cursor);
         }
-        if (span->in_line->has_color) {
-            strbuf_append_format(buf, "color:#%x ", span->in_line->color.c);
+        if (span->inl()->has_color) {
+            strbuf_append_format(buf, "color:#%x ", span->inl()->color.c);
         }
-        if (span->in_line->vertical_align) {
-            strbuf_append_format(buf, "vertical-align:%s ", css_enum_info(span->in_line->vertical_align)->name);
+        if (span->inl()->vertical_align) {
+            strbuf_append_format(buf, "vertical-align:%s ", css_enum_info(span->inl()->vertical_align)->name);
         }
         strbuf_append_str(buf, "}\n");
     }
@@ -839,41 +768,41 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
 
         // Font weight is a numeric value (400, 700, etc.)
         char weight_buf[16];
-        snprintf(weight_buf, sizeof(weight_buf), "%d", span->font->font_weight);
+        snprintf(weight_buf, sizeof(weight_buf), "%d", span->fontp()->font_weight);
 
         strbuf_append_format(buf, "{font:{family:'%s', size:%.1f, style:%s, weight:%s, decoration:%s}}\n",
-            span->font->family, span->font->font_size, css_enum_info(span->font->font_style)->name,
-            weight_buf, css_enum_info(span->font->text_deco)->name);
+            span->fontp()->family, span->fontp()->font_size, css_enum_info(span->fontp()->font_style)->name,
+            weight_buf, css_enum_info(span->fontp()->text_deco)->name);
     }
     if (span->bound) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
-        if (span->bound->background) {
-            strbuf_append_format(buf, "bgcolor:#%x ", span->bound->background->color.c);
+        if (span->boundary()->background) {
+            strbuf_append_format(buf, "bgcolor:#%x ", span->boundary()->background->color.c);
         }
         strbuf_append_format(buf, "margin:{left:%.1f, right:%.1f, top:%.1f, bottom:%.1f} ",
-            span->bound->margin.left, span->bound->margin.right, span->bound->margin.top, span->bound->margin.bottom);
+            span->boundary()->margin.left, span->boundary()->margin.right, span->boundary()->margin.top, span->boundary()->margin.bottom);
         strbuf_append_format(buf, "padding:{left:%.1f, right:%.1f, top:%.1f, bottom:%.1f}",
-            span->bound->padding.left, span->bound->padding.right, span->bound->padding.top, span->bound->padding.bottom);
+            span->boundary()->padding.left, span->boundary()->padding.right, span->boundary()->padding.top, span->boundary()->padding.bottom);
         strbuf_append_str(buf, "}\n");
 
         // border prop group
-        if (span->bound->border) {
+        if (span->boundary()->border) {
             strbuf_append_char_n(buf, ' ', indent);  strbuf_append_str(buf, "{");
             strbuf_append_format(buf, "border:{t-color:#%x, r-color:#%x, b-color:#%x, l-color:#%x,\n",
-                span->bound->border->top_color.c, span->bound->border->right_color.c,
-                span->bound->border->bottom_color.c, span->bound->border->left_color.c);
+                span->boundary()->border->top_color.c, span->boundary()->border->right_color.c,
+                span->boundary()->border->bottom_color.c, span->boundary()->border->left_color.c);
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_format(buf, "  t-wd:%.1f, r-wd:%.1f, b-wd:%.1f, l-wd:%f, "
                 "t-sty:%d, r-sty:%d, b-sty:%d, l-sty:%d\n",
-                span->bound->border->width.top, span->bound->border->width.right,
-                span->bound->border->width.bottom, span->bound->border->width.left,
-                span->bound->border->top_style, span->bound->border->right_style,
-                span->bound->border->bottom_style, span->bound->border->left_style);
+                span->boundary()->border->width.top, span->boundary()->border->width.right,
+                span->boundary()->border->width.bottom, span->boundary()->border->width.left,
+                span->boundary()->border->top_style, span->boundary()->border->right_style,
+                span->boundary()->border->bottom_style, span->boundary()->border->left_style);
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_format(buf, "  tl-rd:%f, tr-rd:%f, br-rd:%f, bl-rd:%f}\n",
-                span->bound->border->radius.top_left, span->bound->border->radius.top_right,
-                span->bound->border->radius.bottom_right, span->bound->border->radius.bottom_left);
+                span->boundary()->border->radius.top_left, span->boundary()->border->radius.top_right,
+                span->boundary()->border->radius.bottom_right, span->boundary()->border->radius.bottom_left);
         }
     }
 }
@@ -882,20 +811,20 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     if (block->blk) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
-        strbuf_append_format(buf, "line-hg:%.1f, ", block->blk->line_height);
-        strbuf_append_format(buf, "txt-align:%s, ", css_enum_info(block->blk->text_align)->name);
-        strbuf_append_format(buf, "txt-indent:%.1f, ", block->blk->text_indent);
-        strbuf_append_format(buf, "ls-sty-type:%d,\n", block->blk->list_style_type);
+        strbuf_append_format(buf, "line-hg:%.1f, ", block->block()->line_height);
+        strbuf_append_format(buf, "txt-align:%s, ", css_enum_info(block->block()->text_align)->name);
+        strbuf_append_format(buf, "txt-indent:%.1f, ", block->block()->text_indent);
+        strbuf_append_format(buf, "ls-sty-type:%d,\n", block->block()->list_style_type);
         strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_format(buf, " min-wd:%.1f, ", block->blk->given_min_width);
-        strbuf_append_format(buf, "max-wd:%.1f, ", block->blk->given_max_width);
-        strbuf_append_format(buf, "min-hg:%.1f, ", block->blk->given_min_height);
-        strbuf_append_format(buf, "max-hg:%.1f, ", block->blk->given_max_height);
-        if (block->blk->given_width >= 0) {
-            strbuf_append_format(buf, "given-wd:%.1f, ", block->blk->given_width);
+        strbuf_append_format(buf, " min-wd:%.1f, ", block->block()->given_min_width);
+        strbuf_append_format(buf, "max-wd:%.1f, ", block->block()->given_max_width);
+        strbuf_append_format(buf, "min-hg:%.1f, ", block->block()->given_min_height);
+        strbuf_append_format(buf, "max-hg:%.1f, ", block->block()->given_max_height);
+        if (block->block()->given_width >= 0) {
+            strbuf_append_format(buf, "given-wd:%.1f, ", block->block()->given_width);
         }
-        if (block->blk->given_height >= 0) {
-            strbuf_append_format(buf, "given-hg:%.1f, ", block->blk->given_height);
+        if (block->block()->given_height >= 0) {
+            strbuf_append_format(buf, "given-hg:%.1f, ", block->block()->given_height);
         }
         if (layout_uses_border_box(block)) {
             strbuf_append_str(buf, "box-sizing:border-box");
@@ -906,13 +835,13 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     }
 
     // Add flex container debugging info
-    if (block->embed && block->embed->flex) {
+    if (block->embed && block->embedp()->flex) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{flex-container: ");
 
         // flex-direction
         const char* direction_str = "row";
-        switch (block->embed->flex->direction) {
+        switch (block->embedp()->flex->direction) {
             case DIR_ROW: direction_str = "row"; break;
             case DIR_ROW_REVERSE: direction_str = "row-reverse"; break;
             case DIR_COLUMN: direction_str = "column"; break;
@@ -922,7 +851,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 
         // flex-wrap
         const char* wrap_str = "nowrap";
-        switch (block->embed->flex->wrap) {
+        switch (block->embedp()->flex->wrap) {
             case WRAP_NOWRAP: wrap_str = "nowrap"; break;
             case WRAP_WRAP: wrap_str = "wrap"; break;
             case WRAP_WRAP_REVERSE: wrap_str = "wrap-reverse"; break;
@@ -931,52 +860,52 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 
         // justify-content (handle custom value CSS_VALUE_SPACE_EVENLY = 0x0199)
         const char* justify_str = flex_enum_name(
-            (CssEnum)block->embed->flex->justify, "flex-start");
+            (CssEnum)block->embedp()->flex->justify, "flex-start");
         strbuf_append_format(buf, "justify:%s ", justify_str);
 
         // align-items (handle custom value for space-evenly)
         const char* align_items_str = flex_enum_name(
-            (CssEnum)block->embed->flex->align_items, "stretch");
+            (CssEnum)block->embedp()->flex->align_items, "stretch");
         strbuf_append_format(buf, "align-items:%s ", align_items_str);
 
         // align-content (handle custom value for space-evenly)
         const char* align_content_str = flex_enum_name(
-            (CssEnum)block->embed->flex->align_content, "stretch");
+            (CssEnum)block->embedp()->flex->align_content, "stretch");
         strbuf_append_format(buf, "align-content:%s ", align_content_str);
 
         strbuf_append_format(buf, "row-gap:%.0f column-gap:%.0f",
-            block->embed->flex->row_gap, block->embed->flex->column_gap);
+            block->embedp()->flex->row_gap, block->embedp()->flex->column_gap);
         strbuf_append_str(buf, "}\n");
     }
 
     if (block->scroller) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
-        if (block->scroller->overflow_x) {
-            const CssEnumInfo* overflow_x_value = css_enum_info(block->scroller->overflow_x);
+        if (block->scroll()->overflow_x) {
+            const CssEnumInfo* overflow_x_value = css_enum_info(block->scroll()->overflow_x);
             if (overflow_x_value && overflow_x_value->name) {
                 strbuf_append_format(buf, "overflow-x:%s ", overflow_x_value->name);
             }
         }
-        if (block->scroller->overflow_y) {
-            const CssEnumInfo* overflow_y_value = css_enum_info(block->scroller->overflow_y);
+        if (block->scroll()->overflow_y) {
+            const CssEnumInfo* overflow_y_value = css_enum_info(block->scroll()->overflow_y);
             if (overflow_y_value && overflow_y_value->name) {
                 strbuf_append_format(buf, "overflow-y:%s ", overflow_y_value->name);
             }
         }
-        if (block->scroller->has_hz_overflow) {
+        if (block->scroll()->has_hz_overflow) {
             strbuf_append_str(buf, "hz-overflow:true ");
         }
-        if (block->scroller->has_vt_overflow) { // corrected variable name
+        if (block->scroll()->has_vt_overflow) { // corrected variable name
             strbuf_append_str(buf, "vt-overflow:true ");
         }
-        if (block->scroller->has_hz_scroll) {
+        if (block->scroll()->has_hz_scroll) {
             strbuf_append_str(buf, "hz-scroll:true ");
         }
-        if (block->scroller->has_vt_scroll) {
+        if (block->scroll()->has_vt_scroll) {
             strbuf_append_str(buf, "vt-scroll:true");
         }
-        // strbuf_append_format(buf, "scrollbar:{v:%p, h:%p}", block->scroller->pane->v_scrollbar, block->scroller->pane->h_scrollbar);
+        // strbuf_append_format(buf, "scrollbar:{v:%p, h:%p}", block->scroll()->pane->v_scrollbar, block->scroll()->pane->h_scrollbar);
         strbuf_append_str(buf, "}\n");
     }
 
@@ -984,37 +913,37 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     if (block->position) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{position:");
-        if (block->position->position) {
-            const CssEnumInfo* pos_value = css_enum_info(block->position->position);
+        if (block->positionp()->position) {
+            const CssEnumInfo* pos_value = css_enum_info(block->positionp()->position);
             if (pos_value && pos_value->name) {
                 strbuf_append_format(buf, "%s", pos_value->name);
             }
         }
-        if (block->position->float_prop) {
-            const CssEnumInfo* float_value = css_enum_info(block->position->float_prop);
+        if (block->positionp()->float_prop) {
+            const CssEnumInfo* float_value = css_enum_info(block->positionp()->float_prop);
             if (float_value && float_value->name) {
                 strbuf_append_format(buf, ", float:%s", float_value->name);
             }
         }
-        if (block->position->has_top) {
-            strbuf_append_format(buf, ", top:%.1f", block->position->top);
+        if (block->positionp()->has_top) {
+            strbuf_append_format(buf, ", top:%.1f", block->positionp()->top);
         }
-        if (block->position->has_right) {
-            strbuf_append_format(buf, ", right:%.1f", block->position->right);
+        if (block->positionp()->has_right) {
+            strbuf_append_format(buf, ", right:%.1f", block->positionp()->right);
         }
-        if (block->position->has_bottom) {
-            strbuf_append_format(buf, ", bottom:%.1f", block->position->bottom);
+        if (block->positionp()->has_bottom) {
+            strbuf_append_format(buf, ", bottom:%.1f", block->positionp()->bottom);
         }
-        if (block->position->has_left) {
-            strbuf_append_format(buf, ", left:%.1f", block->position->left);
+        if (block->positionp()->has_left) {
+            strbuf_append_format(buf, ", left:%.1f", block->positionp()->left);
         }
-        if (block->position->z_index != 0) {
-            strbuf_append_format(buf, ", z-index:%d", block->position->z_index);
+        if (block->positionp()->z_index != 0) {
+            strbuf_append_format(buf, ", z-index:%d", block->positionp()->z_index);
         }
-        if (block->position->first_abs_child) {
+        if (block->positionp()->first_abs_child) {
             strbuf_append_str(buf, ", has-abs-child");
         }
-        if (block->position->next_abs_sibling) {
+        if (block->positionp()->next_abs_sibling) {
             strbuf_append_str(buf, ", has-abs-sibling");
         }
         strbuf_append_str(buf, "}\n");
@@ -1036,9 +965,9 @@ void print_view_block(ViewBlock* block, StrBuf* buf, int indent) {
             strbuf_append_str(buf, "\"");
         }
         // Also print if the image is loaded
-        if (block->embed && block->embed->img) {
+        if (block->embed && block->embedp()->img) {
             strbuf_append_format(buf, ", img-loaded(%dx%d)",
-                block->embed->img->width, block->embed->img->height);
+                block->embedp()->img->width, block->embedp()->img->height);
         } else {
             strbuf_append_str(buf, ", img-NOT-LOADED");
         }
@@ -1245,8 +1174,8 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
     if (view->is_block()) {
         ViewBlock* block = lam::view_require_block(view);
         if (block->position) {
-            is_fixed = (block->position->position == CSS_VALUE_FIXED);
-            is_absolute = (block->position->position == CSS_VALUE_ABSOLUTE);
+            is_fixed = (block->positionp()->position == CSS_VALUE_FIXED);
+            is_absolute = (block->positionp()->position == CSS_VALUE_ABSOLUTE);
         }
     }
 
@@ -1271,9 +1200,9 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
             abs_y += cb->y;
 
             // Now get containing block's absolute position based on its positioning
-            if (cb->position->position == CSS_VALUE_FIXED) {
+            if (cb->positionp()->position == CSS_VALUE_FIXED) {
                 // Fixed: already relative to viewport, done
-            } else if (cb->position->position == CSS_VALUE_ABSOLUTE) {
+            } else if (cb->positionp()->position == CSS_VALUE_ABSOLUTE) {
                 // Absolute containing block: recursively find ITS containing block chain
                 ViewBlock* current = cb;
                 while (true) {
@@ -1285,8 +1214,8 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                     abs_x += cb_cb->x;
                     abs_y += cb_cb->y;
 
-                    if (cb_cb->position->position == CSS_VALUE_FIXED) break;
-                    if (cb_cb->position->position != CSS_VALUE_ABSOLUTE) {
+                    if (cb_cb->positionp()->position == CSS_VALUE_FIXED) break;
+                    if (cb_cb->positionp()->position != CSS_VALUE_ABSOLUTE) {
                         // Relative: continue with normal DOM walk
                         ViewElement* parent = cb_cb->parent_view();
                         while (parent) {
@@ -1327,14 +1256,14 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                 // If parent is fixed, its position is relative to viewport (root at 0,0)
                 // so we can stop here
                 if (parent_block->position &&
-                    parent_block->position->position == CSS_VALUE_FIXED) {
+                    parent_block->positionp()->position == CSS_VALUE_FIXED) {
                     break;
                 }
 
                 // If parent is absolute, its position is relative to its containing block
                 // We need to find that containing block and continue from there
                 if (parent_block->position &&
-                    parent_block->position->position == CSS_VALUE_ABSOLUTE) {
+                    parent_block->positionp()->position == CSS_VALUE_ABSOLUTE) {
                     ViewBlock* positioned_parent_cb =
                         find_positioned_containing_block(parent_block);
                     if (!positioned_parent_cb) {
@@ -1357,17 +1286,17 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                 bool is_root_scroller = parent_block->doc &&
                     parent_block->doc->view_tree &&
                     parent_block->doc->view_tree->root == static_cast<View*>(parent_block);
-                if (!is_root_scroller && parent_block->scroller && parent_block->scroller->pane) {
+                if (!is_root_scroller && parent_block->scroller && parent_block->scroll_mut()->pane) {
                     // visual rects for descendants move by ancestor element scroll; abspos containing-block math is separate above.
                     DocState* state = parent_block->doc ? parent_block->doc->state : NULL;
                     float scroll_x = 0.0f, scroll_y = 0.0f;
                     scroll_state_get_position_for_view(state, static_cast<View*>(parent_block),
-                        parent_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                        parent_block->scroll()->pane, &scroll_x, &scroll_y, NULL, NULL);
                     abs_x -= scroll_x;
                     abs_y -= scroll_y;
                 }
                 if (parent_block->position &&
-                    parent_block->position->position == CSS_VALUE_FIXED) {
+                    parent_block->positionp()->position == CSS_VALUE_FIXED) {
                     break;
                 }
             }
@@ -1383,12 +1312,12 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
             doc->view_tree->root->is_block()
             ? lam::view_require_block(doc->view_tree->root)
             : nullptr;
-        if (root_block && root_block->scroller && root_block->scroller->pane) {
+        if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
             // root scroll moves the viewport for every non-fixed box; element scroll remains paint-time only.
             DocState* state = root_block->doc ? root_block->doc->state : NULL;
             float scroll_x = 0.0f, scroll_y = 0.0f;
             scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
-                root_block->scroller->pane, &scroll_x, &scroll_y, NULL, NULL);
+                root_block->scroll()->pane, &scroll_x, &scroll_y, NULL, NULL);
             abs_x -= scroll_x;
             abs_y -= scroll_y;
         }
@@ -1402,19 +1331,19 @@ static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix) {
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = lam::view_require_block(view);
-    if (!block->transform || !block->transform->functions) return false;
+    if (!block->transform || !block->transformp()->functions) return false;
 
     float abs_x = 0.0f, abs_y = 0.0f;
     calculate_absolute_position(view, nullptr, &abs_x, &abs_y);
-    float origin_x = block->transform->origin_x_percent
-        ? abs_x + (block->transform->origin_x / 100.0f) * block->width
-        : abs_x + block->transform->origin_x;
-    float origin_y = block->transform->origin_y_percent
-        ? abs_y + (block->transform->origin_y / 100.0f) * block->height
-        : abs_y + block->transform->origin_y;
+    float origin_x = block->transformp()->origin_x_percent
+        ? abs_x + (block->transformp()->origin_x / 100.0f) * block->width
+        : abs_x + block->transformp()->origin_x;
+    float origin_y = block->transformp()->origin_y_percent
+        ? abs_y + (block->transformp()->origin_y / 100.0f) * block->height
+        : abs_y + block->transformp()->origin_y;
 
     *out_matrix = radiant::compute_transform_matrix(
-        block->transform->functions, block->width, block->height, origin_x, origin_y);
+        block->transformp()->functions, block->width, block->height, origin_x, origin_y);
     return true;
 }
 
@@ -1501,7 +1430,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     // Only use content_height when the root has no explicit CSS height (CSS 2.1 §10.6.4).
     if (!rect && is_root && view->is_element()) {
         DomElement* elem = lam::dom_require_element(view);
-        bool has_explicit_height = (elem->blk && elem->blk->given_height >= 0);
+        bool has_explicit_height = (elem->blk && elem->block_mut()->given_height >= 0);
         if (!has_explicit_height && elem->content_height > css_height) {
             css_height = elem->content_height;
         }
@@ -1796,17 +1725,15 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 // Helper to check if an element is an anonymous table element (e.g., ::anon-tbody, ::anon-tr)
 // Anonymous elements are created by the layout engine and don't exist in the browser's DOM.
 // Detection methods (any one being true indicates anonymous):
-// 1. No backing Lambda Element (native_element == nullptr) - most reliable
+// 1. Synthetic flag marks no backing Lambda Element - most reliable
 // 2. Tag name starts with "::" (e.g., "::anon-tbody", "::anon-tr") - naming convention
 static bool is_anonymous_element(ViewBlock* block) {
     if (!block) return false;
 
-    // Method 1: Check for missing backing Lambda Element
-    // True DOM elements always have a native_element pointer to the backing Lambda Element.
-    // Anonymous elements created by layout engine (e.g., in create_anonymous_table_element)
-    // don't set native_element, so it remains nullptr.
+    // Anonymous elements created by layout are explicitly synthetic because
+    // their embedded storage is not linked into the Lambda tree.
     DomElement* dom_elem = block->as_element();
-    if (dom_elem && dom_elem->native_element == nullptr) {
+    if (dom_elem && dom_elem->is_synthetic()) {
         return true;
     }
 
@@ -1883,42 +1810,42 @@ static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int in
     strbuf_append_format(buf, "\"display\": \"%s\",\n",
                          non_rendered_table_marker_display(elem));
 
-    if (elem->in_line && elem->in_line->has_color) {
+    if (elem->in_line && elem->inl()->has_color) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"color\": \"#%06x\",\n",
-                             elem->in_line->color.c);
+                             elem->inl()->color.c);
     }
 
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"font\": {\n");
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (elem->font && elem->font->family) {
-        strbuf_append_format(buf, "\"family\": \"%s\",\n", elem->font->family);
+    if (elem->font && elem->fontp()->family) {
+        strbuf_append_format(buf, "\"family\": \"%s\",\n", elem->fontp()->family);
     } else {
         strbuf_append_str(buf, "\"family\": \"Times\",\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (elem->font && elem->font->font_size > 0.0f) {
-        strbuf_append_format(buf, "\"size\": %g,\n", elem->font->font_size);
+    if (elem->font && elem->fontp()->font_size > 0.0f) {
+        strbuf_append_format(buf, "\"size\": %g,\n", elem->fontp()->font_size);
     } else {
         strbuf_append_str(buf, "\"size\": 16,\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
     const char* style_str = "normal";
     if (elem->font) {
-        auto style_val = css_enum_info(elem->font->font_style);
+        auto style_val = css_enum_info(elem->fontp()->font_style);
         if (style_val) style_str = (const char*)style_val->name;
     }
     strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (elem->font && elem->font->font_weight_numeric > 0) {
+    if (elem->font && elem->fontp()->font_weight_numeric > 0) {
         char weight_buf[8];
         snprintf(weight_buf, sizeof(weight_buf), "%d",
-                 elem->font->font_weight_numeric);
+                 elem->fontp()->font_weight_numeric);
         strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_buf);
-    } else if (elem->font && elem->font->font_weight) {
+    } else if (elem->font && elem->fontp()->font_weight) {
         const char* weight_str = "normal";
-        auto weight_val = css_enum_info(elem->font->font_weight);
+        auto weight_val = css_enum_info(elem->fontp()->font_weight);
         if (weight_val) weight_str = (const char*)weight_val->name;
         strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_str);
     } else {
@@ -1942,11 +1869,11 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent);
 static void print_layout_fragments_json(ViewBlock* block, StrBuf* buf, int indent) {
     if (!block) return;
     DomElement* elem = lam::dom_require_element(block);
-    if (!elem->layout_fragments || elem->layout_fragment_count <= 0) return;
+    if (!elem->layout_fragment_list() || elem->layout_fragments_count() <= 0) return;
 
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"fragments\": [\n");
-    LayoutFragmentBox* fragment = elem->layout_fragments;
+    LayoutFragmentBox* fragment = elem->layout_fragment_list();
     int index = 0;
     while (fragment) {
         if (index > 0) {
@@ -2254,7 +2181,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     DomElement* block_elem = lam::dom_require_element(block);
-    bool has_fragments = block_elem->layout_fragments && block_elem->layout_fragment_count > 0;
+    bool has_fragments = block_elem->layout_fragment_list() && block_elem->layout_fragments_count() > 0;
     print_bounds_json(block, buf, indent, nullptr, has_fragments, is_root);
     if (has_fragments) {
         print_layout_fragments_json(block, buf, indent);
@@ -2280,7 +2207,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         // Flex/grid items are blockified, while standalone legacy inline grid/flex
         // values keep their inline outer display in CSSOM serialization.
         display = (display_outer_is_inline && !display_is_blockified_flex_item) ? "inline-grid" : "grid";
-    } else if (block->display.inner == CSS_VALUE_FLEX || (block->embed && block->embed->flex)) {
+    } else if (block->display.inner == CSS_VALUE_FLEX || (block->embed && block->embedp()->flex)) {
         // Flex/grid items are blockified, while standalone legacy inline grid/flex
         // values keep their inline outer display in CSSOM serialization.
         display = (display_outer_is_inline && !display_is_blockified_flex_item) ? "inline-flex" : "flex";
@@ -2323,9 +2250,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         // line_height is const CssValue*; resolve to a numeric value for JSON output
         float lh_value = 0;
-        if (block->blk->line_height) {
-            const CssValue* lh = block->blk->line_height;
-            float fs = (block->font && block->font->font_size > 0) ? block->font->font_size : 16.0f;
+        if (block->block()->line_height) {
+            const CssValue* lh = block->block()->line_height;
+            float fs = (block->font && block->fontp()->font_size > 0) ? block->fontp()->font_size : 16.0f;
             if (lh->type == CSS_VALUE_TYPE_NUMBER) {
                 lh_value = lh->data.number.value * fs;
             } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
@@ -2338,40 +2265,40 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         }
         strbuf_append_format(buf, "\"line_height\": %.1f,\n", lh_value);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"text_align\": \"%s\",\n", css_enum_info(block->blk->text_align)->name);
+        strbuf_append_format(buf, "\"text_align\": \"%s\",\n", css_enum_info(block->block()->text_align)->name);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"text_indent\": %.1f,\n", block->blk->text_indent);
+        strbuf_append_format(buf, "\"text_indent\": %.1f,\n", block->block()->text_indent);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"min_width\": %.1f,\n", block->blk->given_min_width);
+        strbuf_append_format(buf, "\"min_width\": %.1f,\n", block->block()->given_min_width);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"max_width\": %.1f,\n", block->blk->given_max_width);
+        strbuf_append_format(buf, "\"max_width\": %.1f,\n", block->block()->given_max_width);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"min_height\": %.1f,\n", block->blk->given_min_height);
+        strbuf_append_format(buf, "\"min_height\": %.1f,\n", block->block()->given_min_height);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"max_height\": %.1f,\n", block->blk->given_max_height);
+        strbuf_append_format(buf, "\"max_height\": %.1f,\n", block->block()->given_max_height);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"box_sizing\": \"%s\",\n",
             layout_uses_border_box(block) ? "border-box" : "content-box");
 
-        if (block->blk->given_width >= 0) {
+        if (block->block()->given_width >= 0) {
             strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"given_width\": %.1f,\n", block->blk->given_width);
+            strbuf_append_format(buf, "\"given_width\": %.1f,\n", block->block()->given_width);
         }
-        if (block->blk->given_height >= 0) {
+        if (block->block()->given_height >= 0) {
             strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"given_height\": %.1f,\n", block->blk->given_height);
+            strbuf_append_format(buf, "\"given_height\": %.1f,\n", block->block()->given_height);
         }
     }
 
     // Add flex container properties if available
-    if (block->embed && block->embed->flex) {
+    if (block->embed && block->embedp()->flex) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "\"flex_container\": {\n");
 
         // flex-direction
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* direction_str = "row";
-        switch (block->embed->flex->direction) {
+        switch (block->embedp()->flex->direction) {
             case DIR_ROW: direction_str = "row"; break;
             case DIR_ROW_REVERSE: direction_str = "row-reverse"; break;
             case DIR_COLUMN: direction_str = "column"; break;
@@ -2382,7 +2309,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         // flex-wrap
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* wrap_str = "nowrap";
-        switch (block->embed->flex->wrap) {
+        switch (block->embedp()->flex->wrap) {
             case WRAP_NOWRAP: wrap_str = "nowrap"; break;
             case WRAP_WRAP: wrap_str = "wrap"; break;
             case WRAP_WRAP_REVERSE: wrap_str = "wrap-reverse"; break;
@@ -2392,25 +2319,25 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         // justify-content (handle custom value CSS_VALUE_SPACE_EVENLY = 0x0199)
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* justify_str = flex_enum_name(
-            (CssEnum)block->embed->flex->justify, "flex-start");
+            (CssEnum)block->embedp()->flex->justify, "flex-start");
         strbuf_append_format(buf, "\"justify\": \"%s\",\n", justify_str);
 
         // align-items (handle custom value for space-evenly)
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* align_items_str = flex_enum_name(
-            (CssEnum)block->embed->flex->align_items, "stretch");
+            (CssEnum)block->embedp()->flex->align_items, "stretch");
         strbuf_append_format(buf, "\"align_items\": \"%s\",\n", align_items_str);
 
         // align-content (handle custom value for space-evenly)
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* align_content_str = flex_enum_name(
-            (CssEnum)block->embed->flex->align_content, "stretch");
+            (CssEnum)block->embedp()->flex->align_content, "stretch");
         strbuf_append_format(buf, "\"align_content\": \"%s\",\n", align_content_str);
 
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"row_gap\": %.1f,\n", block->embed->flex->row_gap);
+        strbuf_append_format(buf, "\"row_gap\": %.1f,\n", block->embedp()->flex->row_gap);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"column_gap\": %.1f\n", block->embed->flex->column_gap);
+        strbuf_append_format(buf, "\"column_gap\": %.1f\n", block->embedp()->flex->column_gap);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "},\n");
     }
@@ -2418,8 +2345,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     // Flexbox properties
     // Get actual flex-wrap value from the block
     const char* flex_wrap_str = "nowrap";  // default
-    if (block->embed && block->embed->flex) {
-        switch (block->embed->flex->wrap) {
+    if (block->embed && block->embedp()->flex) {
+        switch (block->embedp()->flex->wrap) {
             case WRAP_WRAP:
                 flex_wrap_str = "wrap";
                 break;
@@ -2441,13 +2368,13 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "\"margin\": {\n");
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"top\": %.2f,\n", block->bound->margin.top);
+        strbuf_append_format(buf, "\"top\": %.2f,\n", block->boundary()->margin.top);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"right\": %.2f,\n", block->bound->margin.right);
+        strbuf_append_format(buf, "\"right\": %.2f,\n", block->boundary()->margin.right);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->bound->margin.bottom);
+        strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->boundary()->margin.bottom);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"left\": %.2f\n", block->bound->margin.left);
+        strbuf_append_format(buf, "\"left\": %.2f\n", block->boundary()->margin.left);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "},\n");
 
@@ -2455,29 +2382,29 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "\"padding\": {\n");
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"top\": %.2f,\n", block->bound->padding.top);
+        strbuf_append_format(buf, "\"top\": %.2f,\n", block->boundary()->padding.top);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"right\": %.2f,\n", block->bound->padding.right);
+        strbuf_append_format(buf, "\"right\": %.2f,\n", block->boundary()->padding.right);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->bound->padding.bottom);
+        strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->boundary()->padding.bottom);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"left\": %.2f\n", block->bound->padding.left);
+        strbuf_append_format(buf, "\"left\": %.2f\n", block->boundary()->padding.left);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "},\n");
 
         // Border properties
-        if (block->bound->border) {
+        if (block->boundary()->border) {
             // Border width
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"borderWidth\": {\n");
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"top\": %.2f,\n", block->bound->border->width.top);
+            strbuf_append_format(buf, "\"top\": %.2f,\n", block->boundary()->border->width.top);
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"right\": %.2f,\n", block->bound->border->width.right);
+            strbuf_append_format(buf, "\"right\": %.2f,\n", block->boundary()->border->width.right);
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->bound->border->width.bottom);
+            strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->boundary()->border->width.bottom);
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"left\": %.2f\n", block->bound->border->width.left);
+            strbuf_append_format(buf, "\"left\": %.2f\n", block->boundary()->border->width.left);
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "},\n");
 
@@ -2486,28 +2413,28 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
             strbuf_append_str(buf, "\"borderColor\": {\n");
             strbuf_append_char_n(buf, ' ', indent + 6);
             strbuf_append_format(buf, "\"top\": \"rgba(%d, %d, %d, %.2f)\",\n",
-                block->bound->border->top_color.r,
-                block->bound->border->top_color.g,
-                block->bound->border->top_color.b,
-                block->bound->border->top_color.a / 255.0f);
+                block->boundary()->border->top_color.r,
+                block->boundary()->border->top_color.g,
+                block->boundary()->border->top_color.b,
+                block->boundary()->border->top_color.a / 255.0f);
             strbuf_append_char_n(buf, ' ', indent + 6);
             strbuf_append_format(buf, "\"right\": \"rgba(%d, %d, %d, %.2f)\",\n",
-                block->bound->border->right_color.r,
-                block->bound->border->right_color.g,
-                block->bound->border->right_color.b,
-                block->bound->border->right_color.a / 255.0f);
+                block->boundary()->border->right_color.r,
+                block->boundary()->border->right_color.g,
+                block->boundary()->border->right_color.b,
+                block->boundary()->border->right_color.a / 255.0f);
             strbuf_append_char_n(buf, ' ', indent + 6);
             strbuf_append_format(buf, "\"bottom\": \"rgba(%d, %d, %d, %.2f)\",\n",
-                block->bound->border->bottom_color.r,
-                block->bound->border->bottom_color.g,
-                block->bound->border->bottom_color.b,
-                block->bound->border->bottom_color.a / 255.0f);
+                block->boundary()->border->bottom_color.r,
+                block->boundary()->border->bottom_color.g,
+                block->boundary()->border->bottom_color.b,
+                block->boundary()->border->bottom_color.a / 255.0f);
             strbuf_append_char_n(buf, ' ', indent + 6);
             strbuf_append_format(buf, "\"left\": \"rgba(%d, %d, %d, %.2f)\"\n",
-                block->bound->border->left_color.r,
-                block->bound->border->left_color.g,
-                block->bound->border->left_color.b,
-                block->bound->border->left_color.a / 255.0f);
+                block->boundary()->border->left_color.r,
+                block->boundary()->border->left_color.g,
+                block->boundary()->border->left_color.b,
+                block->boundary()->border->left_color.a / 255.0f);
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "},\n");
 
@@ -2515,25 +2442,25 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"borderRadius\": {\n");
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"topLeft\": %.2f,\n", block->bound->border->radius.top_left);
+            strbuf_append_format(buf, "\"topLeft\": %.2f,\n", block->boundary()->border->radius.top_left);
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"topRight\": %.2f,\n", block->bound->border->radius.top_right);
+            strbuf_append_format(buf, "\"topRight\": %.2f,\n", block->boundary()->border->radius.top_right);
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"bottomRight\": %.2f,\n", block->bound->border->radius.bottom_right);
+            strbuf_append_format(buf, "\"bottomRight\": %.2f,\n", block->boundary()->border->radius.bottom_right);
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"bottomLeft\": %.2f\n", block->bound->border->radius.bottom_left);
+            strbuf_append_format(buf, "\"bottomLeft\": %.2f\n", block->boundary()->border->radius.bottom_left);
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "},\n");
         }
 
         // Background color
-        if (block->bound->background) {
+        if (block->boundary()->background) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"backgroundColor\": \"rgba(%d, %d, %d, %.2f)\",\n",
-                block->bound->background->color.r,
-                block->bound->background->color.g,
-                block->bound->background->color.b,
-                block->bound->background->color.a / 255.0f);
+                block->boundary()->background->color.r,
+                block->boundary()->background->color.g,
+                block->boundary()->background->color.b,
+                block->boundary()->background->color.a / 255.0f);
         }
     }
 
@@ -2542,29 +2469,29 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "\"position\": {\n");
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"type\": \"%s\",\n", css_enum_info(block->position->position)->name);
-        if (block->position->has_top) {
+        strbuf_append_format(buf, "\"type\": \"%s\",\n", css_enum_info(block->positionp()->position)->name);
+        if (block->positionp()->has_top) {
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"top\": %.2f,\n", block->position->top);
+            strbuf_append_format(buf, "\"top\": %.2f,\n", block->positionp()->top);
         }
-        if (block->position->has_right) {
+        if (block->positionp()->has_right) {
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"right\": %.2f,\n", block->position->right);
+            strbuf_append_format(buf, "\"right\": %.2f,\n", block->positionp()->right);
         }
-        if (block->position->has_bottom) {
+        if (block->positionp()->has_bottom) {
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->position->bottom);
+            strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->positionp()->bottom);
         }
-        if (block->position->has_left) {
+        if (block->positionp()->has_left) {
             strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_format(buf, "\"left\": %.2f,\n", block->position->left);
+            strbuf_append_format(buf, "\"left\": %.2f,\n", block->positionp()->left);
         }
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"zIndex\": %d,\n", block->position->z_index);
+        strbuf_append_format(buf, "\"zIndex\": %d,\n", block->positionp()->z_index);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"float\": \"%s\",\n", css_enum_info(block->position->float_prop)->name);
+        strbuf_append_format(buf, "\"float\": \"%s\",\n", css_enum_info(block->positionp()->float_prop)->name);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"clear\": \"%s\"\n", css_enum_info(block->position->clear)->name);
+        strbuf_append_format(buf, "\"clear\": \"%s\"\n", css_enum_info(block->positionp()->clear)->name);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "},\n");
     }
@@ -2573,24 +2500,24 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"font\": {\n");
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font && block->font->family) {
-        strbuf_append_format(buf, "\"family\": \"%s\",\n", block->font->family);
+    if (block->font && block->fontp()->family) {
+        strbuf_append_format(buf, "\"family\": \"%s\",\n", block->fontp()->family);
     } else {
         // CSS default font-family (browser default is typically Times/serif)
         strbuf_append_str(buf, "\"family\": \"Times\",\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font && block->font->font_size > 0) {
+    if (block->font && block->fontp()->font_size > 0) {
         // computed font sizes retain fractional CSS-unit precision across display types.
-        strbuf_append_format(buf, "\"size\": %g,\n", block->font->font_size);
+        strbuf_append_format(buf, "\"size\": %g,\n", block->fontp()->font_size);
     } else {
         // CSS default font-size is 16px (medium)
         strbuf_append_str(buf, "\"size\": 16,\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font && block->font->font_style) {
+    if (block->font && block->fontp()->font_style) {
         const char* style_str = "normal";
-        auto style_val = css_enum_info(block->font->font_style);
+        auto style_val = css_enum_info(block->fontp()->font_style);
         if (style_val) style_str = (const char*)style_val->name;
         strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
     } else {
@@ -2598,13 +2525,13 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
         strbuf_append_str(buf, "\"style\": \"normal\",\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font && block->font->font_weight_numeric > 0) {
+    if (block->font && block->fontp()->font_weight_numeric > 0) {
         char weight_buf[8];
-        snprintf(weight_buf, sizeof(weight_buf), "%d", block->font->font_weight_numeric);
+        snprintf(weight_buf, sizeof(weight_buf), "%d", block->fontp()->font_weight_numeric);
         strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_buf);
-    } else if (block->font && block->font->font_weight) {
+    } else if (block->font && block->fontp()->font_weight) {
         const char* weight_str = "normal";
-        auto weight_val = css_enum_info(block->font->font_weight);
+        auto weight_val = css_enum_info(block->fontp()->font_weight);
         if (weight_val) weight_str = (const char*)weight_val->name;
         strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_str);
     } else {
@@ -2618,21 +2545,17 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     if (block->in_line) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"color\": \"rgba(%d, %d, %d, %.2f)\",\n",
-            block->in_line->color.r,
-            block->in_line->color.g,
-            block->in_line->color.b,
-            block->in_line->color.a / 255.0f);
+            block->inl()->color.r,
+            block->inl()->color.g,
+            block->inl()->color.b,
+            block->inl()->color.a / 255.0f);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"opacity\": %.2f,\n", block->in_line->opacity);
+        strbuf_append_format(buf, "\"opacity\": %.2f,\n", block->inl()->opacity);
     }
 
-    // Flex item properties (for elements inside flex containers)
-    // Note: fi, gi, td are in a union, so check view_type to avoid misinterpreting table cell data as flex data
-    bool is_table_element = (block->view_type == RDT_VIEW_TABLE ||
-                             block->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
-                             block->view_type == RDT_VIEW_TABLE_ROW ||
-                             block->view_type == RDT_VIEW_TABLE_CELL);
-    if (block->fi && !is_table_element) {
+    // Item and table-role storage are independent, so table flex items retain
+    // their ordinary flex state alongside the table role.
+    if (block->flex_item()) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         // Handle NaN values - output 0 instead of nan for valid JSON
         float flex_grow = block->fi->flex_grow;
@@ -2828,26 +2751,26 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
 
     // Add inline properties if available
     if (span->in_line) {
-        if (span->in_line->cursor) {
+        if (span->inl()->cursor) {
             const char* cursor = "default";
-            switch (span->in_line->cursor) {
+            switch (span->inl()->cursor) {
                 case CSS_VALUE_POINTER: cursor = "pointer"; break;
                 case CSS_VALUE_TEXT: cursor = "text"; break;
-                default: cursor = (const char*)css_enum_info(span->in_line->cursor)->name; break;
+                default: cursor = (const char*)css_enum_info(span->inl()->cursor)->name; break;
             }
             strbuf_append_str(buf, ",\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"cursor\": \"%s\"", cursor);
         }
-        if (span->in_line->has_color) {
+        if (span->inl()->has_color) {
             strbuf_append_str(buf, ",\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"color\": \"#%06x\"", span->in_line->color.c);
+            strbuf_append_format(buf, "\"color\": \"#%06x\"", span->inl()->color.c);
         }
-        if (span->in_line->vertical_align) {
+        if (span->inl()->vertical_align) {
             strbuf_append_str(buf, ",\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"vertical_align\": \"%s\"", css_enum_info(span->in_line->vertical_align)->name);
+            strbuf_append_format(buf, "\"vertical_align\": \"%s\"", css_enum_info(span->inl()->vertical_align)->name);
         }
     }
 
@@ -2857,28 +2780,28 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "\"font\": {\n");
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"family\": \"%s\",\n", span->font->family);
+        strbuf_append_format(buf, "\"family\": \"%s\",\n", span->fontp()->family);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"size\": %g,\n", span->font->font_size);
+        strbuf_append_format(buf, "\"size\": %g,\n", span->fontp()->font_size);
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* style_str = "normal";
-        auto style_val = css_enum_info(span->font->font_style);
+        auto style_val = css_enum_info(span->fontp()->font_style);
         if (style_val) style_str = (const char*)style_val->name;
         strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        if (span->font->font_weight_numeric > 0) {
+        if (span->fontp()->font_weight_numeric > 0) {
             char weight_buf[8];
-            snprintf(weight_buf, sizeof(weight_buf), "%d", span->font->font_weight_numeric);
+            snprintf(weight_buf, sizeof(weight_buf), "%d", span->fontp()->font_weight_numeric);
             strbuf_append_format(buf, "\"weight\": \"%s\",\n", weight_buf);
         } else {
             const char* weight_str = "normal";
-            auto weight_val = css_enum_info(span->font->font_weight);
+            auto weight_val = css_enum_info(span->fontp()->font_weight);
             if (weight_val) weight_str = (const char*)weight_val->name;
             strbuf_append_format(buf, "\"weight\": \"%s\",\n", weight_str);
         }
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* deco_str = "none";
-        auto deco_val = css_enum_info(span->font->text_deco);
+        auto deco_val = css_enum_info(span->fontp()->text_deco);
         if (deco_val) deco_str = (const char*)deco_val->name;
         strbuf_append_format(buf, "\"decoration\": \"%s\"\n", deco_str);
         strbuf_append_char_n(buf, ' ', indent + 4);

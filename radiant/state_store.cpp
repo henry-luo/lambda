@@ -1727,9 +1727,9 @@ static void caret_local_from_absolute(View* view, float abs_x, float abs_y,
             ViewBlock* block = lam::view_require_block(parent);
             x -= block->x;
             y -= block->y;
-            if (block->scroller && block->scroller->pane) {
-                x += block->scroller->pane->h_scroll_position;
-                y += block->scroller->pane->v_scroll_position;
+            if (block->scroller && block->scroll_mut()->pane) {
+                x += block->scroll()->pane->h_scroll_position;
+                y += block->scroll()->pane->v_scroll_position;
             }
         }
         parent = parent->parent;
@@ -2296,23 +2296,23 @@ static bool dom_element_default_pseudo_state(DomElement* element, uint32_t pseud
     if (!element) return false;
     switch (pseudo_state) {
         case PSEUDO_STATE_LINK:
-            return dom_element_has_attribute(element, "href");
+            return element->has_attribute("href");
         case PSEUDO_STATE_CHECKED:
-            return dom_element_has_attribute(element, "checked");
+            return element->has_attribute("checked");
         case PSEUDO_STATE_DISABLED:
-            return dom_element_has_attribute(element, "disabled");
+            return element->has_attribute("disabled");
         case PSEUDO_STATE_ENABLED:
-            return !dom_element_has_attribute(element, "disabled");
+            return !element->has_attribute("disabled");
         case PSEUDO_STATE_REQUIRED:
-            return dom_element_has_attribute(element, "required");
+            return element->has_attribute("required");
         case PSEUDO_STATE_OPTIONAL:
-            return !dom_element_has_attribute(element, "required");
+            return !element->has_attribute("required");
         case PSEUDO_STATE_READ_ONLY:
-            return dom_element_has_attribute(element, "readonly");
+            return element->has_attribute("readonly");
         case PSEUDO_STATE_READ_WRITE:
-            return !dom_element_has_attribute(element, "readonly");
+            return !element->has_attribute("readonly");
         case PSEUDO_STATE_SELECTED:
-            return dom_element_has_attribute(element, "selected");
+            return element->has_attribute("selected");
         default:
             return false;
     }
@@ -5058,8 +5058,8 @@ static void mark_for_style_recompute(View* view, ReflowScope scope) {
     if (!view || !view->is_element()) return;
 
     DomElement* element = lam::dom_require_element(view);
-    element->needs_style_recompute = true;
-    element->styles_resolved = false;
+    element->set_needs_style_recompute(true);
+    element->set_styles_resolved(false);
 
     // For REFLOW_SUBTREE, mark all descendants
     if (scope >= REFLOW_SUBTREE) {
@@ -5076,8 +5076,8 @@ static void mark_for_style_recompute(View* view, ReflowScope scope) {
         while (parent) {
             if (parent->is_element()) {
                 DomElement* pe = lam::dom_require_element(parent);
-                pe->needs_style_recompute = true;
-                pe->styles_resolved = false;
+                pe->set_needs_style_recompute(true);
+                pe->set_styles_resolved(false);
             }
             parent = parent->parent;
         }
@@ -5513,7 +5513,7 @@ static bool should_preserve_whitespace(View* view) {
         if (parent->is_element()) {
             DomElement* elem = lam::dom_require_element(parent);
             if (elem->blk) {
-                CssEnum ws = elem->blk->white_space;
+                CssEnum ws = elem->block()->white_space;
                 // CSS_VALUE_PRE, CSS_VALUE_PRE_WRAP, CSS_VALUE_PRE_LINE preserve whitespace
                 if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP || ws == CSS_VALUE_PRE_LINE) {
                     return true;

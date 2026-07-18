@@ -365,7 +365,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
                          ctx->font.style->text_deco != CSS_VALUE__UNDEF;
     DomElement* parent_elem = text->parent ? text->parent->as_element() : nullptr;
     bool has_text_shadow = parent_elem && parent_elem->font &&
-                           parent_elem->font->text_shadow;
+                           parent_elem->fontp()->text_shadow;
 
     if (!has_text_deco && !has_text_shadow) {
         PaintGlyphRun run = {};
@@ -445,9 +445,9 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     }
 
     // Add text-shadow as CSS style attribute
-    if (parent_elem && parent_elem->font && parent_elem->font->text_shadow) {
+    if (parent_elem && parent_elem->font && parent_elem->fontp()->text_shadow) {
         strbuf_append_str(ctx->svg_content, " style=\"text-shadow:");
-        TextShadow* ts = parent_elem->font->text_shadow;
+        TextShadow* ts = parent_elem->fontp()->text_shadow;
         bool first = true;
         while (ts) {
             if (!first) strbuf_append_char(ctx->svg_content, ',');
@@ -694,20 +694,20 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         return;
     }
 
-    if (ctx->effect_fallback.active && view->bound->box_shadow) {
+    if (ctx->effect_fallback.active && view->boundary_mut()->box_shadow) {
         render_paint_boundary_emit_outer_shadows(svg_active_paint_list(ctx), view, x, y);
     }
 
     // Render background
-    if (view->bound->background && view->bound->background->color.a > 0) {
+    if (view->boundary_mut()->background && view->boundary_mut()->background->color.a > 0) {
         // Check for border radius
-        if (svg_has_border_radius(view->bound->border)) {
-            BorderProp* border = view->bound->border;
+        if (svg_has_border_radius(view->boundary()->border)) {
+            BorderProp* border = view->boundary()->border;
             float radius = 0.0f;
             if (svg_get_uniform_border_radius(border, &radius)) {
                 paint_fill_rounded_rect(svg_active_paint_list(ctx), x, y, width, height,
                                         radius, radius,
-                                        view->bound->background->color);
+                                        view->boundary()->background->color);
                 svg_lower_paint_list(ctx);
             } else {
                 Rect rect = {x, y, width, height};
@@ -721,21 +721,21 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
                 radius_shape.bottom_right_y = border->radius.bottom_right;
                 radius_shape.bottom_left_y = border->radius.bottom_left;
                 RdtPath* path = render_path_create_rounded_rect(rect, &radius_shape);
-                paint_fill_path(svg_active_paint_list(ctx), path, view->bound->background->color,
+                paint_fill_path(svg_active_paint_list(ctx), path, view->boundary()->background->color,
                                 RDT_FILL_WINDING, nullptr);
                 svg_lower_paint_list(ctx);
                 rdt_path_free(path);
             }
         } else {
             paint_fill_rect(svg_active_paint_list(ctx), x, y, width, height,
-                            view->bound->background->color);
+                            view->boundary()->background->color);
             svg_lower_paint_list(ctx);
         }
     }
 
     // Render background gradient (linear or radial)
-    if (view->bound->background && view->bound->background->gradient_type != GRADIENT_NONE) {
-        BackgroundProp* bg = view->bound->background;
+    if (view->boundary_mut()->background && view->boundary_mut()->background->gradient_type != GRADIENT_NONE) {
+        BackgroundProp* bg = view->boundary()->background;
         if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient &&
             bg->linear_gradient->stop_count >= 2) {
             int stop_count = bg->linear_gradient->stop_count;
@@ -775,23 +775,23 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     }
 
     // Render background image (background-image, background-size, background-position, background-repeat)
-    if (view->bound->background && view->bound->background->image) {
-        BackgroundProp* bg = view->bound->background;
+    if (view->boundary_mut()->background && view->boundary_mut()->background->image) {
+        BackgroundProp* bg = view->boundary()->background;
         const char* img_url = bg->image;
 
         // Border widths and padding in CSS px (same coordinate space as x/y/width/height in SVG path)
         float bwt = 0, bwr = 0, bwb = 0, bwl = 0;
         float pt = 0, pr = 0, pb = 0, pl = 0;
-        if (view->bound->border) {
-            bwt = view->bound->border->width.top;
-            bwr = view->bound->border->width.right;
-            bwb = view->bound->border->width.bottom;
-            bwl = view->bound->border->width.left;
+        if (view->boundary()->border) {
+            bwt = view->boundary()->border->width.top;
+            bwr = view->boundary()->border->width.right;
+            bwb = view->boundary()->border->width.bottom;
+            bwl = view->boundary()->border->width.left;
         }
-        pt = view->bound->padding.top;
-        pr = view->bound->padding.right;
-        pb = view->bound->padding.bottom;
-        pl = view->bound->padding.left;
+        pt = view->boundary()->padding.top;
+        pr = view->boundary()->padding.right;
+        pb = view->boundary()->padding.bottom;
+        pl = view->boundary()->padding.left;
 
         // Compute positioning area (background-origin, default: padding-box)
         CssEnum origin = bg->bg_origin ? bg->bg_origin : CSS_VALUE_PADDING_BOX;
@@ -890,8 +890,8 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     }
 
     // Render borders with style-aware per-side SVG polygons
-    if (view->bound->border) {
-        BorderProp* border = view->bound->border;
+    if (view->boundary()->border) {
+        BorderProp* border = view->boundary()->border;
         float bwt = border->width.top, bwr = border->width.right;
         float bwb = border->width.bottom, bwl = border->width.left;
 
@@ -931,8 +931,8 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     }
 
     // Render outline (outside border-box)
-    if (view->bound->outline) {
-        OutlineProp* outline = view->bound->outline;
+    if (view->boundary()->outline) {
+        OutlineProp* outline = view->boundary()->outline;
         if (outline->width > 0 && outline->style != CSS_VALUE_NONE &&
             outline->style != CSS_VALUE_HIDDEN && outline->color.a > 0) {
 
@@ -959,8 +959,8 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
 
             svg_indent(ctx);
             // Use rounded rect if border has radius
-            if (svg_has_border_radius(view->bound->border)) {
-                BorderProp* border = view->bound->border;
+            if (svg_has_border_radius(view->boundary()->border)) {
+                BorderProp* border = view->boundary()->border;
                 float r_tl = fmaxf(0, border->radius.top_left + expand);
                 float r_tr = fmaxf(0, border->radius.top_right + expand);
                 float r_br = fmaxf(0, border->radius.bottom_right + expand);
@@ -982,9 +982,9 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
 
 // Render multi-column rules (vertical lines between columns)
 static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
-    if (!block->multicol) return;
+    if (!block->multicol_prop()) return;
 
-    MultiColumnProp* mc = block->multicol;
+    MultiColumnProp* mc = block->multicol_prop();
 
     // Only render rules between columns that actually received content.
     int rule_column_count = mc->computed_used_column_count > 0
@@ -1004,8 +1004,8 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
 
     // Adjust for padding
     if (block->bound) {
-        block_x += block->bound->padding.left;
-        block_y += block->bound->padding.top;
+        block_x += block->boundary()->padding.left;
+        block_y += block->boundary()->padding.top;
     }
 
     // Rule height is the content area height
@@ -1117,8 +1117,8 @@ static void svg_cb_render_text(void* vctx, ViewText* text, float abs_x, float ab
 
 static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
-    if (!block->embed || !block->embed->img) return;
-    ImageSurface* img = block->embed->img;
+    if (!block->embed || !block->embedp()->img) return;
+    ImageSurface* img = block->embedp()->img;
 
     BlockBlot image_block = {};
     image_block.x = abs_x - block->x;
@@ -1145,7 +1145,7 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (!ctx || !block) return;
     DomElement* dom_elem = lam::dom_require_element(lam::view_dom_node(block));
-    if (!dom_elem || !dom_elem->native_element) return;
+    if (!dom_elem || dom_elem->is_synthetic()) return;
 
     BlockBlot block_context = {};
     block_context.x = abs_x - block->x;
@@ -1162,7 +1162,7 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                           content_rect.y + content_rect.height};
     PaintSvgSubscene subscene = {};
     render_svg_build_subscene(&subscene,
-                              dom_elem->native_element,
+                              dom_element_to_element(dom_elem),
                               content_rect.width,
                               content_rect.height,
                               nullptr,
@@ -1205,13 +1205,13 @@ static const char* SVG_GRAPH_SEMANTIC_ATTRS[] = {
 static void svg_append_graph_semantic_attrs(SvgRenderContext* ctx,
                                             ViewBlock* block) {
     if (!ctx || !block) return;
-    const char* role = dom_element_get_attribute(block, "data-graph-role");
+    const char* role = block->get_attribute("data-graph-role");
     if (!role || !role[0]) return;
 
     for (size_t i = 0; i < sizeof(SVG_GRAPH_SEMANTIC_ATTRS) /
                                   sizeof(SVG_GRAPH_SEMANTIC_ATTRS[0]); i++) {
         const char* name = SVG_GRAPH_SEMANTIC_ATTRS[i];
-        const char* value = dom_element_get_attribute(block, name);
+        const char* value = block->get_attribute(name);
         if (!value) continue;
         strbuf_append_char(ctx->svg_content, ' ');
         strbuf_append_str(ctx->svg_content, name);

@@ -66,7 +66,7 @@ static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
                                                     float fallback_content_height) {
     if (!flex_container) return 0.0f;
 
-    bool has_explicit_height = flex_container->blk && flex_container->blk->given_height >= 0.0f;
+    bool has_explicit_height = flex_container->blk && flex_container->block_mut()->given_height >= 0.0f;
     if (has_explicit_height) {
         return flex_container->height;
     }
@@ -76,8 +76,8 @@ static float grid_flex_container_auto_border_height(ViewBlock* flex_container,
     bool has_child = false;
     bool is_row = true;
     float gap = 0.0f;
-    if (flex_container->embed && flex_container->embed->flex) {
-        FlexProp* flex = flex_container->embed->flex;
+    if (flex_container->embed && flex_container->embedp()->flex) {
+        FlexProp* flex = flex_container->embedp()->flex;
         is_row = (flex->direction == DIR_ROW || flex->direction == DIR_ROW_REVERSE);
         gap = is_row ? flex->row_gap : flex->column_gap;
     }
@@ -232,8 +232,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             if (ch->is_element()) {
                 DomElement* ce = ch->as_element();
                 if (ce->position &&
-                    (ce->position->position == CSS_VALUE_ABSOLUTE ||
-                     ce->position->position == CSS_VALUE_FIXED)) {
+                    (ce->positionp()->position == CSS_VALUE_ABSOLUTE ||
+                     ce->positionp()->position == CSS_VALUE_FIXED)) {
                     // Styles were already resolved in resolve_grid_item_styles above
                     // (init_grid_item_view was called for all children). Only call again
                     // if for some reason gi was not populated yet (defensive guard).
@@ -298,9 +298,9 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 if (rs != r || re != r + 1) continue; // only single-row-span items
                 float h = item->content_height;
                 // CSS Grid: if item has max-height, its contribution to the row is capped
-                if (item->blk && item->blk->given_max_height >= 0) {
+                if (item->blk && item->block_mut()->given_max_height >= 0) {
                     float bb_max = layout_css_size_to_border_box(
-                        item->bound, layout_box_sizing(item), item->blk->given_max_height, false);
+                        item->bound, layout_box_sizing(item), item->block()->given_max_height, false);
                     if (layout_uses_border_box(item)) {
                         bb_max = layout_floor_border_box_height(item, bb_max);
                     }
@@ -340,25 +340,25 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         for (int i = 0; i < gl->item_count; i++) {
             ViewBlock* item = gl->grid_items[i];
             if (!item || !item->position) continue;
-            if (item->position->position == CSS_VALUE_STICKY) {
+            if (item->positionp()->position == CSS_VALUE_STICKY) {
                 layout_sticky_positioned(lycon, item);
                 continue;
             }
-            if (item->position->position != CSS_VALUE_RELATIVE) continue;
+            if (item->positionp()->position != CSS_VALUE_RELATIVE) continue;
             float ox = 0, oy = 0;
-            if (item->position->has_left) {
-                ox = isnan(item->position->left_percent) ? item->position->left
-                    : item->position->left_percent * parent_w / 100.0f;
-            } else if (item->position->has_right) {
-                ox = isnan(item->position->right_percent) ? -item->position->right
-                    : -(item->position->right_percent * parent_w / 100.0f);
+            if (item->positionp()->has_left) {
+                ox = isnan(item->positionp()->left_percent) ? item->positionp()->left
+                    : item->positionp()->left_percent * parent_w / 100.0f;
+            } else if (item->positionp()->has_right) {
+                ox = isnan(item->positionp()->right_percent) ? -item->positionp()->right
+                    : -(item->positionp()->right_percent * parent_w / 100.0f);
             }
-            if (item->position->has_top) {
-                oy = isnan(item->position->top_percent) ? item->position->top
-                    : item->position->top_percent * parent_h / 100.0f;
-            } else if (item->position->has_bottom) {
-                oy = isnan(item->position->bottom_percent) ? -item->position->bottom
-                    : -(item->position->bottom_percent * parent_h / 100.0f);
+            if (item->positionp()->has_top) {
+                oy = isnan(item->positionp()->top_percent) ? item->positionp()->top
+                    : item->positionp()->top_percent * parent_h / 100.0f;
+            } else if (item->positionp()->has_bottom) {
+                oy = isnan(item->positionp()->bottom_percent) ? -item->positionp()->bottom
+                    : -(item->positionp()->bottom_percent * parent_h / 100.0f);
             }
             if (ox != 0 || oy != 0) {
                 log_debug("GRID relative offset: item %d (%.0f, %.0f)", i, ox, oy);
@@ -377,7 +377,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // Only do this for containers with auto height (no explicit height set)
     // ========================================================================
     GridContainerLayout* grid_layout = lycon->grid_container;
-    bool has_explicit_height = grid_container->blk && grid_container->blk->given_height > 0;
+    bool has_explicit_height = grid_container->blk && grid_container->block_mut()->given_height > 0;
 
     if (grid_layout && grid_layout->item_count > 0 && !has_explicit_height) {
         // Find the maximum extent of all grid items
@@ -395,9 +395,9 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         // Add container's bottom padding and border
         float required_height = max_item_bottom;
         if (grid_container->bound) {
-            required_height += grid_container->bound->padding.bottom;
-            if (grid_container->bound->border) {
-                required_height += grid_container->bound->border->width.bottom;
+            required_height += grid_container->boundary()->padding.bottom;
+            if (grid_container->boundary()->border) {
+                required_height += grid_container->boundary()->border->width.bottom;
             }
         }
 
@@ -491,14 +491,14 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         // positioned with no explicit width)
         bool is_shrink_to_fit = false;
         if (grid_container->display.outer == CSS_VALUE_INLINE_BLOCK &&
-            (!grid_container->blk || grid_container->blk->given_width < 0)) {
+            (!grid_container->blk || grid_container->block()->given_width < 0)) {
             is_shrink_to_fit = true;
         } else if (grid_container->position &&
-            (grid_container->position->position == CSS_VALUE_ABSOLUTE ||
-             grid_container->position->position == CSS_VALUE_FIXED)) {
+            (grid_container->positionp()->position == CSS_VALUE_ABSOLUTE ||
+             grid_container->positionp()->position == CSS_VALUE_FIXED)) {
             // Check if width is auto (not explicitly set)
-            bool has_explicit_width = grid_container->blk && grid_container->blk->given_width > 0;
-            bool has_left_right = grid_container->position->has_left && grid_container->position->has_right;
+            bool has_explicit_width = grid_container->blk && grid_container->block_mut()->given_width > 0;
+            bool has_left_right = grid_container->positionp()->has_left && grid_container->positionp()->has_right;
             if (!has_explicit_width && !has_left_right) {
                 is_shrink_to_fit = true;
             }
@@ -622,9 +622,20 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     elem->display = resolve_display_value((void*)child);
     log_debug("Grid item display: outer=%d, inner=%d", elem->display.outer, elem->display.inner);
 
-    // Set up the view type based on display
-    // Grid items are blockified - treat as block
-    elem->view_type = RDT_VIEW_BLOCK;
+    // Grid items are blockified, but a table keeps its table view contract because
+    // build_table_tree validates that overlay before constructing row metadata.
+    if (elem->display.inner == CSS_VALUE_TABLE) {
+        if (!elem->table_prop()) set_view(lycon, RDT_VIEW_TABLE, child);
+        else elem->view_type = RDT_VIEW_TABLE;
+    } else {
+        elem->view_type = RDT_VIEW_BLOCK;
+    }
+    if (elem->display.inner == CSS_VALUE_TABLE && !elem->table_prop()) {
+        // Grid blockification used to bypass table-role allocation, so the cascade
+        // had nowhere to retain border-spacing before final table layout.
+        set_view(lycon, RDT_VIEW_TABLE, child);
+        elem->view_type = RDT_VIEW_BLOCK;
+    }
 
     // Initialize dimensions (will be set by grid algorithm)
     elem->x = 0;
@@ -633,30 +644,13 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     elem->height = 0;
 
     // Force boundary properties allocation for proper measurement
-    if (!elem->bound) {
-        Pool* pool = lycon->doc->view_tree->pool;
-        elem->bound = (BoundaryProp*)pool_calloc(pool, sizeof(BoundaryProp));
-    }
+    elem->ensure_boundary(lycon);
 
-    // Ensure grid item properties are allocated
-    // IMPORTANT: fi and gi are in a union! Check item_prop_type, not just gi pointer
+    // The parent-item union is independent of the element-role union, so form
+    // controls retain their role data while receiving ordinary grid item state.
     ViewBlock* elem_block = lam::view_as_block(elem);
-    GridItemProp* existing_gi = grid_item_prop(elem_block);
-    if (!existing_gi) {
-        Pool* pool = lycon->doc->view_tree->pool;
-        GridItemProp* gi = (GridItemProp*)pool_calloc(pool, sizeof(GridItemProp));
-        if (gi) {
-            if (elem->item_prop_type == DomElement::ITEM_PROP_FORM && elem->form) {
-                elem->form->grid_item = gi;
-            } else {
-                elem->gi = gi;
-                elem->item_prop_type = DomElement::ITEM_PROP_GRID;
-            }
-            // Initialize with auto placement defaults
-            gi->is_grid_auto_placed = true;
-            gi->justify_self = CSS_VALUE_AUTO;
-            gi->align_self_grid = CSS_VALUE_AUTO;
-        }
+    if (!grid_item_prop(elem_block)) {
+        elem->ensure_grid_item(lycon->doc->view_tree);
     }
 
     // CRITICAL: Set lycon->view to this element so style resolution
@@ -776,16 +770,16 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     // Check if item has explicit dimensions from CSS
     bool has_explicit_width = false, has_explicit_height = false;
     if (item->blk) {
-        if (item->blk->given_width > 0) {
-            float w = item->blk->given_width;
+        if (item->block()->given_width > 0) {
+            float w = item->block()->given_width;
             if (layout_uses_border_box(item)) {
                 w = layout_floor_border_box_width(item, w);
             }
             *min_width = *max_width = w;
             has_explicit_width = true;
         }
-        if (item->blk->given_height > 0) {
-            float h = item->blk->given_height;
+        if (item->block()->given_height > 0) {
+            float h = item->block()->given_height;
             if (layout_uses_border_box(item)) {
                 h = layout_floor_border_box_height(item, h);
             }
@@ -928,7 +922,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
 
     // Inherit text alignment from grid item if specified
     if (grid_item->blk) {
-        lycon->block.text_align = grid_item->blk->text_align;
+        lycon->block.text_align = grid_item->block()->text_align;
     }
 
     // Set up line formatting context
@@ -967,6 +961,18 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
         lycon->block.parent = saved_parent;
         grid_item->content_height = grid_flex_container_auto_border_height(grid_item, lycon->block.advance_y);
 
+    } else if (grid_item->display.inner == CSS_VALUE_TABLE) {
+        // A table keeps its own role while gi describes participation in this grid.
+        View* saved_view = lycon->view;
+        lycon->view = grid_item;
+        layout_table_content(lycon, grid_item, grid_item->display);
+        lycon->view = saved_view;
+    } else if (grid_item->display.inner == CSS_VALUE_TABLE) {
+        // A table keeps its own role while gi describes participation in this grid.
+        View* saved_view = lycon->view;
+        lycon->view = grid_item;
+        layout_table_content(lycon, grid_item, grid_item->display);
+        lycon->view = saved_view;
     } else {
         // Standard flow layout for grid item content
         log_debug("Layout flow content for grid item %s", grid_item->node_name());
@@ -990,8 +996,8 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     grid_item->content_width = lycon->block.max_width;
     if (grid_item->display.inner != CSS_VALUE_FLEX) {
         if (grid_item->bound) {
-            grid_item->content_width += grid_item->bound->padding.right;
-            grid_item->content_height = lycon->block.advance_y + grid_item->bound->padding.bottom;
+            grid_item->content_width += grid_item->boundary()->padding.right;
+            grid_item->content_height = lycon->block.advance_y + grid_item->boundary()->padding.bottom;
         } else {
             grid_item->content_height = lycon->block.advance_y;
         }
@@ -1071,11 +1077,11 @@ static bool compute_grid_area_for_absolute(
     // Calculate container offsets (padding + border)
     float container_offset_x = 0, container_offset_y = 0;
     if (container->bound) {
-        container_offset_x += container->bound->padding.left;
-        container_offset_y += container->bound->padding.top;
-        if (container->bound->border) {
-            container_offset_x += container->bound->border->width.left;
-            container_offset_y += container->bound->border->width.top;
+        container_offset_x += container->boundary()->padding.left;
+        container_offset_y += container->boundary()->padding.top;
+        if (container->boundary()->border) {
+            container_offset_x += container->boundary()->border->width.left;
+            container_offset_y += container->boundary()->border->width.top;
         }
     }
 
@@ -1094,11 +1100,11 @@ static bool compute_grid_area_for_absolute(
     // the containing block extends to the outer edge of the padding box at that end.
     // This is the BORDER edge (not the content/padding), so it includes padding but not border.
     float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
-    if (container->bound && container->bound->border) {
-        border_left   = container->bound->border->width.left;
-        border_right  = container->bound->border->width.right;
-        border_top    = container->bound->border->width.top;
-        border_bottom = container->bound->border->width.bottom;
+    if (container->bound && container->boundary_mut()->border) {
+        border_left   = container->boundary()->border->width.left;
+        border_right  = container->boundary()->border->width.right;
+        border_top    = container->boundary()->border->width.top;
+        border_bottom = container->boundary()->border->width.bottom;
     }
     // Padding-box outer edges in container border-box coordinates
     float col_auto_start_pos = border_left;
@@ -1185,13 +1191,13 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
 
         if (pos->has_left) {
             new_x = state->grid_area_x + pos->left;
-            if (child_block->bound && child_block->bound->margin.left > 0.0f) {
-                new_x += child_block->bound->margin.left;
+            if (child_block->bound && child_block->boundary_mut()->margin.left > 0.0f) {
+                new_x += child_block->boundary()->margin.left;
             }
         } else if (pos->has_right) {
             new_x = state->grid_area_x + state->grid_area_width - pos->right - child_block->width;
-            if (child_block->bound && child_block->bound->margin.right > 0.0f) {
-                new_x -= child_block->bound->margin.right;
+            if (child_block->bound && child_block->boundary_mut()->margin.right > 0.0f) {
+                new_x -= child_block->boundary()->margin.right;
             }
         } else {
             new_x = state->grid_area_x;
@@ -1199,28 +1205,28 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
 
         if (pos->has_top) {
             new_y = state->grid_area_y + pos->top;
-            if (child_block->bound && child_block->bound->margin.top > 0.0f) {
-                new_y += child_block->bound->margin.top;
+            if (child_block->bound && child_block->boundary_mut()->margin.top > 0.0f) {
+                new_y += child_block->boundary()->margin.top;
             }
         } else if (pos->has_bottom) {
             new_y = state->grid_area_y + state->grid_area_height - pos->bottom - child_block->height;
-            if (child_block->bound && child_block->bound->margin.bottom > 0.0f) {
-                new_y -= child_block->bound->margin.bottom;
+            if (child_block->bound && child_block->boundary_mut()->margin.bottom > 0.0f) {
+                new_y -= child_block->boundary()->margin.bottom;
             }
         } else {
             new_y = state->grid_area_y;
         }
 
         if (pos->has_left && pos->has_right) {
-            float margin_left = child_block->bound ? child_block->bound->margin.left : 0.0f;
-            float margin_right = child_block->bound ? child_block->bound->margin.right : 0.0f;
+            float margin_left = child_block->bound ? child_block->boundary()->margin.left : 0.0f;
+            float margin_right = child_block->bound ? child_block->boundary()->margin.right : 0.0f;
             child_block->width = state->grid_area_width - pos->left - pos->right -
                 margin_left - margin_right;
             new_x = state->grid_area_x + pos->left + margin_left;
         }
         if (pos->has_top && pos->has_bottom) {
-            float margin_top = child_block->bound ? child_block->bound->margin.top : 0.0f;
-            float margin_bottom = child_block->bound ? child_block->bound->margin.bottom : 0.0f;
+            float margin_top = child_block->bound ? child_block->boundary()->margin.top : 0.0f;
+            float margin_bottom = child_block->bound ? child_block->boundary()->margin.bottom : 0.0f;
             child_block->height = state->grid_area_height - pos->top - pos->bottom -
                 margin_top - margin_bottom;
             new_y = state->grid_area_y + pos->top + margin_top;
@@ -1239,10 +1245,10 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     PositionProp* pos = child_block->position;
     bool no_horiz = !pos->has_left && !pos->has_right;
     bool no_vert = !pos->has_top && !pos->has_bottom;
-    float ml = child_block->bound ? child_block->bound->margin.left : 0.0f;
-    float mr = child_block->bound ? child_block->bound->margin.right : 0.0f;
-    float mt = child_block->bound ? child_block->bound->margin.top : 0.0f;
-    float mb = child_block->bound ? child_block->bound->margin.bottom : 0.0f;
+    float ml = child_block->bound ? child_block->boundary()->margin.left : 0.0f;
+    float mr = child_block->bound ? child_block->boundary()->margin.right : 0.0f;
+    float mt = child_block->bound ? child_block->boundary()->margin.top : 0.0f;
+    float mb = child_block->bound ? child_block->boundary()->margin.bottom : 0.0f;
 
     if (no_horiz) {
         int justify = radiant::resolve_justify_self(gi->justify_self,

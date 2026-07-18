@@ -60,9 +60,9 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
     if (render_trace_enabled()) {
         log_debug("[RENDER DISPATCH] view_type=%d, embed=%p, img=%p, width=%.0f, height=%.0f",
                   block->view_type, block->embed,
-                  block->embed ? block->embed->img : NULL, block->width, block->height);
+                  block->embed ? block->embedp()->img : NULL, block->width, block->height);
     }
-    if (block->item_prop_type == DomElement::ITEM_PROP_FORM && block->form) {
+    if (block->form_control()) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_block_view for form control");
         render_block_view(rdcon, block);
     }
@@ -71,11 +71,11 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_inline_svg for inline SVG");
         render_raster_profile_block(rdcon, block, render_inline_svg, RENDER_PROFILE_SVG);
     }
-    else if (block->embed && block->embed->img) {
+    else if (block->embed && block->embedp()->img) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_image_view");
         render_raster_profile_block(rdcon, block, render_image_view, RENDER_PROFILE_IMAGE);
     }
-    else if (block->embed && block->embed->video) {
+    else if (block->embed && block->embedp()->video) {
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_video_content for <video>");
         render_raster_retained_media(rdcon, block, render_video_content);
     }
@@ -83,18 +83,18 @@ static void render_raster_dispatch_block(RenderContext* rdcon, ViewBlock* block,
         if (render_trace_enabled()) log_debug("[RENDER DISPATCH] calling render_webview_layer_content");
         render_raster_retained_media(rdcon, block, render_webview_layer_content);
     }
-    else if (block->embed && block->embed->doc) {
+    else if (block->embed && block->embedp()->doc) {
         render_embed_doc(rdcon, block);
     }
-    else if (block->blk && block->blk->list_style_type) {
+    else if (block->blk && block->block_mut()->list_style_type) {
         render_list_view(rdcon, block);
     }
     else {
         // Skip only absolute/fixed positioned elements - they are rendered separately.
         // Floats also have a position struct and remain in normal flow.
         if (skip_positioned_in_normal_flow && block->position &&
-            (block->position->position == CSS_VALUE_ABSOLUTE ||
-             block->position->position == CSS_VALUE_FIXED)) {
+            (block->positionp()->position == CSS_VALUE_ABSOLUTE ||
+             block->positionp()->position == CSS_VALUE_FIXED)) {
             log_debug("absolute/fixed positioned block, skip in normal rendering");
         } else {
             render_block_view(rdcon, block);
@@ -191,7 +191,7 @@ void render_raster_positive_z_descendants(RenderContext* rdcon, View* view) {
 }
 
 bool render_raster_custom_layout_children(RenderContext* rdcon, ViewBlock* block) {
-    if (!rdcon || !block || !block->custom_layout_paint) return false;
+    if (!rdcon || !block || !block->custom_layout_paint_prop()) return false;
     RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
     RenderBackend backend;
     render_raster_backend_init(&backend, rdcon);

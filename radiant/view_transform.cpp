@@ -292,7 +292,7 @@ RdtMatrix compute_transform_matrix(TransformFunction* functions,
 }
 
 bool has_transform(DomElement* elem) {
-    return elem && elem->transform && elem->transform->functions;
+    return elem && elem->transform && elem->transformp()->functions;
 }
 
 void transform_point(float& x, float& y, const RdtMatrix& m) {

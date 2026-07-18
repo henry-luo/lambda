@@ -22,7 +22,7 @@
 // ============================================================================
 
 static bool marker_image_orientation_uses_from_image(DomElement* element) {
-    for (DomElement* cur = element; cur; cur = dom_element_get_parent(cur)) {
+    for (DomElement* cur = element; cur; cur = cur->parent_element()) {
         CssDeclaration* decl = dom_element_get_specified_value(cur, CSS_PROPERTY_IMAGE_ORIENTATION);
         if (!decl || !decl->value) continue;
         if (decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
@@ -289,8 +289,8 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
     // enabling counters(list-item, ".") to show nested numbering (e.g., "1.2.3").
     // Only skip if explicit counter-reset already includes "list-item".
     bool explicit_has_list_item = false;
-    if (block->blk && block->blk->counter_reset) {
-        explicit_has_list_item = strstr(block->blk->counter_reset, "list-item") != nullptr;
+    if (block->blk && block->block_mut()->counter_reset) {
+        explicit_has_list_item = strstr(block->block()->counter_reset, "list-item") != nullptr;
     }
     if (explicit_has_list_item) return;
 
@@ -299,8 +299,8 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
     bool is_reversed_ol = false;
     if (tag == HTM_TAG_OL) {
         // Check <ol reversed> attribute
-        is_reversed_ol = dom_element_has_attribute(dom_elem, "reversed");
-        const char* start_attr = dom_element_get_attribute(dom_elem, "start");
+        is_reversed_ol = dom_elem->has_attribute("reversed");
+        const char* start_attr = dom_elem->get_attribute("start");
         if (is_reversed_ol) {
             if (start_attr) {
                 start_value = atoi(start_attr) + 1;
@@ -436,7 +436,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     marker_prop->marker_type = marker_style;
     marker_prop->bullet_size = bullet_size;
     marker_prop->is_outside = is_outside;
-    DomElement* list_parent = dom_element_get_parent(parent_elem);
+    DomElement* list_parent = parent_elem->parent_element();
     bool is_quirks = lycon->doc && lycon->doc->view_tree &&
         is_quirks_mode(lycon->doc->view_tree->html_version);
     marker_prop->reserves_first_line = is_quirks && is_outside &&
@@ -513,16 +513,16 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     // Detect if parent is <ol reversed>
     bool parent_reversed = false;
     if (dom_elem && dom_elem->tag_id == HTM_TAG_LI) {
-        DomElement* parent_elem = dom_element_get_parent(dom_elem);
+        DomElement* parent_elem = dom_elem->parent_element();
         if (parent_elem && parent_elem->tag_id == HTM_TAG_OL &&
-            dom_element_has_attribute(parent_elem, "reversed")) {
+            parent_elem->has_attribute("reversed")) {
             parent_reversed = true;
         }
     }
 
     // Handle <li value="N"> attribute: sets counter to N before increment
     if (dom_elem && dom_elem->tag_id == HTM_TAG_LI) {
-        const char* value_attr = dom_element_get_attribute(dom_elem, "value");
+        const char* value_attr = dom_elem->get_attribute("value");
         if (value_attr) {
             int li_value = atoi(value_attr);
             // CSS Lists 3: li[value] acts as counter-set: list-item <value>
@@ -537,8 +537,8 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 
     // CSS Lists 3 §4.5: auto-increment list-item only if the element
     // does NOT already have an explicit counter-increment for list-item
-    bool explicit_list_item_inc = (block->blk && block->blk->counter_increment &&
-                                   strstr(block->blk->counter_increment, "list-item") != nullptr);
+    bool explicit_list_item_inc = (block->blk && block->block_mut()->counter_increment &&
+                                   strstr(block->block()->counter_increment, "list-item") != nullptr);
     if (!explicit_list_item_inc) {
         log_debug("    [List] Auto-%s list-item counter", parent_reversed ? "decrementing" : "incrementing");
         counter_increment(lycon->counter_context, parent_reversed ? "list-item -1" : "list-item 1");
@@ -553,8 +553,8 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     // Set default list-style-position to outside if not specified
     // CSS 2.1 Section 12.5.1: Initial value is 'outside'
     bool is_outside_position = !is_inline_list_item;  // Default is outside, but inside for inline
-    if (block->blk && block->blk->list_style_position != 0) {
-        if (block->blk->list_style_position == 1) {
+    if (block->blk && block->block_mut()->list_style_position != 0) {
+        if (block->block()->list_style_position == 1) {
             is_outside_position = false;
             log_debug("    [List] list-style-position=inside (is_outside=0)");
         } else if (!is_inline_list_item) {
@@ -567,12 +567,12 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 
     // Generate list marker if list-style-type is not 'none'
     // CSS 2.1 §12.5: list-style-type is inherited. Check element first, then parent.
-    CssEnum effective_list_style = block->blk ? block->blk->list_style_type : (CssEnum)0;
+    CssEnum effective_list_style = block->blk ? block->block()->list_style_type : (CssEnum)0;
     if (effective_list_style == 0) {
         // Inherit from parent <ol>/<ul> element
-        DomElement* parent_elem = dom_element_get_parent(dom_elem);
+        DomElement* parent_elem = dom_elem->parent_element();
         if (parent_elem && parent_elem->blk) {
-            effective_list_style = parent_elem->blk->list_style_type;
+            effective_list_style = parent_elem->block()->list_style_type;
         }
         if (effective_list_style == 0) {
             effective_list_style = CSS_VALUE_DISC;
@@ -580,15 +580,15 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     }
 
     // CSS Lists 3 §4.1: check for string marker value
-    const char* string_marker = (block->blk) ? block->blk->list_style_type_string : nullptr;
+    const char* string_marker = (block->blk) ? block->block()->list_style_type_string : nullptr;
     bool has_marker = (effective_list_style != CSS_VALUE_NONE) || (string_marker != nullptr);
 
     // Check for ::marker { content: ... } CSS override
     const char* marker_css_content = nullptr;
     DomElement* list_elem = lam::dom_require<DOM_NODE_ELEMENT>(elmt);
-    if (list_elem->marker_styles) {
+    if (list_elem->pseudo_style(PSEUDO_STYLE_MARKER)) {
         CssDeclaration* content_decl = style_tree_get_declaration(
-            list_elem->marker_styles, CSS_PROPERTY_CONTENT);
+            list_elem->pseudo_style(PSEUDO_STYLE_MARKER), CSS_PROPERTY_CONTENT);
         if (content_decl && content_decl->value) {
             CssValue* cv = content_decl->value;
             if (cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NONE) {
@@ -632,16 +632,16 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 
     if (!block->pseudo->marker_generated) {
         float font_size = 16.0f;
-        if (block->font && block->font->font_size > 0) {
-            font_size = block->font->font_size;
+        if (block->font && block->fontp()->font_size > 0) {
+            font_size = block->fontp()->font_size;
         }
 
         // CSS 2.1 §12.5: list-style-image is inherited; check self then parent
-        const char* image_url = (block->blk) ? block->blk->list_style_image : nullptr;
+        const char* image_url = (block->blk) ? block->block()->list_style_image : nullptr;
         if (!image_url || strcmp(image_url, "none") == 0) {
-            DomElement* pe = dom_element_get_parent(dom_elem);
+            DomElement* pe = dom_elem->parent_element();
             if (pe && pe->blk) {
-                image_url = pe->blk->list_style_image;
+                image_url = pe->block()->list_style_image;
             }
         }
 
