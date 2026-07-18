@@ -6044,6 +6044,34 @@ typedef enum JsConsoleLevel {
     JS_CONSOLE_ERROR,
 } JsConsoleLevel;
 
+static Item js_console_arg_to_string(Item value) {
+    if (get_type_id(value) == LMD_TYPE_MAP &&
+        js_class_is_error_like(js_class_id(value))) {
+        Item name = js_property_get_str(value, "name", 4);
+        Item message = js_property_get_str(value, "message", 7);
+        String* name_string = get_type_id(name) == LMD_TYPE_STRING
+            ? it2s(name) : nullptr;
+        String* message_string = get_type_id(message) == LMD_TYPE_STRING
+            ? it2s(message) : nullptr;
+        StrBuf* rendered = strbuf_new();
+        if (!rendered) return js_to_string(value);
+        if (name_string && name_string->len > 0) {
+            strbuf_append_str_n(rendered, name_string->chars, name_string->len);
+        } else {
+            strbuf_append_str(rendered, "Error");
+        }
+        if (message_string && message_string->len > 0) {
+            strbuf_append_str(rendered, ": ");
+            strbuf_append_str_n(rendered, message_string->chars,
+                                message_string->len);
+        }
+        String* result = heap_strcpy(rendered->str, rendered->length);
+        strbuf_free(rendered);
+        return (Item){.item = s2it(result)};
+    }
+    return js_to_string(value);
+}
+
 static int js_console_format_args(Item* args, int argc, char* buf, int capacity) {
     // if first arg is a string with format specifiers and there are more args,
     // use util.format-style substitution (matches Node.js console.log behavior)
@@ -6066,7 +6094,10 @@ static int js_console_format_args(Item* args, int argc, char* buf, int capacity)
     } else {
         for (int i = 0; i < argc; i++) {
             if (i > 0 && pos < capacity - 1) buf[pos++] = ' ';
-            Item str = js_to_string(args[i]);
+            // Error.prototype.toString can be shadowed or unavailable while an
+            // exception sink is itself reporting a plugin failure. Console
+            // diagnostics must still retain the error name and message.
+            Item str = js_console_arg_to_string(args[i]);
             String* s = it2s(str);
             if (s && s->len > 0) {
                 int copy = (int)s->len < capacity - 1 - pos ? (int)s->len : capacity - 1 - pos;

@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 24px; font: 16px sans-serif; }
+    #editor { width: 520px; min-height: 120px; border: 1px solid #888; }
+    .cm-editor { min-height: 120px; }
+  </style>
+</head>
+<body>
+  <div id="editor"></div>
+  <script src="../../js/codemirror6.min.js"></script>
+  <script>
+    window.editor = new CodeMirror6.EditorView({
+      state: CodeMirror6.EditorState.create({
+        doc: 'paste:',
+        selection: { anchor: 6 },
+        extensions: CodeMirror6.basicSetup
+      }),
+      parent: document.getElementById('editor')
+    });
+  </script>
+</body>
+</html>

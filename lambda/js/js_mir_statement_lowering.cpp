@@ -1788,14 +1788,15 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // Eval completion: ForBodyEvaluation starts with V = undefined (spec §13.7.4.8)
     jm_eval_cptn_reset(mt);
 
-    // --- For-loop specialization: detect and cache loop bound ---
+    // --- For-loop specialization: detect a native-compatible loop bound ---
     // Three tiers of test optimization:
     //   1. full_native:  both sides typed numeric → native compare + branch (existing)
-    //   2. semi_native:  one side typed, other untyped but identifier/literal →
-    //                    cache bound before loop, native compare each iteration (new)
+    //   2. semi_native:  one side typed, other untyped → coerce the live bound
+    //                    and use a native compare each iteration
     //   3. boxed:        no type info → boxed runtime comparison (fallback)
     bool semi_native_test = false;
-    MIR_reg_t cached_bound = 0;
+    JsAstNode* semi_native_bound_node = NULL;
+    TypeId semi_native_bound_type = LMD_TYPE_NULL;
     MIR_insn_code_t cached_cmp_insn = MIR_LTS;
     bool cached_bound_on_right = true;
     JsAstNode* cached_counter_node = NULL;
@@ -1890,6 +1891,8 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
 
                 if (can_semi) {
                     cached_cmp_target = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+                    semi_native_bound_node = bound_expr;
+                    semi_native_bound_type = bound_type;
 
                     switch (test_bin->op) {
                     case JS_OP_LT:        cached_cmp_insn = use_float ? MIR_DLT : MIR_LTS; break;
@@ -1903,8 +1906,10 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                     default: break;
                     }
 
-                    // Cache the bound ONCE before the loop.
-                    cached_bound = jm_transpile_as_native(mt, bound_expr, bound_type, cached_cmp_target);
+                    // A call in the body may resize an array used by the bound
+                    // (for example splice() under `i < array.length`). Re-read
+                    // dynamic bounds at the loop test so native comparison does
+                    // not change JavaScript's per-iteration evaluation semantics.
                     semi_native_test = true;
                 }
             }
@@ -1967,12 +1972,14 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // Test
     if (for_node->test) {
         if (semi_native_test) {
-            // Semi-native: read counter as native, compare with cached bound
+            // Semi-native: read the counter and current bound as native values.
             TypeId ct = jm_get_effective_type(mt, cached_counter_node);
             MIR_reg_t counter_reg = jm_transpile_as_native(mt, cached_counter_node, ct, cached_cmp_target);
+            MIR_reg_t current_bound = jm_transpile_as_native(mt, semi_native_bound_node,
+                semi_native_bound_type, cached_cmp_target);
 
-            MIR_reg_t left_cmp  = cached_bound_on_right ? counter_reg  : cached_bound;
-            MIR_reg_t right_cmp = cached_bound_on_right ? cached_bound : counter_reg;
+            MIR_reg_t left_cmp  = cached_bound_on_right ? counter_reg  : current_bound;
+            MIR_reg_t right_cmp = cached_bound_on_right ? current_bound : counter_reg;
 
             MIR_reg_t test_r = jm_new_reg(mt, "fltest", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, cached_cmp_insn,

@@ -162,6 +162,10 @@ typedef union RdtEvent {
     FocusEvent focus;
 } RdtEvent;
 
+#ifndef RADIANT_EVENT_CORE_ONLY
+void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
+#endif
+
 void radiant_uncheck_radio_group(DomNode* root, const char* name, DomNode* exclude,
                                  DocState* state, bool sync_pseudo);
 
@@ -842,6 +846,15 @@ struct DomNode* dom_node_clone(struct DomNode* node, bool deep);
 // Returns nullptr if `original` has no parent or `offset` is out of bounds.
 struct DomText* dom_text_split_at(DocState* state, struct DomText* original,
                                   uint32_t offset);
+
+// Replace UTF-16 range `offset..offset+count` in a text node with UTF-8 bytes.
+// The replacement is copied into the owning document arena and all live Range
+// boundaries are adjusted through the CharacterData mutation envelope.
+bool dom_text_replace_data_contents(DocState* state, struct DomText* text,
+                                    uint32_t offset, uint32_t count,
+                                    const char* replacement,
+                                    size_t replacement_bytes,
+                                    uint32_t replacement_u16_len);
 
 // Range methods —---------------------------------------------------------
 bool dom_range_delete_contents(DomRange* r, const char** out_exception);

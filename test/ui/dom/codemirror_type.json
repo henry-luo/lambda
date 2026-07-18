@@ -1,0 +1,17 @@
+{
+  "name": "CodeMirror handles typing, arrow navigation, and select-all replacement",
+  "html": "test/ui/dom/codemirror_type.html",
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "wait", "ms": 30},
+    {"type": "focus", "target": {"selector": ".cm-content"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "target": {"selector": ".cm-content"}, "text": " alpha"},
+    {"type": "key_press", "key": "Left"},
+    {"type": "key_press", "key": "Right"},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "type", "target": {"selector": ".cm-content"}, "text": "Radiant DOM2"},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_text", "target": {"selector": ".cm-content"}, "equals": "Radiant DOM2"}
+  ]
+}

@@ -137,10 +137,6 @@ extern "C" Item* js_args_push(int count) {
         return js_alloc_env(count);
     }
     Item* p = js_args_stack + js_args_len;
-    if (getenv("JS_SCOPE_TRACE")) {
-        log_notice("js-scope-args-push: count=%d old=%zu ptr=%p", count,
-            js_args_len, (void*)p);
-    }
     // slots are already zeroed (invariant); fill happens in the JIT caller
     js_args_len += (size_t)count;
     return p;
@@ -155,9 +151,6 @@ extern "C" int64_t js_args_save(void) {
 // [len, cap) zeroed invariant.
 extern "C" void js_args_restore(int64_t mark) {
     size_t m = (size_t)mark;
-    if (getenv("JS_SCOPE_TRACE")) {
-        log_notice("js-scope-args-restore: mark=%zu old=%zu", m, js_args_len);
-    }
     if (m >= js_args_len) return;  // nothing to pop (or stale mark)
     memset(js_args_stack + m, 0, (js_args_len - m) * sizeof(Item));
     js_args_len = m;

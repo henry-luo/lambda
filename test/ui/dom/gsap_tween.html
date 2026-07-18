@@ -11,14 +11,6 @@
   <div id="box">box</div>
   <script src="../../js/gsap.min.js"></script>
   <script>
-    console.log('gsap-plugin-probe:' + typeof window.CSSPlugin + ':' +
-      typeof window.CSSPlugin.targetTest + ':' + Object.keys(window.CSSPlugin).join(',') + ':' +
-      typeof gsap.plugins.css.targetTest + ':' + Object.keys(gsap.plugins.css).join(','));
-    var pluginKeys = [];
-    for (var pluginKey in window.CSSPlugin) {
-      pluginKeys.push(pluginKey + '=' + (pluginKey in gsap.plugins.css));
-    }
-    console.log('gsap-plugin-in:' + pluginKeys.join(','));
     document.getElementById('start').addEventListener('click', function () {
       gsap.to('#box', {
         opacity: 0.25,

@@ -705,6 +705,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 ce->is_declaration = class_node_type && strcmp(class_node_type, "class_declaration") == 0;
             }
             ce->inner_module_var_index = -1;
+            int class_body_functions_start = mt->func_count;
 
             JsBlockNode* body = (JsBlockNode*)cls->body;
             JsAstNode* m = body->statements;
@@ -891,6 +892,17 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 }
                 m = m->next;
             }
+
+            // The private name of a named class is visible throughout field,
+            // static-block, method, and nested-function bodies. Preserve an
+            // already assigned inner class so nested classes keep precedence.
+            for (int fi = class_body_functions_start; fi < mt->func_count; fi++) {
+                if (!mt->func_entries[fi].owner_class) {
+                    mt->func_entries[fi].owner_class = ce;
+                }
+            }
+
+            jm_remove_ctor_props_shadowing_methods(ce);
 
             // When instance fields are present, disable A5/P3/P4 shaped slot optimization.
             // Field inits run before the constructor body via js_property_set, which manages
@@ -1760,6 +1772,41 @@ void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
     if (fc->ctor_prop_count > 0) {
         log_debug("A5: constructor '%s' has %d this.prop assignments", fc->name,
             fc->ctor_prop_count);
+    }
+}
+
+void jm_remove_ctor_props_shadowing_methods(JsClassEntry* ce) {
+    if (!ce || !ce->constructor || !ce->constructor->fc) return;
+    JsFuncCollected* fc = ce->constructor->fc;
+    for (int prop_index = 0; prop_index < fc->ctor_prop_count;) {
+        bool shadows_method = false;
+        for (JsClassEntry* owner = ce; owner && !shadows_method; owner = owner->superclass) {
+            for (int method_index = 0; method_index < owner->method_count; method_index++) {
+                JsClassMethodEntry* method = &owner->methods[method_index];
+                if (method->is_static || method->computed || !method->name) continue;
+                if ((int)method->name->len == fc->ctor_prop_lens[prop_index] &&
+                    strncmp(method->name->chars, fc->ctor_prop_ptrs[prop_index],
+                        method->name->len) == 0) {
+                    shadows_method = true;
+                    break;
+                }
+            }
+        }
+        if (!shadows_method) {
+            prop_index++;
+            continue;
+        }
+
+        // reserved constructor slots exist before the assignment and would
+        // mask a prototype method that the constructor reads and then binds.
+        for (int move = prop_index + 1; move < fc->ctor_prop_count; move++) {
+            fc->ctor_prop_ptrs[move - 1] = fc->ctor_prop_ptrs[move];
+            fc->ctor_prop_lens[move - 1] = fc->ctor_prop_lens[move];
+            fc->ctor_prop_ta_types[move - 1] = fc->ctor_prop_ta_types[move];
+            fc->ctor_prop_types[move - 1] = fc->ctor_prop_types[move];
+            fc->ctor_prop_param_idx[move - 1] = fc->ctor_prop_param_idx[move];
+        }
+        fc->ctor_prop_count--;
     }
 }
 

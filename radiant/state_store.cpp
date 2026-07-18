@@ -1179,6 +1179,10 @@ extern "C" DomRange** dom_range_state_range_freelist_slot(DocState* state) {
 extern "C" struct DomSelection* dom_range_state_selection(DocState* state) {
     return state ? state->dom_selection : NULL;
 }
+extern "C" DomNode* dom_range_state_document_root(DocState* state) {
+    return state && state->owner_store && state->owner_store->document
+        ? (DomNode*)state->owner_store->document->root : NULL;
+}
 
 // ----------------------------------------------------------------------------
 // Selection/caret machine helpers.

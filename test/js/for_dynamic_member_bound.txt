@@ -1,0 +1,2 @@
+shrink=1,0
+grow=3,3

@@ -1,0 +1,13 @@
+{
+  "name": "CodeMirror consumes clipboardData through a real paste gesture",
+  "html": "test/ui/dom/codemirror_paste.html",
+  "viewport": {"width": 720, "height": 420},
+  "events": [
+    {"type": "wait", "ms": 30},
+    {"type": "focus", "target": {"selector": ".cm-content"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "paste_text", "text": "clipboard"},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_text", "target": {"selector": ".cm-content"}, "equals": "paste:clipboard"}
+  ]
+}

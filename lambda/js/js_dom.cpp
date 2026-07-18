@@ -181,17 +181,6 @@ static void js_dom_rich_history_record(DomElement* owner,
                                        const JsDomRichHistorySelection* after_sel);
 static void js_dom_rich_history_reset();
 
-static String* js_dom_create_document_string(DomDocument* doc, const char* str, size_t len) {
-    if (!doc || !doc->arena || !str) return nullptr;
-    String* s = (String*)arena_alloc(doc->arena, sizeof(String) + len + 1);
-    if (!s) return nullptr;
-    s->len = (uint32_t)len;
-    s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
-    if (len > 0) memcpy(s->chars, str, len);
-    s->chars[len] = '\0';
-    return s;
-}
-
 // ============================================================================
 // Unique type markers for DOM-adjacent Maps
 // ============================================================================
@@ -757,6 +746,25 @@ static Item js_dom_testdriver_key(Item key_item,
     if (js_is_truthy(alt_item)) mods |= RDT_MOD_ALT;
     if (js_is_truthy(meta_item)) mods |= RDT_MOD_SUPER;
 
+    if (wpt_key >= 'a' && wpt_key <= 'z') {
+        wpt_key -= ('a' - 'A');
+    }
+    bool primary_shortcut = (mods & (RDT_MOD_CTRL | RDT_MOD_SUPER)) != 0;
+    if (primary_shortcut &&
+        (wpt_key == RDT_KEY_C || wpt_key == RDT_KEY_V || wpt_key == RDT_KEY_X) &&
+        _js_current_ui_context) {
+        // WPT shortcuts must enter the platform event path; synthesizing only a
+        // ClipboardEvent skips the default editing transaction and loses the
+        // target-specific InputEvent data/DataTransfer contract.
+        RdtEvent event;
+        memset(&event, 0, sizeof(event));
+        event.key.type = RDT_EVENT_KEY_DOWN;
+        event.key.key = (int)wpt_key;
+        event.key.mods = mods;
+        handle_event(_js_current_ui_context, _js_current_document, &event);
+        return (Item){.item = ITEM_TRUE};
+    }
+
     InputIntent intent;
     memset(&intent, 0, sizeof(intent));
     intent.type = js_dom_testdriver_delete_intent(
@@ -996,14 +1004,6 @@ static DomNode* js_dom_last_script_visible_child(DomElement* elem) {
     return nullptr;
 }
 
-static inline void dom_text_replace_data(DomText* text, uint32_t off,
-                                         uint32_t cnt, uint32_t repl_len) {
-    DocState* st = js_dom_state_for_nodes((DomNode*)text, text ? text->parent : nullptr);
-    if (st && text) dom_mutation_text_replace_data(st, text, off, cnt, repl_len);
-    js_dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text,
-                                  text ? text->parent : nullptr, 0);
-}
-
 static uint32_t js_dom_utf16_length_from_utf8(const char* text, size_t len) {
     if (!text) return 0;
     uint32_t n = 0;
@@ -1032,13 +1032,6 @@ static int64_t js_dom_to_integer_or_zero(Item value) {
     return (int64_t)d;
 }
 
-static DomDocument* js_dom_text_owner_document(DomText* text_node) {
-    DomNode* parent = text_node ? text_node->parent : nullptr;
-    while (parent && !parent->is_element()) parent = parent->parent;
-    if (parent && parent->is_element()) return parent->as_element()->doc;
-    return _js_current_document;
-}
-
 static void js_dom_throw_index_size_error(const char* message) {
     Item name = (Item){.item = s2it(heap_create_name("IndexSizeError"))};
     Item msg = (Item){.item = s2it(heap_create_name(
@@ -1059,34 +1052,17 @@ static bool js_dom_replace_text_data(DomText* text_node, uint32_t offset,
     uint32_t available = old_u16_len - offset;
     if (count > available) count = available;
 
-    uint32_t u8_off = dom_text_utf16_to_utf8(text_node, offset);
-    uint32_t u8_end = dom_text_utf16_to_utf8(text_node, offset + count);
-    if (u8_end < u8_off) u8_end = u8_off;
-
     size_t repl_len = strlen(repl_chars);
     uint32_t repl_u16_len = js_dom_utf16_length_from_utf8(repl_chars, repl_len);
     const char* old_text = text_node->text ? text_node->text : "";
-    size_t old_len = text_node->length;
-    size_t prefix_len = u8_off;
-    size_t suffix_len = old_len > u8_end ? old_len - u8_end : 0;
-    size_t new_len = prefix_len + repl_len + suffix_len;
-
-    char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_JS_RUNTIME);
-    if (!buf) return false;
-    if (prefix_len) memcpy(buf, old_text, prefix_len);
-    if (repl_len) memcpy(buf + prefix_len, repl_chars, repl_len);
-    if (suffix_len) memcpy(buf + prefix_len + repl_len, old_text + u8_end, suffix_len);
-    buf[new_len] = '\0';
-
-    DomDocument* doc = js_dom_text_owner_document(text_node);
-    String* s = js_dom_create_document_string(doc, buf, new_len);
-    mem_free(buf);
-    if (!s) return false;
-
-    text_node->native_string = s;
-    text_node->text = s->chars;
-    text_node->length = new_len;
-    dom_text_replace_data(text_node, offset, count, repl_u16_len);
+    DocState* state = js_dom_state_for_nodes(
+        (DomNode*)text_node, text_node->parent);
+    if (!dom_text_replace_data_contents(state, text_node, offset, count,
+                                        repl_chars, repl_len, repl_u16_len)) {
+        return false;
+    }
+    js_dom_record_mutation_detail(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
+                                  text_node->parent, 0);
     js_dom_mutation_notify(DOM_JS_MUTATION_TEXT, (DomNode*)text_node,
                            text_node->parent, nullptr, old_text);
     log_debug("js_dom_replace_text_data: offset=%u count=%u replacement_u16=%u",
@@ -2921,7 +2897,7 @@ static DomDocument* create_foreign_html_doc(const char* title) {
     if (head_dom && title_dom) {
         head_dom->append_child(title_dom);
         if (title && *title) {
-            String* tstr = js_dom_create_document_string(fd, title, strlen(title));
+            String* tstr = dom_document_create_string(fd, title, strlen(title));
             DomText* tnode = dom_text_create_detached(tstr, fd);
             if (tnode) title_dom->append_child(tnode);
         }
@@ -6237,7 +6213,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         if (!text) return ItemNull;
 
         // create a detached String-backed DomText node (no parent yet)
-        String* str = js_dom_create_document_string(doc, text, strlen(text));
+        String* str = dom_document_create_string(doc, text, strlen(text));
         DomText* text_node = dom_text_create_detached(str, doc);
         if (!text_node) {
             log_error("js_document_method: createTextNode failed for '%s'", text);
@@ -6297,7 +6273,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
             }
             size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
             if (text_len > 0) {
-                String* str = js_dom_create_document_string(doc, cursor, text_len);
+                String* str = dom_document_create_string(doc, cursor, text_len);
                 DomText* text_node = dom_text_create_detached(str, doc);
                 if (text_node) {
                     ((DomNode*)body)->append_child((DomNode*)text_node);
@@ -6952,6 +6928,7 @@ static bool js_dom_document_method_feature_name(const char* prop) {
         strcmp(prop, "removeEventListener") == 0 ||
         strcmp(prop, "focus") == 0 ||
         strcmp(prop, "blur") == 0 ||
+        strcmp(prop, "hasFocus") == 0 ||
         strcmp(prop, "createRange") == 0 ||
         strcmp(prop, "getSelection") == 0 ||
         strcmp(prop, "createEvent") == 0 ||
@@ -7762,7 +7739,7 @@ extern "C" Item js_dom_text_control_set_default_value_bridge(void* dom_elem, Ite
         elem->first_child = nullptr;
         elem->last_child = nullptr;
         if (*s) {
-            String* str = js_dom_create_document_string(elem->doc, s, strlen(s));
+            String* str = dom_document_create_string(elem->doc, s, strlen(s));
             DomText* tn = dom_text_create(str, elem);
             if (tn) {
                 tn->parent = elem;
@@ -8376,7 +8353,7 @@ extern "C" void js_dom_set_option_text_bridge(void* dom_elem, const char* value)
     }
     elem->first_child = nullptr;
     elem->last_child = nullptr;
-    String* str = js_dom_create_document_string(elem->doc, sv, strlen(sv));
+    String* str = dom_document_create_string(elem->doc, sv, strlen(sv));
     DomText* tn = dom_text_create(str, elem);
     if (tn) {
         tn->parent = elem;
@@ -10946,7 +10923,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
                 if (*p == '\n' || *p == '\r' || *p == '\0') {
                     size_t segment_len = (size_t)(p - segment);
                     if (segment_len > 0) {
-                        String* s = js_dom_create_document_string(
+                        String* s = dom_document_create_string(
                             elem->doc, segment, segment_len);
                         DomText* text_node = dom_text_create(s, elem);
                         if (text_node) {
@@ -11005,7 +10982,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             // DOM string-replace-all uses no replacement node for empty
             // strings; otherwise textContent="" leaves observable children.
             if (text_str[0] != '\0') {
-                String* s = js_dom_create_document_string(elem->doc, text_str, strlen(text_str));
+                String* s = dom_document_create_string(elem->doc, text_str, strlen(text_str));
                 DomText* text_node = dom_text_create(s, elem);
                 if (text_node) {
                     ((DomNode*)text_node)->parent = (DomNode*)elem;
@@ -12390,7 +12367,7 @@ extern "C" Item js_dom_document_write_bridge(void* doc_ptr, Item text_arg) {
         }
         size_t text_len = br ? (size_t)(br - cursor) : strlen(cursor);
         if (text_len > 0) {
-            String* str = js_dom_create_document_string(doc, cursor, text_len);
+            String* str = dom_document_create_string(doc, cursor, text_len);
             DomText* text_node = dom_text_create_detached(str, doc);
             if (text_node) {
                 ((DomNode*)body)->append_child((DomNode*)text_node);
@@ -12430,7 +12407,7 @@ extern "C" Item js_dom_normalize_bridge(void* elem_ptr) {
                 if (next_text->text && next_text->length > 0)
                     memcpy(combined + text->length, next_text->text, next_text->length);
                 combined[new_len] = '\0';
-                String* s = js_dom_create_document_string(elem->doc, combined, new_len);
+                String* s = dom_document_create_string(elem->doc, combined, new_len);
                 if (!s) break;
                 text->native_string = s;
                 text->text = s->chars;
@@ -12697,7 +12674,7 @@ extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int ar
         } else {
             const char* text = fn_to_cstr(args[i]);
             if (text) {
-                String* s = js_dom_create_document_string(elem->doc, text, strlen(text));
+                String* s = dom_document_create_string(elem->doc, text, strlen(text));
                 DomText* tn = dom_text_create(s, elem);
                 if (tn) ((DomNode*)elem)->append_child(tn);
             }
@@ -12728,7 +12705,7 @@ extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int a
         } else {
             const char* text = fn_to_cstr(args[i]);
             if (text) {
-                String* s = js_dom_create_document_string(elem->doc, text, strlen(text));
+                String* s = dom_document_create_string(elem->doc, text, strlen(text));
                 DomText* tn = dom_text_create(s, elem);
                 if (tn) ((DomNode*)elem)->insert_before(tn, ref);
             }
@@ -13213,7 +13190,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                         memcpy(combined + text->length, next_text->text, next_text->length);
                     combined[new_len] = '\0';
                     // update main text node
-                    String* s = js_dom_create_document_string(elem->doc, combined, new_len);
+                    String* s = dom_document_create_string(elem->doc, combined, new_len);
                     if (!s) break;
                     text->native_string = s;
                     text->text = s->chars;
@@ -13614,7 +13591,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                 // string arg → create text node
                 const char* text = fn_to_cstr(args[i]);
                 if (text) {
-                    String* s = js_dom_create_document_string(elem->doc, text, strlen(text));
+                    String* s = dom_document_create_string(elem->doc, text, strlen(text));
                     DomText* tn = dom_text_create(s, elem);
                     if (tn) ((DomNode*)elem)->append_child(tn);
                 }
@@ -13645,7 +13622,7 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
             } else {
                 const char* text = fn_to_cstr(args[i]);
                 if (text) {
-                    String* s = js_dom_create_document_string(elem->doc, text, strlen(text));
+                    String* s = dom_document_create_string(elem->doc, text, strlen(text));
                     DomText* tn = dom_text_create(s, elem);
                     if (tn) ((DomNode*)elem)->insert_before(tn, ref);
                 }
@@ -14457,6 +14434,15 @@ static void _install_node_iface(Item global) {
 
 extern "C" void js_dom_install_collection_globals(void) {
     Item global = js_get_global_this();
+    _install_iface(global, "Window");
+    _link_iface_proto(global, "Window", "EventTarget");
+    Item window_proto = _iface_proto(global, "Window");
+    if (get_type_id(window_proto) == LMD_TYPE_MAP) {
+        // The browsing-context global is the Window instance; exposing only
+        // `window` left WebIDL brand checks such as event.view instanceof Window
+        // unable to enter pointer-driven editor paths.
+        js_set_prototype(global, window_proto);
+    }
     _install_node_iface(global);
     // Document wrappers are module-owned, but bare WebIDL constructor lookup
     // must still succeed before libraries inspect static Document features.
@@ -14516,7 +14502,7 @@ static Item _option_ctor(Item text_arg, Item value_arg, Item def_sel_arg, Item s
     if (text_arg.item != ITEM_NULL && !is_js_undefined(text_arg)) {
         const char* t = fn_to_cstr(text_arg);
         if (t && *t) {
-            String* str = js_dom_create_document_string(doc, t, strlen(t));
+            String* str = dom_document_create_string(doc, t, strlen(t));
             DomText* tn = dom_text_create(str, opt);
             if (tn) {
                 tn->parent = opt;

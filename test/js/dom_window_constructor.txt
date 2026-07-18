@@ -1,0 +1,3 @@
+window:type:function
+window:brand:true
+window:event-target:true

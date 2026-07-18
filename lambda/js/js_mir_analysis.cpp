@@ -1961,6 +1961,16 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         // must not mask an earlier outer binding captured before that block.
         if (jm_ref_is_local_binding(locals, ref)) continue;  // local var
         if (strcmp(ref->name, "_js_new.target") == 0) continue; // handled by arrow lexical capture below
+        if (fc->owner_class && fc->owner_class->name &&
+            strlen(ref->name) == fc->owner_class->name->len + 4 &&
+            strncmp(ref->name, "_js_", 4) == 0 &&
+            strncmp(ref->name + 4, fc->owner_class->name->chars,
+                fc->owner_class->name->len) == 0) {
+            // A named class's private self-name belongs to the class lexical
+            // environment. Treating it as an outer capture makes propagation
+            // demand a nonexistent binding from the enclosing expression scope.
+            continue;
+        }
         // NFE self-reference: check before outer_scope guard since NFE name
         // is not in outer scope but still needs to be captured
         if (!fc->is_class_method && !is_method_syntax &&

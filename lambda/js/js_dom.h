@@ -91,6 +91,9 @@ Item js_dom_wrap_element(void* dom_elem);
  */
 void* js_dom_unwrap_element(Item item);
 
+/** Return the identity-preserving Document proxy that owns a DOM node. */
+Item js_dom_owner_document_for_node(void* node);
+
 /**
  * Check if an Item is a wrapped DOM node.
  * @param item  Item to test

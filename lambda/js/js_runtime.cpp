@@ -2909,7 +2909,43 @@ static Item js_constructor_apply_prototype(Item obj, Item callee) {
 // A5: Create pre-shaped object and set __proto__ from constructor's prototype
 extern "C" Item js_constructor_create_object_shaped(Item callee,
     const char** prop_names, const int* prop_lens, int count) {
-    Item obj = js_new_object_with_shape(prop_names, prop_lens, count);
+    bool has_proto_marker = false;
+    bool has_proto = false;
+    for (int i = 0; i < count; i++) {
+        if (prop_lens[i] == 18 &&
+            strncmp(prop_names[i], "__json_own_proto__", 18) == 0) {
+            has_proto_marker = true;
+        } else if (prop_lens[i] == 9 &&
+            strncmp(prop_names[i], "__proto__", 9) == 0) {
+            has_proto = true;
+        }
+    }
+    int extra_count = (has_proto_marker ? 0 : 1) + (has_proto ? 0 : 1);
+    const char** use_names = prop_names;
+    int* use_lens = (int*)prop_lens;
+    if (extra_count > 0) {
+        int use_count = count + extra_count;
+        use_names = (const char**)alloca((size_t)use_count * sizeof(const char*));
+        use_lens = (int*)alloca((size_t)use_count * sizeof(int));
+        for (int i = 0; i < count; i++) {
+            use_names[i] = prop_names[i];
+            use_lens[i] = prop_lens[i];
+        }
+        int next = count;
+        // prototype writes must fill reserved fixed-width slots; extending a
+        // constructor shape later repacks heterogeneous fields and invalidates
+        // the slot*8 layout used by compiled property access.
+        if (!has_proto_marker) {
+            use_names[next] = "__json_own_proto__";
+            use_lens[next++] = 18;
+        }
+        if (!has_proto) {
+            use_names[next] = "__proto__";
+            use_lens[next] = 9;
+        }
+        count = use_count;
+    }
+    Item obj = js_new_object_with_shape(use_names, use_lens, count);
     return js_constructor_apply_prototype(obj, callee);
 }
 
@@ -2982,24 +3018,8 @@ extern "C" Item js_constructor_create_object_shaped_cached(Item callee,
         }
     }
 
-    const char** use_names = prop_names;
-    int* use_lens = (int*)prop_lens;
-    int use_count = count;
-    if (shape_cache && count >= 0 && js_shared_ctor_shape_enabled()) {
-        use_count = count + 2;
-        use_names = (const char**)alloca(use_count * sizeof(const char*));
-        use_lens = (int*)alloca(use_count * sizeof(int));
-        for (int i = 0; i < count; i++) {
-            use_names[i] = prop_names[i];
-            use_lens[i] = prop_lens[i];
-        }
-        use_names[count] = "__json_own_proto__";
-        use_lens[count] = 18;
-        use_names[count + 1] = "__proto__";
-        use_lens[count + 1] = 9;
-    }
-
-    Item obj = js_constructor_create_object_shaped(callee, use_names, use_lens, use_count);
+    Item obj = js_constructor_create_object_shaped(callee,
+        prop_names, prop_lens, count);
     if (shape_cache && *shape_cache == NULL && js_shared_ctor_shape_enabled() &&
             get_type_id(obj) == LMD_TYPE_MAP) {
         Map* m = (Map*)obj.map;
@@ -9272,7 +9292,9 @@ extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
         log_debug("js_debug_check_callee: non-function callee at site_id=%lld (type=%d)",
             (long long)site_id, get_type_id(callee));
     }
-    return ItemNull;
+    // diagnostics must be observational; returning null changed the checked
+    // call target and hid the original failure whenever a caller reused it.
+    return callee;
 }
 
 // Forward declarations for builtin dispatch
@@ -12856,13 +12878,6 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         return ItemNull;
     }
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
-        if (getenv("JS_SCOPE_TRACE") && args && _trace_last_fn_len == 1 &&
-            _trace_last_fn && _trace_last_fn[0] == 'v') {
-            log_notice("js-scope-call-slot: func_type=%d func_raw=0x%llx prev_type=%d prev_raw=0x%llx args=%p",
-                (int)get_type_id(func_item), (unsigned long long)func_item.item,
-                (int)get_type_id(args[-1]), (unsigned long long)args[-1].item,
-                (void*)args);
-        }
         // Proxy [[Call]] trap
         if (js_is_proxy(func_item)) {
             return js_proxy_trap_apply(func_item, this_val, args, arg_count);
@@ -12947,12 +12962,6 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn && fn->name) { _trace_last_fn = fn->name->chars; _trace_last_fn_len = (int)fn->name->len; }
     else if (fn) { _trace_last_fn = "(anon)"; _trace_last_fn_len = 6; }
     _trace_total_calls++;
-
-    if (getenv("JS_SCOPE_TRACE") && fn && fn->env && fn->name &&
-        fn->name->len == 2 && strncmp(fn->name->chars, "ga", 2) == 0) {
-        log_notice("js-scope-ga-env: slot6_type=%d slot6_raw=0x%llx",
-            (int)get_type_id(fn->env[6]), (unsigned long long)fn->env[6].item);
-    }
 
     if (fn && fn->name && fn->name->len == 4 && strncmp(fn->name->chars, "Date", 4) == 0) {
         extern Item js_date_now_string(void);
@@ -15848,11 +15857,10 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         named_alias_js_names[ai] = NULL;
         named_alias_js_lens[ai] = 0;
     }
-    // Js54 P10: the /v class-set rewriting uses code-point range computation
-    // (set difference, intersection, \q{...} alternation, nested classes) via
-    // the wrapper. We call it BEFORE the named-group rewriter so subsequent
-    // steps see flat classes.
-    if (compile_info.unicode_sets) {
+    // Unicode binary properties such as Alphabetic are valid in both /u and
+    // /v but RE2 does not recognize all of their names. Flatten their generated
+    // ranges together with /v set operations before RE2 sees the class.
+    if (compile_info.unicode || compile_info.unicode_sets) {
         char* rewritten = nullptr;
         int rewritten_len = 0;
         if (js_regex_wrapper_rewrite_v_flag_classes_c(vpat, vpat_len, &rewritten, &rewritten_len)
@@ -16869,8 +16877,13 @@ extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
 
 static JsRegexData* js_get_regex_data(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return NULL;
-    Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
-    Item rd_item = js_property_get(obj, rd_key);
+    if (js_class_id(obj) != JS_CLASS_REGEXP) return NULL;
+    bool found = false;
+    // RegExp data is an internal own slot, so brand probing ordinary maps must
+    // not walk their prototype chains or invoke user-visible accessors.
+    Item rd_item = js_map_get_fast_ext(obj.map,
+        JS_REGEX_DATA_KEY, 4, &found);
+    if (!found) return NULL;
     TypeId tid = get_type_id(rd_item);
     if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) return NULL;
     int64_t ptr_val = it2i(rd_item);
@@ -27987,12 +28000,21 @@ struct JsGenerator {
 static JsGenerator js_generators[JS_MAX_GENERATORS];
 static int js_generator_count = 0;
 
+static bool js_hidden_own_int_index(Item object, const char* name,
+                                    int name_len, int64_t* out_index) {
+    if (get_type_id(object) != LMD_TYPE_MAP || !object.map) return false;
+    bool found = false;
+    Item value = js_map_get_fast_ext(object.map, name, name_len, &found);
+    if (!found || get_type_id(value) != LMD_TYPE_INT) return false;
+    if (out_index) *out_index = it2i(value);
+    return true;
+}
+
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (!map || !gc) return;
-    bool found = false;
-    Item idx_item = js_map_get_fast_ext(map, "__gen_idx", 9, &found);
-    if (!found || get_type_id(idx_item) != LMD_TYPE_INT) return;
-    int64_t idx = it2i(idx_item);
+    int64_t idx = -1;
+    if (!js_hidden_own_int_index((Item){.map = map},
+            "__gen_idx", 9, &idx)) return;
     if (idx < 0 || idx >= js_generator_count) return;
     if (js_generators[idx].env) gc_mark_object_ptr(gc, js_generators[idx].env);
     gc_mark_item(gc, js_generators[idx].delegate.item);
@@ -28217,11 +28239,8 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size, int
 }
 
 static JsGenerator* js_get_generator(Item gen_obj) {
-    if (get_type_id(gen_obj) != LMD_TYPE_MAP) return NULL;
-    String* gen_key = heap_create_name("__gen_idx", 9);
-    Item idx_item = js_property_get(gen_obj, (Item){.item = s2it(gen_key)});
-    if (get_type_id(idx_item) != LMD_TYPE_INT) return NULL;
-    int64_t idx = it2i(idx_item);
+    int64_t idx = -1;
+    if (!js_hidden_own_int_index(gen_obj, "__gen_idx", 9, &idx)) return NULL;
     if (idx < 0 || idx >= js_generator_count) return NULL;
     return &js_generators[idx];
 }
@@ -28770,14 +28789,14 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
 
 // v15: Check if an object is a generator (has __gen_idx property)
 extern "C" bool js_is_generator(Item obj) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return false;
     // Synthetic fast iterators (MAP_KIND_ITERATOR) are never generators and have
     // no real shape — a property lookup on them reads their sentinel type out of
     // bounds, so short-circuit here.
-    if (obj.map && obj.map->map_kind == MAP_KIND_ITERATOR) return false;
-    String* gen_key = heap_create_name("__gen_idx", 9);
-    Item idx_item = js_property_get(obj, (Item){.item = s2it(gen_key)});
-    return get_type_id(idx_item) == LMD_TYPE_INT;
+    if (get_type_id(obj) != LMD_TYPE_MAP || !obj.map ||
+        obj.map->map_kind == MAP_KIND_ITERATOR) return false;
+    // generator identity is an internal own slot; inherited lookups can invoke
+    // unrelated accessors and must never brand an ordinary object.
+    return js_hidden_own_int_index(obj, "__gen_idx", 9, NULL);
 }
 
 extern "C" bool js_is_async_generator(Item obj) {
@@ -29908,10 +29927,12 @@ static Item js_promise_to_item(JsPromise* p) {
 
 static JsPromise* js_get_promise(Item promise_obj) {
     if (get_type_id(promise_obj) != LMD_TYPE_MAP) return NULL;
-    String* key = heap_create_name("__promise_idx", 13);
-    Item idx_item = js_property_get(promise_obj, (Item){.item = s2it(key)});
-    if (get_type_id(idx_item) != LMD_TYPE_INT) return NULL;
-    int64_t idx = it2i(idx_item);
+    if (js_class_id(promise_obj) != JS_CLASS_PROMISE) return NULL;
+    // promise identity is an internal own slot; prototype lookup on every map
+    // could inspect accessors or heterogeneous shaped storage on non-promises.
+    int64_t idx = -1;
+    if (!js_hidden_own_int_index(promise_obj,
+            "__promise_idx", 13, &idx)) return NULL;
     if (idx < 0 || idx >= js_promise_count) return NULL;
     return &js_promises[idx];
 }

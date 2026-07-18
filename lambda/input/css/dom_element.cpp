@@ -2192,6 +2192,23 @@ DomText* dom_text_create_detached(String* native_string, DomDocument* doc) {
     return text_node;
 }
 
+String* dom_document_create_string(DomDocument* doc, const char* text, size_t len) {
+    if (!doc || !doc->arena || (!text && len > 0)) return nullptr;
+    String* string = (String*)arena_alloc(doc->arena, sizeof(String) + len + 1);
+    if (!string) return nullptr;
+    string->len = (uint32_t)len;
+    string->is_ascii = str_is_ascii(text ? text : "", len) ? 1 : 0;
+    if (len > 0) memcpy(string->chars, text, len);
+    string->chars[len] = '\0';
+    return string;
+}
+
+DomText* dom_text_create_detached_copy(DomDocument* doc,
+                                       const char* text, size_t len) {
+    String* string = dom_document_create_string(doc, text, len);
+    return string ? dom_text_create_detached(string, doc) : nullptr;
+}
+
 DomText* dom_text_create_symbol(const char* name, size_t len, DomElement* parent_element) {
     if (!name || len == 0 || !parent_element) {
         log_error("dom_text_create_symbol: name and parent_element required");

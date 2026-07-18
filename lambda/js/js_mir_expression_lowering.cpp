@@ -1238,27 +1238,6 @@ static MIR_reg_t jm_emit_plain_call_this_arg(JsMirTranspiler* mt, JsCallNode* ca
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
 }
 
-static bool jm_emit_live_cell_load(JsMirTranspiler* mt, JsMirVarEntry* var,
-        MIR_reg_t target) {
-    if (var->in_scope_env && var->scope_env_reg != 0 &&
-        var->scope_env_slot >= 0 && var->mir_type == MIR_T_I64) {
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, target),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                var->scope_env_slot * (int)sizeof(uint64_t),
-                var->scope_env_reg, 0, 1)));
-        return true;
-    }
-    if (var->from_env && var->env_reg != 0 && var->env_slot >= 0) {
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, target),
-            MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
-        return true;
-    }
-    return false;
-}
-
 MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
     if (!id || !id->name) {
         // Unsupported identifier-shaped AST nodes can reach expression lowering
@@ -1348,7 +1327,6 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inner_class_binding->inner_module_var_index));
     }
     if (var) {
-        int live_cell_root_slot = -1;
         // Js57 P3 (Track B2): live binding for self-imported default — re-fetch
         // `namespace.default` from the module registry each time the local
         // identifier is read. Throws ReferenceError if the source module's
@@ -1361,8 +1339,11 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             jm_emit_exc_propagate_check(mt);
             return live_val;
         }
-        if (jm_emit_live_cell_load(mt, var, var->reg)) {
-            live_cell_root_slot = jm_create_gc_root_slot(mt, var->reg);
+        if (var->in_scope_env && var->scope_env_reg != 0 && var->mir_type == MIR_T_I64) {
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
         }
         // v20 TDZ: emit runtime check for let/const variables before their declaration
         if (var->tdz_active) {
@@ -1414,18 +1395,6 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->arguments_reg),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, param_index),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
-        }
-        if (var_read_reg == var->reg && live_cell_root_slot >= 0) {
-            MIR_reg_t live_value = jm_new_reg(mt, "live_cell", MIR_T_I64);
-            // Identifier validation emits helper calls that can replace both
-            // capture and env registers; preserve the evaluated cell in the
-            // GC frame before those calls and read that stable snapshot last.
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, live_value),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    live_cell_root_slot * (int)sizeof(uint64_t),
-                    mt->side_root_frame_base, 0, 1)));
-            return live_value;
         }
         return var_read_reg;
     }
@@ -5526,16 +5495,8 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
             }
         }
 
-        // P2: Native compound assignment for shaped class instances.
-        // For `obj.field += expr` where obj has known class_entry and field is typed FLOAT/INT:
-        //   1. js_get_slot_f(obj, offset) → native double
-        //   2. jm_transpile_as_native(rhs) → native double
-        //   3. native MIR arithmetic (DADD, DSUB, DMUL, DDIV)
-        //   4. js_set_slot_f(obj, offset, result)
-        // Replaces 3 boxed runtime calls (property_access + js_add + property_set) with
-        // 2 native slot calls + 1 MIR instruction.
-        // Also handles simple assignment (obj.field = expr) in method bodies (not just constructors).
-        if (!member->computed && !member->optional &&
+        // P2: Guarded simple assignment for inferred shaped class instances.
+        if (asgn->op == JS_OP_ASSIGN && !member->computed && !member->optional &&
             member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER &&
             member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* p2_obj = (JsIdentifierNode*)member->object;
@@ -5558,148 +5519,24 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                 int p2_slot = jm_ctor_prop_slot(p2_fc,
                     p2_prop->name->chars, (int)p2_prop->name->len);
                 if (p2_slot >= 0) {
-                    TypeId field_type = p2_fc->ctor_prop_types[p2_slot];
-                    int64_t byte_offset = (int64_t)p2_slot * (int64_t)sizeof(void*);
-
-                    if (field_type == LMD_TYPE_FLOAT) {
-                        MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
-
-                        if (asgn->op == JS_OP_ASSIGN) {
-                            // Simple assignment: obj.field = expr → native slot write
-                            TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
-                            if (rhs_type == LMD_TYPE_FLOAT || rhs_type == LMD_TYPE_INT) {
-                                MIR_reg_t native_rhs = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
-                                jm_call_void_3(mt, "js_set_slot_f",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
-                                    MIR_T_D,  MIR_new_reg_op(mt->ctx, native_rhs));
-                                return jm_box_float(mt, native_rhs);
-                            }
-                        } else {
-                            // Compound: +=, -=, *=, /=
-                            // Determine MIR instruction for this compound op
-                            MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
-                            switch (asgn->op) {
-                            case JS_OP_ADD_ASSIGN: mir_op = MIR_DADD; break;
-                            case JS_OP_SUB_ASSIGN: mir_op = MIR_DSUB; break;
-                            case JS_OP_MUL_ASSIGN: mir_op = MIR_DMUL; break;
-                            case JS_OP_DIV_ASSIGN: mir_op = MIR_DDIV; break;
-                            default: break;
-                            }
-                            if (mir_op != (MIR_insn_code_t)0) {
-                                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
-                                if (rhs_type == LMD_TYPE_FLOAT || rhs_type == LMD_TYPE_INT || rhs_type == LMD_TYPE_ANY) {
-                                    // Read current value natively
-                                    MIR_reg_t cur_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                        MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
-                                    // Compute RHS natively as float
-                                    MIR_reg_t rhs_f;
-                                    if (rhs_type == LMD_TYPE_ANY) {
-                                        MIR_reg_t rhs_boxed = jm_transpile_box_item(mt, asgn->right);
-                                        rhs_f = jm_emit_unbox_float(mt, rhs_boxed);
-                                    } else {
-                                        rhs_f = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_FLOAT);
-                                    }
-                                    // Native MIR arithmetic
-                                    MIR_reg_t result_f = jm_new_reg(mt, "p2r", MIR_T_D);
-                                    jm_emit(mt, MIR_new_insn(mt->ctx, mir_op,
-                                        MIR_new_reg_op(mt->ctx, result_f),
-                                        MIR_new_reg_op(mt->ctx, cur_f),
-                                        MIR_new_reg_op(mt->ctx, rhs_f)));
-                                    // Write back natively
-                                    jm_call_void_3(mt, "js_set_slot_f",
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                        MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
-                                        MIR_T_D,  MIR_new_reg_op(mt->ctx, result_f));
-                                    log_debug("P2: native compound %.*s.%.*s op=%d → offset %lld",
-                                              (int)p2_obj->name->len, p2_obj->name->chars,
-                                              (int)p2_prop->name->len, p2_prop->name->chars,
-                                              (int)asgn->op, (long long)byte_offset);
-                                    return jm_box_float(mt, result_f);
-                                }
-                            }
-                        }
-                    }
-                    // P2b: INT native compound/simple assignment for shaped class instances.
-                    // Parallel to the FLOAT path above but with js_get_slot_i/js_set_slot_i
-                    // and MIR integer arithmetic (MIR_ADD, MIR_SUB, MIR_MUL).
-                    // Helps: towers (this.movesDone += 1), permute (this.count += 1),
-                    // Vector (this.lastIdx += 1, this.firstIdx += 1).
-                    else if (field_type == LMD_TYPE_INT) {
-                        MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
-
-                        if (asgn->op == JS_OP_ASSIGN) {
-                            // Simple assignment: obj.field = expr → native int slot write
-                            TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
-                            if (rhs_type == LMD_TYPE_INT) {
-                                MIR_reg_t native_rhs = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
-                                jm_call_void_3(mt, "js_set_slot_i",
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, native_rhs));
-                                log_debug("P2b: native int assign %.*s.%.*s → offset %lld",
-                                          (int)p2_obj->name->len, p2_obj->name->chars,
-                                          (int)p2_prop->name->len, p2_prop->name->chars,
-                                          (long long)byte_offset);
-                                return jm_box_int_reg(mt, native_rhs);
-                            }
-                        } else {
-                            // Compound: +=, -=, *=
-                            // Skip DIV — JS integer division produces float (7/2 === 3.5)
-                            MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
-                            switch (asgn->op) {
-                            case JS_OP_ADD_ASSIGN: mir_op = MIR_ADD; break;
-                            case JS_OP_SUB_ASSIGN: mir_op = MIR_SUB; break;
-                            case JS_OP_MUL_ASSIGN: mir_op = MIR_MUL; break;
-                            default: break;
-                            }
-                            if (mir_op != (MIR_insn_code_t)0) {
-                                TypeId rhs_type = jm_get_effective_type(mt, asgn->right);
-                                if (rhs_type == LMD_TYPE_INT || rhs_type == LMD_TYPE_ANY) {
-                                    // Read current value natively
-                                    MIR_reg_t cur_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                        MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
-                                    // Compute RHS natively as int
-                                    MIR_reg_t rhs_i;
-                                    if (rhs_type == LMD_TYPE_ANY) {
-                                        MIR_reg_t rhs_boxed = jm_transpile_box_item(mt, asgn->right);
-                                        MIR_reg_t rhs_f = jm_emit_unbox_float(mt, rhs_boxed);
-                                        rhs_i = jm_emit_double_to_int(mt, rhs_f);
-                                    } else {
-                                        rhs_i = jm_transpile_as_native(mt, asgn->right, rhs_type, LMD_TYPE_INT);
-                                    }
-                                    // Native MIR integer arithmetic
-                                    MIR_reg_t result_i = jm_new_reg(mt, "p2ri", MIR_T_I64);
-                                    jm_emit(mt, MIR_new_insn(mt->ctx, mir_op,
-                                        MIR_new_reg_op(mt->ctx, result_i),
-                                        MIR_new_reg_op(mt->ctx, cur_i),
-                                        MIR_new_reg_op(mt->ctx, rhs_i)));
-                                    // Write back natively
-                                    jm_call_void_3(mt, "js_set_slot_i",
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                        MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset),
-                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result_i));
-                                    log_debug("P2b: native int compound %.*s.%.*s op=%d → offset %lld",
-                                              (int)p2_obj->name->len, p2_obj->name->chars,
-                                              (int)p2_prop->name->len, p2_prop->name->chars,
-                                              (int)asgn->op, (long long)byte_offset);
-                                    return jm_box_int_reg(mt, result_i);
-                                }
-                            }
-                        }
-                    }
-                    // P2 fallback: use boxed shaped slot access (still avoids hash lookup)
-                    if (asgn->op == JS_OP_ASSIGN) {
-                        MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
-                        MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
-                        jm_call_void_3(mt, "js_set_shaped_slot",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p2_slot),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
-                        return new_val;
-                    }
+                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, member->object);
+                    MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
+                    // inferred receiver classes are speculative (especially in
+                    // minified for-of loops), so an unguarded slot write can
+                    // overwrite an unrelated object's prototype storage.
+                    jm_call_5(mt, "js_set_shaped_slot_guarded", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p2_slot),
+                        MIR_T_P, MIR_new_int_op(mt->ctx,
+                            (int64_t)(uintptr_t)p2_prop->name->chars),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx,
+                            (int64_t)p2_prop->name->len),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
+                    log_debug("P2: guarded shaped assign %.*s.%.*s → slot %d",
+                        (int)p2_obj->name->len, p2_obj->name->chars,
+                        (int)p2_prop->name->len, p2_prop->name->chars,
+                        p2_slot);
+                    return new_val;
                 }
             }
         }
@@ -7212,11 +7049,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             // receiver's prototype chain, so an undefined fallback is fine.
                             MIR_reg_t parent_fn;
                             if (mt->current_class->name) {
-                                JsIdentifierNode class_id;
-                                memset(&class_id, 0, sizeof(class_id));
-                                class_id.node_type = JS_AST_NODE_IDENTIFIER;
-                                class_id.name = mt->current_class->name;
-                                MIR_reg_t class_obj = jm_transpile_box_item(mt, (JsAstNode*)&class_id);
+                                // Synthetic identifiers have no source range, so a named
+                                // class expression would fall through to a nonexistent
+                                // global instead of its private class-body binding.
+                                MIR_reg_t class_obj = jm_emit_class_object_for_entry(
+                                    mt, mt->current_class);
                                 MIR_reg_t super_key = jm_box_string_literal(mt, "__super_class__", 15);
                                 parent_fn = jm_call_2(mt, "js_property_get", MIR_T_I64,
                                     MIR_T_I64, MIR_new_reg_op(mt->ctx, class_obj),
@@ -7267,11 +7104,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     mt->current_class->node->superclass->node_type != JS_AST_NODE_IDENTIFIER) {
                     MIR_reg_t parent_fn = 0;
                     if (mt->current_class->name) {
-                        JsIdentifierNode class_id;
-                        memset(&class_id, 0, sizeof(class_id));
-                        class_id.node_type = JS_AST_NODE_IDENTIFIER;
-                        class_id.name = mt->current_class->name;
-                        MIR_reg_t class_obj = jm_transpile_box_item(mt, (JsAstNode*)&class_id);
+                        MIR_reg_t class_obj = jm_emit_class_object_for_entry(mt, mt->current_class);
                         MIR_reg_t super_ctor_key = jm_box_string_literal(mt, "__super_ctor__", 14);
                         parent_fn = jm_call_2(mt, "js_property_get", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, class_obj),
@@ -8605,72 +8438,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         if (m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* prop = (JsIdentifierNode*)m->property;
 
-            // Function.prototype.call(thisArg, ...args)
-            // Pattern: Foo.call(thisObj, a1, a2, ...)
-            // Js55 P22: skip this fast path when any arg is a SpreadElement —
-            // jm_build_args_array doesn't expand spread, so spread args would
-            // get passed as a single Array. Fall through to the spread-aware
-            // dispatch below (js_method_call_apply path).
-            bool call_has_spread = false;
-            for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
-                if (chk->node_type == JS_AST_NODE_SPREAD_ELEMENT) { call_has_spread = true; break; }
-            }
-            if (!call_has_spread && prop->name->len == 4 && strncmp(prop->name->chars, "call", 4) == 0) {
-                MIR_reg_t fn = jm_transpile_box_item(mt, m->object);
-                MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
-                // Build args from the remaining arguments (skip the first 'this' arg)
-                int remaining_count = arg_count > 1 ? arg_count - 1 : 0;
-                JsAstNode* remaining_args = (call->arguments && call->arguments->next) ? call->arguments->next : NULL;
-                MIR_reg_t args_ptr = jm_build_args_array(mt, remaining_args, remaining_count);
-                MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
-                bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-                MIR_reg_t r = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_arg),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, remaining_count));
-                jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
-                return r;
-            }
-
-            // Function.prototype.apply(thisArg, argsArray)
-            if (prop->name->len == 5 && strncmp(prop->name->chars, "apply", 5) == 0) {
-                // Special case: String.fromCharCode/fromCodePoint.apply(null, argsArray)
-                if (m->object && m->object->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
-                    JsMemberNode* inner = (JsMemberNode*)m->object;
-                    if (!inner->computed &&
-                        inner->object && inner->object->node_type == JS_AST_NODE_IDENTIFIER &&
-                        inner->property && inner->property->node_type == JS_AST_NODE_IDENTIFIER) {
-                        JsIdentifierNode* iobj = (JsIdentifierNode*)inner->object;
-                        JsIdentifierNode* iprop = (JsIdentifierNode*)inner->property;
-                        if (iobj->name && iobj->name->len == 6 && strncmp(iobj->name->chars, "String", 6) == 0 &&
-                            iprop->name && iprop->name->len == 12 && strncmp(iprop->name->chars, "fromCharCode", 12) == 0) {
-                            MIR_reg_t args_array = (call->arguments && call->arguments->next)
-                                ? jm_transpile_box_item(mt, call->arguments->next) : jm_emit_null(mt);
-                            return jm_call_1(mt, "js_string_fromCharCode_array", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_array));
-                        }
-                        if (iobj->name && iobj->name->len == 6 && strncmp(iobj->name->chars, "String", 6) == 0 &&
-                            iprop->name && iprop->name->len == 13 && strncmp(iprop->name->chars, "fromCodePoint", 13) == 0) {
-                            MIR_reg_t args_array = (call->arguments && call->arguments->next)
-                                ? jm_transpile_box_item(mt, call->arguments->next) : jm_emit_null(mt);
-                            return jm_call_1(mt, "js_string_fromCodePoint_array", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_array));
-                        }
-                    }
-                }
-                MIR_reg_t fn = jm_transpile_box_item(mt, m->object);
-                MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_undefined(mt);
-                MIR_reg_t args_array = (call->arguments && call->arguments->next)
-                    ? jm_transpile_box_item(mt, call->arguments->next) : jm_emit_null(mt);
-                bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-                MIR_reg_t r = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_arg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, args_array));
-                jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
-                return r;
-            }
+            // Function.prototype call/apply/bind use ordinary property dispatch.
+            // A method name alone does not prove the receiver is callable; class
+            // APIs such as ChangeSet.apply() are ordinary instance methods.
 
             // v11: Function.prototype.bind(thisArg, ...args) — handled at runtime
             // via js_map_method cascade. Removed unconditional shortcut because
@@ -10202,17 +9972,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
-    MIR_reg_t callee_slot = jm_call_1(mt, "js_args_push", MIR_T_I64,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
-    MIR_reg_t callee_binding = jm_transpile_box_item(mt, call->callee);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, callee_slot, 0, 1),
-        MIR_new_reg_op(mt->ctx, callee_binding)));
-    MIR_reg_t callee = jm_new_reg(mt, "call_callee", MIR_T_I64);
-    // Call evaluation captures the callee value before its arguments; keeping
-    // an alias to a mutable binding register lets later helper emission replace it.
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, callee), MIR_new_reg_op(mt->ctx, callee_binding)));
+    MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
 
     // Generator spill: if any argument contains a yield, the callee register will be lost
     // after the yield suspend/resume cycle. Save it to an env slot and restore after args.
@@ -10340,6 +10100,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         return result;
     }
 
+    // Debug: emit runtime check with site_id
+    jm_call_2(mt, "js_debug_check_callee", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site_id));
+
     if (fallback_has_spread) {
         MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
         if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
@@ -10348,7 +10113,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
         bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
         MIR_reg_t call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-            MIR_T_I64, MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, callee_slot, 0, 1),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
         jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
@@ -10364,7 +10129,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
     bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
     MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-        MIR_T_I64, MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, callee_slot, 0, 1),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
@@ -11001,6 +10766,47 @@ MIR_reg_t jm_transpile_typed_array_length(JsMirTranspiler* mt, MIR_reg_t arr_reg
         MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_reg));
 }
 
+static MIR_reg_t jm_emit_guarded_shaped_slot_get(JsMirTranspiler* mt,
+                                                  MIR_reg_t obj_reg,
+                                                  String* key_name,
+                                                  int slot) {
+    MIR_label_t l_fast = jm_new_label(mt);
+    MIR_label_t l_slow = jm_new_label(mt);
+    MIR_label_t l_end = jm_new_label(mt);
+    MIR_reg_t result = jm_new_reg(mt, "gsl", MIR_T_I64);
+    int64_t byte_offset = (int64_t)slot * (int64_t)sizeof(void*);
+
+    // field-name inference is speculative; verify the runtime shape before a
+    // slot read so a same-named minified class cannot expose another field.
+    MIR_reg_t match = jm_call_4(mt, "js_shape_slot_guard", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)key_name->chars),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)key_name->len),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, l_fast), MIR_new_reg_op(mt->ctx, match)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
+
+    jm_emit_label(mt, l_fast);
+    MIR_reg_t fast = jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)slot));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, fast)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    jm_emit_label(mt, l_slow);
+    MIR_reg_t key = jm_box_string_literal(mt, key_name->chars, (int)key_name->len);
+    MIR_reg_t slow = jm_call_2(mt, "js_property_access", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, slow)));
+
+    jm_emit_label(mt, l_end);
+    return result;
+}
+
 // Member expression
 MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
     // well-known object properties
@@ -11493,13 +11299,12 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                     return result;
                 }
 
-                // P4: Untyped fallback — use js_get_shaped_slot
-                log_debug("P4: shaped load %.*s.%.*s → slot %d",
+                // P4: Untyped fallback — guard speculative class inference.
+                log_debug("P4: guarded shaped load %.*s.%.*s → slot %d",
                           (int)p4_obj->name->len, p4_obj->name->chars,
                           (int)p4_prop->name->len, p4_prop->name->chars, p4_slot);
-                return jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p4_slot));
+                return jm_emit_guarded_shaped_slot_get(mt, obj_reg,
+                    p4_prop->name, p4_slot);
             }
         }
     }
@@ -11516,45 +11321,10 @@ MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
             jm_emit_exc_propagate_check(mt);
 
-            MIR_label_t l_fast = jm_new_label(mt);
-            MIR_label_t l_slow = jm_new_label(mt);
-            MIR_label_t l_end = jm_new_label(mt);
-            MIR_reg_t result = jm_new_reg(mt, "gsl", MIR_T_I64);
-            int64_t byte_offset = (int64_t)ctor_slot * (int64_t)sizeof(void*);
-            MIR_reg_t match = jm_call_4(mt, "js_shape_slot_guard", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)key_name->chars),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)key_name->len),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, l_fast),
-                MIR_new_reg_op(mt->ctx, match)));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                MIR_new_label_op(mt->ctx, l_slow)));
-
-            jm_emit_label(mt, l_fast);
-            MIR_reg_t fast = jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ctor_slot));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, result),
-                MIR_new_reg_op(mt->ctx, fast)));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-                MIR_new_label_op(mt->ctx, l_end)));
-
-            jm_emit_label(mt, l_slow);
-            MIR_reg_t key = jm_box_string_literal(mt, key_name->chars, (int)key_name->len);
-            MIR_reg_t slow = jm_call_2(mt, "js_property_access", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, result),
-                MIR_new_reg_op(mt->ctx, slow)));
-
-            jm_emit_label(mt, l_end);
             log_debug("P4g: guarded shaped load expr.%.*s -> slot %d",
                       (int)key_name->len, key_name->chars, ctor_slot);
-            return result;
+            return jm_emit_guarded_shaped_slot_get(mt, obj_reg,
+                key_name, ctor_slot);
         }
     }
 

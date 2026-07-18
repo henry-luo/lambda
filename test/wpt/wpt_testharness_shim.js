@@ -1712,11 +1712,23 @@ _WptActions.prototype.send = function() {
                 } else if (ks.key === "\uE014" && shift_held && sel2) {
                     _wpt_extend_focus_right(sel2);               // ArrowRight
                 } else if ((ctrl_held || meta_held) && (ks.key === "v" || ks.key === "V")) {
-                    _wpt_dispatch_clipboard_event("paste");
+                    // The native key path performs the default edit and builds
+                    // target-correct InputEvents; a ClipboardEvent-only shim
+                    // cannot represent textarea versus contenteditable data.
+                    if (!_wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
+                            shift_held, ctrl_held, alt_held, meta_held)) {
+                        _wpt_dispatch_clipboard_event("paste");
+                    }
                 } else if ((ctrl_held || meta_held) && (ks.key === "c" || ks.key === "C")) {
-                    _wpt_dispatch_clipboard_event("copy");
+                    if (!_wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
+                            shift_held, ctrl_held, alt_held, meta_held)) {
+                        _wpt_dispatch_clipboard_event("copy");
+                    }
                 } else if ((ctrl_held || meta_held) && (ks.key === "x" || ks.key === "X")) {
-                    _wpt_dispatch_clipboard_event("cut");
+                    if (!_wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
+                            shift_held, ctrl_held, alt_held, meta_held)) {
+                        _wpt_dispatch_clipboard_event("cut");
+                    }
                 } else if ((ks.key === "\uE003" || ks.key === "\uE017") &&
                            _wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
                                shift_held, ctrl_held, alt_held, meta_held)) {

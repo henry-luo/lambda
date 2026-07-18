@@ -47,6 +47,12 @@ extern "C" bool js_dom_rich_history_restore_for_surface(
     DocState* state,
     const EditingSurface* surface,
     InputIntentType input_type);
+extern "C" void js_dom_notify_mutation(DomJsMutationKind kind,
+                                        void* target, void* parent);
+extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
+                                               void* target, void* parent,
+                                               const char* attribute_name,
+                                               const char* old_value);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
@@ -2296,16 +2302,95 @@ struct RichDefaultTransactionArgs {
     int fallback_offset;
 };
 
-static bool rich_transaction_default_mutate(EventContext* evcon,
-                                            DocState* state,
-                                            const EditingSurface* surface,
-                                            const EditingIntent* intent,
-                                            void* user) {
-    // Stage 4B Phase 5: the native rich-edit apply layer is retired. Rich
-    // editing is script-owned — `editing_run_transaction` routes `beforeinput`
-    // to the script and never invokes this default mutate. Inert no-op.
-    (void)evcon; (void)state; (void)surface; (void)intent; (void)user;
-    return false;
+static bool rich_transaction_default_mutate_scoped(
+    EventContext* evcon, DocState* state, const EditingSurface* surface,
+    const EditingIntent* intent, void* user);
+
+static bool rich_transaction_default_mutate_unscoped(
+        EventContext* evcon, DocState* state, const EditingSurface* surface,
+        const EditingIntent* intent, void* user) {
+    (void)evcon;
+    (void)user;
+    if (!state || !surface || !surface->owner || !intent ||
+        !state->dom_selection || state->dom_selection->range_count == 0) {
+        return false;
+    }
+
+    bool inserts_text = intent->type == INPUT_INTENT_INSERT_TEXT ||
+        intent->type == INPUT_INTENT_INSERT_REPLACEMENT_TEXT ||
+        intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT ||
+        intent->type == INPUT_INTENT_INSERT_FROM_COMPOSITION ||
+        intent->type == INPUT_INTENT_INSERT_FROM_PASTE ||
+        intent->type == INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION ||
+        intent->type == INPUT_INTENT_INSERT_FROM_YANK ||
+        intent->type == INPUT_INTENT_INSERT_FROM_DROP;
+    if (!inserts_text || !intent->data) return false;
+
+    DomSelection* selection = state->dom_selection;
+    DomRange* range = selection->ranges[0];
+    DomNode* owner = static_cast<DomNode*>(surface->owner);
+    if (!range || !range->start.node || !range->end.node ||
+        !dom_node_is_descendant_of(range->start.node, owner) ||
+        !dom_node_is_descendant_of(range->end.node, owner)) {
+        return false;
+    }
+
+    const char* exception = nullptr;
+    bool replaced_selection = !dom_range_collapsed(range);
+    if (replaced_selection) {
+        if (!dom_range_delete_contents(range, &exception) || exception) {
+            log_debug("rich_transaction_default_mutate: delete selection rejected: %s",
+                      exception ? exception : "unknown");
+            return false;
+        }
+        // A Range deletion can span CharacterData and child removals. Publish
+        // one subtree-level childList mutation so observers reconcile the
+        // complete default action instead of seeing only the final insertion.
+        js_dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, owner, owner);
+    }
+
+    size_t byte_len = strlen(intent->data);
+    uint32_t u16_len = tc_utf8_to_utf16_length(
+        intent->data, (uint32_t)byte_len);
+    DomBoundary insertion = range->start;
+    bool inserted = false;
+    if (insertion.node->is_text()) {
+        DomText* text = lam::dom_require_text(insertion.node);
+        const char* old_text = text->text ? text->text : "";
+        inserted = dom_text_replace_data_contents(
+            state, text, insertion.offset, 0,
+            intent->data, byte_len, u16_len);
+        if (inserted) {
+            js_dom_notify_mutation_detail(DOM_JS_MUTATION_TEXT, text,
+                                          text->parent, nullptr, old_text);
+            dom_selection_collapse(selection, insertion.node,
+                                   insertion.offset + u16_len, &exception);
+        }
+    } else {
+        DomDocument* doc = surface->owner->doc;
+        DomText* text = dom_text_create_detached_copy(
+            doc, intent->data, byte_len);
+        inserted = text && dom_range_insert_node(
+            range, static_cast<DomNode*>(text), &exception);
+        if (inserted) {
+            js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT,
+                                   text, text->parent);
+            dom_selection_collapse(selection, static_cast<DomNode*>(text),
+                                   u16_len, &exception);
+        }
+    }
+    if (!inserted || exception) {
+        log_debug("rich_transaction_default_mutate: insertText rejected: %s",
+                  exception ? exception : "allocation failed");
+        return false;
+    }
+
+    // Unprevented beforeinput has a browser-owned default action. Editors that
+    // own their model retain exclusive control by calling preventDefault();
+    // editors such as CodeMirror observe this native contenteditable mutation.
+    log_debug("rich_transaction_default_mutate: inserted %zu UTF-8 bytes",
+              byte_len);
+    return true;
 }
 
 static bool dispatch_rich_transaction_defaultable(EventContext* evcon,
@@ -2335,7 +2420,7 @@ static bool dispatch_rich_transaction_defaultable(EventContext* evcon,
     tx.surface = &surface;
     tx.intent = intent;
     tx.hooks = &hooks;
-    tx.mutate = rich_transaction_default_mutate;
+    tx.mutate = rich_transaction_default_mutate_scoped;
     tx.mutate_user = &args;
     tx.operation = "default";
     tx.dispatch_input_without_mutation = false;
@@ -4836,6 +4921,26 @@ struct JsDispatchScope {
     }
 };
 
+static bool rich_transaction_default_mutate_scoped(
+        EventContext* evcon, DocState* state, const EditingSurface* surface,
+        const EditingIntent* intent, void* user) {
+    DomDocument* doc = surface && surface->owner ? surface->owner->doc : nullptr;
+    bool active_page_context = context && js_dom_get_document() == doc;
+    if (active_page_context) {
+        return rich_transaction_default_mutate_unscoped(
+            evcon, state, surface, intent, user);
+    }
+
+    // Native contenteditable defaults run after beforeinput dispatch has
+    // restored the retained page context. MutationObserver records allocate JS
+    // values, so the entire DOM mutation and publication must re-enter that
+    // context as one scope rather than notifying from a context-free callback.
+    JsDispatchScope mutation_scope(evcon);
+    if (!mutation_scope.active) return false;
+    return rich_transaction_default_mutate_unscoped(
+        evcon, state, surface, intent, user);
+}
+
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type) {
     if (!uicon || !doc || !type || !type[0]) return;
     EventContext evcon = {};
@@ -4893,7 +4998,13 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target || !build_event) return false;
     JsDispatchScope dispatch_scope(evcon);
-    if (!dispatch_scope.active) return false;
+    DomDocument* target_doc = event_context_target_document(evcon);
+    bool active_batch_context = context && js_dom_get_document() == target_doc;
+    // Testdriver and execCommand actions can synchronously re-enter native
+    // dispatch while the page's batch context is already active. Such documents
+    // do not yet retain js_mir_ctx, so requiring a fresh scope silently drops
+    // beforeinput/input instead of reusing the live allocation context.
+    if (!dispatch_scope.active && !active_batch_context) return false;
     if (dispatched) *dispatched = true;
     Item ev = build_event(userdata);
     Item target_item = js_dom_wrap_element(dom_target);
@@ -8914,7 +9025,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // delegating to te_replace_byte_range, which fires
                 // beforeinput/input and pushes an undo entry. Caret is
                 // positioned by te_replace_byte_range.
-                if (cmd && key_event->key == RDT_KEY_V) {
+                if ((cmd || ctrl) && key_event->key == RDT_KEY_V) {
+                    // Ctrl+V and Cmd+V are the same primary paste action; limiting
+                    // text controls to Cmd bypassed paste on non-macOS testdrivers.
                     dispatch_form_keyboard_paste(&evcon, state, focused, false);
                     break;
                 }
@@ -9121,7 +9234,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // through te_paste so newline normalization (\r\n → \n) and
                 // maxlength clamping happen in one place; caret + undo are
                 // handled by te_replace_byte_range.
-                if (cmd && key_event->key == RDT_KEY_V) {
+                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
+                    key_event->key == RDT_KEY_V) {
+                    // Primary paste is platform-neutral even though the physical
+                    // modifier differs; both routes share the form transaction.
                     dispatch_form_keyboard_paste(&evcon, state, focused, true);
                     break;
                 }

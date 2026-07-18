@@ -814,6 +814,156 @@ static DomElement* radiant_dom_find_by_id(DomElement* root, const char* id) {
     return nullptr;
 }
 
+typedef struct RadiantAriaElementReflection {
+    const char* idl_name;
+    const char* attr_name;
+    const char* cache_name;
+    bool multiple;
+} RadiantAriaElementReflection;
+
+static const RadiantAriaElementReflection RADIANT_ARIA_ELEMENT_REFLECTIONS[] = {
+    {"ariaActiveDescendantElement", "aria-activedescendant",
+     "__lambda_aria_active_descendant_element", false},
+    {"ariaDescribedByElements", "aria-describedby",
+     "__lambda_aria_described_by_elements", true},
+};
+
+static const RadiantAriaElementReflection* radiant_dom_aria_element_reflection(
+        const char* name, bool attribute_name) {
+    if (!name) return nullptr;
+    size_t count = sizeof(RADIANT_ARIA_ELEMENT_REFLECTIONS) /
+        sizeof(RADIANT_ARIA_ELEMENT_REFLECTIONS[0]);
+    for (size_t i = 0; i < count; i++) {
+        const RadiantAriaElementReflection* reflection =
+            &RADIANT_ARIA_ELEMENT_REFLECTIONS[i];
+        const char* candidate = attribute_name
+            ? reflection->attr_name : reflection->idl_name;
+        if (strcmp(name, candidate) == 0) return reflection;
+    }
+    return nullptr;
+}
+
+static DomElement* radiant_dom_element_tree_root(DomElement* elem) {
+    DomNode* root = (DomNode*)elem;
+    while (root && root->parent) root = root->parent;
+    return root && root->is_element() ? root->as_element() : nullptr;
+}
+
+static Item radiant_dom_aria_resolve_idrefs(DomElement* elem, const char* value,
+                                            bool multiple) {
+    Item result = multiple ? radiant_dom_array_item() : ItemNull;
+    DomElement* root = radiant_dom_element_tree_root(elem);
+    if (!root || !value) return result;
+
+    const char* cursor = value;
+    while (*cursor) {
+        while (*cursor && isspace((unsigned char)*cursor)) cursor++;
+        const char* start = cursor;
+        while (*cursor && !isspace((unsigned char)*cursor)) cursor++;
+        size_t len = (size_t)(cursor - start);
+        if (len == 0) continue;
+        char* id = (char*)mem_alloc(len + 1, MEM_CAT_TEMP);
+        if (!id) return result;
+        memcpy(id, start, len);
+        id[len] = '\0';
+        DomElement* target = radiant_dom_find_by_id(root, id);
+        mem_free(id);
+        if (target) {
+            Item target_item = radiant_dom_node_item((DomNode*)target);
+            if (!multiple) return target_item;
+            array_push(result.array, target_item);
+        }
+        if (!multiple) return ItemNull;
+    }
+    return result;
+}
+
+static Item radiant_dom_aria_cached_reference(Item receiver,
+        const RadiantAriaElementReflection* reflection) {
+    Item cache_key = radiant_dom_string_item(reflection->cache_name);
+    Item cached = js_dom_get_property_impl(receiver, cache_key);
+    if (cached.item == ITEM_JS_UNDEFINED || cached.item == ITEM_NULL) {
+        return reflection->multiple ? radiant_dom_array_item() : ItemNull;
+    }
+    return cached;
+}
+
+static void radiant_dom_aria_cache_reference(Item receiver,
+        const RadiantAriaElementReflection* reflection, Item value) {
+    js_dom_set_property_impl(receiver,
+        radiant_dom_string_item(reflection->cache_name), value);
+}
+
+static void radiant_dom_aria_invalidate_attribute_cache(Item receiver,
+                                                         const char* attr_name) {
+    const RadiantAriaElementReflection* reflection =
+        radiant_dom_aria_element_reflection(attr_name, true);
+    if (!reflection) return;
+    // Content-attribute writes replace an explicit associated-element value;
+    // leaving the hidden reference alive would make an empty authored IDREF
+    // indistinguishable from an IDL-set association.
+    radiant_dom_aria_cache_reference(receiver, reflection,
+                                     radiant_dom_undefined_item());
+}
+
+static bool radiant_dom_get_aria_element_reflection(Item receiver,
+        DomElement* elem, const char* prop, Item* out) {
+    const RadiantAriaElementReflection* reflection =
+        radiant_dom_aria_element_reflection(prop, false);
+    if (!reflection || !elem || !out) return false;
+    const char* idrefs = dom_element_get_attribute(elem, reflection->attr_name);
+    if (!idrefs) {
+        *out = ItemNull;
+    } else if (idrefs[0] == '\0') {
+        *out = radiant_dom_aria_cached_reference(receiver, reflection);
+    } else {
+        // Resolve from this element's tree root so IDREFs remain meaningful
+        // while a complete subtree is disconnected from its document.
+        *out = radiant_dom_aria_resolve_idrefs(elem, idrefs, reflection->multiple);
+    }
+    return true;
+}
+
+static bool radiant_dom_set_aria_element_reflection(Item receiver,
+        DomElement* elem, const char* prop, Item value, Item* out) {
+    const RadiantAriaElementReflection* reflection =
+        radiant_dom_aria_element_reflection(prop, false);
+    if (!reflection || !elem || !out) return false;
+
+    TypeId value_type = get_type_id(value);
+    bool clear = value.item == ITEM_NULL || value.item == ITEM_JS_UNDEFINED;
+    Item cached = ItemNull;
+    if (!clear && reflection->multiple) {
+        if (value_type != LMD_TYPE_ARRAY || !value.array) return false;
+        cached = radiant_dom_array_item();
+        for (int i = 0; i < value.array->length; i++) {
+            DomNode* target = (DomNode*)radiant_dom_unwrap_node(value.array->items[i]);
+            if (!target || !target->is_element()) return false;
+            array_push(cached.array, radiant_dom_node_item(target));
+        }
+    } else if (!clear) {
+        DomNode* target = (DomNode*)radiant_dom_unwrap_node(value);
+        if (!target || !target->is_element()) return false;
+        cached = radiant_dom_node_item(target);
+    }
+
+    const char* old_value = dom_element_get_attribute(elem, reflection->attr_name);
+    if (clear) {
+        dom_element_remove_attribute(elem, reflection->attr_name);
+        radiant_dom_aria_cache_reference(receiver, reflection,
+                                         radiant_dom_undefined_item());
+    } else {
+        // The empty content attribute is the specified marker for an explicit
+        // element association; the actual node identity stays in the wrapper.
+        dom_element_set_attribute(elem, reflection->attr_name, "");
+        radiant_dom_aria_cache_reference(receiver, reflection, cached);
+    }
+    js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
+        (void*)elem->parent, reflection->attr_name, old_value);
+    *out = value;
+    return true;
+}
+
 static CssSelectorGroup* radiant_dom_parse_css_selector_group(const char* sel_text, Pool* pool) {
     if (!sel_text || !pool) return nullptr;
     size_t sel_len = strlen(sel_text);
@@ -2920,8 +3070,12 @@ RADIANT_C_API int radiant_dom_m4d___lambda_text_control_caret_bounds(Item r, Ite
     return 1;
 }
 
-static bool radiant_dom_get_element_property(DomElement* elem, const char* prop, Item* out) {
+static bool radiant_dom_get_element_property(Item receiver, DomElement* elem,
+                                             const char* prop, Item* out) {
     if (!elem || !prop || !out) return false;
+    if (radiant_dom_get_aria_element_reflection(receiver, elem, prop, out)) {
+        return true;
+    }
     if (strcmp(prop, "content") == 0 &&
         elem->tag_name && strcasecmp(elem->tag_name, "template") == 0) {
         // current template support exposes parsed children through the template
@@ -2976,7 +3130,7 @@ static bool radiant_dom_get_basic_property(Item elem_item, Item prop_name, Item*
         return radiant_dom_get_comment_property(node->as_comment(), prop, out);
     }
     if (node->is_element()) {
-        return radiant_dom_get_element_property(node->as_element(), prop, out);
+        return radiant_dom_get_element_property(elem_item, node->as_element(), prop, out);
     }
     return false;
 }
@@ -3000,11 +3154,15 @@ static bool radiant_dom_set_basic_property(Item elem_item, Item prop_name, Item 
     if (!node->is_element()) return false;
 
     DomElement* elem = node->as_element();
+    if (radiant_dom_set_aria_element_reflection(elem_item, elem, prop, value, out)) {
+        return true;
+    }
     if (radiant_dom_is_attr_name_projection(prop) && !radiant_dom_is_internal_attr(prop)) {
         const char* text = js_dom_to_attribute_cstr(value);
         // Dashed Lambda projection writes used to be routed by VMap's DOM-only
         // setAttribute shortcut; after Phase 5 removes that shortcut, the DOM
         // named setter must own attr-name writes before JS property fallback.
+        radiant_dom_aria_invalidate_attribute_cache(elem_item, prop);
         dom_element_set_attribute(elem, prop, text ? text : "");
         js_dom_after_set_attribute((void*)elem, prop, text ? text : "");
         js_dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem, (void*)elem->parent);
@@ -3557,6 +3715,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             return true;
         }
         const char* old_value = dom_element_get_attribute(elem, attr_name);
+        radiant_dom_aria_invalidate_attribute_cache(elem_item, attr_name);
         dom_element_set_attribute(elem, attr_name, attr_val);
         js_dom_after_set_attribute((void*)elem, attr_name, attr_val);
         js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
@@ -3576,6 +3735,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             return true;
         }
         const char* old_value = dom_element_get_attribute(elem, attr_name);
+        radiant_dom_aria_invalidate_attribute_cache(elem_item, attr_name);
         dom_element_remove_attribute(elem, attr_name);
         js_dom_after_remove_attribute((void*)elem, attr_name);
         js_dom_notify_mutation_detail(DOM_JS_MUTATION_ATTRIBUTE, (void*)elem,
@@ -4307,6 +4467,15 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
 
     if (strcmp(method, "focus") == 0 || strcmp(method, "blur") == 0) {
         *out = radiant_dom_undefined_item();
+        return 1;
+    }
+
+    if (strcmp(method, "hasFocus") == 0) {
+        // A focused descendant means this retained browsing-context document
+        // owns keyboard focus. Editor view observers use this predicate while
+        // reconciling native contenteditable mutations.
+        DocState* state = doc ? doc->state : nullptr;
+        *out = (Item){.item = b2it(state && focus_get(state) ? 1 : 0)};
         return 1;
     }
 

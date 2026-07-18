@@ -288,6 +288,16 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element);
 DomText* dom_text_create_detached(String* native_string, DomDocument* doc);
 
 /**
+ * Copy UTF-8 bytes into a document-arena String. DOM mutation paths share this
+ * allocator so live text nodes never retain temporary or JS-heap storage.
+ */
+String* dom_document_create_string(DomDocument* doc, const char* text, size_t len);
+
+/** Create a detached DomText whose backing String is copied into `doc`. */
+DomText* dom_text_create_detached_copy(DomDocument* doc,
+                                       const char* text, size_t len);
+
+/**
  * Create a new DomText node for a symbol (entity or emoji)
  * @param name Symbol name (e.g., "smile" for emoji, "copy" for entity)
  * @param len Length of the symbol name

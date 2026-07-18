@@ -74,6 +74,11 @@ extern "C" Arena*    dom_range_state_arena(DocState* state);
 extern "C" DomRange** dom_range_state_live_ranges_slot(DocState* state);
 extern "C" DomRange** dom_range_state_range_freelist_slot(DocState* state);
 extern "C" struct DomSelection* dom_range_state_selection(DocState* state);
+extern "C" DomNode* dom_range_state_document_root(DocState* state);
+extern "C" __attribute__((weak)) DomNode* dom_range_state_document_root(
+        DocState* /*state*/) {
+    return NULL;
+}
 
 // ============================================================================
 // Helpers
@@ -269,9 +274,11 @@ DomRange* dom_range_create(DocState* state) {
     r->is_live = true;
     r->id = s_range_id_counter++;
     r->ref_count = 1;
-    // Per spec, a freshly-created Range is positioned at (document, 0).
-    // We don't have a guaranteed document handle in `state` yet, so leave
-    // start/end as {NULL, 0} until the first set_start/set_end call.
+    // A fresh Range starts at (document, 0); leaving null boundaries made
+    // detach() appear to destroy the Range even though detach is a legacy no-op.
+    DomNode* document_root = dom_range_state_document_root(state);
+    r->start = {document_root, 0};
+    r->end = {document_root, 0};
     return r;
 }
 
@@ -1134,23 +1141,9 @@ static DomDocument* node_doc(DomNode* n) {
 
 // Allocate a String* from doc->arena. Independent of the lambda runtime heap
 // so the same code paths work in unit tests and production.
-static String* arena_make_string(DomDocument* doc, const char* chars, size_t byte_len) {
-    if (!doc || !doc->arena) return nullptr;
-    String* s = (String*)arena_alloc(doc->arena, sizeof(String) + byte_len + 1);
-    if (!s) return nullptr;
-    s->len = (uint32_t)byte_len;
-    s->is_ascii = 0;  // conservative; callers don't depend on this
-    if (byte_len && chars) memcpy(s->chars, chars, byte_len);
-    s->chars[byte_len] = '\0';
-    return s;
-}
-
 // Build a DomText for a UTF-8 byte slice [chars, chars+byte_len).
 static DomText* dom_text_from_bytes(DomDocument* doc, const char* chars, size_t byte_len) {
-    if (!doc) return nullptr;
-    String* s = arena_make_string(doc, chars, byte_len);
-    if (!s) return nullptr;
-    return dom_text_create_detached(s, doc);
+    return dom_text_create_detached_copy(doc, chars, byte_len);
 }
 
 DomElement* dom_document_fragment_create(DomDocument* doc) {
@@ -1196,9 +1189,11 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
     size_t left_bytes  = u8_split;
     size_t right_bytes = original->length - u8_split;
 
-    // Allocate new strings BEFORE mutating original (arena_make_string copies).
-    String* right_str = arena_make_string(doc, original->text + u8_split, right_bytes);
-    String* left_str  = arena_make_string(doc, original->text,            left_bytes);
+    // Allocate new strings before mutating original; both calls copy the bytes.
+    String* right_str = dom_document_create_string(
+        doc, original->text + u8_split, right_bytes);
+    String* left_str = dom_document_create_string(
+        doc, original->text, left_bytes);
     if (!right_str || !left_str) return nullptr;
 
     DomText* right = dom_text_create_detached(right_str, doc);
@@ -1221,11 +1216,11 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
 
 // Replace [u16_offset, u16_offset+u16_count) in `t` with `repl_str` (or empty
 // if null), and fire the range envelope.
-static void text_replace_data_str(DocState* st, DomText* t,
-                                  uint32_t u16_offset, uint32_t u16_count,
-                                  const char* repl_chars, size_t repl_bytes,
-                                  uint32_t repl_u16_len) {
-    if (!t) return;
+bool dom_text_replace_data_contents(DocState* st, DomText* t,
+                                    uint32_t u16_offset, uint32_t u16_count,
+                                    const char* repl_chars, size_t repl_bytes,
+                                    uint32_t repl_u16_len) {
+    if (!t || (!repl_chars && repl_bytes > 0)) return false;
     uint32_t u8_off = dom_text_utf16_to_utf8(t, u16_offset);
     uint32_t u8_end = dom_text_utf16_to_utf8(t, u16_offset + u16_count);
     if (u8_end < u8_off) u8_end = u8_off;
@@ -1235,21 +1230,23 @@ static void text_replace_data_str(DocState* st, DomText* t,
     size_t new_len    = prefix + repl_bytes + suffix_len;
 
     char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_TEMP);
-    if (!buf) return;
+    if (!buf) return false;
     if (prefix)     memcpy(buf,                      t->text,         prefix);
     if (repl_bytes) memcpy(buf + prefix,             repl_chars,      repl_bytes);
     if (suffix_len) memcpy(buf + prefix + repl_bytes, t->text + u8_end, suffix_len);
     buf[new_len] = '\0';
 
-    String* s = arena_make_string(node_doc(static_cast<DomNode*>(t)), buf, new_len);
+    String* s = dom_document_create_string(
+        node_doc(static_cast<DomNode*>(t)), buf, new_len);
     mem_free(buf);
-    if (!s) return;
+    if (!s) return false;
 
     t->native_string = s;
     t->text   = s->chars;
     t->length = new_len;
 
     if (st) dom_mutation_text_replace_data(st, t, u16_offset, u16_count, repl_u16_len);
+    return true;
 }
 
 // True iff `node` is fully contained in `r` (both endpoints encompass it).
@@ -1326,7 +1323,8 @@ static void process_partially_contained(DomRange* r, RangeOp op,
         }
         // For DELETE / EXTRACT, mutate the original text.
         if ((op == ROP_DELETE || op == ROP_EXTRACT) && take_count > 0) {
-            text_replace_data_str(r->state, t, s_off, take_count, "", 0, 0);
+            dom_text_replace_data_contents(r->state, t, s_off, take_count,
+                                           "", 0, 0);
         }
         return;
     }
@@ -1386,7 +1384,7 @@ static DomElement* range_process_contents(DomRange* r, RangeOp op,
             if (clone) (static_cast<DomNode*>(fragment))->append_child(static_cast<DomNode*>(clone));
         }
         if ((op == ROP_DELETE || op == ROP_EXTRACT) && take > 0) {
-            text_replace_data_str(r->state, t, so, take, "", 0, 0);
+            dom_text_replace_data_contents(r->state, t, so, take, "", 0, 0);
         }
         if (op != ROP_CLONE) {
             // Range becomes collapsed at (sn, so).

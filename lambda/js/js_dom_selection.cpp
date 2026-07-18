@@ -730,9 +730,22 @@ static Item build_range_object(DomRange* r) {
 // Receiver-explicit per-property getters — consumed by the radiant module's
 // declared-interface bindings through the Jube host API (DOM3); the strcmp
 // dispatch chains they replace are gone.
+static Item js_range_wrap_boundary_node(DomNode* node) {
+    if (!node) return ItemNull;
+    if (node->is_element()) {
+        DomElement* element = node->as_element();
+        if (element->doc && element->doc->root == element) {
+            // The native document root is an element-shaped storage node, but
+            // Range boundaries at that root must preserve Document proxy identity.
+            return js_dom_owner_document_for_node(node);
+        }
+    }
+    return js_dom_wrap_element(node);
+}
+
 extern "C" Item js_range_get_start_container(Item self_v) {
     DomRange* r = range_from(self_v);
-    return r && r->start.node ? js_dom_wrap_element(r->start.node) : ItemNull;
+    return r ? js_range_wrap_boundary_node(r->start.node) : ItemNull;
 }
 
 extern "C" Item js_range_get_start_offset(Item self_v) {
@@ -742,7 +755,7 @@ extern "C" Item js_range_get_start_offset(Item self_v) {
 
 extern "C" Item js_range_get_end_container(Item self_v) {
     DomRange* r = range_from(self_v);
-    return r && r->end.node ? js_dom_wrap_element(r->end.node) : ItemNull;
+    return r ? js_range_wrap_boundary_node(r->end.node) : ItemNull;
 }
 
 extern "C" Item js_range_get_end_offset(Item self_v) {
@@ -759,7 +772,7 @@ extern "C" Item js_range_get_common_ancestor(Item self_v) {
     DomRange* r = range_from(self_v);
     if (!r) return ItemNull;
     DomNode* anc = dom_range_common_ancestor(r);
-    return anc ? js_dom_wrap_element(anc) : ItemNull;
+    return js_range_wrap_boundary_node(anc);
 }
 
 // ============================================================================

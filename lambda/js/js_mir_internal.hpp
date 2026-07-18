@@ -362,6 +362,7 @@ int jm_detect_typed_array_new(JsAstNode* rhs);
 int jm_class_field_ta_type(JsClassEntry* ce, const char* prop_name, int prop_len);
 TypeId jm_detect_ctor_field_type(JsAstNode* rhs);
 void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body);
+void jm_remove_ctor_props_shadowing_methods(JsClassEntry* ce);
 JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
 void jm_infer_walk(JsAstNode* node, const char param_names[][128],
                           FnParamEvidence* evidence, int param_count,

@@ -1148,6 +1148,7 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
             bool has_q = false;
             bool has_nested = false;
             bool has_str_prop = false;
+            bool has_generated_char_prop = false;
             while (j < n && depth > 0) {
                 char d = in[j];
                 if (d == '\\' && j + 1 < n) {
@@ -1165,6 +1166,11 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
                                     has_str_prop = true; break;
                                 }
                             }
+                            int first_pair[2];
+                            if (js_regex_wrapper_lookup_property_ranges(
+                                    pname.data(), (int)pname.size(), first_pair, 1) > 0) {
+                                has_generated_char_prop = true;
+                            }
                         }
                     }
                     j += 2;
@@ -1176,7 +1182,8 @@ static bool rewrite_v_flag_classes(const std::string& in, std::string& out_str) 
                 if (j + 1 < n && d == '&' && in[j + 1] == '&') { has_set_op = true; j += 2; continue; }
                 j++;
             }
-            if (!has_set_op && !has_q && !has_nested && !has_str_prop) {
+            if (!has_set_op && !has_q && !has_nested && !has_str_prop &&
+                !has_generated_char_prop) {
                 // Pass through unchanged
                 while (i < j) out_str.push_back(in[i++]);
                 continue;

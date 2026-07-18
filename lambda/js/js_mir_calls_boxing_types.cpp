@@ -1443,6 +1443,16 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 
+static MIR_reg_t jm_get_named_property_boxed(JsMirTranspiler* mt,
+                                              MIR_reg_t object,
+                                              String* property) {
+    MIR_reg_t key = jm_box_string_literal(mt,
+        property->chars, (int)property->len);
+    return jm_call_2(mt, "js_property_get", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+}
+
 // Transpile an expression returning a native register of the target type.
 // Handles literals inline (no boxing), identifiers from typed vars, and
 // recursive expressions. Falls back to unbox from boxed Item when needed.
@@ -1767,11 +1777,13 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                 MIR_new_reg_op(mt->ctx, fast_f)));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                                 MIR_new_label_op(mt->ctx, l_end)));
-                            // Slow path: fall back to runtime function
+                            // A shape miss disproves the inferred slot; reading
+                            // that offset again would expose an unrelated field.
                             jm_emit_label(mt, l_slow);
-                            MIR_reg_t slow_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                            MIR_reg_t slow_boxed = jm_get_named_property_boxed(mt,
+                                obj_reg, p1_prop->name);
+                            MIR_reg_t slow_f = jm_ensure_native_float(mt,
+                                slow_boxed, LMD_TYPE_ANY);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                                 MIR_new_reg_op(mt->ctx, result_f),
                                 MIR_new_reg_op(mt->ctx, slow_f)));
@@ -1784,12 +1796,13 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                             else
                                 return jm_emit_double_to_int(mt, result_f);
                         }
-                        MIR_reg_t native_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
-                        log_debug("P1: native float load %.*s.%.*s → offset %d",
+                        MIR_reg_t boxed_f = jm_get_named_property_boxed(mt,
+                            obj_reg, p1_prop->name);
+                        MIR_reg_t native_f = jm_ensure_native_float(mt,
+                            boxed_f, LMD_TYPE_ANY);
+                        log_debug("P1: dynamic float load %.*s.%.*s (no shape cache)",
                                   (int)p1_obj->name->len, p1_obj->name->chars,
-                                  (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
+                                  (int)p1_prop->name->len, p1_prop->name->chars);
                         if (target_type == LMD_TYPE_FLOAT)
                             return native_f;
                         else
@@ -1839,11 +1852,13 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                 MIR_new_reg_op(mt->ctx, fast_i)));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                                 MIR_new_label_op(mt->ctx, l_end)));
-                            // Slow path: fall back to runtime function
+                            // Shape mismatch uses ordinary lookup, not the
+                            // disproved compile-time slot.
                             jm_emit_label(mt, l_slow);
-                            MIR_reg_t slow_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                            MIR_reg_t slow_boxed = jm_get_named_property_boxed(mt,
+                                obj_reg, p1_prop->name);
+                            MIR_reg_t slow_i = jm_ensure_native_int(mt,
+                                slow_boxed, LMD_TYPE_ANY);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, result_i),
                                 MIR_new_reg_op(mt->ctx, slow_i)));
@@ -1856,12 +1871,13 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                             else
                                 return jm_ensure_native_float(mt, result_i, LMD_TYPE_INT);
                         }
-                        MIR_reg_t native_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
-                        log_debug("P1: native int load %.*s.%.*s → offset %d",
+                        MIR_reg_t boxed_i = jm_get_named_property_boxed(mt,
+                            obj_reg, p1_prop->name);
+                        MIR_reg_t native_i = jm_ensure_native_int(mt,
+                            boxed_i, LMD_TYPE_ANY);
+                        log_debug("P1: dynamic int load %.*s.%.*s (no shape cache)",
                                   (int)p1_obj->name->len, p1_obj->name->chars,
-                                  (int)p1_prop->name->len, p1_prop->name->chars, (int)byte_offset);
+                                  (int)p1_prop->name->len, p1_prop->name->chars);
                         if (target_type == LMD_TYPE_INT)
                             return native_i;
                         else

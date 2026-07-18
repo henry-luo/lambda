@@ -311,8 +311,10 @@ static std::string extract_inline_scripts(const std::string& html, const std::st
         if (!src.empty()) {
             std::string body;
             std::string src_label = src;
-            if (src[0] != '/' && src.compare(0, 3, "../") != 0 &&
-                src.find("://") == std::string::npos) {
+            if (src[0] != '/' && src.find("://") == std::string::npos) {
+                // WPT suite helpers such as dom/common.js are repository-local
+                // parent-relative resources; rejecting `../` prevented their tests
+                // from registering and falsely reported an empty result set.
                 std::string full = html_dir + "/" + src;
                 body = read_file_contents(full.c_str());
             }
@@ -613,7 +615,9 @@ TEST_P(WptDomEventsTest, Run) {
     if (passing) append_passing_baseline(p.test_name);
     if (!passing && BASELINE_PATH[0] && !passing_baseline_contains(p.test_name.c_str())) {
         GTEST_SKIP() << "known failure (not in baseline): "
-                     << pass_count << "/" << total_count << " passed";
+                     << pass_count << "/" << total_count << " passed"
+                     << (failures.empty() ? "" : "\nFirst failure: ")
+                     << (failures.empty() ? "" : failures.front());
     }
 
     for (const auto& f : failures) {

@@ -1877,11 +1877,12 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
                 declarator->id = NULL;
             }
 
-            // Get initializer: look past any comment nodes for the '=' sign and value.
-            // For `var x = /* @__PURE__ */ expr`, child 2 may be a comment node.
-            TSNode init_node;
-            bool has_initializer = false;
-            for (uint32_t ci = 2; ci < declarator_child_count; ci++) {
+            // Destructuring declarators may omit '=' from Tree-sitter's raw
+            // children, so assuming the value starts at child 2 loses their
+            // initializer and turns `let {x} = obj` into destructuring null.
+            TSNode init_node = ts_node_child_by_field_name(declarator_node, "value", 5);
+            bool has_initializer = !ts_node_is_null(init_node);
+            for (uint32_t ci = 1; !has_initializer && ci < declarator_child_count; ci++) {
                 TSNode cand = ts_node_child(declarator_node, ci);
                 if (ts_node_is_null(cand)) break;
                 const char* cand_type = ts_node_type(cand);
@@ -1903,14 +1904,18 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
                 declarator->type = &TYPE_NULL; // undefined
             }
 
-            // Add to scope (only for simple identifiers; array/object patterns
-            // have their elements registered individually by the transpiler)
+            // Register bindings after the initializer so later references see
+            // destructuring aliases instead of retaining a same-named outer
+            // entry. Missing pattern entries made capture analysis propagate
+            // local aliases as nonexistent closure variables.
             if (declarator->id && declarator->id->node_type == JS_AST_NODE_IDENTIFIER) {
                 JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
                 log_debug("var-decl-scope: defining '%.*s', declarator=%p, base.type=%p", 
                     (int)id->name->len, id->name->chars, declarator, declarator->type);
                 NameEntry* entry = js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
                 id->entry = entry;
+            } else if (declarator->id) {
+                js_bind_pattern_names(tp, declarator->id, (JsVarKind)var_decl->kind);
             }
 
             if (!prev_declarator) {
@@ -4729,6 +4734,10 @@ static JsAstNode* build_ts_variable_decl_u(JsTranspiler* tp, TSNode var_node) {
             JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
             NameEntry* entry = js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
             id->entry = entry;
+        } else if (declarator->id) {
+            // Keep TypeScript destructuring bindings in the same lexical scope
+            // model as JavaScript declarations so subsequent lookups are local.
+            js_bind_pattern_names(tp, declarator->id, (JsVarKind)var_decl->kind);
         }
 
         if (!prev_declarator) {

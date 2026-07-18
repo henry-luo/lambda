@@ -182,6 +182,7 @@ struct JsFuncCollected {
     bool is_derived_constructor;    // true if class constructor has [[ConstructorKind]] derived
     bool is_class_method;           // true for any class method/accessor/constructor
     bool is_class_static_method;    // true for static class methods/accessors
+    JsClassEntry* owner_class;       // innermost class whose lexical body contains this function
     bool has_rest_param;            // true if last param is ...rest
     bool uses_arguments;            // v18q: true if function body references 'arguments'
     bool has_non_simple_params;      // v20: true if function has default/rest/destructuring params (no arguments aliasing)
