@@ -1056,15 +1056,17 @@ static int js_atomics_next_waiter_id = 1;
 static int js_atomics_last_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
 static int js_atomics_blocking_waiter_by_agent[JS_ATOMICS_MAX_AGENT_SLOTS];
 static double js_atomics_virtual_now_ms = 0.0;
-static bool js_atomics_waiter_roots_registered = false;
+extern "C" uint64_t js_get_heap_epoch(void);
+static uint64_t js_atomics_waiter_roots_epoch = 0;
 
 static void js_atomics_register_waiter_roots(void) {
-    if (js_atomics_waiter_roots_registered) return;
+    uint64_t epoch = js_get_heap_epoch();
+    if (js_atomics_waiter_roots_epoch == epoch) return;
     for (int i = 0; i < JS_ATOMICS_MAX_WAITERS; i++) {
         js_atomics_waiters[i].promise = ItemNull;
         heap_register_gc_root(&js_atomics_waiters[i].promise.item);
     }
-    js_atomics_waiter_roots_registered = true;
+    js_atomics_waiter_roots_epoch = epoch;
 }
 
 static Item js_atomics_status_string(JsAtomicsWaiterStatus status) {

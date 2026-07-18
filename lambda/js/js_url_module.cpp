@@ -37,12 +37,14 @@ static const char* item_to_cstr(Item value, char* buf, int buf_size) {
 static Item js_blob_url_values[JS_BLOB_URL_MAX];
 static char js_blob_url_ids[JS_BLOB_URL_MAX][64];
 static int64_t js_blob_url_next_id = 1;
-static bool js_blob_url_roots_registered = false;
+extern "C" uint64_t js_get_heap_epoch(void);
+static uint64_t js_blob_url_roots_epoch = 0;
 
 static void js_blob_url_register_roots(void) {
-    if (js_blob_url_roots_registered) return;
+    uint64_t epoch = js_get_heap_epoch();
+    if (js_blob_url_roots_epoch == epoch) return;
     heap_register_gc_root_range((uint64_t*)js_blob_url_values, JS_BLOB_URL_MAX);
-    js_blob_url_roots_registered = true;
+    js_blob_url_roots_epoch = epoch;
 }
 
 extern "C" Item js_blob_url_resolve(Item id_item) {

@@ -4282,7 +4282,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             entry.var.env_slot = iter_slot;
             entry.var.env_reg = mt->gen_env_reg;
             entry.var.typed_array_type = -1;
-            hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
         }
         {
             JsVarScopeEntry entry;
@@ -4293,7 +4293,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             entry.var.env_slot = lv_slot;
             entry.var.env_reg = mt->gen_env_reg;
             entry.var.typed_array_type = -1;
-            hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
         }
         mt->label_counter++;
     }
@@ -4341,7 +4341,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 entry.var.env_slot = ret_slot;
                 entry.var.env_reg = mt->gen_env_reg;
                 entry.var.typed_array_type = -1;
-                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
             }
             {
                 JsVarScopeEntry entry;
@@ -4352,7 +4352,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 entry.var.env_slot = hret_slot;
                 entry.var.env_reg = mt->gen_env_reg;
                 entry.var.typed_array_type = -1;
-                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
             }
             mt->label_counter++;
         }

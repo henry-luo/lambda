@@ -20,8 +20,23 @@ typedef struct JubeStaticModuleEntry {
 static JubeStaticModuleEntry jube_static_modules[JUBE_STATIC_MODULE_CAPACITY];
 static int jube_static_modules_count = 0;
 static bool jube_dynamic_modules_from_env_loaded = false;
+static bool jube_legacy_rooting_abi_loaded = false;
+extern __thread EvalContext* context;
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
+
+static bool jube_host_root_frame_begin(LambdaRootFrame* frame,
+        size_t slot_count) {
+    return lambda_root_frame_begin((Context*)context, frame, slot_count);
+}
+
+static uint64_t* jube_host_root_frame_take_slot(LambdaRootFrame* frame) {
+    return lambda_root_frame_take_slot(frame);
+}
+
+static void jube_host_root_frame_end(LambdaRootFrame* frame) {
+    lambda_root_frame_end(frame);
+}
 extern "C" Item vmap_new(void);
 extern "C" Item js_new_object(void);
 extern "C" Item js_array_new(int capacity);
@@ -273,6 +288,9 @@ static void jube_host_dom_notify_mutation_detail(int kind, void* target, void* p
 static const JubeHostGcAPI jube_host_gc_api = {
     heap_register_gc_root,
     heap_unregister_gc_root,
+    jube_host_root_frame_begin,
+    jube_host_root_frame_take_slot,
+    jube_host_root_frame_end,
 };
 
 static const JubeHostValueAPI jube_host_value_api = {
@@ -635,10 +653,18 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
         log_error("JUBE_REG: cannot register null %s module", source_label ? source_label : "Jube");
         return -1;
     }
-    if (module->abi_version != JUBE_ABI_VERSION) {
+    if (module->abi_version != JUBE_ABI_VERSION &&
+            module->abi_version != JUBE_ABI_VERSION_LEGACY) {
         log_error("JUBE_REG: module '%s' ABI mismatch: got %u expected %u",
                   module->name, module->abi_version, JUBE_ABI_VERSION);
         return -1;
+    }
+    if (module->abi_version == JUBE_ABI_VERSION_LEGACY) {
+        // v1 exposes persistent roots but no scoped native handles. Once one
+        // is admitted, its activation chains require conservative scanning.
+        jube_legacy_rooting_abi_loaded = true;
+        log_info("JUBE_REG: module '%s' uses legacy rooting ABI; compatibility GC is required",
+            module->name);
     }
     // v1 modules stop at JUBE_MODULE_DEF_V1_SIZE; the DOM3 tail is additive and
     // size-gated, so only the frozen v1 prefix is a hard requirement here.
@@ -707,6 +733,10 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
 
 int jube_register_static_module(const JubeModuleDef* module) {
     return jube_register_module_descriptor(module, NULL, "static");
+}
+
+bool jube_has_legacy_rooting_abi(void) {
+    return jube_legacy_rooting_abi_loaded;
 }
 
 typedef const JubeModuleDef* (*JubeDynamicModuleEntry)(void);

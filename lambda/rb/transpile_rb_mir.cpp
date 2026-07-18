@@ -50,24 +50,6 @@ extern "C" void* js_function_get_ptr(Item fn_item);
 extern "C" void js_runtime_set_input(void* input);
 extern "C" char* read_text_file(const char* filename);
 
-static void rb_mir_finish_context(Runtime* runtime, EvalContext* old_context, bool reusing_context) {
-    if (!reusing_context && context) {
-        if (runtime) {
-            // Standalone Ruby execution owns this heap until runtime_cleanup(); returning it
-            // through Runtime keeps any non-null script result valid for the caller to print.
-            runtime->heap = context->heap;
-            runtime->name_pool = context->name_pool;
-            runtime->type_list = (ArrayList*)context->type_list;
-        } else {
-            if (context->name_pool) name_pool_release(context->name_pool);
-            if (context->type_list) arraylist_free((ArrayList*)context->type_list);
-            if (context->heap) heap_destroy();
-        }
-    }
-    context = old_context;
-    _lambda_rt = (Context*)old_context;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
@@ -4603,6 +4585,7 @@ static void rm_transpile_ast(RbMirTranspiler* mt, RbAstNode* root) {
 
 Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* filename) {
     log_debug("rb-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
+    if (!runtime_require_gc_compatibility(runtime, "Ruby")) return ItemError;
 
     // create Ruby transpiler
     RbTranspiler* tp = rb_transpiler_create(runtime);
@@ -4659,7 +4642,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     if (!ctx) {
         log_error("rb-mir: MIR context init failed");
         rb_transpiler_destroy(tp);
-        rb_mir_finish_context(runtime, old_context, reusing_context);
+        mir_guest_finish_context(runtime, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -4669,7 +4652,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
         log_error("rb-mir: failed to allocate RbMirTranspiler");
         MIR_finish(ctx);
         rb_transpiler_destroy(tp);
-        rb_mir_finish_context(runtime, old_context, reusing_context);
+        mir_guest_finish_context(runtime, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
     memset(mt, 0, sizeof(RbMirTranspiler));
@@ -4720,7 +4703,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
         mem_free(mt);
         MIR_finish(ctx);
         rb_transpiler_destroy(tp);
-        rb_mir_finish_context(runtime, old_context, reusing_context);
+        mir_guest_finish_context(runtime, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -4742,7 +4725,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     MIR_finish(ctx);
     rb_transpiler_destroy(tp);
 
-    rb_mir_finish_context(runtime, old_context, reusing_context);
+    mir_guest_finish_context(runtime, old_context, reusing_context);
 
     return result;
 }

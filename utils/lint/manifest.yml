@@ -356,6 +356,20 @@ rules:
     tags: [radiant, state-machine, coverage]
     note: "Parses C++ enum header + table source, asserts every enum value has a matching row. Neither ast-grep nor alint can express this; intentionally stays as Python."
 
+  gc-effects:
+    backend: python
+    file: utils/check_gc_effects.py
+    category: memory-safety
+    tags: [lambda, gc, call-graph, mandatory]
+    note: "Builds a conservative source call graph from every JIT NO_GC import, follows project callees transitively, and fails on allocation, generated-code re-entry, unknown calls, or drift from the frozen audited set."
+
+  gc-root-hazards:
+    backend: python
+    file: utils/check_gc_root_hazards.py
+    category: memory-safety
+    tags: [lambda, gc, roots, mandatory]
+    note: "Ratchets migrated native runtime code against automatic-local root addresses, transient register/unregister guards, and process-lifetime boolean gates for heap-local root registries."
+
   no-new-per-file-header:
     backend: python
     file: utils/lint/rules/structural/no_new_per_file_header.py

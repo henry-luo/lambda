@@ -379,16 +379,18 @@ static Item tls_ca_bundled_cache = {0};
 static Item tls_ca_extra_cache = {0};
 static Item tls_ca_system_cache = {0};
 static Item tls_ca_default_cache = {0};
-static bool tls_ca_roots_registered = false;
+extern "C" uint64_t js_get_heap_epoch(void);
+static uint64_t tls_ca_roots_epoch = 0;
 
 static void tls_ca_register_roots(void) {
-    if (tls_ca_roots_registered) return;
+    uint64_t epoch = js_get_heap_epoch();
+    if (tls_ca_roots_epoch == epoch) return;
     heap_register_gc_root(&tls_namespace.item);
     heap_register_gc_root(&tls_ca_bundled_cache.item);
     heap_register_gc_root(&tls_ca_extra_cache.item);
     heap_register_gc_root(&tls_ca_system_cache.item);
     heap_register_gc_root(&tls_ca_default_cache.item);
-    tls_ca_roots_registered = true;
+    tls_ca_roots_epoch = epoch;
 }
 
 static Item tls_clone_unique_string_array(Item source, bool freeze_result) {

@@ -50,6 +50,7 @@ extern double js_get_number(Item value);
 extern __thread EvalContext* context;
 extern "C" Item js_func_get_custom_proto(Item func);
 extern "C" Item js_get_typed_array_base();
+extern "C" uint64_t js_get_heap_epoch(void);
 
 static const JubeTypeDef* js_host_object_type(Item object) {
     if (get_type_id(object) != LMD_TYPE_VMAP || !object.vmap || !object.vmap->host_type) {
@@ -3758,7 +3759,7 @@ static bool js_process_ipc_closing = false;
 static bool js_process_ipc_disconnect_emitted = false;
 static bool js_process_ipc_force_ref = false;
 static Item js_process_ipc_pending_messages = {0};
-static bool js_process_ipc_pending_rooted = false;
+static uint64_t js_process_ipc_pending_root_epoch = 0;
 static char* js_process_ipc_buf = NULL;
 static size_t js_process_ipc_len = 0;
 static size_t js_process_ipc_cap = 0;
@@ -3856,9 +3857,11 @@ static bool js_process_has_message_listener(void) {
 static void js_process_ipc_queue_message(Item message, Item handle) {
     if (js_process_ipc_pending_messages.item == 0) {
         js_process_ipc_pending_messages = js_array_new(0);
-        if (!js_process_ipc_pending_rooted) {
+        uint64_t epoch = js_get_heap_epoch();
+        if (js_process_ipc_pending_root_epoch != epoch) {
             heap_register_gc_root(&js_process_ipc_pending_messages.item);
-            js_process_ipc_pending_rooted = true;
+            // IPC storage outlives a batch heap's root registry.
+            js_process_ipc_pending_root_epoch = epoch;
         }
     }
     Item entry = js_new_object();
@@ -9046,6 +9049,12 @@ extern "C" Item js_object_get_own_property_descriptors(Item obj) {
 }
 
 extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> obj_root(roots, obj);
+    Rooted<Item> name_root(roots, name);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> desc_root(roots, ItemNull);
+    Rooted<Item> attr_key_root(roots, ItemNull);
     // Fast path (object-literal / spread / fromEntries hot path):
     // CreateDataProperty == [[DefineOwnProperty]] of a data property with default
     // attributes (writable/enumerable/configurable = true). [[DefineOwnProperty]]
@@ -9067,35 +9076,44 @@ extern "C" Item js_create_data_property(Item obj, Item name, Item value) {
     //    for deleted-sentinel entries, so map_put never creates a duplicate, and
     //    redefinition of an existing own property keeps its spec-correct path);
     //  - target is extensible.
-    if (js_input && get_type_id(obj) == LMD_TYPE_MAP && get_type_id(name) == LMD_TYPE_STRING) {
-        Map* m = obj.map;
-        JsClass cls = js_class_id(obj);
+    if (js_input && get_type_id(obj_root.get()) == LMD_TYPE_MAP &&
+            get_type_id(name_root.get()) == LMD_TYPE_STRING) {
+        Map* m = obj_root.get().map;
+        JsClass cls = js_class_id(obj_root.get());
         if (m && m->map_kind == MAP_KIND_PLAIN &&
             (cls == JS_CLASS_NONE || cls == JS_CLASS_OBJECT)) {
-            String* nm = it2s(name);
+            String* nm = it2s(name_root.get());
             if (nm && !(nm->len >= 2 && nm->chars[0] == '_' && nm->chars[1] == '_')) {
                 bool key_exists = false;
                 js_map_get_fast_ext(m, nm->chars, (int)nm->len, &key_exists);
-                if (!key_exists && js_is_truthy(js_object_is_extensible(obj))) {
-                    map_put(m, nm, value, js_input);
-                    return obj;
+                if (!key_exists && js_is_truthy(js_object_is_extensible(obj_root.get()))) {
+                    map_put(m, nm, value_root.get(), js_input);
+                    return obj_root.get();
                 }
             }
         }
     }
-    if (get_type_id(obj) == LMD_TYPE_MAP && get_type_id(name) == LMD_TYPE_STRING) {
-        String* name_str = it2s(name);
+    if (get_type_id(obj_root.get()) == LMD_TYPE_MAP &&
+            get_type_id(name_root.get()) == LMD_TYPE_STRING) {
+        String* name_str = it2s(name_root.get());
         if (name_str && name_str->len == 9 && strncmp(name_str->chars, "__proto__", 9) == 0) {
-            js_mark_own_proto_property(obj);
+            js_mark_own_proto_property(obj_root.get());
         }
     }
-    Item desc = js_new_object();
-    js_set_prototype(desc, ItemNull);
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
-    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
-    return js_object_define_property(obj, name, desc);
+    // The slow path performs multiple allocations after constructing the
+    // descriptor. Keep the descriptor and each attribute key exact until
+    // DefineOwnProperty has consumed the completed object.
+    desc_root.set(js_new_object());
+    js_set_prototype(desc_root.get(), ItemNull);
+    attr_key_root.set((Item){.item = s2it(heap_create_name("value", 5))});
+    js_property_set(desc_root.get(), attr_key_root.get(), value_root.get());
+    attr_key_root.set((Item){.item = s2it(heap_create_name("writable", 8))});
+    js_property_set(desc_root.get(), attr_key_root.get(), (Item){.item = b2it(true)});
+    attr_key_root.set((Item){.item = s2it(heap_create_name("enumerable", 10))});
+    js_property_set(desc_root.get(), attr_key_root.get(), (Item){.item = b2it(true)});
+    attr_key_root.set((Item){.item = s2it(heap_create_name("configurable", 12))});
+    js_property_set(desc_root.get(), attr_key_root.get(), (Item){.item = b2it(true)});
+    return js_object_define_property(obj_root.get(), name_root.get(), desc_root.get());
 }
 
 // =============================================================================
@@ -9463,6 +9481,10 @@ extern "C" Item js_alert(Item msg) {
 
 // Object.getOwnPropertyNames — includes non-enumerable own properties
 extern "C" Item js_object_get_own_property_names(Item object) {
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> result_root(roots, ItemNull);
+
     Item exotic_result = ItemNull;
     if (js_try_exotic_own_property_names(object, &exotic_result)) return exotic_result;
     // ES6: ToObject for primitives
@@ -9471,6 +9493,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         String* str = it2s(object);
         int slen = str ? (int)str->len : 0;
         Item result = js_array_new(slen + 1);
+        result_root.set(result);
         for (int i = 0; i < slen; i++) {
             char buf[16];
             int blen = snprintf(buf, sizeof(buf), "%d", i);
@@ -9489,6 +9512,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
         int len = object.array->length;
         // v26: use push approach to skip deleted sentinel elements
         Item result = js_array_new(0);
+        result_root.set(result);
         Map* pm = js_array_props_map(object.array);
         int dense_lim = len;
         int64_t dense_capacity = container_dense_capacity(object.array);
@@ -9560,6 +9584,7 @@ extern "C" Item js_object_get_own_property_names(Item object) {
             if (name_status == JS_SHAPE_SLOT_DELETED) include_name = false;
         }
         Item result = js_array_new(0);
+        result_root.set(result);
         if (include_length)
             js_array_push(result, (Item){.item = s2it(heap_create_name("length", 6))});
         if (include_name)
@@ -9709,6 +9734,9 @@ extern "C" Item js_object_get_own_property_names(Item object) {
 
     TypeMap* tm = (TypeMap*)m->type;
     Item result = js_array_new(0);
+    // Property-name creation can collect; keep both the traversed object and
+    // the result array live until enumeration and builtin-name expansion end.
+    result_root.set(result);
     Array* arr = result.array;
     bool is_regexp_obj = js_class_id((Item){.map = m}) == JS_CLASS_REGEXP;
     bool is_class_ctor = false;
@@ -14979,7 +15007,7 @@ static int js_global_var_cached_defined_count = 0;
 static uint64_t js_global_var_cached_defined_epoch = 0;
 static Item js_global_var_cached_global = {0};
 static Item js_window_event_value = {.item = ITEM_JS_UNDEFINED};
-static bool js_window_event_rooted = false;
+static uint64_t js_window_event_root_epoch = 0;
 static bool js_window_event_intercept_enabled = false;
 
 static bool js_key_is_event_name(Item key) {
@@ -14989,10 +15017,12 @@ static bool js_key_is_event_name(Item key) {
 }
 
 static void js_window_event_ensure_rooted() {
-    if (js_window_event_rooted) return;
+    uint64_t epoch = js_get_heap_epoch();
+    if (js_window_event_root_epoch == epoch) return;
     extern void heap_register_gc_root(uint64_t* slot);
     heap_register_gc_root(&js_window_event_value.item);
-    js_window_event_rooted = true;
+    // globalThis is rebuilt across batch heaps, whose root registries are not shared.
+    js_window_event_root_epoch = epoch;
 }
 
 extern "C" int js_is_window_event_global_property(Item object, Item key) {
@@ -16156,7 +16186,13 @@ extern "C" Item js_get_global_this() {
         {
             extern Item js_performance_now(void);
             extern Item js_performance_observer_new(Item callback);
+            RootFrame performance_roots((Context*)context, 5);
             Item perf = js_new_object();
+            Rooted<Item> perf_root(performance_roots, perf);
+            Rooted<Item> timing_root(performance_roots, ItemNull);
+            Rooted<Item> origin_root(performance_roots, ItemNull);
+            Rooted<Item> observer_root(performance_roots, ItemNull);
+            Rooted<Item> supported_types_root(performance_roots, ItemNull);
             js_property_set(perf, make_string_item("now"),
                 js_new_function((void*)js_performance_now, 0));
             js_property_set(perf, make_string_item("mark"),
@@ -16171,13 +16207,17 @@ extern "C" Item js_get_global_this() {
                 js_new_function((void*)js_performance_entries_by_type, 1));
             double* origin = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
             *origin = js_performance_time_origin_ms();
-            js_property_set(perf, make_string_item("timeOrigin"), lambda_float_ptr_to_item(origin));
-            js_property_set(perf, make_string_item("timing"), js_new_object());
+            origin_root.set(lambda_float_ptr_to_item(origin));
+            js_property_set(perf, make_string_item("timeOrigin"), origin_root.get());
+            timing_root.set(js_new_object());
+            js_property_set(perf, make_string_item("timing"), timing_root.get());
             js_property_set(js_global_this_obj,
                 (Item){.item = s2it(heap_create_name("performance", 11))}, perf);
             Item perf_observer = js_new_function(
                 (void*)js_performance_observer_new, 1);
+            observer_root.set(perf_observer);
             Item supported_types = js_array_new(0);
+            supported_types_root.set(supported_types);
             js_array_push(supported_types, make_string_item("layout-shift"));
             js_property_set(perf_observer, make_string_item("supportedEntryTypes"),
                 supported_types);

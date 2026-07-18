@@ -12,6 +12,7 @@
 #include "js_typed_array.h"
 #include "js_error_codes.h"
 #include "../lambda-data.hpp"
+#include "../lambda.hpp"
 
 extern "C" Item js_get_current_this(void);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
@@ -32,6 +33,7 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 #include <psa/crypto.h>
 
 extern "C" Item bigint_from_string(const char* str, int len);
+extern __thread EvalContext* context;
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -8563,22 +8565,38 @@ extern "C" Item js_subtle_decrypt(Item alg_item, Item key_item, Item data_item) 
 // ============================================================================
 
 static void crypto_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item_crypto(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> ns_root(roots, ns);
+    Rooted<Item> key_root(roots, make_string_item_crypto(name));
+    Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
+    js_property_set(ns_root.get(), key_root.get(), fn_root.get());
 }
 
 static void crypto_set_hidden_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item_crypto(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
-    js_mark_non_enumerable(ns, key);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> ns_root(roots, ns);
+    Rooted<Item> key_root(roots, make_string_item_crypto(name));
+    Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
+    js_property_set(ns_root.get(), key_root.get(), fn_root.get());
+    js_mark_non_enumerable(ns_root.get(), key_root.get());
 }
 
 extern "C" Item js_get_crypto_namespace(void) {
     if (crypto_namespace.item != 0) return crypto_namespace;
 
+    // The module cache is published only after this large constructor returns;
+    // root its stable slot first so forced GC cannot reclaim the partial object.
+    heap_register_gc_root(&crypto_namespace.item);
     crypto_namespace = js_new_object();
+
+    RootFrame roots((Context*)context, 7);
+    Rooted<Item> subtle_root(roots, ItemNull);
+    Rooted<Item> constants_root(roots, ItemNull);
+    Rooted<Item> ecdh_ctor_root(roots, ItemNull);
+    Rooted<Item> keyobject_ctor_root(roots, ItemNull);
+    Rooted<Item> keyobject_proto_root(roots, ItemNull);
+    Rooted<Item> default_key_root(roots, ItemNull);
+    Rooted<Item> temporary_root(roots, ItemNull);
 
     crypto_set_method(crypto_namespace, "createHash",         (void*)js_crypto_createHash, 2);
     crypto_set_method(crypto_namespace, "hash",               (void*)js_crypto_hash, 3);
@@ -8627,70 +8645,60 @@ extern "C" Item js_get_crypto_namespace(void) {
     crypto_set_method(crypto_namespace, "generateKeyPairSync", (void*)js_crypto_generateKeyPairSync, 2);
 
     // subtle Web Crypto API (subset)
-    Item subtle = js_new_object();
-    crypto_set_method(subtle, "digest",  (void*)js_subtle_digest, 2);
-    crypto_set_method(subtle, "importKey", (void*)js_subtle_importKey, 5);
-    crypto_set_method(subtle, "encrypt", (void*)js_subtle_encrypt, 3);
-    crypto_set_method(subtle, "decrypt", (void*)js_subtle_decrypt, 3);
-    js_property_set(crypto_namespace, make_string_item_crypto("subtle"), subtle);
+    subtle_root.set(js_new_object());
+    crypto_set_method(subtle_root.get(), "digest",  (void*)js_subtle_digest, 2);
+    crypto_set_method(subtle_root.get(), "importKey", (void*)js_subtle_importKey, 5);
+    crypto_set_method(subtle_root.get(), "encrypt", (void*)js_subtle_encrypt, 3);
+    crypto_set_method(subtle_root.get(), "decrypt", (void*)js_subtle_decrypt, 3);
+    js_property_set(crypto_namespace, make_string_item_crypto("subtle"), subtle_root.get());
 
     // crypto.constants — OpenSSL-compatible constants
-    Item constants = js_new_object();
+    constants_root.set(js_new_object());
     // SSL/TLS
-    js_property_set(constants, make_string_item_crypto("SSL_OP_ALL"), (Item){.item = i2it(0)});
-    js_property_set(constants, make_string_item_crypto("SSL_OP_NO_SSLv2"), (Item){.item = i2it(0x01000000)});
-    js_property_set(constants, make_string_item_crypto("SSL_OP_NO_SSLv3"), (Item){.item = i2it(0x02000000)});
-    js_property_set(constants, make_string_item_crypto("SSL_OP_NO_TLSv1"), (Item){.item = i2it(0x04000000)});
+    js_property_set(constants_root.get(), make_string_item_crypto("SSL_OP_ALL"), (Item){.item = i2it(0)});
+    js_property_set(constants_root.get(), make_string_item_crypto("SSL_OP_NO_SSLv2"), (Item){.item = i2it(0x01000000)});
+    js_property_set(constants_root.get(), make_string_item_crypto("SSL_OP_NO_SSLv3"), (Item){.item = i2it(0x02000000)});
+    js_property_set(constants_root.get(), make_string_item_crypto("SSL_OP_NO_TLSv1"), (Item){.item = i2it(0x04000000)});
     // DH/RSA padding
-    js_property_set(constants, make_string_item_crypto("RSA_PKCS1_PADDING"), (Item){.item = i2it(1)});
-    js_property_set(constants, make_string_item_crypto("RSA_PKCS1_OAEP_PADDING"), (Item){.item = i2it(4)});
-    js_property_set(constants, make_string_item_crypto("RSA_NO_PADDING"), (Item){.item = i2it(3)});
-    js_property_set(constants, make_string_item_crypto("RSA_PKCS1_PSS_PADDING"), (Item){.item = i2it(6)});
-    js_property_set(constants, make_string_item_crypto("RSA_PSS_SALTLEN_DIGEST"), (Item){.item = i2it(CRYPTO_RSA_PSS_SALTLEN_DIGEST)});
-    js_property_set(constants, make_string_item_crypto("RSA_PSS_SALTLEN_MAX_SIGN"), (Item){.item = i2it(CRYPTO_RSA_PSS_SALTLEN_MAX_SIGN)});
-    js_property_set(constants, make_string_item_crypto("RSA_PSS_SALTLEN_AUTO"), (Item){.item = i2it(CRYPTO_RSA_PSS_SALTLEN_AUTO)});
+    js_property_set(constants_root.get(), make_string_item_crypto("RSA_PKCS1_PADDING"), (Item){.item = i2it(1)});
+    js_property_set(constants_root.get(), make_string_item_crypto("RSA_PKCS1_OAEP_PADDING"), (Item){.item = i2it(4)});
+    js_property_set(constants_root.get(), make_string_item_crypto("RSA_NO_PADDING"), (Item){.item = i2it(3)});
+    js_property_set(constants_root.get(), make_string_item_crypto("RSA_PKCS1_PSS_PADDING"), (Item){.item = i2it(6)});
+    js_property_set(constants_root.get(), make_string_item_crypto("RSA_PSS_SALTLEN_DIGEST"), (Item){.item = i2it(CRYPTO_RSA_PSS_SALTLEN_DIGEST)});
+    js_property_set(constants_root.get(), make_string_item_crypto("RSA_PSS_SALTLEN_MAX_SIGN"), (Item){.item = i2it(CRYPTO_RSA_PSS_SALTLEN_MAX_SIGN)});
+    js_property_set(constants_root.get(), make_string_item_crypto("RSA_PSS_SALTLEN_AUTO"), (Item){.item = i2it(CRYPTO_RSA_PSS_SALTLEN_AUTO)});
     // point conversion
-    js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_COMPRESSED"), (Item){.item = i2it(2)});
-    js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_UNCOMPRESSED"), (Item){.item = i2it(4)});
-    js_property_set(constants, make_string_item_crypto("POINT_CONVERSION_HYBRID"), (Item){.item = i2it(6)});
-    js_property_set(crypto_namespace, make_string_item_crypto("constants"), constants);
+    js_property_set(constants_root.get(), make_string_item_crypto("POINT_CONVERSION_COMPRESSED"), (Item){.item = i2it(2)});
+    js_property_set(constants_root.get(), make_string_item_crypto("POINT_CONVERSION_UNCOMPRESSED"), (Item){.item = i2it(4)});
+    js_property_set(constants_root.get(), make_string_item_crypto("POINT_CONVERSION_HYBRID"), (Item){.item = i2it(6)});
+    js_property_set(crypto_namespace, make_string_item_crypto("constants"), constants_root.get());
 
     // class constructors as stubs (for typeof/instanceof checks)
-    js_property_set(crypto_namespace, make_string_item_crypto("Hash"),
-        js_new_function((void*)js_crypto_createHash, 2));
-    js_property_set(crypto_namespace, make_string_item_crypto("Hmac"),
-        js_new_function((void*)js_crypto_createHmac, 2));
-    js_property_set(crypto_namespace, make_string_item_crypto("Sign"),
-        js_new_function((void*)js_crypto_createSign, 1));
-    js_property_set(crypto_namespace, make_string_item_crypto("Verify"),
-        js_new_function((void*)js_crypto_createVerify, 1));
-    js_property_set(crypto_namespace, make_string_item_crypto("Cipher"),
-        js_new_function((void*)js_crypto_createCipheriv, 3));
-    js_property_set(crypto_namespace, make_string_item_crypto("Decipher"),
-        js_new_function((void*)js_crypto_createDecipheriv, 3));
-    js_property_set(crypto_namespace, make_string_item_crypto("Cipheriv"),
-        js_new_function((void*)js_crypto_createCipheriv, 3));
-    js_property_set(crypto_namespace, make_string_item_crypto("Decipheriv"),
-        js_new_function((void*)js_crypto_createDecipheriv, 3));
-    js_property_set(crypto_namespace, make_string_item_crypto("DiffieHellman"),
-        js_new_function((void*)js_crypto_createDiffieHellman, 4));
-    js_property_set(crypto_namespace, make_string_item_crypto("DiffieHellmanGroup"),
-        js_new_function((void*)js_crypto_createDiffieHellmanGroup, 1));
-    Item ecdh_ctor = js_new_function((void*)js_crypto_createECDH, 1);
-    js_property_set(ecdh_ctor, make_string_item_crypto("convertKey"),
-        js_new_function((void*)js_ecdh_convertKey, 5));
-    js_property_set(crypto_namespace, make_string_item_crypto("ECDH"), ecdh_ctor);
-    Item keyobject_ctor = js_new_function((void*)js_crypto_KeyObject, 0);
-    Item keyobject_proto = js_property_get(keyobject_ctor, make_string_item_crypto("prototype"));
-    if (get_type_id(keyobject_proto) == LMD_TYPE_MAP) {
-        js_property_set(keyobject_proto, make_string_item_crypto("equals"),
-            js_new_function((void*)js_crypto_keyObjectEquals, 1));
+    crypto_set_method(crypto_namespace, "Hash", (void*)js_crypto_createHash, 2);
+    crypto_set_method(crypto_namespace, "Hmac", (void*)js_crypto_createHmac, 2);
+    crypto_set_method(crypto_namespace, "Sign", (void*)js_crypto_createSign, 1);
+    crypto_set_method(crypto_namespace, "Verify", (void*)js_crypto_createVerify, 1);
+    crypto_set_method(crypto_namespace, "Cipher", (void*)js_crypto_createCipheriv, 3);
+    crypto_set_method(crypto_namespace, "Decipher", (void*)js_crypto_createDecipheriv, 3);
+    crypto_set_method(crypto_namespace, "Cipheriv", (void*)js_crypto_createCipheriv, 3);
+    crypto_set_method(crypto_namespace, "Decipheriv", (void*)js_crypto_createDecipheriv, 3);
+    crypto_set_method(crypto_namespace, "DiffieHellman", (void*)js_crypto_createDiffieHellman, 4);
+    crypto_set_method(crypto_namespace, "DiffieHellmanGroup", (void*)js_crypto_createDiffieHellmanGroup, 1);
+    ecdh_ctor_root.set(js_new_function((void*)js_crypto_createECDH, 1));
+    temporary_root.set(js_new_function((void*)js_ecdh_convertKey, 5));
+    js_property_set(ecdh_ctor_root.get(), make_string_item_crypto("convertKey"), temporary_root.get());
+    js_property_set(crypto_namespace, make_string_item_crypto("ECDH"), ecdh_ctor_root.get());
+    keyobject_ctor_root.set(js_new_function((void*)js_crypto_KeyObject, 0));
+    keyobject_proto_root.set(js_property_get(keyobject_ctor_root.get(), make_string_item_crypto("prototype")));
+    if (get_type_id(keyobject_proto_root.get()) == LMD_TYPE_MAP) {
+        temporary_root.set(js_new_function((void*)js_crypto_keyObjectEquals, 1));
+        js_property_set(keyobject_proto_root.get(), make_string_item_crypto("equals"), temporary_root.get());
     }
     js_property_set(crypto_namespace, make_string_item_crypto("KeyObject"),
-        keyobject_ctor);
+        keyobject_ctor_root.get());
 
-    Item default_key = make_string_item_crypto("default");
-    js_property_set(crypto_namespace, default_key, crypto_namespace);
+    default_key_root.set(make_string_item_crypto("default"));
+    js_property_set(crypto_namespace, default_key_root.get(), crypto_namespace);
 
     return crypto_namespace;
 }

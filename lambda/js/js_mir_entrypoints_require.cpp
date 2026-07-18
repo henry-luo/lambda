@@ -985,6 +985,8 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     phase_start = js_mir_phase_now_us();
     Item result = ItemNull;
     if (!g_jm_preamble_compile_only) {
+    LambdaRecoveryCheckpoint recovery_checkpoint =
+        lambda_recovery_checkpoint_capture((Context*)context);
 #if defined(__APPLE__) || defined(__linux__)
     if (sigsetjmp(_lambda_recovery_point, 1)) {
 #elif defined(_WIN32)
@@ -996,6 +998,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         _lambda_recovery_armed = 0;   // recovery consumed; disarm
         log_error("js-mir: recovered from stack overflow via signal handler");
         _lambda_stack_overflow_flag = false;
+        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
         result = (Item){.item = ITEM_ERROR};
         // Report the error so it shows up as an uncaught exception
         js_throw_range_error("Maximum call stack size exceeded");
@@ -1003,6 +1006,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         _lambda_recovery_armed = 1;    // arm only for the duration of user code
         result = js_main((Context*)context);
         _lambda_recovery_armed = 0;
+        lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
     }
     }
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - phase_start;

@@ -3,6 +3,7 @@
 #include "js_runtime.h"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
+#include "../lambda.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 
@@ -34,6 +35,8 @@ static JsMediaQueryState media_queries[JS_MEDIA_QUERY_CAP] = {};
 static int media_query_count = 0;
 
 extern "C" bool js_dom_evaluate_media_query(const char* query);
+extern "C" void heap_register_gc_root(uint64_t* slot);
+extern __thread EvalContext* context;
 
 static char* platform_strdup(const char* value) {
     const char* source = value ? value : "";
@@ -145,8 +148,14 @@ static Item storage_object(JsStorageState* storage) {
     if (storage->object.item != 0 && storage->object.item != ITEM_NULL) {
         return storage->object;
     }
+    // Storage state persists outside the GC heap; its Item slot is the
+    // canonical owner and must remain visible throughout object construction.
+    heap_register_gc_root(&storage->object.item);
     Item object = js_new_object();
     storage->object = object;
+
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> descriptor_root(roots, ItemNull);
     js_property_set(object, js_make_string("key"),
         js_new_function((void*)js_storage_key, 1));
     js_property_set(object, js_make_string("getItem"),
@@ -159,6 +168,7 @@ static Item storage_object(JsStorageState* storage) {
         js_new_function((void*)js_storage_clear, 0));
 
     Item descriptor = js_new_object();
+    descriptor_root.set(descriptor);
     js_property_set(descriptor, js_make_string("get"),
         js_new_function((void*)js_storage_length, 0));
     js_property_set(descriptor, js_make_string("enumerable"),
@@ -231,7 +241,13 @@ extern "C" Item js_match_media(Item query_item) {
     JsMediaQueryState* state = &media_queries[media_query_count++];
     state->query = platform_strdup(platform_string(query_item));
     state->matches = js_dom_evaluate_media_query(state->query);
+    // Media-query records are persistent native owners, so register their
+    // stable object homes before the first allocating construction call.
+    heap_register_gc_root(&state->object.item);
     state->object = js_create_event_target();
+
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> descriptor_root(roots, ItemNull);
     js_property_set(state->object, js_make_string("media"),
         js_make_string(state->query));
     js_property_set(state->object, js_make_string("onchange"), ItemNull);
@@ -241,6 +257,7 @@ extern "C" Item js_match_media(Item query_item) {
         js_new_function((void*)js_media_query_remove_listener, 1));
 
     Item descriptor = js_new_object();
+    descriptor_root.set(descriptor);
     js_property_set(descriptor, js_make_string("get"),
         js_new_function((void*)js_media_query_matches, 0));
     js_property_set(descriptor, js_make_string("enumerable"),

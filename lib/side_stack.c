@@ -140,14 +140,36 @@ LambdaSideStackSnapshot lambda_side_stack_snapshot(Context* runtime_context) {
 void lambda_side_stack_restore(Context* runtime_context,
                                LambdaSideStackSnapshot snapshot) {
     if (!runtime_context) return;
-    if (snapshot.root_top >= runtime_context->side_root_base &&
+    if (runtime_context->side_root_base && runtime_context->side_root_limit &&
+        snapshot.root_top >= runtime_context->side_root_base &&
         snapshot.root_top <= runtime_context->side_root_limit) {
         runtime_context->side_root_top = snapshot.root_top;
     }
-    if (snapshot.number_top >= runtime_context->side_number_base &&
+    if (runtime_context->side_number_base && runtime_context->side_number_limit &&
+        snapshot.number_top >= runtime_context->side_number_base &&
         snapshot.number_top <= runtime_context->side_number_limit) {
         runtime_context->side_number_top = snapshot.number_top;
     }
+}
+
+LambdaRecoveryCheckpoint lambda_recovery_checkpoint_capture(Context* runtime_context) {
+    LambdaRecoveryCheckpoint checkpoint = {0};
+    checkpoint.context = runtime_context;
+    checkpoint.side_stack = lambda_side_stack_snapshot(runtime_context);
+    checkpoint.active = runtime_context != NULL;
+    return checkpoint;
+}
+
+void lambda_recovery_checkpoint_restore(LambdaRecoveryCheckpoint* checkpoint) {
+    if (!checkpoint || !checkpoint->active) return;
+    // A non-local jump can skip any number of nested generated/native frames;
+    // restore both allocation regions before the landing path may allocate.
+    lambda_side_stack_restore(checkpoint->context, checkpoint->side_stack);
+    checkpoint->active = false;
+}
+
+void lambda_recovery_checkpoint_disarm(LambdaRecoveryCheckpoint* checkpoint) {
+    if (checkpoint) checkpoint->active = false;
 }
 
 uint64_t* lambda_side_number_alloc(Context* runtime_context) {
@@ -185,4 +207,53 @@ void lambda_side_stack_decommit_unused(Context* runtime_context) {
     side_stack_region_decommit(&number_region, runtime_context->side_number_top);
     runtime_context->side_root_commit_limit = root_region.committed;
     runtime_context->side_number_commit_limit = number_region.committed;
+}
+
+bool lambda_root_frame_begin(Context* runtime_context, LambdaRootFrame* frame,
+                             size_t slot_count) {
+    if (!frame) return false;
+    frame->context = runtime_context;
+    frame->watermark = NULL;
+    frame->slots = NULL;
+    frame->slot_count = 0;
+    frame->next_slot = 0;
+    frame->active = false;
+    if (!runtime_context ||
+            !lambda_side_stack_ensure(runtime_context, slot_count, 0)) {
+        return false;
+    }
+
+    frame->watermark = runtime_context->side_root_top;
+    frame->slots = frame->watermark;
+    frame->slot_count = slot_count;
+    // Zero before publishing the new watermark so a forced collection can
+    // never interpret stale words from a previous activation as live roots.
+    for (size_t i = 0; i < slot_count; i++) frame->slots[i] = 0;
+    runtime_context->side_root_top += slot_count;
+    frame->active = true;
+    return true;
+}
+
+uint64_t* lambda_root_frame_slot(LambdaRootFrame* frame, size_t index) {
+    if (!frame || !frame->active || index >= frame->slot_count) return NULL;
+    return &frame->slots[index];
+}
+
+uint64_t* lambda_root_frame_take_slot(LambdaRootFrame* frame) {
+    if (!frame || frame->next_slot >= frame->slot_count) return NULL;
+    return lambda_root_frame_slot(frame, frame->next_slot++);
+}
+
+void lambda_root_frame_end(LambdaRootFrame* frame) {
+    if (!frame || !frame->active) return;
+    // Restore only a properly nested frame. A mismatched watermark means a
+    // generated/native child frame escaped its activation and must not be
+    // hidden by silently rewinding through it.
+    uint64_t* expected_top = frame->slots + frame->slot_count;
+    if (frame->context && frame->context->side_root_top == expected_top) {
+        frame->context->side_root_top = frame->watermark;
+    } else {
+        log_error("native-root-frame: non-LIFO frame restoration");
+    }
+    frame->active = false;
 }

@@ -7,6 +7,8 @@
 #include "../lib/arena.h"  // for arena_owns() and arena_realloc()
 #include "js/js_exec_profile_weak.h"
 
+extern __thread EvalContext* context;
+
 #ifndef LAMBDA_STATIC
 // ui_mode helper: copy GC-heap string into result arena as fat DomText node
 // (defined in lambda-data-runtime.cpp which has access to DOM headers)
@@ -33,6 +35,14 @@ extern "C" {
     __attribute__((weak))
     void heap_unregister_gc_root(uint64_t* slot) {
         (void)slot;
+    }
+
+    __attribute__((weak))
+    void lambda_root_frame_overflow_error(void) {
+        // The standalone input library links this file with malloc-backed,
+        // non-collecting allocation and no execution recovery layer. A null
+        // RootFrame therefore means no GC is possible; the full runtime's
+        // strong fail-closed implementation overrides this fallback.
     }
 }
 
@@ -521,16 +531,15 @@ void expand_list(List *list, Arena* arena = nullptr) {
         if (!lam::checked_mul((size_t)new_capacity, sizeof(Item), &new_size)) {
             return;   // overflow: growth not possible, leave capacity untouched
         }
-        uint64_t list_root = (uint64_t)(uintptr_t)list;
-        heap_register_gc_root(&list_root);
+        RootFrame roots((Context*)context, 1);
+        Rooted<List*> rooted_list(roots, list);
         Item* new_items;
         {
             JS_WEAK_PROPERTY_SET_BRANCH("expand_list_heap_alloc");
             new_items = (Item*)heap_data_alloc(new_size);
         }
-        list = (List*)(uintptr_t)list_root;
+        list = rooted_list.get();
         if (!new_items) {
-            heap_unregister_gc_root(&list_root);
             // OOM: leave capacity untouched (old buffer still valid).
             return;
         }
@@ -550,7 +559,6 @@ void expand_list(List *list, Arena* arena = nullptr) {
         // source buffer.
         list->items = new_items;
         list->capacity = new_capacity;
-        heap_unregister_gc_root(&list_root);
     }
 
     list_relocate_owned_tail(list, old_items, prev_capacity,
@@ -622,19 +630,18 @@ void js_array_set_props(Array* arr, Map* props) {
         return;
     }
 
-    uint64_t props_root = (uint64_t)(uintptr_t)props;
-    heap_register_gc_root(&props_root);
+    RootFrame roots((Context*)context, 1);
+    Rooted<Map*> rooted_props(roots, props);
     int64_t dense_capacity = arr->capacity >= arr->extra ? arr->capacity - arr->extra : 0;
     int64_t dense_required = arr->length < dense_capacity ? arr->length : dense_capacity;
     while (!arr->items || dense_required + arr->extra + 2 > arr->capacity) {
         int64_t old_capacity = arr->capacity;
         expand_list((List*)arr);
         if (arr->capacity <= old_capacity) {
-            heap_unregister_gc_root(&props_root);
             return;
         }
     }
-    props = (Map*)(uintptr_t)props_root;
+    props = rooted_props.get();
 
     // The props reservation is the high tail slot. Shift any existing scalar
     // payloads down one slot and rebase only logical Items that point into them.
@@ -667,7 +674,6 @@ void js_array_set_props(Array* arr, Map* props) {
     for (int64_t i = dense_required; i < promoted_dense_capacity; i++) {
         arr->items[i] = {.item = ITEM_JS_DELETED_SENTINEL};
     }
-    heap_unregister_gc_root(&props_root);
 }
 
 Array* array_pooled(Pool *pool) {
@@ -822,14 +828,30 @@ void array_push(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY) { // flatten only content lists (from list_end)
         List *nest_list = item.array;
         if (nest_list && nest_list->is_content) {
+            // Recursive pushes can grow the destination. Keep the not-yet-
+            // copied source and destination live for the entire flattening loop.
+            RootFrame roots((Context*)context, 2);
+            Rooted<Array*> rooted_array(roots, arr);
+            Rooted<Item> rooted_source(roots, item);
             for (int i = 0; i < nest_list->length; i++) {
+                arr = rooted_array.get();
+                nest_list = rooted_source.get().array;
                 Item nest_item = nest_list->items[i];
                 array_push(arr, nest_item);
             }
             return;
         }
     }
-    if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
+    if (arr->length + arr->extra + 2 > arr->capacity) {
+        // expand_list updates only its by-value pointer after compaction. Root
+        // and reload the caller's owner as well as the not-yet-owned item.
+        RootFrame roots((Context*)context, 2);
+        Rooted<Array*> rooted_array(roots, arr);
+        Rooted<Item> rooted_item(roots, item);
+        expand_list((List*)rooted_array.get());
+        arr = rooted_array.get();
+        item = rooted_item.get();
+    }
     array_set(arr, arr->length, item);
     arr->length++;
 }
@@ -933,7 +955,14 @@ void list_push(List *list, Item item) {
                 log_error("list_push: nested list has NULL items array! length=%ld, list=%p", nest_list->length, (void*)nest_list);
                 return;
             }
+            // Recursive pushes may collect between source reads. Keep both
+            // owners live and reload their data through the rooted headers.
+            RootFrame roots((Context*)context, 2);
+            Rooted<List*> rooted_list(roots, list);
+            Rooted<Item> rooted_source(roots, item);
             for (int i = 0; i < nest_list->length; i++) {
+                list = rooted_list.get();
+                nest_list = rooted_source.get().array;
                 Item nest_item = nest_list->items[i];
                 list_push(list, nest_item);
             }
@@ -977,7 +1006,16 @@ void list_push(List *list, Item item) {
                     size_t new_len = prev_str->len + new_str->len;
                     String *merged_str;
                     if (input_context->consts) { // dynamic runtime context
+                        // The merge allocation may collect; preserve both the
+                        // destination owner and the not-yet-stored new string.
+                        RootFrame roots((Context*)context, 2);
+                        Rooted<List*> rooted_list(roots, list);
+                        Rooted<Item> rooted_item(roots, item);
                         merged_str = (String *)input_context->context_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
+                        list = rooted_list.get();
+                        item = rooted_item.get();
+                        prev_str = list->items[list->length - 1].get_safe_string();
+                        new_str = item.get_safe_string();
                     } else {  // static (input) context
                         merged_str = (String*)pool_calloc(input_context->pool, sizeof(String) + new_len + 1);
                     }
@@ -998,7 +1036,14 @@ void list_push(List *list, Item item) {
     }
 
     // store the value in the list (and we may need two slots for long/double)
-    if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
+    if (list->length + list->extra + 2 > list->capacity) {
+        // expand_list roots the owner, but its allocation occurs before this
+        // incoming value is stored, so keep that value exact-rooted as well.
+        RootFrame roots((Context*)context, 1);
+        Rooted<Item> rooted_item(roots, item);
+        expand_list(list);
+        item = rooted_item.get();
+    }
     // Safety check: ensure items array was allocated
     if (list->items == NULL) {
         log_error("CRITICAL: list->items is NULL after expand_list! length=%ld, capacity=%ld", list->length, list->capacity);
@@ -1064,7 +1109,12 @@ void list_push_spread(List *list, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         Array* arr = item.array;
         if (arr && arr->is_spreadable) {
+            RootFrame roots((Context*)context, 2);
+            Rooted<List*> rooted_list(roots, list);
+            Rooted<Item> rooted_source(roots, item);
             for (int i = 0; i < arr->length; i++) {
+                list = rooted_list.get();
+                arr = rooted_source.get().array;
                 list_push(list, arr->items[i]);
             }
             return;
@@ -1074,7 +1124,12 @@ void list_push_spread(List *list, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         List* inner = item.array;
         if (inner && inner->is_spreadable) {
+            RootFrame roots((Context*)context, 2);
+            Rooted<List*> rooted_list(roots, list);
+            Rooted<Item> rooted_source(roots, item);
             for (int i = 0; i < inner->length; i++) {
+                list = rooted_list.get();
+                inner = rooted_source.get().array;
                 list_push(list, inner->items[i]);
             }
             return;
@@ -1084,18 +1139,34 @@ void list_push_spread(List *list, Item item) {
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item.array_num;
         if (arr && arr->is_spreadable) {
+            RootFrame roots((Context*)context, 2);
+            Rooted<List*> rooted_list(roots, list);
+            Rooted<Item> rooted_source(roots, item);
             switch (arr->get_elem_type()) {
             case ELEM_INT:
-                for (int64_t i = 0; i < arr->length; i++)
+                for (int64_t i = 0; i < arr->length; i++) {
+                    list = rooted_list.get();
+                    arr = rooted_source.get().array_num;
                     list_push(list, {.item = i2it(arr->items[i])});
+                }
                 break;
             case ELEM_INT64:
-                for (int64_t i = 0; i < arr->length; i++)
-                    list_push(list, {.item = l2it(&arr->items[i])});
+                for (int64_t i = 0; i < arr->length; i++) {
+                    list = rooted_list.get();
+                    arr = rooted_source.get().array_num;
+                    int64_t value = arr->items[i];
+                    // Expansion may compact the source data buffer; point the
+                    // transient scalar at stable native storage until copied.
+                    list_push(list, {.item = l2it(&value)});
+                }
                 break;
             case ELEM_FLOAT64:
-                for (int64_t i = 0; i < arr->length; i++)
-                    list_push(list, lambda_float_ptr_to_item(&arr->float_items[i]));
+                for (int64_t i = 0; i < arr->length; i++) {
+                    list = rooted_list.get();
+                    arr = rooted_source.get().array_num;
+                    double value = arr->float_items[i];
+                    list_push(list, lambda_float_ptr_to_item(&value));
+                }
                 break;
             default: break;
             }

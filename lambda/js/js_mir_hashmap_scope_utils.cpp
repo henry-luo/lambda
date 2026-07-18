@@ -1,5 +1,6 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
+#include <limits.h>
 
 // ============================================================================
 // Hashmap helpers
@@ -137,10 +138,42 @@ static MIR_reg_t jm_load_side_stack_runtime(JsMirTranspiler* mt) {
     return runtime;
 }
 
-static void jm_register_root_binding(JsMirTranspiler* mt, MIR_reg_t reg, int slot) {
+static void jm_ensure_index_map(int** map, int* capacity, int key) {
+    if (!map || !capacity || key < 0 || key < *capacity) return;
+    if (!em_root_ensure_index_map(map, capacity, key)) {
+        // Losing a home-to-register binding would make the exact root frame
+        // incomplete, so compilation must fail-stop on metadata OOM.
+        log_error("js-mir-root-bindings: index-map allocation failed");
+        abort();
+    }
+}
+
+static void jm_register_root_binding(JsMirTranspiler* mt, MIR_reg_t reg,
+        int slot, int home_id) {
     if (!mt || !reg || slot < 0) return;
-    for (int i = 0; i < mt->side_root_binding_count; i++) {
-        if (mt->side_root_bindings[i].reg == reg) return;
+    int reg_key = (int)reg;
+    jm_ensure_index_map(&mt->side_root_binding_by_reg,
+        &mt->side_root_binding_by_reg_capacity, reg_key);
+    if (home_id > 0) {
+        jm_ensure_index_map(&mt->side_root_binding_by_home,
+            &mt->side_root_binding_by_home_capacity, home_id);
+    }
+    int binding_index = home_id > 0
+        ? mt->side_root_binding_by_home[home_id]
+        : mt->side_root_binding_by_reg[reg_key];
+    if (binding_index >= 0 && binding_index < mt->side_root_binding_count) {
+        JsMirRootBinding* binding = &mt->side_root_bindings[binding_index];
+        if (binding->reg != reg && binding->reg > 0 &&
+                binding->reg < (MIR_reg_t)mt->side_root_binding_by_reg_capacity &&
+                mt->side_root_binding_by_reg[binding->reg] == binding_index) {
+            mt->side_root_binding_by_reg[binding->reg] = -1;
+        }
+        binding->reg = reg;
+        binding->slot = slot;
+        if (mt->side_root_binding_by_reg[reg_key] < 0) {
+            mt->side_root_binding_by_reg[reg_key] = binding_index;
+        }
+        return;
     }
     if (mt->side_root_binding_count >= mt->side_root_binding_capacity) {
         int next_capacity = mt->side_root_binding_capacity
@@ -150,10 +183,57 @@ static void jm_register_root_binding(JsMirTranspiler* mt, MIR_reg_t reg, int slo
             (size_t)next_capacity * sizeof(JsMirRootBinding), MEM_CAT_JS_RUNTIME);
         mt->side_root_binding_capacity = next_capacity;
     }
-    JsMirRootBinding* binding =
-        &mt->side_root_bindings[mt->side_root_binding_count++];
+    binding_index = mt->side_root_binding_count++;
+    JsMirRootBinding* binding = &mt->side_root_bindings[binding_index];
     binding->reg = reg;
     binding->slot = slot;
+    binding->home_id = home_id;
+    if (mt->side_root_binding_by_reg[reg_key] < 0) {
+        mt->side_root_binding_by_reg[reg_key] = binding_index;
+    }
+    if (home_id > 0) {
+        mt->side_root_binding_by_home[home_id] = binding_index;
+    }
+}
+
+static void jm_note_gc_candidate(JsMirTranspiler* mt, MIR_reg_t reg,
+        JitValueClass value_class, int home_id) {
+    if (!mt || !reg) return;
+    if (!em_root_note_candidate(&mt->side_gc_candidates,
+            &mt->side_gc_candidate_count, &mt->side_gc_candidate_capacity,
+            &mt->side_gc_candidate_by_reg,
+            &mt->side_gc_candidate_by_reg_capacity, reg, value_class,
+            home_id)) {
+        log_error("js-mir-root-candidates: unable to record reg=%u",
+            (unsigned)reg);
+        // A missing semantic candidate cannot be repaired by the later
+        // write-through fallback because its identity has already been lost.
+        abort();
+    }
+}
+
+void jm_note_gc_call_site(JsMirTranspiler* mt, MIR_insn_t insn,
+        JitGcEffect effect) {
+    if (!mt || !insn || !mt->side_root_write_back) return;
+    if (!em_root_note_call_site(&mt->side_gc_call_sites,
+            &mt->side_gc_call_site_count, &mt->side_gc_call_site_capacity,
+            insn, effect)) {
+        log_error("js-mir-root-call-sites: unable to record call");
+    }
+}
+
+static void jm_unbind_root_home(JsMirTranspiler* mt, int home_id) {
+    if (!mt || home_id <= 0) return;
+    if (home_id >= mt->side_root_binding_by_home_capacity) return;
+    int binding_index = mt->side_root_binding_by_home[home_id];
+    if (binding_index < 0 || binding_index >= mt->side_root_binding_count) return;
+    JsMirRootBinding* binding = &mt->side_root_bindings[binding_index];
+    if (binding->reg > 0 &&
+            binding->reg < (MIR_reg_t)mt->side_root_binding_by_reg_capacity &&
+            mt->side_root_binding_by_reg[binding->reg] == binding_index) {
+        mt->side_root_binding_by_reg[binding->reg] = -1;
+    }
+    binding->reg = 0;
 }
 
 void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg) {
@@ -178,26 +258,41 @@ void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg) {
     JsMirEnvBinding* binding = &mt->side_env_bindings[mt->side_env_binding_count++];
     binding->source_reg = reg;
     binding->reg = stable_reg;
-}
-
-static MIR_reg_t jm_root_value_bits(JsMirTranspiler* mt, MIR_reg_t value) {
-    // Root publication is sequential, so one scratch register is sufficient.
-    // Giving every call result a distinct conversion register made large vendor
-    // functions exceed MIR's practical register-allocation range at loop back-edges.
-    if (!mt->side_root_bits_scratch) {
-        mt->side_root_bits_scratch = jm_new_reg(mt, "js_root_bits", MIR_T_I64);
-    }
-    MIR_reg_t bits = mt->side_root_bits_scratch;
-    jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, bits), MIR_new_reg_op(mt->ctx, value)));
-    return bits;
+    // The epilogue uses this copied register after the allocation-result
+    // register may have been overwritten. It is therefore its own semantic
+    // raw-GC-pointer lifetime, not merely a machine-level MOV temporary.
+    jm_note_gc_candidate(mt, stable_reg, JIT_VALUE_RAW_GC_POINTER, 0);
 }
 
 static void jm_store_gc_root_slot(JsMirTranspiler* mt, int slot, MIR_reg_t value) {
     if (!mt || !mt->side_frame_active || slot < 0) return;
-    MIR_reg_t bits = jm_root_value_bits(mt, value);
+    if (mt->side_root_write_back) {
+        // Production publication is inserted once from the solved safepoint
+        // dataflow. Emitting eager stores here only to delete them later caused
+        // the MIR blow-up that safepoint-current homes are meant to remove.
+        return;
+    }
+    MIR_type_t value_type = MIR_reg_type(mt->ctx, value, mt->current_func);
+    // Root slots store one machine word. Using the register's semantic MIR
+    // carrier (`P` or `I64`) avoids a redundant conversion register while
+    // preserving the exact bits seen by the collector.
+    if (value_type != MIR_T_P) value_type = MIR_T_I64;
     jm_sync_emitter_from_compat(mt);
-    em_store_frame_slot(&mt->em, mt->side_root_frame_base, slot, bits);
+    em_store_frame_slot_typed(&mt->em, mt->side_root_frame_base, slot, value,
+        value_type);
+    jm_sync_compat_from_emitter(mt);
+    mt->side_root_store_count++;
+}
+
+static void jm_clear_gc_root_slot(JsMirTranspiler* mt, int slot) {
+    if (!mt || !mt->side_frame_active || slot < 0) return;
+    if (mt->side_root_write_back) return;
+    jm_sync_emitter_from_compat(mt);
+    em_emit_insn(&mt->em, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            (MIR_disp_t)slot * (MIR_disp_t)sizeof(uint64_t),
+            mt->side_root_frame_base, 0, 1),
+        MIR_new_int_op(mt->ctx, 0)));
     jm_sync_compat_from_emitter(mt);
     mt->side_root_store_count++;
 }
@@ -227,6 +322,16 @@ void jm_emit_loop_backedge_frame_reload(JsMirTranspiler* mt) {
 
 int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value) {
     if (!mt || !mt->side_frame_active || !value) return -1;
+    jm_note_gc_candidate(mt, value, JIT_VALUE_UNKNOWN, 0);
+    if (mt->side_root_write_back &&
+            value < (MIR_reg_t)mt->side_root_binding_by_reg_capacity) {
+        int binding_index = mt->side_root_binding_by_reg[value];
+        if (binding_index >= 0 && binding_index < mt->side_root_binding_count) {
+            JsMirRootBinding* binding = &mt->side_root_bindings[binding_index];
+            jm_store_gc_root_slot(mt, binding->slot, value);
+            return binding->slot;
+        }
+    }
     for (int i = 0; i < mt->side_root_binding_count; i++) {
         JsMirRootBinding* binding = &mt->side_root_bindings[i];
         if (binding->reg == value) {
@@ -236,7 +341,7 @@ int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value) {
     }
     int slot = mt->side_root_next++;
     jm_store_gc_root_slot(mt, slot, value);
-    jm_register_root_binding(mt, value, slot);
+    jm_register_root_binding(mt, value, slot, 0);
     return slot;
 }
 
@@ -268,17 +373,43 @@ static bool jm_should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
     }
 }
 
+static JitValueClass jm_gc_value_class(MIR_type_t mir_type, TypeId type_id) {
+    if (!jm_should_gc_root_var(mir_type, type_id)) {
+        return JIT_VALUE_NON_GC_SCALAR;
+    }
+    return mir_type == MIR_T_P ? JIT_VALUE_RAW_GC_POINTER
+        : JIT_VALUE_BOXED_ITEM;
+}
+
+void jm_note_gc_var_use(JsMirTranspiler* mt, JsMirVarEntry* var,
+        const char* name) {
+    if (!mt || !var || var->gc_home_id <= 0) return;
+    em_gc_note_use(&mt->em, var->gc_home_id, var->reg,
+        jm_gc_value_class(var->mir_type, var->type_id), name);
+}
+
 void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var) {
     if (!mt || !var || !mt->side_frame_active) return;
-    if (var->root_slot < 0 && !jm_should_gc_root_var(var->mir_type, var->type_id)) return;
-    if (var->root_slot < 0) {
-        var->root_slot = jm_create_gc_root_slot(mt, var->reg);
+    if (!jm_should_gc_root_var(var->mir_type, var->type_id)) {
+        if (var->root_slot >= 0) {
+            // A stable binding can change representation. Clear its canonical
+            // home instead of moving a double/scalar through an Item slot or
+            // retaining the prior managed pointer.
+            jm_clear_gc_root_slot(mt, var->root_slot);
+            jm_unbind_root_home(mt, var->gc_home_id);
+        }
         return;
     }
+    if (var->root_slot < 0) {
+        var->root_slot = mt->side_root_next++;
+    }
+    jm_note_gc_candidate(mt, var->reg,
+        jm_gc_value_class(var->mir_type, var->type_id), var->gc_home_id);
+    jm_register_root_binding(mt, var->reg, var->root_slot, var->gc_home_id);
     jm_store_gc_root_slot(mt, var->root_slot, var->reg);
 }
 
-void jm_root_live_scope_vars(JsMirTranspiler* mt) {
+void jm_write_through_root_live_scope_vars(JsMirTranspiler* mt) {
     if (!mt || !mt->side_frame_active) return;
     for (int depth = 0; depth <= mt->scope_depth; depth++) {
         if (!mt->var_scopes[depth]) continue;
@@ -296,14 +427,24 @@ void jm_root_live_scope_vars(JsMirTranspiler* mt) {
     }
 }
 
-static void jm_emit_root_updates(JsMirTranspiler* mt, MIR_insn_t insn) {
+static void jm_write_through_emit_root_updates(JsMirTranspiler* mt,
+        MIR_insn_t insn) {
     if (!mt || !insn || !mt->side_frame_active || mt->side_root_binding_count == 0) return;
     size_t operand_count = MIR_insn_nops(mt->ctx, insn);
     for (size_t oi = 0; oi < operand_count; oi++) {
         int output = 0;
-        MIR_op_mode_t mode = MIR_insn_op_mode(mt->ctx, insn, oi, &output);
-        if (!output || mode != MIR_OP_REG) continue;
+        MIR_insn_op_mode(mt->ctx, insn, oi, &output);
+        if (!output || insn->ops[oi].mode != MIR_OP_REG) continue;
         MIR_reg_t output_reg = insn->ops[oi].u.reg;
+        if (mt->side_root_write_back &&
+                output_reg < (MIR_reg_t)mt->side_root_binding_by_reg_capacity) {
+            int binding_index = mt->side_root_binding_by_reg[output_reg];
+            if (binding_index >= 0 && binding_index < mt->side_root_binding_count) {
+                JsMirRootBinding* binding = &mt->side_root_bindings[binding_index];
+                jm_store_gc_root_slot(mt, binding->slot, output_reg);
+            }
+            continue;
+        }
         for (int bi = 0; bi < mt->side_root_binding_count; bi++) {
             JsMirRootBinding* binding = &mt->side_root_bindings[bi];
             if (binding->reg == output_reg) {
@@ -319,8 +460,8 @@ static void jm_root_call_insn_regs(JsMirTranspiler* mt, MIR_insn_t insn,
     size_t operand_count = MIR_insn_nops(mt->ctx, insn);
     for (size_t oi = 0; oi < operand_count; oi++) {
         int output = 0;
-        MIR_op_mode_t mode = MIR_insn_op_mode(mt->ctx, insn, oi, &output);
-        if ((bool)output != outputs || mode != MIR_OP_REG) continue;
+        MIR_insn_op_mode(mt->ctx, insn, oi, &output);
+        if ((bool)output != outputs || insn->ops[oi].mode != MIR_OP_REG) continue;
         MIR_reg_t reg = insn->ops[oi].u.reg;
         MIR_type_t type = MIR_reg_type(mt->ctx, reg, mt->current_func);
         if (type == MIR_T_I64 || type == MIR_T_P) jm_create_gc_root_slot(mt, reg);
@@ -331,15 +472,44 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
         bool item_return, MirScalarReturnMode scalar_return_mode,
         MIR_reg_t runtime_reg) {
     if (!mt) return;
+    em_gc_analysis_begin(&mt->em);
     if (mt->side_root_bindings) {
         mem_free(mt->side_root_bindings);
         mt->side_root_bindings = NULL;
     }
     mt->side_root_binding_count = 0;
     mt->side_root_binding_capacity = 0;
+    if (mt->side_root_binding_by_reg) {
+        mem_free(mt->side_root_binding_by_reg);
+        mt->side_root_binding_by_reg = NULL;
+    }
+    mt->side_root_binding_by_reg_capacity = 0;
+    if (mt->side_root_binding_by_home) {
+        mem_free(mt->side_root_binding_by_home);
+        mt->side_root_binding_by_home = NULL;
+    }
+    mt->side_root_binding_by_home_capacity = 0;
     mt->side_root_store_count = 0;
     mt->side_may_gc_call_count = 0;
     mt->side_no_gc_call_count = 0;
+    mt->side_root_write_back = em_root_write_back_enabled();
+    if (mt->side_gc_candidates) {
+        mem_free(mt->side_gc_candidates);
+        mt->side_gc_candidates = NULL;
+    }
+    mt->side_gc_candidate_count = 0;
+    mt->side_gc_candidate_capacity = 0;
+    if (mt->side_gc_candidate_by_reg) {
+        mem_free(mt->side_gc_candidate_by_reg);
+        mt->side_gc_candidate_by_reg = NULL;
+    }
+    mt->side_gc_candidate_by_reg_capacity = 0;
+    if (mt->side_gc_call_sites) {
+        mem_free(mt->side_gc_call_sites);
+        mt->side_gc_call_sites = NULL;
+    }
+    mt->side_gc_call_site_count = 0;
+    mt->side_gc_call_site_capacity = 0;
     if (mt->side_root_backedge_reloads) {
         mem_free(mt->side_root_backedge_reloads);
         mt->side_root_backedge_reloads = NULL;
@@ -353,7 +523,6 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     mt->side_env_binding_count = 0;
     mt->side_env_binding_capacity = 0;
     mt->side_root_next = 0;
-    mt->side_root_bits_scratch = 0;
     mt->side_frame_return_type = return_type;
     mt->side_frame_item_return = item_return;
     mt->side_frame_scalar_return_mode = scalar_return_mode;
@@ -483,6 +652,10 @@ static void jm_finalize_side_root_prologue(JsMirTranspiler* mt) {
         MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor,
             commit_ready);
 #endif
+        jm_sync_emitter_from_compat(mt);
+        em_insert_zero_frame_slots(&mt->em, mt->side_root_anchor,
+            mt->side_root_frame_base, mt->side_root_next);
+        jm_sync_compat_from_emitter(mt);
         MIR_insert_insn_before(mt->ctx, mt->current_func_item, mt->side_root_anchor, store_top);
     } else {
         _MIR_free_insn(mt->ctx, add_top);
@@ -510,22 +683,31 @@ static void jm_epilogue_call_void(JsMirTranspiler* mt, const char* name,
         int nargs, MIR_type_t* arg_types, MIR_op_t* arg_ops) {
     jm_sync_emitter_from_compat(mt);
     em_call_void_with_args(&mt->em, name, nargs, arg_types, arg_ops, true);
+    JitImportMetadata metadata;
+    jit_import_get_metadata(name, &metadata);
+    if (mt->side_root_write_back) {
+        jm_note_gc_call_site(mt,
+            DLIST_TAIL(MIR_insn_t, mt->current_func->insns),
+            metadata.gc_effect);
+    }
     jm_sync_compat_from_emitter(mt);
+}
+
+static void jm_finalize_write_back_roots(JsMirTranspiler* mt) {
+    if (!mt || !mt->side_root_write_back) return;
+    MirRootWriteBackResult result = {};
+    em_finalize_semantic_root_write_back(&mt->em,
+        mt->side_root_frame_base, mt->side_root_anchor, false, 0,
+        &mt->side_gc_candidates, &mt->side_gc_candidate_count,
+        &mt->side_gc_candidate_capacity, &mt->side_gc_candidate_by_reg,
+        &mt->side_gc_candidate_by_reg_capacity, mt->side_gc_call_sites,
+        mt->side_gc_call_site_count, &result, "LambdaJS");
+    mt->side_root_next = result.stable_slots + result.scratch_slots;
+    mt->side_root_store_count = result.inserted_stores;
 }
 
 void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
     if (!mt || !mt->side_frame_active) return;
-    // The precise-root frame size is only final after lowering the whole
-    // function. Patch loop reloads now so their bases survive calls across a
-    // back-edge without carrying a fragile allocator register around the loop.
-    int64_t root_frame_bytes =
-        (int64_t)mt->side_root_next * (int64_t)sizeof(uint64_t);
-    for (int i = 0; i < mt->side_root_backedge_reload_count; i++) {
-        MIR_insn_t reload = mt->side_root_backedge_reloads[i];
-        if (reload && reload->nops >= 3 && reload->ops[2].mode == MIR_OP_INT) {
-            reload->ops[2].u.i = root_frame_bytes;
-        }
-    }
     jm_emit_label(mt, mt->side_frame_return_label);
     for (int i = 0; i < mt->side_env_binding_count; i++) {
         MIR_type_t arg_type = MIR_T_P;
@@ -558,8 +740,20 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
     }
     jm_emit_raw(mt, MIR_new_ret_insn(mt->ctx, 1,
         MIR_new_reg_op(mt->ctx, mt->side_frame_return_reg)));
+    jm_finalize_write_back_roots(mt);
+    // Scratch coloring fixes the physical frame size only after the complete
+    // function, including cleanup calls, has been analyzed.
+    int64_t root_frame_bytes =
+        (int64_t)mt->side_root_next * (int64_t)sizeof(uint64_t);
+    for (int i = 0; i < mt->side_root_backedge_reload_count; i++) {
+        MIR_insn_t reload = mt->side_root_backedge_reloads[i];
+        if (reload && reload->nops >= 3 && reload->ops[2].mode == MIR_OP_INT) {
+            reload->ops[2].u.i = root_frame_bytes;
+        }
+    }
     mt->side_frame_active = false;
     jm_finalize_side_root_prologue(mt);
+    em_gc_analysis_dump(&mt->em, function_name);
     const char* enabled = getenv("LAMBDA_MIR_LOG_FRAME_SLOTS");
     if (enabled && enabled[0] && strcmp(enabled, "0") != 0) {
         log_info("js-mir-frame-slots: function=%s roots=%d numbers=watermark envs=%d root_stores=%d may_gc_calls=%d no_gc_calls=%d",
@@ -573,6 +767,33 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
     }
     mt->side_root_binding_count = 0;
     mt->side_root_binding_capacity = 0;
+    if (mt->side_root_binding_by_reg) {
+        mem_free(mt->side_root_binding_by_reg);
+        mt->side_root_binding_by_reg = NULL;
+    }
+    mt->side_root_binding_by_reg_capacity = 0;
+    if (mt->side_root_binding_by_home) {
+        mem_free(mt->side_root_binding_by_home);
+        mt->side_root_binding_by_home = NULL;
+    }
+    mt->side_root_binding_by_home_capacity = 0;
+    if (mt->side_gc_candidates) {
+        mem_free(mt->side_gc_candidates);
+        mt->side_gc_candidates = NULL;
+    }
+    mt->side_gc_candidate_count = 0;
+    mt->side_gc_candidate_capacity = 0;
+    if (mt->side_gc_candidate_by_reg) {
+        mem_free(mt->side_gc_candidate_by_reg);
+        mt->side_gc_candidate_by_reg = NULL;
+    }
+    mt->side_gc_candidate_by_reg_capacity = 0;
+    if (mt->side_gc_call_sites) {
+        mem_free(mt->side_gc_call_sites);
+        mt->side_gc_call_sites = NULL;
+    }
+    mt->side_gc_call_site_count = 0;
+    mt->side_gc_call_site_capacity = 0;
     if (mt->side_root_backedge_reloads) {
         mem_free(mt->side_root_backedge_reloads);
         mt->side_root_backedge_reloads = NULL;
@@ -607,19 +828,45 @@ void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
         return;
     }
     if (mt->side_frame_active && (insn->code == MIR_CALL || insn->code == MIR_JCALL)) {
+        if (mt->side_root_write_back) {
+            jm_note_gc_call_site(mt, insn, JIT_EFFECT_MAY_GC);
+        }
+        size_t operand_count = MIR_insn_nops(mt->ctx, insn);
+        for (size_t oi = 0; oi < operand_count; oi++) {
+            int output = 0;
+            MIR_insn_op_mode(mt->ctx, insn, oi, &output);
+            if (!output && insn->ops[oi].mode == MIR_OP_REG) {
+                em_gc_note_temp_use(&mt->em, insn->ops[oi].u.reg,
+                    JIT_VALUE_UNKNOWN, "<raw-call>");
+            }
+        }
+        em_gc_note_safepoint(&mt->em, JIT_EFFECT_MAY_GC, "<raw-call>");
         // Calls emitted outside the effect-aware helper path have no trusted
         // metadata, so preserve the conservative MAY_GC contract.
         mt->side_may_gc_call_count++;
-        jm_root_live_scope_vars(mt);
+        if (!mt->side_root_write_back) {
+            jm_write_through_root_live_scope_vars(mt);
+        }
         // Temporaries used only for argument evaluation are absent from lexical
         // scopes; publishing call inputs/results closes that precise-root gap.
         jm_root_call_insn_regs(mt, insn, false);
     }
     jm_emit_raw(mt, insn);
     if (mt->side_frame_active && (insn->code == MIR_CALL || insn->code == MIR_JCALL)) {
+        size_t operand_count = MIR_insn_nops(mt->ctx, insn);
+        for (size_t oi = 0; oi < operand_count; oi++) {
+            int output = 0;
+            MIR_insn_op_mode(mt->ctx, insn, oi, &output);
+            if (output && insn->ops[oi].mode == MIR_OP_REG) {
+                em_gc_note_temp_definition(&mt->em, insn->ops[oi].u.reg,
+                    JIT_VALUE_UNKNOWN, "<raw-call>");
+            }
+        }
         jm_root_call_insn_regs(mt, insn, true);
     }
-    jm_emit_root_updates(mt, insn);
+    if (!mt->side_root_write_back) {
+        jm_write_through_emit_root_updates(mt, insn);
+    }
 }
 
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
@@ -788,6 +1035,32 @@ void jm_pop_scope(JsMirTranspiler* mt) {
 
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 
+JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
+        JsVarScopeEntry* entry) {
+    if (!mt || !entry || depth < 0 || depth >= 64 || !mt->var_scopes[depth]) {
+        return NULL;
+    }
+    // Direct scope insertion used to leave root_slot at memset's zero, which
+    // falsely looked rooted and bypassed semantic-home registration.
+    entry->var.root_slot = -1;
+    entry->var.gc_home_id = mt->side_frame_active
+        ? em_gc_new_home(&mt->em) : 0;
+    hashmap_set(mt->var_scopes[depth], entry);
+
+    JsVarScopeEntry key;
+    memset(&key, 0, sizeof(key));
+    snprintf(key.name, sizeof(key.name), "%s", entry->name);
+    JsVarScopeEntry* inserted = (JsVarScopeEntry*)hashmap_get(
+        mt->var_scopes[depth], &key);
+    if (!inserted) return NULL;
+    em_gc_note_definition(&mt->em, inserted->var.gc_home_id,
+        inserted->var.reg,
+        jm_gc_value_class(inserted->var.mir_type, inserted->var.type_id),
+        inserted->name);
+    jm_update_gc_root_slot(mt, &inserted->var);
+    return &inserted->var;
+}
+
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                        MIR_type_t mir_type , TypeId type_id ) {
     int target_depth = (mt->var_hoist_depth >= 0) ? mt->var_hoist_depth : mt->scope_depth;
@@ -796,6 +1069,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.reg = reg;
     entry.var.root_slot = -1;
+    entry.var.gc_home_id = 0;
     entry.var.async_slot = -1;
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
@@ -842,6 +1116,11 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             }
             entry.var.binding_start = existing->binding_start;
             entry.var.binding_end = existing->binding_end;
+            entry.var.gc_home_id = existing->gc_home_id;
+            // The canonical root slot follows the semantic binding across
+            // register and representation changes; lexical shadows do not
+            // enter this same-scope preservation path.
+            entry.var.root_slot = existing->root_slot;
             if (existing->in_scope_env) {
                 entry.var.in_scope_env = true;
                 entry.var.scope_env_slot = existing->scope_env_slot;
@@ -850,13 +1129,25 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
         }
     }
 
+    if (mt->side_frame_active && entry.var.gc_home_id <= 0) {
+        // Canonical homes belong to semantic bindings. Reassignments in the
+        // same scope retain the ID; lexical shadows receive a fresh identity.
+        entry.var.gc_home_id = em_gc_new_home(&mt->em);
+    }
+
     hashmap_set(mt->var_scopes[target_depth], &entry);
     JsVarScopeEntry key;
     memset(&key, 0, sizeof(key));
     snprintf(key.name, sizeof(key.name), "%s", name);
     JsVarScopeEntry* inserted = (JsVarScopeEntry*)hashmap_get(
         mt->var_scopes[target_depth], &key);
-    if (inserted) jm_update_gc_root_slot(mt, &inserted->var);
+    if (inserted) {
+        em_gc_note_definition(&mt->em, inserted->var.gc_home_id,
+            inserted->var.reg,
+            jm_gc_value_class(inserted->var.mir_type, inserted->var.type_id),
+            name);
+        jm_update_gc_root_slot(mt, &inserted->var);
+    }
 }
 
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name) {

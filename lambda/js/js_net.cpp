@@ -42,6 +42,7 @@ extern "C" Item js_object_keys(Item object);
 extern "C" void js_cluster_notify_worker_listening(void);
 extern "C" void js_process_ipc_notify_handle_accepted(void);
 extern "C" void js_process_ipc_notify_socket_closed(void);
+extern "C" uint64_t js_get_heap_epoch(void);
 extern Item js_make_number(double d);
 
 static Item make_undefined_item(void) {
@@ -110,13 +111,15 @@ typedef struct JsBoundSocket JsBoundSocket;
 #define NET_ACTIVE_SERVER_MAX 128
 static Item net_active_sockets[NET_ACTIVE_SOCKET_MAX];
 static Item net_active_servers[NET_ACTIVE_SERVER_MAX];
-static bool net_active_roots_registered = false;
+extern "C" uint64_t js_get_heap_epoch(void);
+static uint64_t net_active_roots_epoch = 0;
 
 static void net_active_register_roots(void) {
-    if (net_active_roots_registered) return;
+    uint64_t epoch = js_get_heap_epoch();
+    if (net_active_roots_epoch == epoch) return;
     heap_register_gc_root_range((uint64_t*)net_active_sockets, NET_ACTIVE_SOCKET_MAX);
     heap_register_gc_root_range((uint64_t*)net_active_servers, NET_ACTIVE_SERVER_MAX);
-    net_active_roots_registered = true;
+    net_active_roots_epoch = epoch;
 }
 
 static void net_active_add(Item* list, int max, Item obj) {
@@ -5684,7 +5687,7 @@ extern "C" Item js_internal_js_stream_socket_constructor(Item stream) {
 }
 
 static Item internal_js_stream_socket_ctor = {0};
-static bool internal_js_stream_socket_rooted = false;
+static uint64_t internal_js_stream_socket_root_epoch = 0;
 
 extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
     if (internal_js_stream_socket_ctor.item != 0) return internal_js_stream_socket_ctor;
@@ -5694,9 +5697,11 @@ extern "C" Item js_get_internal_js_stream_socket_constructor(void) {
                     internal_js_stream_socket_ctor);
     js_property_set(internal_js_stream_socket_ctor, make_string_item("default"),
                     internal_js_stream_socket_ctor);
-    if (!internal_js_stream_socket_rooted) {
+    uint64_t epoch = js_get_heap_epoch();
+    if (internal_js_stream_socket_root_epoch != epoch) {
         heap_register_gc_root(&internal_js_stream_socket_ctor.item);
-        internal_js_stream_socket_rooted = true;
+        // The constructor slot is static while each batch heap has a new registry.
+        internal_js_stream_socket_root_epoch = epoch;
     }
     return internal_js_stream_socket_ctor;
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../lambda.h"
+#include "../../lib/side_stack.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -8,7 +9,8 @@
 extern "C" {
 #endif
 
-#define JUBE_ABI_VERSION 1
+#define JUBE_ABI_VERSION 2
+#define JUBE_ABI_VERSION_LEGACY 1
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -137,6 +139,9 @@ typedef struct JubeTypeBinding {
 struct JubeHostGcAPI {
     void (*register_root)(uint64_t* slot);
     void (*unregister_root)(uint64_t* slot);
+    bool (*root_frame_begin)(LambdaRootFrame* frame, size_t slot_count);
+    uint64_t* (*root_frame_take_slot)(LambdaRootFrame* frame);
+    void (*root_frame_end)(LambdaRootFrame* frame);
 };
 
 struct JubeHostValueAPI {

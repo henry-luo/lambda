@@ -756,9 +756,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     continue;
                 }
                 JsMirVarEntry* current_binding = jm_function_find_current_scope_var(mt, e->name);
+                bool shadows_capture = current_binding && current_binding->from_env;
                 // Function-body declarations shadow outer names, including
                 // arrow captures installed as from_env bindings.
-                if (!current_binding || current_binding->from_env) {
+                if (!current_binding || shadows_capture) {
                     // Skip hoisting vars that are module vars in IIFE body functions
                     // — these are accessed via js_get/set_module_var, not local registers
                     if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
@@ -776,10 +777,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     {
                         JsMirVarEntry* hvar = jm_find_var(mt, e->name);
                         if (hvar) {
-                            if (current_binding && current_binding->from_env) {
+                            if (shadows_capture) {
                                 // A function-scoped declaration owns this binding; retaining
-                                // outer-capture metadata reloads the stale capture after every
-                                // local write (notably `for (var key in object)`).
+                                // outer-capture metadata reloads the stale capture after writes.
+                                // Snapshot this before jm_set_var, which may resize the hashmap.
                                 jm_function_clear_shadowed_capture_binding(hvar);
                             }
                             hvar->from_hoist = true;
@@ -1130,7 +1131,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.env_reg = mt->gen_env_reg;
                     entry.var.typed_array_type = -1;
                     entry.var.from_hoist = true;
-                    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                    jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
                     li++;
                 }
             }
@@ -1155,7 +1156,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             args_entry.var.env_slot = gen_args_slot;
             args_entry.var.env_reg = mt->gen_env_reg;
             args_entry.var.typed_array_type = -1;
-            hashmap_set(mt->var_scopes[mt->scope_depth], &args_entry);
+            jm_install_fresh_var_entry(mt, mt->scope_depth, &args_entry);
             jm_activate_arguments_aliasing(mt, fc, fn, args_reg);
         }
 
@@ -1203,7 +1204,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 entry.var.is_let_const = true;
                 entry.var.is_const = fc->captures[ci].is_const;
             }
-            hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
         }
 
         // Load parameters from env (stored there during generator creation)
@@ -1226,7 +1227,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 entry.var.env_slot = param_offset + i;
                 entry.var.env_reg = mt->gen_env_reg;
                 entry.var.typed_array_type = -1;
-                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
 
                 // Default parameter handling (assignment pattern)
                 if (sm_param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
@@ -1318,7 +1319,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             this_entry.var.env_slot = gen_this_slot;
             this_entry.var.env_reg = mt->gen_env_reg;
             this_entry.var.typed_array_type = -1;
-            hashmap_set(mt->var_scopes[mt->scope_depth], &this_entry);
+            jm_install_fresh_var_entry(mt, mt->scope_depth, &this_entry);
         }
 
         // Load 'arguments' from env[args_slot] if this generator uses arguments
@@ -1336,7 +1337,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             args_entry.var.env_slot = gen_args_slot;
             args_entry.var.env_reg = mt->gen_env_reg;
             args_entry.var.typed_array_type = -1;
-            hashmap_set(mt->var_scopes[mt->scope_depth], &args_entry);
+            jm_install_fresh_var_entry(mt, mt->scope_depth, &args_entry);
             jm_activate_arguments_aliasing(mt, fc, fn, args_reg);
         }
 
@@ -1374,7 +1375,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     if (is_lexical) {
                         entry.var.is_let_const = true;
                     }
-                    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                    jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
                     li++;
                 }
             }
@@ -1409,7 +1410,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             senv_entry.var.env_slot = scope_env_slot;
             senv_entry.var.env_reg = mt->gen_env_reg;
             senv_entry.var.typed_array_type = -1;
-            hashmap_set(mt->var_scopes[mt->scope_depth], &senv_entry);
+            jm_install_fresh_var_entry(mt, mt->scope_depth, &senv_entry);
 
             // Populate scope env with current values and mark vars for write-back
             // Only iterate normal slots — NFE extra slots are populated by self-patch code
@@ -1464,7 +1465,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     this_entry.var.scope_env_slot = target_slot;
                     this_entry.var.scope_env_reg = mt->scope_env_reg;
                     this_entry.var.typed_array_type = -1;
-                    hashmap_set(mt->var_scopes[mt->scope_depth], &this_entry);
+                    jm_install_fresh_var_entry(mt, mt->scope_depth, &this_entry);
                 } else if (strcmp(sname, "_js_new.target") == 0) {
                     // Child arrows read new.target lexically from this shared
                     // env; store the creation-context value before direct calls
@@ -1480,7 +1481,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     nt_entry.var.scope_env_slot = target_slot;
                     nt_entry.var.scope_env_reg = mt->scope_env_reg;
                     nt_entry.var.typed_array_type = -1;
-                    hashmap_set(mt->var_scopes[mt->scope_depth], &nt_entry);
+                    jm_install_fresh_var_entry(mt, mt->scope_depth, &nt_entry);
                 } else if (mt->module_consts) {
                     JsModuleConstEntry mclookup;
                     snprintf(mclookup.name, sizeof(mclookup.name), "%s", sname);
@@ -1732,7 +1733,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.env_slot = param_offset_sm + i;
                     entry.var.env_reg = mt->gen_env_reg;
                     entry.var.typed_array_type = -1;
-                    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                    jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
 
                     // Default parameter handling (assignment pattern)
                     if (sm_param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
@@ -1819,7 +1820,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.is_let_const = true;
                     entry.var.is_const = fc->captures[ci].is_const;
                 }
-                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
             }
 
             // Load 'this' from env[this_slot] and register as _js_this variable
@@ -1837,7 +1838,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 this_entry.var.env_slot = gen_this_slot;
                 this_entry.var.env_reg = mt->gen_env_reg;
                 this_entry.var.typed_array_type = -1;
-                hashmap_set(mt->var_scopes[mt->scope_depth], &this_entry);
+                jm_install_fresh_var_entry(mt, mt->scope_depth, &this_entry);
             }
 
             // Load 'arguments' from env[args_slot] if this async function uses arguments
@@ -1855,7 +1856,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 args_entry.var.env_slot = gen_args_slot;
                 args_entry.var.env_reg = mt->gen_env_reg;
                 args_entry.var.typed_array_type = -1;
-                hashmap_set(mt->var_scopes[mt->scope_depth], &args_entry);
+                jm_install_fresh_var_entry(mt, mt->scope_depth, &args_entry);
                 jm_activate_arguments_aliasing(mt, fc, fn, args_reg);
             }
 
@@ -1891,7 +1892,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         entry.var.env_reg = mt->gen_env_reg;
                         entry.var.typed_array_type = -1;
                         entry.var.from_hoist = true;  // v50: mark as hoisted
-                        hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                        jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
                         li++;
                     }
                 }
@@ -1924,7 +1925,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 senv_entry.var.env_slot = scope_env_slot;
                 senv_entry.var.env_reg = mt->gen_env_reg;
                 senv_entry.var.typed_array_type = -1;
-                hashmap_set(mt->var_scopes[mt->scope_depth], &senv_entry);
+                jm_install_fresh_var_entry(mt, mt->scope_depth, &senv_entry);
 
                 // Populate scope env with current values and mark vars for write-back
                 // Only iterate normal slots — NFE extra slots are populated by self-patch code
@@ -1976,7 +1977,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         this_entry.var.scope_env_slot = target_slot;
                         this_entry.var.scope_env_reg = mt->scope_env_reg;
                         this_entry.var.typed_array_type = -1;
-                        hashmap_set(mt->var_scopes[mt->scope_depth], &this_entry);
+                        jm_install_fresh_var_entry(mt, mt->scope_depth, &this_entry);
                     } else if (strcmp(sname, "_js_new.target") == 0) {
                         // Async child arrows still need lexical new.target after
                         // the call frame advances, so persist it in the async scope env.
@@ -1991,7 +1992,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         nt_entry.var.scope_env_slot = target_slot;
                         nt_entry.var.scope_env_reg = mt->scope_env_reg;
                         nt_entry.var.typed_array_type = -1;
-                        hashmap_set(mt->var_scopes[mt->scope_depth], &nt_entry);
+                        jm_install_fresh_var_entry(mt, mt->scope_depth, &nt_entry);
                     } else if (mt->module_consts) {
                         JsModuleConstEntry mclookup;
                         snprintf(mclookup.name, sizeof(mclookup.name), "%s", sname);
@@ -2265,7 +2266,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             entry.var.mir_type = MIR_T_I64;
             entry.var.type_id = LMD_TYPE_ANY;
             entry.var.typed_array_type = -1;
-            hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
         }
         hashmap_free(dstr_param_names);
     }
@@ -2404,7 +2405,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     }
                     // Generator wrappers evaluate default parameters before creating
                     // the state-machine env, so captured names must already resolve here.
-                    hashmap_set(mt->var_scopes[mt->scope_depth], &cap_entry);
+                    jm_install_fresh_var_entry(mt, mt->scope_depth, &cap_entry);
                 }
             }
 
@@ -2871,7 +2872,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     entry.var.is_let_const = true;
                     entry.var.is_const = fc->captures[i].is_const;
                 }
-                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
             }
         }
 
@@ -3107,9 +3108,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     continue;
                 }
                 JsMirVarEntry* current_binding = jm_function_find_current_scope_var(mt, e->name);
+                bool shadows_capture = current_binding && current_binding->from_env;
                 // Function-body declarations shadow outer names, including
                 // arrow captures installed as from_env bindings.
-                if (!current_binding || current_binding->from_env) {
+                if (!current_binding || shadows_capture) {
                     // Skip hoisting vars that are module vars in IIFE body functions
                     if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
                         JsModuleConstEntry mclookup;
@@ -3126,10 +3128,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     {
                         JsMirVarEntry* hvar = jm_find_var(mt, e->name);
                         if (hvar) {
-                            if (current_binding && current_binding->from_env) {
+                            if (shadows_capture) {
                                 // A function-scoped declaration owns this binding; retaining
-                                // outer-capture metadata reloads the stale capture after every
-                                // local write (notably `for (var key in object)`).
+                                // outer-capture metadata reloads the stale capture after writes.
+                                // Snapshot this before jm_set_var, which may resize the hashmap.
                                 jm_function_clear_shadowed_capture_binding(hvar);
                             }
                             hvar->from_hoist = true;
@@ -3325,7 +3327,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     this_entry.var.scope_env_slot = s;
                     this_entry.var.scope_env_reg = mt->scope_env_reg;
                     this_entry.var.typed_array_type = -1;
-                    hashmap_set(mt->var_scopes[mt->scope_depth], &this_entry);
+                    jm_install_fresh_var_entry(mt, mt->scope_depth, &this_entry);
                 } else if (strcmp(sname, "_js_new.target") == 0) {
                     // Normal functions seed shared env slots for child arrows;
                     // otherwise a direct call to the arrow observes undefined
@@ -3341,7 +3343,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     nt_entry.var.scope_env_slot = s;
                     nt_entry.var.scope_env_reg = mt->scope_env_reg;
                     nt_entry.var.typed_array_type = -1;
-                    hashmap_set(mt->var_scopes[mt->scope_depth], &nt_entry);
+                    jm_install_fresh_var_entry(mt, mt->scope_depth, &nt_entry);
                 } else if (strcmp(sname, "_js_arguments") == 0 && fc->uses_arguments &&
                            !has_formal_arguments_binding) {
                     bool args_aliased = !fc->has_non_simple_params &&

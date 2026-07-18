@@ -60,6 +60,13 @@ static JitImportMetadata conservative_import_metadata(void) {
 static void init_func_map(void) {
     if (func_map) return;  // already initialized
 
+#ifndef NDEBUG
+    if (!jit_import_validate_no_gc_allowlist()) {
+        log_error("jit-import-metadata: NO_GC allowlist validation failed");
+        abort();
+    }
+#endif
+
     // Count total entries: sys_func_defs (with func_ptr) + jit_runtime_imports
     size_t total = 0;
     for (int i = 0; i < sys_func_def_count; i++) {

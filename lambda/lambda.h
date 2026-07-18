@@ -67,9 +67,13 @@ extern bool g_dry_run;
 
 // Stack overflow protection (callable from JIT-compiled code)
 #ifdef __cplusplus
-extern "C"
+extern "C" {
 #endif
 void lambda_stack_overflow_error(const char* func_name);
+void lambda_root_frame_overflow_error(void);
+#ifdef __cplusplus
+}
+#endif
 
 // Name pool configuration
 #define NAME_POOL_SYMBOL_LIMIT 32  // Max length for symbols in name_pool
@@ -687,7 +691,7 @@ struct Container {
         struct {
             uint8_t is_ndim:1;           // bit 4: has shape side-table in `extra` (n-d owned array)
             uint8_t is_view:1;           // bit 5: aliases another container's storage (implies is_ndim)
-            uint8_t is_pinned:1;         // bit 6: has live views; data buffer must not be relocated by compactor
+            uint8_t is_pinned:1;         // bit 6: reserved legacy pin marker; nursery data is always relocated
             uint8_t is_mutable_view:1;   // bit 7: a view writable through to its base (procedural in-place updates)
         };
     };    
@@ -959,6 +963,7 @@ Function* to_closure(fn_ptr ptr, int arity, void* env);
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 
 // Memory allocation for closure environments
+typedef struct Context Context;
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -967,6 +972,10 @@ void* heap_calloc_js_env(size_t size);
 void* heap_calloc_class(size_t size, TypeId type_id, int cls);  // allocate with pre-computed size class
 void* heap_data_calloc(size_t size);  // allocate GC-managed data buffer (for map/object data)
 uint64_t* heap_gc_root_slot_new(uint64_t value);
+bool heap_register_gc_root_for(Context* runtime, uint64_t* slot);
+void heap_unregister_gc_root_for(Context* runtime, uint64_t* slot);
+void heap_no_gc_scope_begin(Context* runtime);
+void heap_no_gc_scope_end(Context* runtime);
 // String creation for name pooling
 String* heap_create_name(const char* name);
 // String creation for runtime strings
@@ -1498,7 +1507,7 @@ typedef struct Arena Arena;
 // Forward declaration of ArrayList (defined in lib/arraylist.h)
 typedef struct _ArrayList ArrayList;
 
-typedef struct Context {
+struct Context {
     Pool* pool;
     Arena* arena;  // arena allocator (for input parsing path; also result arena in ui_mode)
     void** consts;
@@ -1518,7 +1527,7 @@ typedef struct Context {
     uint64_t* side_number_commit_limit;
     uint64_t* side_number_limit;
     uint64_t mir_return_lane;
-} Context;
+};
 
 #ifndef LAMBDA_STATIC
 #ifdef __cplusplus

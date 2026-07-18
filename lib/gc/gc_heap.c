@@ -37,6 +37,21 @@ void gc_heap_set_node_release_hook(void (*fn)(void*)) { g_gc_heap_node_release =
 
 static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr);
 
+static void gc_assert_allocation_allowed(gc_heap_t* gc, const char* site) {
+#ifndef NDEBUG
+    if (gc && gc->no_gc_scope_depth > 0) {
+        // A NO_GC helper that allocates invalidates generated safepoint
+        // liveness, so fail at the first forbidden operation.
+        log_error("gc-no-gc-scope: forbidden allocation/collection at %s depth=%d",
+            site ? site : "unknown", gc->no_gc_scope_depth);
+        abort();
+    }
+#else
+    (void)gc;
+    (void)site;
+#endif
+}
+
 void gc_native_seen_init(gc_native_seen_t* seen) {
     if (!seen) return;
     seen->data = NULL;
@@ -358,6 +373,21 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     gc->root_range_count = 0;
     gc->root_range_capacity = 0;
 
+    // Compatibility preserves the existing conservative scan until the
+    // runtime explicitly opts a fully-audited heap into another mode.
+    gc->root_mode = GC_ROOT_MODE_COMPATIBILITY;
+    memset(&gc->last_root_stats, 0, sizeof(gc->last_root_stats));
+    gc->root_type_stats = NULL;
+    gc->root_type_stat_count = 0;
+    gc->root_type_stat_capacity = 0;
+    gc->force_collect_interval = 0;
+    gc->force_allocation_count = 0;
+    gc->forced_collection_count = 0;
+    gc->force_random_seed = 0;
+    gc->force_random_state = 0;
+    gc->force_random_one_in = 0;
+    gc->poison_freed = 0;
+
     // collection trigger
     gc->gc_threshold = GC_DATA_ZONE_THRESHOLD;
     gc->collecting = 0;
@@ -419,6 +449,11 @@ void gc_heap_destroy(gc_heap_t* gc) {
         gc->root_ranges = NULL;
     }
 
+    if (gc->root_type_stats) {
+        free(gc->root_type_stats);
+        gc->root_type_stats = NULL;
+    }
+
     // free root slot table (C heap allocated)
     if (gc->root_slots) {
         free(gc->root_slots);
@@ -467,11 +502,45 @@ void gc_heap_destroy(gc_heap_t* gc) {
 // Allocation
 // ============================================================================
 
+static inline int gc_maybe_force_collect(gc_heap_t* gc, const char* site) {
+    if (!gc || gc->collecting || !gc->collect_callback ||
+            (gc->force_collect_interval == 0 &&
+             gc->force_random_one_in == 0)) {
+        return 0;
+    }
+    gc->force_allocation_count++;
+    int force = gc->force_collect_interval > 0 &&
+        gc->force_allocation_count % gc->force_collect_interval == 0;
+    if (gc->force_random_one_in > 0) {
+        // xorshift64* gives a deterministic, dependency-free stress schedule.
+        // A zero seed is remapped by the setter because zero is a fixed point.
+        uint64_t state = gc->force_random_state;
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        gc->force_random_state = state;
+        uint64_t sample = state * UINT64_C(2685821657736338717);
+        if (sample % gc->force_random_one_in == 0) force = 1;
+    }
+    if (!force) return 0;
+
+    gc->forced_collection_count++;
+    log_debug("gc-force-collect: allocation=%zu forced_collection=%zu seed=%llu one_in=%u site=%s",
+        gc->force_allocation_count, gc->forced_collection_count,
+        (unsigned long long)gc->force_random_seed,
+        (unsigned)gc->force_random_one_in,
+        site ? site : "unknown");
+    gc->collect_callback();
+    return 1;
+}
+
 void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     if (!gc || !gc->pool) {
         log_error("gc_heap_alloc: invalid gc_heap");
         return NULL;
     }
+    gc_assert_allocation_allowed(gc, "gc_heap_alloc");
+    gc_maybe_force_collect(gc, "gc_heap_alloc");
 
     // try object zone first (for objects up to GC_LARGE_OBJECT_THRESHOLD)
     void* ptr = gc_object_zone_alloc(gc->object_zone, size, type_tag, &gc->all_objects);
@@ -521,6 +590,8 @@ void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
 }
 
 void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cls) {
+    gc_assert_allocation_allowed(gc, "gc_heap_calloc_class");
+    gc_maybe_force_collect(gc, "gc_heap_calloc_class");
     // Fast path: skip gc_heap_alloc → gc_object_zone_alloc class_index lookup.
     // The class index is pre-computed by the JIT at compile time.
     void* ptr = gc_object_zone_alloc_class(gc->object_zone, cls, size, type_tag,
@@ -537,6 +608,8 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
 
 void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
                           uint16_t type_tag, int cls) {
+    gc_assert_allocation_allowed(gc, "gc_heap_bump_alloc");
+    gc_maybe_force_collect(gc, "gc_heap_bump_alloc");
     // ---- Fast path: try free list first (recycling after GC) ----
     gc_header_t* free_hdr = gc->object_zone->free_lists[cls];
     if (free_hdr) {
@@ -609,6 +682,11 @@ void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
     // guard against double-free
     if (header->gc_flags & GC_FLAG_FREED) return;
     header->gc_flags |= GC_FLAG_FREED;
+    if (gc->poison_freed && header->alloc_size > 0) {
+        // Explicitly freed objects are dead immediately; poison only their
+        // payload so sweep can still classify and unlink the GC header.
+        memset(ptr, GC_FREED_POISON_BYTE, header->alloc_size);
+    }
     gc->total_allocated -= sizeof(gc_header_t) + header->alloc_size;
     gc->object_count--;
 }
@@ -620,8 +698,12 @@ void* gc_data_alloc(gc_heap_t* gc, size_t size) {
         return NULL;
     }
 
-    // check if data zone usage exceeds threshold — trigger GC before allocating
-    if (!gc->collecting && gc->collect_callback) {
+    gc_assert_allocation_allowed(gc, "gc_data_alloc");
+
+    // Forced stress and threshold collection share this legal pre-allocation
+    // safepoint; never invoke the callback twice for one allocation.
+    int forced = gc_maybe_force_collect(gc, "gc_data_alloc");
+    if (!forced && !gc->collecting && gc->collect_callback) {
         size_t used = gc_data_zone_used(gc->data_zone);
         if (used >= gc->gc_threshold) {
             log_debug("gc_data_alloc: threshold exceeded (%zu >= %zu), triggering GC",
@@ -663,11 +745,11 @@ int gc_is_nursery_data(gc_heap_t* gc, void* ptr) {
 // Root Slot Registration
 // ============================================================================
 
-void gc_register_root(gc_heap_t* gc, uint64_t* slot) {
-    if (!gc || !slot) return;
+int gc_try_register_root(gc_heap_t* gc, uint64_t* slot) {
+    if (!gc || !slot) return 0;
     // check for duplicate
     for (int i = 0; i < gc->root_slot_count; i++) {
-        if (gc->root_slots[i] == slot) return;
+        if (gc->root_slots[i] == slot) return 1;
     }
     if (gc->root_slot_count >= gc->root_slot_capacity) {
         int new_cap = gc->root_slot_capacity ? gc->root_slot_capacity * 2 : GC_ROOT_SLOTS_INITIAL;
@@ -675,7 +757,7 @@ void gc_register_root(gc_heap_t* gc, uint64_t* slot) {
             (size_t)new_cap * sizeof(uint64_t*));
         if (!new_slots) {
             log_error("gc_register_root: realloc failed for %d slots", new_cap);
-            return;
+            return 0;
         }
         memset(new_slots + gc->root_slot_capacity, 0,
             (size_t)(new_cap - gc->root_slot_capacity) * sizeof(uint64_t*));
@@ -684,6 +766,11 @@ void gc_register_root(gc_heap_t* gc, uint64_t* slot) {
     }
     gc->root_slots[gc->root_slot_count++] = slot;
     log_debug("gc_register_root: registered slot %p (total: %d)", (void*)slot, gc->root_slot_count);
+    return 1;
+}
+
+void gc_register_root(gc_heap_t* gc, uint64_t* slot) {
+    (void)gc_try_register_root(gc, slot);
 }
 
 void gc_unregister_root(gc_heap_t* gc, uint64_t* slot) {
@@ -699,6 +786,26 @@ void gc_unregister_root(gc_heap_t* gc, uint64_t* slot) {
             return;
         }
     }
+}
+
+void gc_no_gc_scope_begin(gc_heap_t* gc) {
+#ifndef NDEBUG
+    if (gc) gc->no_gc_scope_depth++;
+#else
+    (void)gc;
+#endif
+}
+
+void gc_no_gc_scope_end(gc_heap_t* gc) {
+#ifndef NDEBUG
+    if (!gc || gc->no_gc_scope_depth <= 0) {
+        log_error("gc-no-gc-scope: unbalanced scope end");
+        abort();
+    }
+    gc->no_gc_scope_depth--;
+#else
+    (void)gc;
+#endif
 }
 
 void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
@@ -736,6 +843,86 @@ void gc_unregister_root_range(gc_heap_t* gc, uint64_t* base) {
             return;
         }
     }
+}
+
+void gc_set_root_mode(gc_heap_t* gc, gc_root_mode_t mode) {
+    if (!gc) return;
+    if (mode < GC_ROOT_MODE_COMPATIBILITY || mode > GC_ROOT_MODE_PRECISE_ONLY) {
+        log_error("gc-root-mode: rejected invalid mode %d", (int)mode);
+        return;
+    }
+#if !GC_CONSERVATIVE_SCAN_AVAILABLE
+    if (mode != GC_ROOT_MODE_PRECISE_ONLY) {
+        // Scanner-free release code must never pretend compatibility is
+        // active; retaining precise-only is fail-closed for direct API users.
+        log_error("gc-root-mode: %s unavailable in scanner-free build",
+            gc_root_mode_name(mode));
+        return;
+    }
+#endif
+    gc->root_mode = mode;
+}
+
+int gc_conservative_scan_available(void) {
+    return GC_CONSERVATIVE_SCAN_AVAILABLE;
+}
+
+gc_root_mode_t gc_get_root_mode(const gc_heap_t* gc) {
+    return gc ? gc->root_mode : GC_ROOT_MODE_COMPATIBILITY;
+}
+
+const char* gc_root_mode_name(gc_root_mode_t mode) {
+    switch (mode) {
+    case GC_ROOT_MODE_COMPATIBILITY: return "compatibility";
+    case GC_ROOT_MODE_SHADOW_VERIFY: return "shadow-verify";
+    case GC_ROOT_MODE_PRECISE_ONLY: return "precise-only";
+    default: return "invalid";
+    }
+}
+
+const gc_root_stats_t* gc_get_last_root_stats(const gc_heap_t* gc) {
+    return gc ? &gc->last_root_stats : NULL;
+}
+
+size_t gc_get_last_conservative_type_count(const gc_heap_t* gc,
+        uint16_t type_tag) {
+    if (!gc) return 0;
+    for (int i = 0; i < gc->root_type_stat_count; i++) {
+        if (gc->root_type_stats[i].type_tag == type_tag) {
+            return gc->root_type_stats[i].count;
+        }
+    }
+    return 0;
+}
+
+void gc_set_force_collect_interval(gc_heap_t* gc, size_t interval) {
+    if (!gc) return;
+    gc->force_collect_interval = interval;
+    gc->force_allocation_count = 0;
+    gc->forced_collection_count = 0;
+}
+
+void gc_set_force_collect_random(gc_heap_t* gc, uint64_t seed,
+        uint32_t one_in) {
+    if (!gc) return;
+    gc->force_random_seed = seed;
+    gc->force_random_state = seed ? seed : UINT64_C(0x9e3779b97f4a7c15);
+    gc->force_random_one_in = one_in;
+    gc->force_allocation_count = 0;
+    gc->forced_collection_count = 0;
+}
+
+size_t gc_get_forced_collection_count(const gc_heap_t* gc) {
+    return gc ? gc->forced_collection_count : 0;
+}
+
+void gc_set_poison_freed(gc_heap_t* gc, int enabled) {
+    if (!gc) return;
+    gc->poison_freed = enabled ? 1 : 0;
+}
+
+int gc_get_poison_freed(const gc_heap_t* gc) {
+    return gc ? gc->poison_freed : 0;
 }
 
 // ============================================================================
@@ -1236,6 +1423,16 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
 }
 
+static int gc_drain_mark_stack(gc_heap_t* gc) {
+    int traced_count = 0;
+    while (gc->mark_top > 0) {
+        gc_header_t* obj = mark_stack_pop(gc);
+        gc_trace_object(gc, obj);
+        traced_count++;
+    }
+    return traced_count;
+}
+
 // ---- Data Zone Compaction ----
 
 // Fix up embedded float/int64/datetime pointers within a compacted items[] buffer.
@@ -1269,6 +1466,59 @@ static void gc_fixup_embedded_pointers(uint64_t* old_items, uint64_t* new_items,
             }
         }
     }
+}
+
+static size_t gc_array_num_elem_bytes(uint8_t elem_type) {
+    // ELEM_TYPE_SIZE is a C++ runtime table; keep this C collector table keyed
+    // by the same high-nibble representation class.
+    static const uint8_t elem_size_idx[16] = {
+        8, 8, 1, 2, 4, 8, 1, 2, 4, 8, 2, 4, 8, 1, 1, 0
+    };
+    size_t elem_bytes = elem_size_idx[(elem_type >> 4) & 0xF];
+    return elem_bytes ? elem_bytes : 8;
+}
+
+static int gc_compact_array_num_owned_data(gc_heap_t* gc, uint8_t* array) {
+    if (!gc || !array || (array[2] & 0x02)) return 0;  // views borrow base storage
+    void** data_slot = (void**)(array + 8);
+    int64_t capacity = *(int64_t*)(array + 32);
+    if (!*data_slot || capacity < 0 ||
+            !gc_data_zone_owns(gc->data_zone, *data_slot)) {
+        return 0;
+    }
+
+    size_t elem_bytes = gc_array_num_elem_bytes(array[3]);
+    if ((uint64_t)capacity > SIZE_MAX / elem_bytes) return 0;
+    size_t size = (size_t)capacity * elem_bytes;
+    void* new_data = gc_data_zone_copy(gc->tenured_data, *data_slot, size);
+    if (!new_data) return 0;
+    *data_slot = new_data;
+    return 1;
+}
+
+static int gc_rebind_array_num_gc_view(gc_heap_t* gc, uint8_t* view) {
+    if (!gc || !view || !(view[2] & 0x02)) return 0;
+    ArrayNumShape* shape = *(ArrayNumShape**)(view + 24);
+    if (!shape || shape->backing_kind != ARRAY_NUM_BACKING_GC_VIEW ||
+            !shape->base) {
+        return 0;
+    }
+
+    uint8_t* base = (uint8_t*)shape->base;
+    if (base[0] != LMD_TYPE_ARRAY_NUM_) return 0;
+    int compacted = gc_compact_array_num_owned_data(gc, base);
+
+    size_t elem_bytes = gc_array_num_elem_bytes(view[3]);
+    if (shape->offset < 0 || (uint64_t)shape->offset > SIZE_MAX / elem_bytes) {
+        log_error("gc-array-num-view: invalid element offset %lld",
+            (long long)shape->offset);
+        *(void**)(view + 8) = NULL;
+        return compacted;
+    }
+    uint8_t* base_data = *(uint8_t**)(base + 8);
+    *(void**)(view + 8) = base_data ?
+        base_data + (size_t)shape->offset * elem_bytes : NULL;
+    return compacted;
 }
 
 // Compact surviving data from nursery data zone to tenured data zone.
@@ -1320,30 +1570,42 @@ static void gc_compact_data(gc_heap_t* gc) {
         case LMD_TYPE_ARRAY_NUM_: {
             uint8_t* p = (uint8_t*)obj;
             uint8_t array_flags = p[2];
-            // Skip relocation when:
-            //   is_view: data is borrowed from base array; we must not move it
-            //   is_pinned: a live view references this base; moving it would break the view
-            if (array_flags & 0x06) break;
-            void** items_slot = (void**)(p + 8);
-            int64_t capacity = *(int64_t*)(p + 32);
-            if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
-                // Element width lives in map_kind byte at offset 3 (upper nibble = ELEM_* tag).
-                // ELEM_TYPE_SIZE table is keyed by (elem_type >> 4).
-                static const uint8_t ELEM_SIZE_IDX[16] = {
-                    8, 8, 1, 2, 4, 8, 1, 2, 4, 8, 2, 4, 8, 1, 1, 0
-                };
-                uint8_t elem_type = p[3];
-                size_t elem_bytes = ELEM_SIZE_IDX[(elem_type >> 4) & 0xF];
-                if (elem_bytes == 0) elem_bytes = 8;  // safe default
-                size_t size = (size_t)capacity * elem_bytes;
-                void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
-                if (new_items) {
-                    *items_slot = new_items;
+            // N-D shape descriptors live in the nursery data zone just like
+            // element buffers. Promote them before resetting that zone or a
+            // live array keeps a dangling `extra` pointer after collection.
+            if (array_flags & 0x01) {  // Container.is_ndim
+                void** shape_slot = (void**)(p + 24);
+                if (*shape_slot && gc_data_zone_owns(gc->data_zone, *shape_slot)) {
+                    ArrayNumShape* old_shape = (ArrayNumShape*)*shape_slot;
+                    if (old_shape->ndim >= 1 && old_shape->ndim <= 32) {
+                        size_t shape_size = sizeof(ArrayNumShape) +
+                            2 * (size_t)old_shape->ndim * sizeof(int64_t);
+                        void* new_shape = gc_data_zone_copy(
+                            gc->tenured_data, old_shape, shape_size);
+                        if (new_shape) {
+                            *shape_slot = new_shape;
 #ifndef NDEBUG
-                    compacted++;
+                            compacted++;
 #endif
+                        }
+                    }
                 }
             }
+            if (array_flags & 0x02) {
+                // A pinned nursery buffer would still be discarded by the reset.
+                // Promote the ultimate owner and rebuild this cached alias instead.
+                int moved = gc_rebind_array_num_gc_view(gc, p);
+#ifndef NDEBUG
+                compacted += (size_t)moved;
+#endif
+                (void)moved;
+                break;
+            }
+            int moved = gc_compact_array_num_owned_data(gc, p);
+#ifndef NDEBUG
+            compacted += (size_t)moved;
+#endif
+            (void)moved;
             break;
         }
         case LMD_TYPE_MAP_:
@@ -1486,6 +1748,17 @@ static void gc_finalize_dead_object(gc_heap_t* gc, gc_header_t* header) {
     // and will be reclaimed by data zone reset. No explicit free needed.
 }
 
+static void gc_poison_dead_object(gc_heap_t* gc, gc_header_t* header) {
+    if (!gc || !header || !gc->poison_freed || header->alloc_size == 0) return;
+    // Finalization must observe the original fields. Poison afterward but
+    // before storage reuse so a missed exact root cannot keep reading a
+    // plausible stale object from retained bump blocks or zone slabs.
+    log_debug("gc-poison-freed-object: collection=%zu object=%p type=%u size=%u flags=0x%02x",
+        gc->collections + 1, (void*)(header + 1), (unsigned)header->type_tag,
+        (unsigned)header->alloc_size, (unsigned)header->gc_flags);
+    memset((void*)(header + 1), GC_FREED_POISON_BYTE, header->alloc_size);
+}
+
 static void gc_sweep(gc_heap_t* gc) {
     gc_header_t* current = gc->all_objects;
     gc_header_t* prev = NULL;
@@ -1531,6 +1804,7 @@ static void gc_sweep(gc_heap_t* gc) {
         } else {
             // dead — finalize external sub-allocations
             gc_finalize_dead_object(gc, current);
+            gc_poison_dead_object(gc, current);
 
             // unlink from all_objects
             if (prev) prev->next = next_obj;
@@ -1547,7 +1821,10 @@ static void gc_sweep(gc_heap_t* gc) {
                 free(current);
             } else if (current->gc_flags & GC_FLAG_BUMP) {
                 bump_owned_count++;
-                // bump-block objects are reclaimed only by unlinking; block memory is pool-owned
+                // Retained bump blocks remain address-discoverable after sweep.
+                // Mark dead headers freed so a stale exact root cannot enqueue
+                // and trace their poisoned payload in a later collection.
+                current->gc_flags |= GC_FLAG_FREED;
             } else {
                 object_zone_owned_count++;
                 gc_object_zone_free(gc->object_zone, current);
@@ -1605,7 +1882,7 @@ static void gc_sweep(gc_heap_t* gc) {
 #define GC_ASAN_ENABLED 0
 #endif
 
-#if GC_ASAN_ENABLED
+#if GC_CONSERVATIVE_SCAN_AVAILABLE && GC_ASAN_ENABLED
 extern int __asan_address_is_poisoned(const volatile void *addr);
 
 static int gc_asan_word_is_poisoned(const uintptr_t* p) {
@@ -1617,7 +1894,40 @@ static int gc_asan_word_is_poisoned(const uintptr_t* p) {
 }
 #endif
 
-static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_base, uintptr_t stack_current) {
+static void gc_root_stats_reset(gc_heap_t* gc) {
+    memset(&gc->last_root_stats, 0, sizeof(gc->last_root_stats));
+    gc->root_type_stat_count = 0;
+}
+
+#if GC_CONSERVATIVE_SCAN_AVAILABLE
+static void gc_root_stats_note_type(gc_heap_t* gc, uint16_t type_tag) {
+    for (int i = 0; i < gc->root_type_stat_count; i++) {
+        if (gc->root_type_stats[i].type_tag == type_tag) {
+            gc->root_type_stats[i].count++;
+            return;
+        }
+    }
+    if (gc->root_type_stat_count >= gc->root_type_stat_capacity) {
+        int next_capacity = gc->root_type_stat_capacity
+            ? gc->root_type_stat_capacity * 2 : 16;
+        gc_root_type_stat_t* next = (gc_root_type_stat_t*)realloc(
+            gc->root_type_stats,
+            (size_t)next_capacity * sizeof(gc_root_type_stat_t));
+        if (!next) {
+            log_error("gc-root-shadow: failed to grow per-type statistics");
+            return;
+        }
+        gc->root_type_stats = next;
+        gc->root_type_stat_capacity = next_capacity;
+    }
+    gc_root_type_stat_t* stat =
+        &gc->root_type_stats[gc->root_type_stat_count++];
+    stat->type_tag = type_tag;
+    stat->count = 1;
+}
+
+static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc,
+        uintptr_t stack_base, uintptr_t stack_current) {
     if (stack_base == 0 || stack_current == 0) return;
     if (stack_current >= stack_base) return;  // stack grows down; current < base
 
@@ -1629,6 +1939,9 @@ static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_
     int scanned = 0;
     int marked = 0;
     int skipped_poisoned = 0;
+
+    gc->last_root_stats.conservative_scan_bytes =
+        (size_t)(aligned_end - aligned_start);
 
     for (uintptr_t* p = scan_start; p < scan_end; p++) {
 #if GC_ASAN_ENABLED
@@ -1645,23 +1958,39 @@ static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc, uintptr_t stack_
         // check if it points to a GC-managed object
         if (is_gc_object(gc, ptr)) {
             gc_header_t* header = gc_get_header(ptr);
+            gc->last_root_stats.conservative_candidate_words++;
             if (header && !header->marked && !(header->gc_flags & GC_FLAG_FREED)) {
                 header->marked = 1;
                 mark_stack_push(gc, header);
                 marked++;
+                gc->last_root_stats.conservative_new_objects++;
+                if (gc->root_mode == GC_ROOT_MODE_SHADOW_VERIFY) {
+                    gc_root_stats_note_type(gc, header->type_tag);
+                    log_info("gc-root-shadow-candidate: collection=%zu stack_slot=%p object=%p type=%u size=%u",
+                        gc->collections + 1, (void*)p, ptr,
+                        (unsigned)header->type_tag, (unsigned)header->alloc_size);
+                }
             }
         }
     }
+
+    gc->last_root_stats.conservative_skipped_poisoned_words =
+        (size_t)skipped_poisoned;
 
     log_debug("gc_scan_stack: scanned %d slots (%zu bytes), marked %d objects, skipped %d ASan-poisoned slots",
               scanned, (size_t)(aligned_end - aligned_start), marked, skipped_poisoned);
     (void)scanned; (void)marked; (void)skipped_poisoned;  // silence release-build unused warning
 }
+#endif
 
 void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
-                int extra_count, uintptr_t stack_base, uintptr_t stack_current,
+                int extra_count,
+#if GC_CONSERVATIVE_SCAN_AVAILABLE
+                uintptr_t stack_base, uintptr_t stack_current,
+#endif
                 uint64_t* root_base, int64_t root_count) {
     if (!gc) return;
+    gc_assert_allocation_allowed(gc, "gc_collect_with_root_region");
     if (gc->collecting) {
         log_debug("gc_collect: skipping re-entrant collection");
         return;
@@ -1686,6 +2015,7 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
 
     // reset mark stack
     gc->mark_top = 0;
+    gc_root_stats_reset(gc);
 
     // Phase 1a: Mark registered root slots (BSS globals, context->result, etc.)
     uint64_t gc_roots_token = GC_PROFILE_ENTER("gc_mark_roots");
@@ -1724,26 +2054,47 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     }
     GC_PROFILE_LEAVE("gc_mark_extra_roots", gc_extra_roots_token);
 
-    // Phase 1c: Conservative stack scan
-    uint64_t gc_stack_token = GC_PROFILE_ENTER("gc_scan_stack");
-    gc_scan_stack(gc, stack_base, stack_current);
-    GC_PROFILE_LEAVE("gc_scan_stack", gc_stack_token);
-
-    // Phase 1d: Process mark stack (trace gray objects until empty)
+    // Trace the complete graph reachable from precise roots before shadow
+    // scanning. Otherwise a child of a precise root would be misreported as a
+    // stack-exclusive candidate merely because its parent had not run yet.
+    gc->last_root_stats.precise_root_count = (size_t)gc->mark_top;
     uint64_t gc_trace_token = GC_PROFILE_ENTER("gc_trace_objects");
-#ifndef NDEBUG
-    int traced_count = 0;
-#endif
-    while (gc->mark_top > 0) {
-        gc_header_t* obj = mark_stack_pop(gc);
-        gc_trace_object(gc, obj);
-#ifndef NDEBUG
-        traced_count++;
-#endif
-        // tracing may have pushed more objects; continue until empty
-    }
+    int traced_count = gc_drain_mark_stack(gc);
     GC_PROFILE_LEAVE("gc_trace_objects", gc_trace_token);
+
+    // Phase 1c: Conservative stack scan. Precise-only is explicit and never
+    // falls back to scanning when a root is absent.
+    if (gc->root_mode != GC_ROOT_MODE_PRECISE_ONLY) {
+#if GC_CONSERVATIVE_SCAN_AVAILABLE
+        uint64_t gc_stack_token = GC_PROFILE_ENTER("gc_scan_stack");
+        gc_scan_stack(gc, stack_base, stack_current);
+        GC_PROFILE_LEAVE("gc_scan_stack", gc_stack_token);
+
+        gc_trace_token = GC_PROFILE_ENTER("gc_trace_objects");
+        traced_count += gc_drain_mark_stack(gc);
+        GC_PROFILE_LEAVE("gc_trace_objects", gc_trace_token);
+#else
+        // This state can only arise from memory corruption or a caller that
+        // bypassed gc_set_root_mode(); continuing would collect live objects.
+        log_error("gc-root-mode: compatibility collection reached scanner-free build");
+        abort();
+#endif
+    }
+
+    if (gc->root_mode == GC_ROOT_MODE_SHADOW_VERIFY) {
+        log_info("gc-root-shadow: collection=%zu precise_roots=%zu candidate_words=%zu new_objects=%zu scan_bytes=%zu",
+            gc->collections + 1, gc->last_root_stats.precise_root_count,
+            gc->last_root_stats.conservative_candidate_words,
+            gc->last_root_stats.conservative_new_objects,
+            gc->last_root_stats.conservative_scan_bytes);
+    } else if (gc->root_mode == GC_ROOT_MODE_PRECISE_ONLY) {
+        log_debug("gc-root-precise: collection=%zu precise_roots=%zu conservative_scan=skipped",
+            gc->collections + 1, gc->last_root_stats.precise_root_count);
+    }
     log_debug("gc_collect: traced %d objects total", traced_count);
+    // Release builds compile debug logging away; retain the accounting above
+    // without turning its diagnostic-only result into an unused-variable error.
+    (void)traced_count;
 
     // Measure nursery and tenured usage before compaction for adaptive threshold
     size_t nursery_used_before = gc_data_zone_used(gc->data_zone);
@@ -1799,8 +2150,13 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     GC_PROFILE_LEAVE("gc_collect_total", gc_total_token);
 }
 
+#if GC_CONSERVATIVE_SCAN_AVAILABLE
 void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
                 uintptr_t stack_base, uintptr_t stack_current) {
     gc_collect_with_root_region(gc, extra_roots, extra_count,
                                 stack_base, stack_current, NULL, 0);
+#else
+void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count) {
+    gc_collect_with_root_region(gc, extra_roots, extra_count, NULL, 0);
+#endif
 }

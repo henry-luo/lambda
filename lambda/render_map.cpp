@@ -457,13 +457,9 @@ bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out) {
 }
 
 void render_map_set_doc_root(Item root) {
-    // register s_doc_root as a GC root so the doc root element is not collected
-    // by the garbage collector (static variables are invisible to stack scanning)
-    static bool root_registered = false;
-    if (!root_registered) {
-        heap_register_gc_root(&s_doc_root.item);
-        root_registered = true;
-    }
+    // A later execution can install a fresh heap registry while this static
+    // slot survives; registration is idempotent within the active heap.
+    heap_register_gc_root(&s_doc_root.item);
     s_doc_root = root;
 }
 
@@ -508,11 +504,8 @@ static Item find_parent_of(Item node, Item target, int* out_index, int depth) {
 // ============================================================================
 
 void render_map_set_source_doc_root(Item root) {
-    static bool registered = false;
-    if (!registered) {
-        heap_register_gc_root(&s_source_doc_root.item);
-        registered = true;
-    }
+    // Keep the persistent source slot registered after runtime/heap reuse.
+    heap_register_gc_root(&s_source_doc_root.item);
     s_source_doc_root = root;
 }
 

@@ -141,8 +141,14 @@ static void radiant_obj_set(Item obj, const char* key, Item value) {
     radiant_host_api->value->property_set(obj, key_item, value);
 }
 
-static void radiant_obj_set_optional_float(Item obj, const char* key, float value) {
-    radiant_obj_set(obj, key, value >= 0.0f ? radiant_float_item(value) : ItemNull);
+static void radiant_rooted_obj_set(Rooted<Item>& rooted_obj, const char* key, Item value) {
+    radiant_obj_set(rooted_obj.get(), key, value);
+}
+
+static void radiant_rooted_obj_set_optional_float(Rooted<Item>& rooted_obj,
+                                                   const char* key, float value) {
+    radiant_rooted_obj_set(rooted_obj, key,
+        value >= 0.0f ? radiant_float_item(value) : ItemNull);
 }
 
 static bool radiant_item_is_missing(Item item) {
@@ -165,12 +171,17 @@ static Item radiant_obj_get(Item obj, const char* key) {
 }
 
 static Item radiant_array_new_item(int capacity) {
+    RootFrame roots((Context*)::context, 1);
+    Rooted<Array*> rooted_arr(roots, (Array*)NULL);
     Array* arr = array();
+    rooted_arr.set(arr);
     if (arr && capacity > 0) {
-        arr->items = (Item*)heap_data_calloc((size_t)capacity * sizeof(Item));
+        Item* items = (Item*)heap_data_calloc((size_t)capacity * sizeof(Item));
+        arr = rooted_arr.get();
+        arr->items = items;
         arr->capacity = capacity;
     }
-    return arr ? (Item){.array = arr} : ItemNull;
+    return rooted_arr.get() ? (Item){.array = rooted_arr.get()} : ItemNull;
 }
 
 static void radiant_array_push_item(Item array_item, Item value) {
@@ -383,40 +394,43 @@ static Item radiant_layout_text_item(DomNode* node) {
 
 static Item radiant_layout_edges_item(const VelmtEdges* edges) {
     if (!radiant_host_api || !radiant_host_api->value || !edges) return ItemNull;
-    Item obj = radiant_obj_new();
-    radiant_obj_set(obj, "left", radiant_float_item(edges->left));
-    radiant_obj_set(obj, "right", radiant_float_item(edges->right));
-    radiant_obj_set(obj, "top", radiant_float_item(edges->top));
-    radiant_obj_set(obj, "bottom", radiant_float_item(edges->bottom));
-    return obj;
+    RootFrame roots((Context*)::context, 1);
+    Rooted<Item> rooted_obj(roots, radiant_obj_new());
+    radiant_rooted_obj_set(rooted_obj, "left", radiant_float_item(edges->left));
+    radiant_rooted_obj_set(rooted_obj, "right", radiant_float_item(edges->right));
+    radiant_rooted_obj_set(rooted_obj, "top", radiant_float_item(edges->top));
+    radiant_rooted_obj_set(rooted_obj, "bottom", radiant_float_item(edges->bottom));
+    return rooted_obj.get();
 }
 
 static Item radiant_layout_box_item(const VelmtBox* box) {
     if (!radiant_host_api || !radiant_host_api->value || !box) return ItemNull;
-    Item obj = radiant_obj_new();
-    radiant_obj_set(obj, "x", radiant_float_item(box->x));
-    radiant_obj_set(obj, "y", radiant_float_item(box->y));
-    radiant_obj_set(obj, "width", radiant_float_item(box->width));
-    radiant_obj_set(obj, "height", radiant_float_item(box->height));
-    return obj;
+    RootFrame roots((Context*)::context, 1);
+    Rooted<Item> rooted_obj(roots, radiant_obj_new());
+    radiant_rooted_obj_set(rooted_obj, "x", radiant_float_item(box->x));
+    radiant_rooted_obj_set(rooted_obj, "y", radiant_float_item(box->y));
+    radiant_rooted_obj_set(rooted_obj, "width", radiant_float_item(box->width));
+    radiant_rooted_obj_set(rooted_obj, "height", radiant_float_item(box->height));
+    return rooted_obj.get();
 }
 
 static Item radiant_layout_attrs_item(DomElement* elem) {
     if (!radiant_host_api || !radiant_host_api->value || !elem) return ItemNull;
-    Item attrs = radiant_obj_new();
+    RootFrame roots((Context*)::context, 1);
+    Rooted<Item> rooted_attrs(roots, radiant_obj_new());
     int attr_count = 0;
     const char** names = elem->attribute_names(&attr_count);
     for (int i = 0; names && i < attr_count; i++) {
         const char* name = names[i];
         if (!name) continue;
         const char* value = elem->get_attribute(name);
-        radiant_obj_set(attrs, name, radiant_string_item(value ? value : ""));
+        radiant_rooted_obj_set(rooted_attrs, name, radiant_string_item(value ? value : ""));
     }
-    return attrs;
+    return rooted_attrs.get();
 }
 
 typedef struct RadiantStyleSnapshotContext {
-    Item style;
+    uint64_t* style_root;
 } RadiantStyleSnapshotContext;
 
 static bool radiant_layout_style_snapshot_callback(StyleNode* node, void* context) {
@@ -427,20 +441,22 @@ static bool radiant_layout_style_snapshot_callback(StyleNode* node, void* contex
     if (!name || !decl->value_text) return true;
 
     RadiantStyleSnapshotContext* snapshot = (RadiantStyleSnapshotContext*)context;
-    radiant_obj_set(snapshot->style, name,
+    Item style = (Item){.item = snapshot->style_root ? *snapshot->style_root : ItemNull.item};
+    radiant_obj_set(style, name,
         radiant_string_item_n(decl->value_text, decl->value_text_len));
     return true;
 }
 
 static Item radiant_layout_style_item(DomElement* elem) {
     if (!radiant_host_api || !radiant_host_api->value) return ItemNull;
-    Item style = radiant_obj_new();
-    if (!elem || !elem->specified_style || !elem->specified_style->tree) return style;
+    RootFrame roots((Context*)::context, 1);
+    Rooted<Item> rooted_style(roots, radiant_obj_new());
+    if (!elem || !elem->specified_style || !elem->specified_style->tree) return rooted_style.get();
 
     RadiantStyleSnapshotContext context;
-    context.style = style;
+    context.style_root = rooted_style.home();
     style_tree_foreach(elem->specified_style, radiant_layout_style_snapshot_callback, &context);
-    return style;
+    return rooted_style.get();
 }
 
 static Item radiant_layout_velmt_host_item_depth(const Velmt* velmt, int depth);
@@ -605,8 +621,9 @@ static int radiant_layout_view_child_count(View* view) {
 static Item radiant_layout_view_children_item(View* view, int depth) {
     if (!radiant_host_api || !radiant_host_api->value) return ItemNull;
     int child_count = depth > 0 ? radiant_layout_view_child_count(view) : 0;
-    Item children = radiant_array_new_item(child_count);
-    if (!view || !view->is_element() || depth <= 0) return children;
+    RootFrame roots((Context*)::context, 1);
+    Rooted<Item> rooted_children(roots, radiant_array_new_item(child_count));
+    if (!view || !view->is_element() || depth <= 0) return rooted_children.get();
 
     DomElement* elem = view->as_element();
     int index = 0;
@@ -615,10 +632,11 @@ static Item radiant_layout_view_children_item(View* view, int depth) {
         if (!child_view || child_view->view_type == RDT_VIEW_NONE) continue;
         Velmt child_velmt;
         custom_layout_fill_velmt_from_view(&child_velmt, child_view, index, false);
-        radiant_array_push_item(children, radiant_layout_velmt_host_item_depth(&child_velmt, depth - 1));
+        Item child_item = radiant_layout_velmt_host_item_depth(&child_velmt, depth - 1);
+        radiant_array_push_item(rooted_children.get(), child_item);
         index++;
     }
-    return children;
+    return rooted_children.get();
 }
 
 static Item radiant_layout_velmt_host_item(const Velmt* velmt) {
@@ -656,37 +674,40 @@ static Item radiant_layout_parent_item(const CustomLayoutContext* context) {
 
 static Item radiant_layout_children_item(const CustomLayoutContext* context) {
     if (!radiant_host_api || !radiant_host_api->value || !context) return ItemNull;
-    Item arr = radiant_array_new_item(context->child_count);
+    RootFrame roots((Context*)::context, 1);
+    Rooted<Item> rooted_arr(roots, radiant_array_new_item(context->child_count));
     for (int i = 0; i < context->child_count; i++) {
-        radiant_array_push_item(arr, radiant_layout_velmt_host_item(&context->children[i]));
+        Item child = radiant_layout_velmt_host_item(&context->children[i]);
+        radiant_array_push_item(rooted_arr.get(), child);
     }
-    return arr;
+    return rooted_arr.get();
 }
 
 static Item radiant_layout_context_item(const CustomLayoutContext* context) {
     if (!radiant_host_api || !radiant_host_api->value || !context) return ItemNull;
-    Item obj = radiant_obj_new();
-    radiant_obj_set(obj, "layout_name", radiant_string_item(context->layout_name));
-    radiant_obj_set(obj, "available_width", radiant_float_item(context->available_width));
-    radiant_obj_set(obj, "available_height", radiant_float_item(context->available_height));
-    radiant_obj_set_optional_float(obj, "css_width", context->css_width);
-    radiant_obj_set_optional_float(obj, "css_height", context->css_height);
-    radiant_obj_set(obj, "child_available_width", radiant_float_item(context->child_available_width));
-    radiant_obj_set(obj, "child_available_height", radiant_float_item(context->child_available_height));
-    radiant_obj_set(obj, "child_available_width_definite",
+    RootFrame roots((Context*)::context, 1);
+    Rooted<Item> rooted_obj(roots, radiant_obj_new());
+    radiant_rooted_obj_set(rooted_obj, "layout_name", radiant_string_item(context->layout_name));
+    radiant_rooted_obj_set(rooted_obj, "available_width", radiant_float_item(context->available_width));
+    radiant_rooted_obj_set(rooted_obj, "available_height", radiant_float_item(context->available_height));
+    radiant_rooted_obj_set_optional_float(rooted_obj, "css_width", context->css_width);
+    radiant_rooted_obj_set_optional_float(rooted_obj, "css_height", context->css_height);
+    radiant_rooted_obj_set(rooted_obj, "child_available_width", radiant_float_item(context->child_available_width));
+    radiant_rooted_obj_set(rooted_obj, "child_available_height", radiant_float_item(context->child_available_height));
+    radiant_rooted_obj_set(rooted_obj, "child_available_width_definite",
         radiant_bool_item(context->child_available_width_definite));
-    radiant_obj_set(obj, "child_available_height_definite",
+    radiant_rooted_obj_set(rooted_obj, "child_available_height_definite",
         radiant_bool_item(context->child_available_height_definite));
-    radiant_obj_set(obj, "child_available_width_source",
+    radiant_rooted_obj_set(rooted_obj, "child_available_width_source",
         radiant_string_item(context->child_available_width_source));
-    radiant_obj_set(obj, "child_available_height_source",
+    radiant_rooted_obj_set(rooted_obj, "child_available_height_source",
         radiant_string_item(context->child_available_height_source));
-    radiant_obj_set(obj, "direction", radiant_string_item(
+    radiant_rooted_obj_set(rooted_obj, "direction", radiant_string_item(
         context->direction == CSS_VALUE_RTL ? "rtl" : "ltr"));
-    radiant_obj_set(obj, "writing_mode", radiant_string_item(
+    radiant_rooted_obj_set(rooted_obj, "writing_mode", radiant_string_item(
         context->writing_mode ? context->writing_mode : "horizontal-tb"));
-    radiant_obj_set(obj, "child_count", radiant_int_item(context->child_count));
-    return obj;
+    radiant_rooted_obj_set(rooted_obj, "child_count", radiant_int_item(context->child_count));
+    return rooted_obj.get();
 }
 
 static Heap* radiant_custom_layout_heap(const CustomLayoutContext* layout_context) {
@@ -841,18 +862,25 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         _lambda_rt = (Context*)&callback_context;
     }
 
-    Item args[3];
-    args[0] = radiant_layout_parent_item(context);
-    args[1] = radiant_layout_children_item(context);
-    args[2] = radiant_layout_context_item(context);
-    // Lambda-registered callbacks are core Function values; the Jube script
-    // call hook is JS-specific and corrupts Lambda fn call frames.
-    Item result_item = radiant_lambda_fn_call3(entry->fn.function, args[0], args[1], args[2]);
     bool ok = false;
-    if (get_type_id(result_item) == LMD_TYPE_ERROR) {
-        log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
-    } else {
-        ok = radiant_custom_layout_parse_result(context, result_item, result);
+    {
+        // Every argument builder allocates. Keep prior arguments, the retained
+        // callback, and its result exact-rooted until result parsing completes.
+        RootFrame roots((Context*)::context, 5);
+        Rooted<Item> rooted_fn(roots, entry->fn);
+        Rooted<Item> rooted_parent(roots, radiant_layout_parent_item(context));
+        Rooted<Item> rooted_children(roots, radiant_layout_children_item(context));
+        Rooted<Item> rooted_layout_context(roots, radiant_layout_context_item(context));
+        Rooted<Item> rooted_result(roots, ItemNull);
+        // Lambda-registered callbacks are core Function values; the Jube script
+        // call hook is JS-specific and corrupts Lambda fn call frames.
+        rooted_result.set(radiant_lambda_fn_call3(rooted_fn.get().function,
+            rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()));
+        if (get_type_id(rooted_result.get()) == LMD_TYPE_ERROR) {
+            log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
+        } else {
+            ok = radiant_custom_layout_parse_result(context, rooted_result.get(), result);
+        }
     }
     // This stack-local context owns runtime diagnostics raised by the callback;
     // dropping it without release leaked both LambdaError and its message.
@@ -1136,10 +1164,13 @@ RADIANT_C_API Item fn_radiant_box(Item node_item) {
     box.y = node->y;
     box.width = node->width;
     box.height = node->height;
-    Item obj = radiant_layout_box_item(&box);
-    radiant_obj_set(obj, "wd", radiant_float_item(box.width));
-    radiant_obj_set(obj, "hg", radiant_float_item(box.height));
-    return obj;
+    RootFrame roots((Context*)::context, 1);
+    Rooted<Item> rooted_obj(roots, radiant_layout_box_item(&box));
+    // The compatibility aliases allocate boxed floats; retain the VMap owner
+    // across both writes instead of appending through a stale moved header.
+    radiant_rooted_obj_set(rooted_obj, "wd", radiant_float_item(box.width));
+    radiant_rooted_obj_set(rooted_obj, "hg", radiant_float_item(box.height));
+    return rooted_obj.get();
 }
 
 RADIANT_C_API Item fn_radiant_poc_attr(Item path_item) {

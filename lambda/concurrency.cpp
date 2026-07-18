@@ -1146,6 +1146,12 @@ extern "C" Item lambda_task_start_function_scoped(Item function, List* args, boo
     }
     frame->roots[0] = function;
     for (int i = 0; i < arg_count; i++) frame->roots[i + 1] = args->items[i];
+    // Task creation allocates the GC-managed handle. Register the launch values
+    // before that allocation so precise-only GC cannot reclaim the function or
+    // arguments in the gap before the new task assumes ownership of this range.
+    if (scheduler_has_heap()) {
+        heap_register_gc_root_range((uint64_t*)frame->roots, frame->root_count);
+    }
     frame->args.type_id = LMD_TYPE_ARRAY;
     frame->args.items = frame->roots + 1;
     frame->args.length = arg_count;
@@ -1153,6 +1159,9 @@ extern "C" Item lambda_task_start_function_scoped(Item function, List* args, boo
     LambdaTask* task = lambda_task_create(context->scheduler, task_launch_resume,
         frame, task_launch_destroy);
     if (!task) {
+        if (scheduler_has_heap()) {
+            heap_unregister_gc_root_range((uint64_t*)frame->roots);
+        }
         task_launch_destroy(frame);
         return task_error(ERR_OUT_OF_MEMORY, "task creation failed");
     }

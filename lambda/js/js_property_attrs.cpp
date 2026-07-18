@@ -8,6 +8,7 @@
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_state_guards.h"
+#include "../lambda.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include <string.h>
@@ -499,7 +500,15 @@ extern "C" void js_attr_set_configurable(Item obj, const char* name, int name_le
 extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
                                            Item setter, uint8_t attrs) {
     if (get_type_id(name) != LMD_TYPE_STRING) return;
-    String* ns = it2s(name);
+    extern __thread EvalContext* context;
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> obj_root(roots, obj);
+    Rooted<Item> name_root(roots, name);
+    Rooted<Item> getter_root(roots, getter);
+    Rooted<Item> setter_root(roots, setter);
+    Rooted<Item> pair_root(roots, ItemNull);
+
+    String* ns = it2s(name_root.get());
     if (!ns || ns->len == 0) return;
 
     int nl = (int)ns->len;
@@ -507,17 +516,20 @@ extern "C" void js_install_native_accessor(Item obj, Item name, Item getter,
 
     // Allocate pair and store under name X. Use ItemNull as the slot for
     // missing getter/setter (per ES spec — absent half is undefined).
-    Item g = (getter.item != ItemNull.item) ? getter : ItemNull;
-    Item s = (setter.item != ItemNull.item) ? setter : ItemNull;
+    Item g = (getter_root.get().item != ItemNull.item) ? getter_root.get() : ItemNull;
+    Item s = (setter_root.get().item != ItemNull.item) ? setter_root.get() : ItemNull;
     JsAccessorPair* pair = js_alloc_accessor_pair(g, s);
     if (pair) {
-        Item pair_item = js_accessor_pair_to_item(pair);
-        js_property_set(obj, name, pair_item);
+        // The accessor installation path can allocate repeatedly; keep every
+        // participating value rooted until both the slot and shape are durable.
+        pair_root.set(js_accessor_pair_to_item(pair));
+        js_property_set(obj_root.get(), name_root.get(), pair_root.get());
         // Set IS_ACCESSOR + force NON_ENUMERABLE on the shape entry so the
         // pair slot is not visible to enumeration/JSON/spread.
         uint8_t set_mask = JSPD_IS_ACCESSOR | JSPD_NON_ENUMERABLE;
         if (attrs & JSPD_NON_CONFIGURABLE) set_mask |= JSPD_NON_CONFIGURABLE;
-        js_shape_entry_update_flags(obj, ns->chars, nl, set_mask, JSPD_DELETED);
+        ns = it2s(name_root.get());
+        js_shape_entry_update_flags(obj_root.get(), ns->chars, nl, set_mask, JSPD_DELETED);
     }
 
     // NON_CONFIGURABLE is encoded in the shape entry flags above.

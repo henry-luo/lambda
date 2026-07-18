@@ -175,6 +175,25 @@ extern "C" int js_microtask_pending_count(void) {
     return next_tick_count + microtask_count;
 }
 
+static void js_run_queued_callback(Item cb, Item resource, Item als_context, Item domain) {
+    RootFrame roots((Context*)context, 6);
+    // Queue pop clears the persistent slots before context setup can allocate;
+    // keep the dequeued callback graph exact-rooted for the entire invocation.
+    Rooted<Item> callback_root(roots, cb);
+    Rooted<Item> resource_root(roots, resource);
+    Rooted<Item> als_root(roots, als_context);
+    Rooted<Item> domain_root(roots, domain);
+    Rooted<Item> previous_resource_root(roots, ItemNull);
+    Rooted<Item> previous_domain_root(roots, ItemNull);
+    if (get_type_id(callback_root.get()) != LMD_TYPE_FUNC) return;
+
+    previous_resource_root.set(js_async_hooks_enter_resource(resource_root.get()));
+    previous_domain_root.set(js_domain_set_stack(domain_root.get()));
+    js_als_context_call(als_root.get(), callback_root.get(), ItemNull, ItemNull, 0);
+    js_domain_restore_stack(previous_domain_root.get());
+    js_async_hooks_restore_resource(previous_resource_root.get());
+}
+
 extern "C" void js_microtask_flush(void) {
     int safety = 0;
     while ((next_tick_count > 0 || microtask_count > 0) &&
@@ -184,13 +203,7 @@ extern "C" void js_microtask_flush(void) {
             Item als_context = ItemNull;
             Item domain = ItemNull;
             Item cb = next_tick_pop(&resource, &als_context, &domain);
-            if (get_type_id(cb) == LMD_TYPE_FUNC) {
-                Item previous_resource = js_async_hooks_enter_resource(resource);
-                Item previous_domain = js_domain_set_stack(domain);
-                js_als_context_call(als_context, cb, ItemNull, ItemNull, 0);
-                js_domain_restore_stack(previous_domain);
-                js_async_hooks_restore_resource(previous_resource);
-            }
+            js_run_queued_callback(cb, resource, als_context, domain);
             safety++;
         }
         while (microtask_count > 0 && safety < TASK_FLUSH_SAFETY_LIMIT) {
@@ -198,13 +211,7 @@ extern "C" void js_microtask_flush(void) {
             Item als_context = ItemNull;
             Item domain = ItemNull;
             Item cb = microtask_pop(&resource, &als_context, &domain);
-            if (get_type_id(cb) == LMD_TYPE_FUNC) {
-                Item previous_resource = js_async_hooks_enter_resource(resource);
-                Item previous_domain = js_domain_set_stack(domain);
-                js_als_context_call(als_context, cb, ItemNull, ItemNull, 0);
-                js_domain_restore_stack(previous_domain);
-                js_async_hooks_restore_resource(previous_resource);
-            }
+            js_run_queued_callback(cb, resource, als_context, domain);
             safety++;
         }
     }
@@ -359,9 +366,11 @@ typedef struct JsMockSchedulerWait {
 static bool mock_scheduler_enabled = false;
 static int64_t mock_scheduler_now_ms = 0;
 static JsMockSchedulerWait mock_scheduler_waits[MAX_MOCK_SCHEDULER_WAITS];
-static bool mock_scheduler_roots_registered = false;
+extern "C" uint64_t js_get_heap_epoch(void);
+static uint64_t mock_scheduler_roots_epoch = 0;
 
 static void close_all_timer_handles(void);
+static void timer_register_gc_roots(JsTimerHandle* th);
 
 typedef struct JsTimerRuntimeScope {
     EvalContext runtime_ctx;
@@ -376,15 +385,39 @@ typedef struct JsTimerRuntimeScope {
 
 static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, int resource_len) {
     if (!th) return;
-    th->async_resource = js_async_hooks_create_resource(resource_name, resource_len);
-    th->als_context = js_als_capture_context();
-    th->domain = js_domain_capture_async_stack();
+    RootFrame roots((Context*)context, (size_t)(5 + th->extra_count));
+    Rooted<Item> callback_root(roots, th->callback);
+    Rooted<Item> object_root(roots, th->object);
+    Rooted<Item> resource_root(roots, th->async_resource);
+    Rooted<Item> als_root(roots, th->als_context);
+    Rooted<Item> domain_root(roots, th->domain);
+    uint64_t* extra_roots[8] = {nullptr};
+    for (int i = 0; i < th->extra_count; i++) {
+        extra_roots[i] = roots.take_slot();
+        if (extra_roots[i]) *extra_roots[i] = th->extra_args[i].item;
+    }
+
+    // The native timer record is not a GC object. Publish its callback and
+    // captured values before building more async state, then transfer them to
+    // registered persistent slots before this temporary frame is released.
+    resource_root.set(js_async_hooks_create_resource(resource_name, resource_len));
+    als_root.set(js_als_capture_context());
+    domain_root.set(js_domain_capture_async_stack());
+    th->callback = callback_root.get();
+    th->object = object_root.get();
+    th->async_resource = resource_root.get();
+    th->als_context = als_root.get();
+    th->domain = domain_root.get();
+    for (int i = 0; i < th->extra_count; i++) {
+        th->extra_args[i] = (Item){.item = extra_roots[i] ? *extra_roots[i] : 0};
+    }
     if (context) {
         th->runtime_heap = context->heap;
         th->runtime_name_pool = context->name_pool;
         th->runtime_pool = context->pool;
     }
     th->runtime_doc = js_dom_get_document();
+    timer_register_gc_roots(th);
 }
 
 static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
@@ -1219,14 +1252,15 @@ static Item js_mock_scheduler_wait(Item delay, Item options) {
 }
 
 static void mock_scheduler_register_gc_roots(void) {
-    if (mock_scheduler_roots_registered) return;
+    uint64_t epoch = js_get_heap_epoch();
+    if (mock_scheduler_roots_epoch == epoch) return;
     for (int i = 0; i < MAX_MOCK_SCHEDULER_WAITS; i++) {
         heap_register_gc_root(&mock_scheduler_waits[i].promise.item);
         heap_register_gc_root(&mock_scheduler_waits[i].resolve.item);
         heap_register_gc_root(&mock_scheduler_waits[i].reject.item);
         heap_register_gc_root(&mock_scheduler_waits[i].signal.item);
     }
-    mock_scheduler_roots_registered = true;
+    mock_scheduler_roots_epoch = epoch;
 }
 
 // setTimeout(delay, value, options) → Promise that resolves to value after delay ms
@@ -1580,18 +1614,18 @@ extern "C" void js_event_loop_shutdown(void) {
 // after tests have completed. We catch the signal and abort the event loop
 // gracefully instead of terminating.
 #ifndef _WIN32
-static jmp_buf event_loop_jmpbuf;
+static sigjmp_buf event_loop_jmpbuf;
 static volatile sig_atomic_t event_loop_guarded = 0;
+static volatile sig_atomic_t event_loop_fault_signal = 0;
 static struct sigaction event_loop_old_sa;
 
 static void event_loop_sigsegv_handler(int sig, siginfo_t* info, void* ctx) {
     if (event_loop_guarded) {
-        log_error("event_loop: caught SIGSEGV at %p during drain, aborting event loop",
-                  info ? info->si_addr : NULL);
+        // Signal handlers cannot safely log or mutate the allocator. Record the
+        // fault and restore runtime watermarks at the sigsetjmp landing point.
+        event_loop_fault_signal = sig;
         event_loop_guarded = 0;
-        // restore the old handler before longjmp
-        sigaction(SIGSEGV, &event_loop_old_sa, NULL);
-        longjmp(event_loop_jmpbuf, 1);
+        siglongjmp(event_loop_jmpbuf, 1);
     }
     // not guarded, call previous handler
     if (event_loop_old_sa.sa_flags & SA_SIGINFO) {
@@ -1939,9 +1973,12 @@ extern "C" int js_event_loop_drain(void) {
     sa.sa_flags = SA_SIGINFO;
     sigaction(SIGSEGV, &sa, &event_loop_old_sa);
     event_loop_guarded = 1;
+    event_loop_fault_signal = 0;
 
     int result = 0;
-    if (setjmp(event_loop_jmpbuf) == 0) {
+    LambdaRecoveryCheckpoint recovery_checkpoint =
+        lambda_recovery_checkpoint_capture((Context*)context);
+    if (sigsetjmp(event_loop_jmpbuf, 1) == 0) {
 #else
     int result = 0;
     {
@@ -1994,10 +2031,13 @@ extern "C" int js_event_loop_drain(void) {
 
         // final microtask flush after loop exits
         js_microtask_flush();
+        lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
     }
 #ifndef _WIN32
     else {
-        log_error("event_loop: recovered from crash during drain");
+        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
+        log_error("event_loop: recovered from signal %d during drain",
+                  (int)event_loop_fault_signal);
         result = -1;
     }
 

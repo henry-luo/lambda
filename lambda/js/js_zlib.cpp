@@ -8,6 +8,7 @@
 #include "js_runtime.h"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
+#include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -26,6 +27,7 @@ extern "C" void js_stream_transform_flush_drained(Item self);
 extern "C" void js_next_tick_enqueue(Item callback);
 extern "C" void js_mark_non_writable(Item object, Item name);
 extern "C" void js_mark_non_configurable(Item object, Item name);
+extern __thread EvalContext* context;
 
 enum ZlibTransformMode {
     ZLIB_TRANSFORM_GZIP = 1,
@@ -1249,51 +1251,70 @@ extern "C" Item js_zlib_crc32(Item data_item, Item init_val) {
 static Item zlib_namespace = {0};
 
 static void zlib_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> ns_root(roots, ns);
+    Rooted<Item> key_root(roots, make_string_item(name));
+    Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
+    js_property_set(ns_root.get(), key_root.get(), fn_root.get());
 }
 
 static Item zlib_set_constructor(Item ns, const char* name, void* func_ptr, int mode,
                                  Item transform_proto) {
-    Item ctor = js_new_function(func_ptr, 1);
-    Item proto = js_new_object();
-    if (get_type_id(transform_proto) == LMD_TYPE_MAP) js_set_prototype(proto, transform_proto);
-    js_property_set(proto, make_string_item("constructor"), ctor);
-    js_mark_non_enumerable(proto, make_string_item("constructor"));
-    js_property_set(ctor, make_string_item("prototype"), proto);
-    js_function_set_prototype(ctor, proto);
-    js_set_function_name(ctor, make_string_item(name));
-    if (mode >= ZLIB_TRANSFORM_GZIP && mode <= ZLIB_TRANSFORM_UNZIP) {
-        zlib_constructor_prototypes[mode] = proto;
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> ns_root(roots, ns);
+    Rooted<Item> transform_proto_root(roots, transform_proto);
+    Rooted<Item> ctor_root(roots, js_new_function(func_ptr, 1));
+    Rooted<Item> proto_root(roots, js_new_object());
+    // Constructor and prototype are mutually linked before either is
+    // published in the namespace, so both need exact construction roots.
+    if (get_type_id(transform_proto_root.get()) == LMD_TYPE_MAP) {
+        js_set_prototype(proto_root.get(), transform_proto_root.get());
     }
-    js_property_set(ns, make_string_item(name), ctor);
-    return ctor;
+    js_property_set(proto_root.get(), make_string_item("constructor"), ctor_root.get());
+    js_mark_non_enumerable(proto_root.get(), make_string_item("constructor"));
+    js_property_set(ctor_root.get(), make_string_item("prototype"), proto_root.get());
+    js_function_set_prototype(ctor_root.get(), proto_root.get());
+    js_set_function_name(ctor_root.get(), make_string_item(name));
+    if (mode >= ZLIB_TRANSFORM_GZIP && mode <= ZLIB_TRANSFORM_UNZIP) {
+        zlib_constructor_prototypes[mode] = proto_root.get();
+    }
+    js_property_set(ns_root.get(), make_string_item(name), ctor_root.get());
+    return ctor_root.get();
 }
 
 extern "C" Item js_get_zlib_namespace(void) {
+    heap_register_gc_root(&zlib_namespace.item);
     if (zlib_namespace.item != 0) return zlib_namespace;
 
     zlib_namespace = js_new_object();
+    RootFrame roots((Context*)context, 6);
+    Rooted<Item> ns_root(roots, zlib_namespace);
+    Rooted<Item> stream_root(roots, ItemNull);
+    Rooted<Item> transform_ctor_root(roots, ItemNull);
+    Rooted<Item> transform_proto_root(roots, ItemNull);
+    Rooted<Item> constants_root(roots, ItemNull);
+    Rooted<Item> codes_root(roots, ItemNull);
+    // The namespace is persistent, while stream-derived prototypes and the
+    // two frozen tables remain unpublished during allocating initialization.
 
-    Item stream_ns = js_get_stream_namespace();
-    Item transform_ctor = js_property_get(stream_ns, make_string_item("Transform"));
-    Item transform_proto = js_property_get(transform_ctor, make_string_item("prototype"));
+    stream_root.set(js_get_stream_namespace());
+    transform_ctor_root.set(js_property_get(stream_root.get(), make_string_item("Transform")));
+    transform_proto_root.set(js_property_get(transform_ctor_root.get(), make_string_item("prototype")));
 
-    zlib_set_constructor(zlib_namespace, "Gzip",       (void*)js_zlib_createGzip,
-                         ZLIB_TRANSFORM_GZIP, transform_proto);
-    zlib_set_constructor(zlib_namespace, "Gunzip",     (void*)js_zlib_createGunzip,
-                         ZLIB_TRANSFORM_GUNZIP, transform_proto);
-    zlib_set_constructor(zlib_namespace, "Deflate",    (void*)js_zlib_createDeflate,
-                         ZLIB_TRANSFORM_DEFLATE, transform_proto);
-    zlib_set_constructor(zlib_namespace, "Inflate",    (void*)js_zlib_createInflate,
-                         ZLIB_TRANSFORM_INFLATE, transform_proto);
-    zlib_set_constructor(zlib_namespace, "DeflateRaw", (void*)js_zlib_createDeflateRaw,
-                         ZLIB_TRANSFORM_DEFLATE_RAW, transform_proto);
-    zlib_set_constructor(zlib_namespace, "InflateRaw", (void*)js_zlib_createInflateRaw,
-                         ZLIB_TRANSFORM_INFLATE_RAW, transform_proto);
-    zlib_set_constructor(zlib_namespace, "Unzip",      (void*)js_zlib_createUnzip,
-                         ZLIB_TRANSFORM_UNZIP, transform_proto);
+    zlib_set_constructor(ns_root.get(), "Gzip",       (void*)js_zlib_createGzip,
+                         ZLIB_TRANSFORM_GZIP, transform_proto_root.get());
+    zlib_set_constructor(ns_root.get(), "Gunzip",     (void*)js_zlib_createGunzip,
+                         ZLIB_TRANSFORM_GUNZIP, transform_proto_root.get());
+    zlib_set_constructor(ns_root.get(), "Deflate",    (void*)js_zlib_createDeflate,
+                         ZLIB_TRANSFORM_DEFLATE, transform_proto_root.get());
+    zlib_set_constructor(ns_root.get(), "Inflate",    (void*)js_zlib_createInflate,
+                         ZLIB_TRANSFORM_INFLATE, transform_proto_root.get());
+    zlib_set_constructor(ns_root.get(), "DeflateRaw", (void*)js_zlib_createDeflateRaw,
+                         ZLIB_TRANSFORM_DEFLATE_RAW, transform_proto_root.get());
+    zlib_set_constructor(ns_root.get(), "InflateRaw", (void*)js_zlib_createInflateRaw,
+                         ZLIB_TRANSFORM_INFLATE_RAW, transform_proto_root.get());
+    zlib_set_constructor(ns_root.get(), "Unzip",      (void*)js_zlib_createUnzip,
+                         ZLIB_TRANSFORM_UNZIP, transform_proto_root.get());
 
     zlib_set_method(zlib_namespace, "gzip",                (void*)js_zlib_gzip, 3);
     zlib_set_method(zlib_namespace, "gunzip",              (void*)js_zlib_gunzip, 3);
@@ -1323,6 +1344,7 @@ extern "C" Item js_get_zlib_namespace(void) {
     // constants — all zlib constants including flush modes, error codes, compression levels, strategies
     extern Item js_object_freeze(Item obj);
     Item constants = js_new_object();
+    constants_root.set(constants);
     // flush modes
     js_property_set(constants, make_string_item("Z_NO_FLUSH"),      (Item){.item = i2it(Z_NO_FLUSH)});
     js_property_set(constants, make_string_item("Z_PARTIAL_FLUSH"), (Item){.item = i2it(Z_PARTIAL_FLUSH)});
@@ -1379,6 +1401,7 @@ extern "C" Item js_get_zlib_namespace(void) {
 
     // codes — error code map (frozen)
     Item codes = js_new_object();
+    codes_root.set(codes);
     js_property_set(codes, make_string_item("Z_OK"),              (Item){.item = i2it(Z_OK)});
     js_property_set(codes, make_string_item("Z_STREAM_END"),      (Item){.item = i2it(Z_STREAM_END)});
     js_property_set(codes, make_string_item("Z_NEED_DICT"),       (Item){.item = i2it(Z_NEED_DICT)});

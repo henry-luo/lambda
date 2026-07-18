@@ -8,6 +8,7 @@
 #include "js_typed_array.h"
 #include "js_class.h"
 #include "../lambda-data.hpp"
+#include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -29,6 +30,7 @@ extern "C" Item js_symbol_for(Item desc);
 extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_buffer_isBuffer(Item obj);
 extern "C" Item js_get_process_argv(void);
+extern __thread EvalContext* context;
 
 struct JsUtilFunctionView {
     TypeId type_id;
@@ -2820,34 +2822,51 @@ static Item js_util_extend(Item target, Item source) {
 static Item util_namespace = {0};
 
 static void js_util_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> ns_root(roots, ns);
+    Rooted<Item> key_root(roots, make_string_item(name));
+    Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
+    js_property_set(ns_root.get(), key_root.get(), fn_root.get());
 }
 
 extern "C" Item js_get_util_namespace(void) {
     if (util_namespace.item != 0) return util_namespace;
 
+    // The namespace escapes this helper and is not published in the module
+    // cache until construction completes, so its stable cache slot owns it.
+    heap_register_gc_root(&util_namespace.item);
     util_namespace = js_new_object();
+
+    RootFrame roots((Context*)context, 9);
+    Rooted<Item> inspect_root(roots, ItemNull);
+    Rooted<Item> custom_symbol_root(roots, ItemNull);
+    Rooted<Item> default_options_root(roots, ItemNull);
+    Rooted<Item> promisify_root(roots, ItemNull);
+    Rooted<Item> types_root(roots, ItemNull);
+    Rooted<Item> text_encoder_root(roots, ItemNull);
+    Rooted<Item> text_decoder_root(roots, ItemNull);
+    Rooted<Item> default_key_root(roots, ItemNull);
+    Rooted<Item> temporary_root(roots, ItemNull);
 
     js_util_set_method(util_namespace, "format",              (void*)js_util_format, -1);
     js_util_set_method(util_namespace, "inspect",             (void*)js_util_inspect, 2);
     // Set util.inspect.custom = Symbol.for('nodejs.util.inspect.custom')
     {
         extern Item js_symbol_for(Item desc);
-        Item inspect_fn = js_property_get(util_namespace, make_string_item("inspect"));
-        Item custom_sym = js_symbol_for(make_string_item("nodejs.util.inspect.custom"));
-        js_property_set(inspect_fn, make_string_item("custom"), custom_sym);
-        Item default_options = js_new_object();
+        inspect_root.set(js_property_get(util_namespace, make_string_item("inspect")));
+        custom_symbol_root.set(js_symbol_for(make_string_item("nodejs.util.inspect.custom")));
+        js_property_set(inspect_root.get(), make_string_item("custom"), custom_symbol_root.get());
+        default_options_root.set(js_new_object());
         // util.inspect.defaultOptions is observable and must stay separate from
         // REPL-local writer options so enabling REPL colors does not leak global state.
-        js_property_set(default_options, make_string_item("colors"), (Item){.item = b2it(false)});
-        js_property_set(inspect_fn, make_string_item("defaultOptions"), default_options);
+        js_property_set(default_options_root.get(), make_string_item("colors"), (Item){.item = b2it(false)});
+        js_property_set(inspect_root.get(), make_string_item("defaultOptions"), default_options_root.get());
     }
     js_util_set_method(util_namespace, "promisify",           (void*)js_util_promisify, 1);
     {
-        Item promisify_fn = js_property_get(util_namespace, make_string_item("promisify"));
-        js_property_set(promisify_fn, make_string_item("custom"), js_util_promisify_custom_symbol());
+        promisify_root.set(js_property_get(util_namespace, make_string_item("promisify")));
+        temporary_root.set(js_util_promisify_custom_symbol());
+        js_property_set(promisify_root.get(), make_string_item("custom"), temporary_root.get());
     }
     js_util_set_method(util_namespace, "callbackify",         (void*)js_util_callbackify, 1);
     js_util_set_method(util_namespace, "aborted",             (void*)js_util_aborted, 2);
@@ -2863,26 +2882,27 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(util_namespace, "debug",               (void*)js_util_debuglog, 1);
 
     // util.types sub-namespace
-    Item types = js_new_object();
-    js_util_set_method(types, "isDate",           (void*)js_util_types_isDate, 1);
-    js_util_set_method(types, "isRegExp",         (void*)js_util_types_isRegExp, 1);
-    js_util_set_method(types, "isArray",          (void*)js_util_types_isArray, 1);
-    js_util_set_method(types, "isMap",            (void*)js_util_types_isMap, 1);
-    js_util_set_method(types, "isSet",            (void*)js_util_types_isSet, 1);
-    js_util_set_method(types, "isUint8Array",     (void*)js_util_types_isUint8Array, 1);
-    js_util_set_method(types, "isPromise",        (void*)js_util_types_isPromise, 1);
-    js_util_set_method(types, "isFunction",       (void*)js_util_types_isFunction, 1);
-    js_util_set_method(types, "isString",         (void*)js_util_types_isString, 1);
-    js_util_set_method(types, "isNumber",         (void*)js_util_types_isNumber, 1);
-    js_util_set_method(types, "isBoolean",        (void*)js_util_types_isBoolean, 1);
-    js_util_set_method(types, "isNull",           (void*)js_util_types_isNull, 1);
-    js_util_set_method(types, "isUndefined",      (void*)js_util_types_isUndefined, 1);
-    js_util_set_method(types, "isNullOrUndefined",(void*)js_util_types_isNullOrUndefined, 1);
-    js_util_set_method(types, "isObject",         (void*)js_util_types_isObject, 1);
-    js_util_set_method(types, "isPrimitive",      (void*)js_util_types_isPrimitive, 1);
-    js_util_set_method(types, "isBuffer",         (void*)js_util_types_isBuffer, 1);
-    js_util_set_method(types, "isError",          (void*)js_util_types_isError, 1);
+    types_root.set(js_new_object());
+    js_util_set_method(types_root.get(), "isDate",           (void*)js_util_types_isDate, 1);
+    js_util_set_method(types_root.get(), "isRegExp",         (void*)js_util_types_isRegExp, 1);
+    js_util_set_method(types_root.get(), "isArray",          (void*)js_util_types_isArray, 1);
+    js_util_set_method(types_root.get(), "isMap",            (void*)js_util_types_isMap, 1);
+    js_util_set_method(types_root.get(), "isSet",            (void*)js_util_types_isSet, 1);
+    js_util_set_method(types_root.get(), "isUint8Array",     (void*)js_util_types_isUint8Array, 1);
+    js_util_set_method(types_root.get(), "isPromise",        (void*)js_util_types_isPromise, 1);
+    js_util_set_method(types_root.get(), "isFunction",       (void*)js_util_types_isFunction, 1);
+    js_util_set_method(types_root.get(), "isString",         (void*)js_util_types_isString, 1);
+    js_util_set_method(types_root.get(), "isNumber",         (void*)js_util_types_isNumber, 1);
+    js_util_set_method(types_root.get(), "isBoolean",        (void*)js_util_types_isBoolean, 1);
+    js_util_set_method(types_root.get(), "isNull",           (void*)js_util_types_isNull, 1);
+    js_util_set_method(types_root.get(), "isUndefined",      (void*)js_util_types_isUndefined, 1);
+    js_util_set_method(types_root.get(), "isNullOrUndefined",(void*)js_util_types_isNullOrUndefined, 1);
+    js_util_set_method(types_root.get(), "isObject",         (void*)js_util_types_isObject, 1);
+    js_util_set_method(types_root.get(), "isPrimitive",      (void*)js_util_types_isPrimitive, 1);
+    js_util_set_method(types_root.get(), "isBuffer",         (void*)js_util_types_isBuffer, 1);
+    js_util_set_method(types_root.get(), "isError",          (void*)js_util_types_isError, 1);
     // additional types checks
+    Item types = types_root.get();
     js_util_set_method(types, "isTypedArray",     (void*)js_util_types_isTypedArray, 1);
     js_util_set_method(types, "isArrayBuffer",    (void*)js_util_types_isArrayBuffer, 1);
     js_util_set_method(types, "isSharedArrayBuffer", (void*)js_util_types_isSharedArrayBuffer, 1);
@@ -2915,20 +2935,20 @@ extern "C" Item js_get_util_namespace(void) {
     js_util_set_method(types, "isSetIterator",       (void*)js_util_types_isSetIterator, 1);
     js_util_set_method(types, "isArgumentsObject",   (void*)js_util_types_isArgumentsObject, 1);
     js_util_set_method(types, "isModuleNamespaceObject", (void*)js_util_types_isModuleNamespaceObject, 1);
-    js_property_set(util_namespace, make_string_item("types"), types);
+    js_property_set(util_namespace, make_string_item("types"), types_root.get());
     js_util_set_method(util_namespace, "getCallSites", (void*)js_util_getCallSites, 1);
 
     // TextEncoder/TextDecoder — expose constructors on util namespace
     extern Item js_text_encoder_new(void);
     extern Item js_text_decoder_new(Item encoding_item, Item options_item);
-    Item te_ctor = js_new_function((void*)js_text_encoder_new, 0);
-    Item td_ctor = js_new_function((void*)js_text_decoder_new, 2);
-    js_property_set(util_namespace, make_string_item("TextEncoder"), te_ctor);
-    js_property_set(util_namespace, make_string_item("TextDecoder"), td_ctor);
+    text_encoder_root.set(js_new_function((void*)js_text_encoder_new, 0));
+    text_decoder_root.set(js_new_function((void*)js_text_decoder_new, 2));
+    js_property_set(util_namespace, make_string_item("TextEncoder"), text_encoder_root.get());
+    js_property_set(util_namespace, make_string_item("TextDecoder"), text_decoder_root.get());
 
     // default export
-    Item default_key = make_string_item("default");
-    js_property_set(util_namespace, default_key, util_namespace);
+    default_key_root.set(make_string_item("default"));
+    js_property_set(util_namespace, default_key_root.get(), util_namespace);
 
     return util_namespace;
 }
