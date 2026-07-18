@@ -662,7 +662,7 @@ static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) 
     memcpy(text_string->chars, text, text_len);
     text_string->chars[text_len] = '\0';
 
-    DomText* text_node = dom_text_create(text_string, pseudo_elem);
+    DomText* text_node = DomText::create(text_string, pseudo_elem);
     if (!text_node) return;
     pseudo_append_child(pseudo_elem, static_cast<DomNode*>(text_node));
 }
@@ -671,7 +671,7 @@ static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* p
                                              const CssDeclaration* content_decl, const char* raw_url) {
     if (!lycon || !pseudo_elem || !raw_url || !raw_url[0]) return nullptr;
 
-    DomElement* img_elem = dom_element_create(pseudo_elem->doc, "img", nullptr);
+    DomElement* img_elem = DomElement::create(pseudo_elem->doc, "img", nullptr);
     if (!img_elem) return nullptr;
 
     if (!img_elem->embed) {
@@ -1174,7 +1174,7 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // Create the pseudo DomElement
     // Per CSS spec: pseudo-element is child of defining element,
     // text node is child of pseudo-element
-    DomElement* pseudo_elem = dom_element_create(parent->doc, is_before ? "::before" : "::after", nullptr);
+    DomElement* pseudo_elem = DomElement::create(parent->doc, is_before ? "::before" : "::after", nullptr);
     if (!pseudo_elem) return nullptr;
 
     // Pseudo-element is child of defining element
@@ -1594,16 +1594,9 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     DomElement* fl_elem = lam::pool_alloc_dom_element(pool);
     if (!fl_elem) return;
 
-    fl_elem->node_type = DOM_NODE_ELEMENT;
     dom_element_retain_tag_name(fl_elem, lam::borrow_const(lam::promote_to_pool(pool, "::first-letter")));
     fl_elem->doc = elem->doc;
     fl_elem->parent = text_node->parent;  // same parent as the text node
-    fl_elem->first_child = nullptr;
-    fl_elem->next_sibling = nullptr;
-    fl_elem->prev_sibling = nullptr;
-    fl_elem->font = nullptr;  // will be allocated during style resolution
-    fl_elem->bound = nullptr;
-    fl_elem->in_line = nullptr;
 
     // Set display — default to inline, but check for float (CSS 2.1 §5.12.2)
     // If ::first-letter has float:left/right specified, it should become a floated
@@ -1646,14 +1639,9 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
 
     DomText* fl_text_node = lam::pool_alloc_dom_text(pool);
     if (!fl_text_node) return;
-    fl_text_node->node_type = DOM_NODE_TEXT;
     fl_text_node->parent = fl_elem;
     fl_text_node->text = fl_text;
     fl_text_node->length = boundary;
-    fl_text_node->native_string = nullptr;
-    fl_text_node->set_symbol(false);
-    fl_text_node->next_sibling = nullptr;
-    fl_text_node->prev_sibling = nullptr;
 
     fl_elem->first_child = fl_text_node;
 
@@ -3868,7 +3856,7 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
     DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
 
     // Create pseudo-element DomElement
-    DomElement* pseudo_elem = dom_element_create(parent_elem->doc,
+    DomElement* pseudo_elem = DomElement::create(parent_elem->doc,
                                                   is_before ? "::before" : "::after",
                                                   nullptr);
     if (!pseudo_elem) {
@@ -3876,7 +3864,7 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
         return;
     }
 
-    // Set pseudo-element properties - tag_name already set by dom_element_create
+    // Set pseudo-element properties - tag_name already set by DomElement::create
     pseudo_elem->parent = parent_elem;
 
     // IMPORTANT: Do NOT share parent's FontProp pointer with pseudo-element!
@@ -3919,7 +3907,7 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
                 text_string->chars[content_len] = '\0';
 
                 // Create text node with Lambda String
-                DomText* text_node = dom_text_create(text_string, pseudo_elem);
+                DomText* text_node = DomText::create(text_string, pseudo_elem);
                 if (text_node) {
                     pseudo_elem->first_child = text_node;
                     log_debug("[Pseudo-Element] Created text content: \"%s\"", content);

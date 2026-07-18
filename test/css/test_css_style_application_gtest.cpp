@@ -118,9 +118,9 @@ TEST_F(CssStyleApplicationTest, UniversalSelector_MatchesAllElements) {
     ASSERT_NE(selector, nullptr);
 
     // Test that it matches various elements
-    DomElement* div = dom_element_create(doc, "div", nullptr);
-    DomElement* span = dom_element_create(doc, "span", nullptr);
-    DomElement* body = dom_element_create(doc, "body", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
+    DomElement* span = DomElement::create(doc, "span", nullptr);
+    DomElement* body = DomElement::create(doc, "body", nullptr);
 
     EXPECT_TRUE(selector_matcher_matches_simple(matcher, selector, div))
         << "Universal selector should match <div>";
@@ -135,7 +135,7 @@ TEST_F(CssStyleApplicationTest, UniversalSelector_AppliesMarginReset) {
     CssDeclaration* margin_decl = create_declaration(CSS_PROPERTY_MARGIN, "0", 0, 0, 0);
 
     // Create body element
-    DomElement* body = dom_element_create(doc, "body", nullptr);
+    DomElement* body = DomElement::create(doc, "body", nullptr);
 
     // Apply declaration
     ASSERT_TRUE(dom_element_apply_declaration(body, margin_decl));
@@ -155,7 +155,7 @@ TEST_F(CssStyleApplicationTest, UniversalSelector_OverriddenByTypeSelector) {
     CssDeclaration* body_margin = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 0, 1);
 
     // Create body element
-    DomElement* body = dom_element_create(doc, "body", nullptr);
+    DomElement* body = DomElement::create(doc, "body", nullptr);
 
     // Apply universal selector first (lower specificity)
     ASSERT_TRUE(dom_element_apply_declaration(body, universal_margin));
@@ -180,7 +180,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_MatchesElementWithClass) {
     CssSimpleSelector* selector = create_class_simple_selector("box");
 
     // Element with matching class
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
     div->add_class("box");
 
     EXPECT_TRUE(selector_matcher_matches_simple(matcher, selector, div))
@@ -192,7 +192,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_DoesNotMatchWithoutClass) {
     CssSimpleSelector* selector = create_class_simple_selector("box");
 
     // Element without the class
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
 
     EXPECT_FALSE(selector_matcher_matches_simple(matcher, selector, div))
         << "Class selector .box should NOT match <div> without class";
@@ -203,7 +203,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_AppliesMargin) {
     CssDeclaration* margin_decl = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 1, 0);
 
     // Create element with class
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
     div->add_class("box");
 
     // Apply declaration
@@ -224,7 +224,7 @@ TEST_F(CssStyleApplicationTest, ClassSelector_OverridesUniversalSelector) {
     CssDeclaration* class_margin = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 1, 0);
 
     // Create element with class
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
     div->add_class("box");
 
     // Apply both declarations
@@ -257,8 +257,8 @@ TEST_F(CssStyleApplicationTest, Baseline803_UniversalAndClassSelectors) {
     CssDeclaration* box_margin = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 1, 0);
 
     // Create DOM: <body><div class="box"></div></body>
-    DomElement* body = dom_element_create(doc, "body", nullptr);
-    DomElement* div_box = dom_element_create(doc, "div", nullptr);
+    DomElement* body = DomElement::create(doc, "body", nullptr);
+    DomElement* div_box = DomElement::create(doc, "div", nullptr);
     div_box->add_class("box");
     body->append_child(div_box);
 
@@ -299,7 +299,7 @@ TEST_F(CssStyleApplicationTest, CascadeOrder_LaterRuleSameSpecificity) {
     CssDeclaration* margin1 = create_declaration(CSS_PROPERTY_MARGIN, "10", 0, 1, 0);
     CssDeclaration* margin2 = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 1, 0);
 
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
     div->add_class("box");
 
     // Apply first declaration
@@ -325,7 +325,7 @@ TEST_F(CssStyleApplicationTest, CascadeOrder_SpecificityOverridesSourceOrder) {
     CssDeclaration* class_margin = create_declaration(CSS_PROPERTY_MARGIN, "10", 0, 1, 0);
     CssDeclaration* universal_margin = create_declaration(CSS_PROPERTY_MARGIN, "20", 0, 0, 0);
 
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
     div->add_class("box");
 
     // Apply class declaration first (higher specificity)
@@ -391,11 +391,11 @@ TEST_F(CssStyleApplicationTest, MultipleElements_UniversalSelectorAffectsAll) {
     CssDeclaration* margin_decl = create_declaration(CSS_PROPERTY_MARGIN, "0", 0, 0, 0);
 
     // Create multiple elements
-    DomElement* html = dom_element_create(doc, "html", nullptr);
-    DomElement* body = dom_element_create(doc, "body", nullptr);
-    DomElement* div1 = dom_element_create(doc, "div", nullptr);
-    DomElement* div2 = dom_element_create(doc, "div", nullptr);
-    DomElement* span = dom_element_create(doc, "span", nullptr);
+    DomElement* html = DomElement::create(doc, "html", nullptr);
+    DomElement* body = DomElement::create(doc, "body", nullptr);
+    DomElement* div1 = DomElement::create(doc, "div", nullptr);
+    DomElement* div2 = DomElement::create(doc, "div", nullptr);
+    DomElement* span = DomElement::create(doc, "span", nullptr);
 
     html->append_child(body);
     body->append_child(div1);
@@ -430,12 +430,12 @@ TEST_F(CssStyleApplicationTest, MultipleClasses_SelectiveApplication) {
     CssDeclaration* highlight_bg = create_declaration(CSS_PROPERTY_BACKGROUND_COLOR, "yellow", 0, 1, 0);
 
     // Create elements, some with .highlight class
-    DomElement* div1 = dom_element_create(doc, "div", nullptr);
+    DomElement* div1 = DomElement::create(doc, "div", nullptr);
     div1->add_class("highlight");
 
-    DomElement* div2 = dom_element_create(doc, "div", nullptr);
+    DomElement* div2 = DomElement::create(doc, "div", nullptr);
 
-    DomElement* span = dom_element_create(doc, "span", nullptr);
+    DomElement* span = DomElement::create(doc, "span", nullptr);
     span->add_class("highlight");
 
     // Apply universal selector to all

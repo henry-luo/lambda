@@ -32,6 +32,7 @@ struct DomText;
 struct DomComment;
 struct DomDocument;
 struct ViewState;
+typedef struct Arena Arena;
 typedef struct String String;  // Lambda String type
 typedef struct Element Element;  // Lambda Element type
 
@@ -87,7 +88,7 @@ struct DomNode {
     ViewType view_type;
     // view always has x, y, wd, hg;  otherwise, it is a property group
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
-    int inline_line_number;     // block-local line containing an atomic inline; -1 for other boxes
+    int inline_line_number;     // block-local atomic-inline line; zero until that view role assigns it
     // Tier-1 weak reference: state-store teardown clears it before the document epoch advances.
     ViewState* view_state_ref;  // canonical per-view state owned by DocState
 
@@ -180,14 +181,6 @@ struct DomNode {
     }
 
     const char* view_name();
-
-protected:
-    // Constructor (only callable by derived classes)
-    DomNode(DomNodeType type) : id(0), node_type(type), parent(nullptr),
-        next_sibling(nullptr), prev_sibling(nullptr), view_type(RDT_VIEW_NONE),
-        x(0), y(0), width(0), height(0), inline_line_number(-1),
-        view_state_ref(nullptr), source_line(0),
-        layout_dirty(false), node_flags(0), layout_height_contribution(0) {}
 };
 
 // ============================================================================
@@ -232,9 +225,14 @@ struct DomText : public DomNode {
     TextRect *rect;  // first text rect
     FontProp *font;  // font for this text
 
-    // Constructor
-    DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
-        native_string(nullptr), rect(nullptr), font(nullptr) {}
+    // Factories rely on zeroed arena/pool storage and write only semantic non-zero fields.
+    static DomText* create(String* native_string, DomElement* parent_element);
+    static DomText* create_detached(String* native_string, DomDocument* doc);
+    static DomText* create_detached_copy(DomDocument* doc, const char* text, size_t len);
+    static DomText* create_symbol(const char* name, size_t len, DomElement* parent_element);
+    static DomText* create_in(Arena* arena);
+    static DomText* create_in(Pool* pool);
+    static DomText* create_in(Arena* arena, size_t inline_string_length);
 
     // Check if this is a symbol node
     bool is_symbol() const { return (node_flags & DOM_NODE_FLAG_TEXT_SYMBOL) != 0; }
@@ -276,7 +274,7 @@ static_assert(sizeof(DomText) % alignof(uint32_t) == 0,
 // ============================================================================
 
 /**
- * Create a new DomText node backed by Lambda String
+ * JS/Jube bridge shim for DomText::create().
  * @param native_string Pointer to Lambda String (will be referenced, not copied)
  * @param parent_element Parent DomElement (provides document context)
  * @return New DomText or NULL on failure
@@ -284,7 +282,7 @@ static_assert(sizeof(DomText) % alignof(uint32_t) == 0,
 DomText* dom_text_create(String* native_string, DomElement* parent_element);
 
 /**
- * Create a detached DomText node backed by Lambda String (no parent)
+ * JS/Jube bridge shim for DomText::create_detached().
  * Used by JS createTextNode — the node will be parented later via appendChild/insertBefore.
  * @param native_string Pointer to Lambda String (will be referenced, not copied)
  * @param doc DomDocument (provides arena for allocation)
@@ -297,19 +295,6 @@ DomText* dom_text_create_detached(String* native_string, DomDocument* doc);
  * allocator so live text nodes never retain temporary or JS-heap storage.
  */
 String* dom_document_create_string(DomDocument* doc, const char* text, size_t len);
-
-/** Create a detached DomText whose backing String is copied into `doc`. */
-DomText* dom_text_create_detached_copy(DomDocument* doc,
-                                       const char* text, size_t len);
-
-/**
- * Create a new DomText node for a symbol (entity or emoji)
- * @param name Symbol name (e.g., "smile" for emoji, "copy" for entity)
- * @param len Length of the symbol name
- * @param parent_element Parent DomElement (provides document context)
- * @return New DomText or NULL on failure
- */
-DomText* dom_text_create_symbol(const char* name, size_t len, DomElement* parent_element);
 
 /**
  * Destroy a DomText node
@@ -372,18 +357,12 @@ struct DomComment : public DomNode {
     size_t length;               // Content length
     Element* native_element;     // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
 
-    // Constructor
-    DomComment(DomNodeType type = DOM_NODE_COMMENT) : DomNode(type), tag_name(nullptr),
-        content(nullptr), length(0), native_element(nullptr) {}
+    // Factories rely on zeroed arena storage and write only semantic non-zero fields.
+    static DomComment* create(Element* native_element, DomElement* parent_element);
+    static DomComment* create_detached(Element* native_element, DomDocument* doc);
 };
 
-/**
- * Create a new DomComment node (backed by Lambda Element)
- * @param native_element Lambda Element with tag "!--" or "!DOCTYPE" (required)
- * @param parent_element Parent DomElement (provides document context)
- * @return New backed DomComment or NULL on failure
- */
-DomComment* dom_comment_create(Element* native_element, DomElement* parent_element);
+/** Detached bridge factory retained for JS/Jube callers. */
 DomComment* dom_comment_create_detached(Element* native_element, DomDocument* doc);
 
 /**

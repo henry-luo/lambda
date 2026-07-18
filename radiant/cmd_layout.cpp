@@ -4973,7 +4973,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     log_debug("[Lambda XML] Building DOM tree from XML root with %lld children", xml_root->length);
 
     // Create <html> wrapper element
-    DomElement* html_elem = dom_element_create(dom_doc, "html", nullptr);
+    DomElement* html_elem = DomElement::create(dom_doc, "html", nullptr);
     if (!html_elem) {
         log_error("[Lambda XML] Failed to create html wrapper element");
         return nullptr;
@@ -4981,7 +4981,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     html_elem->tag_id = HTM_TAG_HTML;
 
     // Create <body> wrapper element
-    DomElement* body_elem = dom_element_create(dom_doc, "body", nullptr);
+    DomElement* body_elem = DomElement::create(dom_doc, "body", nullptr);
     if (!body_elem) {
         log_error("[Lambda XML] Failed to create body wrapper element");
         return nullptr;

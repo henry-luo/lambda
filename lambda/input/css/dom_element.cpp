@@ -258,59 +258,76 @@ static uint32_t dom_document_alloc_node_id(DomDocument* doc) {
     return id;
 }
 
-DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element) {
-    if (!doc || !tag_name) {
-        return NULL;
-    }
-
-    // Allocate raw memory from arena
-    DomElement* element = (DomElement*)arena_calloc(doc->arena, sizeof(DomElement));
-    if (!element) {
-        return NULL;
-    }
-
-    // Initialize the element (this sets up the base DomNode fields and derived fields)
-    if (!dom_element_init(element, doc, tag_name, native_element)) {
-        return NULL;
-    }
-
+DomElement* DomElement::create_in(Arena* arena) {
+    if (!arena) return nullptr;
+    // Arena zeroing is the construction contract; only the discriminator is non-zero.
+    DomElement* element = (DomElement*)arena_calloc(arena, sizeof(DomElement));
+    if (element) element->node_type = DOM_NODE_ELEMENT;
     return element;
 }
 
-bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_name, Element* native_element) {
-    if (!element || !doc || !tag_name) {
-        return false;
+DomElement* DomElement::create_in(Pool* pool) {
+    if (!pool) return nullptr;
+    DomElement* element = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+    if (element) {
+        element->node_type = DOM_NODE_ELEMENT;
+        // View-pool generated boxes have no Lambda backing; zero flags would
+        // otherwise make their embedded placeholder look tree-owned.
+        element->set_synthetic(true);
+    }
+    return element;
+}
+
+DomElement* DomElement::create(DomDocument* doc, const char* tag_name,
+                               Element* native_element) {
+    if (!doc || !doc->arena || !tag_name) return nullptr;
+    return create_in(create_in(doc->arena), doc, tag_name, native_element);
+}
+
+DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
+                                  const char* tag_name, Element* native_element) {
+    if (!element || !doc || !tag_name) return nullptr;
+
+    bool reinitializing = element->doc != nullptr;
+    if (reinitializing) {
+        // UI rebuilds reuse fat Lambda-element storage; stale tree links and
+        // attribute caches would splice the previous DOM epoch into the new one.
+        element->parent = nullptr;
+        element->next_sibling = nullptr;
+        element->prev_sibling = nullptr;
+        element->first_child = nullptr;
+        element->last_child = nullptr;
+        dom_element_clear_id(element);
+        dom_element_clear_class_names(element);
+        element->class_count = 0;
+        element->set_styles_resolved(false);
     }
 
-    // NOTE: arena_calloc already zeros the memory, so we just need to initialize specific fields
-    // Initialize base DomNode fields
-    ((DomNode*)element)->id = dom_document_alloc_node_id(doc);
+    static_cast<DomNode*>(element)->id = dom_document_alloc_node_id(doc);
     element->node_type = DOM_NODE_ELEMENT;
-    element->parent = NULL;
-    element->next_sibling = NULL;
-    element->prev_sibling = NULL;
-
-    // Initialize DomElement fields
-    element->first_child = NULL;
-    element->last_child = NULL;
     element->doc = doc;
 
-    // A null input marks layout-only nodes; their embedded Element must never be
-    // mistaken for a member of the Lambda tree.
-    element->set_synthetic(native_element == nullptr);
-    if (native_element && native_element != &element->elmt) {
-        element->elmt = *native_element;  // shallow copy (items[], type, data pointers are shared)
+    // A null backing marks layout-only nodes; their embedded storage must never
+    // be mistaken for a member of the Lambda tree.
+    if (!native_element) {
+        element->set_synthetic(true);
+    }
+    else {
+        // Rebinding reused storage must also retire a prior synthetic identity.
+        if (reinitializing) element->set_synthetic(false);
+        if (native_element != &element->elmt) {
+            element->elmt = *native_element;  // shallow copy (items[], type, data pointers are shared)
+        }
     }
 
-    // Explicitly initialize display to {0, 0} to ensure no garbage values
-    // This is critical for table elements where display resolution depends on this field
+    // An unresolved display is semantically different from display:none; the
+    // retired constructor used NONE and could suppress the first table resolve.
     element->display = {CSS_VALUE__UNDEF, CSS_VALUE__UNDEF};
-    element->set_styles_resolved(false);
 
     // Copy tag name into document arena before retaining on the DOM element.
     lam::PoolPtr<char> tag_copy = lam::promote_to_arena(doc->arena, tag_name);
     if (!tag_copy) {
-        return false;
+        return nullptr;
     }
     dom_element_retain_tag_name(element, tag_copy);
 
@@ -320,16 +337,11 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     // Create style trees (still use pool for AVL nodes)
     element->specified_style = style_tree_create(doc->pool);
     if (!element->specified_style) {
-        return false;
+        return nullptr;
     }
 
-    // Initialize version tracking
     element->style_version = 1;
     element->set_needs_style_recompute(true);
-
-    // Initialize arrays
-    dom_element_clear_class_names(element);
-    element->class_count = 0;
 
     // Initialize cached attribute fields from native element (if exists)
     if (native_element) {
@@ -339,8 +351,6 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
         const char* id_attr = reader.get_attr_string("id");
         if (id_attr) {
             dom_element_retain_id(element, lam::promote_to_arena(doc->arena, id_attr));
-        } else {
-            dom_element_clear_id(element);
         }
 
         // Parse class attribute into array
@@ -380,7 +390,11 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     }
 
     doc->services.element_count++;
-    return true;
+    return element;
+}
+
+DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element) {
+    return DomElement::create(doc, tag_name, native_element);
 }
 
 void dom_element_clear(DomElement* element) {
@@ -2153,70 +2167,62 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
 // DOM Text Node Implementation
 // ============================================================================
 
-DomText* dom_text_create(String* native_string, DomElement* parent_element) {
+DomText* DomText::create_in(Arena* arena) {
+    if (!arena) return nullptr;
+    // Arena zeroing is the construction contract; only the discriminator is non-zero.
+    DomText* text_node = (DomText*)arena_calloc(arena, sizeof(DomText));
+    if (text_node) text_node->node_type = DOM_NODE_TEXT;
+    return text_node;
+}
+
+DomText* DomText::create_in(Pool* pool) {
+    if (!pool) return nullptr;
+    DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
+    if (text_node) text_node->node_type = DOM_NODE_TEXT;
+    return text_node;
+}
+
+DomText* DomText::create(String* native_string, DomElement* parent_element) {
     if (!native_string || !parent_element) {
-        log_error("dom_text_create: native_string and parent_element required");
+        log_error("DomText::create: native_string and parent_element required");
         return nullptr;
     }
 
     if (!parent_element->doc) {
-        log_error("dom_text_create: parent_element has no document");
+        log_error("DomText::create: parent_element has no document");
         return nullptr;
     }
 
-    // Allocate from parent's document arena
-    DomText* text_node = (DomText*)arena_calloc(parent_element->doc->arena, sizeof(DomText));
-    if (!text_node) {
-        log_error("dom_text_create: arena_calloc failed");
-        return nullptr;
-    }
-
-    // Initialize base DomNode fields
-    text_node->id = dom_document_alloc_node_id(parent_element->doc);
-    text_node->node_type = DOM_NODE_TEXT;
-    text_node->parent = parent_element;
-    text_node->next_sibling = nullptr;
-    text_node->prev_sibling = nullptr;
-
-    // Set Lambda backing (REFERENCE, not copy)
-    text_node->native_string = native_string;
-    text_node->text = native_string->chars;  // Reference Lambda String's chars
-    text_node->length = native_string->len;
-    text_node->set_symbol(false);
+    DomText* text_node = create_detached(native_string, parent_element->doc);
+    if (!text_node) return nullptr;
     text_node->parent = parent_element;
 
-    log_debug("dom_text_create: created backed text node, text='%s'", native_string->chars);
+    log_debug("DomText::create: created backed text node, text='%s'", native_string->chars);
     return text_node;
 }
 
-DomText* dom_text_create_detached(String* native_string, DomDocument* doc) {
+DomText* DomText::create_detached(String* native_string, DomDocument* doc) {
     if (!native_string) {
-        log_error("dom_text_create_detached: native_string required");
+        log_error("DomText::create_detached: native_string required");
         return nullptr;
     }
     if (!doc || !doc->arena) {
-        log_error("dom_text_create_detached: doc with arena required");
+        log_error("DomText::create_detached: doc with arena required");
         return nullptr;
     }
 
-    DomText* text_node = (DomText*)arena_calloc(doc->arena, sizeof(DomText));
+    // Arena zeroing supplies every null/zero default omitted below.
+    DomText* text_node = create_in(doc->arena);
     if (!text_node) {
-        log_error("dom_text_create_detached: arena_calloc failed");
+        log_error("DomText::create_detached: arena_calloc failed");
         return nullptr;
     }
 
     text_node->id = dom_document_alloc_node_id(doc);
-    text_node->node_type = DOM_NODE_TEXT;
-    text_node->parent = nullptr;
-    text_node->next_sibling = nullptr;
-    text_node->prev_sibling = nullptr;
-
     text_node->native_string = native_string;
     text_node->text = native_string->chars;
     text_node->length = native_string->len;
-    text_node->set_symbol(false);
 
-    log_debug("dom_text_create_detached: created text node, text='%s'", native_string->chars);
     return text_node;
 }
 
@@ -2231,46 +2237,62 @@ String* dom_document_create_string(DomDocument* doc, const char* text, size_t le
     return string;
 }
 
-DomText* dom_text_create_detached_copy(DomDocument* doc,
+DomText* DomText::create_detached_copy(DomDocument* doc,
                                        const char* text, size_t len) {
     String* string = dom_document_create_string(doc, text, len);
-    return string ? dom_text_create_detached(string, doc) : nullptr;
+    return string ? create_detached(string, doc) : nullptr;
 }
 
-DomText* dom_text_create_symbol(const char* name, size_t len, DomElement* parent_element) {
+DomText* DomText::create_symbol(const char* name, size_t len,
+                                DomElement* parent_element) {
     if (!name || len == 0 || !parent_element) {
-        log_error("dom_text_create_symbol: name and parent_element required");
+        log_error("DomText::create_symbol: name and parent_element required");
         return nullptr;
     }
 
     if (!parent_element->doc) {
-        log_error("dom_text_create_symbol: parent_element has no document");
+        log_error("DomText::create_symbol: parent_element has no document");
         return nullptr;
     }
 
-    // Allocate from parent's document arena
-    DomText* text_node = (DomText*)arena_calloc(parent_element->doc->arena, sizeof(DomText));
+    // Arena zeroing supplies every null/zero default omitted below.
+    DomText* text_node = create_in(parent_element->doc->arena);
     if (!text_node) {
-        log_error("dom_text_create_symbol: arena_calloc failed");
+        log_error("DomText::create_symbol: arena_calloc failed");
         return nullptr;
     }
 
-    // Initialize base DomNode fields
     text_node->id = dom_document_alloc_node_id(parent_element->doc);
-    text_node->node_type = DOM_NODE_TEXT;
     text_node->parent = parent_element;
-    text_node->next_sibling = nullptr;
-    text_node->prev_sibling = nullptr;
-
-    // Set symbol name directly (Symbol and String have different layouts)
-    text_node->native_string = nullptr;
     text_node->text = name;
     text_node->length = len;
     text_node->set_symbol(true);
-    text_node->parent = parent_element;
 
-    log_debug("dom_text_create_symbol: created symbol node, name='%.*s'", (int)len, name);
+    log_debug("DomText::create_symbol: created symbol node, name='%.*s'", (int)len, name);
     return text_node;
+}
+
+DomText* DomText::create_in(Arena* arena, size_t inline_string_length) {
+    if (!arena) return nullptr;
+    size_t total = sizeof(DomText) + sizeof(String) + inline_string_length + 1;
+    // The inline Lambda String shares the same zeroed arena allocation as its node.
+    DomText* text_node = (DomText*)arena_calloc(arena, total);
+    if (!text_node) return nullptr;
+    text_node->node_type = DOM_NODE_TEXT;
+    String* string = dom_text_to_string(text_node);
+    string->len = (uint32_t)inline_string_length;
+    text_node->native_string = string;
+    text_node->text = string->chars;
+    text_node->length = inline_string_length;
+    return text_node;
+}
+
+DomText* dom_text_create(String* native_string, DomElement* parent_element) {
+    return DomText::create(native_string, parent_element);
+}
+
+DomText* dom_text_create_detached(String* native_string, DomDocument* doc) {
+    return DomText::create_detached(native_string, doc);
 }
 
 void dom_text_destroy(DomText* text_node) {
@@ -2524,13 +2546,13 @@ DomText* DomElement::append_text(const char* text_content) {
                 }
             }
             if (!text_node) {
-                text_node = dom_text_create(string_value, parent);
+                text_node = DomText::create(string_value, parent);
                 if (text_node) dom_append_to_sibling_chain(parent, text_node);
             }
         }
     } else {
         // Create separate DomText wrapper with Lambda backing
-        text_node = dom_text_create(string_value, parent);
+        text_node = DomText::create(string_value, parent);
         if (!text_node) {
             log_error("dom_element_append_text: failed to create DomText");
             return nullptr;
@@ -2552,128 +2574,61 @@ DomText* DomElement::append_text(const char* text_content) {
 // DOM Comment/DOCTYPE Node Implementation
 // ============================================================================
 
-DomComment* dom_comment_create(Element* native_element, DomElement* parent_element) {
+DomComment* DomComment::create(Element* native_element, DomElement* parent_element) {
     if (!native_element || !parent_element) {
-        log_error("dom_comment_create: native_element and parent_element required");
+        log_error("DomComment::create: native_element and parent_element required");
         return nullptr;
     }
 
     if (!parent_element->doc) {
-        log_error("dom_comment_create: parent_element has no document");
+        log_error("DomComment::create: parent_element has no document");
         return nullptr;
     }
 
-    // Get tag name and verify it's a comment or DOCTYPE
+    DomComment* comment_node = create_detached(native_element, parent_element->doc);
+    if (!comment_node) return nullptr;
+    comment_node->parent = parent_element;
+    log_debug("DomComment::create: attached comment (tag=%s, content='%s')",
+              comment_node->tag_name, comment_node->content);
+    return comment_node;
+}
+
+DomComment* DomComment::create_detached(Element* native_element, DomDocument* doc) {
+    if (!native_element) {
+        log_error("DomComment::create_detached: native_element required");
+        return nullptr;
+    }
+    if (!doc || !doc->arena) {
+        log_error("DomComment::create_detached: doc with arena required");
+        return nullptr;
+    }
+
     TypeElmt* type = (TypeElmt*)native_element->type;
     const char* tag_name = type ? type->name.str : nullptr;
     if (!tag_name) {
-        log_error("dom_comment_create: no tag name");
+        log_error("DomComment::create_detached: no tag name");
         return nullptr;
     }
 
-    // Determine node type
     DomNodeType node_type;
     if (str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
         node_type = DOM_NODE_DOCTYPE;
     } else if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0) {
         node_type = DOM_NODE_COMMENT;
     } else {
-        log_error("dom_comment_create: not a comment or DOCTYPE: %s", tag_name);
+        log_error("DomComment::create_detached: not a comment or DOCTYPE: %s", tag_name);
         return nullptr;
     }
 
-    // Allocate from parent's document arena
-    DomComment* comment_node = (DomComment*)arena_calloc(parent_element->doc->arena, sizeof(DomComment));
-    if (!comment_node) {
-        log_error("dom_comment_create: arena_calloc failed");
-        return nullptr;
-    }
-
-    // Initialize base DomNode
-    comment_node->id = dom_document_alloc_node_id(parent_element->doc);
-    comment_node->node_type = node_type;
-    comment_node->parent = parent_element;
-    comment_node->next_sibling = nullptr;
-    comment_node->prev_sibling = nullptr;
-
-    // Set Lambda backing
-    comment_node->native_element = native_element;
-    comment_node->tag_name = tag_name;  // RETAINED_FIELD_OK: interned reference type name, no allocation retained
-
-    // Extract content from first String child (if exists)
-    if (native_element->length > 0) {
-        Item first_item = native_element->items[0];
-        if (get_type_id(first_item) == LMD_TYPE_STRING) {
-            String* content_str = first_item.get_string();
-            if (content_str) {
-                comment_node->content = content_str->chars;  // Reference, not copy
-                comment_node->length = content_str->len;
-            }
-        }
-    }
-    if (!comment_node->content) {
-        ElementReader reader(native_element);
-        const char* data_attr = reader.get_attr_string("data");
-        if (!data_attr) {
-            ConstItem attr_value = native_element->get_attr("data");
-            String* data_string = attr_value.string();
-            if (data_string) data_attr = data_string->chars;
-        }
-        if (data_attr) {
-            comment_node->content = data_attr;
-            comment_node->length = strlen(data_attr);
-        }
-    }
-
-    if (!comment_node->content) {
-        comment_node->content = "";
-        comment_node->length = 0;
-    }
-
-    log_debug("dom_comment_create: created backed comment (tag=%s, content='%s')",
-              tag_name, comment_node->content);
-
-    return comment_node;
-}
-
-DomComment* dom_comment_create_detached(Element* native_element, DomDocument* doc) {
-    if (!native_element) {
-        log_error("dom_comment_create_detached: native_element required");
-        return nullptr;
-    }
-    if (!doc || !doc->arena) {
-        log_error("dom_comment_create_detached: doc with arena required");
-        return nullptr;
-    }
-
-    TypeElmt* type = (TypeElmt*)native_element->type;
-    const char* tag_name = type ? type->name.str : nullptr;
-    if (!tag_name) {
-        log_error("dom_comment_create_detached: no tag name");
-        return nullptr;
-    }
-
-    DomNodeType node_type;
-    if (str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
-        node_type = DOM_NODE_DOCTYPE;
-    } else if (strcmp(tag_name, "!--") == 0) {
-        node_type = DOM_NODE_COMMENT;
-    } else {
-        log_error("dom_comment_create_detached: not a comment or DOCTYPE: %s", tag_name);
-        return nullptr;
-    }
-
+    // Arena zeroing supplies every null/zero default omitted below.
     DomComment* comment_node = (DomComment*)arena_calloc(doc->arena, sizeof(DomComment));
     if (!comment_node) {
-        log_error("dom_comment_create_detached: arena_calloc failed");
+        log_error("DomComment::create_detached: arena_calloc failed");
         return nullptr;
     }
 
     comment_node->id = dom_document_alloc_node_id(doc);
     comment_node->node_type = node_type;
-    comment_node->parent = nullptr;
-    comment_node->next_sibling = nullptr;
-    comment_node->prev_sibling = nullptr;
     comment_node->native_element = native_element;
     comment_node->tag_name = tag_name;  // RETAINED_FIELD_OK: interned reference type name, no allocation retained
 
@@ -2703,12 +2658,13 @@ DomComment* dom_comment_create_detached(Element* native_element, DomDocument* do
 
     if (!comment_node->content) {
         comment_node->content = "";
-        comment_node->length = 0;
     }
 
-    log_debug("dom_comment_create_detached: created comment (tag=%s, content='%s')",
-              tag_name, comment_node->content);
     return comment_node;
+}
+
+DomComment* dom_comment_create_detached(Element* native_element, DomDocument* doc) {
+    return DomComment::create_detached(native_element, doc);
 }
 
 void dom_comment_destroy(DomComment* comment_node) {
@@ -2858,7 +2814,7 @@ DomComment* DomElement::append_comment(const char* comment_content) {
     }
 
     // Create DomComment wrapper
-    DomComment* comment_node = dom_comment_create(
+    DomComment* comment_node = DomComment::create(
         comment_item.element,
         parent
     );
@@ -3061,16 +3017,11 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         }
     }
 
-    // create DomElement
+    // UI-mode Lambda elements already occupy zeroed DomElement storage.
     bool ui_mode = doc->input && doc->input->ui_mode;
-    DomElement* dom_elem;
-    if (ui_mode) {
-        // UI mode: DomElement already allocated by MarkBuilder's ElementBuilder
-        dom_elem = element_to_dom_element(elem);
-        if (!dom_element_init(dom_elem, doc, tag_name, elem)) return nullptr;
-    } else {
-        dom_elem = dom_element_create(doc, tag_name, elem);
-    }
+    DomElement* dom_elem = ui_mode
+        ? DomElement::create_in(element_to_dom_element(elem), doc, tag_name, elem)
+        : DomElement::create(doc, tag_name, elem);
     if (!dom_elem) return nullptr;
 
     // populate element-to-DOM map if available (for incremental rebuild)
@@ -3248,7 +3199,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             // HTML5 parser uses "#comment", CSS/older parsers use "!--"
             if (strcmp(child_tag_name, "!--") == 0 || strcmp(child_tag_name, "#comment") == 0 || str_ieq_const(child_tag_name, strlen(child_tag_name), "!DOCTYPE")) {
                 // Create DomComment node backed by Lambda Element
-                DomComment* comment_node = dom_comment_create(child_elem, dom_elem);
+                DomComment* comment_node = DomComment::create(child_elem, dom_elem);
                 if (comment_node) {
                     // Add to DOM sibling chain
                     dom_append_to_sibling_chain(dom_elem, comment_node);
@@ -3290,11 +3241,11 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                         text_node = candidate;
                         text_node->parent = dom_elem;
                     } else {
-                        text_node = dom_text_create(text_str, dom_elem);
+                        text_node = DomText::create(text_str, dom_elem);
                     }
                 } else {
                     // Create text node (preserves Lambda String reference)
-                    text_node = dom_text_create(text_str, dom_elem);
+                    text_node = DomText::create(text_str, dom_elem);
                 }
                 if (text_node) {
                     // Add text node to DOM sibling chain
@@ -3309,7 +3260,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             Symbol* sym = child_item.get_symbol();
             if (sym && sym->len > 0) {
                 // Create symbol text node (will be resolved at render time)
-                DomText* text_node = dom_text_create_symbol(sym->chars, sym->len, dom_elem);
+                DomText* text_node = DomText::create_symbol(sym->chars, sym->len, dom_elem);
                 if (text_node) {
                     // Add symbol node to DOM sibling chain
                     dom_append_to_sibling_chain(dom_elem, text_node);
@@ -3339,10 +3290,10 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                     text_node = candidate;
                                     text_node->parent = dom_elem;
                                 } else {
-                                    text_node = dom_text_create(text_str, dom_elem);
+                                    text_node = DomText::create(text_str, dom_elem);
                                 }
                             } else {
-                                text_node = dom_text_create(text_str, dom_elem);
+                                text_node = DomText::create(text_str, dom_elem);
                             }
                             if (text_node) {
                                 dom_append_to_sibling_chain(dom_elem, text_node);
@@ -3351,7 +3302,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     } else if (arr_item_type == LMD_TYPE_SYMBOL) {
                         Symbol* sym = arr_item.get_symbol();
                         if (sym && sym->len > 0) {
-                            DomText* text_node = dom_text_create_symbol(sym->chars, sym->len, dom_elem);
+                            DomText* text_node = DomText::create_symbol(sym->chars, sym->len, dom_elem);
                             if (text_node) {
                                 dom_append_to_sibling_chain(dom_elem, text_node);
                             }
@@ -3375,17 +3326,17 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                                 tn = candidate;
                                                 tn->parent = dom_elem;
                                             } else {
-                                                tn = dom_text_create(s, dom_elem);
+                                                tn = DomText::create(s, dom_elem);
                                             }
                                         } else {
-                                            tn = dom_text_create(s, dom_elem);
+                                            tn = DomText::create(s, dom_elem);
                                         }
                                         if (tn) dom_append_to_sibling_chain(dom_elem, tn);
                                     }
                                 } else if (nested_type == LMD_TYPE_SYMBOL) {
                                     Symbol* sym = nested_item.get_symbol();
                                     if (sym && sym->len > 0) {
-                                        DomText* tn = dom_text_create_symbol(sym->chars, sym->len, dom_elem);
+                                        DomText* tn = DomText::create_symbol(sym->chars, sym->len, dom_elem);
                                         if (tn) dom_append_to_sibling_chain(dom_elem, tn);
                                     }
                                 }

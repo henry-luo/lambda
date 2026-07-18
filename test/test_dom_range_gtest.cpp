@@ -100,7 +100,9 @@ protected:
 
     // Create a minimally-initialized DomElement.
     DomElement* make_element() {
-        DomElement* e = new DomElement();  // default ctor zeros all fields we care about
+        DomElement* e = new DomElement{};
+        e->node_type = DOM_NODE_ELEMENT;
+        e->set_synthetic(true);
         e->doc = &doc_storage;
         return e;
     }
@@ -108,7 +110,8 @@ protected:
     // Create a minimally-initialized DomText with a literal C string. The
     // string lives as long as the test (string literals have static storage).
     DomText* make_text(const char* s, size_t len) {
-        DomText* t = new DomText();
+        DomText* t = new DomText{};
+        t->node_type = DOM_NODE_TEXT;
         t->text = s;
         t->length = len;
         return t;
@@ -179,7 +182,7 @@ TEST_F(DomRangeTest, BoundaryCompareAncestorContainerVsDescendant) {
 // UTF-16 length
 // ============================================================================
 TEST(DomRangeUtf16, AsciiLengthMatchesByteLength) {
-    DomText t;
+    DomText t = {};
     const char* s = "abcdef";
     t.text = s;
     t.length = 6;
@@ -188,7 +191,7 @@ TEST(DomRangeUtf16, AsciiLengthMatchesByteLength) {
 
 TEST(DomRangeUtf16, BmpAndAstralCount) {
     // "a" + U+00E9 ("é", BMP, 2 UTF-8 bytes) + U+1F600 (😀, astral, 4 UTF-8 bytes)
-    DomText t;
+    DomText t = {};
     const char* s = "a\xC3\xA9\xF0\x9F\x98\x80";
     t.text = s;
     t.length = 7;

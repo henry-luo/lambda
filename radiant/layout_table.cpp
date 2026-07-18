@@ -4300,15 +4300,9 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
     DomElement* anon = lam::pool_alloc_dom_element(pool);
     if (!anon) return nullptr;
 
-    // Initialize as element node
-    anon->node_type = DOM_NODE_ELEMENT;
     dom_element_retain_tag_name(anon, lam::borrow_const(lam::promote_to_pool(pool, tag_name)));
     anon->doc = parent->doc;
     anon->parent = parent;
-    anon->first_child = nullptr;
-    anon->last_child = nullptr;
-    anon->next_sibling = nullptr;
-    anon->prev_sibling = nullptr;
 
     // Set display type based on requested type
     switch (display_type) {
@@ -9327,7 +9321,6 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
 
             table_wrapper = lam::pool_alloc_dom_element(pool);
             if (table_wrapper) {
-                table_wrapper->node_type = DOM_NODE_ELEMENT;
                 dom_element_retain_tag_name(table_wrapper, lam::borrow_const(lam::promote_to_pool(pool, "::anon-table")));
                 table_wrapper->doc = parent->doc;
                 table_wrapper->display.outer = parent_is_inline ? CSS_VALUE_INLINE : CSS_VALUE_BLOCK;
@@ -9358,7 +9351,6 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         if (has_cells && table_wrapper) {
             row_wrapper = lam::pool_alloc_dom_element(pool);
             if (row_wrapper) {
-                row_wrapper->node_type = DOM_NODE_ELEMENT;
                 dom_element_retain_tag_name(row_wrapper, lam::borrow_const(lam::promote_to_pool(pool, "::anon-tr")));
                 row_wrapper->doc = parent->doc;
                 row_wrapper->parent = table_wrapper;

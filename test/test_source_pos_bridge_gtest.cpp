@@ -306,12 +306,15 @@ protected:
     }
 
     DomElement* make_element() {
-        DomElement* e = new DomElement();
+        DomElement* e = new DomElement{};
+        e->node_type = DOM_NODE_ELEMENT;
+        e->set_synthetic(true);
         e->doc = &doc_storage;
         return e;
     }
     DomText* make_text(const char* s, size_t len) {
-        DomText* t = new DomText();
+        DomText* t = new DomText{};
+        t->node_type = DOM_NODE_TEXT;
         t->text = s;
         t->length = len;
         return t;

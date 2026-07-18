@@ -188,7 +188,7 @@ Order chosen so each task's measurement is attributable. Run `size_probe` + reco
 
 ---
 
-## P7 — Constructor retirement: static `create()` construction  **[DV16 — follow-up, NOT STARTED]**
+## P7 — Constructor retirement: static `create()` construction  **[DV16 — follow-up, COMPLETE]**
 
 *(Added 2026-07-18 after campaign completion. The P0–P6 campaign left the C++ constructors untouched; they remain a fourth init path that production never runs and that has already drifted from the real ones. This phase establishes the C+ struct-based construction convention.)*
 
@@ -231,6 +231,7 @@ Order chosen so each task's measurement is attributable. Run `size_probe` + reco
 | after P3.4 | 80 | 120 | 368 | not snapshotted | OQ2 rejected: symbols and first-letter slices intentionally use non-mirroring text/length |
 | after P4 | 80 | 120 | 368 | not snapshotted | 78-row table replaced the JS computed-style switch |
 | campaign end | 80 | 120 | 368 | +329 | final exact ratchets; LOC is the non-blocking production-source check from rule 7 |
+| after P7 | 80 | 120 | 368 | +197 | P7 itself removed 132 production LOC; node sizes are unchanged |
 
 ## 8. Sequencing & risk register
 
@@ -265,7 +266,7 @@ Order chosen so each task's measurement is attributable. Run `size_probe` + reco
 | P4 | complete | The immutable 78-row computed-style table, flush entry, JS routing, unsupported-property logging, gtests, and live mutation UI fixture landed. |
 | P5 | complete | Tree/attribute operations are methods and obsolete wrappers have zero callers. Scratch fields were moved where a stable owner exists; the explicitly allowed tagged deferrals are recorded in §14. |
 | P6 | complete | JS runtime, viewport, reconcile, and opaque service state are grouped under named `DomDocument` sub-structures. |
-| P7 | **not started** | DV16 constructor retirement (added 2026-07-18): remove node constructors, static `create()` = `arena_calloc` + sparse non-zero stores, resolve `display`/`inline_line_number` init divergences, record convention in `C_Plus_Convention.md`. |
+| P7 | complete | Node constructors and the free `dom_element_init` path are retired. Static factories own arena/pool allocation and canonical initialization; only bridge-linked free creation shims remain. The C+ construction convention and verification evidence are recorded below. |
 
 ## 11. P1 shared-group alias ledger
 
@@ -338,3 +339,20 @@ Median combined arena use per page fell from 31,240 B to 28,192 B (−9.76%). Me
 Largest absolute DOM-arena reductions were `underscorejs` (−139,104 B), `cnn_lite` (−29,936 B), `linuxmint` (−26,128 B), `flex` (−26,000 B), and `html5-kitchen-sink` (−24,288 B). `cnn_lite` had the largest reduction among those pages by percentage at 20.4%.
 
 The arena result does not describe every allocation owned by the trees. `ViewTree::alloc_prop()` and cold document extensions allocate directly from their backing pools. Including the complete `dom.document` and `view_tree.pool` cumulative allocation counters gives 28,277,476 B at baseline and 28,325,328 B after the refactor: **+47,852 B (+0.17%)** in aggregate, while the median page falls from 292,688 B to 283,350 B (−3.19%). The near-flat aggregate includes the intentional cost of independently coexisting item/role props, lazy layout caches, and cold extensions; unlike arena used bytes, rpmalloc-backed pool counters are cumulative allocation upper bounds rather than exact live-byte measurements.
+
+## 18. P7 completion evidence
+
+- `DomNode`, `DomText`, `DomComment`, and `DomElement` have no C++ constructors. Compiler-trait assertions (`__is_trivially_copyable`) protect all four types without introducing a forbidden C++ standard-library dependency. The `-Winvalid-offsetof` suppression remains necessary: `DomElement` is still non-standard-layout because both its base and derived class contain storage, independently of constructors.
+- `DomElement`, `DomText`, and `DomComment` now expose static `create()`/`create_in()` factories. All document-arena, view-pool, MarkBuilder UI, runtime, editor, layout, and test call sites use those factories or explicit zero-initialized test fixtures. Raw `arena_calloc`/`pool_calloc` allocation of these node types exists only inside the factories.
+- The UI-mode fat `DomElement` is a genuine reused-storage consumer. Its `create_in(storage, ...)` overload replaces `dom_element_init` and resets old tree links, attribute caches, style-resolution state, and synthetic identity before rebinding; this prevents a previous DOM epoch from being spliced into a rebuilt tree.
+- The canonical display default is `CSS_VALUE__UNDEF`, with the table-first-resolution invariant documented at the store. `inline_line_number` is zero until assigned to an atomic-inline view; the consumer audit found no negative-sentinel test, only local `-1` return fallbacks, so the zeroed arena behavior is canonical.
+- The only retained `dom_*_create` free functions are one-return bridge shims used by `lambda/js/js_dom.cpp` and `lambda/module/radiant/radiant_dom_bridge.cpp`: element, attached/detached text, and detached comment creation. `dom_element_init` and all unlinked creation wrappers have zero declarations or callers.
+- `doc/dev/C_Plus_Convention.md` now specifies static factories for zeroed node/pool storage and density-based selection between sparse factory stores and canonical-default `memcpy` for property groups.
+
+Verification on the final implementation:
+
+- `make build` and `make build-test` pass. Eight focused DOM/CSS/layout executables pass 185/185 tests.
+- The UI suite passes 239 tests with two declared headless skips; this includes the reused-storage selection fixture that originally exposed stale epoch links.
+- `make layout suite=baseline` passes 4,379/4,379 comparisons with six declared skips. The broader Radiant target also passes its layout, page (46), UI, view (21), page-load (104), fuzzy-crash (24), and render baselines; its final aggregate exit remains the separately recorded CSS-syntax threshold defect (18 passes versus 25 required), whose failures are tokenizer/encoding cases outside DOM construction.
+- Constructor, placement-new, raw-allocation, legacy-initializer, wrapper-caller, and `inline_line_number` audits are clean against the contracts above; `git diff --check` passes.
+- P7 production code is 214 additions and 346 deletions, **net −132 LOC**. The required full touched-set check (production, tests, and documentation) reports 64,159 lines before and 64,074 after: **net −85 LOC**, passing `verify_loc_reduction.sh --ref 1183c28ef2af60337988cc0afb7c965687da72dd`.

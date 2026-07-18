@@ -202,17 +202,11 @@ inline ViewTree* pool_alloc_view_tree(Pool* pool) {
 }
 
 inline DomElement* pool_alloc_dom_element(Pool* pool) {
-    DomElement* element = reinterpret_cast<DomElement*>(pool_calloc(pool, sizeof(DomElement)));
-    if (element) {
-        // View-pool DomElements are generated boxes with no Lambda Element;
-        // zeroed flags otherwise make them look backed after native_element removal.
-        element->set_synthetic(true);
-    }
-    return element;
+    return DomElement::create_in(pool);
 }
 
 inline DomText* pool_alloc_dom_text(Pool* pool) {
-    return reinterpret_cast<DomText*>(pool_calloc(pool, sizeof(DomText)));
+    return DomText::create_in(pool);
 }
 
 inline ViewElement* unsafe_view_element_storage(View* view) {

@@ -2368,7 +2368,7 @@ static bool rich_transaction_default_mutate_unscoped(
         }
     } else {
         DomDocument* doc = surface->owner->doc;
-        DomText* text = dom_text_create_detached_copy(
+        DomText* text = DomText::create_detached_copy(
             doc, intent->data, byte_len);
         inserted = text && dom_range_insert_node(
             range, static_cast<DomNode*>(text), &exception);

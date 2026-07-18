@@ -46,6 +46,8 @@ TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
 
     DomDocument doc = {};
     DomElement element = {};
+    element.node_type = DOM_NODE_ELEMENT;
+    element.set_synthetic(true);
     element.doc = &doc;
     element.set_styles_resolved(true);
     doc.root = &element;
@@ -65,6 +67,8 @@ TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
 TEST(CssPropTable, DirtyMutationFlushesBeforeSerialization) {
     DomDocument doc = {};
     DomElement element = {};
+    element.node_type = DOM_NODE_ELEMENT;
+    element.set_synthetic(true);
     InlineProp in_line = INLINE_PROP_DEFAULT;
     in_line.opacity = 1.0f;
     element.doc = &doc;

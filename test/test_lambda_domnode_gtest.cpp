@@ -446,7 +446,7 @@ TEST_F(DomNodeBaseTest, AttributeManipulation) {
     ASSERT_NE(native_elem, nullptr);
 
     // Create DomElement with native backing
-    DomElement* elem = dom_element_create(doc, "div", native_elem);
+    DomElement* elem = DomElement::create(doc, "div", native_elem);
     ASSERT_NE(elem, nullptr);
     elem->doc->input = test_input;  // Set input context for attribute operations
 
@@ -477,7 +477,7 @@ TEST_F(DomNodeBaseTest, AttributeManipulation) {
 }
 
 TEST_F(DomNodeBaseTest, ClassManagement) {
-    DomElement* elem = dom_element_create(doc, "div", nullptr);
+    DomElement* elem = DomElement::create(doc, "div", nullptr);
     ASSERT_NE(elem, nullptr);
 
     // Add classes
@@ -508,7 +508,7 @@ TEST_F(DomNodeBaseTest, ClassManagement) {
 
 TEST_F(DomNodeBaseTest, EmptyAndNullHandling) {
     // Test with null/empty strings
-    DomElement* elem = dom_element_create(doc, "div", nullptr);
+    DomElement* elem = DomElement::create(doc, "div", nullptr);
     ASSERT_NE(elem, nullptr);
 
     // Empty class name
@@ -770,7 +770,7 @@ TEST_F(DomNodeBaseTest, ComplexAttributeValues) {
     ASSERT_NE(native_elem, nullptr);
 
     // Create DomElement with native backing
-    DomElement* elem = dom_element_create(doc, "div", native_elem);
+    DomElement* elem = DomElement::create(doc, "div", native_elem);
     ASSERT_NE(elem, nullptr);
     elem->doc->input = test_input;  // Set input context for attribute operations
 

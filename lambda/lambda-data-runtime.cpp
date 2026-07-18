@@ -2050,8 +2050,8 @@ Element* elmt(int64_t type_index) {
 
     if (context->ui_mode && context->arena) {
         // ui_mode: allocate fat DomElement on result arena
-        DomElement* dom = (DomElement*)arena_calloc(context->arena, sizeof(DomElement));
-        dom->node_type = DOM_NODE_ELEMENT;
+        DomElement* dom = DomElement::create_in(context->arena);
+        if (!dom) return nullptr;
         Element* e = dom_element_to_element(dom);
         e->type_id = LMD_TYPE_ELEMENT;
         e->type = elmt_type;
@@ -2080,17 +2080,11 @@ Element* elmt_with_tl(int64_t type_index, void* type_list_ptr) {
 Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
     String* src = str_item.get_safe_string();
     if (!src) return str_item;
-    size_t total = sizeof(DomText) + sizeof(String) + src->len + 1;
-    DomText* dt = (DomText*)arena_calloc(arena, total);
-    dt->node_type = DOM_NODE_TEXT;
-    dt->set_symbol(false);
+    DomText* dt = DomText::create_in(arena, src->len);
+    if (!dt) return ItemNull;
     String* dst = dom_text_to_string(dt);
-    dst->len = src->len;
     dst->is_ascii = src->is_ascii;
     memcpy(dst->chars, src->chars, src->len + 1);
-    dt->native_string = dst;
-    dt->text = dst->chars;
-    dt->length = dst->len;
     return {.item = s2it(dst)};
 }
 
@@ -2098,19 +2092,13 @@ Item ui_copy_string_to_arena(Arena* arena, Item str_item) {
 // Called by list_push() string merge path in ui_mode.
 Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next) {
     size_t new_len = prev->len + next->len;
-    size_t total = sizeof(DomText) + sizeof(String) + new_len + 1;
-    DomText* dt = (DomText*)arena_calloc(arena, total);
-    dt->node_type = DOM_NODE_TEXT;
-    dt->set_symbol(false);
+    DomText* dt = DomText::create_in(arena, new_len);
+    if (!dt) return ItemNull;
     String* merged = dom_text_to_string(dt);
-    merged->len = new_len;
     merged->is_ascii = prev->is_ascii && next->is_ascii;
     memcpy(merged->chars, prev->chars, prev->len);
     memcpy(merged->chars + prev->len, next->chars, next->len);
     merged->chars[new_len] = '\0';
-    dt->native_string = merged;
-    dt->text = merged->chars;
-    dt->length = merged->len;
     return {.item = s2it(merged)};
 }
 

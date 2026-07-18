@@ -130,7 +130,7 @@ TEST(OwnershipPersistentField, WebviewSourcesRemainBoundToDomPoolLifetime) {
 }
 
 TEST(TaggedView, CastsOnlyWhenRuntimeTagMatches) {
-    ViewBlock block;
+    ViewBlock block = {};
     block.view_type = RDT_VIEW_BLOCK;
     View* view = static_cast<View*>(&block);
 
@@ -145,10 +145,10 @@ TEST(TaggedView, CastsOnlyWhenRuntimeTagMatches) {
 }
 
 TEST(TaggedView, VisitViewDispatchesTypedPointers) {
-    ViewText text;
+    ViewText text = {};
     text.view_type = RDT_VIEW_TEXT;
 
-    ViewBlock block;
+    ViewBlock block = {};
     block.view_type = RDT_VIEW_BLOCK;
 
     EXPECT_EQ(lam::visit_view(static_cast<View*>(&text), VisitKind()), 1);
@@ -157,7 +157,8 @@ TEST(TaggedView, VisitViewDispatchesTypedPointers) {
 }
 
 TEST(TaggedDomNode, DomAsCastsOnlyWhenRuntimeTagMatches) {
-    DomText text;
+    DomText text = {};
+    text.node_type = DOM_NODE_TEXT;
     DomNode* node = static_cast<DomNode*>(&text);
 
     EXPECT_EQ(lam::dom_as<DOM_NODE_TEXT>(node), &text);

@@ -371,11 +371,11 @@ protected:
             doc = dom_document_create(input);
         }
 
-        DomElement* div = dom_element_create(doc, "div", nullptr);
+        DomElement* div = DomElement::create(doc, "div", nullptr);
         div->set_attribute("id", "main");
         div->set_attribute("class", "container");
 
-        DomElement* p = dom_element_create(doc, "p", nullptr);
+        DomElement* p = DomElement::create(doc, "p", nullptr);
         p->set_attribute("class", "text");
         div->append_child(p);
 
@@ -535,7 +535,7 @@ TEST_F(HtmlCssIntegrationTest, ApplySimpleCSSRule) {
     doc = dom_document_create(input);
 
     // Create a simple DOM element
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
     div->add_class("box");
 
     // Create CSS declaration for .box { color: blue; }
@@ -597,7 +597,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
     Input* input = Input::create(pool);
     doc = dom_document_create(input);
 
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
     div->set_attribute("id", "main");
     div->add_class("box");
 
@@ -1581,7 +1581,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTreePerformance_MultipleProperties) {
     Input* input = Input::create(pool);
     doc = dom_document_create(input);
 
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
 
     // Apply many properties to test AVL tree performance
     const int num_properties = 50;
@@ -1626,7 +1626,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
     Input* input = Input::create(pool);
     doc = dom_document_create(input);
 
-    DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = DomElement::create(doc, "div", nullptr);
 
     // Apply color with different specificities
     // 1. Element selector (0,0,0,1)

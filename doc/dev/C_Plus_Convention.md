@@ -196,6 +196,20 @@ void free_map_item(Map* map) {
 | `std::make_shared<T>()` | Embed `ref_cnt` in the struct, manage manually |
 | `std::unique_ptr<T>` | Stack-allocate with RAII destructor, or arena-allocate |
 
+### Struct construction
+
+Nodes and other pool/arena-owned C+ structs use static `create()` factories,
+not C++ constructors. The factory obtains zeroed storage with `arena_calloc()`
+or `pool_calloc()` and writes only semantic non-zero fields. A `create_in()`
+variant may establish the discriminator when a document/context does not exist
+yet. This keeps every allocation path on the same visible initialization contract
+and preserves trivial-copy layout.
+
+Property groups use `ensure_*()` instead: allocate lazily and `memcpy()` from the
+canonical immutable default. Choose between the two patterns by default density:
+sparse zero defaults use `create()` plus explicit stores; dense non-zero defaults
+use `ensure_*()` plus a canonical-default copy.
+
 ---
 
 ## 4. No C++ Exception Handling

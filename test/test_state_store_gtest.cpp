@@ -57,7 +57,9 @@ protected:
     }
 
     DomElement* make_element() {
-        DomElement* element = new DomElement();
+        DomElement* element = new DomElement{};
+        element->node_type = DOM_NODE_ELEMENT;
+        element->set_synthetic(true);
         element->doc = &doc;
         static_cast<DomNode*>(element)->id = doc.next_node_id++;
         element->view_type = RDT_VIEW_BLOCK;

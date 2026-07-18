@@ -176,22 +176,13 @@ String* MarkBuilder::createStringFromBuf(StringBuf* sb) {
 String* MarkBuilder::createDomTextString(const char* str, size_t len) {
     if (!str) return nullptr;
 
-    // Allocate [DomText][String header][chars...\0] as one contiguous block
-    // Used in ui_mode for text content that becomes DomText nodes in layout
-    size_t total = sizeof(DomText) + sizeof(String) + len + 1;
-    DomText* dt = (DomText*)arena_calloc(arena_, total);  // zeros DomText fields
+    // Allocate [DomText][String header][chars...\0] as one contiguous block.
+    DomText* dt = DomText::create_in(arena_, len);
     if (!dt) return nullptr;
-    dt->node_type = DOM_NODE_TEXT;
-    dt->set_symbol(false);
     String* s = dom_text_to_string(dt);
-    s->len = (uint32_t)len;
     s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
     memcpy(s->chars, str, len);
     s->chars[len] = '\0';
-    // Set convenience fields for backward compat with DomText consumers
-    dt->native_string = s;
-    dt->text = s->chars;
-    dt->length = s->len;
     return s;
 }
 
@@ -371,9 +362,8 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
 
     if (builder->ui_mode()) {
         // UI mode: allocate DomElement (contains DomNode + Element + CSS fields)
-        DomElement* dom = (DomElement*)arena_calloc(input->arena, sizeof(DomElement));
+        DomElement* dom = DomElement::create_in(input->arena);
         if (!dom) return;
-        dom->node_type = DOM_NODE_ELEMENT;
         element = dom_element_to_element(dom);
         element->type_id = LMD_TYPE_ELEMENT;
         element->type = &EmptyElmt;

@@ -397,11 +397,18 @@ struct DomElementExt {
  */
 // tier-1: doc-pool, survives relayout
 struct DomElement : DomNode {
+    // Factories rely on zeroed arena/pool storage and write only semantic non-zero fields.
+    static DomElement* create(DomDocument* doc, const char* tag_name, Element* backing);
+    static DomElement* create_in(Arena* arena);
+    static DomElement* create_in(Pool* pool);
+    static DomElement* create_in(DomElement* storage, DomDocument* doc,
+                                 const char* tag_name, Element* backing);
+
     // Resolved props point into the shorter-lived view pool by unified-tree design;
     // every relayout resets and rebuilds them before consumers may read the tree.
     // === Embedded Lambda Element (at known offset from DomNode base) ===
-    // In UI mode, this IS the Lambda Element. In the current phase, data is copied
-    // from the original Element during dom_element_init(). MarkEditor operates on
+    // In UI mode, this IS the Lambda Element. Otherwise, data is copied from the
+    // original Element during create(). MarkEditor operates on
     // this embedded value, so mutations happen in-place.
     Element elmt;
 
@@ -698,30 +705,14 @@ struct DomElement : DomNode {
         ext->custom_layout_paint = nullptr;
     }
 
-    // Constructor
-    DomElement() : DomNode(DOM_NODE_ELEMENT), elmt{},
-        tag_name(nullptr), first_child(nullptr), last_child(nullptr),
-        tag_id(0), id(nullptr),
-        class_names(nullptr), class_count(0), specified_style(nullptr),
-        ext(nullptr), style_version(0),
-        // A constructed element has no Lambda backing until dom_element_init binds one.
-        elmt_flags(ELMT_FLAG_SYNTHETIC),
-        doc(nullptr), css_variables(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE},
-        font(nullptr), bound(nullptr), in_line(nullptr),
-        fi(nullptr), tb(nullptr),
-        content_width(0), content_height(0),
-        blk(nullptr), scroller(nullptr),
-        embed(nullptr), position(nullptr),
-        transform(nullptr), transition_state(nullptr),
-        filter(nullptr), pseudo(nullptr), layout_cache(nullptr) {}
 };
 
 // ============================================================================
 // DomElement ↔ Element conversion (Phase 1: Unified DOM Tree)
 // ============================================================================
 
-// Suppress -Winvalid-offsetof for non-standard-layout types (DomNode has protected ctor).
-// __builtin_offsetof works correctly on all major compilers regardless of layout category.
+// DomElement remains non-standard-layout because both its base and derived class
+// contain storage. __builtin_offsetof is stable on the supported compilers.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 
@@ -838,7 +829,7 @@ void dom_document_destroy(DomDocument* document);
 // ============================================================================
 
 /**
- * Create a new DomElement
+ * JS/Jube bridge shim for DomElement::create().
  * @param doc Parent document (provides arena and input)
  * @param tag_name Element tag name (e.g., "div", "span")
  * @param native_element Pointer to backing Lambda Element; null creates a synthetic node
@@ -851,16 +842,6 @@ DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* 
  * @param element Element to destroy
  */
 void dom_element_destroy(DomElement* element);
-
-/**
- * Initialize a DomElement structure (for stack-allocated elements)
- * @param element Element to initialize
- * @param doc Parent document (provides arena and input)
- * @param tag_name Element tag name
- * @param native_element Pointer to backing Lambda Element; null creates a synthetic node
- * @return true on success, false on failure
- */
-bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_name, Element* native_element);
 
 /**
  * Clear all data from a DomElement (without freeing the structure)

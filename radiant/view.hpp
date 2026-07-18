@@ -1741,6 +1741,11 @@ typedef struct ViewTableCell : ViewBlock {
 
 // Radiant view wrappers are static_cast/reinterpret_cast overlays on DOM storage
 // (see lib/tagged.hpp unsafe_* helpers), so adding fields here corrupts nodes.
+// The compiler trait keeps this C+ header independent of the C++ standard library.
+static_assert(__is_trivially_copyable(DomNode), "DomNode must remain trivially copyable");
+static_assert(__is_trivially_copyable(DomText), "DomText must remain trivially copyable");
+static_assert(__is_trivially_copyable(DomComment), "DomComment must remain trivially copyable");
+static_assert(__is_trivially_copyable(DomElement), "DomElement must remain trivially copyable");
 static_assert(sizeof(View) == sizeof(DomNode), "View must remain a DomNode alias");
 static_assert(sizeof(ViewText) == sizeof(DomText), "ViewText must not add fields");
 static_assert(sizeof(ViewElement) == sizeof(DomElement), "ViewElement must not add fields");

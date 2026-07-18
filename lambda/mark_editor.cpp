@@ -127,7 +127,7 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
                     candidate->native_string == s) {
                     dt = candidate;
                 } else {
-                    dt = dom_text_create(s, parent);
+                    dt = DomText::create(s, parent);
                 }
                 if (dt) {
                     node = static_cast<DomNode*>(dt);

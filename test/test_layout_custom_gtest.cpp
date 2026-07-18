@@ -88,6 +88,8 @@ protected:
 
     static void init_block(ViewBlock* block, const char* tag, float width, float height) {
         ASSERT_NE(block, nullptr);
+        block->node_type = DOM_NODE_ELEMENT;
+        block->set_synthetic(true);
         block->tag_name = tag;
         block->tag_id = DomNode::tag_name_to_id(tag);
         block->view_type = RDT_VIEW_BLOCK;
@@ -194,9 +196,9 @@ static bool custom_layout_test_intrinsic_constraints(const CustomLayoutContext* 
 }
 
 TEST_F(CustomLayoutTest, AutoParentSizeUsesPlacedChildContainingBox) {
-    ViewBlock parent;
-    ViewBlock first;
-    ViewBlock second;
+    ViewBlock parent = {};
+    ViewBlock first = {};
+    ViewBlock second = {};
     init_parent(&parent, 0.0f, 0.0f);
     init_block(&first, "section", 30.0f, 10.0f);
     init_block(&second, "section", 20.0f, 15.0f);
@@ -217,8 +219,8 @@ TEST_F(CustomLayoutTest, AutoParentSizeUsesPlacedChildContainingBox) {
 }
 
 TEST_F(CustomLayoutTest, ExplicitParentSizeWinsOverPlacedChildBounds) {
-    ViewBlock parent;
-    ViewBlock child;
+    ViewBlock parent = {};
+    ViewBlock child = {};
     init_parent(&parent, 123.0f, 45.0f);
     parent_blk.given_width = 123.0f;
     parent_blk.given_height = 45.0f;
@@ -238,9 +240,9 @@ TEST_F(CustomLayoutTest, ExplicitParentSizeWinsOverPlacedChildBounds) {
 }
 
 TEST_F(CustomLayoutTest, AutoParentSizeHonorsMinMaxConstraints) {
-    ViewBlock parent;
-    ViewBlock first;
-    ViewBlock second;
+    ViewBlock parent = {};
+    ViewBlock first = {};
+    ViewBlock second = {};
     init_parent(&parent, 0.0f, 0.0f);
     parent_blk.given_min_width = 100.0f;
     parent_blk.given_max_height = 25.0f;
@@ -261,7 +263,7 @@ TEST_F(CustomLayoutTest, AutoParentSizeHonorsMinMaxConstraints) {
 }
 
 TEST_F(CustomLayoutTest, UnregisteredLayoutFallsBackWithoutChangingBlock) {
-    ViewBlock parent;
+    ViewBlock parent = {};
     init_parent(&parent, 64.0f, 32.0f);
 
     EXPECT_FALSE(layout_custom_apply(&lycon, &parent, "unit-missing-layout"));
@@ -271,9 +273,9 @@ TEST_F(CustomLayoutTest, UnregisteredLayoutFallsBackWithoutChangingBlock) {
 }
 
 TEST_F(CustomLayoutTest, DuplicatePlacementsAreIgnoredAndMissingChildrenResetToOrigin) {
-    ViewBlock parent;
-    ViewBlock first;
-    ViewBlock second;
+    ViewBlock parent = {};
+    ViewBlock first = {};
+    ViewBlock second = {};
     init_parent(&parent, 0.0f, 0.0f);
     init_block(&first, "section", 20.0f, 10.0f);
     init_block(&second, "section", 30.0f, 15.0f);
@@ -292,10 +294,10 @@ TEST_F(CustomLayoutTest, DuplicatePlacementsAreIgnoredAndMissingChildrenResetToO
 }
 
 TEST_F(CustomLayoutTest, PlacementZFeedsSharedStackingOrder) {
-    ViewBlock parent;
-    ViewBlock first;
-    ViewBlock second;
-    ViewBlock third;
+    ViewBlock parent = {};
+    ViewBlock first = {};
+    ViewBlock second = {};
+    ViewBlock third = {};
     init_parent(&parent, 0.0f, 0.0f);
     init_block(&first, "section", 10.0f, 10.0f);
     init_block(&second, "section", 10.0f, 10.0f);
@@ -328,10 +330,10 @@ TEST_F(CustomLayoutTest, PlacementZFeedsSharedStackingOrder) {
 }
 
 TEST_F(CustomLayoutTest, GeneratedPaintAndChildrenShareSignedStackingOrder) {
-    ViewBlock parent;
-    ViewBlock first;
-    ViewBlock second;
-    ViewBlock third;
+    ViewBlock parent = {};
+    ViewBlock first = {};
+    ViewBlock second = {};
+    ViewBlock third = {};
     init_parent(&parent, 0.0f, 0.0f);
     init_block(&first, "section", 10.0f, 10.0f);
     init_block(&second, "section", 10.0f, 10.0f);
@@ -383,10 +385,10 @@ TEST_F(CustomLayoutTest, GeneratedPaintAndChildrenShareSignedStackingOrder) {
 }
 
 TEST_F(CustomLayoutTest, MissingPlacementZClearsPreviousCustomStackingOverlay) {
-    ViewBlock parent;
-    ViewBlock first;
-    ViewBlock second;
-    ViewBlock third;
+    ViewBlock parent = {};
+    ViewBlock first = {};
+    ViewBlock second = {};
+    ViewBlock third = {};
     init_parent(&parent, 0.0f, 0.0f);
     init_block(&first, "section", 10.0f, 10.0f);
     init_block(&second, "section", 10.0f, 10.0f);
@@ -410,8 +412,8 @@ TEST_F(CustomLayoutTest, MissingPlacementZClearsPreviousCustomStackingOverlay) {
 }
 
 TEST_F(CustomLayoutTest, PercentWidthChildInAutoWidthParentStillUsesCustomPlacement) {
-    ViewBlock parent;
-    ViewBlock child;
+    ViewBlock parent = {};
+    ViewBlock child = {};
     BlockProp child_blk = {};
     child_blk.given_width = -1.0f;
     child_blk.given_height = -1.0f;
@@ -443,8 +445,8 @@ TEST_F(CustomLayoutTest, PercentWidthChildInAutoWidthParentStillUsesCustomPlacem
 }
 
 TEST_F(CustomLayoutTest, IntrinsicWidthConstraintIsReportedAsNonDefinite) {
-    ViewBlock parent;
-    ViewBlock child;
+    ViewBlock parent = {};
+    ViewBlock child = {};
     init_parent(&parent, 52.0f, 0.0f);
     init_block(&child, "section", 40.0f, 10.0f);
     ASSERT_TRUE(parent.append_child(&child));

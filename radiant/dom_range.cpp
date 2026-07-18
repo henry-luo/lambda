@@ -1143,12 +1143,12 @@ static DomDocument* node_doc(DomNode* n) {
 // so the same code paths work in unit tests and production.
 // Build a DomText for a UTF-8 byte slice [chars, chars+byte_len).
 static DomText* dom_text_from_bytes(DomDocument* doc, const char* chars, size_t byte_len) {
-    return dom_text_create_detached_copy(doc, chars, byte_len);
+    return DomText::create_detached_copy(doc, chars, byte_len);
 }
 
 DomElement* dom_document_fragment_create(DomDocument* doc) {
     if (!doc) return nullptr;
-    return dom_element_create(doc, "#document-fragment", nullptr);
+    return DomElement::create(doc, "#document-fragment", nullptr);
 }
 
 DomNode* dom_node_clone(DomNode* node, bool deep) {
@@ -1161,7 +1161,7 @@ DomNode* dom_node_clone(DomNode* node, bool deep) {
     }
     if (node->is_element()) {
         DomElement* e = node->as_element();
-        DomElement* clone = dom_element_create(doc, e->tag_name, dom_element_backing(e));
+        DomElement* clone = DomElement::create(doc, e->tag_name, dom_element_backing(e));
         if (!clone) return nullptr;
         if (e->id) dom_element_retain_id(clone, lam::borrow_const(lam::promote_to_arena(doc->arena, e->id)));
         if (e->class_names) dom_element_retain_class_names(clone, lam::PoolPtr<const char*>(e->class_names));
@@ -1196,7 +1196,7 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
         doc, original->text, left_bytes);
     if (!right_str || !left_str) return nullptr;
 
-    DomText* right = dom_text_create_detached(right_str, doc);
+    DomText* right = DomText::create_detached(right_str, doc);
     if (!right) return nullptr;
 
     // Insert right after original.

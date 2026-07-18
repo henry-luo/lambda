@@ -426,7 +426,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
                                          const char* image_url) {
     float bullet_size = font_size * 0.35f;  // ~5-6px at 16px font
 
-    DomElement* marker_elem = dom_element_create(parent_elem->doc, "::marker", nullptr);
+    DomElement* marker_elem = DomElement::create(parent_elem->doc, "::marker", nullptr);
     if (!marker_elem) return nullptr;
 
     marker_elem->parent = parent_elem;

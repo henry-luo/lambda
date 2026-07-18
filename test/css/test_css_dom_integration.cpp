@@ -202,7 +202,7 @@ protected:
         }
 
         // Create DomElement with Lambda backing
-        DomElement* dom_elem = dom_element_create(doc, tag_name, lambda_elem.element);
+        DomElement* dom_elem = DomElement::create(doc, tag_name, lambda_elem.element);
         return dom_elem;
     }
 
@@ -1087,7 +1087,7 @@ TEST_F(DomIntegrationTest, EdgeCase_NullParameters) {
 }
 
 TEST_F(DomIntegrationTest, EdgeCase_EmptyStrings) {
-    DomElement* element = dom_element_create(doc, "", nullptr);
+    DomElement* element = DomElement::create(doc, "", nullptr);
     EXPECT_STREQ(element->tag_name, "");
 
     // Empty class name
