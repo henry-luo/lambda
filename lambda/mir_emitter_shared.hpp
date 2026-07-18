@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "lambda-data.hpp"
+#include "sys_func_registry.h"
 #include "../lib/arraylist.h"
 #include "../lib/hashmap.h"
 
@@ -16,6 +17,7 @@ struct JsClassEntry;
 struct MirImportEntry {
     MIR_item_t proto;
     MIR_item_t import;
+    JitImportMetadata metadata;
 };
 
 struct MirImportCacheEntry {
@@ -556,6 +558,8 @@ static inline MirImportEntry* em_ensure_import(MirEmitter* em,
     snprintf(new_entry.name, sizeof(new_entry.name), "%s", key.name);
     new_entry.entry.proto = proto;
     new_entry.entry.import = imp;
+    // Unknown imports retain conservative MAY_GC/unknown-value defaults.
+    jit_import_get_metadata(name, &new_entry.entry.metadata);
     hashmap_set(em->import_cache, &new_entry);
 
     found = (MirImportCacheEntry*)hashmap_get(em->import_cache, &key);

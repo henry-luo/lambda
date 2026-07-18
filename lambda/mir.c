@@ -47,6 +47,16 @@ static struct hashmap* func_map = NULL;
 
 HASHMAP_DEFINE_STRKEY(func_obj, JitImport, name)
 
+static JitImportMetadata conservative_import_metadata(void) {
+    JitImportMetadata metadata = {
+        JIT_EFFECT_MAY_GC,
+        JIT_REENTRY_UNKNOWN,
+        JIT_VALUE_UNKNOWN,
+        0,
+    };
+    return metadata;
+}
+
 static void init_func_map(void) {
     if (func_map) return;  // already initialized
 
@@ -63,11 +73,13 @@ static void init_func_map(void) {
     // Insert sys_func_defs entries (c_func_name → func_ptr)
     for (int i = 0; i < sys_func_def_count; i++) {
         if (sys_func_defs[i].func_ptr) {
-            JitImport entry = {sys_func_defs[i].c_func_name, sys_func_defs[i].func_ptr};
+            JitImport entry = {sys_func_defs[i].c_func_name,
+                sys_func_defs[i].func_ptr, conservative_import_metadata()};
             hashmap_set(func_map, &entry);
         }
         if (sys_func_defs[i].native_func_ptr) {
-            JitImport entry = {sys_func_defs[i].native_c_name, sys_func_defs[i].native_func_ptr};
+            JitImport entry = {sys_func_defs[i].native_c_name,
+                sys_func_defs[i].native_func_ptr, conservative_import_metadata()};
             hashmap_set(func_map, &entry);
         }
     }
@@ -88,12 +100,28 @@ void ensure_jit_imports_initialized(void) {
     init_func_map();
 }
 
+bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata) {
+    if (!metadata) return false;
+    *metadata = conservative_import_metadata();
+    if (!name) return false;
+
+    init_func_map();
+    JitImport key = {.name = name, .func = NULL};
+    const JitImport* found = (const JitImport*)hashmap_get(func_map, &key);
+    if (!found) return false;
+    *metadata = found->metadata;
+    return true;
+}
+
 void register_dynamic_import(const char *name, void *addr) {
     if (!dynamic_import_map) {
         dynamic_import_map = func_obj_new(64);
     }
     log_debug("register dynamic import: %s -> %p", name, addr);
-    JitImport entry = {(char*)name, (fn_ptr)addr};
+    // Dynamically linked generated functions can allocate and re-enter user
+    // code, so they must never inherit a NO_GC classification by default.
+    JitImport entry = {(char*)name, (fn_ptr)addr,
+        {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_UNKNOWN, 0}};
     hashmap_set(dynamic_import_map, &entry);
 }
 

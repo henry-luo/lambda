@@ -481,6 +481,9 @@ struct JsMirTranspiler {
     JsMirRootBinding* side_root_bindings;
     int side_root_binding_count;
     int side_root_binding_capacity;
+    int side_root_store_count;
+    int side_may_gc_call_count;
+    int side_no_gc_call_count;
     MIR_insn_t* side_root_backedge_reloads;
     int side_root_backedge_reload_count;
     int side_root_backedge_reload_capacity;
