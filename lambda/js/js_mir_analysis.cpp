@@ -1996,11 +1996,11 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         // A parent-local binding shadows an IIFE-promoted module binding with
         // the same minified name. Force the closure cell path or later lowering
         // will incorrectly read/write the unrelated module const.
-        // Top-level functions see module lexicals in ancestor_func_locals too;
-        // treating those as function shadows creates a bogus mixed-loop parent
-        // link past the module env. Only nested functions can shadow a promoted
-        // module binding through an enclosing function activation.
-        bool force_env_capture = fc->parent_index >= 0 && ancestor_func_locals &&
+        // Direct Program declarations never enter ancestor_func_locals. Any
+        // matching entry is therefore a real enclosing block/catch/loop or
+        // function binding that shadows the same-named module cell, including
+        // for a top-level closure whose parent_index is -1.
+        bool force_env_capture = ancestor_func_locals &&
             jm_name_set_has(ancestor_func_locals, ref->name);
 
         // This is a capture
@@ -2061,7 +2061,11 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         fc->captures[fc->capture_count].is_let_const = false;
         fc->captures[fc->capture_count].is_const = false;
         fc->captures[fc->capture_count].is_nfe_binding = is_func_expr;
-        fc->captures[fc->capture_count].force_env_capture = false;
+        // Annex B exposes a separate outer var binding for a block function.
+        // Its self-reference must stay in the private block closure cell;
+        // resolving it through the same-named module var lets `f = 123` inside
+        // the function overwrite the callable outer binding.
+        fc->captures[fc->capture_count].force_env_capture = is_block_func_decl;
         fc->capture_count++;
         log_debug("js-mir: self-capture '%s' in closure '%s'", self_name, fc->name);
     }

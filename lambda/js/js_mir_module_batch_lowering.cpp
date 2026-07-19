@@ -589,12 +589,12 @@ static void jm_collect_duplicate_module_block_lexicals(JsAstNode* node,
         if (n->left) {
             if (n->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
                 jm_note_module_block_lexical_decl(seen, duplicate_consts, (JsVariableDeclarationNode*)n->left);
-            } else if ((n->kind == JS_VAR_LET || n->kind == JS_VAR_CONST) &&
-                    n->left->node_type == JS_AST_NODE_IDENTIFIER) {
-                JsIdentifierNode* id = (JsIdentifierNode*)n->left;
-                char name[128];
-                snprintf(name, sizeof(name), "_js_%.*s", (int)id->name->len, id->name->chars);
-                jm_note_module_block_lexical_name(seen, duplicate_consts, name, (int)n->kind);
+            } else if (n->kind == JS_VAR_LET || n->kind == JS_VAR_CONST) {
+                // The AST stores destructuring for-of heads directly as a
+                // pattern. Counting identifiers only missed shadowing cells
+                // such as `for (let [x] of xs)` and captured the outer x.
+                jm_note_module_block_lexical_pattern(
+                    seen, duplicate_consts, n->left, (int)n->kind);
             } else {
                 jm_collect_duplicate_module_block_lexicals(n->left, seen, duplicate_consts, false);
             }
@@ -4390,6 +4390,12 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // Build set of all variable names visible at the top level and in enclosing functions
         struct hashmap* all_names = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
+        struct hashmap* module_lexical_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        struct hashmap* module_shadow_lexicals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        jm_collect_duplicate_module_block_lexicals((JsAstNode*)program,
+            module_lexical_names, module_shadow_lexicals, true);
 
         // Add top-level variable declarations and function names from program body
         // Use jm_collect_body_locals to also capture variables from for-of/for-in
@@ -4476,9 +4482,24 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // so we can detect when a parent function's local shadows a module constant.
             struct hashmap* ancestor_func_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
-            // Module lexicals are already represented by the module scope. Adding
-            // them here falsely forces descendant-only captures into a TDZ snapshot
-            // instead of the live module cell; only real ancestor functions belong.
+            // A nested module block/catch/loop lexical shadows any same-named
+            // module cell and must be captured from that lexical environment.
+            // Direct module/CommonJS bindings remain live module cells. Only a
+            // nested lexical that shadows another module binding needs a private
+            // closure cell; copying ordinary wrapper locals freezes their TDZ value.
+            struct hashmap* program_lexicals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            jm_collect_enclosing_lexicals_for_target((JsAstNode*)program,
+                (JsAstNode*)fc->node, program_lexicals);
+            size_t pl_iter = 0;
+            void* pl_item = NULL;
+            while (hashmap_iter(program_lexicals, &pl_iter, &pl_item)) {
+                JsNameSetEntry* lexical = (JsNameSetEntry*)pl_item;
+                if (jm_name_set_has(module_shadow_lexicals, lexical->name)) {
+                    jm_name_set_add(ancestor_func_locals, lexical->name);
+                }
+            }
+            hashmap_free(program_lexicals);
             int ancestor_idx = fc->parent_index;
             while (ancestor_idx >= 0 && ancestor_idx < mt->func_count) {
                 JsFuncCollected* anc = &mt->func_entries[ancestor_idx];
@@ -4619,6 +4640,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             hashmap_free(ancestor_func_locals);
             hashmap_free(ancestor_names);
         }
+
+        hashmap_free(module_shadow_lexicals);
+        hashmap_free(module_lexical_names);
 
         // Phase 1.6: Transitive capture propagation for multi-level closures.
         // If function G captures variable V from grandparent scope, then G's parent

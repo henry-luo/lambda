@@ -1380,16 +1380,16 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         }
         MIR_reg_t var_read_reg = live_cell_reg ? live_cell_reg : var->reg;
         MIR_reg_t lookup_key = 0;
-        if (var->from_env && mt->eval_local_frame_reg != 0 &&
-            mt->is_eval_direct && mt->in_main) {
-            // The caller's eval-local environment participates only while
-            // executing direct eval itself. Functions created by eval already
-            // captured their lexical cells and must not be shadowed by an
-            // unrelated same-named caller local on every later read.
+        if (mt->eval_local_frame_reg != 0 && mt->current_fc &&
+            mt->current_fc->has_direct_eval) {
+            // Sloppy direct eval can introduce a function-scoped var after MIR
+            // resolved this identifier to an outer/static binding. Later reads
+            // must consult that eval-local binding, while the fallback preserves
+            // the statically resolved value when eval introduced no such var.
             lookup_key = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
             var_read_reg = jm_call_2(mt, "js_eval_local_get_binding_or_fallback", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, lookup_key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, var_read_reg));
         }
         bool read_with_outer_binding = var->from_env && jm_current_function_captures_with_scope(mt);
         if (mt->with_depth > 0 || read_with_outer_binding) {

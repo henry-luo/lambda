@@ -12628,6 +12628,16 @@ extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallb
     if (js_current_private_home_class.item != 0 &&
         js_current_private_home_class.item != ItemNull.item &&
         get_type_id(js_current_private_home_class) != LMD_TYPE_UNDEFINED) {
+        Item current_super = js_get_prototype_of(js_current_private_home_class);
+        TypeId current_super_type = get_type_id(current_super);
+        if (current_super.item != ItemNull.item && current_super_type != LMD_TYPE_NULL &&
+                current_super_type != LMD_TYPE_UNDEFINED) {
+            // GetSuperConstructor observes the class constructor's mutable
+            // [[Prototype]], including a non-constructor installed through
+            // Object.setPrototypeOf. Return it before IsConstructor so MIR has
+            // already evaluated the super() arguments when the runtime throws.
+            return current_super;
+        }
         if (get_type_id(js_current_private_home_class) == LMD_TYPE_MAP) {
             bool super_found = false;
             Item recorded_super = js_map_get_fast(
@@ -12639,11 +12649,6 @@ extern "C" Item js_get_super_constructor_from_receiver(Item receiver, Item fallb
                 return recorded_super;
             }
         }
-        // super is lexical. An inherited constructor can run on a deeper
-        // subclass receiver, so deriving from receiver.constructor would call
-        // that inherited constructor again and recurse indefinitely.
-        Item lexical_super = js_get_prototype_of(js_current_private_home_class);
-        if (js_super_callee_is_constructor(lexical_super)) return lexical_super;
     }
     TypeId receiver_type = get_type_id(receiver);
     if (receiver.item == 0 || receiver.item == ITEM_JS_UNDEFINED || receiver_type == LMD_TYPE_NULL ||
@@ -12802,22 +12807,22 @@ extern "C" Item js_super_call_native(Item callee, Item this_val, Item* args, int
     if (!js_super_callee_is_constructor(callee)) {
         return js_throw_type_error("Super constructor is not a constructor");
     }
-    if (get_type_id(callee) == LMD_TYPE_MAP) {
-        // A runtime-valued `extends` identifier can denote another Lambda class
-        // object. The static lowering cannot classify that heritage, so route
-        // class maps through their stored constructor instead of calling the map.
-        return js_super_call_class(callee, this_val, args, argc);
-    }
     int ta_type = js_resolve_ta_type_from_ctor(callee);
     if (ta_type < 0 && get_type_id(callee) == LMD_TYPE_MAP) {
         ta_type = js_resolve_ta_type_from_class_map(callee);
     }
     if (ta_type >= 0) {
-        // super(args) for a typed-array subclass must create+initialize the backing
-        // with super's args (length/buffer) and the subclass prototype, not reuse a
-        // pre-allocated empty `this`. js_new_from_class_object honours the pending
-        // new.target (the subclass) for the prototype.
+        // An implicit TypedArray subclass has no own __ctor__. Treating that
+        // class-map super() as an empty constructor leaves a plain object with
+        // a TypedArray prototype but no native slot. Construct through the
+        // superclass so nested subclasses and species results stay real views.
         return js_new_from_class_object(callee, args, argc);
+    }
+    if (get_type_id(callee) == LMD_TYPE_MAP) {
+        // A runtime-valued `extends` identifier can denote another Lambda class
+        // object. The static lowering cannot classify that heritage, so route
+        // class maps through their stored constructor instead of calling the map.
+        return js_super_call_class(callee, this_val, args, argc);
     }
     if (js_builtin_super_constructs_via_construct(callee)) {
         return js_new_from_class_object(callee, args, argc);
