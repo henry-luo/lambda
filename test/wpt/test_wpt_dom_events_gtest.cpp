@@ -27,6 +27,9 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <chrono>
+
+#include "wpt_parallel_runner.hpp"
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -66,6 +69,9 @@
 #endif
 #ifndef WPT_RUNNER_INCLUDE
 #define WPT_RUNNER_INCLUDE(name) true
+#endif
+#ifndef WPT_RUNNER_SKIP_TENTATIVE
+#define WPT_RUNNER_SKIP_TENTATIVE 1
 #endif
 
 static const char* WPT_DIR = WPT_RUNNER_DIR;
@@ -167,9 +173,15 @@ static const char* SKIP_SUBSTRINGS[] = {
     // Replace-listener crash regression in detached browsing context.
     "replace-event-listener-null-browsing-context-crash",
 
+    // Bare IDL harnesses exercise the JavaScript WebIDL parser rather than
+    // the DOM behavior owned by these headless feature suites.
+    "idlharness.window.js",
+
     // Tentative / sub-resource tests -- gated on iframe / cross-origin
-    // capabilities.
+    // capabilities unless a focused suite explicitly opts them in.
+#if WPT_RUNNER_SKIP_TENTATIVE
     ".tentative",
+#endif
     ".sub.",
 
     // Shadow DOM dependencies (uses attachShadow internally).
@@ -264,6 +276,28 @@ static void write_file_contents(const char* path, const std::string& content) {
     if (!f) return;
     fwrite(content.data(), 1, content.size(), f);
     fclose(f);
+}
+
+static int read_wpt_variants(const char* path, char variants[][64], int capacity) {
+    FILE* file = fopen(path, "r");
+    if (!file) return 0;
+    char line[1024];
+    int count = 0;
+    while (count < capacity && fgets(line, sizeof(line), file)) {
+        if (!strstr(line, "<meta name=\"variant\"")) continue;
+        const char* content = strstr(line, "content=\"");
+        if (!content) continue;
+        content += strlen("content=\"");
+        const char* end = strchr(content, '"');
+        if (!end) continue;
+        size_t length = (size_t)(end - content);
+        if (length >= 64) length = 63;
+        memcpy(variants[count], content, length);
+        variants[count][length] = '\0';
+        count++;
+    }
+    fclose(file);
+    return count;
 }
 
 // extract value of an attribute like src="..." or src=foo.js from a tag string
@@ -390,6 +424,21 @@ struct WptDomEventsParam {
     std::string test_name;       // sanitised name for GTest
     bool        is_any_js;       // true if source is a bare .any.js / .window.js
     bool        skip;
+    char        variant[64];     // WPT META query variant, including leading '?'
+};
+
+struct WptDomEventsResult {
+    WptDomEventsParam param;
+    bool skipped;
+    bool crash_test_passed;
+    int pass_count;
+    int total_count;
+    int exit_code;
+    double seconds;
+    std::string skip_reason;
+    std::string setup_error;
+    std::string output;
+    std::vector<std::string> failures;
 };
 
 static void scan_wpt_dom_events_dir(const std::string& dir,
@@ -444,6 +493,7 @@ static void scan_wpt_dom_events_dir(const std::string& dir,
         }
 
         WptDomEventsParam p;
+        p.variant[0] = '\0';
         p.source_path = dir + "/" + name;
         p.is_any_js = is_any_js;
 
@@ -487,7 +537,25 @@ static void scan_wpt_dom_events_dir(const std::string& dir,
             p.skip = should_skip(rel);
         }
 
-        params.push_back(p);
+        char variants[8][64];
+        int variant_count = is_html
+            ? read_wpt_variants(p.source_path.c_str(), variants, 8) : 0;
+        if (variant_count == 0) {
+            params.push_back(p);
+        } else {
+            // A META variant is a separate WPT global with its own location.search;
+            // collapsing them into one empty-query run bypasses the test behavior.
+            for (int variant_index = 0; variant_index < variant_count; variant_index++) {
+                WptDomEventsParam expanded = p;
+                strncpy(expanded.variant, variants[variant_index], sizeof(expanded.variant) - 1);
+                expanded.variant[sizeof(expanded.variant) - 1] = '\0';
+                expanded.test_name += "_variant_";
+                for (const char* cursor = expanded.variant; *cursor; cursor++) {
+                    expanded.test_name += isalnum((unsigned char)*cursor) ? *cursor : '_';
+                }
+                params.push_back(expanded);
+            }
+        }
 
 #ifdef _WIN32
     } while (_findnext(handle, &fd) == 0);
@@ -515,11 +583,14 @@ static std::vector<WptDomEventsParam> discover_wpt_dom_events_tests() {
 
 class WptDomEventsTest : public testing::TestWithParam<WptDomEventsParam> {};
 
-TEST_P(WptDomEventsTest, Run) {
-    const auto& p = GetParam();
-
+static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
+    auto started = std::chrono::steady_clock::now();
+    WptDomEventsResult result = {};
+    result.param = p;
     if (p.skip) {
-        GTEST_SKIP() << "skipped (requires capability not yet supported): " << p.source_path;
+        result.skipped = true;
+        result.skip_reason = "skipped (requires capability not yet supported): " + p.source_path;
+        return result;
     }
 
     std::string scripts;
@@ -529,7 +600,10 @@ TEST_P(WptDomEventsTest, Run) {
         // Bare JS: wrap and treat as a single inline script. Use a blank
         // HTML stub for --document so the document-related globals exist.
         std::string body = read_file_contents(p.source_path.c_str());
-        ASSERT_FALSE(body.empty()) << "Could not read test file: " << p.source_path;
+        if (body.empty()) {
+            result.setup_error = "Could not read test file: " + p.source_path;
+            return result;
+        }
         std::string wrapped = wrap_any_js(body);
         scripts = extract_inline_scripts(wrapped, WPT_DIR);
         // Use a tiny inline blank document for the --document flag.
@@ -538,7 +612,10 @@ TEST_P(WptDomEventsTest, Run) {
         doc_arg = "test/wpt/wpt_blank_document.html";
     } else {
         std::string html = read_file_contents(p.source_path.c_str());
-        ASSERT_FALSE(html.empty()) << "Could not read test file: " << p.source_path;
+        if (html.empty()) {
+            result.setup_error = "Could not read test file: " + p.source_path;
+            return result;
+        }
         size_t slash = p.source_path.rfind('/');
         std::string source_dir = slash == std::string::npos
             ? std::string(WPT_DIR) : p.source_path.substr(0, slash);
@@ -546,11 +623,22 @@ TEST_P(WptDomEventsTest, Run) {
     }
 
     if (scripts.empty()) {
-        GTEST_SKIP() << "No scripts (reftest or empty): " << p.source_path;
+        result.skipped = true;
+        result.skip_reason = "No scripts (reftest or empty): " + p.source_path;
+        return result;
+    }
+
+    if (p.variant[0]) {
+        scripts.insert(0, "\" };\n");
+        scripts.insert(0, p.variant);
+        scripts.insert(0, "var location = { search: \"");
     }
 
     std::string shim = read_file_contents(SHIM_PATH);
-    ASSERT_FALSE(shim.empty()) << "Could not read testharness shim: " << SHIM_PATH;
+    if (shim.empty()) {
+        result.setup_error = std::string("Could not read testharness shim: ") + SHIM_PATH;
+        return result;
+    }
 
     // Compose: shim + extracted scripts + onload simulation + summary.
     std::string combined = shim + "\n" + scripts +
@@ -559,15 +647,13 @@ TEST_P(WptDomEventsTest, Run) {
     std::string temp_js = std::string(TEMP_DIR) + "/" + WPT_RUNNER_TEMP_PREFIX + p.test_name + ".js";
     write_file_contents(temp_js.c_str(), combined);
 
-    int exit_code = 0;
-    std::string output = execute_js_with_doc(temp_js.c_str(), doc_arg.c_str(), &exit_code);
+    std::string output = execute_js_with_doc(
+        temp_js.c_str(), doc_arg.c_str(), &result.exit_code);
+    result.output = output;
 
     // Parse output for FAIL lines and summary.
     //   FAIL: <name> - <error message>
     //   WPT_RESULT: N/M passed
-    std::vector<std::string> failures;
-    int pass_count = 0, total_count = 0;
-
     size_t pos = 0;
     while (pos < output.size()) {
         size_t eol = output.find('\n', pos);
@@ -575,23 +661,41 @@ TEST_P(WptDomEventsTest, Run) {
         std::string line = output.substr(pos, eol - pos);
         pos = eol + 1;
 
-        if (line.substr(0, 6) == "FAIL: ") failures.push_back(line);
+        if (line.substr(0, 6) == "FAIL: ") result.failures.push_back(line);
         if (line.substr(0, 12) == "WPT_RESULT: ") {
-            sscanf(line.c_str(), "WPT_RESULT: %d/%d", &pass_count, &total_count);
+            sscanf(line.c_str(), "WPT_RESULT: %d/%d",
+                   &result.pass_count, &result.total_count);
         }
     }
 
     unlink(temp_js.c_str());
+    result.crash_test_passed =
+        p.test_name.find("crash") != std::string::npos &&
+        result.total_count == 0 && result.exit_code == 0;
+    auto ended = std::chrono::steady_clock::now();
+    result.seconds = std::chrono::duration<double>(ended - started).count();
+    return result;
+}
+
+static void report_wpt_dom_events_result(const WptDomEventsResult& result) {
+    const WptDomEventsParam& p = result.param;
+
+    if (result.skipped) {
+        GTEST_SKIP() << result.skip_reason;
+    }
+    if (!result.setup_error.empty()) {
+        FAIL() << result.setup_error;
+        return;
+    }
 
     // Crash tests pass purely by completing.
-    bool is_crash_test = (p.test_name.find("crash") != std::string::npos);
-    if (is_crash_test && total_count == 0 && exit_code == 0) {
+    if (result.crash_test_passed) {
         append_passing_baseline(p.test_name);
         printf("  %s: crash test -- completed without crash\n", p.test_name.c_str());
         return;
     }
 
-    if (total_count == 0) {
+    if (result.total_count == 0) {
         if (BASELINE_PATH[0] && !passing_baseline_contains(p.test_name.c_str())) {
             GTEST_SKIP() << "known failure (not in baseline): no test results from "
                          << p.source_path;
@@ -601,44 +705,124 @@ TEST_P(WptDomEventsTest, Run) {
         // test() call ran). Expected until the phases described in
         // vibe/radiant/Radiant_Design_Event.md land.
         FAIL() << "No test results from " << p.source_path
-               << "\nExit code: " << exit_code
+               << "\nExit code: " << result.exit_code
                << "\nOutput (first 2KB):\n"
-               << output.substr(0, 2048);
+               << result.output.substr(0, 2048);
         return;
     }
 
-    printf("  %s: %d/%d passed", p.test_name.c_str(), pass_count, total_count);
-    if (!failures.empty()) printf(" (%zu failures)", failures.size());
+    printf("  %s: %d/%d passed", p.test_name.c_str(),
+           result.pass_count, result.total_count);
+    if (!result.failures.empty()) printf(" (%zu failures)", result.failures.size());
     printf("\n");
 
-    bool passing = failures.empty() && pass_count == total_count;
+    bool passing = result.failures.empty() && result.pass_count == result.total_count;
     if (passing) append_passing_baseline(p.test_name);
     if (!passing && BASELINE_PATH[0] && !passing_baseline_contains(p.test_name.c_str())) {
         GTEST_SKIP() << "known failure (not in baseline): "
-                     << pass_count << "/" << total_count << " passed"
-                     << (failures.empty() ? "" : "\nFirst failure: ")
-                     << (failures.empty() ? "" : failures.front());
+                     << result.pass_count << "/" << result.total_count << " passed"
+                     << (result.failures.empty() ? "" : "\nFirst failure: ")
+                     << (result.failures.empty() ? "" : result.failures.front());
     }
 
-    for (const auto& f : failures) {
+    for (const auto& f : result.failures) {
         ADD_FAILURE() << f;
     }
 
-    EXPECT_EQ(pass_count, total_count)
+    EXPECT_EQ(result.pass_count, result.total_count)
         << "Not all tests passed in " << p.source_path;
+}
+
+static const std::vector<WptDomEventsParam> g_wpt_dom_events_params =
+    discover_wpt_dom_events_tests();
+static std::vector<WptDomEventsResult> g_wpt_dom_events_results;
+static bool g_wpt_dom_events_pre_run = false;
+
+static const WptDomEventsResult* find_pre_run_result(const WptDomEventsParam& p) {
+    if (!g_wpt_dom_events_pre_run) return NULL;
+    for (size_t index = 0; index < g_wpt_dom_events_params.size(); index++) {
+        if (g_wpt_dom_events_params[index].test_name == p.test_name) {
+            return &g_wpt_dom_events_results[index];
+        }
+    }
+    return NULL;
+}
+
+TEST_P(WptDomEventsTest, Run) {
+    const WptDomEventsParam& p = GetParam();
+    const WptDomEventsResult* result = find_pre_run_result(p);
+    if (result) {
+        report_wpt_dom_events_result(*result);
+    } else {
+        report_wpt_dom_events_result(run_wpt_dom_events_case(p));
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(
     WptDomEvents,
     WptDomEventsTest,
-    testing::ValuesIn(discover_wpt_dom_events_tests()),
+    testing::ValuesIn(g_wpt_dom_events_params),
     [](const testing::TestParamInfo<WptDomEventsParam>& info) {
         return info.param.test_name;
     });
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(WptDomEventsTest);
 
+static int extract_parallel_jobs(int* argc, char** argv) {
+    int jobs = wpt_parallel_jobs("LAMBDA_WPT_DOM_JOBS", "WPT_DOM_JOBS");
+    for (int i = 1; i < *argc; i++) {
+        int consumed = 0;
+        const char* value = NULL;
+        if (strcmp(argv[i], "--jobs") == 0 && i + 1 < *argc) {
+            value = argv[i + 1];
+            consumed = 2;
+        } else if (wpt_arg_starts_with(argv[i], "--jobs=")) {
+            value = argv[i] + strlen("--jobs=");
+            consumed = 1;
+        }
+        if (!consumed) continue;
+
+        int requested = atoi(value);
+        if (requested > 0) jobs = requested;
+        for (int move = i; move + consumed < *argc; move++) {
+            argv[move] = argv[move + consumed];
+        }
+        *argc -= consumed;
+        i--;
+    }
+    return jobs;
+}
+
+static void pre_run_wpt_dom_events(int jobs) {
+    int worker_count = std::max(1, std::min(jobs, (int)g_wpt_dom_events_params.size()));
+    printf("Found %zu WPT file(s); pre-running with %d bounded job(s)\n",
+           g_wpt_dom_events_params.size(), worker_count);
+    auto started = std::chrono::steady_clock::now();
+
+    // A file owns its lambda.exe child and temp script, so parallel work stays
+    // isolated while the bounded queue prevents memory-heavy children from
+    // multiplying to the machine's full logical CPU count.
+    wpt_run_cases_parallel(
+        g_wpt_dom_events_params, g_wpt_dom_events_results, worker_count,
+        run_wpt_dom_events_case,
+        [](size_t, const WptDomEventsParam& p) {
+            printf("[ PRE-RUN  ] %s\n", p.test_name.c_str());
+        },
+        [](size_t, const WptDomEventsParam& p, const WptDomEventsResult& result) {
+            printf("[ COMPLETE ] %s (%.0f ms)\n",
+                   p.test_name.c_str(), result.seconds * 1000.0);
+        });
+
+    auto ended = std::chrono::steady_clock::now();
+    double seconds = std::chrono::duration<double>(ended - started).count();
+    printf("Pre-ran %zu WPT file(s) in %.0f ms\n\n",
+           g_wpt_dom_events_params.size(), seconds * 1000.0);
+    g_wpt_dom_events_pre_run = true;
+}
+
 int main(int argc, char** argv) {
+    int jobs = extract_parallel_jobs(&argc, argv);
+    bool filtered = wpt_has_filtered_gtest_arg(argc, argv, "WptDomEvents*");
     if (update_baseline_requested() && BASELINE_PATH[0]) {
         FILE* file = fopen(BASELINE_PATH, "w");
         if (file) {
@@ -650,5 +834,10 @@ int main(int argc, char** argv) {
         }
     }
     ::testing::InitGoogleTest(&argc, argv);
+    std::string gtest_filter = ::testing::GTEST_FLAG(filter);
+    if (!filtered && gtest_filter != "*" && gtest_filter != "WptDomEvents*") {
+        filtered = true;
+    }
+    if (!filtered) pre_run_wpt_dom_events(jobs);
     return RUN_ALL_TESTS();
 }

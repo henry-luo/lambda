@@ -3138,6 +3138,21 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     }
 }
 
+static void replace_iframe_srcdoc_document(DomElement* iframe,
+                                            DomDocument* doc) {
+    if (!iframe || !doc) return;
+    // An embedded document loaded through src must remain intact; only the
+    // presence of the srcdoc attribute selects the replacement navigation.
+    if (!iframe->get_attribute("srcdoc")) return;
+    DomElement* body = document_body_element(doc);
+    if (!body) return;
+    // Parsed iframes can already own an empty embedded document before a
+    // later srcdoc assignment; appending without replacing left queries in
+    // that browsing context pointed at the stale document body.
+    clear_element_children_for_navigation(body);
+    append_iframe_srcdoc_to_document(iframe, doc);
+}
+
 // Public: create a foreign HTML document, return wrapped Item.
 extern "C" Item js_create_foreign_html_doc(const char* title) {
     DomDocument* fd = create_foreign_html_doc(title ? title : "");
@@ -3196,6 +3211,7 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
         DomDocument* embedded_doc = iframe->embed ? iframe->embedp()->doc : nullptr;
         if (embedded_doc) {
             js_doc_mark_has_browsing_context(embedded_doc);
+            replace_iframe_srcdoc_document(iframe, embedded_doc);
             if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
                 s_iframe_cache[s_iframe_cache_count].iframe = iframe;
                 s_iframe_cache[s_iframe_cache_count].doc = embedded_doc;
@@ -3209,7 +3225,7 @@ extern "C" Item js_iframe_get_content_document(DomElement* iframe) {
         js_doc_mark_has_browsing_context(doc);
         // Hydrate the iframe document from srcdoc so DOM queries resolve
         // inside the browsing context.
-        append_iframe_srcdoc_to_document(iframe, doc);
+        replace_iframe_srcdoc_document(iframe, doc);
         if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
             s_iframe_cache[s_iframe_cache_count].iframe = iframe;
             s_iframe_cache[s_iframe_cache_count].doc = doc;
@@ -3388,7 +3404,12 @@ static void reset_pending_iframe_loads() {
 
 extern "C" void js_dom_after_srcdoc_set(void* dom_elem) {
     // srcdoc writes mutate an iframe's nested document asynchronously.
-    _schedule_iframe_load((DomElement*)dom_elem);
+    DomElement* iframe = (DomElement*)dom_elem;
+    IframeContentEntry* entry = lookup_iframe_entry(iframe);
+    DomDocument* doc = entry ? entry->doc
+        : (iframe && iframe->embed ? iframe->embedp()->doc : nullptr);
+    if (doc) replace_iframe_srcdoc_document(iframe, doc);
+    _schedule_iframe_load(iframe);
 }
 
 static DomElement* js_dom_find_iframe_by_name(DomNode* node, const char* target_name) {
@@ -5186,6 +5207,27 @@ static void collect_html_attr_value(const char* value, StrBuf* sb) {
     }
 }
 
+static void collect_html_text_value(const char* value, size_t length,
+                                    StrBuf* sb) {
+    if (!value || !sb) return;
+    for (size_t i = 0; i < length; i++) {
+        unsigned char ch = (unsigned char)value[i];
+        if (ch == '&') strbuf_append_str(sb, "&amp;");
+        else if (ch == '<') strbuf_append_str(sb, "&lt;");
+        else if (ch == '>') strbuf_append_str(sb, "&gt;");
+        else if (ch == 0xC2 && i + 1 < length &&
+                 (unsigned char)value[i + 1] == 0xA0) {
+            // HTML fragment serialization canonicalizes a text-node NBSP to
+            // its named reference; emitting the raw code point made editing
+            // results disagree with browser innerHTML.
+            strbuf_append_str(sb, "&nbsp;");
+            i++;
+        } else {
+            strbuf_append_char(sb, (char)ch);
+        }
+    }
+}
+
 static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (!node) return;
     if (js_dom_is_generated_pseudo_node(node)) return;
@@ -5193,7 +5235,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (text->text && text->length > 0) {
-            strbuf_append_str_n(sb, text->text, (int)text->length);
+            collect_html_text_value(text->text, text->length, sb);
         }
         return;
     }
@@ -5220,12 +5262,14 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
             for (int i = 0; i < attr_count; i++) {
                 const char* name = attr_names[i];
                 const char* value = elem->get_attribute(name);
-                if (!name || !value) continue;
+                if (!name) continue;
                 if (js_dom_is_internal_attr(name)) continue;
                 strbuf_append_char(sb, ' ');
                 strbuf_append_str(sb, name);
                 strbuf_append_str(sb, "=\"");
-                collect_html_attr_value(value, sb);
+                // A present valueless HTML attribute serializes with an empty
+                // value; null here represents presence, not attribute absence.
+                if (value) collect_html_attr_value(value, sb);
                 strbuf_append_char(sb, '"');
             }
         }

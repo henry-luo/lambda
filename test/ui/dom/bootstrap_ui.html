@@ -52,8 +52,14 @@ document.getElementById('modal-trigger').addEventListener('click', function () {
 document.getElementById('modal-close').addEventListener('click', function () { modal.hide(); });
 var dropdown = bootstrap.Dropdown.getOrCreateInstance(document.getElementById('dropdown-toggle'), { display: 'static' });
 document.getElementById('outside').addEventListener('click', function () { dropdown.hide(); });
-var collapse = bootstrap.Collapse.getOrCreateInstance(document.getElementById('collapse'), { toggle: false });
-document.getElementById('collapse-trigger').addEventListener('click', function () { collapse.toggle(); });
+var collapseElement = document.getElementById('collapse');
+var collapse = bootstrap.Collapse.getOrCreateInstance(collapseElement, { toggle: false });
+document.getElementById('collapse-trigger').addEventListener('click', function () {
+  collapse.toggle();
+  // The host loop may outlive a short transition before the next fixture event;
+  // capture Bootstrap's synchronous transition-entry invariant in this task.
+  collapseElement.setAttribute('data-saw-collapsing', collapseElement.classList.contains('collapsing') ? 'true' : 'false');
+});
 document.getElementById('tab2').addEventListener('click', function () { bootstrap.Tab.getOrCreateInstance(this).show(); });
 bootstrap.Tooltip.getOrCreateInstance(document.getElementById('tooltip-trigger'), { trigger: 'hover', animation: false });
 var toast = bootstrap.Toast.getOrCreateInstance(document.getElementById('toast'), { animation: false, autohide: true, delay: 5000 });

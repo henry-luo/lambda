@@ -31,12 +31,11 @@
 #include <string>
 #include <vector>
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <ctime>
-#include <mutex>
-#include <thread>
 #include <set>
+
+#include "wpt_parallel_runner.hpp"
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -766,42 +765,7 @@ INSTANTIATE_TEST_SUITE_P(
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(WptFormTest);
 
 static int get_parallel_jobs() {
-    const char* env_jobs = getenv("LAMBDA_WPT_FORM_JOBS");
-    if (!env_jobs || !env_jobs[0]) env_jobs = getenv("WPT_FORM_JOBS");
-    if (env_jobs && env_jobs[0]) {
-        int jobs = atoi(env_jobs);
-        if (jobs > 0) return jobs;
-    }
-
-    unsigned int cpus = std::thread::hardware_concurrency();
-    if (cpus <= 1) return 1;
-    return (int)cpus - 1;
-}
-
-static bool starts_with(const char* text, const char* prefix) {
-    return strncmp(text, prefix, strlen(prefix)) == 0;
-}
-
-static bool has_filtered_gtest_arg(int argc, char** argv) {
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--gtest_list_tests") == 0) return true;
-        if (starts_with(argv[i], "--gtest_filter=")) {
-            const char* filter = argv[i] + strlen("--gtest_filter=");
-            if (strcmp(filter, "*") != 0 && strcmp(filter, "WptForm*") != 0)
-                return true;
-        }
-    }
-    return false;
-}
-
-static std::string get_gtest_json_path(int argc, char** argv) {
-    for (int i = 1; i < argc; i++) {
-        const char* prefix = "--gtest_output=json:";
-        if (starts_with(argv[i], prefix)) {
-            return std::string(argv[i] + strlen(prefix));
-        }
-    }
-    return "";
+    return wpt_parallel_jobs("LAMBDA_WPT_FORM_JOBS", "WPT_FORM_JOBS");
 }
 
 static void write_parallel_json(const char* json_path,
@@ -908,9 +872,6 @@ static void write_parallel_json(const char* json_path,
 static int run_parallel_suite(int argc, char** argv) {
     std::vector<WptFormParam> params = discover_form_tests();
     std::vector<WptFormResult> results(params.size());
-    std::atomic<size_t> next_index(0);
-    std::mutex print_mutex;
-
     int jobs = get_parallel_jobs();
     if (jobs < 1) jobs = 1;
     if ((size_t)jobs > params.size() && !params.empty()) jobs = (int)params.size();
@@ -919,35 +880,19 @@ static int run_parallel_suite(int argc, char** argv) {
            params.size(), jobs);
     auto started = std::chrono::steady_clock::now();
 
-    std::vector<std::thread> workers;
-    for (int wi = 0; wi < jobs; wi++) {
-        workers.emplace_back([&]() {
-            while (true) {
-                size_t index = next_index.fetch_add(1);
-                if (index >= params.size()) break;
-
-                const WptFormParam& p = params[index];
-                {
-                    std::lock_guard<std::mutex> lock(print_mutex);
-                    printf("[ RUN      ] WptForm/WptFormTest.Run/%s\n",
-                           p.test_name.c_str());
-                }
-
-                WptFormResult result = run_form_case(p);
-                results[index] = result;
-
-                {
-                    std::lock_guard<std::mutex> lock(print_mutex);
-                    const char* status = result.skipped ? "[  SKIPPED ]" :
-                        (result.failed ? "[  FAILED  ]" : "[       OK ]");
-                    printf("%s WptForm/WptFormTest.Run/%s (%.0f ms)\n",
-                           status, p.test_name.c_str(), result.seconds * 1000.0);
-                }
-            }
+    // WPT cases launch memory-heavy child runtimes, so a shared bounded queue
+    // keeps file-level parallelism from multiplying without limit.
+    wpt_run_cases_parallel(
+        params, results, jobs, run_form_case,
+        [](size_t, const WptFormParam& p) {
+            printf("[ RUN      ] WptForm/WptFormTest.Run/%s\n", p.test_name.c_str());
+        },
+        [](size_t, const WptFormParam& p, const WptFormResult& result) {
+            const char* status = result.skipped ? "[  SKIPPED ]" :
+                (result.failed ? "[  FAILED  ]" : "[       OK ]");
+            printf("%s WptForm/WptFormTest.Run/%s (%.0f ms)\n",
+                   status, p.test_name.c_str(), result.seconds * 1000.0);
         });
-    }
-
-    for (auto& worker : workers) worker.join();
 
     auto ended = std::chrono::steady_clock::now();
     double total_seconds = std::chrono::duration<double>(ended - started).count();
@@ -993,7 +938,7 @@ static int run_parallel_suite(int argc, char** argv) {
             printf("             - %s\n", name.c_str());
     }
 
-    std::string json_path = get_gtest_json_path(argc, argv);
+    std::string json_path = wpt_gtest_json_path(argc, argv);
     if (!json_path.empty())
         write_parallel_json(json_path.c_str(), results, total_seconds);
 
@@ -1001,7 +946,7 @@ static int run_parallel_suite(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
-    if (!has_filtered_gtest_arg(argc, argv)) {
+    if (!wpt_has_filtered_gtest_arg(argc, argv, "WptForm*")) {
         return run_parallel_suite(argc, argv);
     }
 

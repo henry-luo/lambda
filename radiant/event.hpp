@@ -668,9 +668,8 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode);
 // A collapsed DomSelection IS the canonical caret boundary. Presentation
 // details live in the StateStore projection while legacy render paths remain.
 //
-// The spec allows multiple ranges, but every WPT test we need to pass and
-// every mainstream browser only uses 0 or 1. We support range_count ∈ {0,1}
-// rigorously and ignore additional `addRange()` calls (matching Chromium).
+// The Selection API permits multiple ranges. Rich table editing uses one
+// range per selected cell, so keep a small bounded set for that transaction.
 
 typedef enum DomSelectionDirection {
     DOM_SEL_DIR_NONE     = 0,
@@ -694,12 +693,12 @@ typedef struct EditingSelection {
     uint32_t mutation_seq;
 } EditingSelection;
 
-#define DOM_SELECTION_MAX_RANGES 1   // see comment above
+#define DOM_SELECTION_MAX_RANGES 4
 
 typedef struct DomSelection {
     DocState* state;
     DomRange*     ranges[DOM_SELECTION_MAX_RANGES];
-    uint32_t      range_count;          // 0 or 1
+    uint32_t      range_count;          // 0 through DOM_SELECTION_MAX_RANGES
     DomSelectionDirection direction;
 
     // Document root captured when the current range was added (or its
