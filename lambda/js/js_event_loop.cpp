@@ -342,6 +342,10 @@ typedef struct JsTimerHandle {
     void*      runtime_doc;
     bool       roots_registered;
     bool       closing;
+    double     virtual_due_ms;
+    double     virtual_repeat_ms;
+    bool       virtual_active;
+    bool       virtual_refed;
 } JsTimerHandle;
 
 #define MAX_TIMER_HANDLES 1024
@@ -352,6 +356,8 @@ static uint64_t timer_progress_generation = 0;
 static bool timer_force_shutdown = false;
 static bool timer_nan_warning_emitted = false;
 static bool timer_negative_warning_emitted = false;
+static bool virtual_clock_enabled = false;
+static double virtual_clock_ms = 0.0;
 
 #define MAX_MOCK_SCHEDULER_WAITS 128
 typedef struct JsMockSchedulerWait {
@@ -537,6 +543,7 @@ static void timer_register_gc_roots(JsTimerHandle *th) {
 static void timer_close_handle(JsTimerHandle *th) {
     if (!th || th->closing) return;
     th->closing = true;
+    th->virtual_active = false;
     // close callbacks may run after document/runtime teardown; unregister roots
     // while the captured heap is still valid so late libuv cleanup only frees.
     timer_unregister_gc_roots(th);
@@ -733,7 +740,9 @@ static Item timeout_this_or_arg(Item this_val) {
 extern "C" Item js_timeout_ref(Item this_val) {
     Item self = timeout_this_or_arg(this_val);
     JsTimerHandle* th = find_timer_handle(self);
-    if (th && !uv_is_closing((uv_handle_t*)&th->timer)) {
+    if (th && virtual_clock_enabled) {
+        th->virtual_refed = true;
+    } else if (th && !uv_is_closing((uv_handle_t*)&th->timer)) {
         uv_ref((uv_handle_t*)&th->timer);
     }
     return self;
@@ -743,7 +752,9 @@ extern "C" Item js_timeout_ref(Item this_val) {
 extern "C" Item js_timeout_unref(Item this_val) {
     Item self = timeout_this_or_arg(this_val);
     JsTimerHandle* th = find_timer_handle(self);
-    if (th && !uv_is_closing((uv_handle_t*)&th->timer)) {
+    if (th && virtual_clock_enabled) {
+        th->virtual_refed = false;
+    } else if (th && !uv_is_closing((uv_handle_t*)&th->timer)) {
         uv_unref((uv_handle_t*)&th->timer);
     }
     return self;
@@ -753,8 +764,9 @@ extern "C" Item js_timeout_unref(Item this_val) {
 extern "C" Item js_timeout_hasRef(Item this_val) {
     Item self = timeout_this_or_arg(this_val);
     JsTimerHandle* th = find_timer_handle(self);
-    bool has_ref = th && !uv_is_closing((uv_handle_t*)&th->timer) &&
-        uv_has_ref((uv_handle_t*)&th->timer);
+    bool has_ref = th && (virtual_clock_enabled
+        ? th->virtual_refed
+        : (!uv_is_closing((uv_handle_t*)&th->timer) && uv_has_ref((uv_handle_t*)&th->timer)));
     return (Item){.item = b2it(has_ref)};
 }
 
@@ -826,13 +838,125 @@ static JsTimerHandle* find_timer_handle(Item timer_id) {
     return NULL;
 }
 
-static void timer_start_from_wall_clock(uv_loop_t* loop, JsTimerHandle* timer,
-                                        uint64_t timeout_ms, uint64_t repeat_ms) {
+static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
+                        uint64_t timeout_ms, uint64_t repeat_ms) {
     if (!loop || !timer) return;
+    if (virtual_clock_enabled) {
+        // A virtual timer stays initialized as a libuv handle for common close
+        // cleanup, but readiness is driven exclusively by the headless clock.
+        timer->virtual_due_ms = virtual_clock_ms + (double)timeout_ms;
+        timer->virtual_repeat_ms = (double)repeat_ms;
+        timer->virtual_active = true;
+        timer->virtual_refed = true;
+        return;
+    }
     // JS can schedule timers after a long document compile before libuv's first
     // turn; refresh its cached clock or the elapsed compile time makes them due.
     uv_update_time(loop);
     uv_timer_start(&timer->timer, timer_fire_cb, timeout_ms, repeat_ms);
+}
+
+extern "C" void js_event_loop_set_virtual_clock(bool enabled, double monotonic_ms) {
+    virtual_clock_enabled = enabled;
+    virtual_clock_ms = monotonic_ms >= 0.0 ? monotonic_ms : 0.0;
+    js_performance_virtual_clock_set(enabled, virtual_clock_ms);
+}
+
+extern "C" bool js_event_loop_virtual_clock_enabled(void) {
+    return virtual_clock_enabled;
+}
+
+extern "C" double js_event_loop_virtual_clock_now_ms(void) {
+    return virtual_clock_ms;
+}
+
+static JsTimerHandle* virtual_timer_next_due(double target_ms) {
+    JsTimerHandle* next = nullptr;
+    for (int index = 0; index < timer_handle_count; index++) {
+        JsTimerHandle* timer = timer_handles[index];
+        if (!timer || timer->closing || !timer->virtual_active ||
+            timer->virtual_due_ms > target_ms) continue;
+        if (!next || timer->virtual_due_ms < next->virtual_due_ms ||
+            (timer->virtual_due_ms == next->virtual_due_ms && timer->id < next->id)) {
+            next = timer;
+        }
+    }
+    return next;
+}
+
+static int virtual_timer_fire_due(double target_ms) {
+    const int callback_limit = MAX_TIMER_HANDLES * 64;
+    int fired = 0;
+    while (fired < callback_limit) {
+        JsTimerHandle* timer = virtual_timer_next_due(target_ms);
+        if (!timer) break;
+
+        virtual_clock_ms = timer->virtual_due_ms;
+        js_performance_virtual_clock_set(true, virtual_clock_ms);
+        if (timer->is_interval) {
+            // Publish the next interval deadline before the callback so
+            // clearInterval and nested timer creation see browser ordering.
+            timer->virtual_due_ms += timer->virtual_repeat_ms > 0.0
+                ? timer->virtual_repeat_ms : 1.0;
+        } else {
+            timer->virtual_active = false;
+        }
+        timer_fire_cb(&timer->timer);
+        fired++;
+
+        uv_loop_t* loop = lambda_uv_loop();
+        if (loop) uv_run(loop, UV_RUN_NOWAIT);
+    }
+    if (virtual_timer_next_due(target_ms)) {
+        log_error("event_loop: virtual timer drain exceeded %d callbacks", callback_limit);
+    }
+    return fired;
+}
+
+static int virtual_clock_advance_slice(double target_ms, bool animation_frame) {
+    int progress = virtual_timer_fire_due(target_ms);
+    virtual_clock_ms = target_ms;
+    js_performance_virtual_clock_set(true, virtual_clock_ms);
+
+    if (animation_frame) {
+        progress += js_animation_frame_flush(virtual_clock_ms);
+        if (js_dom_tick_headless_animation_frame()) progress++;
+    }
+    js_microtask_flush();
+    // rAF and microtasks may queue zero-delay timers at this same timestamp.
+    progress += virtual_timer_fire_due(target_ms);
+    return progress;
+}
+
+extern "C" int js_event_loop_advance_virtual_time(double delta_ms, int frame_steps) {
+    if (!virtual_clock_enabled) return 0;
+    if (delta_ms < 0.0) delta_ms = 0.0;
+
+    const double frame_ms = 1000.0 / 60.0;
+    const int frame_limit = 4096;
+    double start_ms = virtual_clock_ms;
+    double target_ms = start_ms + delta_ms;
+    int frames = frame_steps;
+    if (frames <= 0 && delta_ms > 0.0) {
+        frames = (int)ceil(delta_ms / frame_ms);
+    }
+    if (frames > frame_limit) {
+        log_error("event_loop: virtual animation drain limited from %d to %d frames",
+                  frames, frame_limit);
+        frames = frame_limit;
+    }
+
+    int progress = 0;
+    for (int frame = 1; frame <= frames; frame++) {
+        double slice_ms = start_ms + delta_ms * ((double)frame / (double)frames);
+        progress += virtual_clock_advance_slice(slice_ms, true);
+    }
+    if (frames == 0) {
+        progress += virtual_clock_advance_slice(target_ms, false);
+    } else if (virtual_clock_ms < target_ms) {
+        progress += virtual_clock_advance_slice(target_ms, false);
+    }
+    return progress;
 }
 
 extern "C" Item js_setTimeout(Item callback, Item delay) {
@@ -860,7 +984,7 @@ extern "C" Item js_setTimeout(Item callback, Item delay) {
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    timer_start_from_wall_clock(loop, th, ms, 0);
+    timer_start(loop, th, ms, 0);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -909,7 +1033,7 @@ extern "C" Item js_setTimeout_args(Item callback, Item delay, Item args_array) {
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    timer_start_from_wall_clock(loop, th, ms, 0);
+    timer_start(loop, th, ms, 0);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -956,7 +1080,7 @@ static Item js_setImmediate_impl(Item callback, Item args_array, bool has_args) 
 
     uv_timer_init(loop, &th->timer);
     // Immediates queued while draining the current check phase belong to the next turn.
-    timer_start_from_wall_clock(loop, th, 1, 0);
+    timer_start(loop, th, 1, 0);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_IMMEDIATE);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -1046,7 +1170,7 @@ extern "C" Item js_setInterval(Item callback, Item delay) {
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    timer_start_from_wall_clock(loop, th, ms, ms);
+    timer_start(loop, th, ms, ms);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -1095,7 +1219,7 @@ extern "C" Item js_setInterval_args(Item callback, Item delay, Item args_array) 
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    timer_start_from_wall_clock(loop, th, ms, ms);
+    timer_start(loop, th, ms, ms);
     Item timer_obj = make_timer_object(th->id, JS_CLASS_TIMEOUT);
     th->object = timer_obj;
     timer_register_gc_roots(th);
@@ -1302,7 +1426,7 @@ extern "C" Item js_setTimeout_promise(Item delay, Item value, Item options) {
     timer_capture_runtime(th, "Timeout", 7);
 
     uv_timer_init(loop, &th->timer);
-    timer_start_from_wall_clock(loop, th, ms, 0);
+    timer_start(loop, th, ms, 0);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -1382,7 +1506,7 @@ extern "C" Item js_setImmediate_promise(Item value, Item options) {
 
     uv_timer_init(loop, &th->timer);
     // Promise immediates share setImmediate's next-turn scheduling invariant.
-    timer_start_from_wall_clock(loop, th, 1, 0);
+    timer_start(loop, th, 1, 0);
     timer_register_gc_roots(th);
 
     if (timer_handle_count < MAX_TIMER_HANDLES) {
@@ -1884,6 +2008,9 @@ extern "C" int js_await_bounded_drain(int (*predicate)(void*), void* user,
 // `selectionchange` dispatch) between simulated events, without spinning when a
 // callback re-schedules itself.
 extern "C" void js_event_loop_pump_nowait(void) {
+    if (virtual_clock_enabled) {
+        js_event_loop_advance_virtual_time(0.0, 0);
+    }
     js_microtask_flush();
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return;
@@ -1904,6 +2031,9 @@ static void event_loop_pump_wait_cap_cb(uv_timer_t* handle) {
 }
 
 extern "C" bool js_event_loop_pump_wait(int max_wait_ms) {
+    if (virtual_clock_enabled) {
+        return js_event_loop_advance_virtual_time((double)(max_wait_ms > 0 ? max_wait_ms : 0), 0) > 0;
+    }
     bool had_microtasks = js_microtask_pending_count() > 0;
     js_microtask_flush();
     if (had_microtasks) return true;

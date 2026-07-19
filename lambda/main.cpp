@@ -1757,8 +1757,21 @@ int main(int argc, char *argv[]) {
     // Initialize lambda home path (reads LAMBDA_HOME env var if set)
     lambda_home_init();
 
+    // Strip --no-log before reading log.conf. Batch workers share the working
+    // directory, so even briefly opening configured outputs races on log.txt.
+    bool no_log = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--no-log") != 0) continue;
+        no_log = true;
+        for (int j = i; j < argc - 1; j++) {
+            argv[j] = argv[j + 1];
+        }
+        argc--;
+        i--;
+    }
+
     // Initialize logging system with config file if available
-    if (file_exists("log.conf")) {
+    if (!no_log && file_exists("log.conf")) {
         // log.conf exists, load it
         if (log_parse_config_file("log.conf") != LOG_OK) {
             fprintf(stderr, "Warning: Failed to parse log.conf, using defaults\n");
@@ -1766,18 +1779,7 @@ int main(int argc, char *argv[]) {
     }
     log_init("");  // Initialize with parsed config or defaults
 
-    // Check for --no-log flag early (before any logging)
-    // Strip it from argv so subcommand handlers don't see it
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--no-log") == 0) {
-            log_disable_all();
-            for (int j = i; j < argc - 1; j++) {
-                argv[j] = argv[j + 1];
-            }
-            argc--;
-            i--;
-        }
-    }
+    if (no_log) log_disable_all();
 
     // Check for --mem-dump[=PATH] flag early; dump the memory context as JSON
     // at process exit and log a leak report. Strip it from argv.

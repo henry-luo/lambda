@@ -26,6 +26,7 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_dom.h"
+#include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_dom_observers.h"
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
@@ -44,9 +45,18 @@ extern __thread Context* input_context;
 extern "C" Context* _lambda_rt;
 extern UiContext ui_context;
 
-bool radiant_pump_js_event_loop(UiContext* uicon, int wait_ms) {
+typedef enum RadiantJsLoopAction {
+    RADIANT_JS_LOOP_PUMP,
+    RADIANT_JS_LOOP_ADVANCE
+} RadiantJsLoopAction;
+
+static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction action,
+                                          int wait_ms, double delta_ms, int frame_steps) {
     DomDocument* doc = uicon ? uicon->document : nullptr;
     if (!doc || !doc->js.runtime_heap || !doc->js.runtime_name_pool) {
+        if (action == RADIANT_JS_LOOP_ADVANCE) {
+            return js_event_loop_advance_virtual_time(delta_ms, frame_steps) > 0;
+        }
         if (wait_ms >= 0) return js_event_loop_pump_wait(wait_ms);
         js_event_loop_pump_nowait();
         return true;
@@ -71,13 +81,37 @@ bool radiant_pump_js_event_loop(UiContext* uicon, int wait_ms) {
     js_dom_set_document(doc);
     js_dom_observers_post_layout();
     bool pumped = true;
-    if (wait_ms >= 0) pumped = js_event_loop_pump_wait(wait_ms);
-    else js_event_loop_pump_nowait();
+    if (action == RADIANT_JS_LOOP_ADVANCE) {
+        if (js_event_loop_virtual_clock_enabled()) {
+            pumped = js_event_loop_advance_virtual_time(delta_ms, frame_steps) > 0;
+        } else {
+            // Interactive replay has a native clock. Drain one bounded turn and
+            // one frame instead of stalling input dispatch for a fixed sleep.
+            js_event_loop_pump_nowait();
+            double timestamp_ms = js_performance_monotonic_now_ms();
+            pumped = js_animation_frame_flush(timestamp_ms) > 0;
+            pumped = js_dom_tick_headless_animation_frame() || pumped;
+        }
+    } else if (wait_ms >= 0) {
+        pumped = js_event_loop_pump_wait(wait_ms);
+    } else {
+        js_event_loop_pump_nowait();
+    }
     if (uicon) radiant_reconcile_js_dom_mutations(uicon, doc);
     context = saved_ctx;
     input_context = saved_input_ctx;
     _lambda_rt = saved_lambda_rt;
     return pumped;
+}
+
+bool radiant_pump_js_event_loop(UiContext* uicon, int wait_ms) {
+    return radiant_service_js_event_loop(uicon, RADIANT_JS_LOOP_PUMP,
+                                         wait_ms, 0.0, 0);
+}
+
+bool radiant_advance_js_event_loop(UiContext* uicon, double delta_ms, int frame_steps) {
+    return radiant_service_js_event_loop(uicon, RADIANT_JS_LOOP_ADVANCE,
+                                         -1, delta_ms, frame_steps);
 }
 
 #ifdef __APPLE__
@@ -862,6 +896,9 @@ void render(GLFWwindow* window) {
 }
 
 void log_init_wrapper() {
+    // --no-log is process-scoped; reloading log.conf here used to silently
+    // re-enable categories and make parallel view fixtures race on log.txt.
+    if (log_is_disabled()) return;
     // empty existing log file and load config only when log.conf is present (dev/debug mode)
     // in release mode (no log.conf), skip to avoid creating log.txt in the working directory
     if (file_exists("log.conf")) {
@@ -906,6 +943,7 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
     ui_context_cleanup(&ui_context);
     view_cleanup_input_manager();
     lambda_uv_cleanup();
+    js_event_loop_set_virtual_clock(false, 0.0);
     if (log_memory) log_mem_stage("after-cleanup");
     log_cleanup();
 }
@@ -1067,6 +1105,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         log_notice("view: loading document: %s", log_doc_href ? log_doc_href : file_to_load);
         if (log_doc_url) url_destroy(log_doc_url);
         log_mem_stage("before-load");
+        // Headless event fixtures own a synthetic browser clock from the first
+        // inline script onward, so load-time timers never capture wall time.
+        js_event_loop_set_virtual_clock(headless && sim_ctx != nullptr, 0.0);
         DomDocument* doc = nullptr;
         if (doc_source) {
             Url* script_url = url_parse_with_base(file_to_load, cwd);
@@ -1076,6 +1117,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                 url_destroy(cwd);
                 js_dom_set_ui_context(nullptr);
                 js_dom_set_host_driven_loop(false);
+                js_event_loop_set_virtual_clock(false, 0.0);
                 ui_context_cleanup(&ui_context);
                 return -1;
             }
@@ -1089,6 +1131,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             url_destroy(cwd);
             js_dom_set_ui_context(nullptr);
             js_dom_set_host_driven_loop(false);
+            js_event_loop_set_virtual_clock(false, 0.0);
             ui_context_cleanup(&ui_context);
             return -1;
         }
@@ -1225,12 +1268,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                 // so a self-rescheduling callback can't spin to the watchdog.
                 if (event_sim_assertion_retry_pending(sim_ctx)) {
                     int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
-                    if (radiant_pump_js_event_loop(&ui_context, retry_wait_ms)) {
-                        event_sim_wake_assertion_retry(sim_ctx);
-                    }
-                } else {
-                    radiant_pump_js_event_loop(&ui_context, -1);
+                    radiant_pump_js_event_loop(&ui_context, retry_wait_ms);
+                    current_time += retry_wait_ms / 1000.0;
+                    continue;
                 }
+                radiant_pump_js_event_loop(&ui_context, -1);
                 // Advance time by event interval
                 SimEvent* ev = (sim_ctx->current_index > 0 && sim_ctx->current_index <= sim_ctx->events->length)
                     ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index - 1] : NULL;

@@ -67,6 +67,7 @@ static int categories_count = 0;
 static int formats_count = 0;
 static int rules_count = 0;
 static int log_initialized = 0;
+static int log_disabled = 0;
 static int timestamps_enabled = 1;
 static int colors_enabled = 0;
 static int env_min_level = 0;
@@ -808,6 +809,7 @@ void log_finish(void) {
     formats_count = 0;
     rules_count = 0;
     log_initialized = 0;
+    log_disabled = 0;
 }
 
 /* Reload configuration */
@@ -875,6 +877,7 @@ void log_enable_colors(int enable) {
 
 /* Disable all logging categories */
 void log_disable_all(void) {
+    log_disabled = 1;
     // Disable default category
     if (log_default_category) {
         log_default_category->enabled = 0;
@@ -883,6 +886,10 @@ void log_disable_all(void) {
     for (int i = 0; i < categories_count; i++) {
         categories[i].enabled = 0;
     }
+}
+
+int log_is_disabled(void) {
+    return log_disabled;
 }
 
 /* Core logging functions with category parameter */
