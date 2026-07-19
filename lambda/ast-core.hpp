@@ -129,7 +129,9 @@ typedef enum AstNodeType : uint16_t {
     AST_NODE_VIEW = 539,
     AST_NODE_STATE_ENTRY = 540,
     AST_NODE_START = 541,
-    AST_NODE_EVENT_HANDLER = 541,
+    // 542, not 541: AST_NODE_START accidentally reused the event-handler value,
+    // making the two node kinds indistinguishable in node_type dispatch.
+    AST_NODE_EVENT_HANDLER = 542,
 } AstNodeType;
 
 typedef enum Operator {

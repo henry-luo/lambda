@@ -2111,6 +2111,7 @@ static const char* ast_dump_kind_name(AstNodeType type) {
         case AST_NODE_PATTERN_SEQ: return "AST_NODE_PATTERN_SEQ";
         case AST_NODE_VIEW: return "AST_NODE_VIEW";
         case AST_NODE_STATE_ENTRY: return "AST_NODE_STATE_ENTRY";
+        case AST_NODE_START: return "AST_NODE_START";
         case AST_NODE_EVENT_HANDLER: return "AST_NODE_EVENT_HANDLER";
         default: return "AST_NODE_UNKNOWN";
     }
@@ -2442,6 +2443,13 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             if (state->next_state) {
                 emit_lambda_dump_list(source, "next_state", (AstNode*)state->next_state, indent + 1);
             }
+            break;
+        }
+        case AST_NODE_START: {
+            // could not have its own case until AST_NODE_START/AST_NODE_EVENT_HANDLER
+            // stopped sharing enum value 541 (duplicate case label)
+            AstStartNode* start = (AstStartNode*)node;
+            emit_lambda_dump_field(source, "call", (AstNode*)start->call, indent + 1);
             break;
         }
         case AST_NODE_EVENT_HANDLER: {
