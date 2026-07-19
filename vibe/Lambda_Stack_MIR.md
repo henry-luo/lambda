@@ -1,12 +1,15 @@
 # Lambda MIR-Direct stack-frame and rooting review
 
-**Status:** implementation review of the core Lambda MIR-Direct path
+**Status:** historical implementation review through `9402b169`, updated with
+the post-implementation safepoint write-back result
 
 **Reviewed:** 2026-07-16
 
+**Post-implementation profile:** 2026-07-19 at `638e11c93`
+
 **Stack-frame implementation commit:** `0ee5814fa72afb6b813a4988aeca8de571d9dcd4`
 
-**Current reviewed tree:** `9402b16980e819dbd2feae1763e2cade5d327244`
+**Historical side-stack reviewed tree:** `9402b16980e819dbd2feae1763e2cade5d327244`
 
 **Exact pre-change baseline:** `5717d36fb3bd80c9eaaea805d6bf2b19d616de79`, the direct parent of the stack-frame change
 
@@ -14,8 +17,11 @@
 
 This report documents how the **core Lambda MIR-Direct runtime** represents a
 function frame, protects GC-managed values, owns wide scalar payloads, performs
-calls, and returns values. It compares the exact implementation immediately
-before commit `0ee5814f` with the current side-stack implementation.
+calls, and returns values. Its original body compares the exact implementation
+immediately before commit `0ee5814f` with the side-stack implementation at
+`9402b169`. Section 0 adds the latest implemented rooting result. Unless a
+later section explicitly says post-implementation, “Current” in the original
+review means `9402b169`, not repository `HEAD`.
 
 The word *frame* is overloaded in this area. This report distinguishes:
 
@@ -28,6 +34,65 @@ The word *frame* is overloaded in this area. This report distinguishes:
 
 The new stack-frame change primarily replaces items 2 and 3. It does not replace
 MIR's native activation record.
+
+---
+
+## 0. Post-implementation result — 2026-07-19
+
+The latest production implementation uses safepoint-current canonical slots:
+Lambda MIR-Direct reports semantic root candidates and classified call sites
+to the shared `MirEmitter`, which performs CFG liveness, dirty write-back,
+scratch coloring, compact slot assignment, and final store insertion. Ordinary
+production lowering no longer constructs the eager rooting oracle.
+
+For the identical `_frame_review_0` probe used throughout this report:
+
+| Metric | Pre-side-stack `5717d36f` | Reviewed side-stack `9402b169` | Post-implementation write-back `638e11c93` | Reviewed → post change |
+|---|---:|---:|---:|---:|
+| Executable MIR instructions | 90 | 138 | **101** | **−37 (−26.8%)** |
+| MIR body entries, including labels | 96 | 155 | **118** | **−37 (−23.9%)** |
+| MIR locals | 60 | 80 | **47** | **−33 (−41.3%)** |
+| MIR calls | 45 | 10 | **11** | +1 |
+| Root slots | 16 | 16 | **12** | **−4 (−25.0%)** |
+
+The post-implementation function is only 11 instructions (12.2%) above the
+90-instruction pre-side-stack version. The latter was not root-free: it made
+36 heap-root management calls. The latest implementation keeps precise direct
+side-root publication without those calls.
+
+The same current compiler also provides a write-through correctness oracle:
+
+| Current `638e11c93` mode | Executable instructions | Body entries | Locals | Calls | Root slots |
+|---|---:|---:|---:|---:|---:|
+| Write-through oracle | 141 | 158 | 65 | 11 | 34 |
+| Production write-back | **101** | **118** | **47** | 11 | **12** |
+| Reduction | **−40 (−28.4%)** | −40 | −18 | unchanged | **−22 (−64.7%)** |
+
+This same-compiler comparison isolates publication policy. The current
+write-through oracle is not byte-for-byte the historical `9402b169` emitter;
+it shares the new semantic-candidate and canonical-slot infrastructure and
+changes only the publication mode.
+
+Collector status has also changed since the original review. Scanner-
+independent Lambda/LambdaJS release builds now use precise roots without
+native-stack discovery or `gc_scan_stack()`. Scanner-capable debug builds and
+builds containing unchanged C2MIR retain the conservative scanner only for
+shadow verification or sticky compatibility contexts.
+
+Captured evidence:
+
+- production MIR: `temp/lambda_mir_latest_writeback.txt`;
+- write-through MIR: `temp/lambda_mir_latest_writethrough.txt`;
+- slot diagnostics: `temp/lambda_mir_latest_writeback.log` and
+  `temp/lambda_mir_latest_writethrough.log`;
+- full cross-tier comparison and measurement rules:
+  `vibe/Lambda_Design_Stack_Rooting.md` §12.
+
+The current release Test262 baseline completes all 42,889 tests in 160.6s with
+40,261/40,261 fully passing, zero non-fully-passing tests, zero failures, zero
+regressions, and zero retry time. This is current acceptance evidence; it is
+not used to attribute runtime change solely to this MIR reduction because the
+historical source and harness snapshots differ.
 
 ---
 
@@ -44,7 +109,7 @@ after:  MIR mov  -> [root_frame + constant offset] -> side root stack
 
 For the representative function used in this review:
 
-| Metric for `_frame_review_0` | Before | Current | Change |
+| Historical metric for `_frame_review_0` | Before | Reviewed `9402b169` | Change |
 |---|---:|---:|---:|
 | Executable MIR instructions | 90 | 138 | +48, or +53.3% |
 | MIR body entries, including labels | 96 | 155 | +59, or +61.5% |
@@ -64,15 +129,15 @@ The additional MIR instructions are mainly:
 
 They are **not** caused by publishing every live root after every instruction.
 The core Lambda emitter rooted the same temporary values before the new frame.
-The new implementation retains the 16 root slots in this example, but turns 36
-hot C helper calls into direct memory operations.
+The reviewed `9402b169` implementation retains the 16 root slots in this
+example, but turns 36 hot C helper calls into direct memory operations.
 
 ### Migration boundary: removed old mechanisms versus retained old mechanisms
 
 > **[REMOVED OLD FRAME ROOTING] The heap-backed `JitGcRootFrame` implementation
 > is completely removed. It is not running alongside the side root stack.**
 
-| Removed old mechanism | Previous role | Current replacement |
+| Removed old mechanism | Previous role | Reviewed replacement |
 |---|---|---|
 | Thread-local linked `JitGcRootFrame` stack and frame cache | Represented nested JIT root frames | Root/number watermarks in `Context` |
 | Heap-allocated 64-slot `JitGcRootBlock` chains | Stored each function's rooted values | Exact contiguous slots in the side root stack |
@@ -86,11 +151,12 @@ There are no current `heap_jit_gc_root_frame_*` calls or heap JIT root blocks.
 Consequently, the normal MIR path does not pay both the old helper-call rooting
 cost and the new direct side-root-store cost.
 
-> **[RETAINED OLD ROOTING] The current collector still uses registered roots
-> and still conservatively scans the native stack in addition to scanning the
-> new precise side root stack.**
+> **[HISTORICAL AT `9402b169`: RETAINED OLD ROOTING] The reviewed collector
+> still used registered roots and conservatively scanned the native stack in
+> addition to scanning the new precise side root stack. This is no longer the
+> normal scanner-independent release configuration; see §0.**
 
-| Retained old mechanism | Current use | Expected status |
+| Retained old mechanism | Reviewed use | Expected status at `9402b169` |
 |---|---|---|
 | Registered individual root slots | Stable runtime roots such as `heap->result_root` | Retained precise mechanism; not inherently transitional |
 | Registered root ranges | Closure environments and other stable contiguous `Item` storage | Retained precise mechanism; not inherently transitional |
@@ -98,28 +164,28 @@ cost and the new direct side-root-store cost.
 | Native stack-bound discovery | Defines the range passed to `gc_scan_stack()` | Transitional with conservative scanning |
 | `gc_scan_stack()` conservative scan | Protects C2MIR and host/native values not yet covered by a complete precise-root contract | **Still active on every collection; eventual retirement target** |
 
-The current collector root equation is therefore:
+The reviewed `9402b169` collector root equation was therefore:
 
 ```text
-current roots
+reviewed roots
     = registered slots/ranges       # retained precise roots
     + [side_root_base, top)         # new precise MIR roots
     + conservative native stack     # retained old compatibility roots
 ```
 
-Thus the runtime is hybrid at the **collector boundary**, but not at the old
-JIT-frame implementation boundary. The same object may be discovered through a
-precise root and the conservative stack; marking it twice is safe, but the
-conservative pass still costs scan time and can retain false-positive objects.
+Thus the reviewed runtime was hybrid at the **collector boundary**, but not at
+the old JIT-frame implementation boundary. The same object could be discovered
+through a precise root and the conservative stack; marking it twice was safe,
+but the conservative pass cost scan time and could retain false-positive
+objects. In the latest implementation this hybrid path is confined to
+scanner-capable debug/compatibility builds; precise release contexts use the
+scanner-independent root equation documented in §0.
 
-The conservative path remains for C2MIR and host/runtime code that does not yet
-publish every live root precisely. Until those producers are migrated and
-audited, removing it would be a correctness change. Keeping it also means the
-collector has not yet realized the full scan-cost and retention-precision
-benefit of a wholly precise design.
-
-No controlled release-build performance A/B is claimed by this report. The MIR
-captures are debug-build inspection artifacts, not performance results.
+The historical review claimed no controlled release-build performance A/B; its
+MIR captures were debug-build inspection artifacts. Section 0 now records the
+post-implementation structural counts and current release acceptance result,
+while deliberately avoiding a causal timing comparison across changed source
+and harness snapshots.
 
 ---
 
@@ -315,7 +381,7 @@ required for a particular value.
 
 ---
 
-## 4. Current frame and rooting design
+## 4. Reviewed `9402b169` frame and rooting design
 
 ### 4.1 Two side stacks
 
@@ -364,7 +430,7 @@ is known.
 
 If the final count is zero, no side-root reservation is inserted.
 
-### 4.3 Current root predicate
+### 4.3 Reviewed `9402b169` root predicate
 
 The precise root predicate is now:
 
@@ -386,9 +452,9 @@ GC root stack     = values that keep traced GC objects reachable
 number side stack = untraced storage that keeps wide scalar payload bytes alive
 ```
 
-### 4.4 Current collector root order
+### 4.4 Reviewed `9402b169` collector root order
 
-`heap_gc_collect()` currently supplies the collector with:
+At `9402b169`, `heap_gc_collect()` supplied the collector with:
 
 1. registered individual roots such as stable result slots;
 2. registered ranges such as closure environment arrays;
@@ -399,7 +465,7 @@ number side stack = untraced storage that keeps wide scalar payload bytes alive
 
 The removed and retained mechanisms are therefore:
 
-| Mechanism | Before | Current |
+| Mechanism | Before | Reviewed `9402b169` |
 |---|---:|---:|
 | Heap `JitGcRootFrame` stack | Yes | **Removed** |
 | 64-slot JIT root blocks | Yes | **Removed** |
@@ -409,15 +475,15 @@ The removed and retained mechanisms are therefore:
 | Registered stable root slots/ranges | Yes | Retained |
 | Conservative native-stack scan | Yes | **Retained** |
 
-The current implementation therefore does **not** keep both the old heap root
-frame and the new side root stack. It keeps the new side root stack and the
+The reviewed implementation therefore did **not** keep both the old heap root
+frame and the new side root stack. It kept the new side root stack and the
 older conservative scan.
 
 ---
 
-## 5. Current function prologue
+## 5. Reviewed `9402b169` function prologue
 
-For `_frame_review_0`, lowering allocated exactly 16 root slots. The current
+For `_frame_review_0`, lowering allocated exactly 16 root slots. The reviewed
 prologue is:
 
 ```text
@@ -506,7 +572,7 @@ mov  root_bits, _a
 call heap_jit_gc_root_frame_set(0, root_bits)
 ```
 
-Current:
+Reviewed `9402b169`:
 
 ```text
 mov root_bits, _a
@@ -523,7 +589,7 @@ bt   non_null, var_live
 ...
 ```
 
-Current:
+Reviewed `9402b169`:
 
 ```text
 mov var_live, i64:0(root_frame)
@@ -542,7 +608,7 @@ call heap_jit_gc_root_frame_set(4, root_bits)
 call heap_jit_gc_root_frame_get(join_rv, 4)
 ```
 
-Current:
+Reviewed `9402b169`:
 
 ```text
 call fn_join(result, left, right)
@@ -643,7 +709,7 @@ Before the change, `_frame_review_0` emitted:
 45 calls total
 ```
 
-Current:
+Reviewed `9402b169`:
 
 ```text
  0 root-management calls
@@ -720,7 +786,7 @@ Before the change, out-of-line payloads accumulated in the numeric nursery.
 Current MIR-Direct code uses the number side stack so their lifetime follows
 function watermarks.
 
-### 10.2 Current number frame
+### 10.2 Reviewed `9402b169` number frame
 
 At entry, a function saves:
 
@@ -949,7 +1015,7 @@ The numeric nursery, if used by called scalar boxing paths, outlives the call.
 
 ---
 
-## 13. Complete normalized MIR: current
+## 13. Complete normalized MIR: reviewed `9402b169`
 
 ```text
 func _frame_review_0(a: i64, b: i64) -> i64
@@ -1121,7 +1187,7 @@ ret result
 
 Metrics: 19 executable instructions, 19 body entries, 13 locals, 5 calls.
 
-### 14.2 Current `main`
+### 14.2 Reviewed `9402b169` `main`
 
 ```text
 root_frame = runtime.side_root_top
@@ -1203,19 +1269,25 @@ measure the net effect.
 
 ---
 
-## 16. Review findings
+## 16. Historical review findings and latest disposition
+
+The findings below describe the `9402b169` review. F1, F3, F5, F7, F8, and F9
+remain valid. F2 is resolved for precise release contexts and retained only as
+an explicit compatibility/debug capability. F4 is addressed by shared CFG
+liveness, dirty write-back, scratch coloring, and compact slot assignment. F6
+remains a separate return-mode specialization opportunity.
 
 ### F1. The core root side stack replaces the old heap root frame cleanly
 
 No `heap_jit_gc_root_frame_*` references remain in current core/runtime code.
 The probe confirms that root traffic is base-plus-constant memory traffic.
 
-### F2. Current GC still has dual precise/conservative coverage
+### F2. The reviewed GC still had dual precise/conservative coverage
 
-The side-root range is precise, but `gc_scan_stack()` still runs on every
-collection. This is not duplicate MIR rooting; it is duplicate collector
-coverage. It remains needed until C2MIR and host/native paths have a complete
-precise-root contract.
+The side-root range was precise, but `gc_scan_stack()` still ran on every
+collection. This was not duplicate MIR rooting; it was duplicate collector
+coverage needed by C2MIR and then-unmigrated host/native paths. Section 0
+records its retirement from precise release contexts.
 
 ### F3. Core Lambda did not acquire JS-style post-instruction full publication
 
@@ -1223,11 +1295,12 @@ The exact before/after comparison has 16 root slots in both versions. The frame
 change did not create the root definitions responsible for this probe. It
 changed how they are stored and collected.
 
-### F4. Root slot allocation is exact but not liveness-minimal
+### F4. Reviewed root slot allocation was exact but not liveness-minimal
 
-The prologue reserves exactly the number of slots assigned by lowering, but the
-assignment is monotonic. The result is exact relative to the emitter's slot
-plan, not exact relative to peak live roots.
+The reviewed prologue reserved exactly the number of slots assigned by
+lowering, but assignment was monotonic. The result was exact relative to the
+emitter's slot plan, not peak live roots. The current shared finalizer computes
+compact stable/scratch slots from safepoint liveness.
 
 ### F5. Wide scalar lifetime is now structurally bounded
 
@@ -1261,10 +1334,14 @@ dumps show no commit call.
 
 ---
 
-## 17. Recommended optimization order
+## 17. Historical recommended optimization order
 
-The current architecture should be optimized without restoring the old helper
-calls or weakening correctness:
+This was the optimization order recommended by the `9402b169` review. The
+latest status is: semantic root liveness/reuse, dirty write-back, redundant
+publication removal, classified calls, release measurement, precise native
+producer migration, and scanner retirement for precise contexts are
+implemented. Return-mode specialization remains an independent code-size
+opportunity. The historical order was:
 
 1. **Specialize boxed return epilogues from proven return type.** Keep the
    generic classifier only for genuinely dynamic `Item` returns.
@@ -1289,7 +1366,7 @@ rooting architecture changes and require broader tests than the core MIR probe.
 
 ## 18. Source map
 
-| Concern | Current source |
+| Concern | Source |
 |---|---|
 | Root predicate and function-frame emission | `lambda/transpile-mir.cpp` |
 | Direct frame-slot load/store helpers | `lambda/mir_emitter_shared.hpp` |
@@ -1297,11 +1374,12 @@ rooting architecture changes and require broader tests than the core MIR probe.
 | Runtime context watermarks | `lambda/lambda.h` |
 | Side-stack reservation/commit/decommit | `lib/side_stack.c`, `lib/side_stack.h` |
 | Collector entry and side-root range | `lambda/lambda-mem.cpp` |
-| Registered roots, side-root scan, conservative scan | `lib/gc/gc_heap.c` |
+| Registered roots, side-root scan, compatibility/debug conservative scan | `lib/gc/gc_heap.c` |
 | Stack overflow recovery | `lambda/lambda-stack.cpp`, `lambda/lambda-stack.h` |
 | Implementation checklist/history | `vibe/Lambda_Impl_Stack_Frame.md` |
 | Design and migration rationale | `vibe/Lambda_Design_Stack_Frame.md` |
 | JavaScript MIR companion review | `vibe/Lambda_Stack_JS_MIR.md` |
+| Latest rooting design and cross-tier MIR profile | `vibe/Lambda_Design_Stack_Rooting.md` §12 |
 
 Historical sources at `5717d36f` additionally include:
 
@@ -1311,7 +1389,7 @@ Historical sources at `5717d36f` additionally include:
 
 ---
 
-## 19. Verification record
+## 19. Historical verification record
 
 The comparison used:
 
@@ -1319,7 +1397,7 @@ The comparison used:
   branch;
 - identical Lambda source at both revisions;
 - isolated historical source for the old transpiler/runtime;
-- current source for the new transpiler/runtime;
+- `9402b169` source for the reviewed transpiler/runtime;
 - exact MIR dump inspection;
 - instruction/local/call counts for `_frame_review_0`, its typed wrapper, and
   `main`;

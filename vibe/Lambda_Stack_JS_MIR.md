@@ -1,52 +1,123 @@
 # LambdaJS stack-frame MIR emission review
 
-**Status:** review report; no runtime change proposed or implemented here
+**Status:** historical review of the broad shadow-copy implementation, updated
+with the implemented safepoint write-back result
 
-**Date:** 2026-07-16
+**Historical review date:** 2026-07-16
 
-**Current Lambda commit reviewed:** `9402b16980e8`
+**Post-implementation profile:** 2026-07-19 at `638e11c93`
+
+**Historical side-stack commit reviewed:** `9402b16980e8`
 
 **Exact pre-stack comparison point:** `5043b95690ff`, the direct parent of the first JS stack-frame commit `451962211`
 
+Unless a section explicitly says post-implementation, “Current” in the
+original review below means the historical `9402b169` implementation, not
+repository `HEAD`.
+
+## 0. Post-implementation result — 2026-07-19
+
+LambdaJS now uses safepoint-current canonical slots in production. Semantic
+binding homes and temporary candidates are reported to the shared
+`MirEmitter`; classified `MAY_GC` call sites drive CFG liveness, dirty-state
+propagation, scratch coloring, compact slot assignment, and final root-store
+insertion. Production no longer republishes the full lexical scope or scans
+root bindings after every instruction.
+
+For the identical `frameReview` probe used by the historical review:
+
+| Metric | Pre-stack `5043b956` | Broad side-stack `9402b169` | Post-implementation write-back `638e11c93` | Broad → post change |
+|---|---:|---:|---:|---:|
+| Executable MIR instructions | 58 | 440 | **136** | **−304 (−69.1%)** |
+| MIR locals | 29 | 214 | **53** | **−161 (−75.2%)** |
+| MIR calls | 24 | 26 | **26** | unchanged |
+| Per-function side-root slots | 0 | 28 | **7** | **−21 (−75.0%)** |
+| Runtime root publication | none | 161 copy/store pairs = 322 instructions | **11 direct stores** | broad publication removed |
+
+The production function is now 30.9% of the broad side-stack instruction
+count. The design estimate was approximately 130 instructions; the implemented
+result is 136. It remains 78 instructions above the 58-instruction pre-stack
+body (2.34x) because precise execution still needs checked frame
+binding/reservation, slot initialization, safepoint stores, unified cleanup,
+boxed-scalar return classification/donation, watermark restoration, and a cold
+overflow path.
+
+The retained write-through oracle provides a same-compiler comparison:
+
+| Current `638e11c93` mode | Executable instructions | Body entries | Locals | Calls | Root slots | Root stores |
+|---|---:|---:|---:|---:|---:|---:|
+| Write-through oracle | 150 | 168 | 54 | 27 | 15 | 31 |
+| Production write-back | **136** | **154** | **53** | **26** | **7** | **11** |
+| Reduction | **−14 (−9.3%)** | −14 | −1 | −1 | **−8 (−53.3%)** | **−20 (−64.5%)** |
+
+Both modes classify the probe identically at 13 `MAY_GC` calls and 12
+`NO_GC` calls. The current oracle is not the historical 440-instruction
+compiler: it shares semantic candidates, canonical homes, import effects, and
+the consolidated emitter with production and changes the publication policy
+for differential correctness testing.
+
+The collector transition described by the historical review is also complete
+for precise tiers. Scanner-independent Lambda/LambdaJS release builds omit
+native-stack discovery and `gc_scan_stack()`. Scanner-capable debug builds and
+builds containing unchanged C2MIR retain conservative scanning only for shadow
+verification or sticky compatibility contexts.
+
+Captured evidence:
+
+- production MIR: `temp/js_mir_latest_writeback.txt`;
+- write-through MIR: `temp/js_mir_latest_writethrough.txt`;
+- slot/store diagnostics: `temp/js_mir_latest_writeback.log` and
+  `temp/js_mir_latest_writethrough.log`;
+- full Lambda/JS comparison and measurement rules:
+  `vibe/Lambda_Design_Stack_Rooting.md` §12.
+
+The current release Test262 baseline completes all 42,889 tests in 160.6s with
+40,261/40,261 fully passing, zero non-fully-passing tests, zero failures, zero
+regressions, and zero retry time. This is current acceptance evidence, not a
+source-isolated attribution against the historical 195.7s/349.4s comparison;
+the intervening source and harness changes make that runtime comparison
+non-causal.
+
 ## 1. Executive summary
 
-The JS stack-frame work did not merely add a small function prologue and
-epilogue. It added a whole-function rooting transform around the existing JS
-MIR:
+The reviewed `9402b169` JS stack-frame work did not merely add a small function
+prologue and epilogue. It added a whole-function rooting transform around the
+existing JS MIR:
 
-1. every generated JS function now opens root and number side-stack frames;
-2. every variable judged heap-capable receives a root slot;
-3. every runtime helper call republishes all live lexical variables;
-4. every `I64`/pointer register passed to or returned from a call is rooted;
-5. every emitted instruction is checked to see whether it overwrites a rooted
+1. every generated JS function opened root and number side-stack frames;
+2. every variable judged heap-capable received a root slot;
+3. every runtime helper call republished all live lexical variables;
+4. every `I64`/pointer register passed to or returned from a call was rooted;
+5. every emitted instruction was checked to see whether it overwrote a rooted
    register;
-6. every return is redirected to one epilogue that re-homes scalar payloads and
-   restores both watermarks.
+6. every return was redirected to one epilogue that re-homed scalar payloads
+   and restored both watermarks.
 
 The safety goal is valid: a collection during a helper call must see all live
 JS objects, and no returned wide scalar may point into the reclaimed callee
-number extent. The current implementation, however, roots substantially more
-values and emits substantially more stores than that invariant requires.
+number extent. The reviewed implementation, however, rooted substantially more
+values and emitted substantially more stores than that invariant required.
 
-> **[IMPORTANT: CURRENT IMPLEMENTATION USES BOTH ROOTING MODELS]**
+> **[HISTORICAL AT `9402b169`: BOTH ROOTING MODELS WERE ACTIVE]**
 >
-> The new precise LambdaJS side-root stack did **not** replace the old
-> conservative native-stack rooting path. Every collection currently scans the
-> published side-root region **and then still scans the native stack**. Old
+> The new precise LambdaJS side-root stack had **not** replaced the old
+> conservative native-stack rooting path. Every collection scanned the
+> published side-root region **and then still scanned the native stack**. Old
 > registered roots for globals, module variables, runtime singletons, and the JS
-> argument stack also remain. The migration replaced permanent closure-env root
-> ranges with traced GC ownership, but for ordinary live JS locals the new
-> publication is additive to the old conservative discovery mechanism.
+> argument stack also remained. The migration replaced permanent closure-env
+> root ranges with traced GC ownership, but for ordinary live JS locals the new
+> publication was additive to the old conservative discovery mechanism.
 >
-> Consequently, the runtime pays for the newly emitted root stores and
-> root-region scan without yet receiving the potential payoff of removing the
+> Consequently, the runtime paid for the newly emitted root stores and
+> root-region scan without receiving the potential payoff of removing the
 > conservative native-stack scan. This does not make precise rooting useless,
-> but it means the current implementation is a dual-rooting transition state,
-> not a completed replacement.
+> but the reviewed implementation was a dual-rooting transition state, not a
+> completed replacement. Section 0 documents the completed precise-release
+> state.
 
 For the representative function in this report:
 
-| Metric | Pre-stack | Current | Change |
+| Historical metric | Pre-stack | Reviewed `9402b169` | Change |
 |---|---:|---:|---:|
 | MIR instructions | 58 | 440 | +382, or 7.59x total |
 | MIR locals | 29 | 214 | +185, or 7.38x total |
@@ -59,8 +130,9 @@ this function. A simpler one-argument property-reader grows from 20 to 102 MIR
 instructions. An 18-function probe grows from 1,408 to 11,738 MIR instructions.
 
 The full release Test262 comparison using the same runner and suite revisions
-was 195.7 seconds at the pre-stack commit versus 349.4 seconds current. The
-emitted-MIR expansion and the Test262 regression are therefore consistent.
+was 195.7 seconds at the pre-stack commit versus 349.4 seconds at the reviewed
+side-stack commit. The emitted-MIR expansion and the Test262 regression are
+therefore consistent.
 
 ## 2. Design before the new LambdaJS stack frame
 
@@ -325,11 +397,13 @@ root:   side_root_base -> side_root_top -> side_root_limit
 number: side_number_base -> side_number_top -> side_number_limit
 ```
 
-The root stack is a contiguous array of 64-bit candidate roots. A collection
-scans `[side_root_base, side_root_top)` in addition to the conservative native
-stack. Restoring `side_root_top` removes the callee's roots in O(1).
+The root stack is a contiguous array of 64-bit candidate roots. At the reviewed
+commit, a collection scanned `[side_root_base, side_root_top)` in addition to
+the conservative native stack. Restoring `side_root_top` removed the callee's
+roots in O(1).
 
-**[CURRENT: DUAL ROOTING]** The collection sequence marks both regions:
+**[HISTORICAL AT `9402b169`: DUAL ROOTING]** The collection sequence marked
+both regions:
 
 ```text
 mark registered root slots and ranges       // old, retained
@@ -341,7 +415,7 @@ trace the marked heap graph
 
 The status of each pre-change mechanism is:
 
-| Rooting mechanism | Pre-change JS | Current JS | Migration status |
+| Rooting mechanism | Pre-change JS | Reviewed `9402b169` JS | Migration status |
 |---|---:|---:|---|
 | Conservative native-stack discovery of JS locals | yes | yes | retained |
 | Precise JS side-root publication | no | yes | added |
@@ -366,10 +440,10 @@ The side stacks reserve virtual address space per thread:
 - root stack: 16 MiB;
 - number stack: 64 MiB.
 
-`lambda_side_stack_bind()` initializes `Context` from the thread-local regions.
-`lambda_side_stack_ensure()` binds on first use and checks/commits capacity.
-The current macOS/Linux prologue performs the common capacity check inline;
-Windows additionally checks the committed-page watermark.
+`lambda_side_stack_bind()` initialized `Context` from the thread-local regions.
+`lambda_side_stack_ensure()` bound on first use and checked/committed capacity.
+The reviewed macOS/Linux prologue performed the common capacity check inline;
+Windows additionally checked the committed-page watermark.
 
 ## 5. Function-lowering lifecycle
 
@@ -390,9 +464,9 @@ finish MIR function
 There was no generated side-stack prologue, no root-slot table, no unified
 return, and no scalar-watermark restoration in the JS function.
 
-### 5.2 Current lifecycle
+### 5.2 Reviewed `9402b169` lifecycle
 
-The current boxed-function path is:
+The reviewed boxed-function path was:
 
 ```text
 create MIR function and parameter registers
@@ -525,7 +599,7 @@ This baseline already contains significant JS semantic machinery:
 
 Those are existing JS-lowering costs, not stack-frame additions.
 
-## 7. Current prologue: complete emitted MIR
+## 7. Reviewed `9402b169` prologue: complete emitted MIR
 
 For the sample's 28 root slots, the current macOS/Linux prologue is:
 
@@ -827,7 +901,7 @@ additional to the existing MIR in the middle column.
 | exception propagation | `js_check_exception` plus branch | all live roots republished; boolean exception result rooted |
 | explicit/implicit/error return | separate direct `ret` paths | value moved to shared return register and jumped to epilogue |
 
-## 12. Current return funnel and complete epilogue
+## 12. Reviewed `9402b169` return funnel and complete epilogue
 
 ### 12.1 Return rewriting
 
@@ -954,7 +1028,7 @@ The root restoration is emitted only when the function discovered at least one
 root slot. The overflow return bypasses the normal epilogue because the frame
 top has not been successfully published.
 
-## 13. Compact complete current listing
+## 13. Compact complete reviewed `9402b169` listing
 
 Using the exact `ROOT` expansion defined in section 3, the current sample is:
 
@@ -1007,23 +1081,34 @@ listing accounts for all 440 instructions: 58 baseline-body instructions,
 161 root pairs (322 instructions), and the remaining prologue, unified-return,
 scalar, restoration, and overflow instructions.
 
-## 14. Review findings
+## 14. Historical review findings and latest disposition
 
-### R0 — The current migration retains both old and new local-root discovery
+The findings below describe `9402b169`. In the post-implementation design:
+
+- R0 is resolved for precise release contexts; conservative discovery remains
+  only in scanner-capable compatibility/debug builds;
+- R1–R8 are resolved by semantic representation classes, import-effect
+  classification, shared call-site/candidate recording, CFG liveness, dirty
+  write-back, compact stable/scratch homes, initialized frames, and a
+  write-through-only correctness oracle;
+- R9 is addressed by late frame sizing and rootless-frame elision;
+- R10 remains a separate opportunity to specialize genuinely dynamic boxed
+  scalar return epilogues.
+
+### R0 — The reviewed migration retained both old and new local-root discovery
 
 **Severity:** high architectural and performance significance.
 
-The collector still performs the conservative native-stack scan after marking
-the new precise side-root region. Therefore the stack-frame change added a
-second discovery path for ordinary JS locals rather than replacing the first.
-The largest measured regression signal is the MIR needed to keep side-root
-slots synchronized. The dense-root scan adds collection work as well, while the
-old stack-scan cost and its false-retention behavior remain.
+The reviewed collector still performed the conservative native-stack scan
+after marking the new precise side-root region. Therefore that stack-frame
+change added a second discovery path for ordinary JS locals rather than
+replacing the first. The largest measured regression signal was the MIR needed
+to keep side-root slots synchronized. The dense-root scan added collection work
+while the old scan cost and false-retention behavior remained.
 
-This dual state can be appropriate during migration, because C/C++ helper frames
-and any not-yet-audited generated paths may still depend on conservative
-discovery. It should nevertheless be treated as an explicit transition. A
-completed design needs one of two stated outcomes:
+This dual state was appropriate during migration because C/C++ helper frames
+and not-yet-audited generated paths still depended on conservative discovery.
+The review required one of two explicit outcomes:
 
 1. keep the conservative scan as a documented backstop, but make precise JS
    publication cheap through representation, safepoint, liveness, dirty-root,
@@ -1031,9 +1116,8 @@ completed design needs one of two stated outcomes:
 2. prove every generated and native helper root path precise, then retire the
    conservative scan separately.
 
-Simply deleting the conservative scan now is not justified by the current
-frame transform; simply retaining both forever also leaves a major design
-payoff unrealized.
+The implementation selected outcome 2 for precise Lambda/LambdaJS contexts and
+retains outcome 1 only for explicitly compatible/debug builds; see §0.
 
 ### R1 — Call rooting is representation-blind and is the largest inflation source
 
@@ -1104,7 +1188,7 @@ paths consistently.
 
 **Severity:** medium correctness invariant; low direct runtime value.
 
-TDZ/predeclared registers are stored before their first `mov`. Current safety
+TDZ/predeclared registers were stored before their first `mov`. Reviewed safety
 depends on there being no GC safepoint before the first full publication. The
 ordering should be explicit and locally safe rather than dependent on that
 global assumption.
@@ -1132,9 +1216,13 @@ the exact pre-scalar parent showed that the recent inline scalar-return change
 added about 7.9% MIR to the 18-function probe but did not cause the large
 runtime regression. Root publication remains the dominant target.
 
-## 15. Recommended target lowering
+## 15. Recommended target lowering — implemented
 
-The stack-frame safety contract can be retained with a smaller transform:
+The post-implementation emitter implements this target: semantic
+representation classes, classified safepoints, CFG liveness, compact stable
+and scratch homes, dirty write-back, delayed result publication, and frame
+elision are owned by the shared `MirEmitter`. The historical recommendation
+was:
 
 1. classify each MIR register by GC representation, not just machine type;
 2. classify imported/direct calls by whether they are GC safepoints;
@@ -1154,9 +1242,10 @@ live there. Args-buffer storage is independently rooted. Exception flags,
 truthiness flags, source IDs, args marks, and immediate constants require no GC
 slots.
 
-## 16. Review and verification checklist
+## 16. Review and verification checklist — implemented
 
-Before changing the emitter, verify these invariants explicitly:
+These invariants are now permanent verification requirements rather than an
+unimplemented checklist:
 
 - GC can only occur at a known set of generated-call safepoints, or document
   any asynchronous collection mechanism that invalidates this assumption.
@@ -1172,7 +1261,7 @@ Before changing the emitter, verify these invariants explicitly:
 - Root-slot reuse never lets a stale slot keep an unrelated object alive or
   drop a still-live object.
 
-Suggested validation gates for an implementation:
+Implemented validation gates:
 
 1. focused MIR golden/count test for this probe;
 2. forced GC at every declared safepoint;
@@ -1204,7 +1293,7 @@ Pre-change design evidence at `5043b95690ff`:
   - no per-function side-root prologue, root publication, number watermark, or
     unified cleanup epilogue was emitted.
 
-Current implementation entry points:
+Reviewed `9402b169` implementation entry points:
 
 - `lambda/js/js_mir_hashmap_scope_utils.cpp`
   - root slot store/allocation: `jm_store_gc_root_slot`,
@@ -1236,10 +1325,33 @@ Current implementation entry points:
 - `lambda/lambda.h`
   - `Context` side-stack fields and Item representation helpers.
 
-## 18. Reproduction record
+Post-implementation entry points at `638e11c93`:
 
-The current and historical MIR were generated from the same source probe with
-debug binaries solely because detailed MIR dumping is debug-gated:
+- `lambda/mir_emitter_shared.hpp`
+  - semantic root candidates and call sites;
+  - CFG liveness, dirty-state propagation, scratch coloring, OOM fallback,
+    and `em_finalize_semantic_root_write_back()`;
+- `lambda/js/js_mir_hashmap_scope_utils.cpp`
+  - stable semantic-home installation, effect-aware call-site recording,
+    write-back finalization, frame sizing, and slot/store diagnostics;
+  - the eager write-through behavior retained only as the correctness oracle;
+- `lambda/js/js_mir_calls_boxing_types.cpp`
+  - helper calls routed through import-effect and representation metadata;
+- `lambda/js/js_mir_function_class_lowering.cpp` and
+  `lambda/js/js_mir_module_batch_lowering.cpp`
+  - function and module frame integration with the shared finalizer;
+- `lambda/lambda-mem.cpp` and `lib/gc/gc_heap.c`
+  - precise-only admission and scanner-independent release collection, with
+    conservative scanning confined to compatible/debug builds;
+- `utils/check_gc_effects.py` and `utils/check_gc_root_hazards.py`
+  - transitive `NO_GC` enforcement and native-root hazard enforcement;
+- `vibe/Lambda_Design_Stack_Rooting.md` §12
+  - cross-tier post-implementation measurements and artifact list.
+
+## 18. Historical reproduction record
+
+The reviewed side-stack and pre-stack MIR were generated from the same source
+probe with debug binaries solely because detailed MIR dumping is debug-gated:
 
 ```bash
 JS_MIR_DUMP=1 LAMBDA_DISABLE_MIR_CACHE=1 \

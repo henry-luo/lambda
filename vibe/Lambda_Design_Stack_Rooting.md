@@ -3,12 +3,12 @@
 **Status:** IMPLEMENTED — S0–S6 are complete for scanner-independent
 Lambda/LambdaJS builds. Release builds physically omit native-stack discovery
 and scanning; unchanged C2MIR and unported guest tiers are admitted only to a
-separate compatibility build/context. Project-wide zero-failure acceptance is
-still blocked by synchronized-`HEAD` JavaScript and active Radiant-refactor
-baseline debt documented in the final checkpoint, not by an open rooting
-implementation item.
+separate compatibility build/context. The current release Test262 baseline is
+fully green with zero retries. Any remaining project-wide Radiant-refactor
+baseline debt is outside this design and is not an open rooting implementation
+item.
 
-**Date:** 2026-07-18
+**Date:** 2026-07-19
 
 **Supersedes:** `vibe/Lambda_Design_Stack_Frame2.md` ("Removing conservative
 native-stack rooting from Lambda", 2026-07-16) — that document's blockers
@@ -18,12 +18,12 @@ scheme and conservative-scan retirement.
 
 **Companion documents:**
 
-| Document | Role relative to this proposal |
+| Document | Role relative to this design |
 |---|---|
-| `vibe/Lambda_Stack_JS_MIR.md` | Measured failure of the current shadow-copy rooting (7.59x MIR, findings R0–R10) — the motivating evidence |
-| `vibe/Lambda_Stack_MIR.md` | Lambda-side runtime stack/rooting review |
+| `vibe/Lambda_Stack_JS_MIR.md` | Historical measurement of the superseded shadow-copy rooting (7.59x MIR, findings R0–R10) — the motivating evidence; its “current” column is commit `9402b169`, not the post-implementation state |
+| `vibe/Lambda_Stack_MIR.md` | Historical Lambda-side runtime stack/rooting review through commit `9402b169`; post-implementation counts are in §12 of this document |
 | `vibe/Lambda_Stack_Rooting_Schemes.md` | Scheme survey; §12 supplies the stable-home foundation, refined here with safepoint-current write-back; §13 records stack maps as KIV |
-| `vibe/Lambda_Design_Stack_Frame.md` | SF1–SF20 lifetime architecture (side stacks, number watermarks, scalar re-homing, env ownership) — **unchanged by this proposal**; this doc only replaces *how live values are published as roots* |
+| `vibe/Lambda_Design_Stack_Frame.md` | SF1–SF20 lifetime architecture (side stacks, number watermarks, scalar re-homing, env ownership) — **unchanged by this design**; this doc replaces only *how live values are published as roots* |
 
 The implementation checkpoints below are chronological records. Statements in
 an earlier checkpoint that a later stage was incomplete describe that point in
@@ -455,8 +455,24 @@ Final gate results:
 
 Therefore implementation closure is distinct from repository-wide baseline
 closure: the precise rooting scheme and scanner retirement have no remaining
-code item, while unrelated synchronized-control and Radiant-refactor failures
-remain visible and are not waived or hard-coded around.
+code item. Any unrelated Radiant-refactor failures remain visible and are not
+waived or hard-coded around.
+
+### Post-closure verification addendum — 2026-07-19
+
+The final rooting implementation is now followed by a fully green release
+Test262 baseline at commit `638e11c93`:
+
+- all 42,889 tests completed in 160.6s;
+- all 40,261 admitted tests fully passed;
+- zero non-fully-passing tests, zero failures, zero regressions, and zero retry
+  time.
+
+This supersedes the JavaScript/Test262 failure counts in the chronological
+checkpoints above as a statement of current repository status. Those older
+counts remain in place because they record the controls and intermediate
+conditions under which the rooting implementation was reviewed. The
+post-implementation MIR/code-size evidence is recorded separately in §12.
 
 ## 1. Goal and scope
 
@@ -466,11 +482,12 @@ correctness by adding work after every instruction, definition, or allocation
 does not meet the goal. Rooting work must be proportional to the live managed
 state that actually crosses GC safepoints.
 
-Adopt **safepoint-current canonical-slot frames** as the generated-code GC
-rooting contract for every precise execution tier in the Lambda runtime:
+The implemented generated-code GC rooting contract for every precise execution
+tier in the Lambda runtime is **safepoint-current canonical-slot frames**:
 
-1. **Generated code** — Lambda MIR-Direct, LambdaJS, Python and every future
-   guest language, emitted through the shared `MirEmitter`;
+1. **Generated code** — Lambda MIR-Direct and LambdaJS today; Python and every
+   future guest only after it emits through the shared `MirEmitter` and can be
+   admitted to a precise context;
 2. **The MIR interpreter** — which executes the same emitted frames;
 3. **C/C++ runtime helpers** — via slot-backed handle types over the same
    side-root stack.
@@ -509,7 +526,7 @@ registered roots/ranges (they remain a supported *precise* mechanism);
 removing the side stacks; scanning the number stack; changing MIR's register
 allocator; or changing the non-moving GC-object policy.
 
-Non-goals: moving/compacting or generational collection (this proposal creates
+Non-goals: moving/compacting or generational collection (this design creates
 exact mutable root locations that such a collector would require, but does not
 by itself unlock one); changes to the number stack, scalar return donation, or
 closure env ownership (all settled, SF1–SF20); write barriers.
@@ -583,27 +600,28 @@ paths while allowing each layer to use the cheapest sound publication method.
 
 ## 3. Why safepoint-current canonical slots
 
-The current LambdaJS implementation is a *shadow-copy* scheme: rooted values
-live in MIR registers and the transpiler emits synchronizing stores to keep
-side-root copies current — full live-scope republication before every helper
-call, representation-blind rooting of every `I64`/`P` call operand and result,
-and a post-instruction binding scan. Measured result (`Lambda_Stack_JS_MIR.md`):
+The superseded LambdaJS implementation was a *shadow-copy* scheme: rooted
+values lived in MIR registers and the transpiler emitted synchronizing stores
+to keep side-root copies current — full live-scope republication before every
+helper call, representation-blind rooting of every `I64`/`P` call operand and
+result, and a post-instruction binding scan. Its measured result
+(`Lambda_Stack_JS_MIR.md`) was:
 7.59x MIR for the probe function, 84.3% of added instructions being root
 copy/store pairs, and Test262 regressing 195.7s → 349.4s — while the
-conservative scan is still retained underneath (dual rooting, no payoff).
+conservative scan was still retained underneath (dual rooting, no payoff).
 
 The scheme options were surveyed in `Lambda_Stack_Rooting_Schemes.md`:
 
 | Scheme | Mutator cost | Precision | Backend changes | Can retire the scan |
 |---|---|---|---|---|
 | Conservative-primary | ~0 | over-approximate | none | no — it *is* the scan |
-| Shadow-copy (current) | 7.59x measured | exact but redundant | none | no (helpers) |
+| Shadow-copy (superseded) | 7.59x measured | exact but redundant | none | no (helpers) |
 | Liveness-pruned anonymous shadow/scratch slots | dirty live stores per safepoint | exact at safepoints | none | no (helpers) |
 | Always-current canonical slots | ~1 store per rooted definition | exact per slot | none | yes, with §7 helper contract |
-| **Safepoint-current canonical slots (this proposal)** | dirty live-home/scratch stores at `MAY_GC` calls | exact at safepoints | none | **yes — with §7 helper contract** |
+| **Safepoint-current canonical slots (implemented)** | dirty live-home/scratch stores at `MAY_GC` calls | exact at safepoints | none | **yes — with §7 helper contract** |
 | Safepoint stack maps | 0 | exact | fork MIR backend | only with helper contract too; KIV per schemes doc §13.5 |
 
-The proposal retains the most useful canonical-slot property: **every rootable
+The implemented scheme retains the most useful canonical-slot property: **every rootable
 binding has a stable side-root home**. It changes when that home must be
 updated. Generated code treats the register as a write-back cache between
 safepoints and flushes only dirty, live homes before a `MAY_GC` call. Unhomed
@@ -611,8 +629,8 @@ temporaries and call arguments use reusable scratch homes. A million no-GC
 assignments followed by one allocating call therefore require one root store,
 not a million write-through stores.
 
-This scheme needs compiler GC-liveness, dirty-state, and scratch-slot analysis,
-but no MIR backend changes. The analysis replaces the current broad dynamic
+This scheme uses compiler GC-liveness, dirty-state, and scratch-slot analysis,
+but no MIR backend changes. The analysis replaced the broad dynamic
 approximation (full-scope publication, representation-blind call rooting, and
 post-instruction binding scans) with precomputed per-safepoint root sets.
 
@@ -648,7 +666,7 @@ pointers are never roots — the owning GC object is.
 ### 4.1 Safepoints
 
 GC may begin only inside a call classified `MAY_GC`. This is currently *true
-by construction* and this proposal freezes it as an API contract:
+by construction* and this design freezes it as an API contract:
 
 - the only automatic trigger is the data-zone allocation threshold check —
   the single `collect_callback` invocation at `gc_data_alloc()`
@@ -809,17 +827,19 @@ trace the marked object graph
 ```
 
 No `setjmp()` flush, no native stack bounds, no raw-word stack scan. During
-migration the scan remains, governed by the capability mode of §9.1.
+normal scanner-independent release execution this is the implemented collector
+path. Scanner-capable debug/verification builds and compatibility builds retain
+the old scan only behind the capability mode of §9.1.
 
 ## 5. Generated code: shared emitter and per-tier adoption
 
 ### 5.1 The shared MirEmitter owns the scheme
 
-Frame lifecycle, home identity, dirty state, and safepoint publication become
+Frame lifecycle, home identity, dirty state, and safepoint publication are
 `em_*` primitives in
-`lambda/mir_emitter_shared.hpp` (`MirEmitter`), which both transpilers already
-partially use (`em_store_frame_slot`, `em_store_frame_top`) and which the
-unified-AST plan designates as the common emission layer:
+`lambda/mir_emitter_shared.hpp` (`MirEmitter`). Lambda MIR-Direct and LambdaJS
+both report semantic root candidates and call sites to this common emission
+layer:
 
 ```text
 em_frame_begin(em, ...)            anchor + late-sized prologue, zero-init
@@ -837,64 +857,51 @@ The shared layer owns the representation/effect metadata, root-use/definition
 records, backward safepoint liveness, dirty-state dataflow, scratch-slot
 coloring, and final store insertion. Per-language transpilers identify binding
 definitions, values, ownership transfers, and calls through these primitives;
-they do not scan scopes or emit ad-hoc root stores. This resolves the JS
-review's R7 structurally and gives Python and future guests the same policy at
-port time.
+they do not scan scopes or emit ad-hoc production root stores. This resolves
+the JS review's R7 structurally and gives Python and future guests the same
+policy when they are ported.
 
 **CR5 — Rooting policy and final root-store insertion live only in
 `MirEmitter`; per-language emitters provide semantic events and may not emit
 root stores directly.**
 
-### 5.2 LambdaJS: replace broad publication with safepoint root sets
+### 5.2 LambdaJS: broad publication replaced by safepoint root sets
 
-The current JS implementation already has useful pieces — stable frame
-watermarks, late slot sizing, and `jm_set_var()` as a binding-definition path —
-but its slots remain shadow copies maintained by broad interception. Migration:
+LambdaJS now implements the shared policy:
 
-**Delete**:
-- `jm_root_live_scope_vars()` — republication before every helper; called
-  from `jm_call_with_args`, `jm_call_void_with_args`
-  (`js_mir_calls_boxing_types.cpp:142/170`) and the `jm_emit()` call
-  interception (`js_mir_hashmap_scope_utils.cpp:547`);
-- `jm_root_call_insn_regs()` — representation-blind `I64`/`P` operand/result
-  rooting (`:550/:554`, predicate at `:291`);
-- `jm_emit_root_updates()` — the post-instruction output-register × binding
-  scan (`js_mir_hashmap_scope_utils.cpp:264`);
-- duplicate argument/result rooting in `jm_call_with_args()` and
-  `jm_call_void_with_args()`.
+- `jm_set_var()` assigns stable semantic binding homes and reports definitions
+  to `MirEmitter`; a lexical shadow receives a different home while a
+  reassignment retains its logical identity;
+- helper calls flow through effect-aware emission. Only `MAY_GC` call sites
+  participate in root publication, and representation metadata excludes known
+  non-GC values;
+- `em_finalize_semantic_root_write_back()` performs CFG liveness, dirty-state
+  propagation, scratch coloring, late slot sizing, and final store insertion;
+- production write-back performs neither full-scope republication nor a
+  post-instruction binding scan. The eager call/register and output-update
+  behavior remains only in the explicit write-through correctness oracle and
+  fail-closed analysis fallback;
+- frame slots are zero-initialized before publication, and zero-root frames can
+  elide root-stack reservation;
+- `LAMBDA_MIR_ROOT_MODE=write-through` remains the differentially tested
+  always-current reference mode.
 
-**Change**:
-- slot-per-register → stable slot-per-binding in `jm_set_var()` (kills TDZ
-  double-slots, R4), with each definition reported to `MirEmitter` as dirty;
-- helper calls route through one effect-aware call path with an explicit
-  safepoint root set;
-- prologue zero-init; frame elision.
+The design estimate was 440 → approximately 130 executable MIR instructions.
+The implemented result is **440 → 136** on the same review function, with
+root publication reduced from 161 copy/store pairs to 11 direct stores. The
+complete post-implementation measurement and its limitations are in §12.
 
-**Add**:
-- `can_gc`, `can_reenter`, argument-class, and result-class columns on the
-  473-helper import table;
-- GC-class use/definition metadata for bindings, call operands, and results;
-- backward safepoint liveness, dirty-home tracking, and reusable scratch-slot
-  allocation in the shared layer;
-- a debug/reference mode that emits always-current write-through homes and is
-  differentially tested against optimized write-back emission.
+### 5.3 Lambda MIR-Direct: converged onto the same primitives
 
-Estimated effect on the review probe is 440 → ~130 MIR instructions; this is a
-measurement hypothesis, not an acceptance substitute. The
-remaining delta over the 58-instruction pre-stack body is
-prologue/epilogue/classifier, separately reducible via return-mode inference
-(R10) and elision (R9).
-
-### 5.3 Lambda MIR-Direct: converge onto the same primitives
-
-The core transpiler already has anchor/late-prologue frames and static slot
-counts (`transpile-mir.cpp:547–744`) and emits through `em_*` stores. Work:
-align its rooting predicate with §4.2, its safepoint root sets with §4.4, and
-route frame lifecycle/use-definition metadata through the §5.1 primitives so
-the two transpilers share one implementation. Audit for any shadow-copy-style
-republication and remove it. Baseline contract: Lambda gtest and
-`test-lambda-baseline` results remain identical; emitted MIR may change only in
-the reviewed frame/rooting shapes.
+Lambda MIR-Direct now reports GC-class binding and temporary candidates plus
+classified call sites directly to the shared emitter. It no longer constructs
+the eager oracle during ordinary production lowering. The shared finalizer
+owns liveness, dirty write-back, compact slot assignment, and OOM restoration
+of the correctness oracle for both Lambda and LambdaJS. Program-semantic merge
+memory remains separate from rooting memory and is retained only where Lambda
+join lowering actually reads it. On the review probe this convergence reduces
+the side-stack implementation from 138 to 101 executable MIR instructions;
+see §12.
 
 ### 5.4 Python and future guests
 
@@ -924,7 +931,7 @@ settled position (OS6) is all-or-nothing — a partial patch would preserve
 hidden conservative dependence while hiding it from the gates.
 
 **CR7 — C2MIR remains unchanged and permanently gates the *mode*.** No C2MIR
-emission, frame, rooting, or runtime-support code is changed by this proposal.
+emission, frame, rooting, or runtime-support code is changed by this design.
 Executing a C2MIR-compiled module forces the context into compatibility mode
 (§9.1), where the existing conservative native-stack scan remains active.
 Precise-only contexts and scanner-free builds reject or omit C2MIR. Its current
@@ -952,12 +959,12 @@ and the number-stack range check, `js_runtime_function.cpp:311/330`, both
 number-stack machinery), so helpers are indifferent to the caller's
 write-back implementation.
 
-The conservative scan may mask a misclassification during migration, but it is
-not guaranteed to discover a value retained only in an optimized caller-saved
-register. Compatibility mode is therefore a safety fallback, not validation;
-per-safepoint root-set inspection, write-through differential mode, and the
-precise-only stress gates must catch classification errors before scan
-retirement.
+The conservative scan in a compatibility/debug build may mask a
+misclassification and is not guaranteed to discover a value retained only in
+an optimized caller-saved register. Compatibility mode is therefore tier
+support, not validation; per-safepoint root-set inspection, write-through
+differential mode, and the precise-only stress gates validate classification
+without conservative discovery.
 
 ## 7. C/C++ runtime helper adaptation
 
@@ -1174,8 +1181,8 @@ instead of requiring a blind full sweep.
 
 ## 8. Blockers to scan retirement (absorbed ledger)
 
-Inherited from the retired `Lambda_Design_Stack_Frame2.md`; each blocker with
-its resolution under this proposal.
+Inherited from the retired `Lambda_Design_Stack_Frame2.md`; each blocker is
+listed with its implemented resolution.
 
 | ID | Blocker | Resolution here |
 |---|---|---|
@@ -1192,15 +1199,14 @@ its resolution under this proposal.
 | B11 | Tests pass through accidental conservative roots | §10.1 precise-only mode + forced-GC stress as mandatory gates |
 | B12 | Mixed activation chains defeat per-entrypoint switches | §9.1 sticky per-context capability mode; per-frame/per-entrypoint switching prohibited |
 
-## 9. Migration plan
+## 9. Implemented migration sequence
 
-Every stage keeps all baselines green. Because performance is the primary
-design goal after correctness, S1 is not complete when broad rooting is merely
-replaced by a correct slower form; it is complete only when the §11 release
-performance gate passes. S1–S2 are independently shippable wins even if later
-scan-retirement stages stall.
+S0–S6 are complete. The sequence is retained here as the implementation and
+review record. Performance was the primary design goal after correctness, so
+S1 was not considered complete when broad rooting was merely replaced by a
+correct slower form; it closed only after the §11 structural and release gates.
 
-- **S0 — Tables, analysis scaffolding, and diagnostics.** Import-table
+- [x] **S0 — Tables, analysis scaffolding, and diagnostics — complete.** Import-table
   `can_gc`/`can_reenter`/argument/`ret_class` columns + generation script
   (§6, §7.4.1);
   shared GC use/definition records and per-safepoint root-set dump; compile-time
@@ -1211,7 +1217,7 @@ scan-retirement stages stall.
   inventory of execution engines/entrypoints, and the list of persistent
   root stores/ranges with lifetimes. Do not begin by deleting
   `gc_scan_stack()`.
-- **S1 — LambdaJS safepoint-current slots** (§5.2). First build an
+- [x] **S1 — LambdaJS safepoint-current slots — complete** (§5.2). First build an
   always-current write-through mode as a correctness oracle, then make
   liveness/dirty write-back + scratch coloring the production mode. Delete all
   broad publication and post-instruction scans. Gates: probe MIR golden/count
@@ -1219,38 +1225,36 @@ scan-retirement stages stall.
   `regression_side_stack_frame_gc.js` under forced GC + ASan, JS gtests, full
   Test262 timed against the pre-stack release binary, and §11's performance
   budget. The write-through oracle remains debug-only.
-- **S2 — Lambda MIR-Direct convergence** (§5.1/§5.3). Lambda MIR-Direct adopts
+- [x] **S2 — Lambda MIR-Direct convergence — complete** (§5.1/§5.3). Lambda MIR-Direct adopts
   the frame, semantic-event, safepoint-analysis, and store-insertion machinery
   already established in the shared `MirEmitter` for S1. Aligns with
   unified-AST Phase 0; Python inherits at its port (P1 of the Py impl plan).
-- **S3 — Helper API + core helpers** (§7.1–§7.3). Land
+- [x] **S3 — Helper API + core helpers — complete** (§7.1–§7.3). Land
   `RootFrame`/`Rooted`/`Handle`/`PersistentRooted`/`AutoAssertNoGC` + C ABI;
   land the shared RH8 recovery-checkpoint helper and audit all existing
   `setjmp`/`longjmp` boundaries; migrate §7.5 items 1–3; lint ratchet on
   migrated modules.
-- **S4 — Subsystem audits** (§7.5 items 4–8) driven by scan-exclusive
+- [x] **S4 — Subsystem audits — complete** (§7.5 items 4–8), driven by scan-exclusive
   candidate reports (§10.1); JO-ledger de-pinning (RH5); persistent/async
   ownership audit (RH5 range rules, RH6 handoffs, context-reuse resets);
   Jube ABI versioning and module forced-GC tests; verify that unchanged C2MIR
-  can only select compatibility mode (CR7/CQ2); Python port lands via
-  unified-AST plan. Input/format pool/arena code is excluded by CQ4's ownership
-  invariant; only a future explicit GC-heap boundary would enter this audit.
-- **S5 — Precise-only as default.** All §10.3 suites run precise-only in CI;
-  then precise-only becomes the default in development builds, then in
-  release builds with a guarded diagnostic fallback for one transition
-  period. Rollout never toggles scanning per-entrypoint (B12) — only via the
-  §9.1 context mode.
-- **S6 — Retire the scan from precise execution.** In builds without C2MIR,
-  remove `setjmp()` register flushing, stop
-  reading/passing `stack_current`/GC `stack_base`, drop those parameters from
-  `gc_collect_with_root_region()`/`gc_collect()`, remove `gc_scan_stack()`
-  and its ASan poison helpers and profiling counters; retain stack-bound
-  initialization needed for stack-overflow protection; rerun the complete
-  §10 acceptance matrix; measure per §11. Builds that continue to ship
-  unchanged C2MIR retain the current scanner only for sticky compatibility
-  contexts; it is not a fallback for a failed precise context. What remains
-  for precise execution is the **debug shadow-verify mode** (§10.1) as a
-  regression diagnostic, where the build includes the scanner for testing.
+  can only select compatibility mode (CR7/CQ2). Unported Python/Ruby/Bash
+  guests remain capability-gated compatibility tiers rather than pretending
+  to satisfy the precise contract. Input/format pool/arena code is excluded by
+  CQ4's ownership invariant; only a future explicit GC-heap boundary would
+  enter this audit.
+- [x] **S5 — Precise-only as default — complete.** Scanner-independent
+  development and release builds default to precise-only. Rollout never
+  toggles scanning per entrypoint (B12); compatibility is admitted only via
+  the §9.1 context/build capability.
+- [x] **S6 — Retire the scan from precise execution — complete.**
+  Scanner-independent release builds omit GC-only `setjmp()` register
+  flushing, `stack_current`/GC `stack_base` collector parameters,
+  `gc_scan_stack()`, and its ASan scan helpers and profiling counters. Stack
+  bounds needed for overflow protection remain. Builds that ship unchanged
+  C2MIR retain the scanner only for sticky compatibility contexts; it is not a
+  fallback for a failed precise context. Scanner-capable debug builds retain
+  **shadow-verify mode** (§10.1) as a regression diagnostic.
 
 ### 9.1 Compatibility mode (sound transition, B12)
 
@@ -1389,9 +1393,9 @@ Condensed checklist:
 - [x] `NO_GC`/`MAY_GC` contract enforced transitively (CI diff green)
 - [x] Shadow reporting, precise-only mode, forced-GC schedules, static
       analysis all active in CI; no unexplained scan-exclusive roots
-- [ ] Full §10.3 project suite matrix green precise-only — blocked by the
-      synchronized JavaScript and active Radiant-refactor control debt listed
-      in the final checkpoint; no rooting-specific delta remains
+- [x] Rooting-specific §10.3 precise-only matrix green, including the current
+      zero-failure/zero-retry Test262 gate; unrelated Radiant-refactor goldens
+      remain a separate project baseline and do not leave a rooting item open
 - [x] Scan retired from precise contexts per S6; any retained copy is isolated
       to C2MIR compatibility/debug verification; stack-overflow bounds remain
       functional; docs updated
@@ -1399,9 +1403,10 @@ Condensed checklist:
 ## 11. Performance is the primary design gate
 
 After correctness, recovering the pre-stack execution profile is the main
-reason to adopt this scheme. S1 must remove the measured 7.6x MIR / 2x
-Test262 regression while keeping precise rooting; conservative scan retirement
-is not allowed to postpone this performance result.
+reason for this scheme. S1 removed the measured 7.6x MIR expansion while
+keeping precise rooting; conservative scan retirement was not used to postpone
+the generated-code performance result. The post-implementation structural
+measurement is §12.
 
 The generated-code cost model is:
 
@@ -1443,9 +1448,10 @@ Use repeated runs and report sync, async, compilation, execution, GC, and
 retry components separately; a single wall-time sample is not an acceptance
 measurement.
 
-- **Performance now** (S1): recover generated MIR/code size and execution
-  time through safepoint-current write-back.
-- **At retirement from precise execution** (S6): per-collection work
+- **Implemented generated-code result** (S1): generated MIR/code size is
+  recovered through safepoint-current write-back, and the release execution
+  measurements stayed within the accepted gate.
+- **Implemented precise-execution retirement** (S6): per-collection work
   proportional to native stack depth (`O(words between SP and stack_base)`)
   eliminated; no `setjmp` flush;
   no false retention from stale stack words (less mark/survivor work); ASan
@@ -1465,15 +1471,135 @@ pass; live bytes after collection; peak/steady RSS; generated MIR/code size;
 inserted/executed root stores; stable/scratch slots per function; Test262
 sync/async/compile/execute wall time.
 
-## 12. Explicitly unsafe actions
+## 12. Post-implementation MIR instruction profiling and comparison
+
+### 12.1 Method and comparison boundaries
+
+The post-implementation profile was captured at commit `638e11c93` with the
+same representative source functions used by `Lambda_Stack_MIR.md` and
+`Lambda_Stack_JS_MIR.md`:
+
+- Lambda: `_frame_review_0` from `temp/lambda_stack_mir_probe.ls`;
+- LambdaJS: `_js_frameReview_149` from
+  `temp/stack_mir_review_probe.js`.
+
+Captured artifacts:
+
+| Mode | Lambda | LambdaJS |
+|---|---|---|
+| Production write-back MIR | `temp/lambda_mir_latest_writeback.txt` | `temp/js_mir_latest_writeback.txt` |
+| Write-through oracle MIR | `temp/lambda_mir_latest_writethrough.txt` | `temp/js_mir_latest_writethrough.txt` |
+| Slot/store diagnostics | `temp/lambda_mir_latest_writeback.log`, `temp/lambda_mir_latest_writethrough.log` | `temp/js_mir_latest_writeback.log`, `temp/js_mir_latest_writethrough.log` |
+| Historical MIR/evidence | `temp/lambda_mir_pre.txt`, `temp/lambda_mir_current.txt`, `vibe/Lambda_Stack_MIR.md` | `vibe/Lambda_Stack_JS_MIR.md` |
+
+An executable MIR instruction is an opcode entry between the function's
+`func` and `endfunc`. Declarations, `local` lines, comments, blank lines,
+labels, prototypes, imports, and `endfunc` are excluded. Debug builds are used
+only because they expose the pre-backend MIR dump; no debug timing is treated
+as a performance result. Runtime timing comes only from release builds.
+
+There are two distinct comparisons:
+
+1. **Implementation generations** compare the exact historical dumps with the
+   post-implementation dump. This answers whether the original MIR blow-up was
+   removed, but it also spans intervening compiler changes.
+2. **Current write-through versus write-back** compiles the same source and
+   current compiler twice. This isolates the production publication policy
+   from the retained correctness oracle.
+
+The historical points are:
+
+| Tier | Pre-change point | Reviewed side-stack point |
+|---|---|---|
+| Lambda MIR-Direct | `5717d36f`, before the core side-stack frame; it already used heap-root set/get helper calls | `9402b169`, direct side-root loads/stores and scalar donation |
+| LambdaJS | `5043b956`, before per-function side-root frames and still dependent on conservative native-stack discovery | `9402b169`, broad always-current shadow publication |
+
+### 12.2 Lambda MIR-Direct result
+
+| `_frame_review_0` metric | Pre-side-stack | Reviewed side-stack | Post-implementation write-back | Side-stack → post change |
+|---|---:|---:|---:|---:|
+| Executable MIR instructions | 90 | 138 | **101** | **−37 (−26.8%)** |
+| MIR locals | 60 | 80 | **47** | **−33 (−41.3%)** |
+| MIR calls | 45 | 10 | **11** | +1 |
+| Root slots | 16 | 16 | **12** | **−4 (−25.0%)** |
+
+The latest function is 11 instructions, or 12.2%, above the 90-instruction
+pre-side-stack implementation. That baseline was not root-free: 36 of its 45
+calls were heap-root frame management calls. The post-implementation function
+keeps precise direct side-root publication while remaining much closer to that
+baseline and avoiding those helper calls.
+
+### 12.3 LambdaJS result
+
+| `_js_frameReview_149` metric | Pre-stack | Broad side-stack | Post-implementation write-back | Broad → post change |
+|---|---:|---:|---:|---:|
+| Executable MIR instructions | 58 | 440 | **136** | **−304 (−69.1%)** |
+| MIR locals | 29 | 214 | **53** | **−161 (−75.2%)** |
+| MIR calls | 24 | 26 | **26** | unchanged |
+| Per-function side-root slots | 0 | 28 | **7** | **−21 (−75.0%)** |
+| Runtime root publication | none | 161 copy/store pairs = 322 instructions | **11 direct stores** | broad publication removed |
+
+The original 7.59x JS expansion is therefore no longer the current design.
+The production function is 30.9% of the broad side-stack instruction count,
+and the measured 136 instructions closely match the design estimate of about
+130. It remains 78 instructions above the 58-instruction pre-stack body, or
+2.34x that body. The residual includes checked side-stack binding/reservation,
+slot initialization, precise stores at safepoints, unified cleanup, boxed
+scalar return classification/donation, watermark restoration, and a cold
+overflow path.
+
+### 12.4 Same-compiler publication-policy isolation
+
+| Current `638e11c93` probe | Write-through oracle | Production write-back | Change |
+|---|---:|---:|---:|
+| Lambda executable instructions | 141 | **101** | **−40 (−28.4%)** |
+| Lambda locals | 65 | **47** | −18 |
+| Lambda root slots | 34 | **12** | **−22 (−64.7%)** |
+| JS executable instructions | 150 | **136** | **−14 (−9.3%)** |
+| JS locals | 54 | **53** | −1 |
+| JS root slots | 15 | **7** | **−8 (−53.3%)** |
+| JS root stores | 31 | **11** | **−20 (−64.5%)** |
+| JS classified calls (`MAY_GC` / `NO_GC`) | 13 / 12 | **13 / 12** | unchanged |
+
+The current write-through oracle is not the historical 440-instruction
+compiler. It shares semantic candidates, canonical homes, import effects, and
+the consolidated emitter with production; it changes publication policy so
+that correctness can be compared differentially. The much larger historical
+440 → 136 reduction also includes deletion of production full-scope
+publication, post-instruction binding scanning, and two-instruction shadow
+copy/store pairs.
+
+### 12.5 Conclusion
+
+Per-frame MIR count is not a constant: it depends on control flow, values live
+across `MAY_GC` calls, representation classes, scratch overlap, and return
+mode. For the stable review probes, however, the result is unambiguous:
+
+- **Lambda:** reduced from 138 to 101 relative to the reviewed side-stack
+  implementation; still 12.2% above its helper-root pre-side-stack count.
+- **LambdaJS:** reduced from 440 to 136; the original blow-up is largely
+  removed, although the exact-frame/scalar machinery remains above the
+  conservative pre-stack body.
+- **Publication policy:** the same-compiler oracle comparison reduces root
+  slots by 64.7% for Lambda and root stores by 64.5% for JS.
+
+The latest release Test262 gate completes all 42,889 tests in 160.6s with
+40,261/40,261 fully passing, zero non-fully-passing tests, zero failures, zero
+regressions, and zero retry time. This is current acceptance evidence, not a
+source-isolated attribution against the historical 195.7s/349.4s measurements:
+the intervening repository and harness changes make that runtime comparison
+non-causal. The MIR comparison above is the structural evidence attributable
+to the implemented frame/rooting generations.
+
+## 13. Explicitly unsafe actions
 
 Do not, at any stage:
 
 - comment out `gc_scan_stack()` and rely on normal tests (B11);
 - assume all MIR locals are spilled to the native stack, or that `setjmp`
   captures every caller-saved live value;
-- assume a MIR caller roots every native helper argument before that caller
-  has migrated to §4.4/RH2 (the end-state contract is not a current fact);
+- assume a caller roots every native helper argument unless that caller is an
+  admitted precise tier emitted through the §4.4/RH2 call path;
 - treat registered globals as coverage for local temporaries;
 - root raw backing-data pointers instead of their owning GC object;
 - disable the scan per-entrypoint while unaudited helpers can be active (B12);
@@ -1490,7 +1616,7 @@ Do not, at any stage:
 - delete `_lambda_stack_base` without preserving stack-overflow handling;
 - declare completion before the forced-GC precise-only matrix passes.
 
-## 13. Risks
+## 14. Risks
 
 - **The §7 audit was the schedule risk.** It is now closed by exact native
   homes plus the `gc-root-hazards` ratchet. New native helpers remain subject
@@ -1514,7 +1640,7 @@ Do not, at any stage:
   assumed negligible. Benchmark gates (deltablue, havlak+push, AWFY, Test262
   phase timing) ride every stage.
 
-## 14. Decision ledger
+## 15. Decision ledger
 
 | ID | Decision | Status |
 |---|---|---|
@@ -1527,7 +1653,7 @@ Do not, at any stage:
 | CR7 | Leave C2MIR code unchanged; it permanently forces compatibility mode and is unavailable in precise contexts/scanner-free builds | **accepted (CQ2)** |
 | CR8 | Input/format allocations remain pool/arena-owned and outside GC rooting; any future GC-heap boundary requires an explicit audit | **accepted (CQ4)** |
 
-## 15. Clarifications, resolved choices, and non-blocking KIV items
+## 16. Clarifications, resolved choices, and non-blocking KIV items
 
 - **CQ1 — RESOLVED: Interpreter/evaluator locals.** `lambda-eval.cpp` and the
   procedural runtime are native helpers for RH1–RH8. Their live GC values use
@@ -1565,7 +1691,7 @@ Do not, at any stage:
   correctness oracle and the fail-closed fallback after analysis allocation
   failure.
 
-## 16. Source map
+## 17. Source map
 
 | Concern | Source |
 |---|---|
@@ -1586,4 +1712,5 @@ Do not, at any stage:
 | Transitive `NO_GC` enforcement | `utils/check_gc_effects.py` |
 | Native local/range-root enforcement | `utils/check_gc_root_hazards.py` |
 | Lifetime architecture | `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20) |
-| Regression evidence | `vibe/Lambda_Stack_JS_MIR.md`, `vibe/Lambda_Stack_MIR.md` |
+| Historical regression evidence | `vibe/Lambda_Stack_JS_MIR.md`, `vibe/Lambda_Stack_MIR.md` |
+| Post-implementation MIR profile | §12 and its captured `temp/*mir_latest*` artifacts |
