@@ -335,7 +335,9 @@ class RootFrame {
 
 public:
     RootFrame(Context* runtime, size_t slot_count) : frame_{} {
-        if (!lambda_root_frame_begin(runtime, &frame_, slot_count)) {
+        // Pool/arena-backed input paths have no collecting runtime, so their
+        // fallback homes are safe; only a real runtime reservation may fail closed.
+        if (runtime && !lambda_root_frame_begin(runtime, &frame_, slot_count)) {
             lambda_root_frame_overflow_error();
         }
     }
