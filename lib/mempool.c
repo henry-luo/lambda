@@ -501,8 +501,10 @@ void pool_get_mem_stats(Pool* pool, size_t* reserved, size_t* in_use,
         use = pool->live_bytes;
         cnt = pool->alloc_count;
         if (pool->heap) {
-            struct rpmalloc_heap_statistics_t stats = rpmalloc_heap_statistics(pool->heap);
-            rsv = stats.mapped_size ? stats.mapped_size : pool->high_water_live_bytes;
+            // Bundled rpmalloc has no per-first-class-heap statistics API;
+            // global/thread counters would mix unrelated pools. Use the
+            // allocator-owned high-water accounting for this pool instead.
+            rsv = pool->high_water_live_bytes;
         } else {
             // mmap mode: reserved is the sum of all mmap'd chunk sizes
             mmap_mode = 1;
