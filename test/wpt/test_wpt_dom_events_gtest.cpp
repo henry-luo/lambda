@@ -70,6 +70,9 @@
 #ifndef WPT_RUNNER_INCLUDE
 #define WPT_RUNNER_INCLUDE(name) true
 #endif
+#ifndef WPT_RUNNER_SKIP_TENTATIVE
+#define WPT_RUNNER_SKIP_TENTATIVE 1
+#endif
 
 static const char* WPT_DIR = WPT_RUNNER_DIR;
 static const char* SHIM_PATH = "test/wpt/wpt_testharness_shim.js";
@@ -170,9 +173,15 @@ static const char* SKIP_SUBSTRINGS[] = {
     // Replace-listener crash regression in detached browsing context.
     "replace-event-listener-null-browsing-context-crash",
 
+    // Bare IDL harnesses exercise the JavaScript WebIDL parser rather than
+    // the DOM behavior owned by these headless feature suites.
+    "idlharness.window.js",
+
     // Tentative / sub-resource tests -- gated on iframe / cross-origin
-    // capabilities.
+    // capabilities unless a focused suite explicitly opts them in.
+#if WPT_RUNNER_SKIP_TENTATIVE
     ".tentative",
+#endif
     ".sub.",
 
     // Shadow DOM dependencies (uses attachShadow internally).
@@ -267,6 +276,28 @@ static void write_file_contents(const char* path, const std::string& content) {
     if (!f) return;
     fwrite(content.data(), 1, content.size(), f);
     fclose(f);
+}
+
+static int read_wpt_variants(const char* path, char variants[][64], int capacity) {
+    FILE* file = fopen(path, "r");
+    if (!file) return 0;
+    char line[1024];
+    int count = 0;
+    while (count < capacity && fgets(line, sizeof(line), file)) {
+        if (!strstr(line, "<meta name=\"variant\"")) continue;
+        const char* content = strstr(line, "content=\"");
+        if (!content) continue;
+        content += strlen("content=\"");
+        const char* end = strchr(content, '"');
+        if (!end) continue;
+        size_t length = (size_t)(end - content);
+        if (length >= 64) length = 63;
+        memcpy(variants[count], content, length);
+        variants[count][length] = '\0';
+        count++;
+    }
+    fclose(file);
+    return count;
 }
 
 // extract value of an attribute like src="..." or src=foo.js from a tag string
@@ -393,6 +424,7 @@ struct WptDomEventsParam {
     std::string test_name;       // sanitised name for GTest
     bool        is_any_js;       // true if source is a bare .any.js / .window.js
     bool        skip;
+    char        variant[64];     // WPT META query variant, including leading '?'
 };
 
 struct WptDomEventsResult {
@@ -461,6 +493,7 @@ static void scan_wpt_dom_events_dir(const std::string& dir,
         }
 
         WptDomEventsParam p;
+        p.variant[0] = '\0';
         p.source_path = dir + "/" + name;
         p.is_any_js = is_any_js;
 
@@ -504,7 +537,25 @@ static void scan_wpt_dom_events_dir(const std::string& dir,
             p.skip = should_skip(rel);
         }
 
-        params.push_back(p);
+        char variants[8][64];
+        int variant_count = is_html
+            ? read_wpt_variants(p.source_path.c_str(), variants, 8) : 0;
+        if (variant_count == 0) {
+            params.push_back(p);
+        } else {
+            // A META variant is a separate WPT global with its own location.search;
+            // collapsing them into one empty-query run bypasses the test behavior.
+            for (int variant_index = 0; variant_index < variant_count; variant_index++) {
+                WptDomEventsParam expanded = p;
+                strncpy(expanded.variant, variants[variant_index], sizeof(expanded.variant) - 1);
+                expanded.variant[sizeof(expanded.variant) - 1] = '\0';
+                expanded.test_name += "_variant_";
+                for (const char* cursor = expanded.variant; *cursor; cursor++) {
+                    expanded.test_name += isalnum((unsigned char)*cursor) ? *cursor : '_';
+                }
+                params.push_back(expanded);
+            }
+        }
 
 #ifdef _WIN32
     } while (_findnext(handle, &fd) == 0);
@@ -575,6 +626,12 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
         result.skipped = true;
         result.skip_reason = "No scripts (reftest or empty): " + p.source_path;
         return result;
+    }
+
+    if (p.variant[0]) {
+        scripts.insert(0, "\" };\n");
+        scripts.insert(0, p.variant);
+        scripts.insert(0, "var location = { search: \"");
     }
 
     std::string shim = read_file_contents(SHIM_PATH);

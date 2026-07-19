@@ -5207,6 +5207,27 @@ static void collect_html_attr_value(const char* value, StrBuf* sb) {
     }
 }
 
+static void collect_html_text_value(const char* value, size_t length,
+                                    StrBuf* sb) {
+    if (!value || !sb) return;
+    for (size_t i = 0; i < length; i++) {
+        unsigned char ch = (unsigned char)value[i];
+        if (ch == '&') strbuf_append_str(sb, "&amp;");
+        else if (ch == '<') strbuf_append_str(sb, "&lt;");
+        else if (ch == '>') strbuf_append_str(sb, "&gt;");
+        else if (ch == 0xC2 && i + 1 < length &&
+                 (unsigned char)value[i + 1] == 0xA0) {
+            // HTML fragment serialization canonicalizes a text-node NBSP to
+            // its named reference; emitting the raw code point made editing
+            // results disagree with browser innerHTML.
+            strbuf_append_str(sb, "&nbsp;");
+            i++;
+        } else {
+            strbuf_append_char(sb, (char)ch);
+        }
+    }
+}
+
 static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (!node) return;
     if (js_dom_is_generated_pseudo_node(node)) return;
@@ -5214,7 +5235,7 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
     if (node->is_text()) {
         DomText* text = node->as_text();
         if (text->text && text->length > 0) {
-            strbuf_append_str_n(sb, text->text, (int)text->length);
+            collect_html_text_value(text->text, text->length, sb);
         }
         return;
     }
@@ -5241,12 +5262,14 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
             for (int i = 0; i < attr_count; i++) {
                 const char* name = attr_names[i];
                 const char* value = elem->get_attribute(name);
-                if (!name || !value) continue;
+                if (!name) continue;
                 if (js_dom_is_internal_attr(name)) continue;
                 strbuf_append_char(sb, ' ');
                 strbuf_append_str(sb, name);
                 strbuf_append_str(sb, "=\"");
-                collect_html_attr_value(value, sb);
+                // A present valueless HTML attribute serializes with an empty
+                // value; null here represents presence, not attribute absence.
+                if (value) collect_html_attr_value(value, sb);
                 strbuf_append_char(sb, '"');
             }
         }

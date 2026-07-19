@@ -1880,7 +1880,15 @@ static Item js_input_event_get_target_ranges(Item* args, int argc) {
     int64_t len = js_array_length(stashed);
     for (int64_t i = 0; i < len; i++) {
         Item range = js_array_get_int(stashed, i);
-        if (get_type_id(range) != LMD_TYPE_MAP) continue;
+        TypeId range_type = get_type_id(range);
+        // DOM-backed constructor ranges are promoted to live Range host
+        // wrappers so mutations adjust their boundaries. Restricting this
+        // snapshot path to plain maps silently dropped every live wrapper.
+        if (range_type != LMD_TYPE_MAP &&
+            range_type != LMD_TYPE_OBJECT &&
+            range_type != LMD_TYPE_VMAP) {
+            continue;
+        }
         js_array_push(ranges, js_input_event_snapshot_range(range));
     }
     return ranges;

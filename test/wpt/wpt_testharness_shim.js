@@ -237,7 +237,7 @@ function assert_regexp_match(actual, regexp, desc) {
     // undefined turned a valid clipboard assertion into a listener exception.
     if (!regexp || typeof regexp.test !== "function" || !regexp.test(String(actual))) {
         throw new Error((desc ? desc + ": " : "") +
-            "expected " + _wpt_repr(actual) + " to match " + String(regexp));
+            "expected " + format_value(actual) + " to match " + String(regexp));
     }
 }
 
@@ -736,6 +736,16 @@ function _wpt_inline_wrapper_is_empty(n) {
     }
     return true;
 }
+function _wpt_node_index(node) {
+    if (!node || !node.parentNode) return -1;
+    var index = 0;
+    var child = node.parentNode.firstChild;
+    while (child && child !== node) {
+        index++;
+        child = child.nextSibling;
+    }
+    return child === node ? index : -1;
+}
 function _wpt_cleanup_empty_inline_after_delete(textNode, sel) {
     if (!textNode || textNode.nodeType !== 3 || !sel) return false;
     var wrapper = textNode.parentNode;
@@ -745,16 +755,50 @@ function _wpt_cleanup_empty_inline_after_delete(textNode, sel) {
     }
     var parent = wrapper.parentNode;
     if (!parent) return false;
-    var idx = 0;
-    var child = parent.firstChild;
-    while (child && child !== wrapper) {
-        idx++;
-        child = child.nextSibling;
-    }
-    if (child !== wrapper) return false;
+    var idx = _wpt_node_index(wrapper);
+    if (idx < 0) return false;
     try { parent.removeChild(wrapper); } catch (_) { return false; }
     try { sel.collapse(parent, idx); } catch (_) {}
     return true;
+}
+function _wpt_cleanup_rich_range_delete(host) {
+    if (!host) return;
+    function prune(parent) {
+        var child = parent.firstChild;
+        while (child) {
+            var next = child.nextSibling;
+            if (child.nodeType === 1) {
+                prune(child);
+                if (_wpt_is_cleanup_inline_wrapper(child) &&
+                    _wpt_inline_wrapper_is_empty(child)) {
+                    try { parent.removeChild(child); } catch (_) {}
+                }
+            }
+            child = next;
+        }
+    }
+    prune(host);
+    var textNodes = [];
+    _wpt_collect_text_nodes(host, textNodes);
+    if (textNodes.length === 0) return;
+    var last = textNodes[textNodes.length - 1];
+    var data = last.data || last.textContent || "";
+    if (!_wpt_preserves_edit_whitespace(last) &&
+        data.length > 0 && data.charAt(data.length - 1) === " ") {
+        // A trailing collapsible space would disappear after deleting the
+        // following word; browser editing preserves it as a non-breaking
+        // space while removing inline wrappers emptied by the same range.
+        var preserved = data.slice(0, data.length - 1) + "\u00a0";
+        try { last.data = preserved; } catch (_) { try { last.textContent = preserved; } catch (_) {} }
+    }
+}
+function _wpt_editing_host_is_empty(host) {
+    if (!host) return false;
+    var text = host.textContent || "";
+    if (text.length > 0) return false;
+    try {
+        return !host.querySelector("img,hr,input,textarea,video,audio,canvas");
+    } catch (_) { return !host.firstChild; }
 }
 function _wpt_send_one_key(elem, code, nativeAlreadyTried, skipNative,
                            ctrl, alt, meta) {
@@ -777,25 +821,33 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried, skipNative,
         if (typeof ss !== "number") ss = v.length;
         if (typeof se !== "number") se = v.length;
         if (code === 0xE003) { // Backspace
+            var tcBackwardType = ss === se && (ctrl || alt || meta)
+                ? "deleteWordBackward" : "deleteContentBackward";
+            if (!_wpt_dispatch_input_event(ae, "beforeinput", tcBackwardType, null)) return;
             if (ss === se) {
-                if (ss === 0) return;
-                ae.value = v.slice(0, ss - 1) + v.slice(ss);
-                try { ae.setSelectionRange(ss - 1, ss - 1); } catch (_) {}
+                var tcStart = (ctrl || alt || meta) ? _wpt_word_backward(v, ss) : Math.max(0, ss - 1);
+                ae.value = v.slice(0, tcStart) + v.slice(ss);
+                try { ae.setSelectionRange(tcStart, tcStart); } catch (_) {}
             } else {
                 ae.value = v.slice(0, ss) + v.slice(se);
                 try { ae.setSelectionRange(ss, ss); } catch (_) {}
             }
+            _wpt_dispatch_input_event(ae, "input", tcBackwardType, null);
             return;
         }
         if (code === 0xE017) { // Delete
+            var tcForwardType = ss === se && (ctrl || alt || meta)
+                ? "deleteWordForward" : "deleteContentForward";
+            if (!_wpt_dispatch_input_event(ae, "beforeinput", tcForwardType, null)) return;
             if (ss === se) {
-                if (se >= v.length) return;
-                ae.value = v.slice(0, se) + v.slice(se + 1);
+                var tcEnd = (ctrl || alt || meta) ? _wpt_word_forward(v, se) : Math.min(v.length, se + 1);
+                ae.value = v.slice(0, se) + v.slice(tcEnd);
                 try { ae.setSelectionRange(se, se); } catch (_) {}
             } else {
                 ae.value = v.slice(0, ss) + v.slice(se);
                 try { ae.setSelectionRange(ss, ss); } catch (_) {}
             }
+            _wpt_dispatch_input_event(ae, "input", tcForwardType, null);
             return;
         }
         if (code === 0xE010) { // End
@@ -861,14 +913,36 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried, skipNative,
         ? "deleteWordForward" : "deleteContentForward";
     var fallbackInputType = code === 0xE003
         ? backwardInputType : forwardInputType;
+    var fallbackEditRange = _wpt_edit_target_range(fallbackInputType);
+    var crossesEditingHosts = r &&
+        _wpt_editing_host_for_node(r.startContainer) !==
+        _wpt_editing_host_for_node(r.endContainer);
     if (skipNative && (code === 0xE003 || code === 0xE017) && fallbackHost &&
         !_wpt_dispatch_input_event(fallbackHost, "beforeinput", fallbackInputType, null)) {
         return;
     }
+    if (crossesEditingHosts && (code === 0xE003 || code === 0xE017)) {
+        if (!skipNative && fallbackHost) {
+            _wpt_dispatch_input_event(fallbackHost, "beforeinput", fallbackInputType, null);
+        }
+        // A single editing transaction cannot mutate two editing hosts (or an
+        // editable and non-editable subtree); expose the attempt but do no edit.
+        return;
+    }
+    if (skipNative && (code === 0xE003 || code === 0xE017) && sel.rangeCount > 0) {
+        // beforeinput listeners may move the caret. The event's StaticRange
+        // remains the dispatch-time snapshot, but the default edit uses the
+        // selection state left by those listeners.
+        r = sel.getRangeAt(0);
+        fallbackEditRange = _wpt_edit_target_range(fallbackInputType);
+    }
     var fallbackInputFinished = false;
     function _finish_fallback_delete(mutated, inputType) {
-        if (!fallbackInputFinished && (mutated || skipNative) &&
+        if (!fallbackInputFinished &&
+            (mutated || (skipNative && _wpt_editing_host_is_empty(fallbackHost))) &&
             (nativeAlreadyTried || skipNative) && fallbackHost) {
+            // Empty hosts still perform a browser editing transaction, while a
+            // boundary no-op in a non-empty host must not emit input.
             _wpt_dispatch_input_event(fallbackHost, "input", inputType, null);
             fallbackInputFinished = true;
         }
@@ -919,14 +993,17 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried, skipNative,
     }
     if (code === 0xE003) { // Backspace
         if (!r.collapsed) {
-            var deletedRange = false;
-            try {
-                var sc = r.startContainer; var so = r.startOffset;
-                r.deleteContents();
-                sel.collapse(sc, so);
-                deletedRange = true;
-            } catch (_) {}
+            var deletedRange = _wpt_apply_edit_range_delete(
+                fallbackEditRange || r, fallbackHost, sel, false);
             _finish_fallback_delete(deletedRange, backwardInputType);
+            return;
+        }
+        if (fallbackEditRange && !fallbackEditRange.collapsed &&
+            (wordDelete || fallbackEditRange.startContainer !== fallbackEditRange.endContainer ||
+             fallbackEditRange.startContainer.nodeType !== 3)) {
+            _finish_fallback_delete(
+                _wpt_apply_edit_range_delete(fallbackEditRange, fallbackHost, sel, true),
+                backwardInputType);
             return;
         }
         var n2 = r.startContainer; var off2 = r.startOffset;
@@ -1001,14 +1078,17 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried, skipNative,
     }
     if (code === 0xE017) { // Delete
         if (!r.collapsed) {
-            var deletedForwardRange = false;
-            try {
-                var sc2 = r.startContainer; var so2 = r.startOffset;
-                r.deleteContents();
-                sel.collapse(sc2, so2);
-                deletedForwardRange = true;
-            } catch (_) {}
+            var deletedForwardRange = _wpt_apply_edit_range_delete(
+                fallbackEditRange || r, fallbackHost, sel, false);
             _finish_fallback_delete(deletedForwardRange, forwardInputType);
+            return;
+        }
+        if (fallbackEditRange && !fallbackEditRange.collapsed &&
+            (wordDelete || fallbackEditRange.startContainer !== fallbackEditRange.endContainer ||
+             fallbackEditRange.startContainer.nodeType !== 3)) {
+            _finish_fallback_delete(
+                _wpt_apply_edit_range_delete(fallbackEditRange, fallbackHost, sel, true),
+                forwardInputType);
             return;
         }
         var dn = r.startContainer; var doff = r.startOffset;
@@ -1041,10 +1121,27 @@ function _wpt_prev_text_node(n, root) {
     // Walk backward in document order until a text node is found.
     var cur = n;
     while (cur) {
+        if (root && cur === root) return null;
         if (cur.previousSibling) {
             cur = cur.previousSibling;
             // Descend to last text-node descendant
             while (cur.lastChild) cur = cur.lastChild;
+            if (cur.nodeType === 3) return cur;
+        } else {
+            if (root && cur === root) return null;
+            cur = cur.parentNode;
+            if (!cur) return null;
+        }
+    }
+    return null;
+}
+function _wpt_next_text_node(n, root) {
+    var cur = n;
+    while (cur) {
+        if (root && cur === root) return null;
+        if (cur.nextSibling) {
+            cur = cur.nextSibling;
+            while (cur.firstChild) cur = cur.firstChild;
             if (cur.nodeType === 3) return cur;
         } else {
             if (root && cur === root) return null;
@@ -1081,6 +1178,613 @@ function _wpt_editing_host_for_node(node) {
     return null;
 }
 
+function _wpt_range_snapshot(range) {
+    if (!range) return null;
+    try {
+        return new StaticRange({
+            startContainer: range.startContainer,
+            startOffset: range.startOffset,
+            endContainer: range.endContainer,
+            endOffset: range.endOffset
+        });
+    } catch (_) { return null; }
+}
+
+function _wpt_first_text_descendant(node) {
+    var current = node;
+    while (current && current.nodeType !== 3) current = current.firstChild;
+    return current && current.nodeType === 3 ? current : null;
+}
+
+function _wpt_last_text_descendant(node) {
+    var current = node;
+    while (current && current.nodeType !== 3) current = current.lastChild;
+    return current && current.nodeType === 3 ? current : null;
+}
+
+function _wpt_is_editing_block(node) {
+    if (!node || node.nodeType !== 1 || !node.tagName) return false;
+    var tag = String(node.tagName).toUpperCase();
+    return tag === "ADDRESS" || tag === "ARTICLE" || tag === "ASIDE" ||
+        tag === "BLOCKQUOTE" || tag === "DD" || tag === "DIV" ||
+        tag === "DL" || tag === "DT" || tag === "FIGCAPTION" ||
+        tag === "FIGURE" || tag === "FOOTER" || tag === "H1" ||
+        tag === "H2" || tag === "H3" || tag === "H4" || tag === "H5" ||
+        tag === "H6" || tag === "HEADER" || tag === "LI" || tag === "MAIN" ||
+        tag === "NAV" || tag === "OL" || tag === "P" || tag === "PRE" ||
+        tag === "SECTION" || tag === "TD" || tag === "TH" || tag === "UL";
+}
+
+function _wpt_editing_block_for_node(node, host) {
+    var current = node && node.nodeType === 1 ? node : (node ? node.parentNode : null);
+    while (current && current !== host) {
+        if (_wpt_is_editing_block(current)) return current;
+        current = current.parentNode;
+    }
+    return host;
+}
+
+function _wpt_preserves_edit_whitespace(node) {
+    var current = node && node.nodeType === 1 ? node : (node ? node.parentNode : null);
+    while (current && current.nodeType === 1) {
+        if (current.tagName && String(current.tagName).toUpperCase() === "PRE") return true;
+        var style = current.getAttribute ? current.getAttribute("style") : null;
+        if (style && /white-space\s*:\s*(pre|pre-wrap|break-spaces)(?:\s*;|\s*$)/i.test(style)) {
+            return true;
+        }
+        current = current.parentNode;
+    }
+    return false;
+}
+
+function _wpt_trim_trailing_edit_whitespace(textNode) {
+    if (!textNode || textNode.nodeType !== 3) return 0;
+    var data = textNode.data || textNode.textContent || "";
+    if (_wpt_preserves_edit_whitespace(textNode)) return data.length;
+    var length = data.length;
+    while (length > 0 && /\s/.test(data.charAt(length - 1))) length--;
+    if (length !== data.length) {
+        try { textNode.data = data.slice(0, length); } catch (_) { textNode.textContent = data.slice(0, length); }
+    }
+    return length;
+}
+
+function _wpt_trim_leading_edit_whitespace(textNode) {
+    if (!textNode || textNode.nodeType !== 3) return;
+    if (_wpt_preserves_edit_whitespace(textNode)) return;
+    var data = textNode.data || textNode.textContent || "";
+    var offset = 0;
+    while (offset < data.length && /\s/.test(data.charAt(offset))) offset++;
+    if (offset > 0) {
+        try { textNode.data = data.slice(offset); } catch (_) { textNode.textContent = data.slice(offset); }
+    }
+}
+
+function _wpt_ensure_block_placeholder(block) {
+    if (!block || block.nodeType !== 1 || !_wpt_is_editing_block(block)) return;
+    var child = block.firstChild;
+    while (child) {
+        if (child.nodeType !== 3 || _wpt_text_node_length(child) > 0) return;
+        child = child.nextSibling;
+    }
+    try { block.innerHTML = "<br>"; } catch (_) {}
+}
+
+function _wpt_remove_block_placeholder_for_insertion(block, selection) {
+    if (!block || block.nodeType !== 1 || !block.firstChild ||
+        block.firstChild !== block.lastChild) return;
+    var child = block.firstChild;
+    if (child.nodeType !== 1 || !child.tagName ||
+        String(child.tagName).toUpperCase() !== "BR") return;
+    // Padding BRs represent an idle empty editing block; once text is inserted
+    // they are no longer content and must not trail the new text.
+    try { block.removeChild(child); } catch (_) { return; }
+    try { selection.collapse(block, 0); } catch (_) {}
+}
+
+function _wpt_remove_empty_list_structure_ancestors(node, host) {
+    var current = node;
+    while (current && current !== host && current.nodeType === 1) {
+        var tag = current.tagName ? String(current.tagName).toUpperCase() : "";
+        if (tag !== "DL" && tag !== "OL" && tag !== "UL" &&
+            tag !== "LI" && tag !== "DT" && tag !== "DD") return;
+        var child = current.firstChild;
+        var hasContent = false;
+        while (child) {
+            if (child.nodeType !== 3 || _wpt_text_node_length(child) > 0) {
+                hasContent = true;
+                break;
+            }
+            child = child.nextSibling;
+        }
+        if (hasContent) return;
+        var parent = current.parentNode;
+        if (!parent) return;
+        parent.removeChild(current);
+        current = parent;
+    }
+}
+
+function _wpt_node_is_ancestor(ancestor, node) {
+    var current = node;
+    while (current) {
+        if (current === ancestor) return true;
+        current = current.parentNode;
+    }
+    return false;
+}
+
+function _wpt_direct_child_containing(ancestor, node) {
+    var current = node;
+    while (current && current.parentNode !== ancestor) current = current.parentNode;
+    return current && current.parentNode === ancestor ? current : null;
+}
+
+function _wpt_trailing_break_count(block) {
+    if (!block || block.nodeType !== 1) return 0;
+    var count = 0;
+    var child = block.lastChild;
+    while (child && child.nodeType === 1 && child.tagName &&
+           String(child.tagName).toUpperCase() === "BR") {
+        count++;
+        child = child.previousSibling;
+    }
+    return count;
+}
+
+function _wpt_table_cell_for_node(node, host) {
+    var current = node && node.nodeType === 1 ? node : (node ? node.parentNode : null);
+    while (current && current !== host) {
+        var tag = current.tagName ? String(current.tagName).toUpperCase() : "";
+        if (tag === "TD" || tag === "TH") return current;
+        current = current.parentNode;
+    }
+    return null;
+}
+
+function _wpt_delete_text_slice(node, start, end) {
+    if (!node || node.nodeType !== 3) return false;
+    var data = node.data || node.textContent || "";
+    var first = Math.max(0, Math.min(start, data.length));
+    var last = Math.max(first, Math.min(end, data.length));
+    try { node.data = data.slice(0, first) + data.slice(last); }
+    catch (_) { try { node.textContent = data.slice(0, first) + data.slice(last); } catch (_) { return false; } }
+    return true;
+}
+
+function _wpt_delete_across_table_cells(editRange, host, selection) {
+    var startCell = _wpt_table_cell_for_node(editRange.startContainer, host);
+    var endCell = _wpt_table_cell_for_node(editRange.endContainer, host);
+    if (!startCell || !endCell || startCell === endCell) return false;
+
+    var cells = [];
+    try { cells = host.querySelectorAll("td,th"); } catch (_) { return false; }
+    var startIndex = -1;
+    var endIndex = -1;
+    for (var i = 0; i < cells.length; i++) {
+        if (cells[i] === startCell) startIndex = i;
+        if (cells[i] === endCell) endIndex = i;
+    }
+    if (startIndex < 0 || endIndex <= startIndex) return false;
+
+    var startNode = editRange.startContainer;
+    var startOffset = editRange.startOffset;
+    var endNode = editRange.endContainer;
+    var endOffset = editRange.endOffset;
+    if (startNode.nodeType !== 3 || endNode.nodeType !== 3) return false;
+    _wpt_delete_text_slice(startNode, startOffset, _wpt_text_node_length(startNode));
+    _wpt_delete_text_slice(endNode, 0, endOffset);
+    for (i = startIndex + 1; i < endIndex; i++) {
+        // Editing across cells clears their contents; table rows and cells are
+        // structural boundaries and must never be consumed by Range deletion.
+        try { cells[i].innerHTML = ""; } catch (_) {}
+    }
+    try { selection.collapse(startNode, startOffset); } catch (_) {}
+    return true;
+}
+
+function _wpt_join_descendant_block(startBlock, endBlock, selection, caretOffset) {
+    var branch = _wpt_direct_child_containing(startBlock, endBlock);
+    if (!branch) return false;
+    // The descendant block is being dissolved into an inline run, so its
+    // formerly trailing collapsible whitespace becomes an exposed line edge.
+    _wpt_trim_trailing_edit_whitespace(_wpt_last_text_descendant(endBlock));
+    var movedHTML = endBlock.innerHTML;
+    var branchTag = branch.tagName ? String(branch.tagName).toUpperCase() : "";
+    if (branch === endBlock && branchTag !== "LI" && branchTag !== "DT" && branchTag !== "DD") {
+        var breakMatch = /<br(?:\s[^>]*)?\s*\/?\s*>/i.exec(movedHTML);
+        if (breakMatch) {
+            // Joining into an ancestor dissolves only the first visual line;
+            // content after the line break remains in its original block.
+            var beforeBreak = movedHTML.slice(0, breakMatch.index);
+            var afterBreak = movedHTML.slice(breakMatch.index + breakMatch[0].length);
+            if (beforeBreak) branch.insertAdjacentHTML("beforebegin", beforeBreak);
+            branch.innerHTML = afterBreak;
+        } else {
+            if (movedHTML) branch.insertAdjacentHTML("beforebegin", movedHTML);
+            if (branch.parentNode) branch.parentNode.removeChild(branch);
+        }
+    } else {
+        if (movedHTML) branch.insertAdjacentHTML("beforebegin", movedHTML);
+        var afterBranch = branch.nextSibling;
+        var emptiedParent = endBlock.parentNode;
+        if (emptiedParent) emptiedParent.removeChild(endBlock);
+        _wpt_remove_empty_list_structure_ancestors(emptiedParent, null);
+        if (!branch.parentNode && afterBranch) {
+            // Once the enclosing list is dissolved, its following collapsible
+            // whitespace becomes an exposed edge of the joined line.
+            _wpt_trim_leading_edit_whitespace(_wpt_first_text_descendant(afterBranch));
+        }
+    }
+    var reparsedCaretNode = _wpt_first_text_descendant(startBlock);
+    try {
+        selection.collapse(
+            reparsedCaretNode || startBlock,
+            reparsedCaretNode ? Math.min(caretOffset, _wpt_text_node_length(reparsedCaretNode)) : 0);
+    } catch (_) {}
+    return true;
+}
+
+function _wpt_join_ancestor_block(startBlock, endBlock, selection, caretOffset) {
+    var branch = _wpt_direct_child_containing(endBlock, startBlock);
+    if (!branch) return false;
+    var tailHTML = "";
+    var sibling = branch.nextSibling;
+    while (sibling) {
+        tailHTML += sibling.nodeType === 3 ? (sibling.data || sibling.textContent || "") : sibling.outerHTML;
+        sibling = sibling.nextSibling;
+    }
+    while (branch.nextSibling) endBlock.removeChild(branch.nextSibling);
+    // Reparse after detaching the live selection so moving an ancestor's tail
+    // cannot leave Range boundary bookkeeping attached to removed nodes.
+    startBlock.innerHTML = startBlock.innerHTML + tailHTML;
+    var caretNode = _wpt_first_text_descendant(startBlock);
+    if (caretNode) selection.collapse(caretNode, Math.min(caretOffset, _wpt_text_node_length(caretNode)));
+    else selection.collapse(startBlock, 0);
+    return true;
+}
+
+function _wpt_join_editing_blocks(startBlock, endBlock, selection) {
+    if (!startBlock || !endBlock || startBlock === endBlock ||
+        startBlock.nodeType !== 1 || endBlock.nodeType !== 1) return false;
+    var startText = _wpt_last_text_descendant(startBlock);
+    var endText = _wpt_first_text_descendant(endBlock);
+    var caretOffset = _wpt_trim_trailing_edit_whitespace(startText);
+    _wpt_trim_leading_edit_whitespace(endText);
+    try {
+        if (_wpt_node_is_ancestor(startBlock, endBlock)) {
+            return _wpt_join_descendant_block(
+                startBlock, endBlock, selection, caretOffset);
+        }
+        if (_wpt_node_is_ancestor(endBlock, startBlock)) {
+            return _wpt_join_ancestor_block(startBlock, endBlock, selection, caretOffset);
+        }
+        var startTag = startBlock.tagName ? String(startBlock.tagName).toUpperCase() : "";
+        var endTag = endBlock.tagName ? String(endBlock.tagName).toUpperCase() : "";
+        if (startTag === endTag &&
+            (startTag === "LI" || startTag === "DT" || startTag === "DD")) {
+            var endHTML = endBlock.innerHTML;
+            var lineBreak = /<br(?:\s[^>]*)?\s*\/?\s*>/i.exec(endHTML);
+            if (lineBreak) {
+                // Joining list items consumes their boundary and first visual
+                // line; later lines remain a separate item in the same list.
+                startBlock.innerHTML = startBlock.innerHTML + endHTML.slice(0, lineBreak.index);
+                var remainingLine = endHTML.slice(lineBreak.index + lineBreak[0].length);
+                if (remainingLine) {
+                    endBlock.innerHTML = remainingLine;
+                } else if (endBlock.parentNode) {
+                    // A terminal padding break does not create a second empty
+                    // list item after its first line has been joined.
+                    endBlock.parentNode.removeChild(endBlock);
+                }
+                var joinedCaret = _wpt_first_text_descendant(startBlock);
+                if (selection && joinedCaret) {
+                    selection.collapse(joinedCaret,
+                        Math.min(caretOffset, _wpt_text_node_length(joinedCaret)));
+                }
+                return true;
+            }
+        }
+        // Reparse the combined fragment instead of reparenting nodes one by one:
+        // live Range bookkeeping still owns the old boundary nodes during edits.
+        startBlock.innerHTML = startBlock.innerHTML + endBlock.innerHTML;
+        var emptiedParent = endBlock.parentNode;
+        if (emptiedParent) endBlock.parentNode.removeChild(endBlock);
+        _wpt_remove_empty_list_structure_ancestors(emptiedParent, null);
+        if (selection) {
+            var newStartText = _wpt_first_text_descendant(startBlock);
+            if (newStartText) selection.collapse(
+                newStartText, Math.min(caretOffset, _wpt_text_node_length(newStartText)));
+            else selection.collapse(startBlock, 0);
+        }
+        return true;
+    } catch (_) { return false; }
+}
+
+function _wpt_apply_edit_range_delete(editRange, host, selection, preserveBoundaryBreak) {
+    if (!editRange || editRange.collapsed) return false;
+    try {
+        var startContainer = editRange.startContainer;
+        var startOffset = editRange.startOffset;
+        var startBlock = _wpt_editing_block_for_node(editRange.startContainer, host);
+        var endBlock = _wpt_editing_block_for_node(editRange.endContainer, host);
+        if (_wpt_delete_across_table_cells(editRange, host, selection)) return true;
+        var trailingBreaks = preserveBoundaryBreak ? _wpt_trailing_break_count(startBlock) : 0;
+        editRange.deleteContents();
+        selection.collapse(startContainer, startOffset);
+        var remainingBreaks = _wpt_trailing_break_count(startBlock);
+        while (remainingBreaks < Math.max(0, trailingBreaks - 1)) {
+            // A block-boundary delete consumes one visual break, not every
+            // trailing BR included in the browser's broader target range.
+            startBlock.insertAdjacentHTML("beforeend", "<br>");
+            remainingBreaks++;
+        }
+        _wpt_join_editing_blocks(startBlock, endBlock, selection);
+        // Deleting a complete list item leaves an editable item shell; its
+        // padding break is required even when a neighbouring block was joined.
+        _wpt_ensure_block_placeholder(startBlock);
+        _wpt_cleanup_rich_range_delete(host);
+        return true;
+    } catch (_) { return false; }
+}
+
+function _wpt_normalize_selected_edit_range(current, host) {
+    if (!current || current.collapsed) return current;
+    var startNode = current.startContainer;
+    var startOffset = current.startOffset;
+    var endNode = current.endContainer;
+    var endOffset = current.endOffset;
+
+    if (startNode && startNode.nodeType === 1 && startNode.childNodes &&
+        startOffset < startNode.childNodes.length) {
+        var firstSelected = startNode.childNodes[startOffset];
+        var firstText = _wpt_first_text_descendant(firstSelected);
+        if (firstText) {
+            startNode = firstText;
+            startOffset = 0;
+        } else if (firstSelected && firstSelected.nodeType === 1 &&
+                   String(firstSelected.tagName).toUpperCase() === "HR") {
+            // An HR is a block separator: deleting it also consumes the
+            // collapsible text edges which would otherwise become adjacent.
+            var textBeforeSeparator = _wpt_prev_text_node(firstSelected, host);
+            if (textBeforeSeparator) {
+                startNode = textBeforeSeparator;
+                startOffset = _wpt_text_node_length(textBeforeSeparator);
+            }
+        }
+    }
+    if (endNode && endNode.nodeType === 1 && endNode.childNodes && endOffset > 0) {
+        var lastSelected = endNode.childNodes[endOffset - 1];
+        var lastText = _wpt_last_text_descendant(lastSelected);
+        if (lastText) {
+            endNode = lastText;
+            endOffset = _wpt_text_node_length(lastText);
+        } else if (lastSelected && lastSelected.nodeType === 1 &&
+                   String(lastSelected.tagName).toUpperCase() === "HR") {
+            var textAfterSeparator = _wpt_next_text_node(lastSelected, host);
+            if (textAfterSeparator) {
+                endNode = textAfterSeparator;
+                endOffset = 0;
+            }
+        }
+    }
+
+    // Collapsible edge whitespace is part of the editing transaction: if it
+    // survived a block join it would become newly visible beside the caret.
+    if (startNode && startNode.nodeType === 3 && !_wpt_preserves_edit_whitespace(startNode)) {
+        var startData = startNode.data || startNode.textContent || "";
+        while (startOffset > 0 && /\s/.test(startData.charAt(startOffset - 1))) startOffset--;
+    }
+    if (endNode && endNode.nodeType === 3 && !_wpt_preserves_edit_whitespace(endNode)) {
+        var endData = endNode.data || endNode.textContent || "";
+        while (endOffset < endData.length && /\s/.test(endData.charAt(endOffset))) endOffset++;
+    }
+
+    try {
+        var normalized = document.createRange();
+        normalized.setStart(startNode, startOffset);
+        normalized.setEnd(endNode, endOffset);
+        return normalized;
+    } catch (_) { return current.cloneRange(); }
+}
+
+function _wpt_edit_target_range(inputType) {
+    var selection = null;
+    try { selection = getSelection(); } catch (_) {}
+    if (!selection || selection.rangeCount === 0) return null;
+    var current = selection.getRangeAt(0);
+    var host = _wpt_editing_host_for_node(current.startContainer) ||
+        _wpt_editing_host_for_node(current.endContainer);
+    if (!current.collapsed) {
+        return _wpt_normalize_selected_edit_range(current, host);
+    }
+    if (!/^delete(Content|Word)(Backward|Forward)$/.test(inputType)) {
+        try { return current.cloneRange(); } catch (_) { return current; }
+    }
+
+    var backward = /Backward$/.test(inputType);
+    var byWord = /^deleteWord/.test(inputType);
+    var node = current.startContainer;
+    var offset = current.startOffset;
+    if (!node || node.nodeType !== 3) return current.cloneRange();
+    var boundaryNode = node;
+    var boundaryOffset = offset;
+    if (!byWord) {
+        var inlineParent = node.parentNode;
+        var nodeLength = _wpt_text_node_length(node);
+        if (_wpt_is_cleanup_inline_wrapper(inlineParent) && nodeLength === 1) {
+            var inlineIndex = _wpt_node_index(inlineParent);
+            if (inlineIndex >= 0 &&
+                ((backward && offset === 1) || (!backward && offset === 0))) {
+                try {
+                    var inlineRange = document.createRange();
+                    inlineRange.setStart(inlineParent.parentNode, inlineIndex);
+                    inlineRange.setEnd(inlineParent.parentNode, inlineIndex + 1);
+                    return inlineRange;
+                } catch (_) {}
+            }
+        }
+        if (backward && offset === 0) {
+            var previousInlineText = _wpt_prev_text_node(node, host);
+            var previousInline = previousInlineText ? previousInlineText.parentNode : null;
+            if (previousInlineText && _wpt_text_node_length(previousInlineText) === 1 &&
+                _wpt_is_cleanup_inline_wrapper(previousInline)) {
+                var previousInlineIndex = _wpt_node_index(previousInline);
+                try {
+                    var previousInlineRange = document.createRange();
+                    previousInlineRange.setStart(previousInline.parentNode, previousInlineIndex);
+                    previousInlineRange.setEnd(node, 0);
+                    return previousInlineRange;
+                } catch (_) {}
+            }
+        }
+        if (!backward && offset === nodeLength) {
+            var nextInlineText = _wpt_next_text_node(node, host);
+            var nextInline = nextInlineText ? nextInlineText.parentNode : null;
+            if (nextInlineText && _wpt_text_node_length(nextInlineText) === 1 &&
+                _wpt_is_cleanup_inline_wrapper(nextInline)) {
+                var nextInlineIndex = _wpt_node_index(nextInline);
+                try {
+                    var nextInlineRange = document.createRange();
+                    nextInlineRange.setStart(node, nodeLength);
+                    nextInlineRange.setEnd(nextInline.parentNode, nextInlineIndex + 1);
+                    return nextInlineRange;
+                } catch (_) {}
+            }
+        }
+    }
+    if (backward) {
+        var leadingEnd = 0;
+        var nodeData = node.data || node.textContent || "";
+        if (!_wpt_preserves_edit_whitespace(node)) {
+            while (leadingEnd < nodeData.length && /\s/.test(nodeData.charAt(leadingEnd))) leadingEnd++;
+        }
+        var atVisualStart = offset <= leadingEnd;
+        if (atVisualStart) {
+            var previousAtBlock = _wpt_prev_text_node(node, host);
+            var nodeBlock = _wpt_editing_block_for_node(node, host);
+            var previousBlock = _wpt_editing_block_for_node(previousAtBlock, host);
+            if (previousAtBlock && previousBlock !== nodeBlock) {
+                var previousData = previousAtBlock.data || previousAtBlock.textContent || "";
+                var previousEnd = previousData.length;
+                if (!_wpt_preserves_edit_whitespace(previousAtBlock)) {
+                    while (previousEnd > 0 && /\s/.test(previousData.charAt(previousEnd - 1))) previousEnd--;
+                }
+                try {
+                    var blockRange = document.createRange();
+                    var previousBreak = previousAtBlock.nextSibling;
+                    if (previousBreak && previousBreak.nodeType === 1 &&
+                        String(previousBreak.tagName).toUpperCase() === "BR") {
+                        blockRange.setStart(previousBreak.parentNode, _wpt_node_index(previousBreak));
+                    } else if (node.nextSibling && node.nextSibling.nodeType === 1 &&
+                               String(node.nextSibling.tagName).toUpperCase() === "BR") {
+                        // Backspacing into a multi-line list item targets the
+                        // item boundary, since only its first visual line joins.
+                        blockRange.setStart(previousBlock, previousBlock.childNodes.length);
+                    } else {
+                        blockRange.setStart(previousAtBlock, previousEnd);
+                    }
+                    blockRange.setEnd(node, leadingEnd);
+                    return blockRange;
+                } catch (_) {}
+            }
+        }
+        while (boundaryNode) {
+            var before = boundaryNode.data || boundaryNode.textContent || "";
+            if (!byWord) {
+                if (boundaryOffset > 0) { boundaryOffset--; break; }
+            } else {
+                while (boundaryOffset > 0 &&
+                       _wpt_is_word_cp(_wpt_cp_script_class(before.charCodeAt(boundaryOffset - 1)))) {
+                    boundaryOffset--;
+                }
+                if (boundaryOffset > 0 || before.length === 0) break;
+            }
+            var previous = _wpt_prev_text_node(boundaryNode, host);
+            if (!previous) break;
+            boundaryNode = previous;
+            boundaryOffset = _wpt_text_node_length(previous);
+            if (!byWord && boundaryOffset > 0) { boundaryOffset--; break; }
+        }
+    } else {
+        nodeData = node.data || node.textContent || "";
+        var trailingStart = nodeData.length;
+        if (!_wpt_preserves_edit_whitespace(node)) {
+            while (trailingStart > 0 && /\s/.test(nodeData.charAt(trailingStart - 1))) trailingStart--;
+        }
+        var atVisualEnd = offset >= trailingStart;
+        if (atVisualEnd) {
+            var nextAtBlock = _wpt_next_text_node(node, host);
+            var forwardBlock = _wpt_editing_block_for_node(node, host);
+            var nextBlock = _wpt_editing_block_for_node(nextAtBlock, host);
+            if (nextAtBlock && nextBlock !== forwardBlock) {
+                var nextData = nextAtBlock.data || nextAtBlock.textContent || "";
+                var nextStart = 0;
+                if (!_wpt_preserves_edit_whitespace(nextAtBlock)) {
+                    while (nextStart < nextData.length && /\s/.test(nextData.charAt(nextStart))) nextStart++;
+                }
+                try {
+                    var forwardBlockRange = document.createRange();
+                    forwardBlockRange.setStart(node, trailingStart);
+                    var leadingBreak = nextAtBlock.previousSibling;
+                    if (leadingBreak && leadingBreak.nodeType === 1 &&
+                        String(leadingBreak.tagName).toUpperCase() === "BR") {
+                        forwardBlockRange.setEnd(leadingBreak.parentNode, _wpt_node_index(leadingBreak) + 1);
+                    } else {
+                        forwardBlockRange.setEnd(nextAtBlock, nextStart);
+                    }
+                    return forwardBlockRange;
+                } catch (_) {}
+            }
+        }
+        while (boundaryNode) {
+            var after = boundaryNode.data || boundaryNode.textContent || "";
+            if (!byWord) {
+                if (boundaryOffset < after.length) { boundaryOffset++; break; }
+            } else {
+                while (boundaryOffset < after.length &&
+                       _wpt_is_word_cp(_wpt_cp_script_class(after.charCodeAt(boundaryOffset)))) {
+                    boundaryOffset++;
+                }
+                if (boundaryOffset < after.length || after.length === 0) break;
+            }
+            var next = _wpt_next_text_node(boundaryNode, host);
+            if (!next) break;
+            boundaryNode = next;
+            boundaryOffset = 0;
+            if (!byWord && _wpt_text_node_length(next) > 0) { boundaryOffset = 1; break; }
+        }
+    }
+    try {
+        var result = document.createRange();
+        if (backward) {
+            result.setStart(boundaryNode, boundaryOffset);
+            result.setEnd(node, offset);
+        } else {
+            result.setStart(node, offset);
+            result.setEnd(boundaryNode, boundaryOffset);
+        }
+        return result;
+    } catch (_) { return current.cloneRange(); }
+}
+
+function _wpt_target_ranges_for_input(target, type, inputType) {
+    if (type !== "beforeinput" || !target) return [];
+    var tag = target.tagName ? String(target.tagName).toUpperCase() : "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return [];
+    try {
+        var selection = getSelection();
+        if (selection && selection.rangeCount > 0) {
+            var selected = selection.getRangeAt(0);
+            if (_wpt_editing_host_for_node(selected.startContainer) !==
+                _wpt_editing_host_for_node(selected.endContainer)) return [];
+        }
+    } catch (_) {}
+    var range = _wpt_edit_target_range(inputType);
+    var snapshot = _wpt_range_snapshot(range);
+    return snapshot ? [snapshot] : [];
+}
+
 function _wpt_dispatch_input_event(target, type, inputType, data, dataTransfer) {
     if (!target || typeof target.dispatchEvent !== "function") return true;
     var ev = null;
@@ -1091,7 +1795,8 @@ function _wpt_dispatch_input_event(target, type, inputType, data, dataTransfer) 
             composed: true,
             inputType: inputType || "",
             data: data === undefined ? null : data,
-            dataTransfer: dataTransfer === undefined ? null : dataTransfer
+            dataTransfer: dataTransfer === undefined ? null : dataTransfer,
+            targetRanges: _wpt_target_ranges_for_input(target, type, inputType || "")
         });
     } catch (_) {
         try {
@@ -1109,6 +1814,12 @@ function _wpt_dispatch_input_event(target, type, inputType, data, dataTransfer) 
     }
     var ok = true;
     try { ok = target.dispatchEvent(ev); } catch (_) { ok = true; }
+    // Input Events Level 2 clears browser-generated target ranges once the
+    // beforeinput dispatch completes; retaining the live ranges exposed stale
+    // mutation-adjusted boundaries through a saved event object.
+    if (type === "beforeinput") {
+        try { ev.__target_ranges = []; } catch (_) {}
+    }
     return ok !== false && !ev.defaultPrevented;
 }
 
@@ -1242,10 +1953,31 @@ function _wpt_insert_text_in_document_selection(text) {
     if (!host) return false;
     if (!_wpt_dispatch_input_event(host, "beforeinput", "insertText", text)) return true;
     try {
-        r.deleteContents();
-        var tn = document.createTextNode(text);
-        r.insertNode(tn);
-        sel.collapse(tn, text.length);
+        if (!r.collapsed) r = _wpt_normalize_selected_edit_range(r, host);
+        if (r.startContainer === r.endContainer && r.startContainer.nodeType === 3) {
+            // Typing into one text node replaces its selected UTF-16 span in
+            // place; always inserting a sibling split browser-visible target
+            // ranges across two nodes on the next edit.
+            var textNode = r.startContainer;
+            var oldText = textNode.data || textNode.textContent || "";
+            var insertionOffset = r.startOffset;
+            var replaced = oldText.slice(0, insertionOffset) + text +
+                oldText.slice(r.endOffset);
+            try { textNode.data = replaced; } catch (_) { textNode.textContent = replaced; }
+            sel.collapse(textNode, insertionOffset + text.length);
+        } else {
+            // Text insertion over a rich selection uses the same structural
+            // delete as keyboard deletion so table/list boundaries survive.
+            if (!r.collapsed) {
+                if (!_wpt_apply_edit_range_delete(r, host, sel, false)) return false;
+                _wpt_remove_block_placeholder_for_insertion(
+                    _wpt_editing_block_for_node(sel.getRangeAt(0).startContainer, host), sel);
+            }
+            r = sel.getRangeAt(0);
+            var tn = document.createTextNode(text);
+            r.insertNode(tn);
+            sel.collapse(tn, text.length);
+        }
     } catch (_) {
         return false;
     }
@@ -1253,8 +1985,41 @@ function _wpt_insert_text_in_document_selection(text) {
     return true;
 }
 
-function _wpt_type_printable_key(key) {
+function _wpt_selection_is_inside(elem, selection) {
+    if (!elem || !selection || selection.rangeCount === 0) return false;
+    var node = selection.getRangeAt(0).startContainer;
+    while (node) {
+        if (node === elem) return true;
+        node = node.parentNode;
+    }
+    return false;
+}
+
+function _wpt_focus_editable_for_keys(elem) {
+    if (!elem || elem.nodeType !== 1) return;
+    var wasActive = false;
+    try { wasActive = document.activeElement === elem; } catch (_) {}
+    try { if (typeof elem.focus === "function") elem.focus(); } catch (_) {}
+    var tag = elem.tagName ? String(elem.tagName).toUpperCase() : "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    var selection = null;
+    try { selection = getSelection(); } catch (_) {}
+    if (!selection || (wasActive && _wpt_selection_is_inside(elem, selection))) return;
+    var nodes = [];
+    _wpt_collect_text_nodes(elem, nodes);
+    try {
+        if (nodes.length > 0) {
+            var last = nodes[nodes.length - 1];
+            selection.collapse(last, _wpt_text_node_length(last));
+        } else {
+            selection.collapse(elem, 0);
+        }
+    } catch (_) {}
+}
+
+function _wpt_type_printable_key(key, elem) {
     if (typeof key !== "string" || key.length !== 1) return false;
+    _wpt_focus_editable_for_keys(elem);
     var ae = null;
     try { ae = document.activeElement; } catch (_) {}
     var tag = (ae && ae.tagName) ? String(ae.tagName).toUpperCase() : "";
@@ -1314,6 +2079,23 @@ function _wpt_dispatch_history_edit(inputType) {
     // stack is empty; suppressing the no-op dropped both observable events.
     if (!_wpt_dispatch_input_event(host, "beforeinput", inputType, null)) return true;
     _wpt_dispatch_input_event(host, "input", inputType, null);
+    return true;
+}
+
+function _wpt_dispatch_format_bold() {
+    var target = _wpt_active_editable_target();
+    if (!target) return false;
+    if (!_wpt_dispatch_input_event(target, "beforeinput", "formatBold", null)) return true;
+    try {
+        var selection = getSelection();
+        if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+            var range = selection.getRangeAt(0);
+            var wrapper = document.createElement("b");
+            range.surroundContents(wrapper);
+            selection.selectAllChildren(wrapper);
+        }
+    } catch (_) {}
+    _wpt_dispatch_input_event(target, "input", "formatBold", null);
     return true;
 }
 
@@ -1626,6 +2408,20 @@ function _wpt_actions_set_selection(anchor_node, focus_node, mode) {
     var sel = null;
     try { sel = (typeof getSelection === "function") ? getSelection() : null; } catch (_) {}
     if (!sel || !anchor_node) return;
+    if (mode === "end" && anchor_node.nodeType === 1) {
+        var endNodes = [];
+        _wpt_collect_text_nodes(anchor_node, endNodes);
+        try {
+            if (endNodes.length > 0) {
+                var endNode = endNodes[endNodes.length - 1];
+                sel.collapse(endNode, _wpt_text_node_length(endNode));
+            } else {
+                sel.collapse(anchor_node,
+                    anchor_node.childNodes ? anchor_node.childNodes.length : 0);
+            }
+        } catch (_) {}
+        return;
+    }
     anchor_node = _wpt_actions_descend_to_text(anchor_node);
     focus_node = _wpt_actions_descend_to_text(focus_node || anchor_node);
     if (!anchor_node) return;
@@ -1779,6 +2575,11 @@ _WptActions.prototype.send = function() {
                 var tag = event_target && event_target.tagName ? String(event_target.tagName).toUpperCase() : "";
                 if (shift_ptr && tag !== "A" && down_button !== this.ButtonType.RIGHT) {
                     _wpt_actions_set_selection(down_anchor, down_anchor, "extend");
+                } else if (host && down_anchor === host) {
+                    // Element-origin WebDriver clicks are relative to the
+                    // element centre; for a block editing host whose text
+                    // ends before that point, the caret lands at its end.
+                    _wpt_actions_set_selection(down_anchor, down_anchor, "end");
                 } else {
                     _wpt_actions_set_selection(down_anchor, down_anchor, "collapse");
                 }
@@ -1845,6 +2646,8 @@ _WptActions.prototype.send = function() {
                     _wpt_select_all_active_editable();
                 } else if ((ctrl_held || meta_held) && (ks.key === "z" || ks.key === "Z")) {
                     _wpt_dispatch_history_edit(shift_held ? "historyRedo" : "historyUndo");
+                } else if ((ctrl_held || meta_held) && (ks.key === "b" || ks.key === "B")) {
+                    _wpt_dispatch_format_bold();
                 } else if (ks.key === "\uE003" || ks.key === "\uE017") {
                     // Keep mutation and both InputEvents in one path. The
                     // native probe can emit beforeinput even when it declines
@@ -1911,7 +2714,15 @@ function _wpt_select_all_active_editable() {
     }
     try {
         var range = target.ownerDocument.createRange();
-        range.selectNodeContents(target);
+        var textNodes = [];
+        _wpt_collect_text_nodes(target, textNodes);
+        if (textNodes.length > 0) {
+            range.setStart(textNodes[0], 0);
+            var lastText = textNodes[textNodes.length - 1];
+            range.setEnd(lastText, _wpt_text_node_length(lastText));
+        } else {
+            range.selectNodeContents(target);
+        }
         var sel = target.ownerDocument.getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
@@ -1946,9 +2757,15 @@ function _wpt_selected_clipboard_record(target) {
         var selection = getSelection();
         record["text/plain"] = String(selection.toString() || "");
         if (selection.rangeCount > 0) {
-            var wrapper = document.createElement("div");
-            wrapper.appendChild(selection.getRangeAt(0).cloneContents());
-            record["text/html"] = String(wrapper.innerHTML || "");
+            if (record["text/plain"] === String(target.textContent || "")) {
+                // A text-boundary select-all still covers the whole editing
+                // host; clipboard HTML must retain its formatting ancestors.
+                record["text/html"] = String(target.innerHTML || "");
+            } else {
+                var wrapper = document.createElement("div");
+                wrapper.appendChild(selection.getRangeAt(0).cloneContents());
+                record["text/html"] = String(wrapper.innerHTML || "");
+            }
         }
     } catch (_) {
         try { record["text/html"] = String(target.innerHTML || ""); } catch (_) {}
@@ -2097,21 +2914,7 @@ function _wpt_extend_focus_right(sel) {
     if (fn.nodeType === 3) {
         var len = (fn.data || fn.textContent || "").length;
         if (fo < len) { try { sel.extend(fn, fo + 1); } catch (_) {} return; }
-        var nxt = (function _next_text(n) {
-            // walk forward in document order to next text node
-            var cur = n;
-            while (cur) {
-                if (cur.nextSibling) {
-                    cur = cur.nextSibling;
-                    while (cur.firstChild) cur = cur.firstChild;
-                    if (cur.nodeType === 3) return cur;
-                } else {
-                    cur = cur.parentNode;
-                    if (!cur) return null;
-                }
-            }
-            return null;
-        })(fn);
+        var nxt = _wpt_next_text_node(fn);
         if (nxt) { try { sel.extend(nxt, 1); } catch (_) {} }
     }
 }
@@ -2138,7 +2941,7 @@ var test_driver = {
                 // a fallback input mutation.
                 _wpt_send_one_key(elem, code, false, true);
             } else {
-                _wpt_type_printable_key(keys.charAt(i));
+                _wpt_type_printable_key(keys.charAt(i), elem);
             }
         }
         return Promise.resolve();
@@ -3062,6 +3865,19 @@ if (typeof document !== "undefined" && document &&
 (function() {
     var orig = (typeof fetch === "function") ? fetch : null;
     var stub = function(url) {
+        var path = String(url || "");
+        if (path.indexOf("/interfaces/") === 0) {
+            try {
+                var fs = require("fs");
+                var idl = fs.readFileSync("ref/wpt" + path, "utf8");
+                return Promise.resolve({
+                    ok: true,
+                    text: function() { return Promise.resolve(String(idl)); }
+                });
+            } catch (_) {
+                return Promise.resolve({ ok: false, text: function() { return Promise.resolve(""); } });
+            }
+        }
         return Promise.reject(new TypeError("NetworkError: fetch is not supported in headless WPT shim (" + url + ")"));
     };
     if (typeof globalThis !== "undefined") globalThis.fetch = stub;
