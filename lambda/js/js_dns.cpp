@@ -1529,16 +1529,18 @@ static Item dns_promises_namespace = {0};
 static Item dns_resolver_prototype = {0};
 static Item dns_promises_resolver_prototype = {0};
 static Item dns_default_servers = {0};
-static bool dns_roots_registered = false;
+extern "C" uint64_t js_get_heap_epoch(void);
+static uint64_t dns_roots_epoch = 0;
 
 static void dns_register_roots_once(void) {
-    if (dns_roots_registered) return;
+    uint64_t epoch = js_get_heap_epoch();
+    if (dns_roots_epoch == epoch) return;
     heap_register_gc_root(&dns_namespace.item);
     heap_register_gc_root(&dns_promises_namespace.item);
     heap_register_gc_root(&dns_resolver_prototype.item);
     heap_register_gc_root(&dns_promises_resolver_prototype.item);
     heap_register_gc_root(&dns_default_servers.item);
-    dns_roots_registered = true;
+    dns_roots_epoch = epoch;
 }
 
 static Item dns_array_copy(Item servers) {

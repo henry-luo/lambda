@@ -6,6 +6,7 @@
  */
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
+#include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -16,6 +17,8 @@
 #include <cerrno>
 
 extern Item js_make_number(double d);
+extern __thread EvalContext* context;
+extern "C" void heap_register_gc_root(uint64_t* slot);
 
 #ifdef _WIN32
 #include <windows.h>
@@ -643,7 +646,17 @@ static void js_os_set_method(Item ns, const char* name, void* func_ptr, int para
 extern "C" Item js_get_os_namespace(void) {
     if (os_namespace.item != 0) return os_namespace;
 
+    // The namespace cache outlives this native call; register its exact slot
+    // before construction. Repeat after heap recreation; registration itself
+    // de-duplicates the stable slot within one heap epoch.
+    heap_register_gc_root(&os_namespace.item);
     os_namespace = js_new_object();
+
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> constants_root(roots, ItemNull);
+    Rooted<Item> signals_root(roots, ItemNull);
+    Rooted<Item> errno_root(roots, ItemNull);
+    Rooted<Item> priority_root(roots, ItemNull);
 
     js_os_set_method(os_namespace, "platform",          (void*)js_os_platform, 0);
     js_os_set_method(os_namespace, "arch",              (void*)js_os_arch, 0);
@@ -677,8 +690,11 @@ extern "C" Item js_get_os_namespace(void) {
 
     // os.constants with signals and errno subobjects
     Item constants = js_new_object();
+    constants_root.set(constants);
     Item signals = js_new_object();
+    signals_root.set(signals);
     Item errno_obj = js_new_object();
+    errno_root.set(errno_obj);
 
     // POSIX signals (use system constants for correct platform values)
 #ifndef _WIN32
@@ -760,6 +776,7 @@ extern "C" Item js_get_os_namespace(void) {
 
     // os.constants.priority
     Item priority_obj = js_new_object();
+    priority_root.set(priority_obj);
     js_property_set(priority_obj, make_string_item("PRIORITY_LOW"), (Item){.item = i2it(19)});
     js_property_set(priority_obj, make_string_item("PRIORITY_BELOW_NORMAL"), (Item){.item = i2it(10)});
     js_property_set(priority_obj, make_string_item("PRIORITY_NORMAL"), (Item){.item = i2it(0)});

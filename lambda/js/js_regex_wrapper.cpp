@@ -234,23 +234,27 @@ static size_t parse_assertion_quantifier(const std::string& pat, size_t pos, boo
     return len;
 }
 
-// Check if position is inside a character class [...]
-static bool inside_char_class(const std::string& pat, size_t pos) {
-    int bracket_depth = 0;
-    for (size_t i = 0; i < pos; i++) {
-        if (pat[i] == '\\' && i + 1 < pat.size()) { i++; continue; }
-        if (pat[i] == '[' && bracket_depth == 0) bracket_depth++;
-        else if (pat[i] == ']' && bracket_depth > 0) bracket_depth--;
+static bool advance_char_class_scan(char ch, bool* inside) {
+    // Track character-class state in the forward scan; rescanning the prefix for
+    // every byte made bundled regular-expression rewriting quadratic.
+    if (*inside) {
+        if (ch == ']') *inside = false;
+        return true;
     }
-    return bracket_depth > 0;
+    if (ch == '[') {
+        *inside = true;
+        return true;
+    }
+    return false;
 }
 
 // Count capture groups in a pattern (not including (?:...) non-capturing groups)
 static int count_capture_groups(const std::string& pat) {
     int count = 0;
+    bool inside_char_class = false;
     for (size_t i = 0; i < pat.size(); i++) {
         if (pat[i] == '\\' && i + 1 < pat.size()) { i++; continue; }
-        if (inside_char_class(pat, i)) continue;
+        if (advance_char_class_scan(pat[i], &inside_char_class)) continue;
         if (pat[i] == '(' && i + 1 < pat.size()) {
             if (pat[i + 1] != '?') {
                 count++;
@@ -271,10 +275,11 @@ static int count_capture_groups(const std::string& pat) {
 
 static int count_capture_groups_until(const std::string& pat, size_t limit) {
     int count = 0;
+    bool inside_char_class = false;
     if (limit > pat.size()) limit = pat.size();
     for (size_t i = 0; i < limit; i++) {
         if (pat[i] == '\\' && i + 1 < limit) { i++; continue; }
-        if (inside_char_class(pat, i)) continue;
+        if (advance_char_class_scan(pat[i], &inside_char_class)) continue;
         if (is_capturing_group_at(pat, i)) count++;
     }
     return count;
@@ -297,9 +302,10 @@ static void append_decimal_int(std::string* out, int value) {
 static std::string normalize_assertion_backrefs(const std::string& inner, int group_offset) {
     std::string result;
     result.reserve(inner.size());
+    bool inside_char_class = false;
     for (size_t i = 0; i < inner.size(); i++) {
         if (inner[i] == '\\' && i + 1 < inner.size()) {
-            if (inner[i + 1] >= '1' && inner[i + 1] <= '9' && !inside_char_class(inner, i)) {
+            if (inner[i + 1] >= '1' && inner[i + 1] <= '9' && !inside_char_class) {
                 size_t j = i + 1;
                 int ref_num = 0;
                 while (j < inner.size() && inner[j] >= '0' && inner[j] <= '9') {
@@ -320,6 +326,7 @@ static std::string normalize_assertion_backrefs(const std::string& inner, int gr
             i++;
             continue;
         }
+        advance_char_class_scan(inner[i], &inside_char_class);
         result.push_back(inner[i]);
     }
     return result;
@@ -350,13 +357,14 @@ struct AssertionInfo {
 static int scan_assertions(const std::string& pat, int capture_group_count,
                            AssertionInfo* out_infos, int max_infos) {
     int count = 0;
+    bool inside_char_class = false;
 
     for (size_t i = 0; i < pat.size() && count < max_infos; i++) {
         if (pat[i] == '\\' && i + 1 < pat.size()) {
             // Check for decimal backreferences. Consume the whole decimal
             // escape only when that capture exists; otherwise leave it for the
             // regex compiler's legacy escape handling.
-            if (pat[i + 1] >= '1' && pat[i + 1] <= '9' && !inside_char_class(pat, i)) {
+            if (pat[i + 1] >= '1' && pat[i + 1] <= '9' && !inside_char_class) {
                 size_t j = i + 1;
                 int ref_num = 0;
                 while (j < pat.size() && pat[j] >= '0' && pat[j] <= '9') {
@@ -378,7 +386,7 @@ static int scan_assertions(const std::string& pat, int capture_group_count,
             }
             i++; continue;
         }
-        if (inside_char_class(pat, i)) continue;
+        if (advance_char_class_scan(pat[i], &inside_char_class)) continue;
 
         // Check for assertions: (?=, (?!, (?<=, (?<!
         if (pat[i] == '(' && i + 2 < pat.size() && pat[i + 1] == '?') {

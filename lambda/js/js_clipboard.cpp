@@ -1085,12 +1085,14 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
 // getData() in drop, matching the browser. The Item lives in a GC root
 // registered once at the stable static-address (never re-registered).
 static Item g_drag_data_transfer = { .item = ITEM_NULL };
-static bool g_drag_root_registered = false;
+extern "C" uint64_t js_get_heap_epoch(void);
+static uint64_t g_drag_root_epoch = 0;
 
 extern "C" void js_drag_session_begin(void) {
-    if (!g_drag_root_registered) {
+    uint64_t epoch = js_get_heap_epoch();
+    if (g_drag_root_epoch != epoch) {
         heap_register_gc_root(&g_drag_data_transfer.item);
-        g_drag_root_registered = true;
+        g_drag_root_epoch = epoch;
     }
     g_drag_data_transfer = js_data_transfer_new();
 }

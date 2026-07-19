@@ -73,12 +73,15 @@ static Item assert_options_key = {0};
 static Item assert_diff_key = {0};
 static Item assert_instances[64];
 static int assert_instance_count = 0;
-static bool assert_instances_roots_registered = false;
+extern "C" uint64_t js_get_heap_epoch(void);
+static uint64_t assert_key_epoch = 0;
+static uint64_t assert_instances_roots_epoch = 0;
 
 static void js_assert_register_instance(Item instance) {
-    if (!assert_instances_roots_registered) {
+    uint64_t epoch = js_get_heap_epoch();
+    if (assert_instances_roots_epoch != epoch) {
         heap_register_gc_root_range((uint64_t*)assert_instances, 64);
-        assert_instances_roots_registered = true;
+        assert_instances_roots_epoch = epoch;
     }
     if (assert_instance_count < 64) {
         assert_instances[assert_instance_count++] = instance;
@@ -93,18 +96,21 @@ static bool js_assert_is_registered_instance(Item value) {
 }
 
 static Item js_assert_options_key(void) {
-    if (assert_options_key.item == 0) {
+    uint64_t epoch = js_get_heap_epoch();
+    if (assert_options_key.item == 0 || assert_key_epoch != epoch) {
         assert_options_key = assert_make_string("_options");
         heap_register_gc_root(&assert_options_key.item);
+        assert_diff_key = assert_make_string("diff");
+        heap_register_gc_root(&assert_diff_key.item);
+        // Cached keys survive in static storage, but their objects and root
+        // registrations belong to one batch heap only.
+        assert_key_epoch = epoch;
     }
     return assert_options_key;
 }
 
 static Item js_assert_diff_key(void) {
-    if (assert_diff_key.item == 0) {
-        assert_diff_key = assert_make_string("diff");
-        heap_register_gc_root(&assert_diff_key.item);
-    }
+    (void)js_assert_options_key();
     return assert_diff_key;
 }
 
@@ -5472,7 +5478,7 @@ static int g_node_test_total_count = 0;
 static int g_node_test_pass_count = 0;
 static int g_node_test_fail_count = 0;
 static int64_t g_node_test_next_id = 1;
-static bool g_node_test_roots_registered = false;
+static uint64_t g_node_test_roots_epoch = 0;
 
 #define MAX_NODE_TEST_HOOKS 64
 static Item g_node_before_each_hooks[MAX_NODE_TEST_HOOKS];
@@ -5786,9 +5792,10 @@ static void node_test_note_failure(void) {
 }
 
 static void node_test_register_roots(void) {
-    if (g_node_test_roots_registered) return;
+    uint64_t epoch = js_get_heap_epoch();
+    if (g_node_test_roots_epoch == epoch) return;
     heap_register_gc_root(&g_node_test_event_queue.item);
-    g_node_test_roots_registered = true;
+    g_node_test_roots_epoch = epoch;
 }
 
 static bool node_test_event_queue_active(void) {

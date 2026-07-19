@@ -20,6 +20,10 @@ void* heap_alloc(int size, TypeId type_id);
 extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C code (path.c)
 extern "C" String* heap_strcpy(const char* src, int64_t len);  // callable from C code (path.c)
 extern "C" void heap_gc_collect(void);                // trigger GC collection from runtime
+extern "C" bool heap_gc_precise_only_requested_or_active(Heap* heap);
+extern "C" void heap_gc_force_compatibility(Heap* heap);
+extern "C" bool runtime_require_gc_compatibility(Runtime* runtime,
+                                                   const char* tier_name);
 extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global as GC root
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);  // register env array as GC roots
@@ -62,6 +66,7 @@ struct Runtime {
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
     bool use_mir_direct; // if true, all modules (main + imports) compiled via MIR Direct instead of C2MIR
+    bool gc_compatibility_required; // sticky once this Runtime admits a conservative-only execution tier
 
     // Retained execution state (persistent across script evaluations).
     // The GC heap and name_pool are created on first evaluation
@@ -92,6 +97,11 @@ struct Runtime {
     bool js_runtime_used;
     bool no_task_drain;
 };
+
+// Complete a guest MIR activation that either reused its caller's heap or
+// created a standalone heap which must remain owned until runtime_cleanup().
+void mir_guest_finish_context(Runtime* runtime, EvalContext* old_context,
+                              bool reusing_context);
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
 extern bool g_dry_run;

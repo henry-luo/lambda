@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../lambda.h"
+#include "../../lib/side_stack.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -8,7 +9,8 @@
 extern "C" {
 #endif
 
-#define JUBE_ABI_VERSION 1
+#define JUBE_ABI_VERSION 2
+#define JUBE_ABI_VERSION_LEGACY 1
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -139,6 +141,11 @@ typedef void (*JubeGcWeakClearFn)(uint64_t* slot, void* context);
 struct JubeHostGcAPI {
     void (*register_root)(uint64_t* slot);
     void (*unregister_root)(uint64_t* slot);
+    bool (*root_frame_begin)(LambdaRootFrame* frame, size_t slot_count);
+    uint64_t* (*root_frame_take_slot)(LambdaRootFrame* frame);
+    void (*root_frame_end)(LambdaRootFrame* frame);
+    // Preserve the released v2 root-frame offsets; new GC capabilities are an
+    // additive tail so existing rooting-capable modules keep their ABI.
     void (*register_weak)(uint64_t* slot, JubeGcWeakClearFn on_clear, void* context);
     void (*unregister_weak)(uint64_t* slot);
 };

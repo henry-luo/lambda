@@ -88,6 +88,11 @@ void lambda_stack_cleanup(void);
  */
 void lambda_stack_overflow_error(const char* func_name);
 
+// Native RootFrame constructors cannot return an error to their caller. A
+// reservation failure must leave through the armed execution recovery point
+// rather than continue with null, non-rooting slots.
+void lambda_root_frame_overflow_error(void);
+
 /**
  * Get current stack usage in bytes.
  * Useful for debugging and profiling.

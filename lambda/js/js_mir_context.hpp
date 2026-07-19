@@ -45,7 +45,11 @@ struct JsClassEntry;  // forward declaration for JsMirVarEntry.class_entry
 struct JsMirRootBinding {
     MIR_reg_t reg;
     int slot;
+    int home_id;
 };
+
+typedef MirRootCandidate JsMirGcCandidate;
+typedef MirGcCallSite JsMirGcCallSite;
 
 struct JsMirEnvBinding {
     MIR_reg_t source_reg;
@@ -473,7 +477,6 @@ struct JsMirTranspiler {
     MIR_reg_t side_frame_runtime;
     MIR_reg_t side_root_frame_base;
     MIR_reg_t side_number_frame_base;
-    MIR_reg_t side_root_bits_scratch;
     MIR_label_t side_root_anchor;
     MIR_label_t side_frame_return_label;
     MIR_reg_t side_frame_return_reg;
@@ -481,9 +484,22 @@ struct JsMirTranspiler {
     JsMirRootBinding* side_root_bindings;
     int side_root_binding_count;
     int side_root_binding_capacity;
+    int* side_root_binding_by_reg;
+    int side_root_binding_by_reg_capacity;
+    int* side_root_binding_by_home;
+    int side_root_binding_by_home_capacity;
     int side_root_store_count;
     int side_may_gc_call_count;
     int side_no_gc_call_count;
+    bool side_root_write_back;
+    JsMirGcCandidate* side_gc_candidates;
+    int side_gc_candidate_count;
+    int side_gc_candidate_capacity;
+    int* side_gc_candidate_by_reg;
+    int side_gc_candidate_by_reg_capacity;
+    JsMirGcCallSite* side_gc_call_sites;
+    int side_gc_call_site_count;
+    int side_gc_call_site_capacity;
     MIR_insn_t* side_root_backedge_reloads;
     int side_root_backedge_reload_count;
     int side_root_backedge_reload_capacity;
@@ -526,6 +542,7 @@ static inline void jm_sync_compat_from_emitter(JsMirTranspiler* mt) {
 
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
     if (!mt) return;
+    em_gc_analysis_dispose(&mt->em);
     if (mt->em.import_cache) {
         hashmap_free(mt->em.import_cache);
         mt->em.import_cache = NULL;
@@ -568,6 +585,26 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
     if (mt->side_root_bindings) {
         mem_free(mt->side_root_bindings);
         mt->side_root_bindings = NULL;
+    }
+    if (mt->side_root_binding_by_reg) {
+        mem_free(mt->side_root_binding_by_reg);
+        mt->side_root_binding_by_reg = NULL;
+    }
+    if (mt->side_root_binding_by_home) {
+        mem_free(mt->side_root_binding_by_home);
+        mt->side_root_binding_by_home = NULL;
+    }
+    if (mt->side_gc_candidates) {
+        mem_free(mt->side_gc_candidates);
+        mt->side_gc_candidates = NULL;
+    }
+    if (mt->side_gc_candidate_by_reg) {
+        mem_free(mt->side_gc_candidate_by_reg);
+        mt->side_gc_candidate_by_reg = NULL;
+    }
+    if (mt->side_gc_call_sites) {
+        mem_free(mt->side_gc_call_sites);
+        mt->side_gc_call_sites = NULL;
     }
     if (mt->side_env_bindings) {
         mem_free(mt->side_env_bindings);

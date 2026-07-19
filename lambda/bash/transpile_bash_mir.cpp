@@ -6106,6 +6106,7 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
 
 Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char* filename) {
     log_debug("bash-mir: starting transpilation for '%s'", filename ? filename : "<string>");
+    if (!runtime_require_gc_compatibility(runtime, "Bash")) return ItemError;
 
     // store runtime for bash_source_file() to use
     bash_source_runtime = runtime;
@@ -6218,6 +6219,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
         if (dd_buf) strbuf_free(dd_buf);
+        mir_guest_finish_context(runtime, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -6340,9 +6342,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     if (preproc_buf) strbuf_free(preproc_buf);
     if (dd_buf) strbuf_free(dd_buf);
 
-    if (!reusing_context) {
-        context = old_context;
-    }
+    mir_guest_finish_context(runtime, old_context, reusing_context);
 
     return result;
 }

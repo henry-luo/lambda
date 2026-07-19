@@ -1,6 +1,7 @@
 # Lambda Stack Frame Design — Precise Rooting + Frame-Scoped Number Stack
 
 **Status:** IMPLEMENTED (Lambda + LambdaJS) — SF1–SF20 and OS1–OS11 are closed for both MIR-Direct transpilers. The phase records are `vibe/Lambda_Impl_Stack_Frame.md` and `vibe/Lambda_Impl_Stack_Frame_JS.md`.
+**Rooting successor (2026-07-18):** the precise-rooting *emission strategy* and conservative-scan *retirement path* — sketched here as SF8/SF9 — are now governed by `vibe/Lambda_Design_Stack_Rooting.md` (safepoint-current canonical slots, CR1–CR8, in implementation). That document supersedes this one on rooting-emission, helper-handle, and scan-retirement questions; the lifetime architecture in this document (side stacks, watermarks, re-homing, SF12–SF20) is unchanged by it.
 **Date:** 2026-07-15
 **Context:** A unified stack-frame architecture for Lambda and hosted languages (LambdaJS, future Jube guests) that addresses two runtime debts at once: (1) JIT GC rooting goes through heap-allocated shadow frames with a C call per rooted store, and (2) the numeric nursery is never collected — an unbounded leak by design. Successor-in-spirit to the G1 honest-rooting fix (`vibe/Lambda_Issue_GC_Root (fixed).md`); feeds the G2 host-API rooting clause (`vibe/Lambda_Semantics_Features.md` §1.8). Detailed current-state design lives in `doc/dev/lambda/LR_08_Memory_and_GC.md`.
 
@@ -125,15 +126,17 @@ The v1 open question "how do we know a function is hot?" is dissolved rather tha
 
 **SF8 — The RAII root guard is the G2 answer.**
 The same handle class that C helpers use internally becomes the explicit rooting clause of `JubeHostAPI` v1: native modules receive `Handle`-style views and use the guard for anything held across a call that can collect. One discipline, designed once, spanning runtime helpers and the module ABI.
+*(2026-07-18 amendment: concretized and superseded by `vibe/Lambda_Design_Stack_Rooting.md` §7 — the guard family is `RootFrame`/`Rooted<T>`/`LambdaHandle`/`LambdaMutableHandle`/`PersistentRooted`/`AutoAssertNoGC` with normative rules RH1–RH7; the current snapshot-push `LambdaRootGuard` upgrades to always-current slot-backed homes on the same side-root stack. The G2 clause should cite that document.)*
 
 **SF9 — Conservative-scan retirement is a migration, not a switch.**
 End state: scalars out of GC + precise contiguous root stack ⇒ the conservative C-stack scan (with its ASan hacks, false pinning, and spill-reliance hole) can be deleted. But today it is the *only* protection for every C helper holding a raw `Container*` local. Sequence: land the side stacks (correctness immediate, conservative scan still on), migrate helpers to the guard incrementally, retire the scan per-module once its coverage is redundant. The scan is the safety net that makes SF8's migration incremental instead of a flag-day.
+*(2026-07-18 amendment: the retirement mechanism is now specified by `vibe/Lambda_Design_Stack_Rooting.md` — capability-gated **per-context** compatibility mode (its pillar 11 / §9.1) with staged S0–S6 migration and shadow-verify/precise-only/forced-GC gates. "Per-module" toggling of the scan is unsound under mixed native/generated activation chains (its blocker B12) and is superseded; the migration-not-switch principle itself stands.)*
 
 **SF10 — Small-int64 inlining companion.**
 Pack int64 values that fit 56 bits inline in the Item (the same trick as `LMD_TYPE_INT`'s `get_int56`), leaving the number stack to carry only genuinely wide int64/uint64, DateTime, and container copy-outs. Doubles are already inline (v2). This shrinks number-stack traffic to a trickle before the architecture even lands — worth doing first as an independent step.
 
 **SF11 — Roots hold only true references.**
-With scalars out of GC, the rooting predicate tightens to "GC-managed pointer types and `ANY`" — `INT64`/`DTIME` leave `should_gc_root_var`. Root-set noise drops; the honest-typing invariant from the G1 fix becomes even more literal.
+With scalars out of GC, the rooting predicate tightens to "GC-managed pointer types and `ANY`" — `INT64`/`DTIME` leave `should_gc_root_var`. Root-set noise drops; the honest-typing invariant from the G1 fix becomes even more literal. *(Refined by the four semantic representation classes — `BOXED_ITEM`/`RAW_GC_POINTER`/`NON_GC_SCALAR`/`RAW_NON_GC_POINTER` — in `Lambda_Design_Stack_Rooting.md` §4.2.)*
 
 ### 3.3 Mechanics sketch (to be elaborated per §4)
 
@@ -251,6 +254,7 @@ Residual rules:
 Lambda and JS deliberately share this profile because they execute in one context and one pair of virtual reservations. JS has thinner scalar traffic, but a second language-specific mapping would not reduce committed RSS; the fixed reservations are virtual-address budgets. A future script/page/worker-isolate matrix remains an optional tuning refinement.
 
 **OS6 — C2MIR scope.** CLOSED — **C2MIR is kept exactly as-is; no code is touched** *(decided 2026-07-15)*. It inherits the new boxing passively (it calls `push_l`/`push_k` by name; the shared implementations re-home into the exec base frame underneath — script-lifetime numbers, matching its current nursery behavior), and its rooting remains conservative-scan-only, as today. No watermark emission, no helper migration, no emitter change. If C2MIR is ever reopened in the future, that reopening means **upgrading its entire implementation to this design** (frames, watermarks, multi-lane returns, honest rooting) — it must follow the current design anyway; there is no half-step worth building.
+*(2026-07-18: finalized as `Lambda_Design_Stack_Rooting.md` CR7, **accepted** — C2MIR stays permanently unchanged, always executes in conservative compatibility contexts, and is unavailable in precise-only contexts and scanner-free builds. The "upgrade wholesale if reopened" option was not taken.)*
 
 **OS7 — Migration order and acceptance gates.** CLOSED for Lambda phase 1 (2026-07-15). Stages 0–3 and the RAII pilot landed; the implementation record contains the final gate evidence. Broad host-helper migration and conservative-scan retirement remain intentionally coupled to the JS phase rather than being incomplete Lambda work.
 
@@ -290,7 +294,7 @@ The C stack and the side stacks grow and shrink in lockstep (every native frame 
 | Boxed int64/DateTime | C call, bump into never-freed nursery | inline bump, freed at frame exit |
 | Scalars in GC | rooted + traced | invisible to GC (SF2) |
 | C host functions | conservative scan only | inline push + RAII guard (→ G2 clause) |
-| Conservative scan | load-bearing | backstop → retired per-module (SF9) |
+| Conservative scan | load-bearing | backstop → retired via capability-gated migration (SF9 as amended; `Lambda_Design_Stack_Rooting.md` S0–S6) |
 
 Verdict from review: feasible, well-precedented (SpiderMonkey/OCaml chained roots; Lua watermarked value stack), and faster than the current machinery on every axis — *provided* OS1 (escape re-homing) and OS3 (suspended frames) are designed before any code lands, and OS4 (unwind contract) lands with stage 1.
 

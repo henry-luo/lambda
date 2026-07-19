@@ -7,6 +7,9 @@
 
 #include "re2_wrapper.hpp"
 #include "ast.hpp"
+#ifndef SIMPLE_SCHEMA_PARSER
+#include "lambda.hpp"
+#endif
 #include "../lib/re2_glue.hpp"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
@@ -566,12 +569,17 @@ Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
 
     // create Map container
     Map* mp = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    RootFrame roots((Context*)context, 1);
+    Rooted<Map*> rooted_map(roots, mp);
     mp->type_id = LMD_TYPE_MAP;
     mp->type = mt;
     mp->data = heap_data_calloc(byte_size);
 
     // store value field (String* pointer)
     String* val_str = make_heap_string(match_str, match_len);
+    // Both data-buffer and string allocation may collect; the map is the only
+    // owner of its data and is not visible to the caller until this returns.
+    mp = rooted_map.get();
     *(String**)((char*)mp->data + e_value->byte_offset) = val_str;
 
     // store index field (int64)
@@ -584,18 +592,21 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
                                int64_t limit, bool ignore_case) {
     List* result = list();
     result->is_content = 1;
-    if (!pattern || !str || len == 0) return result;
+    RootFrame roots((Context*)context, 2);
+    Rooted<List*> rooted_result(roots, result);
+    Rooted<Map*> rooted_match(roots, (Map*)NULL);
+    if (!pattern || !str || len == 0) return rooted_result.get();
 
     bool must_release = false;
     re2::RE2* re = pattern_get_unanchored_options(pattern, ignore_case, &must_release);
-    if (!re) return result;
+    if (!re) return rooted_result.get();
 
     int64_t total = pattern_count_matches_with_re(re, str, len);
     int64_t first = 0, selected_count = 0;
     lam::re2_glue_select_match_window(total, limit, &first, &selected_count);
     if (selected_count == 0) {
         if (must_release) lam::re2_glue_release(re);
-        return result;
+        return rooted_result.get();
     }
 
     re2::StringPiece input(str, len);
@@ -614,7 +625,10 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
 
         if (ordinal >= first && pushed < selected_count) {
             Map* m = create_match_map(match.data(), match_len_val, match_start);
-            list_push(result, {.map = m});
+            // Keep a new match live until the rooted result list owns it.
+            rooted_match.set(m);
+            list_push(rooted_result.get(), {.map = rooted_match.get()});
+            rooted_match.set((Map*)NULL);
             pushed++;
         }
         ordinal++;
@@ -626,7 +640,7 @@ List* pattern_find_all_options(TypePattern* pattern, const char* str, size_t len
     }
 
     if (must_release) lam::re2_glue_release(re);
-    return result;
+    return rooted_result.get();
 }
 
 // Find all non-overlapping matches of pattern in string
@@ -700,20 +714,42 @@ String* pattern_replace_all(TypePattern* pattern, const char* str, size_t str_le
     return make_heap_string(input.c_str(), input.size());
 }
 
+static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset, size_t len) {
+    String* value = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+    // heap_alloc may compact the source; derive its character pointer only
+    // after the safepoint instead of retaining a raw nursery interior pointer.
+    const char* src = rooted_source.get().get_chars() + offset;
+    value->len = (uint32_t)len;
+    value->is_ascii = 1;
+    for (size_t i = 0; i < len; i++) {
+        if ((unsigned char)src[i] >= 128) { value->is_ascii = 0; break; }
+    }
+    memcpy(value->chars, src, len);
+    value->chars[len] = '\0';
+    return value;
+}
+
 // Split string by pattern matches
-List* pattern_split(TypePattern* pattern, const char* str, size_t len, bool keep_delim) {
+List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_source(roots, source);
+    Rooted<List*> rooted_result(roots, (List*)NULL);
     List* result = list();
-    if (!pattern || !str) return result;
-    if (len == 0) return result;
+    rooted_result.set(result);
+    if (!pattern || !source.get_chars()) return rooted_result.get();
+    size_t len = source.get_len();
+    if (len == 0) return rooted_result.get();
 
     re2::RE2* re = pattern_get_unanchored(pattern);
-    if (!re) return result;
+    if (!re) return rooted_result.get();
 
-    re2::StringPiece input(str, len);
-    re2::StringPiece match;
     size_t pos = 0;
 
     while (pos <= len) {
+        // Each preceding result allocation can move the source string.
+        const char* str = rooted_source.get().get_chars();
+        re2::StringPiece input(str, len);
+        re2::StringPiece match;
         if (!re->Match(input, pos, len, re2::RE2::UNANCHORED, &match, 1)) {
             break;
         }
@@ -723,13 +759,13 @@ List* pattern_split(TypePattern* pattern, const char* str, size_t len, bool keep
 
         // push the part before the match
         size_t part_len = match_start - pos;
-        String* part = make_heap_string(str + pos, part_len);
-        list_push(result, {.item = s2it(part)});
+        String* part = make_heap_rooted_slice(rooted_source, pos, part_len);
+        list_push(rooted_result.get(), {.item = s2it(part)});
 
         // optionally push the delimiter
         if (keep_delim && match_len_val > 0) {
-            String* delim = make_heap_string(match.data(), match_len_val);
-            list_push(result, {.item = s2it(delim)});
+            String* delim = make_heap_rooted_slice(rooted_source, match_start, match_len_val);
+            list_push(rooted_result.get(), {.item = s2it(delim)});
         }
 
         // advance past match; handle zero-length matches
@@ -740,11 +776,11 @@ List* pattern_split(TypePattern* pattern, const char* str, size_t len, bool keep
     // push remaining part after last match
     if (pos <= len) {
         size_t part_len = len - pos;
-        String* part = make_heap_string(str + pos, part_len);
-        list_push(result, {.item = s2it(part)});
+        String* part = make_heap_rooted_slice(rooted_source, pos, part_len);
+        list_push(rooted_result.get(), {.item = s2it(part)});
     }
 
-    return result;
+    return rooted_result.get();
 }
 
 // C-linkage wrapper for create_match_map, callable from lambda-eval.cpp

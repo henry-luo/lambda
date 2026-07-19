@@ -56,12 +56,33 @@ Item vmap_get_by_item(VMap* vm, Item key);
 SymbolKeyList* vmap_keys_for_item(Item vmap_item);
 
 struct LambdaSymbolKeyList {
-    lam::ArrayList<Symbol*> keys;
+    lam::ArrayList<LambdaRootFrame*> root_chunks;
+    size_t count;
+    size_t next_chunk_capacity;
 
     explicit LambdaSymbolKeyList(size_t initial_capacity)
-        : keys(MEM_CAT_CONTAINER, initial_capacity) {
+        : root_chunks(MEM_CAT_CONTAINER, 2), count(0),
+          next_chunk_capacity(initial_capacity ? initial_capacity : 4) {
     }
 };
+
+static LambdaRootFrame* symbol_key_list_add_chunk(LambdaSymbolKeyList* keys) {
+    if (!keys || !context) return nullptr;
+    LambdaRootFrame* chunk = (LambdaRootFrame*)mem_calloc(
+        1, sizeof(LambdaRootFrame), MEM_CAT_CONTAINER);
+    if (!chunk) return nullptr;
+    size_t capacity = keys->next_chunk_capacity;
+    if (!lambda_root_frame_begin((Context*)context, chunk, capacity) ||
+            !keys->root_chunks.append(chunk)) {
+        lambda_root_frame_end(chunk);
+        mem_free(chunk);
+        return nullptr;
+    }
+    if (capacity <= ((size_t)-1) / 2) {
+        keys->next_chunk_capacity = capacity * 2;
+    }
+    return chunk;
+}
 
 extern "C" SymbolKeyList* symbol_key_list_new(int64_t initial_capacity) {
     if (initial_capacity < 0) initial_capacity = 0;
@@ -73,26 +94,50 @@ extern "C" SymbolKeyList* symbol_key_list_new(int64_t initial_capacity) {
 extern "C" bool symbol_key_list_append(SymbolKeyList* keys_ptr, Symbol* symbol) {
     if (!keys_ptr || !symbol) return false;
     LambdaSymbolKeyList* keys = (LambdaSymbolKeyList*)keys_ptr;
-    return keys->keys.append(symbol);
+    LambdaRootFrame* chunk = keys->root_chunks.empty()
+        ? nullptr : keys->root_chunks.back();
+    if (!chunk || chunk->next_slot >= chunk->slot_count) {
+        chunk = symbol_key_list_add_chunk(keys);
+        if (!chunk) return false;
+    }
+    uint64_t* root = lambda_root_frame_take_slot(chunk);
+    if (!root) return false;
+    // Iterator keys outlive item_keys()'s native activation. Keep every
+    // not-yet-visited Symbol in exact side-stack slots until the list is freed.
+    *root = (uint64_t)(uintptr_t)symbol;
+    keys->count++;
+    return true;
 }
 
 extern "C" int64_t symbol_key_list_len(void* keys_ptr) {
     if (!keys_ptr) return 0;
     LambdaSymbolKeyList* keys = (LambdaSymbolKeyList*)keys_ptr;
-    return (int64_t)keys->keys.size();
+    return (int64_t)keys->count;
 }
 
 extern "C" Symbol* symbol_key_list_at(void* keys_ptr, int64_t index) {
     if (!keys_ptr || index < 0) return nullptr;
     LambdaSymbolKeyList* keys = (LambdaSymbolKeyList*)keys_ptr;
     size_t key_index = (size_t)index;
-    Symbol** symbol = keys->keys.try_get(key_index);
-    return symbol ? *symbol : nullptr;
+    if (key_index >= keys->count) return nullptr;
+    for (size_t i = 0; i < keys->root_chunks.size(); i++) {
+        LambdaRootFrame* chunk = keys->root_chunks[i];
+        if (key_index < chunk->next_slot) {
+            return (Symbol*)(uintptr_t)chunk->slots[key_index];
+        }
+        key_index -= chunk->next_slot;
+    }
+    return nullptr;
 }
 
 extern "C" void symbol_key_list_free(void* keys_ptr) {
     if (!keys_ptr) return;
     LambdaSymbolKeyList* keys = (LambdaSymbolKeyList*)keys_ptr;
+    for (size_t i = keys->root_chunks.size(); i > 0; i--) {
+        LambdaRootFrame* chunk = keys->root_chunks[i - 1];
+        lambda_root_frame_end(chunk);
+        mem_free(chunk);
+    }
     keys->~LambdaSymbolKeyList();
     mem_free(keys);
 }
@@ -160,12 +205,19 @@ Item array_get(Array *array, int64_t index) {
 ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!arr) return NULL;
+    // The data-zone allocation can force GC before this helper returns the new
+    // header to generated code, so the native construction interval needs an
+    // exact root of its own.
+    RootFrame roots((Context*)context, 1);
+    Rooted<ArrayNum*> rooted_arr(roots, arr);
     arr->type_id = LMD_TYPE_ARRAY_NUM;
     arr->set_elem_type(elem_type);  // stored in map_kind/elem_type byte
     int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
     size_t bytes;
     if (length > 0 && lam::checked_mul((size_t)length, (size_t)elem_size, &bytes)) {
-        arr->data = heap_data_alloc(bytes);
+        void* data = heap_data_alloc(bytes);
+        arr = rooted_arr.get();
+        arr->data = data;
     }
     if (arr->data) {                          // length/capacity stay 0 on overflow/OOM
         arr->length = length;  arr->capacity = length;
@@ -202,16 +254,18 @@ ArrayNum* array_num_new_external_view(Container* base, void* data_base,
 
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return NULL;
-    LambdaRootGuard view_root((Context*)context);
-    if (!view_root.root(Item{.array_num = view})) return NULL;
+    RootFrame roots((Context*)context, 1);
+    if (!roots.valid()) return NULL;
+    // The shape allocation may collect before the new view reaches its owner.
+    Rooted<ArrayNum*> rooted_view(roots, view);
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
     ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     if (!shape) return NULL;
-    if (!array_num_init_external_view(view, shape, base, data_base, elem_type,
+    if (!array_num_init_external_view(rooted_view.get(), shape, base, data_base, elem_type,
             byte_offset, length, mutable_view)) {
         return NULL;
     }
-    return view;
+    return rooted_view.get();
 }
 
 ArrayNum* array_num_new_buffer_view(Container* base, ByteBufferHandle* handle,
@@ -231,20 +285,22 @@ ArrayNum* array_num_new_buffer_view(Container* base, ByteBufferHandle* handle,
     }
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return NULL;
-    LambdaRootGuard view_root((Context*)context);
-    if (!view_root.root(Item{.array_num = view})) return NULL;
+    RootFrame roots((Context*)context, 1);
+    if (!roots.valid()) return NULL;
+    // The shape allocation may collect before the new view reaches its owner.
+    Rooted<ArrayNum*> rooted_view(roots, view);
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
     ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     if (!shape) return NULL;
     void* data = (void*)byte_buffer_data_const(handle);
-    if (!array_num_init_external_view(view, shape, base, data, elem_type,
+    if (!array_num_init_external_view(rooted_view.get(), shape, base, data, elem_type,
             byte_offset, length, mutable_view)) {
         return NULL;
     }
     shape->backing_kind = ARRAY_NUM_BACKING_BUFFER_HANDLE;
     shape->backing = handle;
     shape->resolved_generation = handle->generation;
-    return view;
+    return rooted_view.get();
 }
 
 ArrayNum* array_num_new_storage_view(ByteStorage* storage,
@@ -252,14 +308,16 @@ ArrayNum* array_num_new_storage_view(ByteStorage* storage,
         bool mutable_view) {
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return NULL;
-    LambdaRootGuard view_root((Context*)context);
-    if (!view_root.root(Item{.array_num = view})) return NULL;
+    RootFrame roots((Context*)context, 1);
+    if (!roots.valid()) return NULL;
+    // The shape allocation may collect before the new view reaches its owner.
+    Rooted<ArrayNum*> rooted_view(roots, view);
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
     ArrayNumShape* shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     if (!shape) return NULL;
-    if (!array_num_init_storage_view(view, shape, storage, elem_type,
+    if (!array_num_init_storage_view(rooted_view.get(), shape, storage, elem_type,
             byte_offset, length, mutable_view)) return NULL;
-    return view;
+    return rooted_view.get();
 }
 
 bool array_num_init_derived_view(ArrayNum* view, ArrayNumShape* shape,
@@ -314,11 +372,9 @@ bool array_num_init_derived_view(ArrayNum* view, ArrayNumShape* shape,
         }
     }
     view->data = source_data ? source_data + relative_bytes : NULL;
-    // Only GC-zone numeric storage needs compaction pinning. Handle/storage
-    // views refresh or retain their allocation and must not pin unrelated maps.
-    if (shape->backing_kind == ARRAY_NUM_BACKING_GC_VIEW && shape->base) {
-        ((Container*)shape->base)->is_pinned = 1;
-    }
+    // GC-owned bases are promoted during collection and every live view is
+    // rebound to the promoted buffer; leaving nursery storage "pinned" would
+    // make it dangle when the nursery is reset.
     return true;
 }
 
@@ -379,10 +435,20 @@ void* array_num_resolve_data(ArrayNum* array, bool write) {
 // numeric literals like [[1,2],[3,4]] as a single tensor.
 ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims) {
     if (ndim < 1 || ndim > 32) return NULL;
+    // MIR currently passes literal dimensions through nursery scratch memory.
+    // Snapshot it before the first allocation because that safepoint may reset
+    // the nursery even though the raw scratch pointer is not a GC object.
+    int64_t dims_stack[32];
+    for (int i = 0; i < ndim; i++) dims_stack[i] = dims[i];
     ArrayNum* arr = array_num_new(elem_type, total);
     if (!arr) return NULL;
+    // The shape allocation can collect the newly returned header before its
+    // generated caller has a chance to install the result in a canonical slot.
+    RootFrame roots((Context*)context, 1);
+    Rooted<ArrayNum*> rooted_arr(roots, arr);
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
     ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
+    arr = rooted_arr.get();
     if (!s) return arr;  // best-effort: keep as 1-D
     s->ndim = (uint8_t)ndim;
     s->is_c_contig = 1;
@@ -393,9 +459,9 @@ ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim
     int64_t* ss = array_num_shape_strides(s);
     int64_t stride = 1;
     for (int i = ndim - 1; i >= 0; i--) {
-        sd[i] = dims[i];
+        sd[i] = dims_stack[i];
         ss[i] = stride;
-        stride *= dims[i];
+        stride *= dims_stack[i];
     }
     arr->is_ndim = 1;
     arr->extra = (int64_t)(uintptr_t)s;
@@ -556,8 +622,18 @@ static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
 
     ArrayNumElemType etype = parent->get_elem_type();
 
+    // Both the parent and its shape can otherwise disappear or relocate at
+    // either allocation below while this helper holds native/interior pointers.
+    RootFrame roots((Context*)context, 2);
+    Rooted<ArrayNum*> rooted_parent(roots, parent);
+    Rooted<ArrayNum*> rooted_view(roots, (ArrayNum*)NULL);
     ArrayNum* view = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!view) return ItemNull;
+    rooted_view.set(view);
+    parent = rooted_parent.get();
+    pshape = (ArrayNumShape*)(uintptr_t)parent->extra;
+    pdims = array_num_shape_dims(pshape);
+    pstrs = array_num_shape_strides(pshape);
     view->type_id = LMD_TYPE_ARRAY_NUM;
     view->set_elem_type(etype);
     view->is_ndim = 1;
@@ -571,6 +647,11 @@ static Item make_leading_axis_view(ArrayNum* parent, int64_t row_idx) {
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)new_ndim * sizeof(int64_t);
     ArrayNumShape* rshape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     if (!rshape) return ItemNull;
+    view = rooted_view.get();
+    parent = rooted_parent.get();
+    pshape = (ArrayNumShape*)(uintptr_t)parent->extra;
+    pdims = array_num_shape_dims(pshape);
+    pstrs = array_num_shape_strides(pshape);
     rshape->ndim = (uint8_t)new_ndim;
     rshape->is_c_contig = pshape->is_c_contig;  // inherits contig if parent was
     rshape->is_f_contig = 0;
@@ -1369,7 +1450,12 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         Array* inner = item.array;
         if (inner && inner->is_spreadable) {
+            RootFrame roots((Context*)context, 2);
+            Rooted<Array*> rooted_array(roots, arr);
+            Rooted<Item> rooted_source(roots, item);
             for (int i = 0; i < inner->length; i++) {
+                arr = rooted_array.get();
+                inner = rooted_source.get().array;
                 array_push(arr, inner->items[i]);
             }
             return;
@@ -1379,7 +1465,12 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         List* inner = item.array;
         if (inner && inner->is_spreadable) {
+            RootFrame roots((Context*)context, 2);
+            Rooted<Array*> rooted_array(roots, arr);
+            Rooted<Item> rooted_source(roots, item);
             for (int i = 0; i < inner->length; i++) {
+                arr = rooted_array.get();
+                inner = rooted_source.get().array;
                 array_push(arr, inner->items[i]);
             }
             return;
@@ -1389,8 +1480,14 @@ void array_push_spread(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* inner = item.array_num;
         if (inner && inner->is_spreadable) {
+            RootFrame roots((Context*)context, 2);
+            Rooted<Array*> rooted_array(roots, arr);
+            Rooted<Item> rooted_source(roots, item);
             for (int64_t i = 0; i < inner->length; i++) {
-                array_push(arr, array_num_get(inner, i));
+                inner = rooted_source.get().array_num;
+                Item value = array_num_get(inner, i);
+                arr = rooted_array.get();
+                array_push(arr, value);
             }
             return;
         }
@@ -1407,14 +1504,29 @@ void array_push_spread_all(Array* arr, Item item) {
     if (type_id == LMD_TYPE_ARRAY) {
         Array* inner = item.array;
         if (inner) {
-            for (int i = 0; i < inner->length; i++) array_push(arr, inner->items[i]);
+            RootFrame roots((Context*)context, 2);
+            Rooted<Array*> rooted_array(roots, arr);
+            Rooted<Item> rooted_source(roots, item);
+            for (int i = 0; i < inner->length; i++) {
+                arr = rooted_array.get();
+                inner = rooted_source.get().array;
+                array_push(arr, inner->items[i]);
+            }
             return;
         }
     }
     if (type_id == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* inner = item.array_num;
         if (inner) {
-            for (int64_t i = 0; i < inner->length; i++) array_push(arr, array_num_get(inner, i));
+            RootFrame roots((Context*)context, 2);
+            Rooted<Array*> rooted_array(roots, arr);
+            Rooted<Item> rooted_source(roots, item);
+            for (int64_t i = 0; i < inner->length; i++) {
+                inner = rooted_source.get().array_num;
+                Item value = array_num_get(inner, i);
+                arr = rooted_array.get();
+                array_push(arr, value);
+            }
             return;
         }
     }
@@ -1513,7 +1625,7 @@ int lambda_item_compare(Item a, Item b) {
 
 typedef struct GroupHashEntry {
     Item key;
-    Array* members;
+    int64_t group_index;
 } GroupHashEntry;
 
 static uint64_t group_hash_entry(const void* entry, uint64_t seed0, uint64_t seed1) {
@@ -1534,77 +1646,124 @@ static Item group_key_part(Item key, int64_t index, int64_t alias_count) {
 }
 
 Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, int64_t alias_count) {
-    Array* out = array_plain();
+    RootFrame roots((Context*)context, 7);
+    Rooted<Item> rooted_rows_item(roots, rows_item);
+    Rooted<Item> rooted_keys_item(roots, keys_item);
+    Rooted<Array*> rooted_out(roots, (Array*)NULL);
+    Rooted<Array*> rooted_order(roots, (Array*)NULL);
+    Rooted<Array*> rooted_member_groups(roots, (Array*)NULL);
+    Rooted<Array*> rooted_new_members(roots, (Array*)NULL);
+    Rooted<Element*> rooted_group(roots, (Element*)NULL);
+    rooted_out.set(array_plain());
     if (get_type_id(rows_item) != LMD_TYPE_ARRAY || get_type_id(keys_item) != LMD_TYPE_ARRAY ||
         !aliases || alias_count <= 0 || !_lambda_rt || !_lambda_rt->pool) {
         log_error("group_by_keys: invalid rows/keys/aliases/runtime");
-        return out;
+        return rooted_out.get();
     }
 
-    Array* rows = rows_item.array;
-    Array* keys = keys_item.array;
+    Array* rows = rooted_rows_item.get().array;
     HashMap* table = hashmap_new(sizeof(GroupHashEntry), rows ? (size_t)rows->length : 8, 0, 0,
         group_hash_entry, group_compare_entry, NULL, NULL);
-    Array* order = array_plain();
-    if (!table || !rows || !keys) return out;
+    rooted_order.set(array_plain());
+    rooted_member_groups.set(array_plain());
+    if (!table || !rows || !rooted_keys_item.get().array) return rooted_out.get();
 
+    Array* keys = rooted_keys_item.get().array;
     int64_t row_count = rows->length < keys->length ? rows->length : keys->length;
     for (int64_t i = 0; i < row_count; i++) {
+        rows = rooted_rows_item.get().array;
+        keys = rooted_keys_item.get().array;
         Item key = keys->items[i];
-        GroupHashEntry probe = { .key = key, .members = NULL };
+        GroupHashEntry probe = { .key = key, .group_index = -1 };
         const GroupHashEntry* existing = (const GroupHashEntry*)hashmap_get(table, &probe);
         if (!existing) {
-            // First appearance fixes deterministic group order; later hash iteration order is ignored.
-            GroupHashEntry entry = { .key = key, .members = array_plain() };
+            // C hash entries cannot own movable/collectable Array pointers.
+            // Keep member arrays in a rooted GC array and store only its index.
+            int64_t group_index = rooted_member_groups.get()->length;
+            rooted_new_members.set(array_plain());
+            array_push(rooted_member_groups.get(), {.array = rooted_new_members.get()});
+            rooted_new_members.set((Array*)NULL);
+            GroupHashEntry entry = { .key = key, .group_index = group_index };
             hashmap_set(table, &entry);
-            array_push(order, key);
+            array_push(rooted_order.get(), key);
             existing = (const GroupHashEntry*)hashmap_get(table, &probe);
         }
-        if (existing && existing->members) array_push(existing->members, rows->items[i]);
+        if (existing && existing->group_index >= 0) {
+            Array* member_groups = rooted_member_groups.get();
+            Item members_item = member_groups->items[existing->group_index];
+            rows = rooted_rows_item.get().array;
+            if (get_type_id(members_item) == LMD_TYPE_ARRAY) {
+                array_push(members_item.array, rows->items[i]);
+            }
+        }
     }
 
+    Array* order = rooted_order.get();
     for (int64_t i = 0; i < order->length; i++) {
-        GroupHashEntry probe = { .key = order->items[i], .members = NULL };
+        order = rooted_order.get();
+        GroupHashEntry probe = { .key = order->items[i], .group_index = -1 };
         const GroupHashEntry* entry = (const GroupHashEntry*)hashmap_get(table, &probe);
-        if (!entry) continue;
+        if (!entry || entry->group_index < 0) continue;
+        Item entry_key = entry->key;
+        Array* member_groups = rooted_member_groups.get();
+        Item members_item = member_groups->items[entry->group_index];
+        Array* members = get_type_id(members_item) == LMD_TYPE_ARRAY
+            ? members_item.array : NULL;
 
-        Element* group = elmt_pooled(_lambda_rt->pool);
+        // Runtime group elements contain GC Items. A pool-immortal Element is
+        // invisible to the GC tracer, so later allocations reclaimed its
+        // member values even while the output array retained the Element.
+        Element* group = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
+        group->type_id = LMD_TYPE_ELEMENT;
+        rooted_group.set(group);
         TypeElmt* group_type = (TypeElmt*)alloc_type(_lambda_rt->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-        String* tag = heap_create_name("group", 5);
-        group_type->name.str = tag ? tag->chars : "group";
-        group_type->name.length = tag ? tag->len : 5;
+        // The fixed tag belongs to type metadata; a literal avoids a dangling
+        // raw chars pointer into an otherwise unowned GC String.
+        group_type->name.str = "group";
+        group_type->name.length = 5;
+        group = rooted_group.get();
         group->type = group_type;
 
         for (int64_t k = 0; k < alias_count; k++) {
             String* attr = heap_create_name(aliases[k]);
-            elmt_put(group, attr, group_key_part(entry->key, k, alias_count), _lambda_rt->pool);
+            group = rooted_group.get();
+            elmt_put(group, attr, group_key_part(entry_key, k, alias_count), _lambda_rt->pool);
         }
-        for (int64_t m = 0; entry->members && m < entry->members->length; m++) {
+        for (int64_t m = 0; members && m < members->length; m++) {
             // Group members are existing Item handles; copying handles preserves source values without re-shaping rows.
-            array_append((Array*)group, entry->members->items[m], _lambda_rt->pool, NULL);
+            group = rooted_group.get();
+            array_append((Array*)group, members->items[m], _lambda_rt->pool, NULL);
         }
+        group = rooted_group.get();
         group_type->content_length = group->length;
-        array_push(out, (Item){.element = group});
+        array_push(rooted_out.get(), (Item){.element = group});
+        rooted_group.set((Element*)NULL);
     }
 
     hashmap_free(table);
-    return out;
+    return rooted_out.get();
 }
 
 Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item) {
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> rooted_rows(roots, rows_item);
+    Rooted<Item> rooted_keys(roots, keys_item);
+    Rooted<Item> rooted_aliases(roots, aliases_item);
     if (get_type_id(aliases_item) != LMD_TYPE_ARRAY || !aliases_item.array) {
         log_error("group_by_keys_items: aliases must be an array");
         return array_plain();
     }
-    Array* aliases = aliases_item.array;
+    Array* aliases = rooted_aliases.get().array;
     const char** alias_names = (const char**)mem_alloc(sizeof(char*) * aliases->length, MEM_CAT_CONTAINER);
     if (!alias_names) return array_plain();
     for (int64_t i = 0; i < aliases->length; i++) {
+        aliases = rooted_aliases.get().array;
         Item alias_item = aliases->items[i];
         String* str = alias_item.get_safe_string();
         alias_names[i] = str ? str->chars : "";
     }
-    Array* result = fn_group_by_keys(rows_item, keys_item, alias_names, aliases->length);
+    Array* result = fn_group_by_keys(rooted_rows.get(), rooted_keys.get(),
+        alias_names, rooted_aliases.get().array->length);
     mem_free(alias_names);
     return result;
 }
@@ -2188,11 +2347,15 @@ void object_type_set_method(int64_t type_index, const char* method_name,
     TypeMethod* method = obj_type->methods;
     while (method) {
         if (strcmp(method->name->str, method_name) == 0) {
-            // Create Function* with the compiled function pointer
-            Function* fn = to_fn_named(func_ptr, (int)arity, method_name);
-            method->fn = fn;
+            // Type metadata outlives individual GC cycles. Keep only the raw
+            // code metadata here; a GC Function wrapper would need a lifetime
+            // root and was reclaimed before the first method lookup.
+            method->compiled_fn = func_ptr;
+            method->compiled_name = method_name;
+            method->arity = (uint8_t)arity;
             log_debug("object_type_set_method: registered '%s' on '%.*s' fn=%p",
-                method_name, (int)obj_type->type_name.length, obj_type->type_name.str, fn);
+                method_name, (int)obj_type->type_name.length, obj_type->type_name.str,
+                (void*)func_ptr);
             return;
         }
         method = method->next;
@@ -2372,6 +2535,13 @@ Item item_attr(Item data, const char* key) {
         bool is_found;
         return _map_get((TypeMap*)map->type, map->data, (char*)key, &is_found);
     }
+    case LMD_TYPE_OBJECT: {
+        // Method prologues use string-key field loads. Treat objects as their
+        // shaped-map storage; returning null here reset every field snapshot.
+        Object* obj = data.object;
+        bool is_found;
+        return _map_get((TypeMap*)obj->type, obj->data, (char*)key, &is_found);
+    }
     case LMD_TYPE_VMAP: {
         VMap* vm = data.vmap;
         return vmap_get_by_str(vm, key);
@@ -2482,7 +2652,7 @@ SymbolKeyList* item_keys(Item data) {
     case LMD_TYPE_MAP: {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
-        SymbolKeyList* keys = symbol_key_list_new(8);
+        SymbolKeyList* keys = symbol_key_list_new(map_type->length);
         FOR_EACH_MAP_FIELD(map_type, field) {
             if (field->name) {
                 // Convert StrView to Symbol for the transpiled code
@@ -2505,7 +2675,7 @@ SymbolKeyList* item_keys(Item data) {
     case LMD_TYPE_ELEMENT: {
         Element* elmt = data.element;
         TypeMap* elmt_type = (TypeMap*)elmt->type;
-        SymbolKeyList* keys = symbol_key_list_new(8);
+        SymbolKeyList* keys = symbol_key_list_new(elmt_type->length);
         FOR_EACH_MAP_FIELD(elmt_type, field) {
             if (field->name) {
                 // Convert StrView to Symbol for the transpiled code

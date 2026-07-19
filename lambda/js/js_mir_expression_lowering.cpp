@@ -1238,6 +1238,23 @@ static MIR_reg_t jm_emit_plain_call_this_arg(JsMirTranspiler* mt, JsCallNode* ca
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
 }
 
+static bool jm_emit_live_scope_cell_load(JsMirTranspiler* mt,
+        JsMirVarEntry* var, MIR_reg_t target) {
+    if (!var || !var->in_scope_env || var->scope_env_reg == 0 ||
+            var->scope_env_slot < 0 || var->mir_type != MIR_T_I64) {
+        return false;
+    }
+    // Only shared scope cells are reloaded on identifier reads. A from_env
+    // capture without this marker is an intentional closure snapshot; treating
+    // it as a live cell changes JavaScript closure semantics.
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, target),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+            var->scope_env_slot * (int)sizeof(uint64_t),
+            var->scope_env_reg, 0, 1)));
+    return true;
+}
+
 MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
     if (!id || !id->name) {
         // Unsupported identifier-shaped AST nodes can reach expression lowering
@@ -1327,6 +1344,8 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inner_class_binding->inner_module_var_index));
     }
     if (var) {
+        jm_note_gc_var_use(mt, var, vname);
+        MIR_reg_t live_cell_reg = 0;
         // Js57 P3 (Track B2): live binding for self-imported default — re-fetch
         // `namespace.default` from the module registry each time the local
         // identifier is read. Throws ReferenceError if the source module's
@@ -1339,21 +1358,27 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             jm_emit_exc_propagate_check(mt);
             return live_val;
         }
-        if (var->in_scope_env && var->scope_env_reg != 0 && var->mir_type == MIR_T_I64) {
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_mem_op(mt->ctx, MIR_T_I64,
-                    var->scope_env_slot * (int)sizeof(uint64_t), var->scope_env_reg, 0, 1)));
+        if (var->in_scope_env && var->scope_env_reg != 0 &&
+                var->scope_env_slot >= 0 && var->mir_type == MIR_T_I64) {
+            // Keep each evaluated cell value in its own virtual register. The
+            // canonical root slot protects the object at safepoints, but loading
+            // the expression result back from that slot confuses semantic homes
+            // and colored scratch slots when a register is reused later.
+            live_cell_reg = jm_new_reg(mt, "live_cell", MIR_T_I64);
+            if (jm_emit_live_scope_cell_load(mt, var, live_cell_reg)) {
+                jm_create_gc_root_slot(mt, live_cell_reg);
+            }
         }
         // v20 TDZ: emit runtime check for let/const variables before their declaration
         if (var->tdz_active) {
             jm_call_void_3(mt, "js_check_tdz",
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx,
+                    live_cell_reg ? live_cell_reg : var->reg),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)id->name->chars),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
             jm_emit_exc_propagate_check(mt);
         }
-        MIR_reg_t var_read_reg = var->reg;
+        MIR_reg_t var_read_reg = live_cell_reg ? live_cell_reg : var->reg;
         MIR_reg_t lookup_key = 0;
         if (var->from_env && mt->eval_local_frame_reg != 0 &&
             mt->is_eval_direct && mt->in_main) {

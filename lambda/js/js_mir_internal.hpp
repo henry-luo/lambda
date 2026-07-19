@@ -141,7 +141,9 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
 void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name);
 int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var);
-void jm_root_live_scope_vars(JsMirTranspiler* mt);
+void jm_write_through_root_live_scope_vars(JsMirTranspiler* mt);
+void jm_note_gc_var_use(JsMirTranspiler* mt, JsMirVarEntry* var,
+    const char* name);
 void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg);
 void jm_emit_loop_backedge_frame_reload(JsMirTranspiler* mt);
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
@@ -183,6 +185,10 @@ bool jm_has_use_strict_directive(JsFunctionNode* fn);
 void jm_pop_scope(JsMirTranspiler* mt);
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                        MIR_type_t mir_type = MIR_T_I64, TypeId type_id = LMD_TYPE_ANY);
+JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
+    JsVarScopeEntry* entry);
+void jm_note_gc_call_site(JsMirTranspiler* mt, MIR_insn_t insn,
+                          JitGcEffect effect);
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 uint64_t jm_name_hash(const void* item, uint64_t seed0, uint64_t seed1);
 int jm_name_cmp(const void* a, const void* b, void* udata);

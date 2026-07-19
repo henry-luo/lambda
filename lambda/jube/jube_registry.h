@@ -15,6 +15,7 @@ const JubeModuleDef* jube_find_static_module(const char* name);
 void jube_notify_heap_cleanup(void* heap);
 const JubeTypeDef* jube_find_type_by_host_type(const void* host_type);
 void jube_modules_runtime_reset(void);
+bool jube_has_legacy_rooting_abi(void);
 
 // DOM3: shared per-type prototype object (lazy, GC-rooted) for types with a
 // compiled interface declaration; modules attach constructors to it so

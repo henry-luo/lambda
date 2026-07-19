@@ -7287,6 +7287,7 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
 
 Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* filename) {
     log_debug("py-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
+    if (!runtime_require_gc_compatibility(runtime, "Python")) return ItemError;
 
     // create Python transpiler (parsing + AST building)
     PyTranspiler* tp = py_transpiler_create(runtime);
@@ -7340,6 +7341,7 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     if (!ctx) {
         log_error("py-mir: MIR context init failed");
         py_transpiler_destroy(tp);
+        mir_guest_finish_context(runtime, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -7349,6 +7351,7 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
         log_error("py-mir: failed to allocate PyMirTranspiler");
         MIR_finish(ctx);
         py_transpiler_destroy(tp);
+        mir_guest_finish_context(runtime, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
     memset(mt, 0, sizeof(PyMirTranspiler));
@@ -7417,6 +7420,7 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
         mem_free(mt);
         MIR_finish(ctx);
         py_transpiler_destroy(tp);
+        mir_guest_finish_context(runtime, old_context, reusing_context);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -7437,9 +7441,7 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     MIR_finish(ctx);
     py_transpiler_destroy(tp);
 
-    if (!reusing_context) {
-        context = old_context;
-    }
+    mir_guest_finish_context(runtime, old_context, reusing_context);
 
     return result;
 }

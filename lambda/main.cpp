@@ -2544,6 +2544,13 @@ int main(int argc, char *argv[]) {
             }
 
             Item result = transpile_py_to_mir(&runtime, py_source, py_file);
+            if (result.item == ITEM_ERROR) {
+                // Conservative-only guest admission failures must be visible to
+                // automation; printing an ItemError with exit zero hides them.
+                mem_free(py_source);
+                runtime_cleanup(&runtime);
+                return lambda_main_finish(1);
+            }
 
             // only print non-null results (Python scripts use print() for output)
             if (result.item != ITEM_NULL && result.item != 0) {
@@ -2605,6 +2612,13 @@ int main(int argc, char *argv[]) {
             }
 
             Item result = transpile_rb_to_mir(&runtime, rb_source, rb_file);
+            if (result.item == ITEM_ERROR) {
+                // Conservative-only guest admission failures must be visible to
+                // automation; printing an ItemError with exit zero hides them.
+                mem_free(rb_source);
+                runtime_cleanup(&runtime);
+                return lambda_main_finish(1);
+            }
 
             // only print non-null results (Ruby scripts use puts for output)
             if (result.item != ITEM_NULL && result.item != 0) {
@@ -2750,6 +2764,7 @@ int main(int argc, char *argv[]) {
             bash_set_posix_mode(true);
         }
 
+        bool bash_transpile_failed = false;
         if (bash_inline_cmd) {
             // -c 'command string' — run inline command string
             // set BASH_COMMAND to the full -c string (real bash sets it to current command)
@@ -2759,7 +2774,7 @@ int main(int argc, char *argv[]) {
             const char* script_name = (bash_args_start >= 0 && bash_args_start < argc)
                 ? argv[bash_args_start] : argv[0];
             Item result = transpile_bash_to_mir(&runtime, bash_source, script_name);
-            (void)result;
+            bash_transpile_failed = result.item == ITEM_ERROR;
             mem_free(bash_source);
         } else if (bash_file) {
             char* bash_source = read_text_file(bash_file);
@@ -2770,6 +2785,7 @@ int main(int argc, char *argv[]) {
             }
 
             Item result = transpile_bash_to_mir(&runtime, bash_source, bash_file);
+            bash_transpile_failed = result.item == ITEM_ERROR;
 
             if (result.item != ITEM_NULL && result.item != 0 && result.item != ITEM_ERROR) {
                 TypeId result_type = get_type_id(result);
@@ -2787,6 +2803,11 @@ int main(int argc, char *argv[]) {
             mem_free(bash_source);
         }
 
+        if (bash_transpile_failed) {
+            // Admission rejection is a command failure, not a Bash script result.
+            runtime_cleanup(&runtime);
+            return lambda_main_finish(1);
+        }
         int bash_exit = bash_exit_code(bash_get_exit_code());
         runtime_cleanup(&runtime);
         return lambda_main_finish(bash_exit);
@@ -4196,8 +4217,8 @@ int main(int argc, char *argv[]) {
                 !lambda_side_stack_bind(&batch_context)) {
                 log_error("batch side-stack: failed to initialize execution regions");
             }
-            LambdaSideStackSnapshot batch_side_stack_snapshot =
-                lambda_side_stack_snapshot(&batch_context);
+            LambdaRecoveryCheckpoint batch_recovery_checkpoint =
+                lambda_recovery_checkpoint_capture(&batch_context);
             int result = 0;
 #ifndef _WIN32
             // Per-test crash recovery via sigsetjmp.
@@ -4305,8 +4326,7 @@ int main(int argc, char *argv[]) {
 
             // Crash, timeout, and MIR-error longjmps bypass generated
             // epilogues, so every batch path returns to its test watermark.
-            lambda_side_stack_restore(&batch_context,
-                                      batch_side_stack_snapshot);
+            lambda_recovery_checkpoint_restore(&batch_recovery_checkpoint);
 
             gettimeofday(&tv_end, NULL);
             long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);

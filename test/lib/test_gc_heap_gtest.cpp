@@ -25,6 +25,7 @@ extern "C" {
 #include "../../lib/gc/gc_object_zone.h"
 #include "../../lib/gc/gc_data_zone.h"
 #include "../../lib/mempool.h"
+#include "../../lib/side_stack.h"
 }
 
 // Use LMD_TYPE_* enum values from lambda.h directly — no local aliases needed.
@@ -115,6 +116,68 @@ static void test_weak_clear(uint64_t* slot, void* context) {
     weak_clear_calls++;
     weak_clear_context = context;
     EXPECT_EQ(*slot, 0u);
+}
+
+TEST(SideStackRootFrameTest, NestedFramesRestoreExactWatermarks) {
+    Context runtime{};
+    ASSERT_TRUE(lambda_side_stack_bind(&runtime));
+    uint64_t* initial_top = runtime.side_root_top;
+
+    LambdaRootFrame outer{};
+    ASSERT_TRUE(lambda_root_frame_begin(&runtime, &outer, 3));
+    ASSERT_EQ(runtime.side_root_top, initial_top + 3);
+    for (size_t i = 0; i < 3; i++) {
+        ASSERT_NE(lambda_root_frame_slot(&outer, i), nullptr);
+        EXPECT_EQ(*lambda_root_frame_slot(&outer, i), 0u);
+    }
+    *lambda_root_frame_take_slot(&outer) = UINT64_C(0x1234);
+
+    LambdaRootFrame inner{};
+    ASSERT_TRUE(lambda_root_frame_begin(&runtime, &inner, 2));
+    EXPECT_EQ(inner.watermark, initial_top + 3);
+    EXPECT_EQ(runtime.side_root_top, initial_top + 5);
+    lambda_root_frame_end(&inner);
+    EXPECT_EQ(runtime.side_root_top, initial_top + 3);
+    EXPECT_EQ(*lambda_root_frame_slot(&outer, 0), UINT64_C(0x1234));
+
+    lambda_root_frame_end(&outer);
+    EXPECT_EQ(runtime.side_root_top, initial_top);
+    lambda_side_stack_reset(&runtime);
+}
+
+TEST(SideStackRootFrameTest, RecoveryCheckpointRestoresBothStacks) {
+    Context runtime{};
+    ASSERT_TRUE(lambda_side_stack_bind(&runtime));
+    LambdaRecoveryCheckpoint checkpoint =
+        lambda_recovery_checkpoint_capture(&runtime);
+    ASSERT_TRUE(checkpoint.active);
+
+    LambdaRootFrame roots{};
+    ASSERT_TRUE(lambda_root_frame_begin(&runtime, &roots, 2));
+    ASSERT_NE(lambda_side_number_alloc(&runtime), nullptr);
+    EXPECT_NE(runtime.side_root_top, checkpoint.side_stack.root_top);
+    EXPECT_NE(runtime.side_number_top, checkpoint.side_stack.number_top);
+
+    lambda_recovery_checkpoint_restore(&checkpoint);
+    EXPECT_EQ(runtime.side_root_top, checkpoint.side_stack.root_top);
+    EXPECT_EQ(runtime.side_number_top, checkpoint.side_stack.number_top);
+    EXPECT_FALSE(checkpoint.active);
+    lambda_side_stack_reset(&runtime);
+}
+
+TEST(SideStackRootFrameTest, OversizedFrameFailsWithoutAdvancingWatermark) {
+    Context runtime{};
+    ASSERT_TRUE(lambda_side_stack_bind(&runtime));
+    uint64_t* initial_top = runtime.side_root_top;
+    LambdaRootFrame roots{};
+    size_t reserve_slots =
+        LAMBDA_SIDE_ROOT_RESERVE_BYTES / sizeof(uint64_t);
+
+    EXPECT_FALSE(lambda_root_frame_begin(&runtime, &roots,
+        reserve_slots + 1));
+    EXPECT_FALSE(roots.active);
+    EXPECT_EQ(runtime.side_root_top, initial_top);
+    lambda_side_stack_reset(&runtime);
 }
 
 // ============================================================================
@@ -321,6 +384,31 @@ TEST_F(GCHeapTest, RegisterRoot) {
     EXPECT_EQ(gc->root_slot_count, 2);
 }
 
+TEST_F(GCHeapTest, TryRegisterRootReportsCanonicalRegistration) {
+    uint64_t slot = 0;
+    EXPECT_EQ(gc_try_register_root(gc, &slot), 1);
+    EXPECT_EQ(gc_try_register_root(gc, &slot), 1);
+    EXPECT_EQ(gc->root_slot_count, 1);
+    EXPECT_EQ(gc_try_register_root(nullptr, &slot), 0);
+}
+
+#ifndef NDEBUG
+TEST_F(GCHeapTest, NoGcScopeRejectsPublicAllocation) {
+    EXPECT_DEATH({
+        gc_no_gc_scope_begin(gc);
+        (void)gc_heap_alloc(gc, 16, LMD_TYPE_STRING);
+    }, ".*");
+}
+
+TEST_F(GCHeapTest, NoGcScopeSupportsBalancedNesting) {
+    gc_no_gc_scope_begin(gc);
+    gc_no_gc_scope_begin(gc);
+    gc_no_gc_scope_end(gc);
+    gc_no_gc_scope_end(gc);
+    EXPECT_EQ(gc->no_gc_scope_depth, 0);
+}
+#endif
+
 TEST_F(GCHeapTest, UnregisterRoot) {
     uint64_t slot1 = 0, slot2 = 0, slot3 = 0;
     gc_register_root(gc, &slot1);
@@ -501,6 +589,67 @@ TEST_F(GCHeapTest, CompactPreservesListData) {
     gc_unregister_root(gc, &root);
 }
 
+TEST_F(GCHeapTest, CompactPromotesArrayNumBaseAndRebindsLiveView) {
+    // Build the raw ArrayNum ABI used by the C collector: the view is newer and
+    // therefore visited before its base in the all_objects list.
+    uint8_t* base = (uint8_t*)gc_heap_calloc(gc, 40, LMD_TYPE_ARRAY_NUM);
+    ASSERT_NE(base, nullptr);
+    base[0] = LMD_TYPE_ARRAY_NUM;
+    base[3] = ELEM_INT64;
+    int64_t* base_data = (int64_t*)gc_data_alloc(gc, 4 * sizeof(int64_t));
+    ASSERT_NE(base_data, nullptr);
+    base_data[0] = 10;
+    base_data[1] = 20;
+    base_data[2] = 30;
+    base_data[3] = 40;
+    *(void**)(base + 8) = base_data;
+    *(int64_t*)(base + 16) = 4;
+    *(int64_t*)(base + 32) = 4;
+
+    uint8_t* view = (uint8_t*)gc_heap_calloc(gc, 40, LMD_TYPE_ARRAY_NUM);
+    ASSERT_NE(view, nullptr);
+    view[0] = LMD_TYPE_ARRAY_NUM;
+    view[2] = 0x03;  // is_ndim | is_view
+    view[3] = ELEM_INT64;
+    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * sizeof(int64_t);
+    ArrayNumShape* shape = (ArrayNumShape*)gc_data_alloc(gc, shape_bytes);
+    ASSERT_NE(shape, nullptr);
+    memset(shape, 0, shape_bytes);
+    shape->ndim = 1;
+    shape->is_c_contig = 1;
+    shape->is_f_contig = 1;
+    shape->backing_kind = ARRAY_NUM_BACKING_GC_VIEW;
+    shape->offset = 1;
+    shape->base = base;
+    array_num_shape_dims(shape)[0] = 2;
+    array_num_shape_strides(shape)[0] = 1;
+    *(void**)(view + 8) = base_data + 1;
+    *(int64_t*)(view + 16) = 2;
+    *(void**)(view + 24) = shape;
+    *(int64_t*)(view + 32) = 2;
+
+    uint64_t root = list_item(view);
+    gc_register_root(gc, &root);
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    int64_t* promoted_base = *(int64_t**)(base + 8);
+    int64_t* rebound_view = *(int64_t**)(view + 8);
+    EXPECT_FALSE(gc_is_nursery_data(gc, promoted_base));
+    EXPECT_NE(promoted_base, base_data);
+    EXPECT_EQ(rebound_view, promoted_base + 1);
+    EXPECT_EQ(rebound_view[0], 20);
+    EXPECT_EQ(rebound_view[1], 30);
+
+    // Nursery reuse must not overwrite the promoted owner or its rebound alias.
+    int64_t* reused = (int64_t*)gc_data_alloc(gc, 4 * sizeof(int64_t));
+    ASSERT_NE(reused, nullptr);
+    for (int i = 0; i < 4; i++) reused[i] = 99;
+    EXPECT_EQ(rebound_view[0], 20);
+    EXPECT_EQ(rebound_view[1], 30);
+
+    gc_unregister_root(gc, &root);
+}
+
 // ============================================================================
 // 7. Reachability Through Object Graph
 // ============================================================================
@@ -602,6 +751,54 @@ TEST_F(GCHeapTest, AutoTriggerCallback) {
     EXPECT_GE(trigger_count, 1);
 }
 
+TEST_F(GCHeapTest, ForcedScheduleCoversEveryPublicAllocationPath) {
+    trigger_count = 0;
+    gc_set_collect_callback(gc, test_collect_callback);
+    gc_set_force_collect_interval(gc, 1);
+
+    int cls = gc_object_zone_class_index(32);
+    ASSERT_GE(cls, 0);
+    size_t slot_size = sizeof(gc_header_t) + gc_object_zone_class_size(cls);
+
+    ASSERT_NE(gc_heap_alloc(gc, 32, LMD_TYPE_STRING), nullptr);
+    ASSERT_NE(gc_heap_calloc(gc, 32, LMD_TYPE_STRING), nullptr);
+    ASSERT_NE(gc_heap_calloc_class(gc, 32, LMD_TYPE_STRING, cls), nullptr);
+    ASSERT_NE(gc_heap_bump_alloc(gc, slot_size, 32, LMD_TYPE_STRING, cls), nullptr);
+    ASSERT_NE(gc_data_alloc(gc, 32), nullptr);
+
+    EXPECT_EQ(trigger_count, 5);
+    EXPECT_EQ(gc_get_forced_collection_count(gc), 5u);
+
+    // A collection may allocate internal data while the guard is active; that
+    // work must not recursively trigger another forced collection.
+    gc->collecting = 1;
+    ASSERT_NE(gc_data_alloc(gc, 32), nullptr);
+    gc->collecting = 0;
+    EXPECT_EQ(trigger_count, 5);
+    EXPECT_EQ(gc_get_forced_collection_count(gc), 5u);
+}
+
+TEST_F(GCHeapTest, RandomForcedScheduleIsSeedReproducible) {
+    trigger_count = 0;
+    gc_set_collect_callback(gc, test_collect_callback);
+    gc_set_force_collect_random(gc, 0x12345678u, 4);
+
+    for (int i = 0; i < 32; i++) {
+        ASSERT_NE(gc_heap_alloc(gc, 16, LMD_TYPE_STRING), nullptr);
+    }
+    int first_count = trigger_count;
+    ASSERT_GT(first_count, 0);
+    ASSERT_LT(first_count, 32);
+
+    trigger_count = 0;
+    gc_set_force_collect_random(gc, 0x12345678u, 4);
+    for (int i = 0; i < 32; i++) {
+        ASSERT_NE(gc_heap_alloc(gc, 16, LMD_TYPE_STRING), nullptr);
+    }
+    EXPECT_EQ(trigger_count, first_count);
+    EXPECT_EQ(gc_get_forced_collection_count(gc), (size_t)first_count);
+}
+
 TEST_F(GCHeapTest, ReentrancyGuard) {
     // during collection, gc_data_alloc should NOT re-trigger
     gc->gc_threshold = 64;
@@ -648,6 +845,41 @@ TEST_F(GCHeapTest, FreedObjectsCleanedInSweep) {
     gc_unregister_root(gc, &root);
 }
 
+TEST_F(GCHeapTest, PoisonFreedOverwritesDeadPayloadAndRecycledSlotIsZeroed) {
+    gc_set_poison_freed(gc, 1);
+    EXPECT_EQ(gc_get_poison_freed(gc), 1);
+
+    uint8_t* dead = (uint8_t*)gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
+    ASSERT_NE(dead, nullptr);
+    memset(dead, 0x5A, 32);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    for (int i = 0; i < 32; i++) {
+        EXPECT_EQ(dead[i], GC_FREED_POISON_BYTE);
+    }
+
+    uint8_t* recycled = (uint8_t*)gc_heap_alloc(gc, 32, LMD_TYPE_STRING);
+    ASSERT_EQ(recycled, dead);
+    for (int i = 0; i < 32; i++) {
+        EXPECT_EQ(recycled[i], 0);
+    }
+}
+
+TEST_F(GCHeapTest, PoisonFreedCoversExplicitFreeBeforeSweep) {
+    gc_set_poison_freed(gc, 1);
+    uint8_t* dead = (uint8_t*)gc_heap_alloc(gc, 24, LMD_TYPE_STRING);
+    ASSERT_NE(dead, nullptr);
+    memset(dead, 0x5A, 24);
+
+    gc_heap_pool_free(gc, dead);
+
+    for (int i = 0; i < 24; i++) {
+        EXPECT_EQ(dead[i], GC_FREED_POISON_BYTE);
+    }
+    gc_collect(gc, NULL, 0, 0, 0);
+}
+
 // ============================================================================
 // 11. Collection Statistics
 // ============================================================================
@@ -692,6 +924,55 @@ TEST_F(GCHeapTest, StackScanKeepsStackReferencedObjects) {
 
     // the string should survive because its tagged pointer was in the scan range
     EXPECT_EQ(gc->object_count, 1u);
+}
+
+TEST_F(GCHeapTest, ShadowScanReportsOnlyObjectsOutsidePreciseGraph) {
+    void* parent = make_list(1, 1);
+    void* precise_child = make_string("precise child");
+    void* stack_only = make_string("stack only");
+    uint64_t* items = *(uint64_t**)((uint8_t*)parent + 8);
+    items[0] = string_item(precise_child);
+
+    uint64_t root = list_item(parent);
+    gc_register_root(gc, &root);
+    gc_set_root_mode(gc, GC_ROOT_MODE_SHADOW_VERIFY);
+
+    uint64_t fake_stack[16];
+    memset(fake_stack, 0, sizeof(fake_stack));
+    fake_stack[3] = string_item(precise_child);
+    fake_stack[9] = string_item(stack_only);
+
+    gc_collect(gc, NULL, 0,
+        (uintptr_t)&fake_stack[16], (uintptr_t)&fake_stack[0]);
+
+    // The precise child is traced before the shadow scan, so only the orphan
+    // is a scan-exclusive object even though both words look pointer-like.
+    const gc_root_stats_t* stats = gc_get_last_root_stats(gc);
+    ASSERT_NE(stats, nullptr);
+    EXPECT_EQ(stats->precise_root_count, 1u);
+    EXPECT_EQ(stats->conservative_candidate_words, 2u);
+    EXPECT_EQ(stats->conservative_new_objects, 1u);
+    EXPECT_EQ(stats->conservative_scan_bytes, sizeof(fake_stack));
+    EXPECT_EQ(gc_get_last_conservative_type_count(gc, LMD_TYPE_STRING), 1u);
+    EXPECT_EQ(gc->object_count, 3u);
+}
+
+TEST_F(GCHeapTest, PreciseOnlyNeverFallsBackToStackScanning) {
+    void* stack_only = make_string("not precisely rooted");
+    uint64_t fake_stack[8];
+    memset(fake_stack, 0, sizeof(fake_stack));
+    fake_stack[2] = string_item(stack_only);
+    gc_set_root_mode(gc, GC_ROOT_MODE_PRECISE_ONLY);
+
+    gc_collect(gc, NULL, 0,
+        (uintptr_t)&fake_stack[8], (uintptr_t)&fake_stack[0]);
+
+    const gc_root_stats_t* stats = gc_get_last_root_stats(gc);
+    ASSERT_NE(stats, nullptr);
+    EXPECT_EQ(stats->conservative_candidate_words, 0u);
+    EXPECT_EQ(stats->conservative_new_objects, 0u);
+    EXPECT_EQ(stats->conservative_scan_bytes, 0u);
+    EXPECT_EQ(gc->object_count, 0u);
 }
 
 // ============================================================================

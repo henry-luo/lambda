@@ -112,6 +112,12 @@ typedef struct AsyncRegSpill {
     int slot;
 } AsyncRegSpill;
 
+typedef struct MirPendingRootStore {
+    int slot;
+    MIR_reg_t value;
+    MIR_insn_t definition;
+} MirPendingRootStore;
+
 struct MirTranspiler {
     // Input
     AstScript* script;
@@ -159,9 +165,23 @@ struct MirTranspiler {
     // by the runtime as a thread-local stack so generated code never carries a
     // long-lived root-frame pointer register across calls.
     int jit_root_next;
+    MIR_reg_t* jit_root_latest;
+    int jit_root_latest_capacity;
+    MirRootCandidate* jit_root_candidates;
+    int jit_root_candidate_count;
+    int jit_root_candidate_capacity;
+    int* jit_root_candidate_by_reg;
+    int jit_root_candidate_by_reg_capacity;
+    MirPendingRootStore* jit_root_pending_stores;
+    int jit_root_pending_store_count;
+    int jit_root_pending_store_capacity;
+    MirGcCallSite* jit_root_call_sites;
+    int jit_root_call_site_count;
+    int jit_root_call_site_capacity;
     MIR_reg_t side_root_frame_base;
     MIR_reg_t side_root_runtime;
     MIR_label_t side_root_anchor;
+    bool side_root_exit_emitted;
     MIR_type_t side_root_return_type;
     MIR_label_t function_return_label;
     MIR_reg_t function_return_reg;
@@ -537,21 +557,127 @@ static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
     }
 }
 
-static MIR_reg_t emit_root_value_bits(MirTranspiler* mt, MIR_reg_t value) {
-    MIR_reg_t bits = new_reg(mt, "root_bits", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, bits),
-        MIR_new_reg_op(mt->ctx, value)));
-    return bits;
-}
-
 static void emit_jit_root_frame_enter(MirTranspiler* mt) {
     mt->jit_root_next = 0;
+    mt->side_root_exit_emitted = false;
     mt->side_root_frame_base = new_reg(mt, "root_frame", MIR_T_I64);
     mt->side_root_anchor = new_label(mt);
     emit_label(mt, mt->side_root_anchor);
 }
 
+struct MirRootCallSiteState {
+    MirGcCallSite* sites;
+    int count;
+    int capacity;
+};
+
+struct MirRootCandidateState {
+    MirRootCandidate* candidates;
+    int count;
+    int capacity;
+    int* by_reg;
+    int by_reg_capacity;
+    MirPendingRootStore* pending_stores;
+    int pending_store_count;
+    int pending_store_capacity;
+};
+
+static MirRootCandidateState suspend_gc_root_candidates(MirTranspiler* mt) {
+    MirRootCandidateState saved = {
+        mt->jit_root_candidates,
+        mt->jit_root_candidate_count,
+        mt->jit_root_candidate_capacity,
+        mt->jit_root_candidate_by_reg,
+        mt->jit_root_candidate_by_reg_capacity,
+        mt->jit_root_pending_stores,
+        mt->jit_root_pending_store_count,
+        mt->jit_root_pending_store_capacity,
+    };
+    mt->jit_root_candidates = NULL;
+    mt->jit_root_candidate_count = 0;
+    mt->jit_root_candidate_capacity = 0;
+    mt->jit_root_candidate_by_reg = NULL;
+    mt->jit_root_candidate_by_reg_capacity = 0;
+    mt->jit_root_pending_stores = NULL;
+    mt->jit_root_pending_store_count = 0;
+    mt->jit_root_pending_store_capacity = 0;
+    return saved;
+}
+
+static void dispose_gc_root_candidates(MirTranspiler* mt) {
+    if (!mt) return;
+    if (mt->jit_root_candidates) mem_free(mt->jit_root_candidates);
+    if (mt->jit_root_candidate_by_reg) mem_free(mt->jit_root_candidate_by_reg);
+    if (mt->jit_root_pending_stores) mem_free(mt->jit_root_pending_stores);
+    mt->jit_root_candidates = NULL;
+    mt->jit_root_candidate_count = 0;
+    mt->jit_root_candidate_capacity = 0;
+    mt->jit_root_candidate_by_reg = NULL;
+    mt->jit_root_candidate_by_reg_capacity = 0;
+    mt->jit_root_pending_stores = NULL;
+    mt->jit_root_pending_store_count = 0;
+    mt->jit_root_pending_store_capacity = 0;
+}
+
+static void restore_gc_root_candidates(MirTranspiler* mt,
+        MirRootCandidateState saved) {
+    dispose_gc_root_candidates(mt);
+    mt->jit_root_candidates = saved.candidates;
+    mt->jit_root_candidate_count = saved.count;
+    mt->jit_root_candidate_capacity = saved.capacity;
+    mt->jit_root_candidate_by_reg = saved.by_reg;
+    mt->jit_root_candidate_by_reg_capacity = saved.by_reg_capacity;
+    mt->jit_root_pending_stores = saved.pending_stores;
+    mt->jit_root_pending_store_count = saved.pending_store_count;
+    mt->jit_root_pending_store_capacity = saved.pending_store_capacity;
+}
+
+static MirRootCallSiteState suspend_gc_root_call_sites(MirTranspiler* mt) {
+    MirRootCallSiteState saved = {
+        mt->jit_root_call_sites,
+        mt->jit_root_call_site_count,
+        mt->jit_root_call_site_capacity,
+    };
+    mt->jit_root_call_sites = NULL;
+    mt->jit_root_call_site_count = 0;
+    mt->jit_root_call_site_capacity = 0;
+    return saved;
+}
+
+static void dispose_gc_root_call_sites(MirTranspiler* mt) {
+    if (!mt) return;
+    if (mt->jit_root_call_sites) mem_free(mt->jit_root_call_sites);
+    mt->jit_root_call_sites = NULL;
+    mt->jit_root_call_site_count = 0;
+    mt->jit_root_call_site_capacity = 0;
+}
+
+static void restore_gc_root_call_sites(MirTranspiler* mt,
+        MirRootCallSiteState saved) {
+    dispose_gc_root_call_sites(mt);
+    mt->jit_root_call_sites = saved.sites;
+    mt->jit_root_call_site_count = saved.count;
+    mt->jit_root_call_site_capacity = saved.capacity;
+}
+
+static void note_gc_root_call_site(MirTranspiler* mt, MIR_insn_t insn,
+        JitGcEffect effect) {
+    if (!mt || !insn || !em_root_write_back_enabled() ||
+            !mt->function_return_active || !mt->side_root_frame_base) return;
+    if (!MIR_call_code_p(insn->code)) {
+        log_error("mir-root-call-sites: emitted tail is not a call");
+        return;
+    }
+    if (!em_root_note_call_site(&mt->jit_root_call_sites,
+            &mt->jit_root_call_site_count,
+            &mt->jit_root_call_site_capacity, insn, effect)) {
+        // Missing metadata safely degrades to MAY_GC in the shared finalizer.
+        log_error("mir-root-call-sites: unable to record call");
+    }
+}
+
 static void emit_jit_root_frame_exit(MirTranspiler* mt) {
+    mt->side_root_exit_emitted = true;
     em_store_frame_top(&mt->em, mt->side_root_runtime,
         offsetof(Context, side_root_top), mt->side_root_frame_base);
 }
@@ -733,7 +859,7 @@ static void finish_function_epilogue(MirTranspiler* mt) {
 }
 
 static void finalize_side_root_frame(MirTranspiler* mt) {
-    if (mt->jit_root_next == 0) return;
+    if (mt->jit_root_next == 0 && !mt->side_root_exit_emitted) return;
     MIR_reg_t new_top = new_reg(mt, "root_top", MIR_T_I64);
     MIR_reg_t limit = new_reg(mt, "root_limit", MIR_T_I64);
     MIR_reg_t overflow = new_reg(mt, "root_overflow", MIR_T_I64);
@@ -813,6 +939,8 @@ static void finalize_side_root_frame(MirTranspiler* mt) {
     MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor,
         commit_ready);
 #endif
+    em_insert_zero_frame_slots(&mt->em, mt->side_root_anchor,
+        mt->side_root_frame_base, mt->jit_root_next);
     MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->side_root_anchor, store_top);
 
     emit_label(mt, overflow_label);
@@ -845,15 +973,157 @@ static void log_frame_slot_counts(const char* function_name, int root_slots,
              number_slots);
 }
 
+static void finalize_gc_root_publication(MirTranspiler* mt,
+        const char* function_name) {
+    if (!mt || !em_root_write_back_enabled() || mt->jit_root_next <= 0) return;
+    MirRootWriteBackResult result;
+    if (em_finalize_eager_root_write_back(&mt->em,
+            mt->side_root_frame_base, mt->side_root_anchor,
+            mt->jit_root_call_sites, mt->jit_root_call_site_count,
+            &result, function_name, mt->jit_root_candidates,
+            mt->jit_root_candidate_count)) {
+        mt->jit_root_next = result.stable_slots + result.scratch_slots;
+    }
+}
+
+static const MIR_reg_t MIR_ROOT_MEMORY_AUTHORITATIVE = (MIR_reg_t)-1;
+
+static void note_gc_root_candidate(MirTranspiler* mt, MIR_reg_t value,
+        int root_slot) {
+    if (!em_root_note_candidate(&mt->jit_root_candidates,
+            &mt->jit_root_candidate_count, &mt->jit_root_candidate_capacity,
+            &mt->jit_root_candidate_by_reg,
+            &mt->jit_root_candidate_by_reg_capacity, value,
+            JIT_VALUE_UNKNOWN, root_slot + 1)) {
+        log_error("mir-root-candidates: unable to record reg=%u",
+            (unsigned)value);
+        // Candidate identity is unavailable to every later correctness
+        // fallback, so compilation must fail closed.
+        abort();
+    }
+}
+
+static void record_pending_gc_root_store(MirTranspiler* mt, int root_slot,
+        MIR_reg_t value) {
+    if (mt->jit_root_pending_store_count >=
+            mt->jit_root_pending_store_capacity) {
+        int next_capacity = mt->jit_root_pending_store_capacity
+            ? mt->jit_root_pending_store_capacity * 2 : 32;
+        MirPendingRootStore* next = (MirPendingRootStore*)mem_realloc(
+            mt->jit_root_pending_stores,
+            (size_t)next_capacity * sizeof(MirPendingRootStore), MEM_CAT_EVAL);
+        if (!next) {
+            log_error("mir-root-pending-stores: unable to grow to %d",
+                next_capacity);
+            abort();
+        }
+        mt->jit_root_pending_stores = next;
+        mt->jit_root_pending_store_capacity = next_capacity;
+    }
+    MirPendingRootStore* pending =
+        &mt->jit_root_pending_stores[mt->jit_root_pending_store_count++];
+    pending->slot = root_slot;
+    pending->value = value;
+    pending->definition = DLIST_TAIL(MIR_insn_t, mt->em.func->insns);
+}
+
+static void materialize_pending_gc_root_stores(MirTranspiler* mt,
+        int root_slot) {
+    for (int i = 0; i < mt->jit_root_pending_store_count; i++) {
+        MirPendingRootStore* pending = &mt->jit_root_pending_stores[i];
+        if (pending->slot != root_slot) continue;
+        MIR_type_t value_type = MIR_reg_type(mt->ctx, pending->value,
+            mt->em.func);
+        if (value_type != MIR_T_P) value_type = MIR_T_I64;
+        MIR_insn_t store = MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, value_type,
+                (MIR_disp_t)root_slot * (MIR_disp_t)sizeof(uint64_t),
+                mt->side_root_frame_base, 0, 1),
+            MIR_new_reg_op(mt->ctx, pending->value));
+        if (pending->definition) {
+            MIR_insert_insn_after(mt->ctx, mt->em.func_item,
+                pending->definition, store);
+        } else {
+            MIR_append_insn(mt->ctx, mt->em.func_item, store);
+        }
+        pending->slot = -1;
+    }
+}
+
 static void store_gc_root_slot(MirTranspiler* mt, int root_slot, MIR_reg_t value) {
     if (root_slot < 0) return;
-    MIR_reg_t bits = emit_root_value_bits(mt, value);
-    em_store_frame_slot(&mt->em, mt->side_root_frame_base, root_slot, bits);
+    if (root_slot >= mt->jit_root_latest_capacity) {
+        int next_capacity = mt->jit_root_latest_capacity
+            ? mt->jit_root_latest_capacity * 2 : 32;
+        while (next_capacity <= root_slot) next_capacity *= 2;
+        MIR_reg_t* next = (MIR_reg_t*)mem_realloc(mt->jit_root_latest,
+            (size_t)next_capacity * sizeof(MIR_reg_t), MEM_CAT_EVAL);
+        if (!next) {
+            log_error("mir-root-latest: failed to grow slot map to %d",
+                next_capacity);
+            return;
+        }
+        memset(next + mt->jit_root_latest_capacity, 0,
+            (size_t)(next_capacity - mt->jit_root_latest_capacity) *
+                sizeof(MIR_reg_t));
+        mt->jit_root_latest = next;
+        mt->jit_root_latest_capacity = next_capacity;
+    }
+    MIR_reg_t previous = mt->jit_root_latest[root_slot];
+    MIR_type_t value_type = MIR_reg_type(mt->ctx, value, mt->em.func);
+    if (value_type != MIR_T_P) value_type = MIR_T_I64;
+    if (em_root_write_back_enabled()) {
+        note_gc_root_candidate(mt, value, root_slot);
+        if (previous != MIR_ROOT_MEMORY_AUTHORITATIVE) {
+            // Buffer ordinary definitions as semantic metadata. If lowering
+            // later changes the binding's physical register, retroactively
+            // materialize only that genuine control-flow merge home.
+            record_pending_gc_root_store(mt, root_slot, value);
+            if (previous && previous != value) {
+                mt->jit_root_latest[root_slot] =
+                    MIR_ROOT_MEMORY_AUTHORITATIVE;
+                materialize_pending_gc_root_stores(mt, root_slot);
+            } else {
+                mt->jit_root_latest[root_slot] = value;
+            }
+            return;
+        }
+    }
+    em_store_frame_slot_typed(&mt->em, mt->side_root_frame_base, root_slot,
+        value, value_type);
+}
+
+static int create_binding_gc_root_slot(MirTranspiler* mt, MIR_reg_t value) {
+    int root_slot = mt->jit_root_next++;
+    store_gc_root_slot(mt, root_slot, value);
+    return root_slot;
 }
 
 static int create_gc_root_slot(MirTranspiler* mt, MIR_reg_t value) {
     int root_slot = mt->jit_root_next++;
-    store_gc_root_slot(mt, root_slot, value);
+    if (!em_root_write_back_enabled()) {
+        store_gc_root_slot(mt, root_slot, value);
+        return root_slot;
+    }
+    note_gc_root_candidate(mt, value, root_slot);
+    if (root_slot >= mt->jit_root_latest_capacity) {
+        int next_capacity = mt->jit_root_latest_capacity
+            ? mt->jit_root_latest_capacity * 2 : 32;
+        while (next_capacity <= root_slot) next_capacity *= 2;
+        MIR_reg_t* next = (MIR_reg_t*)mem_realloc(mt->jit_root_latest,
+            (size_t)next_capacity * sizeof(MIR_reg_t), MEM_CAT_EVAL);
+        if (!next) {
+            log_error("mir-root-latest: failed to grow direct candidate map to %d",
+                next_capacity);
+            abort();
+        }
+        memset(next + mt->jit_root_latest_capacity, 0,
+            (size_t)(next_capacity - mt->jit_root_latest_capacity) *
+                sizeof(MIR_reg_t));
+        mt->jit_root_latest = next;
+        mt->jit_root_latest_capacity = next_capacity;
+    }
+    mt->jit_root_latest[root_slot] = value;
     return root_slot;
 }
 
@@ -867,6 +1137,15 @@ static MIR_reg_t load_gc_root_slot(MirTranspiler* mt, int root_slot, const char*
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, zero),
             MIR_new_int_op(mt->ctx, 0)));
         return zero;
+    }
+    if (em_root_write_back_enabled() &&
+            root_slot < mt->jit_root_latest_capacity &&
+            mt->jit_root_latest[root_slot] &&
+            mt->jit_root_latest[root_slot] != MIR_ROOT_MEMORY_AUTHORITATIVE) {
+        // Write-back makes registers authoritative between safepoints. Reading
+        // the eager oracle slot after its stores are deleted would return stale
+        // data, so consumers use the latest semantic value directly.
+        return mt->jit_root_latest[root_slot];
     }
     MIR_reg_t value = new_reg(mt, prefix, MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -885,7 +1164,7 @@ static void update_gc_root_slot(MirTranspiler* mt, MirVarEntry* var) {
     if (var->async_slot >= 0) return;
     if (var->root_slot < 0 && !should_gc_root_var(var->mir_type, var->type_id)) return;
     if (var->root_slot < 0) {
-        var->root_slot = create_gc_root_slot(mt, var->reg);
+        var->root_slot = create_binding_gc_root_slot(mt, var->reg);
         return;
     }
     store_gc_root_slot(mt, var->root_slot, var->reg);
@@ -930,7 +1209,7 @@ static void set_var(MirTranspiler* mt, const char* name, MIR_reg_t reg, MIR_type
     entry.var.is_state_var = false;
     if (mt->in_async_proc) entry.var.async_slot = mt->async_next_slot++;
     if (entry.var.async_slot < 0 && should_gc_root_var(mir_type, type_id)) {
-        entry.var.root_slot = create_gc_root_slot(mt, reg);
+        entry.var.root_slot = create_binding_gc_root_slot(mt, reg);
     }
     async_store_var(mt, &entry.var);
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
@@ -955,7 +1234,7 @@ static void set_state_var(MirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.state_name_ptr = interned_name_ptr;
     if (mt->in_async_proc) entry.var.async_slot = mt->async_next_slot++;
     if (entry.var.async_slot < 0 && should_gc_root_var(mir_type, type_id)) {
-        entry.var.root_slot = create_gc_root_slot(mt, reg);
+        entry.var.root_slot = create_binding_gc_root_slot(mt, reg);
     }
     async_store_var(mt, &entry.var);
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
@@ -1195,12 +1474,51 @@ static MIR_reg_t emit_call_with_args(MirTranspiler* mt, const char* fn_name,
         log_error("[MIR_CALL] unsupported return-call arity %d for %s", nargs, fn_name);
         return 0;
     }
+    JitImportMetadata metadata;
+    jit_import_get_metadata(fn_name, &metadata);
+    for (int i = 0; i < nargs; i++) {
+        if (arg_ops[i].mode == MIR_OP_REG) {
+            em_gc_note_temp_use(&mt->em, arg_ops[i].u.reg,
+                jit_import_arg_class(&metadata, i), fn_name);
+        }
+    }
+    em_gc_note_safepoint(&mt->em, metadata.gc_effect, fn_name);
+    if (metadata.gc_effect != JIT_EFFECT_NO_GC &&
+            mt->function_return_active && mt->side_root_frame_base) {
+        // Argument evaluation can produce a managed temporary before the call
+        // that triggers collection; publish semantic GC operands first.
+        for (int i = 0; i < nargs; i++) {
+            JitValueClass value_class = jit_import_arg_class(&metadata, i);
+            bool needs_root = mir_gc_value_needs_root(
+                value_class, arg_types[i]);
+            if (needs_root && arg_ops[i].mode == MIR_OP_REG) {
+                create_gc_root_slot(mt, arg_ops[i].u.reg);
+            }
+        }
+    }
     MIR_reg_t result = em_call_with_args(
         &mt->em, fn_name, ret_type, nargs, arg_types, arg_ops, false);
+    if (result) {
+        note_gc_root_call_site(mt,
+            DLIST_TAIL(MIR_insn_t, mt->em.func->insns),
+            metadata.gc_effect);
+    }
     // Shared-emitter calls allocate their result register internally. Track it
     // explicitly so a value prepared before a suspension remains available at
     // the replay-free invocation label.
     async_track_reg(mt, result, ret_type);
+    if (result) {
+        em_gc_note_temp_definition(&mt->em, result, metadata.ret_class,
+            fn_name);
+        bool needs_root = mir_gc_value_needs_root(
+            metadata.ret_class, ret_type);
+        // The result is born after this call's safepoint, but later argument
+        // evaluation may collect before its consumer runs.
+        if (needs_root && mt->function_return_active &&
+                mt->side_root_frame_base) {
+            create_gc_root_slot(mt, result);
+        }
+    }
     return result;
 }
 
@@ -1210,7 +1528,34 @@ static void emit_call_void_with_args(MirTranspiler* mt, const char* fn_name,
         log_error("[MIR_CALL] unsupported void-call arity %d for %s", nargs, fn_name);
         return;
     }
+    JitImportMetadata metadata;
+    jit_import_get_metadata(fn_name, &metadata);
+    for (int i = 0; i < nargs; i++) {
+        if (arg_ops[i].mode == MIR_OP_REG) {
+            em_gc_note_temp_use(&mt->em, arg_ops[i].u.reg,
+                jit_import_arg_class(&metadata, i), fn_name);
+        }
+    }
+    em_gc_note_safepoint(&mt->em, metadata.gc_effect, fn_name);
+    if (metadata.gc_effect != JIT_EFFECT_NO_GC &&
+            mt->function_return_active && mt->side_root_frame_base) {
+        // The callee may collect before consuming its operands, so a managed
+        // temporary cannot remain only in a MIR/native register.
+        for (int i = 0; i < nargs; i++) {
+            JitValueClass value_class = jit_import_arg_class(&metadata, i);
+            bool needs_root = mir_gc_value_needs_root(
+                value_class, arg_types[i]);
+            if (needs_root && arg_ops[i].mode == MIR_OP_REG) {
+                create_gc_root_slot(mt, arg_ops[i].u.reg);
+            }
+        }
+    }
+    MIR_insn_t previous_tail = DLIST_TAIL(MIR_insn_t, mt->em.func->insns);
     em_call_void_with_args(&mt->em, fn_name, nargs, arg_types, arg_ops, false);
+    MIR_insn_t call = DLIST_TAIL(MIR_insn_t, mt->em.func->insns);
+    if (call != previous_tail) {
+        note_gc_root_call_site(mt, call, metadata.gc_effect);
+    }
 }
 
 static MIR_reg_t emit_call_0(MirTranspiler* mt, const char* fn_name,
@@ -12095,9 +12440,18 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_reg_t saved_consts_reg = mt->consts_reg;
     MIR_reg_t saved_gc_reg = mt->gc_reg;
     int saved_jit_root_next = mt->jit_root_next;
+    MIR_reg_t* saved_jit_root_latest = mt->jit_root_latest;
+    int saved_jit_root_latest_capacity = mt->jit_root_latest_capacity;
+    MirRootCallSiteState saved_root_call_sites =
+        suspend_gc_root_call_sites(mt);
+    MirRootCandidateState saved_root_candidates =
+        suspend_gc_root_candidates(mt);
+    mt->jit_root_latest = NULL;
+    mt->jit_root_latest_capacity = 0;
     MIR_reg_t saved_side_root_frame_base = mt->side_root_frame_base;
     MIR_reg_t saved_side_root_runtime = mt->side_root_runtime;
     MIR_label_t saved_side_root_anchor = mt->side_root_anchor;
+    bool saved_side_root_exit_emitted = mt->side_root_exit_emitted;
     MIR_type_t saved_side_root_return_type = mt->side_root_return_type;
     MIR_label_t saved_function_return_label = mt->function_return_label;
     MIR_reg_t saved_function_return_reg = mt->function_return_reg;
@@ -12304,6 +12658,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Save and set closure context
     AstFuncNode* saved_closure = mt->current_closure;
     MIR_reg_t saved_env_reg = mt->env_reg;
+    bool saved_in_pipe = mt->in_pipe;
+    MIR_reg_t saved_pipe_item_reg = mt->pipe_item_reg;
+    MIR_reg_t saved_self_reg = mt->self_reg;
     if (is_closure) {
         mt->current_closure = fn_node;
         // Get the _env_ptr parameter register
@@ -12356,6 +12713,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             MIR_new_reg_op(mt->ctx, self_item_reg),
             MIR_new_reg_op(mt->ctx, self_ptr_reg)));
 
+        // The receiver is a managed Item and field access may collect. Publish
+        // it once for the whole method instead of rebuilding an unrooted copy.
+        create_gc_root_slot(mt, self_item_reg);
+        mt->self_reg = self_item_reg;
+
         // make '~' (current item / self) refer to self inside method body
         mt->in_pipe = true;
         mt->pipe_item_reg = self_item_reg;
@@ -12377,6 +12739,10 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
                 // Unbox to native type if known
                 TypeId ftid = se->type ? se->type->type_id : LMD_TYPE_ANY;
+                if (ftid == LMD_TYPE_TYPE && se->type) {
+                    TypeType* field_type = (TypeType*)se->type;
+                    if (field_type->type) ftid = field_type->type->type_id;
+                }
                 if (is_integer_type_id(ftid) || ftid == LMD_TYPE_BOOL) {
                     MIR_reg_t unboxed = emit_unbox(mt, field_val, ftid);
                     set_var(mt, field_name, unboxed, type_to_mir(ftid), ftid);
@@ -12526,59 +12892,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     bool saved_block_returned = mt->block_returned;
     mt->block_returned = false;
 
-    // Save pipe state so method body can use ~ for self without leaking
-    bool saved_in_pipe = mt->in_pipe;
-    MIR_reg_t saved_pipe_item_reg = mt->pipe_item_reg;
-
-    // For methods: load object fields from _self into local scope
+    // Save the method owner for the surrounding compilation context.
     TypeObject* saved_method_owner = mt->method_owner;
-    MIR_reg_t saved_self_reg = mt->self_reg;
-    if (is_method && !is_closure) {
-        // _self is passed as void* (actually a boxed Item: uint64_t reinterpreted as pointer)
-        MIR_reg_t self_ptr_reg = MIR_reg(mt->ctx, "_self", func);
-        // Cast void* to i64 to use as boxed Item
-        MIR_reg_t self_item_reg = new_reg(mt, "self_item", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, self_item_reg),
-            MIR_new_reg_op(mt->ctx, self_ptr_reg)));
-        mt->self_reg = self_item_reg;
-
-        // Load each field from the object into local scope
-        TypeObject* owner = mt->method_owner;
-        ShapeEntry* field = owner->shape;
-        while (field) {
-            const char* field_name = field->name->str;
-            int field_name_len = (int)field->name->length;
-            // Create a Symbol* key for fn_member lookup
-            MIR_reg_t name_ptr = emit_load_string_literal(mt, field_name);
-            MIR_reg_t sym_ptr = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, name_ptr),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)field_name_len));
-            MIR_reg_t key_boxed = emit_box_symbol(mt, sym_ptr);
-            // Call fn_member(self_item, key) to get field value
-            MIR_reg_t field_val = emit_call_2(mt, "fn_member", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, self_item_reg),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_boxed));
-
-            // Determine the field's type for optimal native representation
-            TypeId field_tid = field->type ? field->type->type_id : LMD_TYPE_ANY;
-            // Unwrap TypeType wrapper if present
-            if (field_tid == LMD_TYPE_TYPE && field->type) {
-                TypeType* ft = (TypeType*)field->type;
-                if (ft->type) field_tid = ft->type->type_id;
-            }
-            if (mir_is_native_scalar_value_type(field_tid)) {
-                MIR_reg_t unboxed = emit_unbox(mt, field_val, field_tid);
-                MIR_type_t mtype = type_to_mir(field_tid);
-                set_var(mt, field_name, unboxed, mtype, field_tid);
-            } else {
-                set_var(mt, field_name, field_val, MIR_T_I64, LMD_TYPE_ANY);
-            }
-
-            log_debug("mir: method '%s' - loaded field '%s' from self", name_buf->str, field_name);
-            field = field->next;
-        }
-    }
 
     // ===== TCO Setup =====
     // Check if this function is eligible for tail call optimization.
@@ -12724,6 +13039,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     async_complete_frame(mt);
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, body_result));
     finish_function_epilogue(mt);
+    finalize_gc_root_publication(mt, name_buf->str);
     finalize_side_root_frame(mt);
     finalize_async_frame_enter(mt);
 
@@ -12746,10 +13062,16 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->em.func = saved_func;
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
+    mem_free(mt->jit_root_latest);
+    restore_gc_root_call_sites(mt, saved_root_call_sites);
+    restore_gc_root_candidates(mt, saved_root_candidates);
     mt->jit_root_next = saved_jit_root_next;
+    mt->jit_root_latest = saved_jit_root_latest;
+    mt->jit_root_latest_capacity = saved_jit_root_latest_capacity;
     mt->side_root_frame_base = saved_side_root_frame_base;
     mt->side_root_runtime = saved_side_root_runtime;
     mt->side_root_anchor = saved_side_root_anchor;
+    mt->side_root_exit_emitted = saved_side_root_exit_emitted;
     mt->side_root_return_type = saved_side_root_return_type;
     mt->function_return_label = saved_function_return_label;
     mt->function_return_reg = saved_function_return_reg;
@@ -13353,9 +13675,18 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     MIR_reg_t saved_gc_reg = mt->gc_reg;
     MIR_reg_t saved_tl_reg = mt->type_list_reg;
     int saved_jit_root_next = mt->jit_root_next;
+    MIR_reg_t* saved_jit_root_latest = mt->jit_root_latest;
+    int saved_jit_root_latest_capacity = mt->jit_root_latest_capacity;
+    MirRootCallSiteState saved_root_call_sites =
+        suspend_gc_root_call_sites(mt);
+    MirRootCandidateState saved_root_candidates =
+        suspend_gc_root_candidates(mt);
+    mt->jit_root_latest = NULL;
+    mt->jit_root_latest_capacity = 0;
     MIR_reg_t saved_side_root_frame_base = mt->side_root_frame_base;
     MIR_reg_t saved_side_root_runtime = mt->side_root_runtime;
     MIR_label_t saved_side_root_anchor = mt->side_root_anchor;
+    bool saved_side_root_exit_emitted = mt->side_root_exit_emitted;
     MIR_type_t saved_side_root_return_type = mt->side_root_return_type;
     MIR_label_t saved_function_return_label = mt->function_return_label;
     MIR_reg_t saved_function_return_reg = mt->function_return_reg;
@@ -13478,6 +13809,7 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     // emit return
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, body_result));
     finish_function_epilogue(mt);
+    finalize_gc_root_publication(mt, name_buf);
     finalize_side_root_frame(mt);
 
     pop_scope(mt);
@@ -13496,10 +13828,16 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
+    mem_free(mt->jit_root_latest);
+    restore_gc_root_call_sites(mt, saved_root_call_sites);
+    restore_gc_root_candidates(mt, saved_root_candidates);
     mt->jit_root_next = saved_jit_root_next;
+    mt->jit_root_latest = saved_jit_root_latest;
+    mt->jit_root_latest_capacity = saved_jit_root_latest_capacity;
     mt->side_root_frame_base = saved_side_root_frame_base;
     mt->side_root_runtime = saved_side_root_runtime;
     mt->side_root_anchor = saved_side_root_anchor;
+    mt->side_root_exit_emitted = saved_side_root_exit_emitted;
     mt->side_root_return_type = saved_side_root_return_type;
     mt->function_return_label = saved_function_return_label;
     mt->function_return_reg = saved_function_return_reg;
@@ -13534,9 +13872,18 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     MIR_reg_t saved_gc_reg = mt->gc_reg;
     MIR_reg_t saved_tl_reg = mt->type_list_reg;
     int saved_jit_root_next = mt->jit_root_next;
+    MIR_reg_t* saved_jit_root_latest = mt->jit_root_latest;
+    int saved_jit_root_latest_capacity = mt->jit_root_latest_capacity;
+    MirRootCallSiteState saved_root_call_sites =
+        suspend_gc_root_call_sites(mt);
+    MirRootCandidateState saved_root_candidates =
+        suspend_gc_root_candidates(mt);
+    mt->jit_root_latest = NULL;
+    mt->jit_root_latest_capacity = 0;
     MIR_reg_t saved_side_root_frame_base = mt->side_root_frame_base;
     MIR_reg_t saved_side_root_runtime = mt->side_root_runtime;
     MIR_label_t saved_side_root_anchor = mt->side_root_anchor;
+    bool saved_side_root_exit_emitted = mt->side_root_exit_emitted;
     MIR_type_t saved_side_root_return_type = mt->side_root_return_type;
     MIR_label_t saved_function_return_label = mt->function_return_label;
     MIR_reg_t saved_function_return_reg = mt->function_return_reg;
@@ -13676,6 +14023,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, null_r));
     finish_function_epilogue(mt);
+    finalize_gc_root_publication(mt, handler_name);
     finalize_side_root_frame(mt);
 
     pop_scope(mt);
@@ -13692,10 +14040,16 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->consts_reg = saved_consts_reg;
     mt->gc_reg = saved_gc_reg;
     mt->type_list_reg = saved_tl_reg;
+    mem_free(mt->jit_root_latest);
+    restore_gc_root_call_sites(mt, saved_root_call_sites);
+    restore_gc_root_candidates(mt, saved_root_candidates);
     mt->jit_root_next = saved_jit_root_next;
+    mt->jit_root_latest = saved_jit_root_latest;
+    mt->jit_root_latest_capacity = saved_jit_root_latest_capacity;
     mt->side_root_frame_base = saved_side_root_frame_base;
     mt->side_root_runtime = saved_side_root_runtime;
     mt->side_root_anchor = saved_side_root_anchor;
+    mt->side_root_exit_emitted = saved_side_root_exit_emitted;
     mt->side_root_return_type = saved_side_root_return_type;
     mt->function_return_label = saved_function_return_label;
     mt->function_return_reg = saved_function_return_reg;
@@ -14132,8 +14486,16 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     // Return result
     emit_function_return(&mt, MIR_new_reg_op(ctx, result));
     finish_function_epilogue(&mt);
+    finalize_gc_root_publication(&mt, "main");
     finalize_side_root_frame(&mt);
     log_frame_slot_counts("main", mt.jit_root_next, 0);
+    // The latest-value map is compiler bookkeeping only; main has no enclosing
+    // compilation context that would otherwise reclaim the map.
+    mem_free(mt.jit_root_latest);
+    mt.jit_root_latest = NULL;
+    mt.jit_root_latest_capacity = 0;
+    dispose_gc_root_call_sites(&mt);
+    dispose_gc_root_candidates(&mt);
 
 #ifndef NDEBUG
     // Dump MIR text for debugging (before finish_func to capture state on error).
@@ -14716,8 +15078,8 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         log_notice("Executing JIT compiled code...");
         runner.context.run_main = run_main;
         Item result;
-        LambdaSideStackSnapshot side_stack_snapshot =
-            lambda_side_stack_snapshot(&runner.context);
+        LambdaRecoveryCheckpoint recovery_checkpoint =
+            lambda_recovery_checkpoint_capture(&runner.context);
         #if defined(__APPLE__) || defined(__linux__)
         if (sigsetjmp(_lambda_recovery_point, 1)) {
         #elif defined(_WIN32)
@@ -14728,14 +15090,14 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             _lambda_recovery_armed = 0;   // recovery consumed; disarm
             log_error("exec: recovered from stack overflow via signal handler");
             _lambda_stack_overflow_flag = false;
-            // the signal skips generated epilogues in this cached-import path.
-            lambda_side_stack_restore(&runner.context, side_stack_snapshot);
+            lambda_recovery_checkpoint_restore(&recovery_checkpoint);
             lambda_stack_overflow_error("<signal>");
             result = runner.context.result = ItemError;
         } else {
             _lambda_recovery_armed = 1;    // arm only for the duration of user code
             result = runner.context.result = runner.script->main_func(&runner.context);
             _lambda_recovery_armed = 0;
+            lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
         }
         if (runner.context.heap) {
             runner.context.heap->result_root = runner.context.result.item;

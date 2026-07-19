@@ -495,7 +495,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
-	    test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup docs intellisense analyze-binary \
 	    build-debug build-release build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
@@ -555,6 +555,7 @@ help:
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
+	@echo "  test-gc-rooting - Run precise-only forced-GC JIT/interpreter/root-effect gates"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-radiant-baseline - Run shared layout baselines ($(LAYOUT_BASELINE_SUITES)) + render visual + other checks"
@@ -957,6 +958,31 @@ test-lambda-baseline: build-test test-input-baseline
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --parallel --input-results=test_output/input_baseline_results.json
+
+# Permanent exact-root CI lane. Collection is injected only at public allocator
+# boundaries, and poison makes a missed root deterministic instead of relying
+# on a stale native-stack word or recycled slab contents.
+test-gc-rooting: build
+	@mkdir -p temp
+	@echo "Running LambdaJS JIT precise-only forced-GC gate..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_jit.txt
+	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_jit.txt
+	@echo "Running LambdaJS deterministic randomized forced-GC gate..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_SEED=1592594996 LAMBDA_GC_FORCE_ONE_IN=3 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_random.txt
+	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_random.txt
+	@echo "Running LambdaJS MIR-interpreter precise-only forced-GC gate..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe js --mir-interp --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_interp.txt
+	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_interp.txt
+	@echo "Running Lambda MIR-Direct precise-only forced-GC gate..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe run --no-log test/lambda/proc/proc_var.ls > temp/gc_rooting_lambda.txt
+	@diff -u test/lambda/proc/proc_var.txt temp/gc_rooting_lambda.txt
+	@python3 utils/check_gc_effects.py
+	@python3 utils/check_gc_root_hazards.py
+	@echo "Precise-root forced-GC gates passed."
 
 test-redex-baseline: build
 	@echo "Running Redex formal semantics baseline verification..."

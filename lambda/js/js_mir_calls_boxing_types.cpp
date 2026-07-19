@@ -141,13 +141,23 @@ static MIR_reg_t jm_call_with_args(JsMirTranspiler* mt,
     }
     JitImportMetadata metadata;
     jit_import_get_metadata(fn_name, &metadata);
+    for (int i = 0; i < nargs; i++) {
+        if (arg_ops[i].mode == MIR_OP_REG) {
+            em_gc_note_temp_use(&mt->em, arg_ops[i].u.reg,
+                jit_import_arg_class(&metadata, i), fn_name);
+        }
+    }
+    em_gc_note_safepoint(&mt->em, metadata.gc_effect, fn_name);
     bool may_gc = metadata.gc_effect != JIT_EFFECT_NO_GC;
     if (may_gc) {
         mt->side_may_gc_call_count++;
-        jm_root_live_scope_vars(mt);
+        if (!mt->side_root_write_back) {
+            jm_write_through_root_live_scope_vars(mt);
+        }
         for (int i = 0; i < nargs; i++) {
+            JitValueClass value_class = jit_import_arg_class(&metadata, i);
             if (arg_ops[i].mode == MIR_OP_REG &&
-                    (arg_types[i] == MIR_T_I64 || arg_types[i] == MIR_T_P)) {
+                    mir_gc_value_needs_root(value_class, arg_types[i])) {
                 jm_create_gc_root_slot(mt, arg_ops[i].u.reg);
             }
         }
@@ -157,11 +167,21 @@ static MIR_reg_t jm_call_with_args(JsMirTranspiler* mt,
     jm_sync_emitter_from_compat(mt);
     MIR_reg_t res = em_call_with_args(&mt->em, fn_name, ret_type, nargs,
         arg_types, arg_ops, true);
+    if (mt->side_root_write_back) {
+        jm_note_gc_call_site(mt,
+            DLIST_TAIL(MIR_insn_t, mt->current_func->insns),
+            metadata.gc_effect);
+    }
     jm_sync_compat_from_emitter(mt);
-    if (res && (ret_type == MIR_T_I64 || ret_type == MIR_T_P)) {
+    if (res) {
+        // Call results are born after the safepoint. Recording that order is
+        // required so backward analysis never roots a not-yet-defined value.
+        em_gc_note_temp_definition(&mt->em, res, metadata.ret_class, fn_name);
+    }
+    if (res && mir_gc_value_needs_root(metadata.ret_class, ret_type)) {
         // Helper results can remain live while later arguments are evaluated;
-        // Keep the current result publication until GC-class use/definition
-        // metadata proves no later value reuses this MIR register identity.
+        // publish only semantic GC values; scalar/raw-native results are not
+        // collector roots even when their physical carrier is MIR_T_I64.
         jm_create_gc_root_slot(mt, res);
     }
     return res;
@@ -178,13 +198,23 @@ static void jm_call_void_with_args(JsMirTranspiler* mt,
     }
     JitImportMetadata metadata;
     jit_import_get_metadata(fn_name, &metadata);
+    for (int i = 0; i < nargs; i++) {
+        if (arg_ops[i].mode == MIR_OP_REG) {
+            em_gc_note_temp_use(&mt->em, arg_ops[i].u.reg,
+                jit_import_arg_class(&metadata, i), fn_name);
+        }
+    }
+    em_gc_note_safepoint(&mt->em, metadata.gc_effect, fn_name);
     bool may_gc = metadata.gc_effect != JIT_EFFECT_NO_GC;
     if (may_gc) {
         mt->side_may_gc_call_count++;
-        jm_root_live_scope_vars(mt);
+        if (!mt->side_root_write_back) {
+            jm_write_through_root_live_scope_vars(mt);
+        }
         for (int i = 0; i < nargs; i++) {
+            JitValueClass value_class = jit_import_arg_class(&metadata, i);
             if (arg_ops[i].mode == MIR_OP_REG &&
-                    (arg_types[i] == MIR_T_I64 || arg_types[i] == MIR_T_P)) {
+                    mir_gc_value_needs_root(value_class, arg_types[i])) {
                 jm_create_gc_root_slot(mt, arg_ops[i].u.reg);
             }
         }
@@ -193,6 +223,11 @@ static void jm_call_void_with_args(JsMirTranspiler* mt,
     }
     jm_sync_emitter_from_compat(mt);
     em_call_void_with_args(&mt->em, fn_name, nargs, arg_types, arg_ops, true);
+    if (mt->side_root_write_back) {
+        jm_note_gc_call_site(mt,
+            DLIST_TAIL(MIR_insn_t, mt->current_func->insns),
+            metadata.gc_effect);
+    }
     jm_sync_compat_from_emitter(mt);
 }
 

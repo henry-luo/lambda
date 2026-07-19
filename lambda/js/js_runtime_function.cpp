@@ -144,12 +144,14 @@ extern "C" Item* js_args_push(int count) {
 
 // Current bump top — saved before a call expression is lowered.
 extern "C" int64_t js_args_save(void) {
+    AutoAssertNoGC no_gc((Context*)context);
     return (int64_t)js_args_len;
 }
 
 // Pop back to a saved mark, re-zeroing the popped slots to preserve the
 // [len, cap) zeroed invariant.
 extern "C" void js_args_restore(int64_t mark) {
+    AutoAssertNoGC no_gc((Context*)context);
     size_t m = (size_t)mark;
     if (m >= js_args_len) return;  // nothing to pop (or stale mark)
     memset(js_args_stack + m, 0, (js_args_len - m) * sizeof(Item));
@@ -235,10 +237,13 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
 
     // Only cache-addressable compiled wrappers are module-lifetime. A wrapper
     // carrying `with` state or cache-suppressed identity must own traced edges.
+    RootFrame roots((Context*)context, 1);
+    Rooted<JsFunction*> fn_root(roots, (JsFunction*)NULL);
     JsFunction* fn = (has_with_env || suppress_cache)
         ? js_alloc_gc_function_object()
         : (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     if (!fn) return ItemError;
+    fn_root.set(fn);
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
@@ -261,8 +266,13 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
     }
     // Method wrappers are not in the func_ptr identity cache, so ordinary GC
     // ownership avoids retaining every dynamically materialized method.
+    RootFrame roots((Context*)context, 1);
+    Rooted<JsFunction*> fn_root(roots, (JsFunction*)NULL);
     JsFunction* fn = js_alloc_gc_function_object();
     if (!fn) return ItemError;
+    // The wrapper is fresh and not yet reachable from its owning object while
+    // global/with capture helpers may allocate.
+    fn_root.set(fn);
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
     fn->formal_length = -1;
@@ -278,17 +288,26 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
 
 // Create a closure (function with captured environment)
 extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size) {
+    RootFrame roots((Context*)context, 2);
+    // The environment has no reachability owner until the function object is
+    // published. Root the raw GC allocation before allocating that function;
+    // forced collection here otherwise reclaims the env and corrupts captures.
+    Rooted<Item*> env_root(roots, env);
+    Rooted<JsFunction*> fn_root(roots, (JsFunction*)NULL);
     JsFunction* fn = js_alloc_gc_function_object();
     if (!fn) return ItemError;
+    // A new closure is not owned by its caller until return. Root it across
+    // scalar rehoming and dynamic-with capture, both of which may allocate.
+    fn_root.set(fn);
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
     fn->formal_length = -1; // -1 = use param_count for .length
-    fn->env = env;
+    fn->env = env_root.get();
     fn->env_size = env_size;
     fn->prototype = ItemNull;
     fn->module_vars = js_active_module_vars; // bind to creating module's vars
     fn->home_global = js_get_global_this();
-    js_env_rehome_scalars(env);
+    js_env_rehome_scalars(fn->env);
     js_function_capture_with_env(fn);
     return (Item){.function = (Function*)fn};
 }

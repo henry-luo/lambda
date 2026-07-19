@@ -25,6 +25,7 @@ extern "C" TSParser* lambda_parser(void);
 extern "C" TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 extern "C" Item js_get_this();
 extern "C" Item js_new_method_function(void* func_ptr, int param_count);
+extern __thread EvalContext* context;
 // raw VMap backing-store access (vmap.cpp); bypasses host-object routing so
 // the generic expando store cannot recurse back into member dispatch
 extern "C" Item vmap_backing_get(VMap* vm, Item key);
@@ -336,15 +337,23 @@ static Item jube_member_lambda_method_item(Item receiver, JubeMemberRecord* rec)
     int arity = rec->arity;
     if (arity < 0) arity = 0;
     if (arity > 7) arity = 7;
-    Item* env = (Item*)heap_data_calloc(sizeof(Item) * 2);
-    if (!env) return jube_undefined_item();
-    env[0] = receiver;
-    env[1] = jube_name_item(rec->snake_name);
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_receiver(roots, receiver);
+    Rooted<Function*> rooted_fn(roots, (Function*)NULL);
     // Lambda projection reads run outside js_input, so Jube methods cannot use
     // JS function allocation there; capture receiver+name as real Items and
     // re-enter record dispatch through the normal Lambda closure ABI.
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
     if (!fn) return jube_undefined_item();
+    rooted_fn.set(fn);
+    // The data-zone environment must acquire a rooted GC owner before another
+    // allocation can collect or compact it. Allocating the Function first
+    // closes the former ownerless-env window between these two allocations.
+    Item* env = (Item*)heap_data_calloc(sizeof(Item) * 2);
+    if (!env) return jube_undefined_item();
+    fn = rooted_fn.get();
+    env[0] = rooted_receiver.get();
+    env[1] = jube_name_item(rec->snake_name);
     fn->type_id = LMD_TYPE_FUNC;
     fn->arity = (uint8_t)rec->arity;
     fn->fn_type = NULL;
@@ -711,32 +720,43 @@ int jube_member_descriptor(Item receiver, Item key, Item* out) {
 int jube_member_own_keys(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> rooted_receiver(roots, receiver);
+    Rooted<Item> rooted_keys(roots, ItemNull);
+    Rooted<Item> rooted_name(roots, ItemNull);
+    Rooted<Item> rooted_expando(roots, ItemNull);
+    Rooted<Item> rooted_expando_keys(roots, ItemNull);
     if (trec->binding && trec->binding->object_own_keys && receiver.vmap->host_data &&
-            trec->binding->object_own_keys(receiver, out)) {
+            trec->binding->object_own_keys(rooted_receiver.get(), out)) {
         return 1;
     }
     if (jube_legacy_ops(trec)) return 0;
     const JubeHostAPI* host = jube_internal_host_api();
-    Item keys = host->value->array_new(0);
+    rooted_keys.set(host->value->array_new(0));
     for (int i = 0; i < trec->member_count; i++) {
         JubeMemberRecord* rec = &trec->members[i];
         if (!rec->enumerable) continue;
-        if (rec->bind && rec->bind->guard && !rec->bind->guard(receiver)) continue;
-        host->value->array_push(keys, jube_name_item(rec->camel_name));
+        if (rec->bind && rec->bind->guard && !rec->bind->guard(rooted_receiver.get())) continue;
+        rooted_name.set(jube_name_item(rec->camel_name));
+        host->value->array_push(rooted_keys.get(), rooted_name.get());
     }
-    if (receiver.vmap->host_data) {
-        Item expando = jube_expando_object(receiver, false);
-        if (get_type_id(expando) == LMD_TYPE_MAP) {
-            Item expando_keys = host->script->reflect_own_keys(expando);
-            if (get_type_id(expando_keys) == LMD_TYPE_ARRAY && expando_keys.array) {
-                Array* arr = expando_keys.array;
-                for (int64_t i = 0; i < arr->length; i++) {
-                    host->value->array_push(keys, arr->items[i]);
+    if (rooted_receiver.get().vmap->host_data) {
+        rooted_expando.set(jube_expando_object(rooted_receiver.get(), false));
+        if (get_type_id(rooted_expando.get()) == LMD_TYPE_MAP) {
+            rooted_expando_keys.set(host->script->reflect_own_keys(rooted_expando.get()));
+            if (get_type_id(rooted_expando_keys.get()) == LMD_TYPE_ARRAY &&
+                    rooted_expando_keys.get().array) {
+                for (int64_t i = 0; i < rooted_expando_keys.get().array->length; i++) {
+                    // array_push may compact the source data buffer; reload it
+                    // through the exact root before reading the next key.
+                    Array* arr = rooted_expando_keys.get().array;
+                    rooted_name.set(arr->items[i]);
+                    host->value->array_push(rooted_keys.get(), rooted_name.get());
                 }
             }
         }
     }
-    *out = keys;
+    *out = rooted_keys.get();
     return 1;
 }
 
@@ -755,30 +775,40 @@ static bool jube_array_has_string_key(Item keys, const char* chars) {
 int jube_member_projection_keys(Item receiver, Item* out) {
     JubeTypeRecord* trec = jube_record_for(receiver);
     if (!trec || !out) return 0;
+    RootFrame roots((Context*)context, 5);
+    Rooted<Item> rooted_receiver(roots, receiver);
+    Rooted<Item> rooted_keys(roots, ItemNull);
+    Rooted<Item> rooted_name(roots, ItemNull);
+    Rooted<Item> rooted_expando(roots, ItemNull);
+    Rooted<Item> rooted_expando_keys(roots, ItemNull);
     const JubeHostAPI* host = jube_internal_host_api();
-    Item keys = host->value->array_new(0);
+    rooted_keys.set(host->value->array_new(0));
     for (int i = 0; i < trec->member_count; i++) {
         JubeMemberRecord* rec = &trec->members[i];
         if (rec->kind != JUBE_MEMBER_FIELD) continue;
-        if (rec->bind && rec->bind->guard && !rec->bind->guard(receiver)) continue;
-        if (jube_array_has_string_key(keys, rec->snake_name)) continue;
+        if (rec->bind && rec->bind->guard && !rec->bind->guard(rooted_receiver.get())) continue;
+        if (jube_array_has_string_key(rooted_keys.get(), rec->snake_name)) continue;
         // Lambda projection iteration exposes declared snake_case fields; JS
         // own-key enumeration remains WebIDL/camelCase through object_own_keys.
-        host->value->array_push(keys, jube_name_item(rec->snake_name));
+        rooted_name.set(jube_name_item(rec->snake_name));
+        host->value->array_push(rooted_keys.get(), rooted_name.get());
     }
-    if (receiver.vmap->host_data) {
-        Item expando = jube_expando_object(receiver, false);
-        if (get_type_id(expando) == LMD_TYPE_MAP) {
-            Item expando_keys = host->script->reflect_own_keys(expando);
-            if (get_type_id(expando_keys) == LMD_TYPE_ARRAY && expando_keys.array) {
-                Array* arr = expando_keys.array;
-                for (int64_t i = 0; i < arr->length; i++) {
-                    host->value->array_push(keys, arr->items[i]);
+    if (rooted_receiver.get().vmap->host_data) {
+        rooted_expando.set(jube_expando_object(rooted_receiver.get(), false));
+        if (get_type_id(rooted_expando.get()) == LMD_TYPE_MAP) {
+            rooted_expando_keys.set(host->script->reflect_own_keys(rooted_expando.get()));
+            if (get_type_id(rooted_expando_keys.get()) == LMD_TYPE_ARRAY &&
+                    rooted_expando_keys.get().array) {
+                for (int64_t i = 0; i < rooted_expando_keys.get().array->length; i++) {
+                    // keep the copied key exact while array_push may collect.
+                    Array* arr = rooted_expando_keys.get().array;
+                    rooted_name.set(arr->items[i]);
+                    host->value->array_push(rooted_keys.get(), rooted_name.get());
                 }
             }
         }
     }
-    *out = keys;
+    *out = rooted_keys.get();
     return 1;
 }
 

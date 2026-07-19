@@ -1200,9 +1200,20 @@ extern void js_private_field_init_end(void);
 
 JitImport jit_runtime_imports[] = {
     // C library functions
-    {"memset", FPTR(memset)},
-    {"memcpy", FPTR(memcpy)},
-    {"fmod", FPTR(fmod)},
+    {"memset", FPTR(memset),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR)}},
+    {"memcpy", FPTR(memcpy),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR)}},
+    {"fmod", FPTR(fmod),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR)}},
     // float32 bit conversion (C2MIR can't inline these correctly)
     {"f32_to_bits", FPTR(f32_to_bits)},
     {"bits_to_f32", FPTR(bits_to_f32)},
@@ -1287,11 +1298,19 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // Boxing / unboxing / type checks
     // ========================================================================
-    {"is_truthy", FPTR(is_truthy)},
+    // These representation readers inspect existing payloads only; none can
+    // allocate Lambda GC memory or re-enter generated code.
+    {"is_truthy", FPTR(is_truthy),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     {"v2it", FPTR(v2it)},
     {"push_d", FPTR(push_d)},
-    {"lambda_mir_double_bits", FPTR(lambda_mir_double_bits)},
-    {"lambda_mir_bits_double", FPTR(lambda_mir_bits_double)},
+    {"lambda_mir_double_bits", FPTR(lambda_mir_double_bits),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+    {"lambda_mir_bits_double", FPTR(lambda_mir_bits_double),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
 #ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_profiled_push_d", FPTR(js_profiled_push_d)},
     {"js_profile_shape_guard_hit", FPTR(js_profile_shape_guard_hit)},
@@ -1313,21 +1332,35 @@ JitImport jit_runtime_imports[] = {
     {"item_keys", FPTR(item_keys)},
     {"symbol_key_list_free", FPTR(symbol_key_list_free)},
     {"item_attr", FPTR(item_attr)},
-    {"item_type_id", FPTR(item_type_id)},
+    {"item_type_id", FPTR(item_type_id),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     {"item_at", FPTR(item_at)},
-    {"it2l", FPTR(it2l)},
-    {"it2d", FPTR(it2d)},
+    {"it2l", FPTR(it2l),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
+    {"it2d", FPTR(it2d),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
 #ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_profiled_it2d", FPTR(js_profiled_it2d)},
 #endif
-    {"it2i", FPTR(it2i)},
+    {"it2i", FPTR(it2i),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
 #ifdef LAMBDA_JS_EXEC_PROFILE
     {"js_profiled_it2i", FPTR(js_profiled_it2i)},
 #endif
-    {"it2b", FPTR(it2b)},
-    {"it2s", FPTR(it2s)},
+    {"it2b", FPTR(it2b),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
+    {"it2s", FPTR(it2s),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     // Binary owns a distinct descriptor, so generated code must not resolve its unbox through it2s.
-    {"it2x", FPTR(it2x)},
+    {"it2x", FPTR(it2x),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     {"fn_to_cstr", FPTR(fn_to_cstr)},
     {"coerce_num_sized", FPTR(coerce_num_sized)},
     {"coerce_uint64", FPTR(coerce_uint64)},
@@ -1593,12 +1626,14 @@ JitImport jit_runtime_imports[] = {
     {"js_to_string", FPTR(js_to_string)},
     {"js_to_boolean", FPTR(js_to_boolean)},
     {"js_to_object", FPTR(js_to_object)},
-    // Truthiness has explicit representation/re-entry metadata, but remains
-    // conservatively MAY_GC until the native-helper audit proves NO_GC.
+    // Truthiness reads only the Item payload (including mpdecimal's zero bit);
+    // it neither allocates nor invokes user code.
     {"js_is_truthy", FPTR(js_is_truthy),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
-    {"js_is_nullish", FPTR(js_is_nullish)},
+    {"js_is_nullish", FPTR(js_is_nullish),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM)}},
     {"js_increment", FPTR(js_increment)},
     {"js_decrement", FPTR(js_decrement)},
     {"js_number_function", FPTR(js_number_function)},
@@ -1722,12 +1757,12 @@ JitImport jit_runtime_imports[] = {
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_env_rehome_scalars", FPTR(js_env_rehome_scalars)},
     {"js_args_push", FPTR(js_args_push)},
-    // Argument-stack watermark operations have explicit value/re-entry metadata,
-    // but remain conservatively MAY_GC until the native-helper audit proves NO_GC.
+    // Argument-watermark operations only read/write the registered argument
+    // range and call libc memset while popping; they cannot enter the GC.
     {"js_args_save", FPTR(js_args_save),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
     {"js_args_restore", FPTR(js_args_restore),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"js_call_function", FPTR(js_call_function)},
     {"js_apply_function", FPTR(js_apply_function)},
@@ -1776,10 +1811,9 @@ JitImport jit_runtime_imports[] = {
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
     {"js_throw_value", FPTR(js_throw_value)},
-    // Exception polling has explicit scalar/re-entry metadata, but remains
-    // conservatively MAY_GC until the native-helper audit proves NO_GC.
+    // Exception polling is a thread-local flag read with no allocation.
     {"js_check_exception", FPTR(js_check_exception),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0}},
     {"js_clear_exception", FPTR(js_clear_exception)},
     {"js_require_object_coercible", FPTR(js_require_object_coercible)},
     // Tune8 §2.3: js_throw_syntax_error / _reference_error replaced by
@@ -2993,5 +3027,52 @@ const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_ru
 JitImport jit_runtime_imports[] = {{NULL, NULL}};
 const int jit_runtime_import_count = 0;
 #endif // !LAMBDA_STATIC
+
+bool jit_import_validate_no_gc_allowlist(void) {
+#ifdef LAMBDA_STATIC
+    return true;
+#else
+    static const char* audited[] = {
+        "memset", "memcpy", "fmod", "is_truthy",
+        "lambda_mir_double_bits", "lambda_mir_bits_double",
+        "item_type_id", "it2l", "it2d", "it2i", "it2b", "it2s", "it2x",
+        "js_is_truthy", "js_is_nullish", "js_args_save", "js_args_restore",
+        "js_check_exception",
+    };
+    const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));
+    int no_gc_count = 0;
+    for (int i = 0; i < jit_runtime_import_count; i++) {
+        const JitImport* import = &jit_runtime_imports[i];
+        if (import->metadata.gc_effect != JIT_EFFECT_NO_GC) continue;
+        no_gc_count++;
+        if (import->metadata.reentry_effect != JIT_REENTRY_NO ||
+                import->metadata.ret_class == JIT_VALUE_UNKNOWN) return false;
+        bool allowed = false;
+        for (int ai = 0; ai < audited_count; ai++) {
+            if (strcmp(import->name, audited[ai]) == 0) {
+                allowed = true;
+                break;
+            }
+        }
+        // A new NO_GC entry must update this audited list; otherwise a table
+        // edit could silently suppress required safepoint publication.
+        if (!allowed) return false;
+    }
+    if (no_gc_count != audited_count) return false;
+    for (int ai = 0; ai < audited_count; ai++) {
+        bool found = false;
+        for (int i = 0; i < jit_runtime_import_count; i++) {
+            if (strcmp(jit_runtime_imports[i].name, audited[ai]) == 0 &&
+                    jit_runtime_imports[i].metadata.gc_effect ==
+                        JIT_EFFECT_NO_GC) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+    return true;
+#endif
+}
 
 #pragma clang diagnostic pop // -Wcast-function-type-mismatch (FPTR/NPTR registry erasure)

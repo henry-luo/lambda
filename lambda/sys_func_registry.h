@@ -123,6 +123,7 @@ fn_ptr find_dynamic_sys_func_import(const char* c_func_name);
 extern JitImport jit_runtime_imports[];
 extern const int jit_runtime_import_count;
 bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata);
+bool jit_import_validate_no_gc_allowlist(void);
 
 #ifdef __cplusplus
 }

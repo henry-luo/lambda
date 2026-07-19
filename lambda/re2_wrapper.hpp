@@ -93,11 +93,11 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
  * If keep_delim is true, matched delimiters are included as separate elements.
  *
  * @param pattern Compiled pattern
- * @param str String to split
+ * @param source Rootable string/symbol value to split
  * @param keep_delim Whether to include matched delimiters in result
  * @return List of split parts
  */
-List* pattern_split(TypePattern* pattern, const char* str, size_t len, bool keep_delim);
+List* pattern_split(TypePattern* pattern, Item source, bool keep_delim);
 
 /**
  * Convert a Lambda pattern AST to a RE2 regex string.

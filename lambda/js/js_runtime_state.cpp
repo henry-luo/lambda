@@ -1,5 +1,6 @@
 #include "js_runtime_internal.hpp"
 #include "../lambda-error.h"
+#include "../lambda.hpp"
 #include "../jube/jube_registry.h"
 
 JsRuntimeState js_runtime_state;
@@ -12,13 +13,13 @@ static int64_t js_eval_source_line_offset_stack[JS_EVAL_SOURCE_STACK_MAX];
 static int64_t js_eval_source_column_offset_stack[JS_EVAL_SOURCE_STACK_MAX];
 static bool js_eval_source_compact_stack[JS_EVAL_SOURCE_STACK_MAX];
 static int js_eval_source_stack_depth = 0;
-static bool js_eval_source_roots_registered = false;
+static uint64_t js_eval_source_roots_epoch = 0;
 
 static void js_eval_source_register_roots(void) {
-    if (js_eval_source_roots_registered) return;
+    if (js_eval_source_roots_epoch == js_heap_epoch) return;
     heap_register_gc_root_range((uint64_t*)js_eval_source_filename_stack, JS_EVAL_SOURCE_STACK_MAX);
     heap_register_gc_root_range((uint64_t*)js_eval_source_code_stack, JS_EVAL_SOURCE_STACK_MAX);
-    js_eval_source_roots_registered = true;
+    js_eval_source_roots_epoch = js_heap_epoch;
 }
 
 static void js_eval_source_push_mode(Item filename, Item source,
@@ -224,11 +225,18 @@ extern "C" Item js_in(Item key, Item object);
 extern "C" Item js_get_current_this(void) { return js_current_this; }
 
 static void js_runtime_make_non_enumerable(Item object, Item name) {
-    Item desc = js_new_object();
-    js_set_prototype(desc, ItemNull);
-    Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
-    js_property_set(desc, enum_key, (Item){.item = b2it(false)});
-    js_object_define_property(object, name, desc);
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> object_root(roots, object);
+    Rooted<Item> name_root(roots, name);
+    Rooted<Item> desc_root(roots, ItemNull);
+    Rooted<Item> enum_key_root(roots, ItemNull);
+    // The descriptor is fresh and property construction allocates; keep every
+    // borrowed argument exact until defineProperty has consumed the object.
+    desc_root.set(js_new_object());
+    js_set_prototype(desc_root.get(), ItemNull);
+    enum_key_root.set((Item){.item = s2it(heap_create_name("enumerable", 10))});
+    js_property_set(desc_root.get(), enum_key_root.get(), (Item){.item = b2it(false)});
+    js_object_define_property(object_root.get(), name_root.get(), desc_root.get());
 }
 
 bool js_runtime_trace_enabled() {
@@ -402,6 +410,7 @@ extern "C" const char* js_get_exception_message(void) {
 }
 
 extern "C" int js_check_exception(void) {
+    AutoAssertNoGC no_gc((Context*)context);
     return js_exception_pending ? 1 : 0;
 }
 
@@ -947,51 +956,10 @@ static Item js_error_prepare_stack_trace(Item error_obj) {
 
 // v12: Create Error with a compile-time stack trace string
 extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
-    Item obj = js_new_object();
-    Item name_val = (Item){.item = s2it(heap_create_name("Error"))};
-    // Per spec: 'name' is inherited from Error.prototype, NOT set as own property
-    // Only set 'message' when it is explicitly provided (not undefined/null)
-    Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
-    if (message.item != ITEM_JS_UNDEFINED && get_type_id(message) != LMD_TYPE_UNDEFINED) {
-        if (get_type_id(message) != LMD_TYPE_STRING) {
-            Item str_msg = js_to_string(message);
-            js_property_set(obj, msg_key, str_msg);
-        } else {
-            js_property_set(obj, msg_key, message);
-        }
-        // mark message as non-enumerable per spec §19.5.1.1
-        js_mark_non_enumerable(obj, msg_key);
-    }
-    Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
-    js_class_stamp(obj, JS_CLASS_ERROR);
-    // Set __proto__ to Error.prototype so prototype methods (toString) are found
-    {
-        Item ctor_fn = js_get_constructor(name_val);
-        if (ctor_fn.item != ITEM_JS_UNDEFINED && get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
-            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-            Item proto = js_property_get(ctor_fn, proto_key);
-            if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
-                js_set_prototype(obj, proto);
-            }
-        }
-    }
-    // Error stacks now use Lambda's JIT frame walk so normal calls avoid
-    // per-call push/pop bookkeeping; lexical source strings remain fallback.
-    Item prepared_stack = js_error_prepare_stack_trace(obj);
-    Item native_stack = js_error_native_stack_string(name_val, message, (Item){.item = ITEM_JS_UNDEFINED});
-    Item eval_stack = js_eval_source_stack_string(name_val, message);
-    if (prepared_stack.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, prepared_stack);
-    } else if (native_stack.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, native_stack);
-    } else if (eval_stack.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, eval_stack);
-    } else if (stack_str.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, stack_str);
-    } else {
-        js_property_set(obj, stack_key, js_error_default_stack_string(name_val, message));
-    }
-    return obj;
+    // Keep one error-construction path: the canonical implementation owns the
+    // exact native roots needed while descriptor, prototype, and stack helpers allocate.
+    Item error_name = (Item){.item = s2it(heap_create_name("Error"))};
+    return js_new_error_with_name_stack(error_name, message, stack_str);
 }
 
 // v11: Create a typed Error (TypeError, RangeError, SyntaxError, ReferenceError)
@@ -1001,74 +969,100 @@ extern "C" Item js_new_error_with_name(Item error_name, Item message) {
 
 // v12: Create typed Error with compile-time stack trace
 extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str) {
-    Item obj = js_new_object();
+    RootFrame roots((Context*)context, 14);
+    Rooted<Item> error_name_root(roots, error_name);
+    Rooted<Item> message_root(roots, message);
+    Rooted<Item> stack_str_root(roots, stack_str);
+    Rooted<Item> obj_root(roots, ItemNull);
+    Rooted<Item> msg_key_root(roots, ItemNull);
+    Rooted<Item> temp_key_root(roots, ItemNull);
+    Rooted<Item> temp_value_root(roots, ItemNull);
+    Rooted<Item> stack_key_root(roots, ItemNull);
+    Rooted<Item> ctor_root(roots, ItemNull);
+    Rooted<Item> proto_root(roots, ItemNull);
+    Rooted<Item> prepared_stack_root(roots, ItemNull);
+    Rooted<Item> native_stack_root(roots, ItemNull);
+    Rooted<Item> eval_stack_root(roots, ItemNull);
+    Rooted<Item> fallback_stack_root(roots, ItemNull);
+
+    // Error construction has many allocating property/stack helpers. Keep the
+    // new object and every temporary that crosses one of those calls exact.
+    obj_root.set(js_new_object());
     // Per spec: 'name' is inherited from the prototype, NOT set as own property
     // Only set 'message' when it is explicitly provided (not undefined/null)
-    Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
-    if (message.item != ITEM_JS_UNDEFINED && get_type_id(message) != LMD_TYPE_UNDEFINED) {
-        if (get_type_id(message) != LMD_TYPE_STRING) {
-            Item str_msg = js_to_string(message);
-            js_property_set(obj, msg_key, str_msg);
+    msg_key_root.set((Item){.item = s2it(heap_create_name("message"))});
+    if (message_root.get().item != ITEM_JS_UNDEFINED &&
+            get_type_id(message_root.get()) != LMD_TYPE_UNDEFINED) {
+        if (get_type_id(message_root.get()) != LMD_TYPE_STRING) {
+            temp_value_root.set(js_to_string(message_root.get()));
+            js_property_set(obj_root.get(), msg_key_root.get(), temp_value_root.get());
         } else {
-            js_property_set(obj, msg_key, message);
+            js_property_set(obj_root.get(), msg_key_root.get(), message_root.get());
         }
         // mark message as non-enumerable per spec §20.5.1.1
-        js_mark_non_enumerable(obj, msg_key);
+        js_mark_non_enumerable(obj_root.get(), msg_key_root.get());
     }
-    Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
+    stack_key_root.set((Item){.item = s2it(heap_create_name("stack"))});
     // Stamp typed class identity. Unknown engine-created names ending in
     // "Error" still get generic Error identity.
     {
-        String* en = (get_type_id(error_name) == LMD_TYPE_STRING) ? it2s(error_name) : NULL;
+        Item rooted_error_name = error_name_root.get();
+        String* en = (get_type_id(rooted_error_name) == LMD_TYPE_STRING) ?
+            it2s(rooted_error_name) : NULL;
         JsClass ec = en ? js_class_from_name(en->chars, (int)en->len) : JS_CLASS_ERROR;
         if (ec == JS_CLASS_NONE && en && en->len >= 5 &&
             !strncmp(en->chars + en->len - 5, "Error", 5)) {
             ec = JS_CLASS_ERROR;
         }
         if (ec == JS_CLASS_NONE) ec = JS_CLASS_ERROR;
-        js_class_stamp(obj, ec);
+        js_class_stamp(obj_root.get(), ec);
     }
     // v18c: Set .constructor for assert.throws / constructor identity checks
-    Item ctor_fn = js_get_constructor(error_name);
-    if (ctor_fn.item != ITEM_JS_UNDEFINED && get_type_id(ctor_fn) == LMD_TYPE_FUNC) {
-        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
-        js_property_set(obj, ctor_key, ctor_fn);
+    ctor_root.set(js_get_constructor(error_name_root.get()));
+    if (ctor_root.get().item != ITEM_JS_UNDEFINED &&
+            get_type_id(ctor_root.get()) == LMD_TYPE_FUNC) {
+        temp_key_root.set((Item){.item = s2it(heap_create_name("constructor"))});
+        js_property_set(obj_root.get(), temp_key_root.get(), ctor_root.get());
         // Mark constructor as non-enumerable
-        js_mark_non_enumerable(obj, ctor_key);
+        js_mark_non_enumerable(obj_root.get(), temp_key_root.get());
         // Set __proto__ to ErrorType.prototype so prototype methods (toString) are found
-        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        Item proto = js_property_get(ctor_fn, proto_key);
-        if (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP) {
-            js_set_prototype(obj, proto);
+        temp_key_root.set((Item){.item = s2it(heap_create_name("prototype", 9))});
+        proto_root.set(js_property_get(ctor_root.get(), temp_key_root.get()));
+        if (proto_root.get().item != ItemNull.item &&
+                get_type_id(proto_root.get()) == LMD_TYPE_MAP) {
+            js_set_prototype(obj_root.get(), proto_root.get());
         }
     } else {
         // No matching constructor (e.g. DOMException names like
         // "IndexSizeError", "WrongDocumentError"): set .name as an own
         // property so `e.name` returns the supplied name. Per WHATWG
         // DOMException spec, .name is a per-instance own property.
-        Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
-        js_property_set(obj, name_key, error_name);
-        js_mark_non_enumerable(obj, name_key);
+        temp_key_root.set((Item){.item = s2it(heap_create_name("name", 4))});
+        js_property_set(obj_root.get(), temp_key_root.get(), error_name_root.get());
+        js_mark_non_enumerable(obj_root.get(), temp_key_root.get());
     }
     // Error.prepareStackTrace may test err instanceof SyntaxError, so typed
     // errors must be linked before invoking the native-stack-backed hook.
-    Item prepared_stack = js_error_prepare_stack_trace(obj);
-    Item native_stack = js_error_native_stack_string(error_name, message, (Item){.item = ITEM_JS_UNDEFINED});
-    Item eval_stack = js_eval_source_stack_string(error_name, message);
-    if (prepared_stack.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, prepared_stack);
-    } else if (native_stack.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, native_stack);
-    } else if (eval_stack.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, eval_stack);
-    } else if (stack_str.item != ITEM_JS_UNDEFINED) {
-        js_property_set(obj, stack_key, stack_str);
+    prepared_stack_root.set(js_error_prepare_stack_trace(obj_root.get()));
+    native_stack_root.set(js_error_native_stack_string(error_name_root.get(),
+        message_root.get(), (Item){.item = ITEM_JS_UNDEFINED}));
+    eval_stack_root.set(js_eval_source_stack_string(error_name_root.get(), message_root.get()));
+    if (prepared_stack_root.get().item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj_root.get(), stack_key_root.get(), prepared_stack_root.get());
+    } else if (native_stack_root.get().item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj_root.get(), stack_key_root.get(), native_stack_root.get());
+    } else if (eval_stack_root.get().item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj_root.get(), stack_key_root.get(), eval_stack_root.get());
+    } else if (stack_str_root.get().item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj_root.get(), stack_key_root.get(), stack_str_root.get());
     } else {
-        js_property_set(obj, stack_key, js_error_default_stack_string(error_name, message));
+        fallback_stack_root.set(js_error_default_stack_string(error_name_root.get(),
+            message_root.get()));
+        js_property_set(obj_root.get(), stack_key_root.get(), fallback_stack_root.get());
     }
     // Mark stack as non-enumerable (per ES spec)
-    js_runtime_make_non_enumerable(obj, stack_key);
-    return obj;
+    js_runtime_make_non_enumerable(obj_root.get(), stack_key_root.get());
+    return obj_root.get();
 }
 
 // ES2022: Extract cause from options object and set on error

@@ -17,7 +17,7 @@
 #include <cstring>
 #include <cstdio>
 
-extern Context* context;
+extern __thread EvalContext* context;
 
 static const JubeHostObjectOps* vmap_host_ops(VMap* vm) {
     if (!vm || !vm->host_type) return nullptr;
@@ -453,22 +453,33 @@ Item vmap_get_by_item(VMap* vm, Item key) {
 
 SymbolKeyList* vmap_keys_for_item(Item vmap_item) {
     if (get_type_id(vmap_item) != LMD_TYPE_VMAP || !vmap_item.vmap) return nullptr;
-    VMap* vm = vmap_item.vmap;
+    // SymbolKeyList installs side-stack chunks that intentionally outlive this
+    // activation. Registered exact handles avoid placing a shorter frame below
+    // those iterator chunks, which would violate LIFO restoration on return.
+    PersistentRooted<Item> rooted_vmap((Context*)context, vmap_item);
+    PersistentRooted<Item> rooted_result((Context*)context, ItemNull);
+    if (!rooted_vmap.valid() || !rooted_result.valid()) return nullptr;
+    VMap* vm = rooted_vmap.get().vmap;
 
     Item result = ItemNull;
     // Lambda projection keys come from declared Jube field names. Keeping this
     // out of generic string transforms prevents DOM-only snake/camel policy
     // from leaking into ordinary VMap host fallback.
-    if (!jube_member_projection_keys(vmap_item, &result)) {
+    if (!jube_member_projection_keys(rooted_vmap.get(), &result)) {
         const JubeHostObjectOps* ops = vmap_host_ops(vm);
         if (!ops || !ops->own_property_keys) return nullptr;
-        if (!ops->own_property_keys(vmap_item, &result)) return nullptr;
+        if (!ops->own_property_keys(rooted_vmap.get(), &result)) return nullptr;
     }
-    if (get_type_id(result) != LMD_TYPE_ARRAY || !result.array) return nullptr;
+    rooted_result.set(result);
+    if (get_type_id(rooted_result.get()) != LMD_TYPE_ARRAY ||
+            !rooted_result.get().array) return nullptr;
 
-    List* list = result.array;
+    List* list = rooted_result.get().array;
     SymbolKeyList* keys = symbol_key_list_new(list->length > 0 ? list->length : 4);
-    for (int64_t i = 0; i < list->length; i++) {
+    for (int64_t i = 0; i < rooted_result.get().array->length; i++) {
+        // Symbol allocation can compact the array data zone, so reload the
+        // rooted owner and its items pointer on every iteration.
+        list = rooted_result.get().array;
         append_host_key(keys, list->items[i]);
     }
     return keys;

@@ -344,3 +344,19 @@ extern "C" void lambda_stack_overflow_error(const char* func_name) {
     // Set runtime error using the no-trace version (safe after recovery)
     set_runtime_error_no_trace(ERR_STACK_OVERFLOW, message);
 }
+
+extern "C" void lambda_root_frame_overflow_error(void) {
+    lambda_stack_overflow_error("native-root-frame");
+    _lambda_stack_overflow_flag = true;
+    // Continuing after a failed reservation would turn every Rooted home in
+    // the frame into a null slot and make precise collection unsound.
+    if (_lambda_recovery_armed) {
+#if defined(__APPLE__) || defined(__linux__)
+        siglongjmp(_lambda_recovery_point, 1);
+#elif defined(_WIN32)
+        longjmp(_lambda_recovery_point, 1);
+#endif
+    }
+    log_error("native-root-frame: reservation failed without an armed recovery point");
+    abort();
+}

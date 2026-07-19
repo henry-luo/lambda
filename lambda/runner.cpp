@@ -1461,6 +1461,11 @@ void runner_setup_context(Runner* runner) {
             rt->name_pool = context->name_pool;
         }
     }
+    if (rt && rt->gc_compatibility_required) {
+        // Conservative-only tiers make the heap mode sticky; later precise code
+        // must not disable the native-stack roots on the same activation chain.
+        heap_gc_force_compatibility(context->heap);
+    }
 
     if (rt && rt->scheduler) {
         context->scheduler = rt->scheduler;
@@ -1510,6 +1515,11 @@ void resolve_sys_paths_recursive(Item item) {
 
 // Common helper function to execute a compiled script and wrap the result in an Input*
 // The GC heap is retained on the Runtime — caller calls runtime_cleanup() when done.
+static bool runtime_conservative_execution_allowed(Runtime* runtime) {
+    if (!runtime || !runtime->gc_compatibility_required) return true;
+    return runtime_require_gc_compatibility(runtime, "C2MIR");
+}
+
 Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if (!runner->script || !runner->script->main_func) {
         log_error("Error: Failed to compile the function.");
@@ -1523,6 +1533,9 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         output->root = ItemError;
         return output;
     }
+
+    Runtime* runtime = runner->runtime;
+    if (!runtime_conservative_execution_allowed(runtime)) return nullptr;
 
     log_notice("Executing JIT compiled code...");
     runner_setup_context(runner);
@@ -1540,8 +1553,8 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     // If a stack overflow occurs during execution, the signal handler will
     // siglongjmp back here. No per-call overhead — detection is OS-level.
     Item result;
-    LambdaSideStackSnapshot side_stack_snapshot =
-        lambda_side_stack_snapshot(context);
+    LambdaRecoveryCheckpoint recovery_checkpoint =
+        lambda_recovery_checkpoint_capture(context);
 #if defined(__APPLE__) || defined(__linux__)
     if (sigsetjmp(_lambda_recovery_point, 1)) {
 #elif defined(_WIN32)
@@ -1553,8 +1566,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         _lambda_recovery_armed = 0;   // recovery consumed; disarm
         log_error("exec: recovered from stack overflow via signal handler");
         _lambda_stack_overflow_flag = false;
-        // longjmp bypasses generated epilogues, so recover both watermarks.
-        lambda_side_stack_restore(context, side_stack_snapshot);
+        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
         lambda_stack_overflow_error("<signal>");
         result = context->result = ItemError;
     } else {
@@ -1563,6 +1575,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         log_debug("exec main func");
         result = context->result = runner->script->main_func(context);
         _lambda_recovery_armed = 0;
+        lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
         log_debug("after main func, result type_id=%d", get_type_id(result));
     }
     if ((!runner->runtime || !runner->runtime->no_task_drain) && context->scheduler) {
@@ -1606,6 +1619,10 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 }
 
 Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only) {
+    if (runtime && !transpile_only) {
+        runtime->gc_compatibility_required = true;
+        if (!runtime_conservative_execution_allowed(runtime)) return nullptr;
+    }
     Runner runner;
     runner_init(runtime, &runner);
     runner.script = load_script(runtime, script_path, source, false);
@@ -1633,6 +1650,10 @@ Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
 
 // Extended function that supports setting run_main context and returns Input*
 Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main) {
+    if (runtime && !transpile_only) {
+        runtime->gc_compatibility_required = true;
+        if (!runtime_conservative_execution_allowed(runtime)) return nullptr;
+    }
     Runner runner;
     runner_init(runtime, &runner);
     runner.script = load_script(runtime, script_path, NULL, false);
@@ -1680,6 +1701,11 @@ void runtime_init(Runtime* runtime) {
     }
     module_registry_init();
     jube_register_builtin_modules();
+    if (jube_has_legacy_rooting_abi()) {
+        // The capability is sticky for this Runtime because a legacy module
+        // can re-enter generated code on the same native activation chain.
+        runtime->gc_compatibility_required = true;
+    }
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 

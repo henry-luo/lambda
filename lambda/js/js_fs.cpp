@@ -13,6 +13,7 @@
 #include "js_class.h"
 #include "js_property_attrs.h"
 #include "../lambda-data.hpp"
+#include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
@@ -38,6 +39,7 @@ extern "C" Item js_util_custom_promisify_args_symbol(void);
 extern "C" Item js_util_promisify_custom_symbol(void);
 extern "C" Item js_domain_get_current(void);
 extern "C" Item js_domain_call_function(Item domain, Item fn, Item this_val, Item* args, int arg_count);
+extern __thread EvalContext* context;
 
 // Helper: make JS undefined value
 // Helper: extract a null-terminated C string from an Item string
@@ -2487,6 +2489,7 @@ static Item js_fs_filehandle_close(void) {
 
 static Item fs_filehandle_ctor = {0};
 static Item fs_filehandle_proto = {0};
+static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count);
 
 static Item js_fs_filehandle_illegal_constructor(void) {
     return js_throw_type_error("FileHandle is not constructible");
@@ -2500,6 +2503,9 @@ static Item js_fs_filehandle_fd_getter(void) {
 static Item fs_get_filehandle_prototype(void) {
     if (fs_filehandle_proto.item != 0) return fs_filehandle_proto;
 
+    // Constructor/prototype caches survive the native construction call and
+    // must own their partially built objects under precise-only collection.
+    heap_register_gc_root(&fs_filehandle_proto.item);
     fs_filehandle_proto = js_new_object();
     Item fd_getter = js_new_function((void*)js_fs_filehandle_fd_getter, 0);
     js_install_native_accessor(fs_filehandle_proto, make_string_item("fd"), fd_getter,
@@ -2507,8 +2513,7 @@ static Item fs_get_filehandle_prototype(void) {
     js_fs_set_method(fs_filehandle_proto, "read", (void*)js_fs_filehandle_read, 4);
     js_fs_set_method(fs_filehandle_proto, "readFile", (void*)js_fs_filehandle_readFile, 1);
     js_fs_set_method(fs_filehandle_proto, "close", (void*)js_fs_filehandle_close, 0);
-    js_property_set(fs_filehandle_proto, make_string_item("__sym_14"),
-                    js_new_function((void*)js_fs_filehandle_close, 0));
+    js_fs_set_method(fs_filehandle_proto, "__sym_14", (void*)js_fs_filehandle_close, 0);
     return fs_filehandle_proto;
 }
 
@@ -2516,6 +2521,7 @@ static Item fs_get_filehandle_constructor(void) {
     if (fs_filehandle_ctor.item != 0) return fs_filehandle_ctor;
 
     Item proto = fs_get_filehandle_prototype();
+    heap_register_gc_root(&fs_filehandle_ctor.item);
     fs_filehandle_ctor = js_new_function((void*)js_fs_filehandle_illegal_constructor, 0);
     js_property_set(fs_filehandle_ctor, make_string_item("prototype"), proto);
     js_property_set(proto, make_string_item("constructor"), fs_filehandle_ctor);
@@ -2523,10 +2529,12 @@ static Item fs_get_filehandle_constructor(void) {
 }
 
 static Item fs_create_filehandle(Item fd) {
-    Item handle = js_new_object();
-    js_set_prototype(handle, fs_get_filehandle_prototype());
-    js_property_set(handle, make_string_item("__fd"), fd);
-    return handle;
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> fd_root(roots, fd);
+    Rooted<Item> handle_root(roots, js_new_object());
+    js_set_prototype(handle_root.get(), fs_get_filehandle_prototype());
+    js_property_set(handle_root.get(), make_string_item("__fd"), fd_root.get());
+    return handle_root.get();
 }
 
 extern "C" Item js_fs_writeSync(Item fd_item, Item data_item, Item offset_item, Item length_item, Item position_item) {
@@ -3087,22 +3095,31 @@ static Item js_fs_fstat_async(Item fd_item, Item opts_or_cb, Item callback_item)
 static Item fs_internal_promises_namespace = {0};
 
 static Item js_fs_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
-    Item key = make_string_item(name);
-    Item fn = js_new_function(func_ptr, param_count);
-    js_property_set(ns, key, fn);
-    return fn;
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> ns_root(roots, ns);
+    Rooted<Item> key_root(roots, make_string_item(name));
+    Rooted<Item> fn_root(roots, js_new_function(func_ptr, param_count));
+    js_property_set(ns_root.get(), key_root.get(), fn_root.get());
+    return fn_root.get();
 }
 
 static void js_fs_set_custom_promisify_args(Item fn, const char* name1, const char* name2) {
-    Item names = js_array_new(0);
-    js_array_push(names, make_string_item(name1));
-    if (name2) js_array_push(names, make_string_item(name2));
-    js_property_set(fn, js_util_custom_promisify_args_symbol(), names);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> fn_root(roots, fn);
+    Rooted<Item> names_root(roots, js_array_new(0));
+    Rooted<Item> symbol_root(roots, ItemNull);
+    js_array_push(names_root.get(), make_string_item(name1));
+    if (name2) js_array_push(names_root.get(), make_string_item(name2));
+    symbol_root.set(js_util_custom_promisify_args_symbol());
+    js_property_set(fn_root.get(), symbol_root.get(), names_root.get());
 }
 
 static void js_fs_set_custom_promisify(Item fn, void* func_ptr, int param_count) {
-    Item custom = js_new_function(func_ptr, param_count);
-    js_property_set(fn, js_util_promisify_custom_symbol(), custom);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> fn_root(roots, fn);
+    Rooted<Item> custom_root(roots, js_new_function(func_ptr, param_count));
+    Rooted<Item> symbol_root(roots, js_util_promisify_custom_symbol());
+    js_property_set(fn_root.get(), symbol_root.get(), custom_root.get());
 }
 
 // ─── fs.promises wrapper functions ─────────────────────────────────────────
@@ -3662,19 +3679,28 @@ extern "C" Item js_internal_fs_validateOffsetLengthWrite(Item offset_item, Item 
 }
 
 extern "C" Item js_get_internal_fs_utils_namespace(void) {
-    Item ns = js_new_object();
-    js_property_set(ns, make_string_item("validateOffsetLengthRead"),
-                    js_new_function((void*)js_internal_fs_validateOffsetLengthRead, 3));
-    js_property_set(ns, make_string_item("validateOffsetLengthWrite"),
-                    js_new_function((void*)js_internal_fs_validateOffsetLengthWrite, 3));
-    js_property_set(ns, make_string_item("default"), ns);
-    return ns;
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> ns_root(roots, js_new_object());
+    js_fs_set_method(ns_root.get(), "validateOffsetLengthRead",
+        (void*)js_internal_fs_validateOffsetLengthRead, 3);
+    js_fs_set_method(ns_root.get(), "validateOffsetLengthWrite",
+        (void*)js_internal_fs_validateOffsetLengthWrite, 3);
+    js_property_set(ns_root.get(), make_string_item("default"), ns_root.get());
+    return ns_root.get();
 }
 
 extern "C" Item js_get_fs_namespace(void) {
     if (fs_namespace.item != 0) return fs_namespace;
 
+    // The static module cache is the exact owner while the large namespace is
+    // being assembled and after it escapes this native helper.
+    heap_register_gc_root(&fs_namespace.item);
     fs_namespace = js_new_object();
+
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> constants_root(roots, ItemNull);
+    Rooted<Item> promises_root(roots, ItemNull);
+    Rooted<Item> default_key_root(roots, ItemNull);
 
     // synchronous methods
     js_fs_set_method(fs_namespace, "readFileSync",    (void*)js_fs_readFileSync, 2);
@@ -3771,7 +3797,8 @@ extern "C" Item js_get_fs_namespace(void) {
 
     // fs.constants — null prototype per Node.js spec
     extern Item js_object_create(Item proto);
-    Item constants = js_object_create(ItemNull);
+    constants_root.set(js_object_create(ItemNull));
+    Item constants = constants_root.get();
     js_property_set(constants, make_string_item("F_OK"), (Item){.item = i2it(0)});
     js_property_set(constants, make_string_item("R_OK"), (Item){.item = i2it(4)});
     js_property_set(constants, make_string_item("W_OK"), (Item){.item = i2it(2)});
@@ -3824,7 +3851,8 @@ extern "C" Item js_get_fs_namespace(void) {
         extern Item js_promise_resolve(Item value);
         extern Item js_promise_reject(Item reason);
 
-        Item promises = js_new_object();
+        promises_root.set(js_new_object());
+        Item promises = promises_root.get();
 
         // fs.promises.readFile(path, options?) — returns Promise<Buffer|string>
         // We wrap the sync version for simplicity
@@ -3864,8 +3892,8 @@ extern "C" Item js_get_fs_namespace(void) {
     }
 
     // set "default" export to the namespace itself (for `import fs from 'fs'`)
-    Item default_key = make_string_item("default");
-    js_property_set(fs_namespace, default_key, fs_namespace);
+    default_key_root.set(make_string_item("default"));
+    js_property_set(fs_namespace, default_key_root.get(), fs_namespace);
 
     return fs_namespace;
 }
@@ -3878,6 +3906,7 @@ extern "C" Item js_get_fs_promises_namespace(void) {
 extern "C" Item js_get_internal_fs_promises_namespace(void) {
     if (fs_internal_promises_namespace.item != 0) return fs_internal_promises_namespace;
 
+    heap_register_gc_root(&fs_internal_promises_namespace.item);
     fs_internal_promises_namespace = js_new_object();
     js_property_set(fs_internal_promises_namespace, make_string_item("FileHandle"),
                     fs_get_filehandle_constructor());

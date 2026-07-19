@@ -224,11 +224,18 @@ String *fn_strcat(String *left, String *right) {
         return &STR_ERROR;
     }
     int left_len = left->len, right_len = right->len;
+    // Destination allocation may collect converted strings that exist only in
+    // this native call chain, so keep both copy sources exact-rooted.
+    RootFrame roots((Context*)context, 2);
+    Rooted<String*> rooted_left(roots, left);
+    Rooted<String*> rooted_right(roots, right);
     String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
     if (!result) {
         log_error("failed to allocate memory for fn_strcat result");
         return NULL;
     }
+    left = rooted_left.get();
+    right = rooted_right.get();
     result->len = left_len + right_len;
     result->is_ascii = left->is_ascii && right->is_ascii;
     memcpy(result->chars, left->chars, left_len);
@@ -237,8 +244,15 @@ String *fn_strcat(String *left, String *right) {
     return result;
 }
 
-extern "C" void heap_register_gc_root(uint64_t* slot);
-extern "C" void heap_unregister_gc_root(uint64_t* slot);
+static String* fn_concat_string_items(Item left, Item right) {
+    // The second conversion can collect the first conversion result before
+    // fn_strcat receives it, so conversion temporaries need native homes too.
+    RootFrame roots((Context*)context, 2);
+    Rooted<String*> left_str(roots, fn_string(left));
+    Rooted<String*> right_str(roots, (String*)NULL);
+    right_str.set(fn_string(right));
+    return fn_strcat(left_str.get(), right_str.get());
+}
 
 Item fn_join(Item left, Item right) {
     GUARD_ERROR2(left, right);
@@ -302,17 +316,20 @@ Item fn_join(Item left, Item right) {
         // null ++ string → string, string ++ null → string
         if (left_type == LMD_TYPE_NULL) return right;
         if (right_type == LMD_TYPE_NULL) return left;
-        String *left_str = fn_string(left), *right_str = fn_string(right);
-        String *result = fn_strcat(left_str, right_str);
+        String *result = fn_concat_string_items(left, right);
         return {.item = s2it(result)};
     }
     else if (left_type == LMD_TYPE_SYMBOL || right_type == LMD_TYPE_SYMBOL) {
         // null ++ symbol → symbol, symbol ++ null → symbol
         if (left_type == LMD_TYPE_NULL) return right;
         if (right_type == LMD_TYPE_NULL) return left;
-        String *left_str = fn_string(left), *right_str = fn_string(right);
-        String *result = fn_strcat(left_str, right_str);
+        String *result = fn_concat_string_items(left, right);
+        // Symbol allocation is another safepoint before it copies the inline
+        // characters from the intermediate String.
+        RootFrame roots((Context*)context, 1);
+        Rooted<String*> rooted_result(roots, result);
         // Create a proper Symbol from the concatenated string
+        result = rooted_result.get();
         Symbol* sym = heap_create_symbol(result->chars, result->len);
         return {.item = y2it(sym)};
     }
@@ -332,12 +349,11 @@ Item fn_join(Item left, Item right) {
                 result->type_id = LMD_TYPE_ARRAY_NUM;
                 result->set_elem_type(la->get_elem_type());
                 result->length = total;  result->capacity = total;
-                uint64_t result_root = (uint64_t)(uintptr_t)result;
-                heap_register_gc_root(&result_root);
+                RootFrame roots((Context*)context, 1);
+                Rooted<ArrayNum*> rooted_result(roots, result);
                 size_t elem_size = ELEM_TYPE_SIZE[la->get_elem_type() >> 4];
                 result->data = heap_data_alloc(total * elem_size);
-                result = (ArrayNum*)(uintptr_t)result_root;
-                heap_unregister_gc_root(&result_root);
+                result = rooted_result.get();
                 memcpy(result->data, la->data, elem_size*la->length);
                 memcpy((char*)result->data + elem_size*la->length, ra->data, elem_size*ra->length);
                 return {.array_num = result};
@@ -376,8 +392,7 @@ Item fn_join(Item left, Item right) {
         // scalar ++ scalar: convert both to string and concatenate
         if (left_type == LMD_TYPE_NULL) return right;
         if (right_type == LMD_TYPE_NULL) return left;
-        String *left_str = fn_string(left), *right_str = fn_string(right);
-        String *result = fn_strcat(left_str, right_str);
+        String *result = fn_concat_string_items(left, right);
         return {.item = s2it(result)};
     }
     else {
@@ -2439,7 +2454,11 @@ String* fn_string(Item itm) {
     }
     case LMD_TYPE_SYMBOL: {
         // Symbol has different layout than String; create a String from symbol chars
-        Symbol* sym = itm.get_safe_symbol();
+        // heap_strcpy may collect before copying its source. Keep the Symbol's
+        // owning Item exact-rooted so its inline character buffer stays live.
+        RootFrame roots((Context*)context, 1);
+        Rooted<Item> rooted(roots, itm);
+        Symbol* sym = rooted.get().get_safe_symbol();
         if (!sym) return &STR_NULL;
         return heap_strcpy(sym->chars, sym->len);
     }
@@ -3523,14 +3542,14 @@ Item fn_member(Item item, Item key) {
             TypeObject* obj_type = (TypeObject*)obj->type;
             TypeMethod* method = obj_type->methods;
             while (method) {
-                if (strcmp(method->name->str, key_str) == 0 && method->fn) {
+                if (strcmp(method->name->str, key_str) == 0 && method->compiled_fn) {
                     // Create a bound method: closure where closure_env = boxed self Item
                     // fn_call will pass closure_env as first arg (the _self parameter)
                     Function* bound = to_closure_named(
-                        method->fn->ptr,
-                        method->fn->arity,
+                        method->compiled_fn,
+                        method->arity,
                         (void*)(uintptr_t)item.item,  // boxed self as closure_env
-                        method->fn->name);
+                        method->compiled_name);
                     return {.item = (uint64_t)(uintptr_t)bound};
                 }
                 method = method->next;
@@ -3540,12 +3559,12 @@ Item fn_member(Item item, Item key) {
             while (base) {
                 TypeMethod* bmethod = base->methods;
                 while (bmethod) {
-                    if (strcmp(bmethod->name->str, key_str) == 0 && bmethod->fn) {
+                    if (strcmp(bmethod->name->str, key_str) == 0 && bmethod->compiled_fn) {
                         Function* bound = to_closure_named(
-                            bmethod->fn->ptr,
-                            bmethod->fn->arity,
+                            bmethod->compiled_fn,
+                            bmethod->arity,
                             (void*)(uintptr_t)item.item,
-                            bmethod->fn->name);
+                            bmethod->compiled_name);
                         return {.item = (uint64_t)(uintptr_t)bound};
                     }
                     bmethod = bmethod->next;
@@ -4477,6 +4496,18 @@ Item fn_url_resolve(Item base_item, Item relative_item) {
     return {.item = s2it(result)};
 }
 
+static String* split_heap_string_slice(Rooted<Item>& rooted_source, size_t offset, size_t len) {
+    String* part = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+    // The allocation can compact the source string, so reload its interior
+    // character address from the exact root before examining or copying it.
+    const char* chars = rooted_source.get().get_chars() + offset;
+    part->len = (uint32_t)len;
+    part->is_ascii = str_is_ascii(chars, len) ? 1 : 0;
+    memcpy(part->chars, chars, len);
+    part->chars[len] = '\0';
+    return part;
+}
+
 // split(str, sep) - split string by separator, returns list of strings
 Item fn_split(Item str_item, Item sep_item) {
     GUARD_ERROR1(str_item);
@@ -4508,9 +4539,7 @@ Item fn_split(Item str_item, Item sep_item) {
                 return ItemError;
             }
             TypePattern* pattern = (TypePattern*)type;
-            const char* str_chars = str_item.get_chars();
-            uint32_t str_len = str_item.get_len();
-            List* ps = pattern_split(pattern, str_chars, str_len, false);
+            List* ps = pattern_split(pattern, str_item, false);
             if (ps) ps->is_content = 1;
             return {.array = ps};
         }
@@ -4522,9 +4551,12 @@ Item fn_split(Item str_item, Item sep_item) {
         return ItemError;
     }
 
-    const char* str_chars = str_item.get_chars();
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> rooted_str(roots, str_item);
+    Rooted<Item> rooted_sep(roots, sep_item);
+    Rooted<List*> rooted_result(roots, (List*)NULL);
+
     uint32_t str_len = str_item.get_len();
-    const char* sep_chars = null_sep ? nullptr : sep_item.get_chars();
     uint32_t sep_len = null_sep ? 0 : sep_item.get_len();
 
     // disable string merging in list_push so split results stay separate
@@ -4535,78 +4567,66 @@ Item fn_split(Item str_item, Item sep_item) {
     }
 
     List* result = list();
+    rooted_result.set(result);
     result->is_content = 1;
 
-    if (!str_chars || str_len == 0) {
+    if (!rooted_str.get().get_chars() || str_len == 0) {
         if (context) { context->disable_string_merging = saved_merging; }
-        return {.array = result};  // empty list for empty string
+        return {.array = rooted_result.get()};  // empty list for empty string
     }
 
     if (null_sep) {
         // null separator: split on whitespace (like Python str.split(None))
         // strips leading/trailing whitespace, splits on runs of whitespace
-        const char* p = str_chars;
-        const char* end = str_chars + str_len;
-        while (p < end) {
+        size_t p = 0;
+        while (p < str_len) {
+            const char* str_chars = rooted_str.get().get_chars();
             // skip whitespace
-            while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f' || *p == '\v')) {
+            while (p < str_len && (str_chars[p] == ' ' || str_chars[p] == '\t' || str_chars[p] == '\n' ||
+                    str_chars[p] == '\r' || str_chars[p] == '\f' || str_chars[p] == '\v')) {
                 p++;
             }
-            if (p >= end) break;
+            if (p >= str_len) break;
             // find end of word
-            const char* word_start = p;
-            while (p < end && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && *p != '\f' && *p != '\v') {
+            size_t word_start = p;
+            while (p < str_len && str_chars[p] != ' ' && str_chars[p] != '\t' && str_chars[p] != '\n' &&
+                    str_chars[p] != '\r' && str_chars[p] != '\f' && str_chars[p] != '\v') {
                 p++;
             }
-            size_t word_len = p - word_start;
-            String* part = (String *)heap_alloc(sizeof(String) + word_len + 1, LMD_TYPE_STRING);
-            part->len = word_len;
-            part->is_ascii = str_is_ascii(word_start, word_len) ? 1 : 0;
-            memcpy(part->chars, word_start, word_len);
-            part->chars[word_len] = '\0';
-            list_push(result, {.item = s2it(part)});
+            String* part = split_heap_string_slice(rooted_str, word_start, p - word_start);
+            list_push(rooted_result.get(), {.item = s2it(part)});
         }
         if (context) { context->disable_string_merging = saved_merging; }
-        return {.array = result};
+        return {.array = rooted_result.get()};
     }
 
-    if (!sep_chars || sep_len == 0) {
+    if (!rooted_sep.get().get_chars() || sep_len == 0) {
         // empty string separator: split into individual characters
-        const char* p = str_chars;
-        const char* end = str_chars + str_len;
-        while (p < end) {
-            int char_len = (int)str_utf8_char_len((unsigned char)*p);
+        size_t p = 0;
+        while (p < str_len) {
+            const char* str_chars = rooted_str.get().get_chars();
+            int char_len = (int)str_utf8_char_len((unsigned char)str_chars[p]);
             if (char_len <= 0) char_len = 1;  // fallback for invalid UTF-8
-
-            String* part = (String *)heap_alloc(sizeof(String) + char_len + 1, LMD_TYPE_STRING);
-            part->len = char_len;
-            part->is_ascii = (char_len == 1 && (unsigned char)*p < 128) ? 1 : 0;
-            memcpy(part->chars, p, char_len);
-            part->chars[char_len] = '\0';
-
-            list_push(result, {.item = s2it(part)});
+            String* part = split_heap_string_slice(rooted_str, p, (size_t)char_len);
+            list_push(rooted_result.get(), {.item = s2it(part)});
             p += char_len;
         }
         if (context) { context->disable_string_merging = saved_merging; }
-        return {.array = result};
+        return {.array = rooted_result.get()};
     }
 
     // split by separator
-    const char* start = str_chars;
-    const char* end = str_chars + str_len;
-    const char* p = start;
+    size_t start = 0;
+    size_t p = 0;
 
-    while (p <= end - sep_len) {
-        if (memcmp(p, sep_chars, sep_len) == 0) {
+    while (p + sep_len <= str_len) {
+        const char* str_chars = rooted_str.get().get_chars();
+        const char* sep_chars = rooted_sep.get().get_chars();
+        if (memcmp(str_chars + p, sep_chars, sep_len) == 0) {
             // found separator
             size_t part_len = p - start;
-            String* part = (String *)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
-            part->len = part_len;
-            part->is_ascii = str_is_ascii(start, part_len) ? 1 : 0;
-            memcpy(part->chars, start, part_len);
-            part->chars[part_len] = '\0';
-
-            list_push(result, {.item = s2it(part)});
+            String* part = split_heap_string_slice(rooted_str, start, part_len);
+            list_push(rooted_result.get(), {.item = s2it(part)});
 
             p += sep_len;
             start = p;
@@ -4616,17 +4636,11 @@ Item fn_split(Item str_item, Item sep_item) {
     }
 
     // add the last part
-    size_t part_len = end - start;
-    String* part = (String *)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
-    part->len = part_len;
-    part->is_ascii = str_is_ascii(start, part_len) ? 1 : 0;
-    memcpy(part->chars, start, part_len);
-    part->chars[part_len] = '\0';
-
-    list_push(result, {.item = s2it(part)});
+    String* part = split_heap_string_slice(rooted_str, start, str_len - start);
+    list_push(rooted_result.get(), {.item = s2it(part)});
 
     if (context) { context->disable_string_merging = saved_merging; }
-    return {.array = result};
+    return {.array = rooted_result.get()};
 }
 
 // split(str, sep, keep_delim) - 3-arg version with keep_delim boolean
@@ -4662,9 +4676,7 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
                 return ItemError;
             }
             TypePattern* pattern = (TypePattern*)type;
-            const char* str_chars = str_item.get_chars();
-            uint32_t str_len = str_item.get_len();
-            List* ps = pattern_split(pattern, str_chars, str_len, keep_delim);
+            List* ps = pattern_split(pattern, str_item, keep_delim);
             if (ps) ps->is_content = 1;
             return {.array = ps};
         }
@@ -4683,10 +4695,13 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
         return ItemError;
     }
 
-    const char* str_chars = str_item.get_chars();
     uint32_t str_len = str_item.get_len();
-    const char* sep_chars = sep_item.get_chars();
     uint32_t sep_len = sep_item.get_len();
+
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> rooted_str(roots, str_item);
+    Rooted<Item> rooted_sep(roots, sep_item);
+    Rooted<List*> rooted_result(roots, (List*)NULL);
 
     bool saved_merging = false;
     if (context) {
@@ -4695,34 +4710,28 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     }
 
     List* result = list();
+    rooted_result.set(result);
     result->is_content = 1;
-    if (!str_chars || str_len == 0 || !sep_chars || sep_len == 0) {
+    if (!rooted_str.get().get_chars() || str_len == 0 || !rooted_sep.get().get_chars() || sep_len == 0) {
         if (context) { context->disable_string_merging = saved_merging; }
-        return {.array = result};
+        return {.array = rooted_result.get()};
     }
 
-    const char* start = str_chars;
-    const char* end = str_chars + str_len;
-    const char* p = start;
+    size_t start = 0;
+    size_t p = 0;
 
-    while (p <= end - sep_len) {
-        if (memcmp(p, sep_chars, sep_len) == 0) {
+    while (p + sep_len <= str_len) {
+        const char* str_chars = rooted_str.get().get_chars();
+        const char* sep_chars = rooted_sep.get().get_chars();
+        if (memcmp(str_chars + p, sep_chars, sep_len) == 0) {
             // push part before separator
             size_t part_len = p - start;
-            String* part = (String*)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
-            part->len = part_len;
-            part->is_ascii = str_is_ascii(start, part_len) ? 1 : 0;
-            memcpy(part->chars, start, part_len);
-            part->chars[part_len] = '\0';
-            list_push(result, {.item = s2it(part)});
+            String* part = split_heap_string_slice(rooted_str, start, part_len);
+            list_push(rooted_result.get(), {.item = s2it(part)});
 
             // push the delimiter
-            String* delim = (String*)heap_alloc(sizeof(String) + sep_len + 1, LMD_TYPE_STRING);
-            delim->len = sep_len;
-            delim->is_ascii = str_is_ascii(sep_chars, sep_len) ? 1 : 0;
-            memcpy(delim->chars, sep_chars, sep_len);
-            delim->chars[sep_len] = '\0';
-            list_push(result, {.item = s2it(delim)});
+            String* delim = split_heap_string_slice(rooted_sep, 0, sep_len);
+            list_push(rooted_result.get(), {.item = s2it(delim)});
 
             p += sep_len;
             start = p;
@@ -4732,16 +4741,11 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     }
 
     // add the last part
-    size_t part_len = end - start;
-    String* part = (String*)heap_alloc(sizeof(String) + part_len + 1, LMD_TYPE_STRING);
-    part->len = part_len;
-    part->is_ascii = str_is_ascii(start, part_len) ? 1 : 0;
-    memcpy(part->chars, start, part_len);
-    part->chars[part_len] = '\0';
-    list_push(result, {.item = s2it(part)});
+    String* part = split_heap_string_slice(rooted_str, start, str_len - start);
+    list_push(rooted_result.get(), {.item = s2it(part)});
 
     if (context) { context->disable_string_merging = saved_merging; }
-    return {.array = result};
+    return {.array = rooted_result.get()};
 }
 
 // ord(str) - return Unicode code point of first character
@@ -4832,6 +4836,10 @@ Item fn_join2(Item list_item, Item sep_item) {
         return ItemError;
     }
 
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_list(roots, list_item);
+    Rooted<Item> rooted_sep(roots, sep_item);
+
     // calculate total length
     size_t total_len = 0;
     int64_t count = 0;
@@ -4864,6 +4872,11 @@ Item fn_join2(Item list_item, Item sep_item) {
 
     // allocate result
     String* result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
+    // Result allocation may compact container storage and can reclaim the
+    // separator unless both semantic inputs remain exact-rooted.
+    list_item = rooted_list.get();
+    sep_item = rooted_sep.get();
+    sep_chars = is_text_type_id(sep_type) ? sep_item.get_chars() : nullptr;
     result->len = total_len;
     result->is_ascii = 0;  // safe default for join
 
@@ -5237,13 +5250,16 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
 
     List* result = list();
     result->is_content = 1;
-    if (!needle || needle_len == 0) return {.array = result};
+    RootFrame roots((Context*)context, 2);
+    Rooted<List*> rooted_result(roots, result);
+    Rooted<Map*> rooted_match(roots, (Map*)NULL);
+    if (!needle || needle_len == 0) return {.array = rooted_result.get()};
 
     int64_t total = count_literal_matches(str_chars, str_len, needle, needle_len, options.ignore_case);
     int64_t first = 0, selected_count = 0;
     // Limit selects the visible match window; replacement uses the same helper.
     select_match_window(total, options, &first, &selected_count);
-    if (selected_count == 0) return {.array = result};
+    if (selected_count == 0) return {.array = rooted_result.get()};
 
     const char* p = str_chars;
     const char* end = str_chars + str_len;
@@ -5254,7 +5270,11 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
             if (ordinal >= first && pushed < selected_count) {
                 int64_t index = (int64_t)(p - str_chars);
                 Map* m = create_match_map_ext(p, needle_len, index);
-                list_push(result, {.map = m});
+                // The match is not reachable from the result until list_push
+                // finishes, and that push may grow the list and collect.
+                rooted_match.set(m);
+                list_push(rooted_result.get(), {.map = rooted_match.get()});
+                rooted_match.set((Map*)NULL);
                 pushed++;
             }
             ordinal++;
@@ -5265,7 +5285,7 @@ static Item fn_find_impl(Item source_item, Item pattern_item, FindReplaceOptions
         }
     }
 
-    return {.array = result};
+    return {.array = rooted_result.get()};
 }
 
 // find(str, pattern_or_string) -> [{value, index}, ...]
@@ -5940,18 +5960,31 @@ static void mutable_clone_register(MutableCloneContext* clone_ctx, void* src, It
 
 static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx);
 
-static void clone_mutable_shape_data(TypeMap* map_type, void* dst_data, void* src_data,
+static void* mutable_clone_owner_data(Item owner) {
+    switch (get_type_id(owner)) {
+    case LMD_TYPE_MAP: return owner.map ? owner.map->data : NULL;
+    case LMD_TYPE_OBJECT: return owner.object ? owner.object->data : NULL;
+    case LMD_TYPE_ELEMENT: return owner.element ? owner.element->data : NULL;
+    default: return NULL;
+    }
+}
+
+static void clone_mutable_shape_data(TypeMap* map_type, Item dst_owner, Item src_owner,
                                      MutableCloneContext* clone_ctx) {
-    if (!map_type || !dst_data || !src_data) return;
+    if (!map_type || !mutable_clone_owner_data(dst_owner) ||
+            !mutable_clone_owner_data(src_owner)) return;
     ShapeEntry* entry = map_type->shape;
     while (entry) {
-        void* dst_field = (char*)dst_data + entry->byte_offset;
+        void* src_data = mutable_clone_owner_data(src_owner);
         if (!entry->name) {
             // Map spread slots are recursive raw Map* links, not normal typed
             // fields; storing a TypedItem here makes _map_get treat tag bytes
             // as a nested map pointer.
             Map* nested_src = map_shape_field_to_map(src_data, entry);
             Item field_clone = nested_src ? clone_mutable_item({.map = nested_src}, clone_ctx) : ItemNull;
+            // Recursive cloning can compact the destination data zone; reload
+            // its owner-relative field address only after the recursion.
+            void* dst_field = (char*)mutable_clone_owner_data(dst_owner) + entry->byte_offset;
             *(Map**)dst_field = get_type_id(field_clone) == LMD_TYPE_MAP ?
                 field_clone.map : NULL;
         } else {
@@ -5960,6 +5993,7 @@ static void clone_mutable_shape_data(TypeMap* map_type, void* dst_data, void* sr
             // Cloned maps must keep the original slot layout; writing an `any`
             // field as a raw pointer makes later reads interpret pointer bytes as
             // a TypedItem tag.
+            void* dst_field = (char*)mutable_clone_owner_data(dst_owner) + entry->byte_offset;
             map_field_store(dst_field, field_clone, entry->type->type_id);
         }
         entry = entry->next;
@@ -5980,17 +6014,24 @@ static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
     if (!src) return ItemNull;
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    RootFrame roots((Context*)context, 2);
+    Rooted<Array*> rooted_src(roots, src);
+    Rooted<Array*> rooted_dst(roots, (Array*)NULL);
     Array* dst = array_plain();
     if (!dst) return ItemNull;
+    rooted_dst.set(dst);
+    src = rooted_src.get();
     clone_mutable_container_flags((Container*)dst, (Container*)src);
     dst->type_id = LMD_TYPE_ARRAY;
     // Mutable values may contain cycles through arrays/maps; register the
     // destination before cloning children so back-edges keep object identity.
-    mutable_clone_register(clone_ctx, src, {.array = dst});
+    mutable_clone_register(clone_ctx, src, {.array = rooted_dst.get()});
     for (int64_t i = 0; i < src->length; i++) {
-        array_push(dst, clone_mutable_item(src->items[i], clone_ctx));
+        src = rooted_src.get();
+        Item child = clone_mutable_item(src->items[i], clone_ctx);
+        array_push(rooted_dst.get(), child);
     }
-    return {.array = dst};
+    return {.array = rooted_dst.get()};
 }
 
 static Item clone_mutable_array_num(ArrayNum* src, MutableCloneContext* clone_ctx) {
@@ -6002,15 +6043,20 @@ static Item clone_mutable_array_num(ArrayNum* src, MutableCloneContext* clone_ct
     }
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    RootFrame roots((Context*)context, 2);
+    Rooted<ArrayNum*> rooted_src(roots, src);
+    Rooted<ArrayNum*> rooted_dst(roots, (ArrayNum*)NULL);
     ArrayNumElemType elem_type = src->get_elem_type();
     ArrayNum* dst = array_num_new(elem_type, src->length);
     if (!dst) return ItemNull;
+    rooted_dst.set(dst);
+    src = rooted_src.get();
     clone_mutable_container_flags((Container*)dst, (Container*)src);
     dst->type_id = LMD_TYPE_ARRAY_NUM;
     dst->set_elem_type(elem_type);
     dst->is_view = 0;
     dst->is_mutable_view = 0;
-    mutable_clone_register(clone_ctx, src, {.array_num = dst});
+    mutable_clone_register(clone_ctx, src, {.array_num = rooted_dst.get()});
 
     int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
     if (src->data && dst->data && elem_size > 0 && src->length > 0) {
@@ -6021,13 +6067,18 @@ static Item clone_mutable_array_num(ArrayNum* src, MutableCloneContext* clone_ct
         size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)shape->ndim * sizeof(int64_t);
         ArrayNumShape* dst_shape = (ArrayNumShape*)heap_data_calloc(shape_bytes);
         if (dst_shape) {
+            // Shape allocation can compact both the source descriptor and the
+            // destination data buffer; reload both through their exact owners.
+            src = rooted_src.get();
+            dst = rooted_dst.get();
+            shape = (ArrayNumShape*)src->extra;
             memcpy(dst_shape, shape, shape_bytes);
             dst_shape->base = NULL;
             dst->extra = (int64_t)dst_shape;
             dst->is_ndim = 1;
         }
     }
-    return {.array_num = dst};
+    return {.array_num = rooted_dst.get()};
 }
 
 static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
@@ -6035,8 +6086,13 @@ static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
     if (!src || !src->type) return ItemNull;
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    RootFrame roots((Context*)context, 2);
+    Rooted<Map*> rooted_src(roots, src);
+    Rooted<Map*> rooted_dst(roots, (Map*)NULL);
     Map* dst = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     if (!dst) return ItemNull;
+    rooted_dst.set(dst);
+    src = rooted_src.get();
     clone_mutable_container_flags((Container*)dst, (Container*)src);
     dst->type_id = LMD_TYPE_MAP;
     dst->map_kind = src->map_kind;
@@ -6045,12 +6101,13 @@ static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
     dst->data_cap = data_cap;
     // Register before descending into fields because map graphs can cycle
     // through `any` fields or spread-map slots.
-    mutable_clone_register(clone_ctx, src, {.map = dst});
+    mutable_clone_register(clone_ctx, src, {.map = rooted_dst.get()});
     if (data_cap > 0) {
-        dst->data = heap_data_calloc((size_t)data_cap);
-        clone_mutable_shape_data((TypeMap*)src->type, dst->data, src->data, clone_ctx);
+        rooted_dst.get()->data = heap_data_calloc((size_t)data_cap);
+        clone_mutable_shape_data((TypeMap*)rooted_src.get()->type,
+            {.map = rooted_dst.get()}, {.map = rooted_src.get()}, clone_ctx);
     }
-    return {.map = dst};
+    return {.map = rooted_dst.get()};
 }
 
 static Item clone_mutable_object(Item src_item, MutableCloneContext* clone_ctx) {
@@ -6058,20 +6115,26 @@ static Item clone_mutable_object(Item src_item, MutableCloneContext* clone_ctx) 
     if (!src || !src->type) return ItemNull;
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    RootFrame roots((Context*)context, 2);
+    Rooted<Object*> rooted_src(roots, src);
+    Rooted<Object*> rooted_dst(roots, (Object*)NULL);
     Object* dst = (Object*)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
     if (!dst) return ItemNull;
+    rooted_dst.set(dst);
+    src = rooted_src.get();
     clone_mutable_container_flags((Container*)dst, (Container*)src);
     dst->type_id = LMD_TYPE_OBJECT;
     dst->map_kind = src->map_kind;
     dst->type = src->type;
     int data_cap = src->data_cap > 0 ? src->data_cap : ((TypeObject*)src->type)->byte_size;
     dst->data_cap = data_cap;
-    mutable_clone_register(clone_ctx, src, {.object = dst});
+    mutable_clone_register(clone_ctx, src, {.object = rooted_dst.get()});
     if (data_cap > 0) {
-        dst->data = heap_data_calloc((size_t)data_cap);
-        clone_mutable_shape_data((TypeMap*)src->type, dst->data, src->data, clone_ctx);
+        rooted_dst.get()->data = heap_data_calloc((size_t)data_cap);
+        clone_mutable_shape_data((TypeMap*)rooted_src.get()->type,
+            {.object = rooted_dst.get()}, {.object = rooted_src.get()}, clone_ctx);
     }
-    return {.object = dst};
+    return {.object = rooted_dst.get()};
 }
 
 static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx) {
@@ -6079,25 +6142,33 @@ static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx)
     if (!src || !src->type) return ItemNull;
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
+    RootFrame roots((Context*)context, 2);
+    Rooted<Element*> rooted_src(roots, src);
+    Rooted<Element*> rooted_dst(roots, (Element*)NULL);
     Element* dst = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     if (!dst) return ItemNull;
+    rooted_dst.set(dst);
+    src = rooted_src.get();
     clone_mutable_container_flags((Container*)dst, (Container*)src);
     dst->type_id = LMD_TYPE_ELEMENT;
     dst->map_kind = src->map_kind;
     dst->type = src->type;
-    mutable_clone_register(clone_ctx, src, {.element = dst});
+    mutable_clone_register(clone_ctx, src, {.element = rooted_dst.get()});
 
     for (int64_t i = 0; i < src->length; i++) {
-        array_push((Array*)dst, clone_mutable_item(src->items[i], clone_ctx));
+        src = rooted_src.get();
+        Item child = clone_mutable_item(src->items[i], clone_ctx);
+        array_push((Array*)rooted_dst.get(), child);
     }
 
     int data_cap = src->data_cap > 0 ? src->data_cap : ((TypeElmt*)src->type)->byte_size;
     dst->data_cap = data_cap;
     if (data_cap > 0) {
-        dst->data = heap_data_calloc((size_t)data_cap);
-        clone_mutable_shape_data((TypeMap*)src->type, dst->data, src->data, clone_ctx);
+        rooted_dst.get()->data = heap_data_calloc((size_t)data_cap);
+        clone_mutable_shape_data((TypeMap*)rooted_src.get()->type,
+            {.element = rooted_dst.get()}, {.element = rooted_src.get()}, clone_ctx);
     }
-    return {.element = dst};
+    return {.element = rooted_dst.get()};
 }
 
 static Item clone_mutable_item(Item value, MutableCloneContext* clone_ctx) {
@@ -6197,13 +6268,12 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // For heap containers: calloc (consistent with map_fill, freed by free_container)
     // For markup containers: pool_calloc from runtime pool (data migrated from input pool)
     bool use_pool = !container->is_heap;
-    bool roots_registered = !use_pool;
-    uint64_t container_root = (uint64_t)(uintptr_t)container;
-    uint64_t value_root = new_value.item;
-    if (roots_registered) {
-        heap_register_gc_root(&container_root);
-        heap_register_gc_root(&value_root);
-    }
+    // Shape rebuild is already a cold path. A structured frame avoids leaving
+    // registered native addresses behind on a non-local recovery edge while
+    // keeping both unpublished owners exact through the data allocation.
+    RootFrame roots((Context*)context, 2);
+    Rooted<Container*> rooted_container(roots, container);
+    Rooted<Item> rooted_value(roots, new_value);
 
     void* new_data;
     if (use_pool) {
@@ -6212,13 +6282,11 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
         new_data = heap_data_calloc(new_byte_size > 0 ? new_byte_size : 1);
     }
     if (!new_data) {
-        if (roots_registered) {
-            heap_unregister_gc_root(&value_root);
-            heap_unregister_gc_root(&container_root);
-        }
         log_error("map_rebuild: data allocation failed");
         return;
     }
+    container = rooted_container.get();
+    new_value = rooted_value.get();
 
     // Re-read old_data after allocation: GC may have fired during
     // heap_data_calloc, compacting *data_slot from nursery to tenured.
@@ -6324,11 +6392,6 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // mark data as migrated for future mutations
     if (use_pool) {
         container->is_data_migrated = 1;
-    }
-
-    if (roots_registered) {
-        heap_unregister_gc_root(&value_root);
-        heap_unregister_gc_root(&container_root);
     }
 
     log_debug("map_rebuild: type change complete, fields=%d, byte_size=%ld, migrated=%d",

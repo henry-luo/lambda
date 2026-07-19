@@ -33,6 +33,9 @@ extern "C" {
 #define GC_FLAG_LARGE    0x08   // large object allocated via malloc (not pool)
 #define GC_FLAG_BUMP     0x10   // object allocated from bump block, not object zone
 
+// Debug/stress fill used after a dead object's external payloads are finalized.
+#define GC_FREED_POISON_BYTE 0xDD
+
 // GC generation tags (stored in gc_flags bits 1-2)
 #define GC_GEN_NURSERY   0x00   // generation 0: nursery object
 #define GC_GEN_TENURED   0x02   // generation 1: tenured (survived a collection)
@@ -61,8 +64,9 @@ typedef struct gc_header {
 
 /**
  * Callback type for triggering GC collection from allocation paths.
- * The gc_heap calls this when data zone exceeds threshold.
- * The callback should gather roots (stack scan, context) and call gc_collect().
+ * The gc_heap calls this when data zone exceeds threshold. Scanner-capable
+ * compatibility builds also gather native-stack bounds before collection;
+ * precise scanner-free builds publish roots through exact slots only.
  */
 typedef void (*gc_collect_callback_t)(void);
 
@@ -125,6 +129,39 @@ typedef struct gc_weak_slot {
     gc_weak_clear_fn on_clear;
     void* context;
 } gc_weak_slot_t;
+
+/**
+ * Root-discovery mode for one GC heap. Compatibility is the production
+ * default while precise rooting is being migrated. Shadow verification keeps
+ * the conservative scan but reports objects that precise roots did not reach.
+ */
+typedef enum gc_root_mode {
+    GC_ROOT_MODE_COMPATIBILITY = 0,
+    GC_ROOT_MODE_SHADOW_VERIFY,
+    GC_ROOT_MODE_PRECISE_ONLY,
+} gc_root_mode_t;
+
+// Release builds that cannot admit C2MIR omit the native-stack scanner.
+// Debug builds retain it solely for shadow verification; C2MIR builds retain
+// it for their sticky compatibility contexts.
+#if defined(LAMBDA_C2MIR) || !defined(NDEBUG)
+#define GC_CONSERVATIVE_SCAN_AVAILABLE 1
+#else
+#define GC_CONSERVATIVE_SCAN_AVAILABLE 0
+#endif
+
+typedef struct gc_root_stats {
+    size_t precise_root_count;
+    size_t conservative_candidate_words;
+    size_t conservative_new_objects;
+    size_t conservative_scan_bytes;
+    size_t conservative_skipped_poisoned_words;
+} gc_root_stats_t;
+
+typedef struct gc_root_type_stat {
+    uint16_t type_tag;
+    size_t count;
+} gc_root_type_stat_t;
 
 /**
  * GCHeap - manages all GC-tracked allocations.
@@ -197,6 +234,32 @@ typedef struct gc_heap {
     gc_root_range_t* root_ranges;
     int root_range_count;
     int root_range_capacity;
+
+    // Root migration diagnostics. The mode is sticky for the heap unless an
+    // explicit test/debug API changes it before executing guest code.
+    gc_root_mode_t root_mode;
+    gc_root_stats_t last_root_stats;
+    gc_root_type_stat_t* root_type_stats;
+    int root_type_stat_count;
+    int root_type_stat_capacity;
+
+    // Deterministic forced-GC schedule for safepoint stress. Zero disables it.
+    size_t force_collect_interval;
+    size_t force_allocation_count;
+    size_t forced_collection_count;
+    uint64_t force_random_seed;
+    uint64_t force_random_state;
+    uint32_t force_random_one_in;
+
+    // Opt-in rooting stress: overwrite dead object payloads before their
+    // storage is recycled so missed precise roots fail deterministically.
+    int poison_freed;
+
+#ifndef NDEBUG
+    // Debug proof for helpers classified NO_GC. Public GC allocation and
+    // collection entry points must reject activity while this scope is live.
+    int no_gc_scope_depth;
+#endif
 
     // VMap tracing/finalization callbacks (set by runtime, called from GC)
     gc_vmap_trace_fn vmap_trace;    // traces Item keys/values in VMap's HashMap
@@ -330,6 +393,7 @@ int gc_is_nursery_data(gc_heap_t* gc, void* ptr);
  * @param slot pointer to uint64_t that holds a boxed Item
  */
 void gc_register_root(gc_heap_t* gc, uint64_t* slot);
+int gc_try_register_root(gc_heap_t* gc, uint64_t* slot);
 
 /**
  * Unregister an external root slot.
@@ -337,6 +401,9 @@ void gc_register_root(gc_heap_t* gc, uint64_t* slot);
  * @param slot pointer previously registered with gc_register_root
  */
 void gc_unregister_root(gc_heap_t* gc, uint64_t* slot);
+
+void gc_no_gc_scope_begin(gc_heap_t* gc);
+void gc_no_gc_scope_end(gc_heap_t* gc);
 
 /** Register/unregister a non-marking Item slot. The clear callback runs after
  * the slot is zeroed, while the dead object's header is still available to GC. */
@@ -361,8 +428,38 @@ void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count);
 void gc_unregister_root_range(gc_heap_t* gc, uint64_t* base);
 
 /**
+ * Configure and inspect collector root discovery. Precise-only mode is a
+ * verification facility until every active execution tier has exact roots.
+ */
+void gc_set_root_mode(gc_heap_t* gc, gc_root_mode_t mode);
+gc_root_mode_t gc_get_root_mode(const gc_heap_t* gc);
+const char* gc_root_mode_name(gc_root_mode_t mode);
+int gc_conservative_scan_available(void);
+const gc_root_stats_t* gc_get_last_root_stats(const gc_heap_t* gc);
+size_t gc_get_last_conservative_type_count(const gc_heap_t* gc,
+                                           uint16_t type_tag);
+
+/**
+ * Force the existing collection callback before every Nth public GC
+ * allocation. This is disabled by default and intended for deterministic
+ * rooting stress at allocator boundaries that are already MAY_GC.
+ */
+void gc_set_force_collect_interval(gc_heap_t* gc, size_t interval);
+void gc_set_force_collect_random(gc_heap_t* gc, uint64_t seed,
+                                 uint32_t one_in);
+size_t gc_get_forced_collection_count(const gc_heap_t* gc);
+
+/**
+ * Enable deterministic dead-object payload poisoning for rooting stress.
+ * Disabled by default; recycled object-zone slots are zeroed on allocation.
+ */
+void gc_set_poison_freed(gc_heap_t* gc, int enabled);
+int gc_get_poison_freed(const gc_heap_t* gc);
+
+/**
  * Run a full garbage collection cycle:
- *   1. Mark: scan registered roots, stack, and explicit roots; trace reachable
+ *   1. Mark: scan registered and explicit roots; compatibility builds also
+ *      scan the native stack
  *   2. Compact: copy surviving data zone buffers to tenured data zone
  *   3. Sweep: free unmarked objects back to free lists
  *   4. Reset nursery data zone
@@ -370,14 +467,18 @@ void gc_unregister_root_range(gc_heap_t* gc, uint64_t* base);
  * @param gc            heap to collect
  * @param extra_roots   array of additional root Items (may be NULL)
  * @param extra_count   number of additional root Items
- * @param stack_base    high address of the C stack (thread's stack base)
- * @param stack_current current stack pointer (low address)
  */
+#if GC_CONSERVATIVE_SCAN_AVAILABLE
 void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
                 uintptr_t stack_base, uintptr_t stack_current);
 void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
                 int extra_count, uintptr_t stack_base, uintptr_t stack_current,
                 uint64_t* root_base, int64_t root_count);
+#else
+void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count);
+void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
+                int extra_count, uint64_t* root_base, int64_t root_count);
+#endif
 
 /**
  * Mark a single Item as reachable (pushes to mark stack if GC-managed).

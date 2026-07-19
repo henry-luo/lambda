@@ -20,7 +20,7 @@ extern "C" Item rb_call_spaceship(Item left, Item right);
 extern "C" Item push_d(double dval);
 extern "C" void* heap_data_alloc(size_t size);
 extern "C" void heap_register_gc_root(uint64_t* slot);
-extern "C" void heap_unregister_gc_root(uint64_t* slot);
+extern __thread EvalContext* context;
 
 // forward declarations
 extern String* heap_create_name(const char* str, size_t len);
@@ -583,14 +583,13 @@ extern "C" bool rb_array_ensure_capacity(Array* arr, int64_t min_capacity) {
     }
     if (new_capacity > (int64_t)(SIZE_MAX / sizeof(Item))) return false;
 
-    uint64_t arr_root = (uint64_t)(uintptr_t)arr;
-    heap_register_gc_root(&arr_root);
+    RootFrame roots((Context*)context, 1);
+    Rooted<Array*> rooted_arr(roots, arr);
     // Ruby arrays are GC containers; keeping their item buffers in the GC data zone
     // prevents tracked side allocations from surviving until process shutdown.
     Item* new_items = (Item*)heap_data_alloc((size_t)new_capacity * sizeof(Item));
-    arr = (Array*)(uintptr_t)arr_root;
+    arr = rooted_arr.get();
     if (!new_items) {
-        heap_unregister_gc_root(&arr_root);
         return false;
     }
     if (arr->items && arr->capacity > 0) {
@@ -598,7 +597,6 @@ extern "C" bool rb_array_ensure_capacity(Array* arr, int64_t min_capacity) {
     }
     arr->items = new_items;
     arr->capacity = new_capacity;
-    heap_unregister_gc_root(&arr_root);
     return true;
 }
 
