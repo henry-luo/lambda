@@ -29604,69 +29604,78 @@ extern "C" Item js_iterable_to_array(Item iterable) {
         return ItemNull;
     }
 
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> iterable_root(roots, iterable);
+    Rooted<Item> array_root(roots, ItemNull);
+    Rooted<Item> iterator_root(roots, ItemNull);
+    Rooted<Item> temp_root(roots, ItemNull);
+    // Iterable conversion allocates while draining the source. Native locals
+    // are not precise roots, so keep the source, iterator, destination, and
+    // current compound value live until each is published into the result.
+
     // Typed arrays (Uint8Array, Int32Array, etc.): convert to plain array of boxed numbers
-    if (js_is_typed_array(iterable)) {
-        int len = js_typed_array_length(iterable);
-        Item arr = js_array_new(0);
+    if (js_is_typed_array(iterable_root.get())) {
+        int len = js_typed_array_length(iterable_root.get());
+        array_root.set(js_array_new(0));
         for (int i = 0; i < len; i++) {
-            Item elem = js_typed_array_get(iterable, (Item){.item = i2it(i)});
-            js_array_push_item_direct(arr.array, elem);
+            Item elem = js_typed_array_get(iterable_root.get(), (Item){.item = i2it(i)});
+            js_array_push_item_direct(array_root.get().array, elem);
         }
-        return arr;
+        return array_root.get();
     }
 
     // Check if it's a generator object
-    if (js_is_generator(iterable)) {
-        Item arr = js_array_new(0);
+    if (js_is_generator(iterable_root.get())) {
+        array_root.set(js_array_new(0));
         for (int safety = 0; safety < 100000; safety++) {
-            Item result = js_generator_next(iterable, make_js_undefined());
+            temp_root.set(js_generator_next(iterable_root.get(), make_js_undefined()));
             if (js_exception_pending) return ItemNull;
             // Extract .done and .value from result
             String* done_key = heap_create_name("done", 4);
-            Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
+            Item done_item = js_property_get(temp_root.get(), (Item){.item = s2it(done_key)});
             if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
             String* val_key = heap_create_name("value", 5);
-            Item value = js_property_get(result, (Item){.item = s2it(val_key)});
-            js_array_push_item_direct(arr.array, value);
+            Item value = js_property_get(temp_root.get(), (Item){.item = s2it(val_key)});
+            js_array_push_item_direct(array_root.get().array, value);
         }
-        return arr;
+        return array_root.get();
     }
 
     // Check if it's a Map/Set collection — convert to array directly
-    if (get_type_id(iterable) == LMD_TYPE_MAP) {
-        JsCollectionData* cd = js_get_collection_data(iterable);
+    if (get_type_id(iterable_root.get()) == LMD_TYPE_MAP) {
+        JsCollectionData* cd = js_get_collection_data(iterable_root.get());
         if (cd) {
             size_t count = hashmap_count(cd->hmap);
-            Item arr = js_array_new((int)count);
+            array_root.set(js_array_new((int)count));
             JsCollectionOrderNode* node = cd->order_head;
             int idx = 0;
             if (cd->type == JS_COLLECTION_MAP) {
                 // Map: array of [key, value] pairs
                 while (node) {
-                    Item pair = js_array_new(2);
-                    js_array_set_int(pair, 0, node->key);
-                    js_array_set_int(pair, 1, node->value);
-                    js_array_set_int(arr, idx, pair);
+                    temp_root.set(js_array_new(2));
+                    js_array_set_int(temp_root.get(), 0, node->key);
+                    js_array_set_int(temp_root.get(), 1, node->value);
+                    js_array_set_int(array_root.get(), idx, temp_root.get());
                     idx++;
                     node = node->next;
                 }
             } else {
                 // Set: array of values
                 while (node) {
-                    js_array_set_int(arr, idx, node->key);
+                    js_array_set_int(array_root.get(), idx, node->key);
                     idx++;
                     node = node->next;
                 }
             }
-            return arr;
+            return array_root.get();
         }
     }
 
     // String: split into individual characters
-    if (get_type_id(iterable) == LMD_TYPE_STRING) {
-        String* str = it2s(iterable);
+    if (get_type_id(iterable_root.get()) == LMD_TYPE_STRING) {
+        String* str = it2s(iterable_root.get());
         if (str) {
-            Item arr = js_array_new(0);
+            array_root.set(js_array_new(0));
             int i = 0;
             while (i < (int)str->len) {
                 unsigned char lead = (unsigned char)str->chars[i];
@@ -29691,10 +29700,10 @@ extern "C" Item js_iterable_to_array(Item iterable) {
                 }
                 String* ch = heap_create_name(str->chars + i, total_len);
                 Item ch_item = (Item){.item = s2it(ch)};
-                js_array_push_item_direct(arr.array, ch_item);
+                js_array_push_item_direct(array_root.get().array, ch_item);
                 i += total_len;
             }
-            return arr;
+            return array_root.get();
         }
     }
 
@@ -29704,16 +29713,16 @@ extern "C" Item js_iterable_to_array(Item iterable) {
     // using the lazy getter here, so lightweight built-in iterators returned
     // from user @@iterator wrappers are stepped by js_iterator_step instead of
     // being rejected for not materializing an own `.next` property.
-    Item iterator = js_get_iterator_lazy(iterable);
+    iterator_root.set(js_get_iterator_lazy(iterable_root.get()));
     if (js_exception_pending) return ItemNull;
-    Item arr = js_array_new(0);
+    array_root.set(js_array_new(0));
     for (int safety = 0; safety < 100000; safety++) {
-        Item value = js_iterator_step(iterator);
+        Item value = js_iterator_step(iterator_root.get());
         if (js_exception_pending) return ItemNull;
         if (value.item == JS_ITER_DONE_SENTINEL) break;
-        js_array_push_item_direct(arr.array, value);
+        js_array_push_item_direct(array_root.get().array, value);
     }
-    return arr;
+    return array_root.get();
 }
 
 // =============================================================================

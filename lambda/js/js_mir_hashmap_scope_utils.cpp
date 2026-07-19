@@ -1111,10 +1111,13 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
             }
         }
         if (!existing) existing = jm_find_var(mt, name);
-        if (existing && existing_in_target_scope) {
-            // A fresh lexical shadow may share an identifier with an outer
-            // capture, but it is a distinct binding and must not inherit that
-            // binding's environment, TDZ, or const metadata.
+        bool generator_storage_home = mt->in_generator && existing &&
+            existing->from_env && existing->from_hoist;
+        if (existing && (existing_in_target_scope || generator_storage_home)) {
+            // Generator locals are predeclared in the function scope solely to
+            // reserve suspend/resume storage. Their later lexical declaration
+            // must retain that env home; ordinary outer lexical/capture bindings
+            // remain excluded so real shadows cannot inherit unrelated state.
             if (existing->from_env) {
                 entry.var.from_env = true;
                 entry.var.env_slot = existing->env_slot;
