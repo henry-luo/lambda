@@ -17,6 +17,7 @@
 #include "../lib/utf.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "view.hpp"  // For HTM_TAG_* constants
 #include "render.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -878,6 +879,24 @@ void dom_range_unlink_from_state(DocState* state, DomRange* range) {
     range->prev = range->next = NULL;
 }
 
+void dom_range_refresh_lifecycle_pins(DomDocument* doc) {
+    if (!doc) return;
+    dom_node_clear_reason_pins(doc, DOM_NODE_PIN_RANGE);
+    DomRange** head = doc->state ? dom_range_state_live_ranges_slot(doc->state) : nullptr;
+    if (!head) return;
+    for (DomRange* range = *head; range; range = range->next) {
+        DomNode* endpoints[2] = {range->start.node, range->end.node};
+        for (int i = 0; i < 2; i++) {
+            DomNode* node = endpoints[i];
+            if (!node) continue;
+            DomNodeRef ref = dom_node_ref(node);
+            if (dom_node_ref_validate(doc, ref)) {
+                dom_node_pin(doc, ref, DOM_NODE_PIN_RANGE);
+            }
+        }
+    }
+}
+
 void dom_state_invalidate_all_range_layouts(DocState* state) {
     if (!state) return;
     DomRange** head = dom_range_state_live_ranges_slot(state);
@@ -1139,8 +1158,6 @@ static DomDocument* node_doc(DomNode* n) {
     return nullptr;
 }
 
-// Allocate a String* from doc->arena. Independent of the lambda runtime heap
-// so the same code paths work in unit tests and production.
 // Build a DomText for a UTF-8 byte slice [chars, chars+byte_len).
 static DomText* dom_text_from_bytes(DomDocument* doc, const char* chars, size_t byte_len) {
     return DomText::create_detached_copy(doc, chars, byte_len);
@@ -1163,9 +1180,9 @@ DomNode* dom_node_clone(DomNode* node, bool deep) {
         DomElement* e = node->as_element();
         DomElement* clone = DomElement::create(doc, e->tag_name, dom_element_backing(e));
         if (!clone) return nullptr;
-        if (e->id) dom_element_retain_id(clone, lam::borrow_const(lam::promote_to_arena(doc->arena, e->id)));
-        if (e->class_names) dom_element_retain_class_names(clone, lam::PoolPtr<const char*>(e->class_names));
-        clone->class_count = e->class_count;
+        // DomElement::create already snapshots the backing attributes into
+        // independently owned document-pool caches; borrowing the source cache
+        // here would make either clone retirement free the other's storage.
         clone->tag_id      = e->tag_id;
         if (deep) {
             for (DomNode* c = e->first_child; c; c = c->next_sibling) {
@@ -1189,15 +1206,17 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
     size_t left_bytes  = u8_split;
     size_t right_bytes = original->length - u8_split;
 
-    // Allocate new strings before mutating original; both calls copy the bytes.
-    String* right_str = dom_document_create_string(
+    // Allocate both replacements before mutating the original. The new node's
+    // inline payload recycles with its primary allocation.
+    DomText* right = DomText::create_detached_copy(
         doc, original->text + u8_split, right_bytes);
     String* left_str = dom_document_create_string(
         doc, original->text, left_bytes);
-    if (!right_str || !left_str) return nullptr;
-
-    DomText* right = DomText::create_detached(right_str, doc);
-    if (!right) return nullptr;
+    if (!right || !left_str) {
+        if (left_str) pool_free(doc->document_pool, left_str);
+        if (right) dom_node_schedule_detached(doc, right);
+        return nullptr;
+    }
 
     // Insert right after original.
     DomNode* parent = original->parent;
@@ -1206,9 +1225,7 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
     else       parent->append_child(static_cast<DomNode*>(right));
 
     // Truncate original.
-    original->native_string = left_str;
-    original->text   = left_str->chars;
-    original->length = left_bytes;
+    dom_text_adopt_document_string(original, doc, left_str);
 
     if (state) dom_mutation_text_split(state, original, right, offset);
     return right;
@@ -1236,14 +1253,14 @@ bool dom_text_replace_data_contents(DocState* st, DomText* t,
     if (suffix_len) memcpy(buf + prefix + repl_bytes, t->text + u8_end, suffix_len);
     buf[new_len] = '\0';
 
-    String* s = dom_document_create_string(
-        node_doc(static_cast<DomNode*>(t)), buf, new_len);
+    DomDocument* doc = node_doc(static_cast<DomNode*>(t));
+    String* s = dom_document_create_string(doc, buf, new_len);
     mem_free(buf);
     if (!s) return false;
 
-    t->native_string = s;
-    t->text   = s->chars;
-    t->length = new_len;
+    // Range edits can replace the same detached text repeatedly; transfer
+    // payload ownership so the prior generated String is freed at replacement.
+    dom_text_adopt_document_string(t, doc, s);
 
     if (st) dom_mutation_text_replace_data(st, t, u16_offset, u16_count, repl_u16_len);
     return true;
@@ -1945,7 +1962,7 @@ static CssEnum cascaded_keyword(const DomElement* e, CssPropertyId prop) {
     if (!e || !e->doc) return (CssEnum)0;
     DomDocument* doc = e->doc;
     if (!doc->stylesheets || doc->stylesheet_count <= 0) return (CssEnum)0;
-    SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+    SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
     if (!matcher) return (CssEnum)0;
     CssDeclaration* best = nullptr;
     CssSpecificity best_spec = {0, 0, 0, 0, false};

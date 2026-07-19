@@ -3001,7 +3001,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         ViewText* existing_view = lam::view_require<RDT_VIEW_TEXT>(text_node);
         if (existing_view->rect) {
             log_debug("clearing existing text rects for re-layout");
-            existing_view->rect = nullptr;  // pool memory will be reused
+            // Multipass layout can revisit a text node in one generation; put
+            // its old fragments on the ViewTree cache before dropping the head.
+            lycon->doc->view_tree->recycle_text_rects(existing_view->rect);
+            existing_view->rect = nullptr;
         }
     }
 
@@ -3173,7 +3176,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
     // if font-size is 0, create zero-size text rect and return
     if (lycon->font.style && lycon->font.style->font_size <= 0.0f) {
-        TextRect* rect = (TextRect*)pool_calloc(lycon->doc->view_tree->pool, sizeof(TextRect));
+        TextRect* rect = lycon->doc->view_tree->alloc_text_rect();
         if (!text_view->rect) {
             text_view->rect = rect;
         } else {
@@ -3191,7 +3194,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         return;
     }
 
-    TextRect* rect = (TextRect*)pool_calloc(lycon->doc->view_tree->pool, sizeof(TextRect));
+    TextRect* rect = lycon->doc->view_tree->alloc_text_rect();
     if (!text_view->rect) {
         text_view->rect = rect;
     } else {

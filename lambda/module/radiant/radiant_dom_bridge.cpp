@@ -7,6 +7,7 @@
 #include "../../jube/jube_interface.h"
 #include "../../input/css/dom_node.hpp"
 #include "../../input/css/dom_element.hpp"
+#include "../../input/css/dom_lifecycle.hpp"
 #include "../../input/css/css_tokenizer.hpp"
 #include "../../input/css/selector_matcher.hpp"
 #include "../../js/js_class.h"
@@ -166,10 +167,11 @@ static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
 static const char s_radiant_dom_vmap_type_marker = 0;
 
 struct RadiantDomWrapperCacheEntry {
-    DomNode* node;
+    DomNodeRef node_ref;
     DomDocument* owner_doc;
     uint64_t item;
     RadiantDomWrapperCacheEntry* next_free;
+    RadiantDomWrapperCacheEntry* next_sweep;
 };
 
 struct RadiantDomWrapperCacheIndexEntry {
@@ -187,6 +189,7 @@ static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_head = 
 static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_tail = nullptr;
 static __thread HashMap* s_radiant_dom_wrapper_index = nullptr;
 static __thread RadiantDomWrapperCacheEntry* s_radiant_dom_wrapper_free = nullptr;
+static __thread RadiantDomWrapperCacheEntry* s_radiant_dom_wrapper_sweep = nullptr;
 static __thread bool s_radiant_dom_cache_owner_set = false;
 static __thread pthread_t s_radiant_dom_cache_owner;
 
@@ -264,17 +267,6 @@ static Item radiant_dom_int_item(int64_t value) {
 
 static Item radiant_dom_undefined_item() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
-}
-
-static String* radiant_dom_document_string(DomDocument* doc, const char* str, size_t len) {
-    if (!doc || !doc->arena || !str) return nullptr;
-    String* s = (String*)arena_alloc(doc->arena, sizeof(String) + len + 1);
-    if (!s) return nullptr;
-    s->len = (uint32_t)len;
-    s->is_ascii = str_is_ascii(str, len) ? 1 : 0;
-    if (len > 0) memcpy(s->chars, str, len);
-    s->chars[len] = '\0';
-    return s;
 }
 
 static Item radiant_dom_node_item(DomNode* node) {
@@ -1032,7 +1024,8 @@ static Item radiant_dom_lookup_wrapper(DomNode* node) {
     RadiantDomWrapperCacheIndexEntry probe = {.node = node, .entry = nullptr};
     const RadiantDomWrapperCacheIndexEntry* found =
         (const RadiantDomWrapperCacheIndexEntry*)hashmap_get(index, &probe);
-    if (found && found->entry && found->entry->item != 0) {
+    if (found && found->entry && found->entry->item != 0 &&
+        dom_node_ref_validate(found->entry->owner_doc, found->entry->node_ref)) {
         return (Item){.item = found->entry->item};
     }
     return ItemNull;
@@ -1054,6 +1047,53 @@ static RadiantDomWrapperCacheChunk* radiant_dom_alloc_wrapper_cache_chunk() {
     return chunk;
 }
 
+static void radiant_dom_weak_wrapper_cleared(uint64_t*, void* context) {
+    RadiantDomWrapperCacheEntry* entry = (RadiantDomWrapperCacheEntry*)context;
+    radiant_dom_cache_check_owner("weak_wrapper_cleared");
+    if (!entry || !entry->owner_doc || !entry->node_ref.address) return;
+    DomNode* address = entry->node_ref.address;
+    if (s_radiant_dom_wrapper_index) {
+        RadiantDomWrapperCacheIndexEntry probe = {.node = address, .entry = nullptr};
+        hashmap_delete(s_radiant_dom_wrapper_index, &probe);
+    }
+    // The wrapper pin guarantees the generation is still registered. Weak
+    // cleanup uses only the validated token and never inspects detached bytes.
+    dom_node_unpin(entry->owner_doc, entry->node_ref, DOM_NODE_PIN_WRAPPER);
+    entry->node_ref = {nullptr, 0};
+    entry->item = 0;
+    // Do not recycle the cache slot until the collector completes all weak
+    // callbacks; the owner document is needed for one post-batch DOM sweep.
+    entry->next_sweep = s_radiant_dom_wrapper_sweep;
+    s_radiant_dom_wrapper_sweep = entry;
+}
+
+extern "C" void gc_weak_slots_processed(void) {
+    if (!s_radiant_dom_wrapper_sweep) return;
+    radiant_dom_cache_check_owner("weak_slots_processed");
+    for (RadiantDomWrapperCacheEntry* entry = s_radiant_dom_wrapper_sweep;
+         entry; entry = entry->next_sweep) {
+        bool already_swept = false;
+        for (RadiantDomWrapperCacheEntry* prior = s_radiant_dom_wrapper_sweep;
+             prior != entry; prior = prior->next_sweep) {
+            if (prior->owner_doc == entry->owner_doc) {
+                already_swept = true;
+                break;
+            }
+        }
+        if (!already_swept && entry->owner_doc) {
+            dom_retire_sweep(entry->owner_doc);
+        }
+    }
+    while (s_radiant_dom_wrapper_sweep) {
+        RadiantDomWrapperCacheEntry* entry = s_radiant_dom_wrapper_sweep;
+        s_radiant_dom_wrapper_sweep = entry->next_sweep;
+        entry->owner_doc = nullptr;
+        entry->next_sweep = nullptr;
+        entry->next_free = s_radiant_dom_wrapper_free;
+        s_radiant_dom_wrapper_free = entry;
+    }
+}
+
 static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
     radiant_dom_cache_check_owner("cache_wrapper");
     if (!node || wrapper.item == ITEM_NULL) return;
@@ -1068,10 +1108,20 @@ static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
         }
         entry = &chunk->entries[chunk->count++];
     }
-    entry->node = node;
     entry->owner_doc = radiant_dom_node_document(node, true);
+    entry->node_ref = dom_node_ref(node);
+    if (!entry->owner_doc ||
+        !dom_node_ref_validate(entry->owner_doc, entry->node_ref)) {
+        entry->node_ref = {nullptr, 0};
+        entry->owner_doc = nullptr;
+        entry->item = 0;
+        entry->next_free = s_radiant_dom_wrapper_free;
+        s_radiant_dom_wrapper_free = entry;
+        return;
+    }
     entry->item = wrapper.item;
     entry->next_free = nullptr;
+    entry->next_sweep = nullptr;
 
     HashMap* index = radiant_dom_wrapper_index();
     if (index) {
@@ -1080,19 +1130,24 @@ static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
         RadiantDomWrapperCacheIndexEntry index_entry = {.node = node, .entry = entry};
         hashmap_set(index, &index_entry);
     }
-    radiant_host_api->gc->register_root(&entry->item);
+    // Wrapper identity is weak: live JS reaches the wrapper naturally; this
+    // slot only observes death so the matching native pin can be released.
+    dom_node_pin(entry->owner_doc, entry->node_ref, DOM_NODE_PIN_WRAPPER);
+    radiant_host_api->gc->register_weak(
+        &entry->item, radiant_dom_weak_wrapper_cleared, entry);
 }
 
 static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
     radiant_dom_cache_check_owner("clear_cache_entry");
     if (!entry || entry->item == 0) return;
-    DomNode* node = entry->node;
+    DomNode* node = entry->node_ref.address;
     if (s_radiant_dom_wrapper_index && node) {
         RadiantDomWrapperCacheIndexEntry probe = {.node = node, .entry = nullptr};
         hashmap_delete(s_radiant_dom_wrapper_index, &probe);
     }
-    if (node && node->is_element()) {
-        form_control_release_prop(node->as_element());
+    DomNode* live_node = dom_node_ref_validate(entry->owner_doc, entry->node_ref);
+    if (live_node && live_node->is_element()) {
+        form_control_release_prop(live_node->as_element());
     }
     Item wrapper = (Item){.item = entry->item};
     // Document teardown frees arena-owned DOM nodes; retained wrappers must
@@ -1105,10 +1160,14 @@ static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
             radiant_dom_host_invalidate(wrapper);
         }
     }
-    radiant_host_api->gc->unregister_root(&entry->item);
-    entry->node = nullptr;
+    radiant_host_api->gc->unregister_weak(&entry->item);
+    if (live_node) {
+        dom_node_unpin(entry->owner_doc, entry->node_ref, DOM_NODE_PIN_WRAPPER);
+    }
+    entry->node_ref = {nullptr, 0};
     entry->owner_doc = nullptr;
     entry->item = 0;
+    entry->next_sweep = nullptr;
     entry->next_free = s_radiant_dom_wrapper_free;
     s_radiant_dom_wrapper_free = entry;
 }
@@ -1119,7 +1178,7 @@ RADIANT_C_API void radiant_dom_invalidate_document(DomDocument* doc) {
     for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
         for (int i = 0; i < chunk->count; i++) {
             RadiantDomWrapperCacheEntry* entry = &chunk->entries[i];
-            if (entry->owner_doc == doc || radiant_dom_node_document(entry->node, false) == doc) {
+            if (entry->owner_doc == doc) {
                 radiant_dom_clear_cache_entry(entry);
             }
         }
@@ -3385,14 +3444,14 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->pool);
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->document_pool);
         if (!selector_group) {
             *out = ItemNull;
             return true;
         }
         // selector parsing and matching stay on the document pool so returned
         // wrappers are the only GC-managed values created by this read-only path.
-        SelectorMatcher* matcher = selector_matcher_create(elem->doc->pool);
+        SelectorMatcher* matcher = selector_matcher_create(elem->doc->document_pool);
         // Element selector queries walk descendants and must not match the
         // context element itself (Document queries pass true below).
         DomElement* found = radiant_dom_selector_group_find_first(
@@ -3412,12 +3471,12 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             return true;
         }
         Item arr_item = radiant_dom_array_item();
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->pool);
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->document_pool);
         if (!selector_group) {
             *out = arr_item;
             return true;
         }
-        SelectorMatcher* matcher = selector_matcher_create(elem->doc->pool);
+        SelectorMatcher* matcher = selector_matcher_create(elem->doc->document_pool);
         ArrayList* results = arraylist_new(16);
         if (!results) {
             *out = arr_item;
@@ -3443,12 +3502,12 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = (Item){.item = b2it(0)};
             return true;
         }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->pool);
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->document_pool);
         if (!selector_group) {
             *out = (Item){.item = b2it(0)};
             return true;
         }
-        SelectorMatcher* matcher = selector_matcher_create(elem->doc->pool);
+        SelectorMatcher* matcher = selector_matcher_create(elem->doc->document_pool);
         MatchResult result;
         bool matched = selector_matcher_matches_group(matcher, selector_group, elem, &result);
         *out = (Item){.item = b2it(matched ? 1 : 0)};
@@ -3465,12 +3524,12 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->pool);
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, elem->doc->document_pool);
         if (!selector_group) {
             *out = ItemNull;
             return true;
         }
-        SelectorMatcher* matcher = selector_matcher_create(elem->doc->pool);
+        SelectorMatcher* matcher = selector_matcher_create(elem->doc->document_pool);
         MatchResult result;
         DomElement* current = elem;
         while (current) {
@@ -4597,11 +4656,11 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             return 1;
         }
         const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text || !doc || !doc->pool) {
+        if (!sel_text || !doc || !doc->document_pool) {
             *out = ItemNull;
             return 1;
         }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->pool);
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->document_pool);
         if (!selector_group) {
             Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
             Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
@@ -4610,7 +4669,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             *out = ItemNull;
             return 1;
         }
-        SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+        SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
         DomElement* found = radiant_dom_selector_group_find_first(
             matcher, selector_group, root, true);
         *out = radiant_dom_node_item((DomNode*)found);
@@ -4623,16 +4682,16 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             return 1;
         }
         const char* sel_text = radiant_dom_to_dom_string_cstr(args[0]);
-        if (!sel_text || !doc || !doc->pool) {
+        if (!sel_text || !doc || !doc->document_pool) {
             *out = radiant_dom_array_item();
             return 1;
         }
-        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->pool);
+        CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->document_pool);
         if (!selector_group) {
             *out = radiant_dom_array_item();
             return 1;
         }
-        SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+        SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
         ArrayList* results = arraylist_new(16);
         Item arr_item = radiant_dom_array_item();
         Array* arr = arr_item.array;
@@ -4697,8 +4756,8 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             *out = ItemNull;
             return 1;
         }
-        String* str = radiant_dom_document_string(doc, text, strlen(text));
-        DomText* text_node = dom_text_create_detached(str, doc);
+        DomText* text_node = DomText::create_detached_copy(
+            doc, text, strlen(text));
         *out = radiant_dom_node_item((DomNode*)text_node);
         return 1;
     }

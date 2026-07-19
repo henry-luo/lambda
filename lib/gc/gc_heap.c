@@ -17,6 +17,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Hosts may batch native-lifetime work released by weak callbacks. The weak
+// default keeps the collector independent when no host integration is linked.
+__attribute__((weak)) void gc_weak_slots_processed(void) {}
+
 #ifdef LAMBDA_JS_EXEC_PROFILE
 #define GC_PROFILE_ENTER(label) js_weak_profile_property_set_branch_enter(label)
 #define GC_PROFILE_LEAVE(label, token) js_weak_profile_property_set_branch_leave(label, token)
@@ -368,6 +372,10 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
         gc->root_slot_capacity = 0;
     }
 
+    gc->weak_slots = NULL;
+    gc->weak_slot_count = 0;
+    gc->weak_slot_capacity = 0;
+
     // initialize root range registry (for JS closure env arrays)
     gc->root_ranges = NULL;
     gc->root_range_count = 0;
@@ -458,6 +466,11 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (gc->root_slots) {
         free(gc->root_slots);
         gc->root_slots = NULL;
+    }
+
+    if (gc->weak_slots) {
+        free(gc->weak_slots);
+        gc->weak_slots = NULL;
     }
 
     if (gc->large_objects) {
@@ -808,6 +821,47 @@ void gc_no_gc_scope_end(gc_heap_t* gc) {
 #endif
 }
 
+void gc_register_weak(gc_heap_t* gc, uint64_t* slot,
+                      gc_weak_clear_fn on_clear, void* context) {
+    if (!gc || !slot) return;
+    for (int i = 0; i < gc->weak_slot_count; i++) {
+        if (gc->weak_slots[i].slot == slot) {
+            gc->weak_slots[i].on_clear = on_clear;
+            gc->weak_slots[i].context = context;
+            return;
+        }
+    }
+    if (gc->weak_slot_count >= gc->weak_slot_capacity) {
+        int new_capacity = gc->weak_slot_capacity
+            ? gc->weak_slot_capacity * 2 : GC_ROOT_SLOTS_INITIAL;
+        gc_weak_slot_t* slots = (gc_weak_slot_t*)realloc(
+            gc->weak_slots, (size_t)new_capacity * sizeof(gc_weak_slot_t));
+        if (!slots) {
+            log_error("gc_register_weak: failed to grow weak slot registry to %d",
+                      new_capacity);
+            return;
+        }
+        gc->weak_slots = slots;
+        gc->weak_slot_capacity = new_capacity;
+    }
+    gc_weak_slot_t* weak = &gc->weak_slots[gc->weak_slot_count++];
+    weak->slot = slot;
+    weak->on_clear = on_clear;
+    weak->context = context;
+}
+
+void gc_unregister_weak(gc_heap_t* gc, uint64_t* slot) {
+    if (!gc || !slot) return;
+    for (int i = 0; i < gc->weak_slot_count; i++) {
+        if (gc->weak_slots[i].slot == slot) {
+            gc->weak_slots[i].slot = NULL;
+            gc->weak_slots[i].on_clear = NULL;
+            gc->weak_slots[i].context = NULL;
+            return;
+        }
+    }
+}
+
 void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
     if (!gc || !base || count <= 0) return;
     for (int i = 0; i < gc->root_range_count; i++) {
@@ -1087,6 +1141,39 @@ void gc_mark_object_ptr(gc_heap_t* gc, void* ptr) {
 
     header->marked = 1;
     mark_stack_push(gc, header);
+}
+
+static void gc_process_weak_slots(gc_heap_t* gc) {
+    if (!gc || !gc->weak_slots) return;
+    // Only slots present when weak processing starts participate in this
+    // collection; callbacks may safely register work for the next cycle.
+    int snapshot_count = gc->weak_slot_count;
+    for (int i = 0; i < snapshot_count; i++) {
+        uint64_t* slot = gc->weak_slots[i].slot;
+        if (!slot || *slot == 0) continue;
+        void* ptr = item_to_ptr(*slot);
+        if (!ptr || !is_gc_object(gc, ptr)) continue;
+        gc_header_t* header = gc_get_header(ptr);
+        if (header && header->marked && !(header->gc_flags & GC_FLAG_FREED)) continue;
+
+        gc_weak_clear_fn on_clear = gc->weak_slots[i].on_clear;
+        void* context = gc->weak_slots[i].context;
+        // Remove the registry edge before invoking user cleanup, so callback
+        // unregistration is idempotent and cannot shift the active traversal.
+        gc->weak_slots[i].slot = NULL;
+        gc->weak_slots[i].on_clear = NULL;
+        gc->weak_slots[i].context = NULL;
+        *slot = 0;
+        if (on_clear) on_clear(slot, context);
+    }
+
+    int write = 0;
+    for (int read = 0; read < gc->weak_slot_count; read++) {
+        if (!gc->weak_slots[read].slot) continue;
+        if (write != read) gc->weak_slots[write] = gc->weak_slots[read];
+        write++;
+    }
+    gc->weak_slot_count = write;
 }
 
 static void gc_mark_possible_item(gc_heap_t* gc, uint64_t value) {
@@ -2095,6 +2182,11 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     // Release builds compile debug logging away; retain the accounting above
     // without turning its diagnostic-only result into an unused-variable error.
     (void)traced_count;
+
+    // Weak slots observe the completed reachability graph but must clear
+    // before sweep reuses dead object storage.
+    gc_process_weak_slots(gc);
+    gc_weak_slots_processed();
 
     // Measure nursery and tenured usage before compaction for adaptive threshold
     size_t nursery_used_before = gc_data_zone_used(gc->data_zone);

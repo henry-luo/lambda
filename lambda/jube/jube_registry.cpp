@@ -24,6 +24,9 @@ static bool jube_legacy_rooting_abi_loaded = false;
 extern __thread EvalContext* context;
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
+extern "C" void heap_register_gc_weak(uint64_t* slot,
+    JubeGcWeakClearFn on_clear, void* context);
+extern "C" void heap_unregister_gc_weak(uint64_t* slot);
 
 static bool jube_host_root_frame_begin(LambdaRootFrame* frame,
         size_t slot_count) {
@@ -291,6 +294,8 @@ static const JubeHostGcAPI jube_host_gc_api = {
     jube_host_root_frame_begin,
     jube_host_root_frame_take_slot,
     jube_host_root_frame_end,
+    heap_register_gc_weak,
+    heap_unregister_gc_weak,
 };
 
 static const JubeHostValueAPI jube_host_value_api = {

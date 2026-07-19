@@ -140,10 +140,13 @@ struct DomDocumentServices {
     uint32_t element_count;
     uint32_t ext_allocations;
     uint32_t layout_cache_allocations;
+    void* node_registry;       // external generations, pins, and detached candidates
+    void* style_epoch_manager; // versioned canonical specified-style pools
 
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
         keyframe_registry(nullptr), element_count(0), ext_allocations(0),
-        layout_cache_allocations(0) {}
+        layout_cache_allocations(0), node_registry(nullptr),
+        style_epoch_manager(nullptr) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
@@ -167,8 +170,8 @@ static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
 struct DomDocument {
     // Lambda integration
     Input* input;                // Lambda Input context for MarkEditor operations
-    Pool* pool;                  // Pool for arena chunks
-    Arena* arena;                // Memory arena for all DOM node allocations
+    Pool* document_pool;         // Document-owned objects and backing for node_arena
+    Arena* node_arena;           // Stable DOM nodes and registered node-owned payloads
     DomDocumentServices services;
 
     // Document content
@@ -233,9 +236,10 @@ struct DomDocument {
     float pending_viewport_scroll_x;
     float pending_viewport_scroll_y;
     DomElement* pending_scroll_into_view_target;
+    uint32_t pending_scroll_into_view_target_id;
 
     // Constructor
-    DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
+    DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
                     next_node_id(1),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
@@ -249,7 +253,8 @@ struct DomDocument {
                     pending_navigation_url(nullptr),
                     document_charset(nullptr),
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),
-                    pending_scroll_into_view_target(nullptr) {}
+                    pending_scroll_into_view_target(nullptr),
+                    pending_scroll_into_view_target_id(0) {}
 
     bool init(Input* input);
     void destroy();
@@ -345,7 +350,17 @@ enum DomElementFlag : uint32_t {
     ELMT_FLAG_ROLE_KIND_SHIFT = 13,
     ELMT_FLAG_ROLE_KIND_MASK = 7u << ELMT_FLAG_ROLE_KIND_SHIFT,
     ELMT_FLAG_SYNTHETIC = 1u << 16,
+    // Canonical view props are immutable. Every writer must cross ensure_* so
+    // the element can copy the value back into mutable prop-pool storage.
+    ELMT_FLAG_INLINE_PROP_SHARED = 1u << 17,
+    // Reserved for R6: shared specified styles are owned by a StyleEpoch pool.
+    ELMT_FLAG_SPECIFIED_STYLE_SHARED = 1u << 18,
 };
+
+static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
+              "view-prop ownership flags overlap established element state");
+static_assert((ELMT_FLAG_SPECIFIED_STYLE_SHARED & ELMT_FLAG_INLINE_PROP_SHARED) == 0,
+              "style and view-prop ownership flags must remain independent");
 
 enum FragmentUnionKind : uint8_t {
     FRAGMENT_UNION_INLINE = 0,
@@ -384,6 +399,8 @@ struct DomElementExt {
     DomElement* shadow_root;
     float pending_element_scroll_x;
     float pending_element_scroll_y;
+    const char** attribute_names_cache;
+    int attribute_names_capacity;
 };
 
 /**
@@ -496,7 +513,7 @@ struct DomElement : DomNode {
     TransformProp* transform;
     // CSS transitions: persistent per-element snapshot of the last-applied used
     // values of transitionable properties, plus back-pointers to running
-    // transition instances. Allocated lazily from doc->pool (survives view-pool
+    // transition instances. Allocated lazily from doc->document_pool (survives view-pool
     // relayout, unlike in_line/bound/transform which are view-pool allocated).
     // Opaque here (radiant/view.hpp owns the type) to avoid a header dep.
     void* transition_state;
@@ -528,6 +545,16 @@ struct DomElement : DomNode {
     void set_measuring_intrinsic_width(bool value) { set_flag(ELMT_FLAG_MEASURING_INTRINSIC_WIDTH, value); }
     bool is_synthetic() const { return flag(ELMT_FLAG_SYNTHETIC); }
     void set_synthetic(bool value) { set_flag(ELMT_FLAG_SYNTHETIC, value); }
+    bool inline_prop_shared() const { return flag(ELMT_FLAG_INLINE_PROP_SHARED); }
+    void mark_inline_prop_owned() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, false); }
+    void mark_inline_prop_shared() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, true); }
+    void clear_inline_prop_binding() {
+        in_line = nullptr;
+        set_flag(ELMT_FLAG_INLINE_PROP_SHARED, false);
+    }
+    bool specified_style_shared() const { return flag(ELMT_FLAG_SPECIFIED_STYLE_SHARED); }
+    void mark_specified_style_owned() { set_flag(ELMT_FLAG_SPECIFIED_STYLE_SHARED, false); }
+    void mark_specified_style_shared() { set_flag(ELMT_FLAG_SPECIFIED_STYLE_SHARED, true); }
     bool has_pending_element_scroll_x() const { return flag(ELMT_FLAG_HAS_PENDING_SCROLL_X); }
     void set_has_pending_element_scroll_x(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_X, value); }
     bool has_pending_element_scroll_y() const { return flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y); }
@@ -643,8 +670,8 @@ struct DomElement : DomNode {
     DomComment* append_comment(const char* comment_content);
 
     DomElementExt* ensure_ext() {
-        if (!ext && doc && doc->pool) {
-            ext = (DomElementExt*)pool_calloc(doc->pool, sizeof(DomElementExt));
+        if (!ext && doc && doc->document_pool) {
+            ext = (DomElementExt*)pool_calloc(doc->document_pool, sizeof(DomElementExt));
             if (ext) doc->services.ext_allocations++;
         }
         return ext;
@@ -842,6 +869,7 @@ DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* 
  * @param element Element to destroy
  */
 void dom_element_destroy(DomElement* element);
+void dom_element_release_retired_storage(DomElement* element);
 
 /**
  * Clear all data from a DomElement (without freeing the structure)

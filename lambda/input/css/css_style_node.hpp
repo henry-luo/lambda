@@ -68,6 +68,7 @@ typedef struct StyleTree {
     int declaration_count;           // Total number of declarations
     int next_source_order;           // Next source order counter
     uint32_t compute_version;        // Global compute version for cache invalidation
+    void* canonical_owner;           // StyleCanonicalEntry for epoch-owned immutable trees
 } StyleTree;
 
 // ============================================================================
@@ -114,6 +115,19 @@ CssDeclaration* css_declaration_create(CssPropertyId property_id,
                                       CssSpecificity specificity,
                                       CssOrigin origin,
                                       Pool* pool);
+
+/** Copy declaration metadata while borrowing immutable document-lifetime values. */
+CssDeclaration* css_declaration_clone_for_cascade(
+    const CssDeclaration* source, CssSpecificity specificity,
+    CssOrigin origin, Pool* pool);
+
+/** Return whether a declaration payload can be snapshotted into another pool. */
+bool css_declaration_can_clone_owned(const CssDeclaration* source);
+
+/** Copy declaration metadata and all mutable/pointer payload into target_pool. */
+CssDeclaration* css_declaration_clone_owned(
+    const CssDeclaration* source, CssSpecificity specificity,
+    CssOrigin origin, Pool* target_pool);
 
 /**
  * Increment declaration reference count
@@ -321,6 +335,16 @@ void style_tree_get_statistics(StyleTree* style_tree,
  * @return Cloned tree or NULL on failure
  */
 StyleTree* style_tree_clone(StyleTree* source, Pool* target_pool);
+
+/** Clone all declaration records into target_pool; borrowed values must outlive it. */
+StyleTree* style_tree_clone_owned(StyleTree* source, Pool* target_pool);
+
+/** Reclaim a tree whose nodes and declaration records are all pool-owned. */
+void style_tree_destroy_owned(StyleTree* style_tree);
+
+bool style_tree_has_inline_declarations(StyleTree* style_tree);
+bool style_tree_is_empty(StyleTree* style_tree);
+bool style_tree_winners_equal(StyleTree* left, StyleTree* right);
 
 /**
  * Merge two style trees (for style composition)

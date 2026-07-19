@@ -13,6 +13,8 @@
 #include "../lib/str.h"
 // str.h included via view.hpp
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
+#include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/template_registry.h"
@@ -4017,55 +4019,6 @@ static bool dispatch_editing_composition_for_controller(EventContext* evcon,
 }
 
 /**
- * Clear view-pool-allocated pointers from DOM tree nodes.
- * Must be called after view_pool_destroy() and before relayout to prevent
- * dangling pointer access (TextRect, FontProp, BoundaryProp, etc. are
- * allocated from the view tree's pool which has just been destroyed).
- */
-static void clear_dom_view_pool_pointers(DomNode* node) {
-    while (node) {
-        if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* elem = lam::dom_require_element(node);
-            elem->font = nullptr;
-            elem->bound = nullptr;
-            elem->in_line = nullptr;
-            elem->blk = nullptr;
-            elem->scroller = nullptr;
-            elem->embed = nullptr;
-            elem->position = nullptr;
-            elem->transform = nullptr;
-            elem->filter = nullptr;
-            elem->set_backdrop_filter_prop(nullptr);
-            elem->set_multicol_prop(nullptr);
-            elem->pseudo = nullptr;
-            elem->set_vector_path(nullptr);
-            elem->layout_cache = nullptr;
-            elem->view_type = RDT_VIEW_NONE;
-            elem->content_width = 0;
-            elem->content_height = 0;
-            elem->set_has_cached_intrinsic_widths(false);
-            elem->set_styles_resolved(false);
-            elem->set_float_prelaid(false);
-            elem->reset_view_ext();
-            // View teardown must invalidate both independent shorter-lived prop roles.
-            elem->fi = nullptr;
-            elem->tb = nullptr;
-            elem->set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
-            elem->set_role_kind(DomElement::ROLE_NONE);
-            if (elem->first_child) {
-                clear_dom_view_pool_pointers(elem->first_child);
-            }
-        } else if (node->node_type == DOM_NODE_TEXT) {
-            DomText* text = lam::dom_require_text(node);
-            text->rect = nullptr;
-            text->font = nullptr;
-            text->view_type = RDT_VIEW_NONE;
-        }
-        node = node->next_sibling;
-    }
-}
-
-/**
  * Post-handler rebuild: after JS handler mutates DOM, re-cascade CSS and relayout.
  */
 #ifndef NDEBUG
@@ -4085,12 +4038,7 @@ static const char* dom_js_mutation_kind_name(DomJsMutationKind kind) {
 #endif
 
 static void dom_js_mutation_reset_records(DomDocument* doc) {
-    if (!doc) return;
-    doc->js.mutation_count = 0;
-    doc->js.mutation_sequence = 0;
-    doc->js.mutation_kind_mask = 0;
-    doc->js.mutation_record_count = 0;
-    doc->js.mutation_record_overflow = 0;
+    dom_js_mutation_records_reset(doc);
 }
 
 static void dom_js_mutation_log_records(DomDocument* doc) {
@@ -4430,8 +4378,10 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
 
     clear_cascaded_styles_recursive(static_cast<DomNode*>(root));
 
-    Pool* pool = doc->pool;
+    Pool* pool = doc->document_pool;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
+    bool epoch_scope = style_epoch_cascade_begin(
+        doc, root, css_engine, false);
     if (pool && css_engine && matcher) {
         for (int i = 0; i < doc->stylesheet_count; i++) {
             if (doc->stylesheets[i]) {
@@ -4444,6 +4394,7 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
     if (!root->is_synthetic()) {
         apply_inline_styles_to_tree(root, dom_element_to_element(root), pool);
     }
+    if (epoch_scope) style_epoch_cascade_end(doc);
 }
 
 typedef struct DomJsDirtyBound {
@@ -4591,7 +4542,7 @@ static bool post_html_handler_incremental_rebuild(
     }
     if (fallback_reason_out) *fallback_reason_out = "eligible";
 
-    Pool* pool = doc->pool;
+    Pool* pool = doc->document_pool;
     SelectorMatcher* matcher = selector_matcher_create(pool);
     state_configure_selector_matcher((DocState*)doc->state, matcher);
 
@@ -4716,10 +4667,15 @@ static void post_html_handler_rebuild(EventContext* evcon,
         dom_js_mutation_reset_records(doc);
         return;
     }
+    if (fallback_reason && strcmp(fallback_reason, "stylesheet-mutation") == 0) {
+        // A <style>/<link> structural edit changes global selector inputs even
+        // when no CSSOM wrapper initiated the mutation.
+        style_epoch_mark_global_change(doc);
+    }
 
     // Re-cascade CSS on the full tree (handles broad className changes, style writes, etc.)
     // Re-collect inline stylesheets in case JS added/removed/disabled <style> elements
-    Pool* pool = doc->pool;
+    Pool* pool = doc->document_pool;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
     SelectorMatcher* matcher = selector_matcher_create(pool);
     state_configure_selector_matcher((DocState*)doc->state, matcher);
@@ -4727,6 +4683,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Clear previously cascaded declarations so removed classes/attributes cannot
     // keep stale winning CSS declarations in specified_style.
     clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
+
+    bool epoch_scope = style_epoch_cascade_begin(
+        doc, doc->root, css_engine, false);
 
     // Apply all cached stylesheets
     for (int i = 0; i < doc->stylesheet_count; i++) {
@@ -4737,6 +4696,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     // Re-apply inline style="" attributes
     apply_inline_styles_to_tree(doc->root, doc->html_root, pool);
+    if (epoch_scope) style_epoch_cascade_end(doc);
 
     auto t1 = high_resolution_clock::now();
 
@@ -4766,11 +4726,6 @@ static void post_html_handler_rebuild(EventContext* evcon,
         // below re-creates them for elements that still have them. Without this, the next
         // animation_scheduler_tick dereferences a dangling View* (use-after-free).
         animation_scheduler_remove_views(state->animation_scheduler);
-    }
-
-    // Clear dangling view-pool pointers from DOM tree nodes before relayout
-    if (doc->root) {
-        clear_dom_view_pool_pointers(static_cast<DomNode*>(doc->root));
     }
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
@@ -5621,13 +5576,16 @@ static bool document_has_hover_rules(DomDocument* doc) {
 static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* state) {
     if (!doc || !state) return;
 
-    Pool* pool = doc->pool;
+    Pool* pool = doc->document_pool;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
     if (pool && css_engine && doc->root) {
         // Pseudo-state changes can affect descendants through selectors like
         // `.parent:hover .child`, so clear and re-apply the full cascade once
         // after the StateStore pseudo bits have been updated.
         clear_cascaded_styles_recursive(static_cast<DomNode*>(doc->root));
+
+        bool epoch_scope = style_epoch_cascade_begin(
+            doc, doc->root, css_engine, false);
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
         state_configure_selector_matcher(state, matcher);
@@ -5638,6 +5596,7 @@ static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* stat
             }
         }
         apply_inline_styles_to_tree(doc->root, doc->html_root, pool);
+        if (epoch_scope) style_epoch_cascade_end(doc);
     }
 }
 
@@ -6502,7 +6461,7 @@ DomNode* set_iframe_src_by_name(DomElement *document, const char *target_name, c
         return NULL;
     }
     // get memory pool from document
-    Pool* pool = document->doc ? document->doc->pool : nullptr;
+    Pool* pool = document->doc ? document->doc->document_pool : nullptr;
     if (!pool) {
         log_error("Document has no memory pool");
         return NULL;

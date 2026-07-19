@@ -103,6 +103,31 @@ TEST_F(MemoryPoolTest, BasicAllocation) {
     pool_free(pool, ptr);
 }
 
+TEST_F(MemoryPoolTest, DetailedStatisticsTrackLiveAndCumulativeBytes) {
+    void* first = pool_alloc(pool, 100);
+    void* second = pool_calloc(pool, 200);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+
+    PoolStats stats;
+    pool_get_detailed_stats(pool, &stats);
+    EXPECT_GE(stats.live_bytes, 300u);
+    EXPECT_GE(stats.high_water_live_bytes, stats.live_bytes);
+    EXPECT_EQ(stats.cumulative_bytes, 300u);
+    EXPECT_EQ(stats.allocation_count, 2u);
+    EXPECT_EQ(stats.free_count, 0u);
+    EXPECT_GT(pool_allocation_size(pool, first), 0u);
+
+    size_t owned = pool_allocation_size(pool, first);
+    size_t before = stats.live_bytes;
+    pool_free(pool, first);
+    pool_get_detailed_stats(pool, &stats);
+    EXPECT_EQ(stats.live_bytes, before - owned);
+    EXPECT_EQ(stats.free_count, 1u);
+
+    pool_free(pool, second);
+}
+
 TEST_F(MemoryPoolTest, BasicCalloc) {
     size_t size = 1024;
     char* ptr = (char*)pool_calloc(pool, size);

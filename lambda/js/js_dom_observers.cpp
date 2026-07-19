@@ -2,6 +2,8 @@
 #include "js_dom.h"
 #include "js_runtime.h"
 #include "../input/css/dom_node.hpp"
+#include "../input/css/dom_element.hpp"
+#include "../input/css/dom_lifecycle.hpp"
 #include "../../radiant/view.hpp"
 #include "../../lib/log.h"
 
@@ -20,6 +22,8 @@ typedef enum JsObserverKind {
 
 typedef struct JsObserverTarget {
     DomNode* node;
+    DomDocument* owner_doc;
+    DomNodeRef node_ref;
     bool child_list;
     bool attributes;
     bool character_data;
@@ -29,6 +33,7 @@ typedef struct JsObserverTarget {
     char attribute_filter[8][64];
     int attribute_filter_count;
     DomNode* transient_roots[8];
+    DomNodeRef transient_refs[8];
     int transient_root_count;
     float last_width;
     float last_height;
@@ -42,6 +47,7 @@ typedef struct JsObserverState {
     Item callback;
     JsObserverKind kind;
     DomElement* root;
+    DomNodeRef root_ref;
     float root_margin[4];
     bool root_margin_percent[4];
     float thresholds[16];
@@ -77,6 +83,49 @@ static JsObserverState* observer_from_this(void) {
         if (observers[i].object.item == receiver.item) return &observers[i];
     }
     return nullptr;
+}
+
+static DomDocument* observer_node_document(DomNode* node) {
+    for (DomNode* current = node; current; current = current->parent) {
+        if (current->is_element() && current->as_element()->doc) {
+            return current->as_element()->doc;
+        }
+    }
+    return (DomDocument*)js_dom_get_document();
+}
+
+static bool observer_pin_node(DomDocument* doc, DomNode* node, DomNodeRef* out) {
+    if (!doc || !node || !out) return false;
+    *out = dom_node_ref(node);
+    if (!dom_node_ref_validate(doc, *out)) return false;
+    return dom_node_pin(doc, *out, DOM_NODE_PIN_OBSERVER);
+}
+
+static void observer_release_target(JsObserverTarget* target) {
+    if (!target) return;
+    if (target->owner_doc && target->node_ref.address) {
+        dom_node_unpin(target->owner_doc, target->node_ref, DOM_NODE_PIN_OBSERVER);
+    }
+    for (int i = 0; i < target->transient_root_count; i++) {
+        if (target->owner_doc && target->transient_refs[i].address) {
+            dom_node_unpin(target->owner_doc, target->transient_refs[i],
+                           DOM_NODE_PIN_OBSERVER);
+        }
+    }
+    memset(target, 0, sizeof(*target));
+}
+
+static void observer_release_transient_roots(JsObserverTarget* target) {
+    if (!target) return;
+    for (int i = 0; i < target->transient_root_count; i++) {
+        if (target->owner_doc && target->transient_refs[i].address) {
+            dom_node_unpin(target->owner_doc, target->transient_refs[i],
+                           DOM_NODE_PIN_OBSERVER);
+        }
+    }
+    memset(target->transient_roots, 0, sizeof(target->transient_roots));
+    memset(target->transient_refs, 0, sizeof(target->transient_refs));
+    target->transient_root_count = 0;
 }
 
 static JsObserverState* observer_create(JsObserverKind kind, Item callback) {
@@ -206,7 +255,9 @@ static JsObserverTarget* observer_find_target(JsObserverState* observer, DomNode
 static Item js_observer_disconnect(void) {
     JsObserverState* observer = observer_from_this();
     if (observer) {
-        memset(observer->targets, 0, sizeof(observer->targets));
+        for (int i = 0; i < observer->target_count; i++) {
+            observer_release_target(&observer->targets[i]);
+        }
         observer->target_count = 0;
         observer_replace_pending(observer);
     }
@@ -247,6 +298,12 @@ static Item js_mutation_observer_observe(Item target_item, Item options) {
         target = &observer->targets[observer->target_count++];
         memset(target, 0, sizeof(*target));
         target->node = node;
+        target->owner_doc = observer_node_document(node);
+        if (!observer_pin_node(target->owner_doc, node, &target->node_ref)) {
+            memset(target, 0, sizeof(*target));
+            observer->target_count--;
+            return make_js_undefined();
+        }
     }
     target->child_list = child_list;
     target->attributes = attributes;
@@ -280,6 +337,7 @@ static Item js_observer_unobserve(Item target_item) {
     if (!observer || !node) return make_js_undefined();
     for (int i = 0; i < observer->target_count; i++) {
         if (observer->targets[i].node != node) continue;
+        observer_release_target(&observer->targets[i]);
         for (int j = i; j + 1 < observer->target_count; j++) {
             observer->targets[j] = observer->targets[j + 1];
         }
@@ -304,6 +362,12 @@ static Item js_geometry_observer_observe(Item target_item) {
     JsObserverTarget* target = &observer->targets[observer->target_count++];
     memset(target, 0, sizeof(*target));
     target->node = node;
+    target->owner_doc = observer_node_document(node);
+    if (!observer_pin_node(target->owner_doc, node, &target->node_ref)) {
+        memset(target, 0, sizeof(*target));
+        observer->target_count--;
+        return make_js_undefined();
+    }
     // Geometry observation requires an initial sample even when observe() did
     // not dirty layout, but sampling waits until the current script's writes
     // settle so ResizeObserver reports the latest box once per checkpoint.
@@ -313,6 +377,8 @@ static Item js_geometry_observer_observe(Item target_item) {
 
 static Item js_observer_deliver(void) {
     observer_delivery_scheduled = false;
+    DomDocument* sweep_docs[JS_OBSERVER_CAP * JS_OBSERVER_TARGET_CAP] = {};
+    int sweep_doc_count = 0;
     for (int i = 0; i < observer_count; i++) {
         JsObserverState* observer = &observers[i];
         Item records = observer_pending(observer);
@@ -322,12 +388,20 @@ static Item js_observer_deliver(void) {
         js_call_function(observer->callback, make_js_undefined(), args, 2);
         if (observer->kind == JS_OBSERVER_MUTATION) {
             for (int j = 0; j < observer->target_count; j++) {
-                memset(observer->targets[j].transient_roots, 0,
-                       sizeof(observer->targets[j].transient_roots));
-                observer->targets[j].transient_root_count = 0;
+                DomDocument* owner_doc = observer->targets[j].owner_doc;
+                observer_release_transient_roots(&observer->targets[j]);
+                bool known = false;
+                for (int d = 0; d < sweep_doc_count; d++) {
+                    if (sweep_docs[d] == owner_doc) {
+                        known = true;
+                        break;
+                    }
+                }
+                if (owner_doc && !known) sweep_docs[sweep_doc_count++] = owner_doc;
             }
         }
     }
+    for (int i = 0; i < sweep_doc_count; i++) dom_retire_sweep(sweep_docs[i]);
     return make_js_undefined();
 }
 
@@ -378,6 +452,10 @@ extern "C" Item js_intersection_observer_new(Item callback, Item options) {
     observer_install_common_methods(observer, false);
     Item root_item = observer_option(options, "root");
     observer->root = (DomElement*)js_dom_unwrap_element(root_item);
+    if (observer->root) {
+        observer_pin_node(observer->root->doc, (DomNode*)observer->root,
+                          &observer->root_ref);
+    }
     js_property_set(observer->object, observer_key("root"),
         observer->root ? root_item : ItemNull);
     Item margin_item = observer_option(options, "rootMargin");
@@ -489,7 +567,12 @@ extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
             // belong to this observer's batch.
             if (kind == DOM_JS_MUTATION_CHILD_REMOVE && registration->subtree && target &&
                 registration->transient_root_count < 8) {
-                registration->transient_roots[registration->transient_root_count++] = target;
+                int transient_index = registration->transient_root_count;
+                if (observer_pin_node(registration->owner_doc, target,
+                        &registration->transient_refs[transient_index])) {
+                    registration->transient_roots[transient_index] = target;
+                    registration->transient_root_count++;
+                }
             }
             break;
         }
@@ -632,6 +715,16 @@ static Item js_geometry_observer_initial_sample(void) {
 }
 
 extern "C" void js_dom_observers_reset(void) {
+    for (int i = 0; i < observer_count; i++) {
+        JsObserverState* observer = &observers[i];
+        for (int j = 0; j < observer->target_count; j++) {
+            observer_release_target(&observer->targets[j]);
+        }
+        if (observer->root && observer->root_ref.address) {
+            dom_node_unpin(observer->root->doc, observer->root_ref,
+                           DOM_NODE_PIN_OBSERVER);
+        }
+    }
     memset(observers, 0, sizeof(observers));
     observer_count = 0;
     observer_delivery_scheduled = false;

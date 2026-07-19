@@ -1,5 +1,6 @@
 #include "view.hpp"
 
+#include <assert.h>
 #include <math.h>
 #include <string.h>
 
@@ -140,7 +141,12 @@ const FilterProp* DomElement::filterp() const { return filter ? filter : &FILTER
 BlockProp* DomElement::block_mut() { return blk; }
 BoundaryProp* DomElement::boundary_mut() { return bound; }
 FontProp* DomElement::font_mut() { return font; }
-InlineProp* DomElement::inline_mut() { return in_line; }
+InlineProp* DomElement::inline_mut() {
+    // Callers without an allocator cannot perform COW. Keep this legacy accessor
+    // from silently exposing immutable canonical storage to a writer.
+    assert(!inline_prop_shared());
+    return in_line;
+}
 ScrollProp* DomElement::scroll_mut() { return scroller; }
 PositionProp* DomElement::position_mut() { return position; }
 EmbedProp* DomElement::embed_mut() { return embed; }

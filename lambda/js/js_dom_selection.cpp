@@ -29,6 +29,7 @@
 #include "../jube/jube_interface.h"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/dom_element.hpp"
+#include "../input/css/dom_lifecycle.hpp"
 #include "../../lib/arraylist.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -169,7 +170,7 @@ static DocState* get_or_create_state() {
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     if (!doc) return nullptr;
     if (doc->state) return doc->state;
-    if (!doc->pool) return nullptr;
+    if (!doc->document_pool) return nullptr;
     return radiant_document_ensure_state(doc, "js_dom_selection");
 }
 
@@ -1547,8 +1548,13 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
         Item ev = js_create_event("selectionchange", /*bubbles=*/true,
                                   /*cancelable=*/false);
         js_dom_dispatch_event(js_dom_wrap_element(head), ev);
+        dom_node_unpin(head->doc, dom_node_ref((DomNode*)head),
+                       DOM_NODE_PIN_EVENT_QUEUE);
         head = next;
     }
+    // All selectionchange callbacks for this checkpoint have returned; nodes
+    // whose final queue pin was released may now be recycled together.
+    dom_retire_sweep(doc);
     js_doc_runtime_exit(&scope);
     return ItemNull;
 }
@@ -1567,6 +1573,12 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
         return;
     }
     if (f->tc_sc_pending) {
+        js_doc_runtime_exit(&scope);
+        return;
+    }
+    DomNodeRef pending_ref = dom_node_ref((DomNode*)elem);
+    if (!doc || !dom_node_ref_validate(doc, pending_ref) ||
+        !dom_node_pin(doc, pending_ref, DOM_NODE_PIN_EVENT_QUEUE)) {
         js_doc_runtime_exit(&scope);
         return;
     }
@@ -1605,6 +1617,20 @@ extern "C" void js_dom_selection_reset(void) {
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     if (!doc || !doc->state) return;
     DocState* state = doc->state;
+    DomElement* pending = state->tc_selectionchange_head;
+    while (pending) {
+        FormControlProp* form = pending->form;
+        DomElement* next = form ? form->tc_sc_next_pending : nullptr;
+        if (form) {
+            form->tc_sc_next_pending = nullptr;
+            form->tc_sc_pending = 0;
+        }
+        dom_node_unpin(pending->doc, dom_node_ref((DomNode*)pending),
+                       DOM_NODE_PIN_EVENT_QUEUE);
+        pending = next;
+    }
+    state->tc_selectionchange_head = nullptr;
+    state->tc_selectionchange_drain_scheduled = false;
     DomRange* r = state->live_ranges;
     while (r) {
         DomRange* next = r->next;

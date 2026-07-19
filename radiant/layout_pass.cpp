@@ -232,6 +232,14 @@ bool layout_pass_cache_get_for_space(::LayoutContext* lycon, ::DomElement* eleme
     SizeF* out_size, const char* label) {
     if (!lycon || !element || !element->layout_cache || !out_size) return false;
     if (lycon->run_mode != RunMode::ComputeSize) return false;
+    uint32_t generation = lycon->doc && lycon->doc->view_tree
+        ? lycon->doc->view_tree->layout_generation : 0;
+    if (element->layout_cache->generation != generation) {
+        // A retained prop block may survive reflow, but its measurements may
+        // only be consumed by the generation that produced them.
+        layout_cache_init(element->layout_cache, generation);
+        return false;
+    }
 
     if (layout_cache_get(element->layout_cache, known_dimensions, available_space,
                          lycon->run_mode, out_size)) {
@@ -263,7 +271,9 @@ LayoutCache* layout_pass_ensure_cache(::LayoutContext* lycon, ::DomElement* elem
     if (!cache && lycon->pool) {
         cache = (LayoutCache*)pool_calloc(lycon->pool, sizeof(LayoutCache));
         if (cache) {
-            layout_cache_init(cache);
+            uint32_t generation = lycon->doc && lycon->doc->view_tree
+                ? lycon->doc->view_tree->layout_generation : 0;
+            layout_cache_init(cache, generation);
             element->layout_cache = cache;
             if (element->doc) element->doc->services.layout_cache_allocations++;
         }

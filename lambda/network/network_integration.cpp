@@ -327,7 +327,7 @@ static void discover_document_font_resources(DomDocument* doc) {
         if (!doc->stylesheets[s]) continue;
         int face_count = 0;
         CssStylesheet* sheet = doc->stylesheets[s];
-        Pool* face_pool = doc->pool ? doc->pool : sheet->pool;
+        Pool* face_pool = doc->document_pool ? doc->document_pool : sheet->pool;
         bool free_faces = (face_pool == NULL);
         const char* font_base_url = sheet->origin_url ? sheet->origin_url : NULL;
         CssFontFaceDescriptor** faces = css_extract_font_faces(

@@ -90,7 +90,7 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
 
     if (doc->stylesheet_count >= doc->stylesheet_capacity) {
         int new_capacity = doc->stylesheet_capacity == 0 ? 4 : doc->stylesheet_capacity * 2;
-        if (!doc->pool) {
+        if (!doc->document_pool) {
             log_error("resource_loaders: cannot expand stylesheet array without document pool");
             return false;
         }
@@ -98,7 +98,7 @@ static bool add_stylesheet_to_document(DomDocument* doc, CssStylesheet* sheet) {
         // document stylesheet arrays are pool-owned after initial HTML load, so
         // network CSS must grow by copying instead of reallocating pool memory.
         size_t new_size = (size_t)new_capacity * sizeof(CssStylesheet*);
-        CssStylesheet** new_sheets = (CssStylesheet**)pool_calloc(doc->pool, new_size);
+        CssStylesheet** new_sheets = (CssStylesheet**)pool_calloc(doc->document_pool, new_size);
         if (!new_sheets) {
             log_error("resource_loaders: failed to expand stylesheet array");
             return false;
@@ -197,9 +197,9 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
     CssEngine* engine = NULL;
     if (res->manager && res->manager->css_engine) {
         engine = (CssEngine*)res->manager->css_engine;
-    } else if (doc->pool) {
+    } else if (doc->document_pool) {
         // create temporary engine if none available
-        engine = css_engine_create(doc->pool);
+        engine = css_engine_create(doc->document_pool);
         if (!engine) {
             log_error("network: failed to create CSS engine");
             mem_free(css_content);
@@ -345,10 +345,10 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     if (!img_element->embed) {
         if (img_element->doc && img_element->doc->view_tree) {
             img_element->ensure_embed(img_element->doc->view_tree);
-        } else if (img_element->doc && img_element->doc->pool) {
+        } else if (img_element->doc && img_element->doc->document_pool) {
             // An async decode can finish before the first ViewTree exists; use
             // the document pool only at that lifetime seam and seed CSS initials.
-            img_element->embed = (EmbedProp*)pool_calloc(img_element->doc->pool, sizeof(EmbedProp));
+            img_element->embed = (EmbedProp*)pool_calloc(img_element->doc->document_pool, sizeof(EmbedProp));
             if (img_element->embed) *img_element->embed = EMBED_PROP_DEFAULT;
         } else {
             img_element->embed = (EmbedProp*)mem_calloc(1, sizeof(EmbedProp), MEM_CAT_NETWORK);

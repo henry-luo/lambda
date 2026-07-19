@@ -46,6 +46,7 @@ enum DomNodeType {
 
 enum DomNodeFlag : uint8_t {
     DOM_NODE_FLAG_TEXT_SYMBOL = 1u << 0,
+    DOM_NODE_FLAG_TEXT_OWNS_STRING = 1u << 1,
 };
 
 typedef enum {
@@ -227,6 +228,8 @@ struct DomText : public DomNode {
 
     // Factories rely on zeroed arena/pool storage and write only semantic non-zero fields.
     static DomText* create(String* native_string, DomElement* parent_element);
+    static DomText* create_copy(const char* text, size_t len,
+                                DomElement* parent_element);
     static DomText* create_detached(String* native_string, DomDocument* doc);
     static DomText* create_detached_copy(DomDocument* doc, const char* text, size_t len);
     static DomText* create_symbol(const char* name, size_t len, DomElement* parent_element);
@@ -239,6 +242,13 @@ struct DomText : public DomNode {
     void set_symbol(bool value) {
         if (value) node_flags |= DOM_NODE_FLAG_TEXT_SYMBOL;
         else node_flags &= ~DOM_NODE_FLAG_TEXT_SYMBOL;
+    }
+    bool owns_native_string() const {
+        return (node_flags & DOM_NODE_FLAG_TEXT_OWNS_STRING) != 0;
+    }
+    void set_owns_native_string(bool value) {
+        if (value) node_flags |= DOM_NODE_FLAG_TEXT_OWNS_STRING;
+        else node_flags &= ~DOM_NODE_FLAG_TEXT_OWNS_STRING;
     }
 };
 
@@ -291,10 +301,17 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element);
 DomText* dom_text_create_detached(String* native_string, DomDocument* doc);
 
 /**
- * Copy UTF-8 bytes into a document-arena String. DOM mutation paths share this
- * allocator so live text nodes never retain temporary or JS-heap storage.
+ * Copy UTF-8 bytes into an individually reclaimable document-pool String.
+ * Transfer it to a DomText with dom_text_adopt_document_string().
  */
 String* dom_document_create_string(DomDocument* doc, const char* text, size_t len);
+
+/** Transfer a String returned by dom_document_create_string() to a text node. */
+bool dom_text_adopt_document_string(DomText* text_node, DomDocument* doc,
+                                    String* string);
+
+/** Release a text node's individually owned payload before primary recycling. */
+void dom_text_release_retired_storage(DomDocument* doc, DomText* text_node);
 
 /**
  * Destroy a DomText node

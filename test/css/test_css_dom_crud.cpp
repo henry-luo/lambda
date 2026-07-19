@@ -65,7 +65,7 @@ protected:
         // library) so that the dylib's copy of static globals gets initialized.
         // NOTE: css_property_system_init(pool) only initializes the test binary's copy
         // of the statics, not the shared library's copy used by css_parser/dom_element.
-        css_engine_create(doc->pool);
+        css_engine_create(doc->document_pool);
 
         matcher = selector_matcher_create(pool);
         ASSERT_NE(matcher, nullptr);

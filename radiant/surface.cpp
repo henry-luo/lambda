@@ -813,11 +813,11 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                     inst = lottie_player_create_from_data(rs->animation_scheduler, surface,
                                 (const char*)downloaded_data, downloaded_size,
                                 surface->width, surface->height,
-                                rs->animation_scheduler->current_time, uicon->document->pool);
+                                rs->animation_scheduler->current_time, uicon->document->document_pool);
                 } else {
                     inst = lottie_player_create_from_file(rs->animation_scheduler, surface,
                                 file_path, surface->width, surface->height,
-                                rs->animation_scheduler->current_time, uicon->document->pool);
+                                rs->animation_scheduler->current_time, uicon->document->document_pool);
                 }
                 if (inst) {
                     LottiePlayer* lp = (LottiePlayer*)inst->state;
@@ -946,7 +946,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             DocState* rs = (DocState*)uicon->document->state;
             if (rs && rs->animation_scheduler) {
                 gif_animation_create(rs->animation_scheduler, surface, gif_frames,
-                                      rs->animation_scheduler->current_time, uicon->document->pool);
+                                      rs->animation_scheduler->current_time, uicon->document->document_pool);
                 log_info("gif animated: registered %d-frame GIF with scheduler", gif_frames->frame_count);
             } else {
                 image_gif_free(gif_frames);

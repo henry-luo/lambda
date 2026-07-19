@@ -333,18 +333,20 @@ struct LayoutCache {
     float intrinsic_min_content_width;
     float intrinsic_max_content_width;
     bool is_empty;
+    uint32_t generation;
 };
 
-inline void layout_cache_init(LayoutCache* cache) {
+inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
     cache->final_layout.valid = false;
     for (int i = 0; i < LAYOUT_CACHE_SIZE; i++) {
         cache->measure_entries[i].valid = false;
     }
     cache->is_empty = true;
+    cache->generation = generation;
 }
 
 inline void layout_cache_clear(LayoutCache* cache) {
-    layout_cache_init(cache);
+    layout_cache_init(cache, cache ? cache->generation : 0);
 }
 
 inline int layout_cache_compute_slot(
@@ -2604,6 +2606,8 @@ struct DocState;
 // View tree printing functions (output CSS logical pixels directly)
 void print_view_tree(ViewElement* view_root, Url* url, const char* output_path = nullptr);
 void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_path = nullptr);
+bool view_memory_profile_write(DomDocument* doc, const char* input_file,
+                               const char* output_path);
 
 // Print caret state to view_tree.txt (appends caret info)
 void print_caret_state(DocState* state, const char* output_path = nullptr);

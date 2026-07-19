@@ -656,13 +656,7 @@ static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) 
     if (!pseudo_elem || !pseudo_elem->doc || !text || !text[0]) return;
 
     size_t text_len = strlen(text);
-    String* text_string = (String*)arena_alloc(pseudo_elem->doc->arena, sizeof(String) + text_len + 1);
-    if (!text_string) return;
-    text_string->len = text_len;
-    memcpy(text_string->chars, text, text_len);
-    text_string->chars[text_len] = '\0';
-
-    DomText* text_node = DomText::create(text_string, pseudo_elem);
+    DomText* text_node = DomText::create_copy(text, text_len, pseudo_elem);
     if (!text_node) return;
     pseudo_append_child(pseudo_elem, static_cast<DomNode*>(text_node));
 }
@@ -727,7 +721,7 @@ static const char* pseudo_resolve_text_fragment(LayoutContext* lycon, DomElement
                 func->args[1]->type == CSS_VALUE_TYPE_KEYWORD) {
                 style_type = func->args[1]->data.keyword;
             }
-            char* buffer = (char*)arena_alloc(lycon->doc->arena, 64);
+            char* buffer = (char*)scratch_alloc(&lycon->scratch, 64);
             if (!buffer || !counter_name) return "";
             counter_format((CounterContext*)lycon->counter_context, counter_name, style_type, buffer, 64);
             return buffer;
@@ -741,7 +735,7 @@ static const char* pseudo_resolve_text_fragment(LayoutContext* lycon, DomElement
                 func->args[2]->type == CSS_VALUE_TYPE_KEYWORD) {
                 style_type = func->args[2]->data.keyword;
             }
-            char* buffer = (char*)arena_alloc(lycon->doc->arena, 128);
+            char* buffer = (char*)scratch_alloc(&lycon->scratch, 128);
             if (!buffer || !counter_name) return "";
             counters_format((CounterContext*)lycon->counter_context, counter_name,
                             separator ? separator : ".", style_type, buffer, 128);
@@ -1330,7 +1324,7 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
         if (lycon->counter_context) {
             log_info("%s [PSEUDO] Calling get_pseudo_element_content_with_counters", block->source_loc());
             before_content = dom_element_get_pseudo_element_content_with_counters(
-                elem, PSEUDO_ELEMENT_BEFORE, lycon->counter_context, lycon->doc->arena);
+                elem, PSEUDO_ELEMENT_BEFORE, lycon->counter_context, lycon->scratch.arena);
             log_info("%s [PSEUDO] Returned from with_counters: %p, len=%zu, bytes=[%02x %02x %02x]", block->source_loc(),
                 (void*)before_content,
                 before_content ? strlen(before_content) : 0,
@@ -1380,7 +1374,7 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
         const char* after_content = nullptr;
         if (lycon->counter_context) {
             after_content = dom_element_get_pseudo_element_content_with_counters(
-                elem, PSEUDO_ELEMENT_AFTER, lycon->counter_context, lycon->doc->arena);
+                elem, PSEUDO_ELEMENT_AFTER, lycon->counter_context, lycon->scratch.arena);
         }
         if (!after_content) {
             after_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_AFTER);
@@ -1587,7 +1581,7 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
 
     log_debug("%s [FIRST-LETTER] Found boundary=%d bytes in '%.*s'", block->source_loc(), boundary, text_len, text_data);
 
-    Pool* pool = lycon->doc->view_tree->pool;
+    Pool* pool = lycon->doc->view_tree->prop_pool;
     if (!pool) return;
 
     // Create the ::first-letter pseudo-element
@@ -3897,21 +3891,11 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
             // attr() content already resolved to string by the same path.
             // Fall through to STRING handling.
         case CONTENT_TYPE_STRING: {
-            // Create Lambda String for the content
             size_t content_len = strlen(content);
-            String* text_string = (String*)arena_alloc(parent_elem->doc->arena,
-                                                        sizeof(String) + content_len + 1);
-            if (text_string) {
-                text_string->len = content_len;
-                memcpy(text_string->chars, content, content_len);
-                text_string->chars[content_len] = '\0';
-
-                // Create text node with Lambda String
-                DomText* text_node = DomText::create(text_string, pseudo_elem);
-                if (text_node) {
-                    pseudo_elem->first_child = text_node;
-                    log_debug("[Pseudo-Element] Created text content: \"%s\"", content);
-                }
+            DomText* text_node = DomText::create_copy(content, content_len, pseudo_elem);
+            if (text_node) {
+                pseudo_elem->first_child = text_node;
+                log_debug("[Pseudo-Element] Created text content: \"%s\"", content);
             }
             break;
         }

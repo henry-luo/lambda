@@ -76,6 +76,9 @@ struct Pool {
     // not frees, so this is a high-water-mark approximation).
     size_t alloc_bytes;     // total bytes ever allocated
     size_t alloc_count;     // total alloc calls
+    size_t live_bytes;      // allocator-owned bytes not individually freed
+    size_t high_water_live_bytes;
+    size_t free_count;
     void* mem_node;         // MemContext registration node (NULL if untracked)
 };
 
@@ -141,6 +144,9 @@ Pool* pool_create(void) {
     pool->limit = NULL;
     pool->alloc_bytes = 0;
     pool->alloc_count = 0;
+    pool->live_bytes = 0;
+    pool->high_water_live_bytes = 0;
+    pool->free_count = 0;
     pool->mem_node = NULL;
 
     // Optional one-line backtrace dump on each pool creation: POOL_TRACE=1
@@ -207,6 +213,9 @@ Pool* pool_create_mmap(void) {
     pool->limit = NULL;
     pool->alloc_bytes = 0;
     pool->alloc_count = 0;
+    pool->live_bytes = 0;
+    pool->high_water_live_bytes = 0;
+    pool->free_count = 0;
     pool->mem_node = NULL;
     mmap_pool_grow(pool, MMAP_CHUNK_SIZE);
     return pool;
@@ -293,6 +302,18 @@ void pool_reset(Pool* pool) {
         mmap_pool_free_chunks(pool);
         mmap_pool_grow(pool, MMAP_CHUNK_SIZE);
     }
+    pool->live_bytes = 0;
+}
+
+static void pool_record_allocation(Pool* pool, void* ptr, size_t requested) {
+    if (!pool || !ptr) return;
+    size_t owned = pool_allocation_size(pool, ptr);
+    pool->alloc_bytes += requested;
+    pool->alloc_count++;
+    pool->live_bytes += owned;
+    if (pool->live_bytes > pool->high_water_live_bytes) {
+        pool->high_water_live_bytes = pool->live_bytes;
+    }
 }
 
 void* pool_alloc(Pool* pool, size_t size) {
@@ -318,8 +339,7 @@ void* pool_alloc(Pool* pool, size_t size) {
         if (!result) {
             log_error("pool_alloc: rpmalloc_heap_alloc returned NULL (heap=%p, size=%zu)", pool->heap, size);
         } else {
-            pool->alloc_bytes += size;
-            pool->alloc_count++;
+            pool_record_allocation(pool, result, size);
         }
         return result;
     }
@@ -335,6 +355,7 @@ void* pool_alloc(Pool* pool, size_t size) {
     *header = size;
     void* ptr = pool->cursor + MMAP_SIZE_HEADER;
     pool->cursor += total;
+    pool_record_allocation(pool, ptr, size);
     return ptr;
 }
 
@@ -367,10 +388,7 @@ void* pool_calloc(Pool* pool, size_t size) {
         result = pool->cursor + MMAP_SIZE_HEADER;
         pool->cursor += total;
     }
-    if (result) {
-        pool->alloc_bytes += size;
-        pool->alloc_count++;
-    }
+    if (result) pool_record_allocation(pool, result, size);
     return result;
 }
 
@@ -379,7 +397,10 @@ void pool_free(Pool* pool, void* ptr) {
         return;
     }
     if (pool->heap) {
+        size_t owned = pool_allocation_size(pool, ptr);
         rpmalloc_heap_free(pool->heap, ptr);
+        pool->live_bytes = pool->live_bytes >= owned ? pool->live_bytes - owned : 0;
+        pool->free_count++;
     }
     // mmap mode: no-op (bump allocator, freed in bulk on reset/destroy)
 }
@@ -397,9 +418,21 @@ void* pool_realloc(Pool* pool, void* ptr, size_t size) {
             log_error("pool_realloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
             return NULL;
         }
-        if (!ptr) return rpmalloc_heap_alloc(pool->heap, size);
-        if (size == 0) { rpmalloc_heap_free(pool->heap, ptr); return NULL; }
-        return rpmalloc_heap_realloc(pool->heap, ptr, size, 0);
+        if (!ptr) return pool_alloc(pool, size);
+        if (size == 0) { pool_free(pool, ptr); return NULL; }
+        size_t old_owned = pool_allocation_size(pool, ptr);
+        void* result = rpmalloc_heap_realloc(pool->heap, ptr, size, 0);
+        if (result) {
+            size_t new_owned = pool_allocation_size(pool, result);
+            pool->live_bytes = pool->live_bytes >= old_owned
+                ? pool->live_bytes - old_owned + new_owned : new_owned;
+            if (pool->live_bytes > pool->high_water_live_bytes) {
+                pool->high_water_live_bytes = pool->live_bytes;
+            }
+            pool->alloc_bytes += size;
+            pool->alloc_count++;
+        }
+        return result;
     }
     // mmap mode: allocate new + copy using size header
     if (!ptr) return pool_alloc(pool, size);
@@ -465,12 +498,11 @@ void pool_get_mem_stats(Pool* pool, size_t* reserved, size_t* in_use,
     size_t rsv = 0, use = 0, cnt = 0;
     int mmap_mode = 0;
     if (pool && pool->valid == POOL_VALID_MARKER) {
-        use = pool->alloc_bytes;
+        use = pool->live_bytes;
         cnt = pool->alloc_count;
         if (pool->heap) {
-            // rpmalloc mode: true reserved bytes aren't cheaply available;
-            // alloc_bytes is a high-water upper bound (frees not subtracted).
-            rsv = pool->alloc_bytes;
+            struct rpmalloc_heap_statistics_t stats = rpmalloc_heap_statistics(pool->heap);
+            rsv = stats.mapped_size ? stats.mapped_size : pool->high_water_live_bytes;
         } else {
             // mmap mode: reserved is the sum of all mmap'd chunk sizes
             mmap_mode = 1;
@@ -481,4 +513,21 @@ void pool_get_mem_stats(Pool* pool, size_t* reserved, size_t* in_use,
     if (in_use) *in_use = use;
     if (alloc_count) *alloc_count = cnt;
     if (is_mmap) *is_mmap = mmap_mode;
+}
+
+size_t pool_allocation_size(Pool* pool, void* ptr) {
+    if (!pool || pool->valid != POOL_VALID_MARKER || !ptr) return 0;
+    if (pool->heap) return rpmalloc_usable_size(ptr);
+    return *(size_t*)((uint8_t*)ptr - MMAP_SIZE_HEADER);
+}
+
+void pool_get_detailed_stats(Pool* pool, PoolStats* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!pool || pool->valid != POOL_VALID_MARKER) return;
+    pool_get_mem_stats(pool, &out->reserved_bytes, &out->live_bytes,
+                       &out->allocation_count, &out->is_mmap);
+    out->high_water_live_bytes = pool->high_water_live_bytes;
+    out->cumulative_bytes = pool->alloc_bytes;
+    out->free_count = pool->free_count;
 }

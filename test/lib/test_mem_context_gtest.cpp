@@ -193,6 +193,8 @@ TEST_F(MemContextTest, SnapshotCountsAndTotals) {
     EXPECT_EQ(snap->count, 2u);
     EXPECT_EQ(snap->total_reserved, 3000u);
     EXPECT_EQ(snap->total_in_use, 2100u);
+    EXPECT_EQ(snap->physical_total_reserved, 1000u);
+    EXPECT_EQ(snap->physical_total_in_use, 600u);
 
     // verify parent linkage is present in the flat samples
     bool found_arena_with_parent = false;
@@ -236,6 +238,8 @@ TEST_F(MemContextTest, SnapshotJsonContainsFields) {
     EXPECT_NE(strstr(json, "\"kind\":\"pool\""), nullptr);
     EXPECT_NE(strstr(json, "\"role\":\"input\""), nullptr);
     EXPECT_NE(strstr(json, "\"bytes_reserved\":4096"), nullptr);
+    EXPECT_NE(strstr(json, "\"physical_total\""), nullptr);
+    EXPECT_NE(strstr(json, "\"logical_domains\""), nullptr);
     EXPECT_NE(strstr(json, "https://x.test/p.html"), nullptr);
     free(json);
     mem_snapshot_free(snap);

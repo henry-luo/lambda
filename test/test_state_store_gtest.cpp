@@ -28,8 +28,8 @@ protected:
         arena = arena_create_default(pool);
         ASSERT_NE(arena, nullptr);
 
-        doc.pool = pool;
-        doc.arena = arena;
+        doc.document_pool = pool;
+        doc.node_arena = arena;
 
         root = make_element();
         live = make_element();

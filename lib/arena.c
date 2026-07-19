@@ -6,6 +6,7 @@
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <assert.h>
 
 #define ARENA_VALID_MARKER 0xABCD4321
 #define SIZE_LIMIT (1024 * 1024 * 1024)  // 1GB limit for single allocation
@@ -65,8 +66,34 @@ struct Arena {
     ArenaFreeBlock* free_lists[ARENA_FREE_LIST_BINS];  // Free-list bins
     size_t free_bytes;          // Total bytes in free-lists
 
+    size_t high_water_active_bytes;
+    uint64_t allocation_count;
+    uint64_t free_count;
+    uint64_t reuse_hits;
+    uint64_t reuse_misses;
+    uint64_t split_count;
+    uint64_t coalesce_count;
+    uint64_t bump_back_count;
+    uint64_t fresh_chunk_count;
+    uint64_t fresh_growth_bytes;
+    uint64_t reset_count;
+    uint64_t clear_count;
+    uint32_t active_scope_count;
+
     void* mem_node;             // MemContext registration node (NULL if untracked)
 };
+
+static inline size_t _arena_active_bytes(const Arena* arena) {
+    return arena->total_used >= arena->free_bytes
+        ? arena->total_used - arena->free_bytes : 0;
+}
+
+static inline void _arena_update_high_water(Arena* arena) {
+    size_t active = _arena_active_bytes(arena);
+    if (active > arena->high_water_active_bytes) {
+        arena->high_water_active_bytes = active;
+    }
+}
 
 // Helper: get bin index for size (log2-based bins: 16, 32, 64, 128, 256, 512, 1024, 2048+)
 static inline int _arena_get_bin(size_t size) {
@@ -78,6 +105,11 @@ static inline int _arena_get_bin(size_t size) {
     if (size <= 512) return 5;
     if (size <= 1024) return 6;
     return 7;  // 2048+ goes to last bin
+}
+
+static inline size_t _arena_allocation_span(const Arena* arena, size_t size) {
+    size_t span = ALIGN_UP(size, arena->alignment);
+    return span < ARENA_MIN_FREE_BLOCK_SIZE ? ARENA_MIN_FREE_BLOCK_SIZE : span;
 }
 
 // Helper: find and remove a free block adjacent to [addr, addr+size)
@@ -168,6 +200,19 @@ Arena* arena_create(Pool* pool, size_t initial_chunk_size, size_t max_chunk_size
     arena->chunk_count = 0;
     arena->valid = ARENA_VALID_MARKER;
     arena->mem_node = NULL;
+    arena->high_water_active_bytes = 0;
+    arena->allocation_count = 0;
+    arena->free_count = 0;
+    arena->reuse_hits = 0;
+    arena->reuse_misses = 0;
+    arena->split_count = 0;
+    arena->coalesce_count = 0;
+    arena->bump_back_count = 0;
+    arena->fresh_chunk_count = 1;
+    arena->fresh_growth_bytes = initial_chunk_size;
+    arena->reset_count = 0;
+    arena->clear_count = 0;
+    arena->active_scope_count = 0;
 
     // Initialize free-lists
     for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
@@ -235,15 +280,17 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
     // Calculate aligned size for proper accounting
     // Ensure minimum size so all blocks can participate in free-list (A1 fix)
     size_t aligned_size = ALIGN_UP(size, alignment);
-    if (aligned_size < ARENA_MIN_FREE_BLOCK_SIZE) {
-        aligned_size = ARENA_MIN_FREE_BLOCK_SIZE;
-    }
+    if (aligned_size < ARENA_MIN_FREE_BLOCK_SIZE) aligned_size = ARENA_MIN_FREE_BLOCK_SIZE;
 
     // Try to allocate from free-list first (alignment-aware, A3 fix)
     void* free_ptr = _arena_alloc_from_freelist(arena, aligned_size, alignment);
     if (free_ptr) {
+        arena->allocation_count++;
+        arena->reuse_hits++;
+        _arena_update_high_water(arena);
         return free_ptr;
     }
+    arena->reuse_misses++;
 
     ArenaChunk* chunk = arena->current;
 
@@ -259,6 +306,8 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
         void* ptr = &chunk->data[aligned_offset];
         chunk->used = aligned_offset + aligned_size;
         arena->total_used += aligned_size;
+        arena->allocation_count++;
+        _arena_update_high_water(arena);
         return ptr;
     }
 
@@ -279,12 +328,16 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
     arena->current = new_chunk;
     arena->total_allocated += chunk_capacity;
     arena->chunk_count++;
+    arena->fresh_chunk_count++;
+    arena->fresh_growth_bytes += chunk_capacity;
 
     // Allocate from new chunk - data array is already aligned to 256 bytes
     // so any alignment <= 256 will work from position 0
     void* ptr = &new_chunk->data[0];
     new_chunk->used = aligned_size;
     arena->total_used += aligned_size;
+    arena->allocation_count++;
+    _arena_update_high_water(arena);
 
     return ptr;
 }
@@ -374,6 +427,15 @@ void arena_reset(Arena* arena) {
         return;
     }
 
+    // Active scratch scopes retain pointers into these chunks; resetting here
+    // would silently turn them into aliases of subsequent allocations.
+    if (arena->active_scope_count != 0) {
+        log_error("arena_reset: %u active scope(s) still reference arena %p",
+                  arena->active_scope_count, (void*)arena);
+        assert(arena->active_scope_count == 0);
+        return;
+    }
+
     // Reset all chunks to unused
     ArenaChunk* chunk = arena->first;
     while (chunk) {
@@ -390,12 +452,21 @@ void arena_reset(Arena* arena) {
         arena->free_lists[i] = NULL;
     }
     arena->free_bytes = 0;
+    arena->reset_count++;
 
     // Note: chunk_size is NOT reset - keeps grown size for efficiency
 }
 
 void arena_clear(Arena* arena) {
     if (!arena || arena->valid != ARENA_VALID_MARKER) {
+        return;
+    }
+
+    // Clearing an arena with active scratch scopes invalidates their headers.
+    if (arena->active_scope_count != 0) {
+        log_error("arena_clear: %u active scope(s) still reference arena %p",
+                  arena->active_scope_count, (void*)arena);
+        assert(arena->active_scope_count == 0);
         return;
     }
 
@@ -422,6 +493,7 @@ void arena_clear(Arena* arena) {
         arena->free_lists[i] = NULL;
     }
     arena->free_bytes = 0;
+    arena->clear_count++;
 
     // Reset chunk size to initial
     arena->chunk_size = arena->initial_chunk_size;
@@ -453,6 +525,58 @@ size_t arena_chunk_count(Arena* arena) {
         return 0;
     }
     return arena->chunk_count;
+}
+
+void arena_get_stats(Arena* arena, ArenaStats* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!arena || arena->valid != ARENA_VALID_MARKER) return;
+
+    size_t backing = pool_allocation_size(arena->pool, arena);
+    for (ArenaChunk* chunk = arena->first; chunk; chunk = chunk->next) {
+        backing += pool_allocation_size(arena->pool, chunk);
+    }
+    out->backing_bytes = backing;
+    out->committed_bytes = arena->total_allocated;
+    out->bump_used_bytes = arena->total_used;
+    out->active_bytes = _arena_active_bytes(arena);
+    out->recyclable_bytes = arena->free_bytes;
+    out->waste_bytes = arena->total_allocated - arena->total_used;
+    out->overhead_bytes = backing > arena->total_allocated
+        ? backing - arena->total_allocated : 0;
+    out->high_water_active_bytes = arena->high_water_active_bytes;
+    out->allocation_count = arena->allocation_count;
+    out->free_count = arena->free_count;
+    out->reuse_hits = arena->reuse_hits;
+    out->reuse_misses = arena->reuse_misses;
+    out->split_count = arena->split_count;
+    out->coalesce_count = arena->coalesce_count;
+    out->bump_back_count = arena->bump_back_count;
+    out->fresh_chunk_count = arena->fresh_chunk_count;
+    out->fresh_growth_bytes = arena->fresh_growth_bytes;
+    out->reset_count = arena->reset_count;
+    out->clear_count = arena->clear_count;
+    out->active_scope_count = arena->active_scope_count;
+}
+
+void arena_scope_enter(Arena* arena) {
+    if (!arena || arena->valid != ARENA_VALID_MARKER) return;
+    arena->active_scope_count++;
+}
+
+void arena_scope_leave(Arena* arena) {
+    if (!arena || arena->valid != ARENA_VALID_MARKER) return;
+    if (arena->active_scope_count == 0) {
+        log_error("arena_scope_leave: scope underflow for arena %p", (void*)arena);
+        assert(arena->active_scope_count > 0);
+        return;
+    }
+    arena->active_scope_count--;
+}
+
+uint32_t arena_active_scope_count(Arena* arena) {
+    if (!arena || arena->valid != ARENA_VALID_MARKER) return 0;
+    return arena->active_scope_count;
 }
 
 bool arena_owns(Arena* arena, const void* ptr) {
@@ -499,12 +623,12 @@ void arena_free(Arena* arena, void* ptr, size_t size) {
         log_error("arena_free: ptr %p (size %zu) not owned by arena %p", ptr, size, (void*)arena);
         return;
     }
+    arena->free_count++;
 
-    // Promote small sizes to minimum free block size (A1 fix)
-    // Safe because arena_alloc_aligned guarantees at least ARENA_MIN_FREE_BLOCK_SIZE
-    if (size < ARENA_MIN_FREE_BLOCK_SIZE) {
-        size = ARENA_MIN_FREE_BLOCK_SIZE;
-    }
+    // Callers retain requested object sizes, while the bump cursor advances by
+    // the aligned allocation span. Freeing the raw size stranded tail padding
+    // and made variable-sized DOM text churn grow linearly.
+    size = _arena_allocation_span(arena, size);
 
     // Bump-back coalescing: if block is at the end of current chunk,
     // reclaim space directly instead of adding to free-list (A4 fix)
@@ -515,6 +639,7 @@ void arena_free(Arena* arena, void* ptr, size_t size) {
     if (block_end == chunk_cursor) {
         chunk->used -= size;
         arena->total_used -= size;
+        arena->bump_back_count++;
         return;
     }
 
@@ -528,6 +653,7 @@ void arena_free(Arena* arena, void* ptr, size_t size) {
     // Repeatedly scan for adjacent free blocks and merge them
     ArenaFreeBlock* adj;
     while ((adj = _arena_find_adjacent_block(arena, merged_addr, merged_size)) != NULL) {
+        arena->coalesce_count++;
         uintptr_t adj_addr = (uintptr_t)adj;
         if (adj_addr + adj->size == merged_addr) {
             // left neighbor: adj is before our block
@@ -545,6 +671,7 @@ void arena_free(Arena* arena, void* ptr, size_t size) {
     if (merged_end == chunk_cursor) {
         chunk->used -= merged_size;
         arena->total_used -= merged_size;
+        arena->bump_back_count++;
         return;
     }
 
@@ -576,6 +703,7 @@ static void* _arena_alloc_from_freelist(Arena* arena, size_t size, size_t alignm
                 // If block is significantly larger, split it
                 size_t excess = block->size - size;
                 if (excess >= ARENA_MIN_FREE_BLOCK_SIZE) {
+                    arena->split_count++;
                     void* excess_ptr = (char*)block + size;
                     arena_free(arena, excess_ptr, excess);
                 }
@@ -606,16 +734,19 @@ void* arena_realloc(Arena* arena, void* ptr, size_t old_size, size_t new_size) {
         return NULL;
     }
 
-    // Same size -> no-op
-    if (new_size == old_size) {
+    size_t old_span = _arena_allocation_span(arena, old_size);
+    size_t new_span = _arena_allocation_span(arena, new_size);
+
+    // Same allocator span -> no-op
+    if (new_span == old_span) {
         return ptr;
     }
 
     // Shrinking -> add excess to free-list
-    if (new_size < old_size) {
-        size_t excess = old_size - new_size;
+    if (new_span < old_span) {
+        size_t excess = old_span - new_span;
         if (excess >= ARENA_MIN_FREE_BLOCK_SIZE) {
-            void* excess_ptr = (char*)ptr + new_size;
+            void* excess_ptr = (char*)ptr + new_span;
             arena_free(arena, excess_ptr, excess);
         }
         return ptr;
@@ -628,9 +759,8 @@ void* arena_realloc(Arena* arena, void* ptr, size_t old_size, size_t new_size) {
     uintptr_t chunk_end = data_start + chunk->used;
 
     // If at end of chunk and enough space remaining, extend in place
-    if (ptr_addr + old_size == chunk_end) {
-        size_t growth = new_size - old_size;
-        size_t aligned_growth = ALIGN_UP(growth, arena->alignment);
+    if (ptr_addr + old_span == chunk_end) {
+        size_t aligned_growth = new_span - old_span;
 
         if (chunk->used + aligned_growth <= chunk->capacity) {
             chunk->used += aligned_growth;
@@ -642,7 +772,7 @@ void* arena_realloc(Arena* arena, void* ptr, size_t old_size, size_t new_size) {
     // Otherwise, allocate new, copy, free old
     void* new_ptr = arena_alloc(arena, new_size);
     if (new_ptr) {
-        memcpy(new_ptr, ptr, old_size);
+        memcpy(new_ptr, ptr, MIN(old_size, new_size));
         arena_free(arena, ptr, old_size);
     }
     return new_ptr;

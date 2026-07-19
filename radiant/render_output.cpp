@@ -238,11 +238,11 @@ static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, V
         rdcon->retained_dl_cache = uicon->document->state->retained_dl_cache;
     }
 
-    mem_scratch_init(NULL, &rdcon->scratch, view_tree->arena, MEM_ROLE_RENDER, "render.scratch");
+    mem_scratch_init(NULL, &rdcon->scratch, view_tree->scratch_arena, MEM_ROLE_RENDER, "render.scratch");
     // Semantic paint IR target: routes the rc_* primitive gateway through the
     // PaintBuilder during recording (Phase C). Reused (cleared) per primitive.
     rdcon->paint_list = (PaintList*)mem_calloc(1, sizeof(PaintList), MEM_CAT_RENDER);
-    paint_list_init(rdcon->paint_list, view_tree->arena);
+    paint_list_init(rdcon->paint_list, view_tree->scratch_arena);
     rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
         uicon->surface->width, uicon->surface->height, uicon->surface->width);
     const RenderBackendCaps* caps = render_backend_get_caps(&rdcon->vec);
@@ -285,7 +285,7 @@ RenderFrameScope::RenderFrameScope(RenderContext* r, UiContext* uicon, ViewTree*
     if (!rdcon || !view_tree) return;
     render_output_init_context(rdcon, uicon, view_tree, profiler);
     context_active = true;
-    dl_init(&display_list, view_tree->arena);
+    dl_init(&display_list, view_tree->scratch_arena);
     display_list_active = true;
     rdcon->dl = &display_list;
 }

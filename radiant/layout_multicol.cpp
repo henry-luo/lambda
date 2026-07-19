@@ -1344,10 +1344,10 @@ static void multicol_store_layout_fragments(
     elem->layout_fragments_count_ref() = 0;
 
     Pool* pool = nullptr;
-    if (elem->doc && elem->doc->view_tree && elem->doc->view_tree->pool) {
-        pool = elem->doc->view_tree->pool;
+    if (elem->doc && elem->doc->view_tree && elem->doc->view_tree->prop_pool) {
+        pool = elem->doc->view_tree->prop_pool;
     } else if (elem->doc) {
-        pool = elem->doc->pool;
+        pool = elem->doc->document_pool;
     }
     if (!pool) return;
 

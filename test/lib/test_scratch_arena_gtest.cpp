@@ -30,9 +30,19 @@ protected:
 TEST_F(ScratchArenaTest, InitAndRelease) {
     ScratchArena sa;
     scratch_init(&sa, arena);
+    EXPECT_EQ(arena_active_scope_count(arena), 1u);
     EXPECT_EQ(scratch_live_count(&sa), 0);
     scratch_release(&sa);
+    EXPECT_EQ(arena_active_scope_count(arena), 0u);
     EXPECT_EQ(scratch_live_count(&sa), 0);
+}
+
+TEST_F(ScratchArenaTest, RepeatedReleaseLeavesScopeBalanced) {
+    ScratchArena sa;
+    scratch_init(&sa, arena);
+    scratch_release(&sa);
+    scratch_release(&sa);
+    EXPECT_EQ(arena_active_scope_count(arena), 0u);
 }
 
 TEST_F(ScratchArenaTest, SingleAllocFree) {

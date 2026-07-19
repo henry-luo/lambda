@@ -17,6 +17,7 @@
 #include "../../lib/mempool.h"
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
+#include "../input/css/style_epoch.hpp"
 #include "../input/css/css_parser.hpp"
 #include "../input/css/css_style.hpp"
 #include "../input/css/css_formatter.hpp"
@@ -37,6 +38,7 @@ extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, voi
 
 static void js_cssom_notify_stylesheet_mutation(void) {
     // stylesheet edits do not touch a DOM node, but they still require post-script cascade.
+    style_epoch_mark_global_change((DomDocument*)js_dom_get_document());
     js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, nullptr, nullptr);
 }
 
@@ -565,7 +567,7 @@ static Pool* unwrap_rule_decl_pool(Item item) {
 
 static Pool* get_document_pool() {
     DomDocument* doc = (DomDocument*)js_dom_get_document();
-    return doc ? doc->pool : nullptr;
+    return doc ? doc->document_pool : nullptr;
 }
 
 // =============================================================================
@@ -769,6 +771,7 @@ extern "C" Item js_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_
     sheet->rule_count++;
 
     log_debug("js_cssom_stylesheet_method insertRule: inserted at index %d, count=%zu", index, sheet->rule_count);
+    js_cssom_notify_stylesheet_mutation();
     return (Item){.item = i2it((int64_t)index)};
 }
 
@@ -793,6 +796,7 @@ extern "C" Item js_cssom_delete_rule(Item sheet_item, Item index_arg) {
     sheet->rule_count--;
 
     log_debug("js_cssom_stylesheet_method deleteRule: removed index %d, count=%zu", index, sheet->rule_count);
+    js_cssom_notify_stylesheet_mutation();
     return ItemNull;
 }
 
@@ -1270,7 +1274,7 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
 
     // if no stylesheets array exists yet, create one for the empty <style> element
     if (!doc->stylesheets || doc->stylesheet_count <= 0) {
-        Pool* pool = doc->pool;
+        Pool* pool = doc->document_pool;
         if (!pool) return ItemNull;
 
         CssStylesheet* sheet = (CssStylesheet*)pool_calloc(pool, sizeof(CssStylesheet));
@@ -1348,7 +1352,7 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
     if (sheet_idx >= doc->stylesheet_count) {
         // empty <style> element — create an empty stylesheet and add it to the document
         log_debug("js_cssom_get_style_element_sheet: creating empty sheet for <style> index %d", style_index);
-        Pool* pool = doc->pool;
+        Pool* pool = doc->document_pool;
         if (!pool) return ItemNull;
 
         CssStylesheet* sheet = (CssStylesheet*)pool_calloc(pool, sizeof(CssStylesheet));

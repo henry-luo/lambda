@@ -1469,7 +1469,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (is_after_pseudo && elmt->parent && elmt->parent->is_element()) {
             DomElement* origin = layout_inline_as_element(elmt->parent);
             const char* content = dom_element_get_pseudo_element_content_with_counters(
-                origin, 2, lycon->counter_context, lycon->doc->arena);
+                origin, 2, lycon->counter_context, lycon->scratch.arena);
             if (!content) content = dom_element_get_pseudo_element_content(origin, 2);
             if (content && elmt->is_element()) {
                 DomElement* pseudo_elem = layout_inline_as_element(elmt);
@@ -1477,15 +1477,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (first && first->is_text()) {
                     DomText* text_node = layout_inline_as_text(first);
                     size_t content_len = strlen(content);
-                    String* text_string = (String*)arena_alloc(pseudo_elem->doc->arena,
-                        sizeof(String) + content_len + 1);
+                    String* text_string = dom_document_create_string(
+                        pseudo_elem->doc, content, content_len);
                     if (text_string) {
-                        text_string->len = content_len;
-                        memcpy(text_string->chars, content, content_len);
-                        text_string->chars[content_len] = '\0';
-                        text_node->native_string = text_string;
-                        text_node->text = text_string->chars;
-                        text_node->length = content_len;
+                        // ::after is regenerated across layouts; replacing its
+                        // payload must reclaim the prior generated String.
+                        dom_text_adopt_document_string(
+                            text_node, pseudo_elem->doc, text_string);
                         text_node->rect = nullptr;
                     }
                 }

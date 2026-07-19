@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <assert.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -516,13 +517,42 @@ MemSnapshot* mem_snapshot_capture(MemContext* ctx) {
     snap->captured_seq = g_birth;
     snap->count = n;
     snap->samples = samples;
-    uint64_t tr = 0, tu = 0;
+    // A pool's live count includes the exact backing allocations of its child
+    // arenas. Subtract those bytes only for logical attribution; physical
+    // totals below continue to count each independent root allocator once.
+    for (uint32_t child = 0; child < n; child++) {
+        uint32_t parent_id = samples[child].parent_id;
+        uint64_t backing = samples[child].backing_bytes;
+        if (!parent_id || !backing) continue;
+        for (uint32_t parent = 0; parent < n; parent++) {
+            if (samples[parent].id != parent_id) continue;
+            if (backing > samples[parent].direct_bytes) {
+                samples[parent].flags |= MEM_FLAG_ATTRIBUTION_ERROR;
+                log_error("MEMCTX-ATTRIBUTION: child #%u backing=%llu exceeds parent #%u direct=%llu",
+                          samples[child].id, (unsigned long long)backing,
+                          samples[parent].id,
+                          (unsigned long long)samples[parent].direct_bytes);
+                assert(backing <= samples[parent].direct_bytes);
+            } else {
+                samples[parent].direct_bytes -= backing;
+            }
+            break;
+        }
+    }
+
+    uint64_t tr = 0, tu = 0, ptr = 0, ptu = 0;
     for (uint32_t i = 0; i < n; i++) {
         tr += samples[i].bytes_reserved;
         tu += samples[i].bytes_in_use;
+        if (samples[i].parent_id == 0) {
+            ptr += samples[i].bytes_reserved;
+            ptu += samples[i].bytes_in_use;
+        }
     }
     snap->total_reserved = tr;
     snap->total_in_use = tu;
+    snap->physical_total_reserved = ptr;
+    snap->physical_total_in_use = ptu;
     UNLOCK();
     return snap;
 }
@@ -592,31 +622,59 @@ static void jb_json_str(JBuf* j, const char* s) {
     jb_puts(j, "\"");
 }
 
+static void jb_mem_sample(JBuf* j, const MemStatSample* s) {
+    jb_fmt(j, "{\"id\":%u,\"parent_id\":%u,\"doc_id\":%u,",
+           s->id, s->parent_id, s->doc_id);
+    jb_puts(j, "\"kind\":");
+    jb_json_str(j, mem_kind_name((MemKind)s->kind));
+    jb_puts(j, ",\"role\":");
+    jb_json_str(j, mem_role_name((MemRole)s->role));
+    jb_puts(j, ",\"label\":");
+    jb_json_str(j, s->label);
+    jb_puts(j, ",\"url\":");
+    jb_json_str(j, mem_doc_url(s->doc_id));
+    jb_fmt(j, ",\"bytes_reserved\":%llu,\"bytes_in_use\":%llu,\"backing_bytes\":%llu,\"direct_bytes\":%llu,\"committed_bytes\":%llu,\"recyclable_bytes\":%llu,\"waste_bytes\":%llu,\"overhead_bytes\":%llu,\"high_water_bytes\":%llu,\"cumulative_bytes\":%llu,\"alloc_count\":%llu,\"free_count\":%llu,\"reuse_hits\":%llu,\"reuse_misses\":%llu,\"split_count\":%llu,\"coalesce_count\":%llu,\"bump_back_count\":%llu,\"fresh_chunk_count\":%llu,\"fresh_growth_bytes\":%llu,\"reset_count\":%llu,\"clear_count\":%llu,\"active_scope_count\":%u,\"chunk_count\":%u,\"thread\":%u,\"flags\":%u}",
+           (unsigned long long)s->bytes_reserved,
+           (unsigned long long)s->bytes_in_use,
+           (unsigned long long)s->backing_bytes,
+           (unsigned long long)s->direct_bytes,
+           (unsigned long long)s->committed_bytes,
+           (unsigned long long)s->recyclable_bytes,
+           (unsigned long long)s->waste_bytes,
+           (unsigned long long)s->overhead_bytes,
+           (unsigned long long)s->high_water_bytes,
+           (unsigned long long)s->cumulative_bytes,
+           (unsigned long long)s->alloc_count,
+           (unsigned long long)s->free_count,
+           (unsigned long long)s->reuse_hits,
+           (unsigned long long)s->reuse_misses,
+           (unsigned long long)s->split_count,
+           (unsigned long long)s->coalesce_count,
+           (unsigned long long)s->bump_back_count,
+           (unsigned long long)s->fresh_chunk_count,
+           (unsigned long long)s->fresh_growth_bytes,
+           (unsigned long long)s->reset_count,
+           (unsigned long long)s->clear_count,
+           s->active_scope_count, s->chunk_count, s->thread_id, s->flags);
+}
+
 char* mem_snapshot_to_json(const MemSnapshot* snap) {
     if (!snap) return NULL;
     JBuf j = {0};
-    jb_fmt(&j, "{\"captured_seq\":%llu,\"count\":%u,\"total_reserved\":%llu,\"total_in_use\":%llu,\"nodes\":[",
+    jb_fmt(&j, "{\"captured_seq\":%llu,\"count\":%u,\"total_reserved\":%llu,\"total_in_use\":%llu,\"physical_total\":{\"bytes_reserved\":%llu,\"bytes_in_use\":%llu},\"nodes\":[",
            (unsigned long long)snap->captured_seq, snap->count,
            (unsigned long long)snap->total_reserved,
-           (unsigned long long)snap->total_in_use);
+           (unsigned long long)snap->total_in_use,
+           (unsigned long long)snap->physical_total_reserved,
+           (unsigned long long)snap->physical_total_in_use);
     for (uint32_t i = 0; i < snap->count; i++) {
-        const MemStatSample* s = &snap->samples[i];
         if (i) jb_puts(&j, ",");
-        jb_fmt(&j, "{\"id\":%u,\"parent_id\":%u,\"doc_id\":%u,",
-               s->id, s->parent_id, s->doc_id);
-        jb_puts(&j, "\"kind\":");
-        jb_json_str(&j, mem_kind_name((MemKind)s->kind));
-        jb_puts(&j, ",\"role\":");
-        jb_json_str(&j, mem_role_name((MemRole)s->role));
-        jb_puts(&j, ",\"label\":");
-        jb_json_str(&j, s->label);
-        jb_puts(&j, ",\"url\":");
-        jb_json_str(&j, mem_doc_url(s->doc_id));
-        jb_fmt(&j, ",\"bytes_reserved\":%llu,\"bytes_in_use\":%llu,\"alloc_count\":%llu,\"chunk_count\":%u,\"thread\":%u,\"flags\":%u}",
-               (unsigned long long)s->bytes_reserved,
-               (unsigned long long)s->bytes_in_use,
-               (unsigned long long)s->alloc_count,
-               s->chunk_count, s->thread_id, s->flags);
+        jb_mem_sample(&j, &snap->samples[i]);
+    }
+    jb_puts(&j, "],\"logical_domains\":[");
+    for (uint32_t i = 0; i < snap->count; i++) {
+        if (i) jb_puts(&j, ",");
+        jb_mem_sample(&j, &snap->samples[i]);
     }
     jb_puts(&j, "]}");
     return j.buf;  // may be NULL if nothing was written and no alloc happened

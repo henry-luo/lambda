@@ -38,6 +38,19 @@ extern "C" {
     }
 
     __attribute__((weak))
+    void heap_register_gc_weak(uint64_t* slot,
+            void (*on_clear)(uint64_t*, void*), void* context) {
+        (void)slot;
+        (void)on_clear;
+        (void)context;
+    }
+
+    __attribute__((weak))
+    void heap_unregister_gc_weak(uint64_t* slot) {
+        (void)slot;
+    }
+
+    __attribute__((weak))
     void lambda_root_frame_overflow_error(void) {
         // The standalone input library links this file with malloc-backed,
         // non-collecting allocation and no execution recovery layer. A null

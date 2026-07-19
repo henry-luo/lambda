@@ -134,6 +134,7 @@ typedef enum ViewTeardownFlag {
     VIEW_TEARDOWN_CLEAR_POINTERS   = 1 << 1,
     VIEW_TEARDOWN_FREE_POOL        = 1 << 2,
     VIEW_TEARDOWN_FREE_NODE        = 1 << 3,
+    VIEW_TEARDOWN_RESET_IN_PLACE   = 1 << 4,
 } ViewTeardownFlag;
 
 typedef void (*ViewPropReleaseFn)(DomElement* elem, ViewTree* tree);
@@ -149,13 +150,16 @@ typedef struct ViewPropTeardownEntry {
     ViewPropCustomFn clear_member;
     ViewPropCustomFn custom_clear;
     ViewPropCustomFn custom_free;
+    const void* reset_default;
+    size_t reset_size;
+    ViewPropCustomFn custom_reset;
 } ViewPropTeardownEntry;
 
 static void view_teardown_visit_node(ViewTree* tree, DomNode* node, int flags, bool include_siblings);
 
 static void view_pool_free_ptr(ViewTree* tree, void* ptr) {
-    if (tree && tree->pool && ptr) {
-        pool_free(tree->pool, ptr);
+    if (tree && tree->prop_pool && ptr) {
+        pool_free(tree->prop_pool, ptr);
     }
 }
 
@@ -168,7 +172,6 @@ static void view_prop_clear_##field(DomElement* elem, ViewTree*) { \
 }
 
 DEFINE_VIEW_PROP_ACCESSORS(font)
-DEFINE_VIEW_PROP_ACCESSORS(in_line)
 DEFINE_VIEW_PROP_ACCESSORS(bound)
 DEFINE_VIEW_PROP_ACCESSORS(blk)
 DEFINE_VIEW_PROP_ACCESSORS(scroller)
@@ -183,6 +186,14 @@ DEFINE_VIEW_PROP_ACCESSORS(layout_cache)
 
 static void* view_prop_get_backdrop_filter(DomElement* elem) {
     return elem ? (void*)elem->backdrop_filter_prop() : nullptr;
+}
+
+static void* view_prop_get_in_line(DomElement* elem) {
+    return elem ? (void*)elem->in_line : nullptr;
+}
+
+static void view_prop_clear_inline(DomElement* elem, ViewTree*) {
+    if (elem) elem->clear_inline_prop_binding();
 }
 static void view_prop_clear_backdrop_filter(DomElement* elem, ViewTree*) {
     if (elem) elem->set_backdrop_filter_prop(nullptr);
@@ -212,21 +223,114 @@ static void release_element_font_prop(DomElement* elem, ViewTree*) {
 
 static void free_element_font_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->font) return;
-    // FontProp family is sometimes retained separately from the prop; the
-    // teardown table owns both members so new font-owned pool pointers only
-    // need to register in one place.
-    if (elem->fontp()->family) {
-        view_pool_free_ptr(tree, elem->fontp()->family);
+    // Font families may be borrowed from an ancestor or the document CSS
+    // pool. Text-shadow nodes are created per resolved FontProp and are owned.
+    TextShadow* shadow = elem->font->text_shadow;
+    while (shadow) {
+        TextShadow* next = shadow->next;
+        view_pool_free_ptr(tree, shadow);
+        shadow = next;
     }
+    elem->font->text_shadow = nullptr;
+}
+
+static void free_linear_gradient(ViewTree* tree, LinearGradient* gradient) {
+    if (!gradient) return;
+    view_pool_free_ptr(tree, gradient->stops);
+    view_pool_free_ptr(tree, gradient);
+}
+
+static void free_radial_gradient(ViewTree* tree, RadialGradient* gradient) {
+    if (!gradient) return;
+    view_pool_free_ptr(tree, gradient->stops);
+    view_pool_free_ptr(tree, gradient);
+}
+
+static void free_conic_gradient(ViewTree* tree, ConicGradient* gradient) {
+    if (!gradient) return;
+    view_pool_free_ptr(tree, gradient->stops);
+    view_pool_free_ptr(tree, gradient);
+}
+
+static void free_background_prop(ViewTree* tree, BackgroundProp* background) {
+    if (!background) return;
+    free_linear_gradient(tree, background->linear_gradient);
+    free_radial_gradient(tree, background->radial_gradient);
+    free_conic_gradient(tree, background->conic_gradient);
+    for (int i = 0; i < background->radial_layer_count; i++) {
+        free_radial_gradient(tree, background->radial_layers[i]);
+    }
+    for (int i = 0; i < background->linear_layer_count; i++) {
+        free_linear_gradient(tree, background->linear_layers[i]);
+    }
+    view_pool_free_ptr(tree, background->radial_layers);
+    view_pool_free_ptr(tree, background->linear_layers);
+    view_pool_free_ptr(tree, background);
 }
 
 static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->bound) return;
-    view_pool_free_ptr(tree, elem->boundary()->background);
+    free_background_prop(tree, elem->boundary()->background);
+    if (elem->boundary()->border) {
+        free_linear_gradient(tree, elem->boundary()->border->border_image_linear_gradient);
+    }
     view_pool_free_ptr(tree, elem->boundary()->border);
     view_pool_free_ptr(tree, elem->boundary()->mask);
-    view_pool_free_ptr(tree, elem->boundary()->box_shadow);
+    BoxShadow* shadow = elem->boundary()->box_shadow;
+    while (shadow) {
+        BoxShadow* next = shadow->next;
+        view_pool_free_ptr(tree, shadow);
+        shadow = next;
+    }
     view_pool_free_ptr(tree, elem->boundary()->outline);
+}
+
+static void free_transform_payload(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->transform) return;
+    TransformFunction* function = elem->transform->functions;
+    while (function) {
+        TransformFunction* next = function->next;
+        view_pool_free_ptr(tree, function);
+        function = next;
+    }
+}
+
+static void free_filter_chain(ViewTree* tree, FilterProp* filter) {
+    if (!filter) return;
+    FilterFunction* function = filter->functions;
+    while (function) {
+        FilterFunction* next = function->next;
+        view_pool_free_ptr(tree, function);
+        function = next;
+    }
+}
+
+static void free_filter_payload(DomElement* elem, ViewTree* tree) {
+    free_filter_chain(tree, elem ? elem->filter : nullptr);
+}
+
+static void free_backdrop_filter_payload(DomElement* elem, ViewTree* tree) {
+    free_filter_chain(tree, elem ? elem->backdrop_filter_prop() : nullptr);
+}
+
+static void free_pseudo_payload(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->pseudo) return;
+    view_pool_free_ptr(tree, elem->pseudo->before_content);
+    view_pool_free_ptr(tree, elem->pseudo->after_content);
+    view_pool_free_ptr(tree, elem->pseudo->before_separator);
+    view_pool_free_ptr(tree, elem->pseudo->after_separator);
+}
+
+static void free_vector_path_payload(DomElement* elem, ViewTree* tree) {
+    VectorPathProp* path = elem ? elem->vector_path() : nullptr;
+    if (!path) return;
+    VectorPathSegment* segment = path->segments;
+    while (segment) {
+        VectorPathSegment* next = segment->next;
+        view_pool_free_ptr(tree, segment);
+        segment = next;
+    }
+    view_pool_free_ptr(tree, path->dash_pattern);
 }
 
 static void release_embedded_document(DomElement* elem) {
@@ -383,6 +487,33 @@ static void free_item_prop(DomElement* elem, ViewTree* tree) {
     elem->set_role_kind(DomElement::ROLE_NONE);
 }
 
+static const PseudoContentProp PSEUDO_CONTENT_PROP_DEFAULT = {};
+static const VectorPathProp VECTOR_PATH_PROP_DEFAULT = {};
+
+static void reset_layout_cache(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->layout_cache) return;
+    radiant::layout_cache_init(elem->layout_cache, tree ? tree->layout_generation : 0);
+}
+
+static void free_inline_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->in_line) return;
+    if (!elem->inline_prop_shared()) {
+        view_pool_free_ptr(tree, elem->in_line);
+    }
+    elem->clear_inline_prop_binding();
+}
+
+static void reset_inline_prop(DomElement* elem, ViewTree*) {
+    if (!elem || !elem->in_line) return;
+    if (elem->inline_prop_shared()) {
+        // The canonical arena outlives ordinary reflow, but the next cascade
+        // must bind afresh rather than overwrite or retain a stale shared value.
+        elem->clear_inline_prop_binding();
+        return;
+    }
+    memcpy(elem->in_line, &INLINE_PROP_DEFAULT, sizeof(InlineProp));
+}
+
 static void view_prop_free_member(DomElement* elem, ViewTree* tree,
                                   ViewPropGetFn get_member,
                                   ViewPropCustomFn clear_member) {
@@ -394,23 +525,34 @@ static void view_prop_free_member(DomElement* elem, ViewTree* tree,
 }
 
 static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
-    { "font",            release_element_font_prop, free_element_font_payload, view_prop_get_font,            view_prop_clear_font,            nullptr,         nullptr },
-    { "inline",          nullptr,                   nullptr,                   view_prop_get_in_line,         view_prop_clear_in_line,         nullptr,         nullptr },
-    { "boundary",        nullptr,                   free_boundary_payload,     view_prop_get_bound,           view_prop_clear_bound,           nullptr,         nullptr },
-    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr },
-    { "scroll",          nullptr,                   free_scroll_payload,       view_prop_get_scroller,        view_prop_clear_scroller,        nullptr,         nullptr },
-    { "embed",           release_embed_prop_entry,  free_embed_payload,        view_prop_get_embed,           view_prop_clear_embed,           nullptr,         nullptr },
-    { "position",        nullptr,                   nullptr,                   view_prop_get_position,        view_prop_clear_position,        nullptr,         nullptr },
-    { "transform",       nullptr,                   nullptr,                   view_prop_get_transform,       view_prop_clear_transform,       nullptr,         nullptr },
-    { "filter",          nullptr,                   nullptr,                   view_prop_get_filter,          view_prop_clear_filter,          nullptr,         nullptr },
-    { "backdrop-filter", nullptr,                   nullptr,                   view_prop_get_backdrop_filter, view_prop_clear_backdrop_filter, nullptr,         nullptr },
-    { "multicol",        nullptr,                   nullptr,                   view_prop_get_multicol,        view_prop_clear_multicol,        nullptr,         nullptr },
-    { "form",            release_form_prop,         nullptr,                   nullptr,                       nullptr,                       nullptr,         nullptr },
-    { "item",            nullptr,                   nullptr,                   nullptr,                       nullptr,                       clear_item_prop, free_item_prop },
-    { "pseudo",          release_pseudo_content_prop_entry, nullptr,           view_prop_get_pseudo,          view_prop_clear_pseudo,          nullptr,         nullptr },
-    { "vector-path",     nullptr,                   nullptr,                   view_prop_get_vpath,           view_prop_clear_vpath,           nullptr,         nullptr },
-    { "layout-cache",    nullptr,                   nullptr,                   view_prop_get_layout_cache,    view_prop_clear_layout_cache,    nullptr,         nullptr },
+    { "font",            release_element_font_prop, free_element_font_payload, view_prop_get_font,            view_prop_clear_font,            nullptr,         nullptr,       &FONT_PROP_DEFAULT,          sizeof(FontProp),          nullptr },
+    { "inline",          nullptr,                   nullptr,                   view_prop_get_in_line,         view_prop_clear_inline,          nullptr,         free_inline_prop, nullptr,                    sizeof(InlineProp),        reset_inline_prop },
+    { "boundary",        nullptr,                   free_boundary_payload,     view_prop_get_bound,           view_prop_clear_bound,           nullptr,         nullptr,       &BOUNDARY_PROP_DEFAULT,      sizeof(BoundaryProp),      nullptr },
+    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr,       &BLOCK_PROP_DEFAULT,         sizeof(BlockProp),         nullptr },
+    { "scroll",          nullptr,                   free_scroll_payload,       view_prop_get_scroller,        view_prop_clear_scroller,        nullptr,         nullptr,       &SCROLL_PROP_DEFAULT,        sizeof(ScrollProp),        nullptr },
+    { "embed",           release_embed_prop_entry,  free_embed_payload,        view_prop_get_embed,           view_prop_clear_embed,           nullptr,         nullptr,       &EMBED_PROP_DEFAULT,         sizeof(EmbedProp),         nullptr },
+    { "position",        nullptr,                   nullptr,                   view_prop_get_position,        view_prop_clear_position,        nullptr,         nullptr,       &POSITION_PROP_DEFAULT,      sizeof(PositionProp),      nullptr },
+    { "transform",       nullptr,                   free_transform_payload,    view_prop_get_transform,       view_prop_clear_transform,       nullptr,         nullptr,       &TRANSFORM_PROP_DEFAULT,     sizeof(TransformProp),     nullptr },
+    { "filter",          nullptr,                   free_filter_payload,       view_prop_get_filter,          view_prop_clear_filter,          nullptr,         nullptr,       &FILTER_PROP_DEFAULT,        sizeof(FilterProp),        nullptr },
+    { "backdrop-filter", nullptr,                   free_backdrop_filter_payload, view_prop_get_backdrop_filter, view_prop_clear_backdrop_filter, nullptr,       nullptr,       &FILTER_PROP_DEFAULT,        sizeof(FilterProp),        nullptr },
+    { "multicol",        nullptr,                   nullptr,                   view_prop_get_multicol,        view_prop_clear_multicol,        nullptr,         nullptr,       &MULTICOL_PROP_DEFAULT,      sizeof(MultiColumnProp),   nullptr },
+    { "form",            release_form_prop,         nullptr,                   nullptr,                       nullptr,                       nullptr,         nullptr,       nullptr,                      0,                         nullptr },
+    { "item",            nullptr,                   nullptr,                   nullptr,                       nullptr,                       clear_item_prop, free_item_prop, nullptr,                   0,                         free_item_prop },
+    { "pseudo",          release_pseudo_content_prop_entry, free_pseudo_payload, view_prop_get_pseudo,        view_prop_clear_pseudo,          nullptr,         nullptr,       &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), nullptr },
+    { "vector-path",     nullptr,                   free_vector_path_payload,  view_prop_get_vpath,           view_prop_clear_vpath,           nullptr,         nullptr,       &VECTOR_PATH_PROP_DEFAULT,   sizeof(VectorPathProp),    nullptr },
+    { "layout-cache",    nullptr,                   nullptr,                   view_prop_get_layout_cache,    view_prop_clear_layout_cache,    nullptr,         nullptr,       nullptr,                      sizeof(radiant::LayoutCache), reset_layout_cache },
 };
+
+static_assert(sizeof(FONT_PROP_DEFAULT) == sizeof(FontProp), "font reset metadata drift");
+static_assert(sizeof(INLINE_PROP_DEFAULT) == sizeof(InlineProp), "inline reset metadata drift");
+static_assert(sizeof(BOUNDARY_PROP_DEFAULT) == sizeof(BoundaryProp), "boundary reset metadata drift");
+static_assert(sizeof(BLOCK_PROP_DEFAULT) == sizeof(BlockProp), "block reset metadata drift");
+static_assert(sizeof(SCROLL_PROP_DEFAULT) == sizeof(ScrollProp), "scroll reset metadata drift");
+static_assert(sizeof(EMBED_PROP_DEFAULT) == sizeof(EmbedProp), "embed reset metadata drift");
+static_assert(sizeof(POSITION_PROP_DEFAULT) == sizeof(PositionProp), "position reset metadata drift");
+static_assert(sizeof(TRANSFORM_PROP_DEFAULT) == sizeof(TransformProp), "transform reset metadata drift");
+static_assert(sizeof(FILTER_PROP_DEFAULT) == sizeof(FilterProp), "filter reset metadata drift");
+static_assert(sizeof(MULTICOL_PROP_DEFAULT) == sizeof(MultiColumnProp), "multicol reset metadata drift");
 
 static void view_teardown_visit_pseudo(ViewTree* tree,
                                        PseudoContentProp* pseudo,
@@ -445,6 +587,23 @@ static void view_teardown_apply_table(ViewTree* tree,
                 view_prop_free_member(elem, tree, entry->get_member, entry->clear_member);
             }
         }
+        if ((flags & VIEW_TEARDOWN_RESET_IN_PLACE)) {
+            if (entry->custom_reset) {
+                entry->custom_reset(elem, tree);
+            } else if (entry->get_member) {
+                void* member = entry->get_member(elem);
+                if (member) {
+                    // Payloads leave before typed defaults overwrite their only
+                    // owning pointer; the main block itself remains stable.
+                    if (entry->free_payload) entry->free_payload(elem, tree);
+                    if (entry->reset_default) {
+                        memcpy(member, entry->reset_default, entry->reset_size);
+                    } else if (entry->reset_size) {
+                        memset(member, 0, entry->reset_size);
+                    }
+                }
+            }
+        }
         if ((flags & VIEW_TEARDOWN_CLEAR_POINTERS)) {
             if (entry->custom_clear) {
                 entry->custom_clear(elem, tree);
@@ -469,6 +628,16 @@ static void view_teardown_clear_element_scalars(DomElement* elem) {
 static void view_teardown_clear_text(DomText* text) {
     if (!text) return;
     text->rect = nullptr;
+    text->font = nullptr;
+    text->view_type = RDT_VIEW_NONE;
+}
+
+static void view_teardown_reset_text(ViewTree* tree, DomText* text) {
+    if (!tree || !text) return;
+    tree->recycle_text_rects(text->rect);
+    text->rect = nullptr;
+    // Text nodes borrow the resolved ancestor FontProp; the element owner is
+    // responsible for releasing/resetting that prop exactly once.
     text->font = nullptr;
     text->view_type = RDT_VIEW_NONE;
 }
@@ -535,7 +704,7 @@ static void view_teardown_visit_node(ViewTree* tree,
             view_teardown_visit_pseudo(tree, pseudo, flags);
             view_teardown_visit_node(tree, first_child, child_flags, true);
             view_teardown_apply_table(tree, elem, flags);
-            if (flags & VIEW_TEARDOWN_CLEAR_POINTERS) {
+            if (flags & (VIEW_TEARDOWN_CLEAR_POINTERS | VIEW_TEARDOWN_RESET_IN_PLACE)) {
                 view_teardown_clear_element_scalars(elem);
             }
         } else if (node->is_text()) {
@@ -546,13 +715,16 @@ static void view_teardown_visit_node(ViewTree* tree,
             if (flags & VIEW_TEARDOWN_FREE_POOL) {
                 view_teardown_free_text_font(tree, text);
             }
+            if (flags & VIEW_TEARDOWN_RESET_IN_PLACE) {
+                view_teardown_reset_text(tree, text);
+            }
             if (flags & VIEW_TEARDOWN_CLEAR_POINTERS) {
                 view_teardown_clear_text(text);
             }
         }
 
-        if ((flags & VIEW_TEARDOWN_FREE_NODE) && tree && tree->pool) {
-            pool_free(tree->pool, node);
+        if ((flags & VIEW_TEARDOWN_FREE_NODE) && tree && tree->prop_pool) {
+            pool_free(tree->prop_pool, node);
         }
         node = next;
     }
@@ -563,15 +735,36 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
 }
 
 void* ViewTree::alloc_prop(size_t size) {
-    void* prop = pool_calloc(pool, size);
+    void* prop = pool_calloc(prop_pool, size);
     if (prop) {
         return prop;
     }
     else {
         // layout properties have no recovery path; aborting here avoids unchecked callers dereferencing NULL later.
         log_error("alloc_prop: pool_calloc returned NULL (pool=%p, size=%zu) - pool may be corrupt",
-                  (void*)pool, size);
+                  (void*)prop_pool, size);
         abort();
+    }
+}
+
+TextRect* ViewTree::alloc_text_rect() {
+    if (free_text_rects) {
+        TextRect* rect = free_text_rects;
+        free_text_rects = rect->next;
+        memset(rect, 0, sizeof(TextRect));
+        return rect;
+    }
+    return (TextRect*)alloc_prop(sizeof(TextRect));
+}
+
+void ViewTree::recycle_text_rects(TextRect* first) {
+    TextRect* rect = first;
+    while (rect) {
+        TextRect* next = rect->next;
+        memset(rect, 0, sizeof(TextRect));
+        rect->next = free_text_rects;
+        free_text_rects = rect;
+        rect = next;
     }
 }
 
@@ -674,14 +867,28 @@ void view_pool_release_detached_subtree(DomNode* root) {
         false);
 }
 
+void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root) {
+    if (!tree || !root) return;
+
+    // Retirement is the only path that returns retained property blocks to
+    // the pool; reset-only teardown must keep them attached for view reuse.
+    view_teardown_visit_node(tree, root,
+        VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_FREE_POOL |
+        VIEW_TEARDOWN_CLEAR_POINTERS,
+        false);
+}
+
 void ViewTree::init() {
     log_debug("init view pool");
-    pool = mem_pool_create(NULL, MEM_ROLE_VIEW, "view_tree.pool");
-    if (!pool) {
+    prop_pool = mem_pool_create(NULL, MEM_ROLE_VIEW, "view_tree.prop_pool");
+    if (!prop_pool) {
         log_error("Failed to initialize view pool");
     }
     else {
-        arena = mem_arena_create(NULL, pool, MEM_ROLE_VIEW, "view_tree.arena");
+        view_tree_canonical_init(this);
+        scratch_arena = mem_arena_create(NULL, prop_pool, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
+        free_text_rects = nullptr;
+        if (layout_generation == 0) layout_generation = 1;
         log_debug("view pool initialized");
     }
 }
@@ -691,25 +898,25 @@ void view_pool_init(ViewTree* tree) {
 }
 
 void ViewTree::reset_retained() {
+    layout_generation++;
+    if (layout_generation == 0) layout_generation = 1;
     if (root) {
-        // DOM mutation fallback keeps DOM/view nodes; only layout-pool-owned
-        // props are replaced so StateStore anchors can keep binding by node id.
+        // DOM mutation fallback keeps both DOM/view nodes and their owned prop
+        // blocks; only external payloads and generation-local values reset.
         view_teardown_visit_node(this, root,
-            VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_CLEAR_POINTERS,
+            VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_RESET_IN_PLACE,
             false);
         root = NULL;
     }
     // Measurement entries point at this tree's views; reset invalidates them with the layout epoch.
     clear_measurement_cache(this);
 
-    Arena* old_arena = arena;
-    Pool* old_pool = pool;
-    arena = NULL;
-    pool = NULL;
-    // Factory-created view roots must unregister their memory-context nodes on teardown.
-    if (old_arena) mem_arena_destroy(old_arena);
-    if (old_pool) mem_pool_destroy(old_pool);
-    init();
+    if (scratch_arena) {
+        // A retained reset is only legal between layout/render scopes. Keeping
+        // chunks gives the next generation the bump-allocation fast path.
+        assert(arena_active_scope_count(scratch_arena) == 0);
+        arena_reset(scratch_arena);
+    }
 }
 
 void view_pool_reset_retained(ViewTree* tree) {
@@ -720,14 +927,16 @@ void ViewTree::destroy() {
     destroy_measurement_cache(this);
     if (root) {
         view_teardown_visit_node(this, root,
-            VIEW_TEARDOWN_RELEASE_EXTERNAL,
+            VIEW_TEARDOWN_RELEASE_EXTERNAL | VIEW_TEARDOWN_CLEAR_POINTERS,
             false);
         root = NULL;
     }
-    Arena* old_arena = arena;
-    Pool* old_pool = pool;
-    arena = NULL;
-    pool = NULL;
+    view_tree_canonical_destroy(this);
+    Arena* old_arena = scratch_arena;
+    Pool* old_pool = prop_pool;
+    scratch_arena = NULL;
+    prop_pool = NULL;
+    free_text_rects = NULL;
     // Factory-created view roots must unregister their memory-context nodes on teardown.
     if (old_arena) mem_arena_destroy(old_arena);
     if (old_pool) mem_pool_destroy(old_pool);

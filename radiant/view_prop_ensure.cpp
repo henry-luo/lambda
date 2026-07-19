@@ -12,19 +12,63 @@ static Prop* ensure_view_prop(Pool* pool, Prop*& storage, const Prop& defaults) 
     return storage;
 }
 
-static Pool* prop_pool(ViewTree* tree) { return tree ? tree->pool : nullptr; }
+static Pool* prop_pool(ViewTree* tree) { return tree ? tree->prop_pool : nullptr; }
 
 static Pool* prop_pool(LayoutContext* lycon) {
     if (!lycon) return nullptr;
-    if (lycon->doc && lycon->doc->view_tree) return lycon->doc->view_tree->pool;
+    if (lycon->doc && lycon->doc->view_tree) return lycon->doc->view_tree->prop_pool;
     // Focused layout tests and embedders can provide the pass pool without a ViewTree shell.
     return lycon->pool;
+}
+
+static ViewTree* prop_tree(LayoutContext* lycon) {
+    return lycon && lycon->doc ? lycon->doc->view_tree : nullptr;
+}
+
+static InlineProp* ensure_inline_prop(DomElement* element, Pool* pool,
+                                      ViewTree* tree) {
+    if (!element || !pool) return element ? element->in_line : nullptr;
+    if (element->in_line && element->inline_prop_shared()) {
+        InlineProp* owned = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
+        if (!owned) return nullptr;
+        memcpy(owned, element->in_line, sizeof(InlineProp));
+        // Canonical values are immutable; crossing ensure_inline is the single
+        // mutation gate that restores element-owned writable storage.
+        element->in_line = owned;
+        element->mark_inline_prop_owned();
+        if (tree) tree->canonical_stats.inline_cows++;
+    } else if (!element->in_line) {
+        element->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
+        if (element->in_line) {
+            memcpy(element->in_line, &INLINE_PROP_DEFAULT, sizeof(InlineProp));
+            element->mark_inline_prop_owned();
+        }
+    }
+    return element->in_line;
+}
+
+static TextShadow* clone_text_shadows(Pool* pool, const TextShadow* source) {
+    TextShadow* first = nullptr;
+    TextShadow* last = nullptr;
+    while (source && pool) {
+        TextShadow* copy = (TextShadow*)pool_calloc(pool, sizeof(TextShadow));
+        if (!copy) return first;
+        *copy = *source;
+        copy->next = nullptr;
+        if (!first) first = copy;
+        else last->next = copy;
+        last = copy;
+        source = source->next;
+    }
+    return first;
 }
 
 BlockProp* DomElement::ensure_block(ViewTree* tree) { return ensure_view_prop(prop_pool(tree), blk, BLOCK_PROP_DEFAULT); }
 BoundaryProp* DomElement::ensure_boundary(ViewTree* tree) { return ensure_view_prop(prop_pool(tree), bound, BOUNDARY_PROP_DEFAULT); }
 FontProp* DomElement::ensure_font(ViewTree* tree) { return ensure_view_prop(prop_pool(tree), font, FONT_PROP_DEFAULT); }
-InlineProp* DomElement::ensure_inline(ViewTree* tree) { return ensure_view_prop(prop_pool(tree), in_line, INLINE_PROP_DEFAULT); }
+InlineProp* DomElement::ensure_inline(ViewTree* tree) {
+    return ensure_inline_prop(this, prop_pool(tree), tree);
+}
 
 static ScrollProp* ensure_scroll_prop(DomElement* element, Pool* pool) {
     ScrollProp* value = ensure_view_prop(pool, element->scroller, SCROLL_PROP_DEFAULT);
@@ -91,7 +135,9 @@ FormControlProp* DomElement::ensure_form(ViewTree* tree) {
 }
 
 BoundaryProp* DomElement::ensure_boundary(LayoutContext* lycon) { return ensure_view_prop(prop_pool(lycon), bound, BOUNDARY_PROP_DEFAULT); }
-InlineProp* DomElement::ensure_inline(LayoutContext* lycon) { return ensure_view_prop(prop_pool(lycon), in_line, INLINE_PROP_DEFAULT); }
+InlineProp* DomElement::ensure_inline(LayoutContext* lycon) {
+    return ensure_inline_prop(this, prop_pool(lycon), prop_tree(lycon));
+}
 PositionProp* DomElement::ensure_position(LayoutContext* lycon) { return ensure_view_prop(prop_pool(lycon), position, POSITION_PROP_DEFAULT); }
 EmbedProp* DomElement::ensure_embed(LayoutContext* lycon) { return ensure_view_prop(prop_pool(lycon), embed, EMBED_PROP_DEFAULT); }
 TransformProp* DomElement::ensure_transform(LayoutContext* lycon) { return ensure_view_prop(prop_pool(lycon), transform, TRANSFORM_PROP_DEFAULT); }
@@ -119,6 +165,9 @@ FontProp* DomElement::ensure_font(LayoutContext* lycon) {
         // Font groups inherit as a value snapshot so later cascade mutation remains element-owned.
         *value = *lycon->font.style;
         value->owns_font_handle = false;
+        // The inherited FontProp snapshot owns its mutable text-shadow chain;
+        // sharing the parent's list would make retained reset double-free it.
+        value->text_shadow = clone_text_shadows(prop_pool(lycon), lycon->font.style->text_shadow);
         assert(value->font_size >= 0);
     }
     return value;

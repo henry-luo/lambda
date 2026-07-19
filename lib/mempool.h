@@ -110,6 +110,22 @@ unsigned int pool_get_id(Pool* pool);
  */
 void pool_get_stats(Pool* pool, size_t* alloc_bytes, size_t* alloc_count);
 
+typedef struct PoolStats {
+    size_t reserved_bytes;
+    size_t live_bytes;
+    size_t high_water_live_bytes;
+    size_t cumulative_bytes;
+    size_t allocation_count;
+    size_t free_count;
+    int is_mmap;
+} PoolStats;
+
+/** Return the allocator-owned size of one live allocation. */
+size_t pool_allocation_size(Pool* pool, void* ptr);
+
+/** Copy detailed pool counters used by memory-domain attribution. */
+void pool_get_detailed_stats(Pool* pool, PoolStats* out);
+
 /**
  * Memory-context registration node accessors (opaque void* to avoid a hard
  * dependency on mem_context.h). Used by the allocator factory (mem_factory.c).
