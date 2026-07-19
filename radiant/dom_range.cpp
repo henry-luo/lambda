@@ -673,7 +673,8 @@ static void sync_anchor_focus(DomSelection* s, bool forward) {
 void dom_selection_add_range(DomSelection* s, DomRange* range) {
     if (!s || !range) return;
     if (!s->state) s->state = range->state;
-    // Per Chromium-compatible behavior, only the first range is honored.
+    // Table-cell editing represents discontiguous cells as bounded ranges;
+    // ignore only selections beyond the engine's explicit capacity.
     if (s->range_count >= DOM_SELECTION_MAX_RANGES) {
         log_debug("dom_selection_add_range: ignoring extra range (range_count=%u)",
                   s->range_count);

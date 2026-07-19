@@ -806,9 +806,17 @@ static void validate_selection_invariants(DocState* state,
     if (!state_store_editing_selection_shadow_matches(state)) {
         report_fail(report, "editing selection shadow disagrees with DOM selection");
     }
-    if (selection->range_count > 1) {
-        report_fail(report, "DOM selection has more than one range");
+    if (selection->range_count > DOM_SELECTION_MAX_RANGES) {
+        report_fail(report, "DOM selection exceeds bounded range capacity");
         return;
+    }
+    for (uint32_t i = 0; i < selection->range_count; i++) {
+        // Presentation and the scalar editing shadow project the first range,
+        // while discontiguous table-cell ranges remain valid transaction data.
+        if (!selection->ranges[i]) {
+            report_fail(report, "DOM selection range slot is empty");
+            return;
+        }
     }
 
     if (selection->range_count == 0) {
@@ -819,11 +827,6 @@ static void validate_selection_invariants(DocState* state,
     }
 
     DomRange* range = selection->ranges[0];
-    if (!range) {
-        report_fail(report, "DOM selection range slot is empty");
-        return;
-    }
-
     DomBoundary anchor = dom_selection_anchor_boundary(selection);
     DomBoundary focus = dom_selection_focus_boundary(selection);
     if (!dom_boundary_is_valid(&anchor) ||

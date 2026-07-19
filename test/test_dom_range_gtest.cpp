@@ -364,6 +364,24 @@ TEST_F(DomRangeTest, SelectionInitiallyEmpty) {
     EXPECT_STREQ(dom_selection_type(s), "None");
 }
 
+TEST_F(DomRangeTest, SelectionKeepsBoundedDiscontiguousRanges) {
+    DomSelection* s = dom_selection_create(state);
+    const char* exc = nullptr;
+    for (uint32_t i = 0; i < DOM_SELECTION_MAX_RANGES + 1; i++) {
+        DomRange* range = dom_range_create(state);
+        ASSERT_TRUE(dom_range_set_start(range, hello, i % 5, &exc));
+        ASSERT_TRUE(dom_range_set_end(range, hello, (i % 5) + 1, &exc));
+        dom_selection_add_range(s, range);
+        dom_range_release(range);
+    }
+    EXPECT_EQ(dom_selection_range_count(s),
+              static_cast<uint32_t>(DOM_SELECTION_MAX_RANGES));
+    for (uint32_t i = 0; i < DOM_SELECTION_MAX_RANGES; i++) {
+        EXPECT_NE(dom_selection_get_range_at(s, i, &exc), nullptr);
+        EXPECT_EQ(exc, nullptr);
+    }
+}
+
 TEST_F(DomRangeTest, SelectionCollapseCreatesCaret) {
     DomSelection* s = dom_selection_create(state);
     const char* exc = nullptr;
