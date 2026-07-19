@@ -1048,6 +1048,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->gen_param_offset = param_offset;
         mt->gen_local_offset = local_offset;
         mt->gen_local_slot_count = (gen_args_slot >= 0 ? gen_args_slot : gen_this_slot) + 1;  // next available slot (within padding area)
+        mt->gen_dynamic_slot_limit = gen_spill_start;
         mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
         mt->gen_active_iterator_slot = gen_active_iterator_slot;
 
@@ -1676,6 +1677,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             mt->gen_param_offset = param_offset_sm;
             mt->gen_local_offset = local_offset;
             mt->gen_local_slot_count = (gen_args_slot >= 0 ? gen_args_slot : gen_this_slot) + 1;  // next available slot (within padding area)
+            mt->gen_dynamic_slot_limit = gen_spill_start;
             mt->gen_spill_slot_next = gen_spill_start;  // spill slots start at beginning of spill padding area
             mt->gen_active_iterator_slot = gen_active_iterator_slot;
 

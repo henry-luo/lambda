@@ -1,0 +1,12 @@
+{
+  "name": "same-document history traversal restores state and dispatches hashchange",
+  "html": "test/ui/dom/history_hash.html",
+  "viewport": {"width": 640, "height": 420},
+  "events": [
+    {"type": "click", "target": {"selector": "#push"}},
+    {"type": "click", "target": {"selector": "#push"}},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "push two #two hashes=0"},
+    {"type": "click", "target": {"selector": "#back"}},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "popstate one #one hashes=1"}
+  ]
+}

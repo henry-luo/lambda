@@ -765,7 +765,10 @@ extern "C" Item js_timeout_refresh(Item this_val) {
 
 // Timeout[Symbol.toPrimitive]() — returns the timer id
 extern "C" Item js_timeout_toPrimitive(Item this_val) {
-    Item id = js_property_get(this_val, (Item){.item = s2it(heap_create_name("_timerId", 8))});
+    Item self = timeout_this_or_arg(this_val);
+    // Native method calls pass the coercion hint in the first ABI slot; recover
+    // the receiver so numeric timer-handle coercion cannot yield undefined.
+    Item id = js_property_get(self, (Item){.item = s2it(heap_create_name("_timerId", 8))});
     return id;
 }
 

@@ -28,6 +28,8 @@
 extern __thread EvalContext* context;
 extern "C" Context* _lambda_rt;
 extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc);
+extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc);
+extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc);
 
 static void gc_finalize_all_objects(gc_heap_t *gc);
 extern "C" void vmap_gc_destroy(void* obj, void* data);
@@ -96,6 +98,8 @@ static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
     Map* map = (Map*)data;
     if (!map || !gc) return;
     js_generator_map_gc_trace(map, gc);
+    js_collection_map_gc_trace(map, gc);
+    js_iterator_map_gc_trace(map, gc);
     if (map->type_id != LMD_TYPE_MAP || map->map_kind != MAP_KIND_TYPED_ARRAY) return;
 
     JsTypedArray* ta = gc_typed_array_from_map(map);

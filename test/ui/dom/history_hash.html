@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>history and hash traversal</title>
+  <style>
+    body { margin: 20px; font: 16px sans-serif; }
+    button, #status { display: block; margin: 8px 0; padding: 6px; }
+  </style>
+</head>
+<body>
+  <button id="push" type="button">push state</button>
+  <button id="back" type="button">back</button>
+  <div id="status">ready start #start hashes=0</div>
+  <script>
+    var page = 0;
+    var phase = 'ready';
+    var hashChanges = 0;
+
+    history.replaceState({ page: 'start' }, '', '#start');
+
+    function renderStatus() {
+      document.getElementById('status').textContent =
+        phase + ' ' + history.state.page + ' ' + location.hash + ' hashes=' + hashChanges;
+    }
+
+    document.getElementById('push').addEventListener('click', function () {
+      page++;
+      var name = page === 1 ? 'one' : 'two';
+      history.pushState({ page: name }, '', '#' + name);
+      phase = 'push';
+      renderStatus();
+    });
+
+    document.getElementById('back').addEventListener('click', function () {
+      history.go(-1);
+    });
+
+    window.addEventListener('popstate', function () {
+      phase = 'popstate';
+      renderStatus();
+    });
+
+    window.addEventListener('hashchange', function () {
+      hashChanges++;
+      renderStatus();
+    });
+  </script>
+</body>
+</html>

@@ -137,8 +137,16 @@ static Url* history_resolve_url(DomDocument* document, const char* url_text) {
 static bool history_apply_document_url(DomDocument* document, const Url* url) {
     Url* copy = history_copy_url(url);
     if (!document || !copy) return false;
-    if (document->url) url_destroy(document->url);
-    document->url = copy;
+    if (!document->url) {
+        document->url = copy;
+        return true;
+    }
+    // The loader and Input retain this Url address while scripts run, so swap
+    // owned contents in place instead of leaving those aliases dangling.
+    Url previous = *document->url;
+    *document->url = *copy;
+    *copy = previous;
+    url_destroy(copy);
     return true;
 }
 

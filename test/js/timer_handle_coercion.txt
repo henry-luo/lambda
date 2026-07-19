@@ -1,0 +1,4 @@
+timer-coercion: function true true
+timer-cleared: true
+timer-member-coercion: function true true
+timer-member-cleared: true true

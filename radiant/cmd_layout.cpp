@@ -3513,8 +3513,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
             url_destroy(superseded_html_urls[i]);
         }
     }
-    dom_doc->view_tree = nullptr;  // Will be created during layout
-    dom_doc->state = nullptr;
+    // Parsing can execute scripts that synchronously create geometry and state;
+    // preserve their shared owners through the document's committed layout.
 
     // Set scale fields for HTML documents
     // HTML layout is in CSS logical pixels, scale is set later based on display context
@@ -5758,8 +5758,8 @@ void rebuild_lambda_doc(UiContext* uicon) {
     apply_inline_styles_to_tree(new_root, html_elem, doc->document_pool);
     auto t_css = high_resolution_clock::now();
 
-    // mark view tree dirty for full relayout
-    doc->view_tree = nullptr;  // force full layout rebuild
+    // layout_html_doc owns the retained-tree reset; clearing this pointer would
+    // orphan a script-created geometry tree and its heap-allocated shell.
 
     // trigger relayout + repaint
     layout_html_doc(uicon, doc, false);

@@ -3265,6 +3265,7 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
 }
 
 void layout_cleanup(LayoutContext* lycon) {
+    Arena* scratch_arena = lycon->scratch.arena;
     // Release scratch allocator (safety net for any un-freed temp buffers)
     scratch_release(&lycon->scratch);
 
@@ -3274,14 +3275,14 @@ void layout_cleanup(LayoutContext* lycon) {
         lycon->counter_context = nullptr;
     }
 
-    if (lycon->doc && lycon->doc->view_tree &&
-        lycon->doc->view_tree->scratch_arena) {
-        Arena* scratch_arena = lycon->doc->view_tree->scratch_arena;
+    if (scratch_arena) {
         // Counter scopes allocate directly from the shared scratch arena, so
         // releasing the ScratchArena wrapper alone leaves pass-local bytes live.
-        // The completed pass is the ownership boundary for every such value.
-        assert(arena_active_scope_count(scratch_arena) == 0);
-        arena_reset(scratch_arena);
+        // Nested geometry reads share this arena; only the outermost pass owns
+        // its reset, and the document tree can change during a nested pass.
+        if (arena_active_scope_count(scratch_arena) == 0) {
+            arena_reset(scratch_arena);
+        }
     }
 
     // BlockContext cleanup - floats are pool-allocated, no explicit cleanup needed
@@ -3303,7 +3304,15 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
         return;
     }
+    if (!is_reflow && doc->view_tree && doc->view_tree->scratch_arena &&
+        arena_active_scope_count(doc->view_tree->scratch_arena) > 0) {
+        // A full nested pass would replace the tree still owned by its caller;
+        // the outer pass will publish the completed geometry.
+        log_debug("layout html doc - defer nested full layout to active pass");
+        return;
+    }
     bool init_view_pool = false;
+    bool reset_script_layout = false;
     if (is_reflow) {
         if (!doc->view_tree) {
             doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
@@ -3311,9 +3320,15 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         } else if (!doc->view_tree->prop_pool) {
             init_view_pool = true;
         }
-    } else {
+    } else if (!doc->view_tree) {
         doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
         init_view_pool = true;
+    } else {
+        // Reuse the shell built by script-time geometry so document commit does
+        // not leak a separate ViewTree ownership epoch.
+        view_pool_reset_retained(doc->view_tree);
+        reset_script_layout = true;
+        if (!doc->view_tree->prop_pool) init_view_pool = true;
     }
     // Phase 16: In incremental layout, keep existing view pool (preserves BoundaryProp etc.).
     // Reflow callers either keep the current pool or pre-reset it for retained
@@ -3405,6 +3420,11 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     log_layout_timing_summary();
     log_info("[TIMING] layout_html_doc total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
     if (!is_reflow && doc->view_tree && doc->view_tree->root) {
+        if (reset_script_layout && doc->state) {
+            // Reset views can leave hidden pre-layout state unreachable; prune
+            // it only after the final tree has restored live DOM identities.
+            state_store_prune_after_reflow((DocState*)doc->state);
+        }
         doc_state_set_lifecycle((DocState*)doc->state, DOC_LIFECYCLE_COMMITTED);
     }
 }

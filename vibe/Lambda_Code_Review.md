@@ -2,9 +2,9 @@
 
 **Date:** 2026-07-18
 **Commit:** `d76b90f5e`
-**Scope:** ~747k lines of first-party C/C++ across `lambda/` (core runtime, input parsers, formatters, validator, network, JS/Python/Bash engines), `radiant/` (CSS layout & rendering engine), and `lib/` (foundation allocators, containers, GC, string libraries). Vendored code (`lib/sqlite/`, tree-sitter, WOFF2, tidwall hashmap, c-algorithms arraylist, mbedTLS) and generated files (`parser.c`, `lambda-embed.h`) excluded.
+**Scope:** ~747k lines of first-party C/C++ across `lambda/` (core runtime, input parsers, formatters, validator, network, JS/Python/Bash engines, **the `serve/` HTTP server**), `radiant/` (CSS layout & rendering engine), and `lib/` (foundation allocators, containers, GC, string libraries, **URL/date/image/font/line-editor utilities**), plus **the concurrency substrate, the test suite, and the build/CI configuration**. Vendored code (`lib/sqlite/`, tree-sitter, WOFF2, tidwall hashmap, c-algorithms arraylist, mbedTLS, libuv) and generated files (`parser.c`, `lambda-embed.h`) excluded.
 
-**Method:** Six parallel audit agents, one per subsystem, each instructed to verify every finding by reading the cited source rather than inferring from grep. The highest-severity findings in this report were then independently re-verified against the current tree. Line numbers are current as of the commit above.
+**Method:** Ten parallel audit agents across two rounds, each instructed to verify every finding by reading the cited source rather than inferring from grep. **Round 1** (six agents) covered the core runtime, input/format/validator pipeline, radiant, `lib/` foundation, LambdaJS, and cross-cutting hygiene. **Round 2** (four agents) extended into the surfaces Round 1 under-covered: the `serve/` HTTP server, the concurrency/threading substrate, the remaining `lib/` utilities + build/CI, and a test-coverage-gap analysis asking *why the Round-1 bugs survived*. All high-severity findings were independently re-verified against the tree before inclusion. Line numbers are current as of the commit above.
 
 **What this review is *not*:** It does not re-litigate two workstreams already tracked in `vibe/`:
 - **`Compile_Warning.md`** — the compiler-warning cleanup (82k → 61 warnings) is essentially done; this review does not re-derive it.
@@ -18,19 +18,25 @@ The project's coding conventions are respected as constraints, not flagged as de
 
 The codebase is, in most respects, **more disciplined than its size would predict**. It ships a purpose-built safety library (`checked_math.hpp`, `checked_alloc.hpp`, `mem_grow.hpp`) that is genuinely adopted; an audited-exception comment convention (`UNSAFE_LIBC_OK`, `RAWALLOC_OK`, `INT_CAST_OK`, `RAW_ITEM_EQ_OK`) tied to custom ast-grep lint rules; a `.clang-tidy` with a broad check set; thoughtful stack-overflow engineering (signal-based recovery, RAII recursion guards, TCO iteration caps); and near-zero dead/commented-out code with best-in-class TODO density. Naming, header guards, and the tagged-pointer cast discipline are followed almost universally.
 
-The problems cluster into **five themes**, in rough priority order:
+The single most important finding of the review, however, is not a code defect — it is that **the safety net that should catch these defects is switched off**. All three CI workflows are `workflow_dispatch:`-only (auto-triggers commented out "until nightly CI stabilizes"); the in-process unit tests build with **`enable_sanitizer_tests: false`** so the suites most likely to expose use-after-free and heap overflow run without ASan; the validator's malformed-input crash tests are `GTEST_SKIP`-ed rather than fixed; the one GC "stress" test keeps a single object live so the collector's growth path never executes; and the Windows/CLI/jube builds compile with `-w`, silencing even the `-Werror=` gates. This is *why* the memory-safety bugs below survived into the tree: nothing runs on push or PR, and what does run is under-instrumented. Fixing the process (§10) is the highest-leverage action in this report — without it, every fix below can silently regress.
 
-1. **Memory-safety gaps on the OOM and untrusted-input paths.** The most serious findings are not everyday bugs — they are latent failures that surface under memory pressure or on adversarial input. The GC collector can free live objects if a `realloc` fails mid-mark; the memtrack layer can corrupt the heap on a cross-mode `realloc`; several untrusted parsers (PDF, YAML) recurse without a working depth limit; and the HTTP server has a stack-buffer overflow and a header-injection hole. These are individually fixable and mostly localized.
+The code-level problems cluster into **seven themes**, in rough priority order:
 
-2. **Structure: mega-functions and mega-files.** This is the most *pervasive* issue by volume. `resolve_css_property` is a single **5,978-line function**; `js_runtime.cpp` is **39,481 lines / 1,125 functions** with a 2,545-line dispatcher; `main()` is ~2,987 lines. Across the tree, ~90 functions exceed 300 lines and a dozen exceed 1,000. This is a maintainability and reviewability tax, and it is where subtle state-flow bugs hide.
+1. **Memory-safety gaps on the OOM and untrusted-input paths.** The most serious findings are latent failures that surface under memory pressure or on adversarial input. The GC collector can free live objects if a `realloc` fails mid-mark; the memtrack layer can corrupt the heap on a cross-mode `realloc`; several untrusted parsers (PDF, YAML) recurse without a working depth limit; untrusted image/font decoders overflow 32-bit `w*h*4` / `offset+length` size math into undersized allocations and out-of-bounds reads; and `url_decode` emits `%00` as a raw NUL. Individually fixable and mostly localized.
 
-3. **Fallible-but-silent APIs.** A recurring shape: functions that can fail (OOM, short write, overflow) return `void` or an always-true value, or log-and-continue. String-builder appends, GC root registration, file writers, and ~66 allocation sites in the core runtime swallow failure. Output silently truncates; the atomic-file writer can install a truncated file; roots silently go unregistered.
+2. **The HTTP server is a young, exposed attack surface.** `lambda/serve/` (~7.2k lines) — barely tested — has a cookie-serializer stack overflow, no CRLF validation on *any* response header/cookie/redirect sink (response splitting), a request-framing desync (Content-Length matched as a substring anywhere in the header block; `Transfer-Encoding` ignored), and a TLS layer whose `tls_read`/`tls_write` are **dead code** so `server_start_tls()` advertises HTTPS a handshake never runs. This is the subsystem where the gap between "shipped" and "hardened" is widest.
 
-4. **Global mutable state vs. a multi-threaded future.** ~1,015 mutable file-scope statics (620 in `lambda/js` alone), plus process-global singletons (`_lambda_rt`, `js_runtime_state`, `s_in_batch`) that coexist uneasily with a `__thread`-local context design and real threads (parallel module compilation, frame clock, network). Single-runtime-per-process is an *implicit, unenforced* invariant.
+3. **Structure: mega-functions and mega-files.** The most *pervasive* issue by volume. `resolve_css_property` is a single **5,978-line function**; `js_runtime.cpp` is **39,481 lines / 1,125 functions** with a 2,545-line dispatcher; `main()` is ~2,987 lines. Across the tree, ~90 functions exceed 300 lines and a dozen exceed 1,000 — a reviewability tax, and where subtle state-flow bugs hide.
 
-5. **Inconsistent error conventions and integer-width handling.** Within a single module, failures are variously `ItemNull`, `ItemError`, `NULL`, `&STR_ERROR`, or `set_runtime_error`; callers can't handle them uniformly. `size_t` computations truncate through `int` allocation parameters; untrusted numbers are parsed with `atoi`/`strtol` without `ERANGE` checks.
+4. **Fallible-but-silent APIs.** Functions that can fail (OOM, short write, overflow) return `void` or an always-true value, or log-and-continue. String-builder appends, GC root registration, file writers, and ~66 allocation sites in the core runtime swallow failure. Output silently truncates; the atomic-file writer can install a truncated file; roots silently go unregistered.
 
-**Bottom line:** No architectural rewrite is warranted. The recommended program is (a) a focused memory-safety sprint on the ~15 high-severity findings, (b) a sustained structural-decomposition effort on the worst dozen functions, and (c) two or three new lint rules plus a UBSan CI job to prevent regression. Detailed roadmap in [§7](#7-prioritized-remediation-roadmap).
+5. **Global mutable state vs. the threading the code already does.** ~1,015 mutable file-scope statics (620 in `lambda/js`), plus process-global singletons (`_lambda_rt`, `js_runtime_state`, `attached_scheduler`, `s_in_batch`) that coexist uneasily with a `__thread`-local context design. The async/scheduler/loop substrate is single-threaded-cooperative by design, but "one runtime per process" is an *unenforced* invariant, and five concurrency defects already fire in the parallel-compile path that exists today.
+
+6. **Inconsistent error conventions and integer-width handling.** Within one module, failures are variously `ItemNull`, `ItemError`, `NULL`, `&STR_ERROR`, or `set_runtime_error`; callers can't handle them uniformly. `size_t` computations truncate through `int` allocation parameters; untrusted numbers (Content-Length, Range, image dimensions, CSS values) are parsed with `atoi`/`strtol`/`int` math without `ERANGE` or overflow checks.
+
+7. **Inconsistent hardening of near-identical code paths.** Repeatedly, one variant is guarded and its sibling is not: `load_jpeg_scaled` checks `file_size<=0` but `load_jpeg` doesn't; `url_decode_component` validates NUL/UTF-8 but `url_decode` doesn't; `datetime_yearday` guards `month` but `datetime_weekday` doesn't; the font `name` table casts operands before comparing but `font_tables_find` doesn't. Aligning each pair on the already-written safe variant closes many findings cheaply.
+
+**Bottom line:** No architectural rewrite is warranted. The recommended program is (a) **re-enable CI with sanitized test lanes** (§10) — the prerequisite for everything else; (b) a focused memory-safety sprint on the ~25 high-severity findings; (c) a security pass on `serve/`; and (d) a sustained structural-decomposition effort on the worst dozen functions. Detailed roadmap in [§12](#12-prioritized-remediation-roadmap).
 
 ---
 
@@ -76,6 +82,31 @@ The table lists every **high-severity** finding plus the most consequential medi
 | 34 | Med | Inconsistent error conventions within one module (`ItemNull` vs `ItemError` vs `NULL` vs `&STR_ERROR`); one function returns two different failure values | `lambda/lambda-eval.cpp:221` | error-handling |
 | 35 | Med | `fclose`/`write` results ignored on write paths, **including atomic-rename flows** → silent truncated-file install | `lambda/lambda-proc.cpp:228`, `lib/file.c:298` | error-handling |
 | 36 | Med | Lowercase `min`/`max` **macros in the core header** (`lambda-data.hpp`, included by 105 TUs); 5 rival MIN/MAX definitions | `lambda/lambda-data.hpp:33` | macro |
+
+### Round 2 — Extended scope (serve/, concurrency, remaining lib/, test & CI)
+
+Kept as a separate block to preserve the Round-1 numbering above; still severity-ranked within.
+
+| # | Severity | Finding | Location | Class |
+|---|----------|---------|----------|-------|
+| 37 | **High** | **CI is switched off**: all 3 workflows are `workflow_dispatch:`-only (push/PR/schedule commented out); CodeQL SAST off too | `.github/workflows/*.yml` | ci |
+| 38 | **High** | Unit tests build **without ASan** (`enable_sanitizer_tests: false`) — the suites most likely to catch UAF/overflow run uninstrumented | `build_lambda_config.json:8` | test/ci |
+| 39 | **High** | `-w` on the **Windows/CLI/jube builds** disables all warnings and defeats every `-Werror=` gate (missing-return UB compiles clean) | `Makefile:651,760,780,788` | build-config |
+| 40 | **High** | serve: cookie serializer stack overflow — `off += snprintf(buf+off, sizeof-off, …)` into `buf[1024]`; a cookie value >1KB corrupts the stack | `lambda/serve/http_response.cpp:293` | memory-safety |
+| 41 | **High** | serve: **no CRLF validation** on any response header / cookie / redirect sink → header injection / response splitting | `lambda/serve/http_response.cpp:95,260,286` | injection |
+| 42 | **High** | serve: request-framing desync — `content-length:` matched as a substring anywhere in the header block; `Transfer-Encoding` ignored (returns 0) | `lambda/serve/server.cpp:442,662` | request-parsing |
+| 43 | **High** | serve: TLS record layer **never wired into the I/O path** — `tls_read`/`tls_write`/`tls_handshake` are dead code; responses sent in plaintext | `lambda/serve/server.cpp:618`, `tls_handler.cpp:428` | tls |
+| 44 | **High** | Image decode: `width * height * 4` computed in 32-bit `int` on untrusted (remote) images → undersized alloc + multi-GB write (heap overflow); 6 sites | `lib/image.c:145,279,326,541,592,1169` | integer |
+| 45 | **High** | Font parsing: `offset + length` overflows `uint32_t` *before* the `(size_t)` cast → central table bounds check bypassed → OOB reads on untrusted fonts | `lib/font/font_tables.c:173` | integer |
+| 46 | **High** | rpmalloc lazy-init is **broken double-checked locking** (non-atomic flag, weak-memory UB on arm64) — also flagged in Round 1 (#21), fires in parallel compile | `lib/mempool.c:101` | data-race |
+| 47 | Med | serve: TLS `VERIFY_OPTIONAL` never aborts the handshake; `tls_get_verify_result` never called → client-mode MITM | `lambda/serve/tls_handler.cpp:129,212` | tls |
+| 48 | Med | serve: non-propagated `realloc` grow-failure in UDS/ASGI read loops → `memcpy` overflow or NULL-deref; world-accessible UDS IPC socket | `lambda/serve/uds_transport.cpp:27,209` | memory-safety |
+| 49 | Med | `url_decode` (used for `file://` → local path) decodes `%00`/`..` with no validation → null-byte truncation opens `/etc/passwd\0.png` | `lib/url.c:683,731` | url |
+| 50 | Med | base64 decode over-reports `*output_len` when data follows padding → caller reads uninitialized heap (reachable via `data:` URIs) | `lib/base64.c:118,163` | other |
+| 51 | Med | Script index mutated **outside `scripts_mutex`** on the read-failure path; workers never call `rpmalloc_thread_finalize()` (steady cache leak) | `lambda/runner.cpp:1281,1051` | data-race/lifetime |
+| 52 | Med | JS-Promise reaction can resume a **freed `LambdaTask` by handle** after scheduler teardown (UAF); pending observers dropped without firing | `lambda/concurrency_js.cpp:88`, `concurrency.cpp:623` | lifetime |
+| 53 | Med | No exploit-mitigation flags anywhere (`_FORTIFY_SOURCE`, stack-protector, RELRO, `-Wformat-security`); **UBSan configured nowhere**; macOS (primary dev platform) has **no CI** | `build_lambda_config.json`, `.github/workflows/` | build-config |
+| 54 | Med | Validator **crashes on malformed input are hidden by `GTEST_SKIP`** (6 skips document segfaults), not fixed; HTTP security paths & GC-OOM paths untested | `test/test_validator_gtest.cpp:805,934,1037` | test-coverage |
 
 ---
 
@@ -270,70 +301,212 @@ Table-driven teardown (`ViewPropTeardownEntry`) with root-cause lifecycle commen
 
 ---
 
-## 7. Tooling & Process Recommendations
+## 7. HTTP Server (`lambda/serve/`)
 
-The project already has strong guardrails: `.clang-tidy` (broad check set), ~30 custom ast-grep rules under `utils/lint/rules/`, CodeQL + nightly CI, ASan in debug builds, and the audited-exception comment conventions. The gaps below would have *caught* several findings in this report at commit time.
+**Scale:** ~7.2k lines, ~50 files (routing, TLS, body parsing, IPC to language backends, worker pool, Express/Flask/ASGI compat shims). Consumes untrusted HTTP; treat everything from the socket as hostile. This subsystem was **not covered in Round 1** and is the least battle-tested security surface in the tree — largest gap between "shipped" and "hardened."
+
+### High severity
+
+- **S-F1 — Cookie serializer stack overflow (#40).** Verified: `char buf[1024]` with `off += snprintf(buf + off, sizeof(buf) - (size_t)off, …)` accumulation across up to 7 appends. A cookie **value** >~1023 bytes (a JWT/session token or reflected input) makes `off > 1024`; the next append writes at `buf + off` (out of bounds) with `sizeof(buf) - off` underflowed to a huge `size_t`. Attacker controls the write offset via value length. The sibling `cookie.cpp:cookie_build_set_cookie` sizes its buffer to the actual length — the correct template. Same shape (lower impact) in `http_response_send_event`'s `buf[4096]`. **Fix:** dynamic sizing, or clamp `off` after each `snprintf`.
+- **S-F2 — No CRLF validation on any header/cookie/redirect sink (#41).** Verified: `http_response_set_header`, `append_header`, `set_cookie`, and `redirect` (which puts a caller-supplied `url` straight into `Location`) never reject `\r`/`\n`/NUL. Reflecting a request header or redirecting to a user URL lets an attacker inject headers or split the response (cache poisoning, XSS). Zero defense. **Fix:** reject/strip control chars in names and values before storing/emitting.
+- **S-F3 — Request-framing desync / smuggling (#42).** `parse_content_length` substring-scans `content-length:` across the *entire* header block (so `GET /content-length:100 …` in the request-line matches), takes the first match, doesn't reject duplicates, and returns 0 for `Transfer-Encoding: chunked` (unhandled). Standalone impact is limited (the server resets `read_len` and discards trailing bytes, so it doesn't re-parse a second smuggled request itself), but behind a proxy that honors TE or a different CL this is a classic desync. **Fix:** parse CL only from a line-start header *name*; reject TE+CL, duplicate/inconsistent CL, and unknown TE; implement or 501 chunked.
+- **S-F4 — TLS never wired into the I/O path (#43).** Verified: `tls_read`/`tls_write`/`tls_handshake`/`tls_connection_feed` have **zero callers** outside `tls_handler.cpp`. `server.cpp` creates `conn->tls` but `on_read` parses raw socket bytes as plaintext and every response writer targets the bare TCP handle. `server_start_tls()` advertises HTTPS the handshake never performs. Request-side fails closed (a ClientHello won't parse as HTTP), so active disclosure isn't currently demonstrable, but the advertised control is absent. **Fix:** route ingress through `tls_connection_feed`→`tls_handshake`→`tls_read` and egress through `tls_write` when `conn->is_tls`.
+
+### Medium severity
+
+- **S-F5 — TLS peer verification never rejects a bad cert (#47).** `verify_peer=0` default, and even when set uses `MBEDTLS_SSL_VERIFY_OPTIONAL` (computes trust flags but completes the handshake); `tls_get_verify_result` is never called. Benign for pure server mode; in client mode (upstream proxying) it accepts any/expired/wrong-host cert → MITM. **Fix:** `VERIFY_REQUIRED` for client contexts, or check the result and drop.
+- **S-F6 — Non-propagated `realloc` grow-failure + UDS hardening (#48).** `ensure_read_capacity` (UDS) logs and returns *without growing* on `realloc` failure; the following `memcpy` overflows the old buffer. `server.cpp`/`asgi_bridge.cpp` assign `realloc` back to the live pointer with no NULL check (leak + NULL-deref). Sizes are `int` with no max line length. Separately, the UDS IPC socket is `uv_pipe_bind`'d with no `chmod`/private-dir → any local user can inject IPC responses (which are then trusted and applied with no CRLF re-validation). **Fix:** propagate failure and close the connection; `size_t` + max size; create the socket 0600 in a 0700 dir (or `SO_PEERCRED`).
+- **S-F7 — DoS: 4-thread pool, no request timeout, ineffective queue cap (#7-serve).** `request_timeout_ms` stored but never enforced; `queued_tasks` is incremented then immediately decremented so `max_queue_length` never trips; handlers run synchronously on libuv's default 4-thread pool. Four slow handlers stall all request processing. **Fix:** enforce the timeout, fix the queue accounting, size the pool from config.
+
+### Low severity
+
+- **S-F8** — self-signed private key written world-readable (no `umask`/`chmod 0600`, `tls_handler.cpp:646`); Content-Length/Range parsed with `atol`/`atoll` no `ERANGE` (bounded downstream by `max_body_size`/file size, so low); path-traversal defense is a `..` substring blocklist that follows symlinks and never canonicalizes (but *does* run after URL-decode, closing `%2e%2e`/`%00`); the CGI env builder has httpoxy + header→env-name injection but the exec backends are 501 stubs (not yet reachable).
+
+### Positives
+
+`ipc_parse_response` decodes untrusted fields into bounded `name_buf[256]`/`val_buf[1024]` with explicit `len < sizeof` guards. The router is recursion-bounded (64-segment cap, length-clamped param copies). Path is URL-decoded *once* and traversal-checked *after* decoding (closes `%2e%2e`/`%00`). Consistent `is_closing` guards, per-connection timeout timers, a global connection cap, and a request-size ceiling show real lifecycle attention. TLS pins ≥1.2 with a real entropy source; backends spawn via `uv_spawn` argv arrays (no shell → no command injection).
+
+---
+
+## 8. Concurrency & Threading Substrate
+
+**Scope:** `lambda/concurrency*.cpp` (scheduler/mailbox/promise bridge), `lib/thread_pool.c`, `lib/uv_loop.c` (libuv wrapper), and the parallel-compile touchpoints.
+
+**The model (so the report can state the invariant):** there is effectively **one execution thread** — the entire cooperative layer (single global libuv loop, `LambdaScheduler`, tasks, mailboxes, wait-groups, Promises, GC) runs on it, lock-free by design because its state is single-owner. The **only real parallelism** is transient, join-bounded **compile fan-out** (`thread_pool` for Lambda imports; raw `pthread_create` for JS imports), where each worker compiles an independent module into its own parser + `Input` pool/arena/name_pool + `MIR_context_t`, sharing only the `scripts_mutex`-guarded script index. **The invariant to enforce and document:** *the async/scheduler/loop substrate is single-threaded-cooperative and must never be entered from a second thread; parallel compile is safe only so long as workers touch nothing shared except the `scripts_mutex`-guarded index.* Most findings are latent violations that activate under a second concurrent runtime; **five fire in the compile path today** (T-F1, T-F3, T-F4, and the unlocked counter/log writes).
+
+### High / Medium — fires in the parallel-compile path today
+
+- **T-F1 — rpmalloc broken double-checked locking (#46).** Non-atomic read of `rpmalloc_initialized` outside the mutex races the locked store (C11 data race = UB); on arm64 a worker can see the flag set without a happens-before edge to rpmalloc's init writes → crash in `rpmalloc_heap_acquire`. Practically masked because the execution thread allocates (initializing rpmalloc) before spawning workers; bites if a pool is ever first created from a fresh thread. **Fix:** atomic acquire/release or `pthread_once`.
+- **T-F2 — Script index mutated outside `scripts_mutex` on the read-failure path (#51).** The lookup side reads `script_index` under the mutex, but the error path (`read_text_file` failed) deletes the just-registered stub from that hashmap and nulls the scripts slot with the lock *released*. A concurrent worker lookup races a hashmap mutation → corruption / read of a freed `Script`. Gated by a mid-compile read failure + a depth miscomputation (diamond deps). **Fix:** hold the mutex across the failure-path removal.
+- **T-F3 — Non-atomic `next_pool_id++` raced by workers (#51-adjacent).** Every `transpile_script` allocates its own `Input` pool; the compile workers run concurrently and each does a non-atomic RMW on the process-global `next_pool_id` → data race (ids collide/skip). Consequence bounded (diagnostics identity), but a real concurrent race. **Fix:** `atomic_inc32`.
+- **T-F4 — Workers never call `rpmalloc_thread_finalize()` (#51).** Each worker lazily runs `rpmalloc_thread_initialize()` on first alloc but nothing finalizes on exit; rpmalloc's per-thread cache is orphaned until process exit. A long-running process (server, watch mode, REPL) leaks a thread cache per spawned worker. **Fix:** finalize at the end of each worker function.
+- Also fire now: unlocked `runtime->mir_cache_hits++` (`runner.cpp:1267`, lost updates — the *miss* counter is under the lock) and concurrent `log.c` writes from workers (garbled lines + a race on the logger buffer — see L-F6).
+
+### Medium — latent (activate under a second concurrent runtime)
+
+- **T-F5 — Process-global scheduler↔loop wiring (#32-extended).** `attached_scheduler` and `uv_loop.c`'s `g_task_drain`/`g_loop` are singletons behind a `__thread` context. A second `lambda_scheduler_create` silently overwrites `attached_scheduler` (the loop only drains the last one → first scheduler's tasks starve); destroying the second nulls it even if the first lives. **Fix:** store the active scheduler in the loop's `data`/`EvalContext`, or assert single-scheduler.
+- **T-F6 — JS-Promise reaction resumes a freed task after teardown (#52).** A task parked on a JS Promise leaves `.then` closures holding the task's *handle*; `lambda_scheduler_destroy` frees every `LambdaTask` but the GC-managed handle survives with `host_data` dangling. If the Promise later settles, `lambda_task_from_handle` returns the freed task and `lambda_task_resume_external` dereferences it → UAF. Compounded by teardown firing only `destroy_data`, never the observer `callback`, so bridged Promises hang. **Fix:** invalidate handles / settle pending observers before freeing tasks.
+- **T-F7 — `lambda_uv_init` check-then-act (#7-concurrency).** Two threads racing it both allocate the loop and `uv_prepare_start` the same static handles → leaked loop + corrupted handle state. Safe only because the loop is created once on the execution thread. **Fix:** `pthread_once`.
+
+### Low severity
+
+Thread-pool queue is unbounded (no backpressure); the worker loop isn't exception-safe (a C++ exception from a job skips `active--` → `tp_wait_all` deadlock + UB unwinding through the C frame); the drain watchdog is a stack `uv_timer_t` retired with a single `UV_RUN_NOWAIT` (correct today, fragile to future close-deferral).
+
+### Positives
+
+`thread_pool.c` is **carefully synchronized** — every shared field mutex-guarded, both condvars use predicate `while` loops, and `pthread_create` failure cleanly tears down with no thread/lock leak. `mem_context.c` handles teardown re-entrancy correctly (global mutex + `__thread g_in_teardown` guard prevents deadlock/double-free during cascade destroy). `concurrency.cpp` wait-group teardown is explicitly UAF-aware (re-reads `waiters` after each resume; idempotent complete/cancel). `lambda_scheduler_destroy` orders teardown deliberately (detach drain hook → unlink wait-groups → pump loop to retire in-flight `uv_fs` requests → free tasks). The base `mem_alloc` is honestly thread-safe (malloc-backed + stats mutex), making the per-module-isolated transpile phase legitimately parallel.
+
+---
+
+## 9. Remaining `lib/` Utilities (URL, date/time, image, font, line editor)
+
+**Scope:** the parsing/handling utilities Round 1's `lib/` pass (allocators/containers/GC/strings) did not reach. Several are untrusted-input surfaces.
+
+### High severity
+
+- **U-F1 — Image `w * h * 4` 32-bit overflow → heap overflow (#44).** Verified: `mem_alloc(*width * *height * 4, …)` with `int` dimensions from untrusted headers, reachable from remote images via `network/resource_loaders.cpp`. A ~46341² image wraps the product to a small `int` → tiny alloc, then the decoder writes the true multi-GB extent. Six sites (PNG/JPEG/GIF, file + memory). The *scaled* decoders already cast `(size_t)out_w * out_h * 4` — the fix pattern exists but wasn't applied to the primary paths. **Fix:** cast to `size_t` before multiplying + a max-pixel cap, all six sites.
+- **U-F2 — Font `offset + length` 32-bit overflow bypasses the central bounds check (#45).** Verified: `if ((size_t)(offset + length) > tables->data_len)` computes `offset + length` in `uint32_t` before the cast, so `offset=0xFFFFFFFF, length=2` passes and returns `data + 0xFFFFFFFF` — a wild pointer every table getter then reads through. Fonts are untrusted (web `@font-face`/`data:` URIs). The `name` table casts each operand correctly — inconsistent. **Fix:** `(size_t)offset + (size_t)length`; same at the `offset + 10` glyf site.
+
+### Medium severity
+
+- **U-F3 — `hmtx_get_lsb` unbounded read (#3-lib2).** The comment says a bounds check is needed but the code reads anyway; `glyph_id` (up to 65535, from cmap) isn't checked against `num_glyphs` and hmtx was only validated to `num_h_metrics*4` → 2-byte OOB read past the font blob. **Fix:** store the hmtx length and bounds-check.
+- **U-F4 — GIF multi-frame decode: unchecked allocs + `w*h` overflow (#4-lib2).** Frame count/dimensions from an untrusted GIF; five `mem_calloc` results used without NULL checks, and `w * h` is another 32-bit multiply while `canvas_bytes` is correctly `(size_t)w*h*4` → a crafted GIF crashes (NULL-deref DoS) or under-allocates → `memcpy` overflow. **Fix:** NULL-check + `(size_t)` counts + dimension cap.
+- **U-F5 — `url_decode` null-byte / traversal truncation (#49).** Verified: the static `url_decode` (used by `url_to_local_path`) emits any decoded byte including `%00`→NUL and `%2e%2e`→`..`, unlike `url_decode_component`/`url_decode_uri` which reject NUL and validate UTF-8. `file:///etc/passwd%00.png` decodes to `/etc/passwd\0.png` → suffix/extension checks bypassed, `fopen` opens `/etc/passwd`. **Fix:** reject decoded NUL, or route `url_to_local_path` through the validating decoder.
+- **U-F6 — base64 decode over-reports length → uninitialized-heap disclosure (#50).** The count pass tallies *all* data chars (even after `=`) to size the buffer, but the decode pass `break`s at the first `=`; `*output_len` then exceeds bytes written and `mem_alloc` doesn't zero → callers read uninitialized heap. Reachable via `data:` URIs. **Fix:** set `*output_len` to bytes actually written, or reject data after padding.
+- **U-F7 — VLA sized by editor input in `cmdedit` kill-word handlers (#7-lib2).** `char killed_text[end_pos - start_pos + 1]` sized by the edit-buffer span (no small cap) → pasting a long line and killing a word blows a stack VLA (also non-standard C++, MSVC-unsupported). **Fix:** heap or fixed bounded buffer.
+
+### Low severity
+
+`datetime_weekday` indexes `t[month-1]` without the `month` range guard its siblings (`datetime_yearday`/`format_pattern`) have → OOB read via `.weekday`/`.week` on a month-0/13–15 value; `char c = getchar()` in the Windows getline fallback collapses EOF/0xFF (correctness bug on binary/UTF-8 paste); `load_jpeg` trusts `ftell` (no `<=0` guard) and skips the row-pointer NULL check its siblings have; `url_encode_*` sizes `len*3+1` (overflow only at exabyte inputs). *Note:* `lib/escape.c`, `lib/hex.h`, `lib/digest.c` were scanned only at grep level, not line-by-line — a residual gap.
+
+### Positives
+
+Font table parsing is otherwise **methodical** — per-table minimum-size gates (`head`/`hhea`/`maxp`/`OS2`/`post` all check `len < N`; cmap format 4/12 validate array extents); U-F2 is the one gap. The **CoreText rasterizer is defensively coded** with a fuzzer-found 4096×4096 glyph-bitmap clamp and no-copy `CFData`. The component/URI percent-decoders (`url_decode_component`, `url_decode_uri`) are **rigorous** — reject truncated escapes, invalid hex, NUL, overlong UTF-8, surrogates, out-of-range code points (only the legacy `url_decode` lags).
+
+---
+
+## 10. Test Coverage, Sanitizers & CI — *why the bugs survived*
+
+This section answers the question the code findings raise: with a purpose-built safety library and a broad `.clang-tidy`, how did use-after-free and heap-overflow bugs reach the tree? **Because the verification layer that should catch them does not run.**
+
+### High severity
+
+- **CI-F1 — All automated CI is disabled (#37).** Verified: `codeql.yml`, `nightly-linux.yml`, `nightly-windows.yml` are all `on: workflow_dispatch:` with `push`/`pull_request`/`schedule` commented out ("Disabled automatic triggers until nightly CI stabilizes"). CodeQL SAST is off. **Nothing builds, tests, or scans on any push or PR.** This neutralizes every other control. **Fix:** re-enable `push`/`pull_request` on `master` for a fast build+test lane; restore nightly crons; make it a required check.
+- **CI-F2 — Unit tests build without ASan (#38).** `enable_sanitizer_tests: false` while `enable_sanitizer_main: true`. Only `lambda.exe` is ASan-instrumented, so CLI-driven integration tests get transitive coverage but the **in-process unit tests** (gc_heap, mark_builder, serve, checked_alloc…) — exactly those that would expose the GC/serve/memtrack UAF and overflow findings — run uninstrumented. A UAF only fails if it deterministically crashes. **Fix:** a CI leg with `enable_sanitizer_tests: true` (ASan+UBSan) over `make build-test && make test`.
+- **CI-F3 — `-w` disables all warnings on Windows/CLI/jube builds (#39).** Verified: `Makefile:651/760/780/788` pass `CFLAGS="-w" CXXFLAGS="-w"`; `-w` wins over `-Wall -Wextra -Werror=return-type`. The Windows-CI build and headless CLI/jube builds compile with **no diagnostics** — a missing-return (UB) or format bug that fails macOS/Linux passes silently there. **Fix:** drop the blanket `-w`; scope `-Wno-<specific>` to offending third-party projects.
+- **CI-F4 — Validator crash tests hidden by `GTEST_SKIP` (#54).** Six baseline validator skips document crashes verbatim: `"segmentation fault in XML cookbook validation"` (`:805`), `"segmentation fault in JSON validation"` (`:934,939`), and disabled `XmlMalformedStructure`/`XmlInvalidEncoding` (`:1037-1045`) — precisely the hostile-input negative tests, turned off *because they crash*. The reproducers exist but can't regress-fail. **Fix:** convert to xfail asserting graceful rejection (no SIGSEGV), fix the null/recursion root cause, re-enable.
+
+### Medium severity
+
+- **CI-F5 — HTTP server security paths almost entirely untested.** `test_serve_gtest.cpp` StaticHandler tests cover only config/etag; **no** path-traversal, CRLF-injection, malformed-request, oversized-body (413), or Content-Length-edge test. A regression removing the `..` check or the body cap passes green. Directly maps to §7. **Fix:** add the negative tests.
+- **CI-F6 — GC OOM / mark-stack-growth never exercised.** No fault injection anywhere in `test/`. The one GC "stress" test keeps **only the last object alive**, so at collection the mark stack holds one object — the growth/realloc path L-F1 flagged is dark code. **Fix:** a wide/deep reachable-graph test (10⁴–10⁵ live objects) + an alloc-fail injection hook.
+- **CI-F7 — No hardening flags, no UBSan, no macOS CI (#53).** Release ships with no `_FORTIFY_SOURCE` (would activate at `-O3`), no `-fstack-protector-strong`, no RELRO/PIE, no `-Wformat-security`; UBSan is configured nowhere — despite a tagged-pointer/bit-twiddling value model + JIT that is exactly UBSan's domain (the class U-F1/U-F2/L-F12 fall into). macOS — the primary dev platform (`-mmacosx-version-min=15.7`) — has **no CI workflow** at all. **Fix:** add the hardening flags, a debug-scoped UBSan opt-in + CI lane, and a `macos-latest`/arm64 build+test job.
+- **CI-F8 — No race/stress test and no TSan for the real threading.** The parallel-compile path (§8) shares the name pool, MIR cache, and GC across worker threads with zero contention testing; thread tests cover only the isolated `thread_pool` primitive and the single-thread cooperative scheduler. **Fix:** a multi-thread interdependent-module compile stress test + an optional TSan lane.
+- **CI-F9 — Golden-file brittleness + exit-0-on-error.** 560 Lambda + 235 JS goldens compared with exact `ASSERT_STREQ`; the CLI "exits 0 even on type errors," so negative tests grep stderr substrings for error markers. A crash printing a different string, or a silent wrong-answer on exit-0, can slip through. **Fix:** make the CLI return non-zero on error and assert exit codes.
+- **CI-F10 — Build-variant `flags` in the JSON source-of-truth are dead config (#16-build).** Verified: `_apply_variant_overlay` copies only `output/source_dirs/exclude_source_files/includes/defines` — never `flags`/`linker_flags`; the real opt/std/sanitizer flags are hardcoded in the generator's premake filter blocks. Editing `platforms.release.flags` in the documented source of truth has **no effect** — a silent JSON-vs-generator drift trap. **Fix:** emit variant flags from the overlay, or delete the dead keys and document where flags really live.
+
+### Low severity
+
+111 `DISABLED_` tests + 170 `GTEST_SKIP` sites (many environmental, but whole feature areas — LaTeX math, MDX, markup roundtrip — are dark); parser-robustness tests assert only "non-null" (a bounded-depth *rejection* is not verified, and depth caps are per-parser/inconsistent — see I-F1/I-F2); fuzzers exist (`test/fuzzy/`) but run out-of-band, not in `make test`; the `csv_test` map-traversal crash was worked around in `runner.cpp` and its reproducing test removed (C-F16); scripts without a matching `.txt` golden are silently not run (~190 `.ls`/~75 `.js` potentially invisible); `-march=native` hardcoded in release → non-portable artifacts.
+
+### Build/CI summary table
+
+| Aspect | Debug | Release | CI | Verdict |
+|--------|-------|---------|----|---------|
+| ASan | `lambda.exe` only (mac/Linux); off Windows; **tests off** | off | only the `lambda.exe` smoke run is sanitized | partial / inconsistent |
+| UBSan | none | none | none | **missing everywhere** |
+| stack-protector / FORTIFY / RELRO | vendor default only | **absent** | — | **not configured** |
+| `-Wformat-security` | only `-Wformat` | no | no | missing |
+| lint / clang-tidy / CodeQL | manual `make lint`/`lint-full` | — | **not run in CI**; CodeQL dispatch-only | not gated |
+| warning parity | mac/Linux `-Wall -Wextra -pedantic` + curated `-Werror=`; **Windows/CLI/jube `-w`** | same split | Windows CI is `-w` | **broken** |
+| C11/C++17 separation | `.c`→c11, `.cpp`→c++17 | same | same | **consistent (good)** |
+| macOS CI | — | — | **none** | missing |
+| release built in CI | — | **never** | no | missing |
+| tests run automatically | nightly `make test` | not built | **dispatch-only** | not automated |
+
+### Positives (what *is* well tested)
+
+`test_checked_alloc_gtest.cpp` is **exemplary invariant testing** (`checked_mul(SIZE_MAX,2)`→false, `checked_realloc` preserves the buffer on failure, death-test on null). GC *mechanics* are thoroughly covered (60 tests: mark/sweep, weak-slot clearing, root register/unregister, finalizers, side-stack watermark restore incl. the failure case) — the gap is only at the OOM/growth *limits*. **test262 runs the official ECMAScript suite with just 5 active skips** — a genuine spec oracle. Real negative testing exists in several suites (`test_html_negative` 53KB, CSS-engine negative, parser-robustness malformed/UTF-8). Layout uses a **browser/jsdom differential oracle over 7,057 HTML cases** plus a committed crash-corpus replay in the radiant baseline. When enabled, CI even has a `lambda.exe --mem-dump` leaked-allocator gate. The machinery is good; **it is simply not running.**
+
+---
+
+## 11. Tooling & Process Recommendations
+
+The project already *owns* strong guardrails — `.clang-tidy` (broad check set), ~30 custom ast-grep rules under `utils/lint/rules/`, CodeQL, nightly workflows, ASan on `lambda.exe`, and the audited-exception comment conventions. The problem established in §10 is that most of them are **inert** (CI disabled, tests un-sanitized, lint not gated). The single highest-leverage action is therefore not a *new* tool but **turning the existing ones on** (§10 CI-F1–F3, CI-F7). The lint gaps below are additive — each would have *caught* a specific finding at commit time and belongs in the `make lint` PR lane once CI runs.
 
 | Gap | Recommendation | Would have caught |
 |-----|----------------|-------------------|
-| No UBSan in CI | Add a `-fsanitize=undefined` build to nightly (alongside the existing ASan). Signed-overflow, misaligned access, unreachable-return. | L-F4, L-F12, C-F5, R-F6 |
-| `make lint`/`lint-full` not wired into CI | Run the fast `make lint` on every PR (it's ~10s); run `lint-full` nightly. | R-F8, future int-cast/dup regressions |
-| No lint for `realloc(p, …)` self-assign | The rule exists in spirit (`no-open-realloc.yml`) — extend it to flag `x = realloc(x, …)`. | L-F1, L-F3, L-F11 |
+| No UBSan anywhere | Add `-fsanitize=undefined` (debug-scoped opt-in + a CI lane). Signed-overflow, misaligned access, unreachable-return, bad shift. | L-F4, L-F12, C-F5, R-F6, **U-F1, U-F2, U-F4** |
+| `make lint`/`lint-full` not wired into CI | Run fast `make lint` on every PR (~10s); `lint-full` nightly. | R-F8, future int-cast/dup regressions |
+| No lint for `realloc(p, …)` self-assign | Extend `no-open-realloc.yml` to flag `x = realloc(x, …)`. | **L-F1, L-F3, L-F11, S-F6** |
+| No lint for `snprintf(buf+off, sizeof(buf)-off, …)` accumulation into fixed buffers | New ast-grep rule (the pattern recurs in `js/`, `serve/`, `util`). | **J-F2, S-F1** (and the `js_util`/`js_buffer` sites) |
+| No lint for `int`/`uint32_t` arithmetic feeding `mem_alloc`/bounds checks | ast-grep for `<int-expr> * <int-expr>` and `off + len` reaching an allocation or comparison in `input/`, `lib/image.c`, `lib/font/`. | **U-F1, U-F2, U-F4, I-F3** |
+| No CRLF check at header/cookie sinks | A required helper (`http_header_is_safe`) + lint forbidding raw writes to header sinks. | **S-F2, J-F3** |
 | No lint for raw `->border->width.` outside helpers | New ast-grep rule (radiant). | R-F8 (~380 sites) |
-| No recursion-guard checklist for new parsers | A `RecursionGuard`/depth-field lint or a parser-authoring checklist. | I-F1, I-F2, I-F4, C-F9 |
-| `assert`-only downcast/alloca bounds vanish in release | Introduce a project `RDT_CHECK`/`LAMBDA_CHECK` that aborts (or logs+returns) in release for security-relevant paths; reserve `assert` for pure invariants. | R-F7, C-F3 |
+| No recursion-guard checklist for new parsers | A `RecursionGuard`/depth-field lint or parser-authoring checklist. | I-F1, I-F2, I-F4, C-F9 |
+| `assert`-only downcast/alloca bounds vanish in release | A project `RDT_CHECK`/`LAMBDA_CHECK` that aborts (or logs+returns) in release for security paths; reserve `assert` for pure invariants. | R-F7, C-F3 |
 | No `static_assert(offsetof)` on GC-traced structs | Add a layout-check header. | L-F13 |
-| `atoi`/`atol` on untrusted input | ast-grep rule flagging `ato*` in `input/`, `js/`, `serve/`, `network/`. | I-F6, I-F9, #33 |
+| `atoi`/`atol` on untrusted input | ast-grep flagging `ato*` in `input/`, `js/`, `serve/`, `network/`. | I-F6, I-F9, #33, S-F8 |
+| `-w` / dead JSON build flags | Drop the blanket `-w` (CI-F3); make `_apply_variant_overlay` honor `flags` or delete the dead keys (CI-F10). | silent Windows/CLI/jube breakage |
 | Stale `CLAUDE.md` entry points | `transpile.cpp` is excluded from the build yet listed as a key entry point; ~13k lines of unbuilt sources + a `.broken` file sit in-tree. Delete/attic them and fix the doc. | C-F11, navigation |
 
 ---
 
-## 8. Prioritized Remediation Roadmap
+## 12. Prioritized Remediation Roadmap
 
-Ordered by (risk reduction ÷ effort). Phases are independently shippable.
+Ordered by (risk reduction ÷ effort). Phases are independently shippable. **Phase 0 comes first and gates the rest** — without a running, sanitized CI, every fix below can silently regress and the review will need to be re-run by hand.
 
-### Phase 1 — Memory-safety sprint (highest risk, mostly localized)
-The ~15 high-severity findings. Roughly one to three days each; none is a rewrite.
-1. **GC OOM handling** — L-F1, L-F2 (mark stack + slab registration). *Highest priority: silent live-object frees are the hardest bugs to diagnose.*
+### Phase 0 — Turn the safety net back on (do this first; days, not weeks)
+0a. **Re-enable CI** on `push`/`pull_request` for a fast build+test lane; restore nightly crons; re-enable CodeQL (CI-F1).
+0b. **Add a sanitized test lane**: `enable_sanitizer_tests: true` (ASan **and** UBSan) over `make build-test && make test` (CI-F2, CI-F7). This alone would have surfaced most of Phase 1.
+0c. **Drop the blanket `-w`** on Windows/CLI/jube builds so the `-Werror=` gates apply everywhere (CI-F3); add a `make release` compile+smoke job and a macOS lane (CI-F7).
+0d. Un-skip the validator crash tests as xfail so they *track* rather than hide (CI-F4).
+
+### Phase 1 — Memory-safety & security sprint (highest risk, mostly localized)
+The ~25 high-severity findings; roughly one to three days each, none a rewrite.
+1. **GC OOM handling** — L-F1, L-F2 (mark stack + slab registration). *Highest priority: silent live-object frees are the hardest bugs to diagnose.* Add the CI-F6 large-graph + alloc-fail test alongside.
 2. **memtrack cross-mode realloc** — L-F3.
 3. **Untrusted-parser depth/size caps** — I-F1 (PDF depth), I-F2 (YAML depth), I-F3 (decompression bomb), I-F4 (HTML formatter), C-F9 (py/bash frontends).
-4. **HTTP server** — J-F2 (stack overflow), J-F3 (CRLF injection), J-F4 (GCM auth), I-F5 (TLS bypass).
-5. **Stack corruption / dangling** — C-F1 (dangling context), C-F2 (>16 params), C-F3 (release alloca).
+4. **Untrusted size math** — U-F1 (image `w*h*4`), U-F2/U-F3 (font `offset+length`/hmtx), U-F4 (GIF), U-F5 (`url_decode` NUL), U-F6 (base64) — the 32-bit-overflow + missing-validation cluster.
+5. **HTTP server (`serve/` + `js/`)** — S-F1/J-F2 (stack overflow), S-F2/J-F3 (CRLF injection), S-F3 (framing desync), S-F4 (wire up TLS), J-F4 (GCM auth), I-F5 (XHR TLS bypass), S-F5/S-F6 (cert verify, UDS).
+6. **Stack corruption / dangling** — C-F1 (dangling context), C-F2 (>16 params), C-F3 (release alloca), U-F7 (cmdedit VLA).
 
 ### Phase 2 — Fallible-but-silent APIs (correctness under stress)
-6. Sticky-error bits on StrBuf/StringBuf (L-F8) and the ~66 unchecked core allocations (C-F4).
-7. File-writer / atomic-rename error checking (C-F7, L-F11, I-F7).
-8. GC-root the static prototype globals (J-F9); make security-relevant downcasts fail loud in release (R-F7).
+7. Sticky-error bits on StrBuf/StringBuf (L-F8) and the ~66 unchecked core allocations (C-F4); NULL-check the serve/image decode allocs (S-F6, U-F4).
+8. File-writer / atomic-rename error checking (C-F7, L-F11, I-F7).
+9. GC-root the static prototype globals (J-F9); make security-relevant downcasts fail loud in release (R-F7).
 
 ### Phase 3 — Integer & error-convention hygiene
-9. `heap_alloc` → `size_t` (C-F5); `atoi`→`strtoll`+`errno` on network paths (#33, I-F9); UB overflow guards → `checked_mul`/`size_t` (L-F12).
-10. Converge error conventions in `lambda-eval.cpp` (C-F8/#34); one sentinel per return type.
+10. `heap_alloc` → `size_t` (C-F5); `atoi`→`strtoll`+`errno` on all network/serve paths (#33, I-F9, S-F8); UB overflow guards → `checked_mul`/`size_t` (L-F12).
+11. Converge error conventions in `lambda-eval.cpp` (C-F8/#34); one sentinel per return type.
 
-### Phase 4 — Structural decomposition (sustained; do opportunistically alongside feature work)
-11. Table-drive `resolve_css_property` (R-F1) and unify the property→behavior chains (R-F3) — the single biggest maintainability win in radiant.
-12. Split `js_runtime.cpp` along dispatch seams (J-F1); split `main()` (C-F10), `handle_event`, `layout_block_content` (R-F2).
-13. Extract the border-side/UA-default helpers (R-F8, R-F9, R-F11) and the intern-table fix (R-F4).
+### Phase 4 — Concurrency & global-state (enabler for multi-document/off-thread)
+12. Fixes that fire in the compile path *today*: rpmalloc init (T-F1/L-F5), script-index locking (T-F2), `next_pool_id`/`mir_cache_hits` atomics (T-F3), `rpmalloc_thread_finalize` (T-F4), `log.c` thread-safety (L-F6), `func_map` `pthread_once` (C-F13). Add the CI-F8 race/stress test + TSan lane.
+13. Document-and-enforce the single-runtime invariant, or move the singletons per-context: `_lambda_rt`/`s_in_batch`/`js_runtime_state`/`attached_scheduler` (C-F6, R-F10, J-F6, T-F5); fix the Promise-teardown UAF (T-F6).
 
-### Phase 5 — Thread-safety & global-state (enabler for multi-document/off-thread)
-14. `log.c` thread-safety (L-F6), rpmalloc init (L-F5), `func_map` (`pthread_once`, C-F13).
-15. Document-and-enforce the single-runtime invariant, or move `_lambda_rt`/`s_in_batch`/`js_runtime_state` per-context (C-F6, R-F10, J-F6).
+### Phase 5 — Structural decomposition (sustained; opportunistic alongside feature work)
+14. Table-drive `resolve_css_property` (R-F1) and unify the property→behavior chains (R-F3) — the biggest maintainability win in radiant.
+15. Split `js_runtime.cpp` along dispatch seams (J-F1); split `main()` (C-F10), `handle_event`, `layout_block_content` (R-F2).
+16. Extract the border-side/UA-default helpers (R-F8, R-F9, R-F11) and the intern-table fix (R-F4).
 
-### Phase 6 — Tooling (prevents regression; do in parallel with Phase 1)
-16. The §7 table: UBSan CI, `make lint` on PRs, the new ast-grep rules, the GC layout-check header, `CLAUDE.md` cleanup.
+### Phase 6 — Tooling & hardening (in parallel with Phase 1)
+17. The §11 table: new ast-grep rules (realloc self-assign, snprintf-accumulation, int-overflow-into-alloc, CRLF sinks), the GC layout-check header, hardening flags (`_FORTIFY_SOURCE`/stack-protector/RELRO, CI-F7), fix the dead JSON build flags (CI-F10), `CLAUDE.md` cleanup.
 
 ---
 
-## 9. What the Codebase Does Well
+## 13. What the Codebase Does Well
 
 This is not a troubled codebase, and the review would be misleading without saying so plainly:
 
 - **Purpose-built safety infrastructure that is actually used.** `checked_math.hpp`/`checked_alloc.hpp`, the audited-exception comment conventions tied to lint rules, `make check-raw-alloc`/`check-int-cast`, and the layered memtrack allocator are a serious, coherent safety program — well beyond what most C/C++ projects this size have.
 - **Exemplary foundation pieces.** `lib/str.h` (documented contracts, UB-aware scanner tier), `byte_storage.c` (correct lock-free refcounting), the arena scope-tracking (prevents a whole use-after-free class), and the conservative stack-scanning GC design.
 - **Discipline at scale.** Near-zero `#if 0`/commented-out code across ~835 files, best-in-class TODO density (66 TODO / 0 FIXME / 0 HACK), near-universal snake_case, universal header guards, textbook `goto` usage, and a tagged-pointer cast pattern applied consistently with adjacent tag checks.
-- **The hard parts are done carefully.** The HTML5/CSS tokenizers are rigorously bounds-checked; crypto uses vetted mbedTLS with correct constant-time comparison; UTF-16 codecs are sized right; the stack-overflow recovery (armed/unarmed signal handling, RAII guards, TCO caps) is genuinely thoughtful; builtin dispatch is table-driven from one source of truth.
-- **Self-awareness.** The `vibe/` docs (`Compile_Warning.md`, `Lambda_Code_Clean_Up.md`) show the team already tracks warning and duplication debt honestly and is actively paying it down.
+- **The hard parts are done carefully.** The HTML5/CSS tokenizers are rigorously bounds-checked; crypto uses vetted mbedTLS with correct constant-time comparison; UTF-16 codecs are sized right; the stack-overflow recovery (armed/unarmed signal handling, RAII guards, TCO caps) is genuinely thoughtful; builtin dispatch is table-driven from one source of truth; the CoreText rasterizer even carries a fuzzer-found glyph-bitmap clamp.
+- **The concurrency substrate is soundly built where it counts.** `thread_pool.c` is textbook-synchronized (predicate-loop condvars, clean partial-construction teardown); `mem_context.c` handles teardown re-entrancy; the wait-group and scheduler-destroy paths are explicitly UAF-aware. The single-threaded-cooperative model is the right call and is mostly honored.
+- **The test *machinery* is strong — it's the automation that's off.** test262 runs the real ECMAScript suite (5 skips); layout uses a 7,057-case browser/jsdom differential oracle; `checked_alloc` and GC mechanics have exemplary invariant tests; several suites do real negative testing. Turning CI back on (§10) unlocks coverage that already exists.
+- **Self-awareness.** The `vibe/` docs (`Compile_Warning.md`, `Lambda_Code_Clean_Up.md`) show the team already tracks warning and duplication debt honestly and is actively paying it down — this review is meant to slot in beside them.
 
-The findings above are the exceptions to an otherwise disciplined codebase — which is exactly why they're worth fixing: they're isolated enough to address without disturbing the parts that work.
+The findings above are the exceptions to an otherwise disciplined codebase — which is exactly why they're worth fixing: they're isolated enough to address without disturbing the parts that work. The one systemic item, and the place to start, is **re-enabling the CI and sanitizer coverage the project already built** (§10, Phase 0): it is what turns every other fix here from "done once" into "stays done."
 
 ---
 
@@ -342,6 +515,7 @@ The findings above are the exceptions to an otherwise disciplined codebase — w
 | Metric | Value |
 |--------|-------|
 | First-party C/C++ reviewed (excl. vendored/generated) | ~747k lines |
+| Audit agents / rounds | 10 agents across 2 rounds |
 | Largest subsystem | `lambda/js/` (~225k, 101 files) |
 | Functions ≥1,000 lines (radiant + core) | ~15 |
 | Functions ≥300 lines | ~90+ |
@@ -354,5 +528,11 @@ The findings above are the exceptions to an otherwise disciplined codebase — w
 | `#if 0` blocks / commented-out code blocks ≥15 lines | 0 / 0 |
 | TODO / FIXME / HACK | 66 / 0 / 0 |
 | Recursive parsers with a working depth guard | JSON, XML, TOML, Mark, JSX, RTF (✓); YAML, PDF, HTML-formatter, py/bash (✗) |
+| **CI workflows auto-triggered on push/PR** | **0 of 3** (all `workflow_dispatch:`-only) |
+| **Unit tests built with ASan** | **no** (`enable_sanitizer_tests: false`) |
+| **UBSan configured** | **nowhere** |
+| Builds compiling with `-w` (all warnings off) | Windows, CLI, jube |
+| `DISABLED_` tests / `GTEST_SKIP` sites | 111 / 170 |
+| Serve `w*h`/`offset+len` untrusted 32-bit size-math sites | image ×6, font ×2, GIF ×2 |
 
-*Report generated from six parallel subsystem audits; all high-severity findings independently re-verified against the tree at `d76b90f5e`.*
+*Report generated from 10 parallel subsystem audits across two rounds; all high-severity findings independently re-verified against the tree at `d76b90f5e`. Round 1: core runtime, input/format/validator, radiant, `lib/` foundation, LambdaJS, cross-cutting hygiene. Round 2: `serve/` HTTP server, concurrency/threading, remaining `lib/` utilities + build/CI, and test-coverage-gap analysis.*

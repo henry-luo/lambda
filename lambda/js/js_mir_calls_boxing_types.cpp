@@ -1009,6 +1009,56 @@ int jm_ctor_prop_slot(JsFuncCollected* fc, const char* prop_name, int prop_len);
 // Returns the inferred TypeId for a JS AST expression node.
 // LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING → known type
 // LMD_TYPE_ANY → unknown (must use boxed path)
+static bool jm_ts_node_text_equals(JsMirTranspiler* mt, TSNode node,
+                                   const char* text, size_t text_len) {
+    if (!mt || !mt->tp || !mt->tp->source || ts_node_is_null(node)) return false;
+    uint32_t start = ts_node_start_byte(node);
+    uint32_t end = ts_node_end_byte(node);
+    if (end < start || end > mt->tp->source_length ||
+            (size_t)(end - start) != text_len) return false;
+    return memcmp(mt->tp->source + start, text, text_len) == 0;
+}
+
+static bool jm_ts_writes_this_property(JsMirTranspiler* mt, TSNode node,
+                                       String* property) {
+    if (!mt || !property || ts_node_is_null(node)) return false;
+    if (strcmp(ts_node_type(node), "assignment_expression") == 0) {
+        TSNode left = ts_node_child_by_field_name(node, "left", 4);
+        if (!ts_node_is_null(left) &&
+                strcmp(ts_node_type(left), "member_expression") == 0) {
+            TSNode object = ts_node_child_by_field_name(left, "object", 6);
+            TSNode field = ts_node_child_by_field_name(left, "property", 8);
+            if (jm_ts_node_text_equals(mt, object, "this", 4) &&
+                    jm_ts_node_text_equals(mt, field,
+                        property->chars, property->len)) return true;
+        }
+    }
+    uint32_t child_count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        if (jm_ts_writes_this_property(mt, ts_node_named_child(node, i), property)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool jm_ctor_property_type_is_stable(JsMirTranspiler* mt,
+                                             JsClassEntry* ce,
+                                             String* property) {
+    if (!mt || !ce || !property) return false;
+    for (int i = 0; i < ce->method_count; i++) {
+        JsClassMethodEntry* method = &ce->methods[i];
+        if (method->is_constructor || method->is_static || !method->fc ||
+                !method->fc->node || !method->fc->node->body) continue;
+        // Constructor-only inference cannot remain native when another method
+        // can replace the field with an object or otherwise change its type.
+        if (jm_ts_writes_this_property(mt, method->fc->node->body->node, property)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return LMD_TYPE_ANY;
 
@@ -1264,7 +1314,8 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
                         prop->name->chars, (int)prop->name->len);
                     if (p1_slot >= 0) {
                         TypeId ft = ce->constructor->fc->ctor_prop_types[p1_slot];
-                        if (ft == LMD_TYPE_INT || ft == LMD_TYPE_FLOAT)
+                        if ((ft == LMD_TYPE_INT || ft == LMD_TYPE_FLOAT) &&
+                            jm_ctor_property_type_is_stable(mt, ce, prop->name))
                             return ft;
                     }
                 }
@@ -1816,14 +1867,15 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                 MIR_new_reg_op(mt->ctx, match_reg)));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                                 MIR_new_label_op(mt->ctx, l_slow)));
-                            // shape match: the slot's runtime type may differ from the
-                            // compile-time FLOAT inference (e.g. `x % 500` stores a tagged
-                            // int), so a raw double load would read garbage (AWFY bounce).
-                            // use the type-guarded helper, which coerces by entry->type.
+                            // Shape inference is speculative across methods; read the
+                            // live boxed slot before numeric coercion so an object value
+                            // still receives ToPrimitive instead of a native bit load.
                             jm_emit_label(mt, l_fast);
-                            MIR_reg_t fast_f = jm_call_2(mt, "js_get_slot_f", MIR_T_D,
+                            MIR_reg_t fast_boxed = jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, p1_slot));
+                            MIR_reg_t fast_f = jm_ensure_native_float(mt,
+                                fast_boxed, LMD_TYPE_ANY);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
                                 MIR_new_reg_op(mt->ctx, result_f),
                                 MIR_new_reg_op(mt->ctx, fast_f)));
@@ -1892,13 +1944,15 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                                 MIR_new_reg_op(mt->ctx, match_reg)));
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                                 MIR_new_label_op(mt->ctx, l_slow)));
-                            // shape match: the slot's runtime type may differ from the
-                            // compile-time INT inference, so a raw int load could read a
-                            // boxed double's bits. use the type-guarded helper.
+                            // Shape inference is speculative across methods; read the
+                            // live boxed slot before numeric coercion so an object value
+                            // still receives ToPrimitive instead of a native bit load.
                             jm_emit_label(mt, l_fast);
-                            MIR_reg_t fast_i = jm_call_2(mt, "js_get_slot_i", MIR_T_I64,
+                            MIR_reg_t fast_boxed = jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, byte_offset));
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, p1_slot));
+                            MIR_reg_t fast_i = jm_ensure_native_int(mt,
+                                fast_boxed, LMD_TYPE_ANY);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, result_i),
                                 MIR_new_reg_op(mt->ctx, fast_i)));

@@ -436,6 +436,7 @@ struct JsMirTranspiler {
     MIR_label_t gen_done_label;      // label for done state (function end)
     // Generator variable-to-env-slot mapping
     int gen_local_slot_count;        // total env slots (captures + params + locals)
+    int gen_dynamic_slot_limit;      // first spill slot; lexical homes stay below it
     int gen_capture_offset;          // start of captures in env
     int gen_param_offset;            // start of params in env
     int gen_local_offset;            // start of locals in env

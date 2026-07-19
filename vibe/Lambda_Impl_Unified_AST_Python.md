@@ -64,7 +64,7 @@ Still fully parallel (the actual work):
 - Standalone: `lambda-jube.exe py script.py` → `transpile_py_to_mir(runtime, source, filename)` (`transpile_py_mir.cpp:7288`) — parse → `build_py_ast` → `pm_transpile_ast` → `MIR_link` → run `py_main`.
 - Module: `load_py_module` (`transpile_py_mir.cpp:7468`) — used by Lambda importing `.py` (`build_ast.cpp:9494`), by Python↔Python imports (`transpile_py_mir.cpp:4123,4142,4285`), and for packages (`__init__.py`).
 - Build: Python compiles **only into the jube variant** (`build_lambda_config.json` target `jube` → `lambda-jube.exe`, links `tree-sitter-python`); the main `lambda.exe` has no Python. This bounds blast radius: Python-side churn cannot break `make build`/`make test-lambda-baseline` except through shared-header edits.
-- Tests: `test_py_gtest.cpp` discovers `test/py/test_py_*.py` with golden `.txt` (currently ~30 pairs), runs each and diffs output; one skip (`test_py_import`, filesystem-import Bus error, "Phase E not yet implemented").
+- Tests: `test_py_gtest.cpp` discovers `test/py/test_py_*.py` with golden `.txt`, runs each and diffs output. **Measured: only 25 runnable pairs; 14 more scripts have no `.txt` and are silently skipped by discovery** (`test_py_basic/closures/comprehensions/defaults/exceptions/slicing/formatting/string_methods_v2/dict_methods_v2/builtins_v2/extended/pkg_simple/print_kwargs/sort_key`) — several cover exactly the constructs this port migrates. One explicit skip (`test_py_import`, filesystem-import Bus error, "Phase E not yet implemented").
 
 ---
 
@@ -340,6 +340,7 @@ Define `PyProfile` with the §3 hook table and move lowering family-by-family ou
 
 ## 8. Testing and Gates
 
+- **Gate zero (before P0): restore the orphaned corpus.** 14 of 39 test scripts have no golden `.txt` and are silently skipped (§2.3) — generate goldens from today's implementation (current behavior *is* the baseline being protected) and fix or consciously retire any that fail. Closures, comprehensions, exceptions, and slicing must be in the gate before their families migrate; a 25-pair gate is too thin for a 7,600-line rewrite.
 - **Primary gate:** `test_py_gtest` over `test/py/` — 100% minus the explicit skip list at every stage; skip list may only shrink.
 - **Shared-code gates:** any stage touching `ast-core.hpp`/`mir_emitter_shared.hpp`/shared driver runs `make test-lambda-baseline` (100%) + the JS suites (editor Phase-A, node-baseline no-regression) — same gates as the main plan §8.
 - **AST-dump goldens** (new, P1): corpus-wide Python AST dumps by kind-name; byte-stable across renumbering, diff-reviewed across struct adoption.

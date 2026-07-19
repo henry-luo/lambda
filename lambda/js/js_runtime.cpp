@@ -3217,34 +3217,31 @@ extern "C" Item js_set_shaped_slot_guarded(Item object, int64_t slot,
     return js_property_set(object, key, value);
 }
 
-extern "C" double js_get_slot_f(Item object, int64_t byte_offset) {
-    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_GET_SLOT_F);
+static double js_get_slot_number(Item object, int64_t byte_offset) {
     Map* m = (Map*)object.map;
     void* field_ptr = (char*)m->data + byte_offset;
-    // Guard: if the runtime ShapeEntry type is INT, convert int→double
     TypeMap* tm = (TypeMap*)m->type;
     int slot = (int)(byte_offset / (int64_t)sizeof(void*));
     ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
     if (entry && entry->type) {
         TypeId tid = entry->type->type_id;
         if (tid == LMD_TYPE_INT) return (double)(*(int64_t*)field_ptr);
+        if (tid == LMD_TYPE_FLOAT) return *(double*)field_ptr;
     }
-    return *(double*)field_ptr;
+    // Constructor field inference is speculative: a later method can replace
+    // a number with an object, which must use ordinary ToNumber semantics.
+    Item value = js_get_shaped_slot(object, slot);
+    return js_get_number(js_to_number(value));
+}
+
+extern "C" double js_get_slot_f(Item object, int64_t byte_offset) {
+    JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_GET_SLOT_F);
+    return js_get_slot_number(object, byte_offset);
 }
 
 extern "C" int64_t js_get_slot_i(Item object, int64_t byte_offset) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_GET_SLOT_I);
-    Map* m = (Map*)object.map;
-    void* field_ptr = (char*)m->data + byte_offset;
-    // Guard: if the runtime ShapeEntry type is FLOAT, convert double→int
-    TypeMap* tm = (TypeMap*)m->type;
-    int slot = (int)(byte_offset / (int64_t)sizeof(void*));
-    ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
-    if (entry && entry->type) {
-        TypeId tid = entry->type->type_id;
-        if (tid == LMD_TYPE_FLOAT) return (int64_t)(*(double*)field_ptr);
-    }
-    return *(int64_t*)field_ptr;
+    return (int64_t)js_get_slot_number(object, byte_offset);
 }
 
 extern "C" void js_set_slot_f(Item object, int64_t byte_offset, double value) {
@@ -18449,6 +18446,27 @@ extern "C" void js_collection_map_heap_destroy(Map* map, gc_native_seen_t* seen_
     cd->hmap = NULL;
 }
 
+extern "C" void js_collection_map_gc_trace(Map* map, gc_heap_t* gc) {
+    if (!map || !gc) return;
+    bool found = false;
+    Item cd_item = js_map_get_fast(map, "__cd", 4, &found);
+    if (!found) return;
+    TypeId tid = get_type_id(cd_item);
+    if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) return;
+    int64_t ptr_val = it2i(cd_item);
+    if (ptr_val < 4096) return;
+    JsCollectionData* cd = (JsCollectionData*)(uintptr_t)ptr_val;
+    if (cd->is_weak) return;
+
+    // Strong collection entries live in native insertion-order storage, which
+    // the managed Map payload scan cannot see.
+    for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
+        if (node->deleted) continue;
+        gc_mark_item(gc, node->key.item);
+        gc_mark_item(gc, node->value.item);
+    }
+}
+
 extern "C" Item js_map_collection_new(void) {
     Item obj = js_collection_create(JS_COLLECTION_MAP);
     js_collection_link_prototype(obj, "Map", 3);
@@ -29057,6 +29075,15 @@ static Item js_create_typed_array_iterator(Item source) {
     m->data = data;
     m->data_cap = sizeof(JsIterData);
     return (Item){.map = m};
+}
+
+extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc) {
+    if (!map || !gc || map->type_id != LMD_TYPE_MAP ||
+            map->map_kind != MAP_KIND_ITERATOR || !map->data) return;
+    JsIterData* data = (JsIterData*)map->data;
+    // Lightweight iterator state is native side storage; retain its iterable
+    // for the lifetime of the managed iterator wrapper.
+    gc_mark_item(gc, data->source.item);
 }
 
 // v95: Check if Array.prototype[Symbol.iterator] has been overridden or deleted.

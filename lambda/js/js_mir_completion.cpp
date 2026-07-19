@@ -33,6 +33,17 @@ void jm_emit_suspend_env_save(JsMirTranspiler* mt) {
         void* item;
         while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
             JsVarScopeEntry* entry = (JsVarScopeEntry*)item;
+            if (!entry->var.from_env && entry->var.mir_type == MIR_T_I64) {
+                if (mt->gen_local_slot_count >= mt->gen_dynamic_slot_limit) {
+                    log_error("js-mir suspend env: dynamic binding slots exhausted before spill region");
+                    continue;
+                }
+                // The name prepass cannot distinguish lexical shadows; give the
+                // exact active binding its own suspend home before first yield.
+                entry->var.from_env = true;
+                entry->var.env_slot = mt->gen_local_slot_count++;
+                entry->var.env_reg = mt->gen_env_reg;
+            }
             if (entry->var.env_slot < 0 || !entry->var.from_env) continue;
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64,

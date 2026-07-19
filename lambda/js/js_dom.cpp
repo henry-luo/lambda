@@ -1917,6 +1917,10 @@ static __thread LiveLookupCollectionEntry s_live_lookup_collections[LIVE_LOOKUP_
 static __thread int s_live_lookup_collection_count = 0;
 static __thread int s_dom_collection_refresh_depth = 0;
 
+extern "C" void heap_register_gc_weak(uint64_t* slot,
+    void (*on_clear)(uint64_t*, void*), void* weak_context);
+extern "C" void heap_unregister_gc_weak(uint64_t* slot);
+
 struct DomCollectionRefreshGuard {
     DomCollectionRefreshGuard() { s_dom_collection_refresh_depth++; }
     ~DomCollectionRefreshGuard() { s_dom_collection_refresh_depth--; }
@@ -1940,20 +1944,24 @@ static void reset_live_dom_collections() {
     // Live collections keep native owner pointers outside the GC graph; release
     // their explicit lifecycle pins before the next document epoch can recycle.
     for (int i = 0; i < s_select_options_owner_count; i++) {
+        heap_unregister_gc_weak((uint64_t*)&s_select_options_owners[i].array);
         DomElement* owner = s_select_options_owners[i].owner;
         live_collection_unpin(owner ? owner->doc : nullptr,
                               &s_select_options_owners[i].owner_ref);
     }
     for (int i = 0; i < s_live_child_collection_count; i++) {
+        heap_unregister_gc_weak((uint64_t*)&s_live_child_collections[i].array);
         DomElement* owner = s_live_child_collections[i].owner;
         live_collection_unpin(owner ? owner->doc : nullptr,
                               &s_live_child_collections[i].owner_ref);
     }
     for (int i = 0; i < s_live_form_collection_count; i++) {
+        heap_unregister_gc_weak((uint64_t*)&s_live_form_collections[i].array);
         live_collection_unpin(s_live_form_collections[i].doc,
                               &s_live_form_collections[i].owner_ref);
     }
     for (int i = 0; i < s_live_lookup_collection_count; i++) {
+        heap_unregister_gc_weak((uint64_t*)&s_live_lookup_collections[i].array);
         live_collection_unpin(s_live_lookup_collections[i].doc,
                               &s_live_lookup_collections[i].root_ref);
     }
@@ -1983,14 +1991,26 @@ static void _register_select_options_owner(Item collection, DomElement* owner, i
             return;
         }
     }
-    if (s_select_options_owner_count >= SELECT_OPTIONS_OWNER_CACHE_SIZE) return;
-    SelectOptionsOwnerEntry* entry =
-        &s_select_options_owners[s_select_options_owner_count];
+    int entry_index = s_select_options_owner_count;
+    for (int i = 0; i < s_select_options_owner_count; i++) {
+        if (!s_select_options_owners[i].array) {
+            DomElement* old_owner = s_select_options_owners[i].owner;
+            live_collection_unpin(old_owner ? old_owner->doc : nullptr,
+                                  &s_select_options_owners[i].owner_ref);
+            entry_index = i;
+            break;
+        }
+    }
+    if (entry_index >= SELECT_OPTIONS_OWNER_CACHE_SIZE) return;
+    SelectOptionsOwnerEntry* entry = &s_select_options_owners[entry_index];
     if (!live_collection_pin(owner->doc, owner, &entry->owner_ref)) return;
     entry->array = collection.array;
     entry->owner = owner;
     entry->kind = kind;
-    s_select_options_owner_count++;
+    // The registry is native side storage, so weak-clear the raw array address
+    // before the allocator can reuse it for an unrelated ordinary array.
+    heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
+    if (entry_index == s_select_options_owner_count) s_select_options_owner_count++;
 }
 
 static DomElement* _select_options_owner(Item collection, int* out_kind) {
@@ -2020,14 +2040,24 @@ static void _register_live_child_collection(Item collection, DomElement* owner, 
             return;
         }
     }
-    if (s_live_child_collection_count >= LIVE_CHILD_COLLECTION_CACHE_SIZE) return;
-    LiveChildCollectionEntry* entry =
-        &s_live_child_collections[s_live_child_collection_count];
+    int entry_index = s_live_child_collection_count;
+    for (int i = 0; i < s_live_child_collection_count; i++) {
+        if (!s_live_child_collections[i].array) {
+            DomElement* old_owner = s_live_child_collections[i].owner;
+            live_collection_unpin(old_owner ? old_owner->doc : nullptr,
+                                  &s_live_child_collections[i].owner_ref);
+            entry_index = i;
+            break;
+        }
+    }
+    if (entry_index >= LIVE_CHILD_COLLECTION_CACHE_SIZE) return;
+    LiveChildCollectionEntry* entry = &s_live_child_collections[entry_index];
     if (!live_collection_pin(owner->doc, owner, &entry->owner_ref)) return;
     entry->array = collection.array;
     entry->owner = owner;
     entry->kind = kind;
-    s_live_child_collection_count++;
+    heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
+    if (entry_index == s_live_child_collection_count) s_live_child_collection_count++;
 }
 
 static DomElement* _live_child_collection_owner(Item collection, int* out_kind) {
@@ -2063,16 +2093,25 @@ static void _register_live_form_collection(Item collection, DomDocument* doc,
             return;
         }
     }
-    if (s_live_form_collection_count >= LIVE_FORM_COLLECTION_CACHE_SIZE) return;
-    LiveFormCollectionEntry* entry =
-        &s_live_form_collections[s_live_form_collection_count];
+    int entry_index = s_live_form_collection_count;
+    for (int i = 0; i < s_live_form_collection_count; i++) {
+        if (!s_live_form_collections[i].array) {
+            live_collection_unpin(s_live_form_collections[i].doc,
+                                  &s_live_form_collections[i].owner_ref);
+            entry_index = i;
+            break;
+        }
+    }
+    if (entry_index >= LIVE_FORM_COLLECTION_CACHE_SIZE) return;
+    LiveFormCollectionEntry* entry = &s_live_form_collections[entry_index];
     DomElement* pin_owner = owner ? owner : doc->root;
     if (!live_collection_pin(doc, pin_owner, &entry->owner_ref)) return;
     entry->array = collection.array;
     entry->doc = doc;
     entry->owner = owner;
     entry->kind = kind;
-    s_live_form_collection_count++;
+    heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
+    if (entry_index == s_live_form_collection_count) s_live_form_collection_count++;
 }
 
 static LiveFormCollectionEntry* _live_form_collection_entry(Item collection) {
@@ -2111,9 +2150,17 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
             return;
         }
     }
-    if (s_live_lookup_collection_count >= LIVE_LOOKUP_COLLECTION_CACHE_SIZE) return;
-    LiveLookupCollectionEntry* entry =
-        &s_live_lookup_collections[s_live_lookup_collection_count];
+    int entry_index = s_live_lookup_collection_count;
+    for (int i = 0; i < s_live_lookup_collection_count; i++) {
+        if (!s_live_lookup_collections[i].array) {
+            live_collection_unpin(s_live_lookup_collections[i].doc,
+                                  &s_live_lookup_collections[i].root_ref);
+            entry_index = i;
+            break;
+        }
+    }
+    if (entry_index >= LIVE_LOOKUP_COLLECTION_CACHE_SIZE) return;
+    LiveLookupCollectionEntry* entry = &s_live_lookup_collections[entry_index];
     DomElement* pin_root = root ? root : doc->root;
     if (!live_collection_pin(doc, pin_root, &entry->root_ref)) return;
     entry->array = collection.array;
@@ -2122,7 +2169,8 @@ static void _register_live_lookup_collection(Item collection, DomDocument* doc,
     entry->query = query_name;
     entry->kind = kind;
     entry->include_root = include_root;
-    s_live_lookup_collection_count++;
+    heap_register_gc_weak((uint64_t*)&entry->array, nullptr, nullptr);
+    if (entry_index == s_live_lookup_collection_count) s_live_lookup_collection_count++;
 }
 
 static LiveLookupCollectionEntry* _live_lookup_collection_entry(Item collection) {
@@ -2400,6 +2448,7 @@ extern "C" Item js_dom_live_element_get_elements_by_class_name_bridge(void* elem
 static void js_dom_refresh_live_child_collections_for_mutation(DomNode* target,
                                                                DomNode* parent) {
     for (int i = 0; i < s_live_child_collection_count; i++) {
+        if (!s_live_child_collections[i].array) continue;
         DomElement* owner = s_live_child_collections[i].owner;
         if (!owner) continue;
         if ((DomNode*)owner != target && (DomNode*)owner != parent) continue;
@@ -2415,6 +2464,7 @@ static void js_dom_refresh_live_form_collections_for_mutation(DomNode* target,
     (void)parent;
     for (int i = 0; i < s_live_form_collection_count; i++) {
         LiveFormCollectionEntry* entry = &s_live_form_collections[i];
+        if (!entry->array) continue;
         DomDocument* owner_doc = entry->doc ? entry->doc : (entry->owner ? entry->owner->doc : nullptr);
         if (doc && owner_doc && owner_doc != doc) continue;
         Item collection = (Item){.array = entry->array};
@@ -2428,6 +2478,7 @@ static void js_dom_refresh_select_option_collections_for_mutation(DomNode* targe
     (void)target;
     (void)parent;
     for (int i = 0; i < s_select_options_owner_count; i++) {
+        if (!s_select_options_owners[i].array) continue;
         DomElement* owner = s_select_options_owners[i].owner;
         if (!owner || !_is_tag(owner, "select")) continue;
         if (doc && owner->doc && owner->doc != doc) continue;
@@ -2449,6 +2500,7 @@ static void js_dom_refresh_live_lookup_collections_for_mutation(DomNode* target,
     (void)parent;
     for (int i = 0; i < s_live_lookup_collection_count; i++) {
         LiveLookupCollectionEntry* entry = &s_live_lookup_collections[i];
+        if (!entry->array) continue;
         DomDocument* owner_doc = entry->doc ? entry->doc : (entry->root ? entry->root->doc : nullptr);
         if (doc && owner_doc && owner_doc != doc) continue;
         Item collection = (Item){.array = entry->array};

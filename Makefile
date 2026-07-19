@@ -50,7 +50,8 @@ NPROCS := $(shell n="$(NPROCS)"; if expr "$$n" : '^[1-9][0-9]*$$' >/dev/null; th
 # the OS and browser/reference helpers.
 RADIANT_RENDER_JOBS := $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); else echo 1; fi)
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1
-RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest
+RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest test_wpt_dom_ranges_gtest test_wpt_html_reflection_gtest
+RADIANT_DOM2_WPT_RUNNERS := input_events dom_ranges html_reflection
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -1287,6 +1288,7 @@ test-radiant-baseline: build-radiant-baseline
 # A crashed layout category must fail the gate instead of disappearing from its totals.
 run-radiant-baseline:
 	@ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
+	dom_ui_passed=0; dom_ui_failed=0; dom_ui_status="⏭️  SKIP"; \
 	radiant_view_passed=0; radiant_view_failed=0; radiant_view_status="⏭️  SKIP"; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
 	fuzzy_passed=0; fuzzy_failed=0; fuzzy_status="⏭️  SKIP"; \
@@ -1423,6 +1425,19 @@ run-radiant-baseline:
 		echo "   ⚠️  test/render/test_radiant_render.js not found"; \
 	fi; \
 	\
+	echo ""; \
+	echo "📦 DOM UI Integration:"; \
+	dom_ui_exit=0; \
+	run_logged "temp/_radiant_dom_ui.log" $(MAKE) --no-print-directory dom-ui-run || dom_ui_exit=$$?; \
+	output=$$(cat "temp/_radiant_dom_ui.log"); \
+	echo "$$output" | tail -5; \
+	dom_ui_line=$$(echo "$$output" | grep "^dom-ui:" | tail -1); \
+	dom_ui_passed=$$(echo "$$dom_ui_line" | grep -oE "[0-9]+/[0-9]+" | cut -d/ -f1 || echo "0"); \
+	dom_ui_total=$$(echo "$$dom_ui_line" | grep -oE "[0-9]+/[0-9]+" | cut -d/ -f2 || echo "0"); \
+	dom_ui_passed=$${dom_ui_passed:-0}; dom_ui_total=$${dom_ui_total:-0}; \
+	dom_ui_failed=$$((dom_ui_total - dom_ui_passed)); \
+	if [ $$dom_ui_exit -eq 0 ] && [ $$dom_ui_total -gt 0 ]; then dom_ui_status="✅ PASS"; else dom_ui_status="❌ FAIL"; if [ $$dom_ui_failed -eq 0 ]; then dom_ui_failed=1; fi; any_failed=1; fi; \
+	\
 	wpt_syntax_passed=0; wpt_syntax_failed=0; wpt_syntax_status="⏭️  SKIP"; \
 	echo ""; \
 	echo "📦 WPT CSS Syntax Conformance:"; \
@@ -1439,8 +1454,24 @@ run-radiant-baseline:
 		echo "   ⚠️  test/test_wpt_css_syntax_gtest.exe not found"; \
 	fi; \
 	\
-	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + radiant_view_passed + page_passed + fuzzy_passed + render_passed + wpt_syntax_passed)); \
-	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + radiant_view_failed + page_failed + fuzzy_failed + render_failed + wpt_syntax_failed)); \
+	wpt_dom2_passed=0; wpt_dom2_failed=0; wpt_dom2_status="✅ PASS"; \
+	echo ""; \
+	echo "📦 WPT DOM2 Conformance:"; \
+	for runner in $(RADIANT_DOM2_WPT_RUNNERS); do \
+		exe="test/test_wpt_$${runner}_gtest.exe"; \
+		if [ ! -f "$$exe" ]; then echo "   ⚠️  $$exe not found"; wpt_dom2_failed=$$((wpt_dom2_failed + 1)); wpt_dom2_status="❌ FAIL"; any_failed=1; continue; fi; \
+		runner_exit=0; log_file="temp/_radiant_wpt_$${runner}.log"; \
+		run_logged "$$log_file" "$$exe" || runner_exit=$$?; \
+		output=$$(cat "$$log_file"); \
+		passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); passed=$${passed:-0}; \
+		failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); failed=$${failed:-0}; \
+		if [ $$runner_exit -ne 0 ] && [ $$failed -eq 0 ]; then failed=1; fi; \
+		wpt_dom2_passed=$$((wpt_dom2_passed + passed)); wpt_dom2_failed=$$((wpt_dom2_failed + failed)); \
+		if [ $$failed -eq 0 ]; then echo "   ✅ $$runner ($$passed passing files)"; else echo "   ❌ $$runner ($$failed regressions)"; wpt_dom2_status="❌ FAIL"; any_failed=1; fi; \
+	done; \
+	\
+	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + dom_ui_passed + radiant_view_passed + page_passed + fuzzy_passed + render_passed + wpt_syntax_passed + wpt_dom2_passed)); \
+	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + dom_ui_failed + radiant_view_failed + page_failed + fuzzy_failed + render_failed + wpt_syntax_failed + wpt_dom2_failed)); \
 	total_skipped=$$layout_total_skipped; \
 	total_tests=$$((total_passed + layout_total_partial + total_failed)); \
 	\
@@ -1463,11 +1494,13 @@ run-radiant-baseline:
 	done < $(LAYOUT_BASELINE_RESULTS); \
 	echo "   ├── Layout Page Suite   $$snapshot_status  ($$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
+	echo "   ├── DOM UI Integration  $$dom_ui_status  ($$dom_ui_passed passed, $$dom_ui_failed failed) (dom-ui-run)"; \
 	echo "   ├── Radiant View Cmd    $$radiant_view_status  ($$radiant_view_passed passed, $$radiant_view_failed failed) (test_radiant_view_gtest.exe)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
 	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$fuzzy_passed passed, $$fuzzy_failed failed) (test_layout_fuzzy_gtest.exe)"; \
 	echo "   ├── Render Visual       $$render_status  ($$render_details) (test_radiant_render.js --baseline)"; \
-	echo "   └── WPT CSS Syntax      $$wpt_syntax_status  ($$wpt_syntax_passed passed, $$wpt_syntax_failed failed) (test_wpt_css_syntax_gtest.exe)"; \
+	echo "   ├── WPT CSS Syntax      $$wpt_syntax_status  ($$wpt_syntax_passed passed, $$wpt_syntax_failed failed) (test_wpt_css_syntax_gtest.exe)"; \
+	echo "   └── WPT DOM2            $$wpt_dom2_status  ($$wpt_dom2_passed passed, $$wpt_dom2_failed failed) ($(RADIANT_DOM2_WPT_RUNNERS))"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \
@@ -2323,7 +2356,7 @@ build-test: build-lambda-input
 		mv .lambda_build_backup.exe lambda.exe; \
 	fi
 
-# Radiant baseline needs lambda plus five native runners; building every test
+# Radiant baseline needs lambda plus its focused native runners; building every test
 # project made unrelated suites dominate this gate after a clean build.
 build-radiant-baseline:
 	@echo "Building the Radiant baseline runtime and native test runners..."
