@@ -232,6 +232,15 @@ function assert_array_equals(actual, expected, desc) {
     }
 }
 
+function assert_regexp_match(actual, regexp, desc) {
+    // WPT assertions are part of the harness contract; leaving this helper
+    // undefined turned a valid clipboard assertion into a listener exception.
+    if (!regexp || typeof regexp.test !== "function" || !regexp.test(String(actual))) {
+        throw new Error((desc ? desc + ": " : "") +
+            "expected " + _wpt_repr(actual) + " to match " + String(regexp));
+    }
+}
+
 function assert_greater_than(actual, expected, desc) {
     if (!(actual > expected)) {
         var msg = "assert_greater_than: " + JSON.stringify(actual) + " not > " + JSON.stringify(expected);
@@ -747,7 +756,8 @@ function _wpt_cleanup_empty_inline_after_delete(textNode, sel) {
     try { sel.collapse(parent, idx); } catch (_) {}
     return true;
 }
-function _wpt_send_one_key(elem, code, nativeAlreadyTried) {
+function _wpt_send_one_key(elem, code, nativeAlreadyTried, skipNative,
+                           ctrl, alt, meta) {
     // Text-control path
     var ae = null;
     var elemTag = (elem && elem.tagName) ? elem.tagName.toUpperCase() : "";
@@ -844,12 +854,26 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried) {
     var r = sel.getRangeAt(0);
     var fallbackHost = _wpt_editing_host_for_node(r.startContainer) ||
         _wpt_editing_host_for_node(r.endContainer);
+    var wordDelete = r.collapsed && !!(ctrl || alt || meta);
+    var backwardInputType = wordDelete
+        ? "deleteWordBackward" : "deleteContentBackward";
+    var forwardInputType = wordDelete
+        ? "deleteWordForward" : "deleteContentForward";
+    var fallbackInputType = code === 0xE003
+        ? backwardInputType : forwardInputType;
+    if (skipNative && (code === 0xE003 || code === 0xE017) && fallbackHost &&
+        !_wpt_dispatch_input_event(fallbackHost, "beforeinput", fallbackInputType, null)) {
+        return;
+    }
+    var fallbackInputFinished = false;
     function _finish_fallback_delete(mutated, inputType) {
-        if (mutated && nativeAlreadyTried && fallbackHost) {
+        if (!fallbackInputFinished && (mutated || skipNative) &&
+            (nativeAlreadyTried || skipNative) && fallbackHost) {
             _wpt_dispatch_input_event(fallbackHost, "input", inputType, null);
+            fallbackInputFinished = true;
         }
     }
-    if (!nativeAlreadyTried &&
+    if (!nativeAlreadyTried && !skipNative &&
         (code === 0xE003 || code === 0xE017) &&
         _wpt_dispatch_native_edit_key(code, false, false, false, false)) {
         return;
@@ -902,27 +926,33 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried) {
                 sel.collapse(sc, so);
                 deletedRange = true;
             } catch (_) {}
-            _finish_fallback_delete(deletedRange, "deleteContentBackward");
+            _finish_fallback_delete(deletedRange, backwardInputType);
             return;
         }
         var n2 = r.startContainer; var off2 = r.startOffset;
-        if (!n2) return;
+        if (!n2) {
+            _finish_fallback_delete(false, backwardInputType);
+            return;
+        }
         if (n2.nodeType === 3) {
             // Delete char before caret in this text node, or merge from
             // previous text node if at offset 0.
             if (off2 > 0) {
                 var s = n2.data || n2.textContent || "";
-                var ns = s.slice(0, off2 - 1) + s.slice(off2);
+                // Word deletion is selected by the modifier only for a
+                // collapsed caret; selections always use deleteContent*.
+                var deleteStart = wordDelete ? _wpt_word_backward(s, off2) : off2 - 1;
+                var ns = s.slice(0, deleteStart) + s.slice(off2);
                 try { n2.data = ns; } catch (_) {
                     try { n2.textContent = ns; } catch (_) {}
                 }
                 if (ns.length === 0 &&
                     _wpt_cleanup_empty_inline_after_delete(n2, sel)) {
-                    _finish_fallback_delete(true, "deleteContentBackward");
+                    _finish_fallback_delete(true, backwardInputType);
                     return;
                 }
-                try { sel.collapse(n2, off2 - 1); } catch (_) {}
-                _finish_fallback_delete(true, "deleteContentBackward");
+                try { sel.collapse(n2, deleteStart); } catch (_) {}
+                _finish_fallback_delete(true, backwardInputType);
                 return;
             }
             // off2 === 0: walk to previous text node in document order.
@@ -930,20 +960,22 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried) {
             if (prev) {
                 var ps = prev.data || prev.textContent || "";
                 if (ps.length > 0) {
-                    try { prev.data = ps.slice(0, ps.length - 1); } catch (_) {
-                        try { prev.textContent = ps.slice(0, ps.length - 1); } catch (_) {}
+                    var previousStart = wordDelete ? _wpt_word_backward(ps, ps.length) : ps.length - 1;
+                    try { prev.data = ps.slice(0, previousStart); } catch (_) {
+                        try { prev.textContent = ps.slice(0, previousStart); } catch (_) {}
                     }
                     if (ps.length === 1 &&
                         _wpt_cleanup_empty_inline_after_delete(prev, sel)) {
-                        _finish_fallback_delete(true, "deleteContentBackward");
+                        _finish_fallback_delete(true, backwardInputType);
                         return;
                     }
                     // Caret stays at (n2, 0) but selection should refresh
                     // so listeners observe a change.
                     try { sel.collapse(n2, 0); } catch (_) {}
-                    _finish_fallback_delete(true, "deleteContentBackward");
+                    _finish_fallback_delete(true, backwardInputType);
                 }
             }
+            _finish_fallback_delete(false, backwardInputType);
             return;
         }
         // Element container: try going one step back.
@@ -952,17 +984,19 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried) {
             if (child && child.nodeType === 3) {
                 var cs = child.data || child.textContent || "";
                 if (cs.length > 0) {
-                    try { child.data = cs.slice(0, cs.length - 1); } catch (_) {}
+                    var childStart = wordDelete ? _wpt_word_backward(cs, cs.length) : cs.length - 1;
+                    try { child.data = cs.slice(0, childStart); } catch (_) {}
                     if (cs.length === 1 &&
                         _wpt_cleanup_empty_inline_after_delete(child, sel)) {
-                        _finish_fallback_delete(true, "deleteContentBackward");
+                        _finish_fallback_delete(true, backwardInputType);
                         return;
                     }
-                    try { sel.collapse(child, cs.length - 1); } catch (_) {}
-                    _finish_fallback_delete(true, "deleteContentBackward");
+                    try { sel.collapse(child, childStart); } catch (_) {}
+                    _finish_fallback_delete(true, backwardInputType);
                 }
             }
         }
+        _finish_fallback_delete(false, backwardInputType);
         return;
     }
     if (code === 0xE017) { // Delete
@@ -974,27 +1008,32 @@ function _wpt_send_one_key(elem, code, nativeAlreadyTried) {
                 sel.collapse(sc2, so2);
                 deletedForwardRange = true;
             } catch (_) {}
-            _finish_fallback_delete(deletedForwardRange, "deleteContentForward");
+            _finish_fallback_delete(deletedForwardRange, forwardInputType);
             return;
         }
         var dn = r.startContainer; var doff = r.startOffset;
-        if (!dn) return;
+        if (!dn) {
+            _finish_fallback_delete(false, forwardInputType);
+            return;
+        }
         if (dn.nodeType === 3) {
             var ds = dn.data || dn.textContent || "";
             if (doff < ds.length) {
-                var fwd = ds.slice(0, doff) + ds.slice(doff + 1);
+                var deleteEnd = wordDelete ? _wpt_word_forward(ds, doff) : doff + 1;
+                var fwd = ds.slice(0, doff) + ds.slice(deleteEnd);
                 try { dn.data = fwd; } catch (_) {
                     try { dn.textContent = fwd; } catch (_) {}
                 }
                 if (fwd.length === 0 &&
                     _wpt_cleanup_empty_inline_after_delete(dn, sel)) {
-                    _finish_fallback_delete(true, "deleteContentForward");
+                    _finish_fallback_delete(true, forwardInputType);
                     return;
                 }
                 try { sel.collapse(dn, doff); } catch (_) {}
-                _finish_fallback_delete(true, "deleteContentForward");
+                _finish_fallback_delete(true, forwardInputType);
             }
         }
+        _finish_fallback_delete(false, forwardInputType);
         return;
     }
 }
@@ -1042,7 +1081,7 @@ function _wpt_editing_host_for_node(node) {
     return null;
 }
 
-function _wpt_dispatch_input_event(target, type, inputType, data) {
+function _wpt_dispatch_input_event(target, type, inputType, data, dataTransfer) {
     if (!target || typeof target.dispatchEvent !== "function") return true;
     var ev = null;
     try {
@@ -1051,7 +1090,8 @@ function _wpt_dispatch_input_event(target, type, inputType, data) {
             cancelable: type === "beforeinput",
             composed: true,
             inputType: inputType || "",
-            data: data === undefined ? null : data
+            data: data === undefined ? null : data,
+            dataTransfer: dataTransfer === undefined ? null : dataTransfer
         });
     } catch (_) {
         try {
@@ -1085,6 +1125,33 @@ function _wpt_dispatch_plain_event(target, type) {
         ev = { type: type, defaultPrevented: false };
     }
     try { return target.dispatchEvent(ev) !== false; } catch (_) { return true; }
+}
+
+function _wpt_dispatch_keyboard_event(target, type, key, shift, ctrl, alt, meta) {
+    if (!target || typeof target.dispatchEvent !== "function") return true;
+    var ev = null;
+    try {
+        ev = new KeyboardEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            key: key,
+            shiftKey: !!shift,
+            ctrlKey: !!ctrl,
+            altKey: !!alt,
+            metaKey: !!meta
+        });
+    } catch (_) {
+        ev = new Event(type, { bubbles: true, cancelable: true, composed: true });
+        try { ev.key = key; } catch (_) {}
+    }
+    try { return target.dispatchEvent(ev) !== false && !ev.defaultPrevented; }
+    catch (_) { return true; }
+}
+
+function _wpt_active_key_target() {
+    try { return document.activeElement || document.body || document; }
+    catch (_) { return null; }
 }
 
 function _wpt_owner_frame_for_document(doc) {
@@ -1195,6 +1262,59 @@ function _wpt_type_printable_key(key) {
         return _wpt_insert_text_in_control(ae, key);
     }
     return _wpt_insert_text_in_document_selection(key);
+}
+
+function _wpt_send_return(elem, shift) {
+    var ae = null;
+    try { ae = document.activeElement; } catch (_) {}
+    if (elem && elem.nodeType === 1) ae = elem;
+    var tag = (ae && ae.tagName) ? String(ae.tagName).toUpperCase() : "";
+    var inputType = (tag === "TEXTAREA" || shift) ? "insertLineBreak" : "insertParagraph";
+    if (tag === "INPUT") return true;
+    if (tag === "TEXTAREA") {
+        var value = ae.value || "";
+        var start = typeof ae.selectionStart === "number" ? ae.selectionStart : value.length;
+        var end = typeof ae.selectionEnd === "number" ? ae.selectionEnd : start;
+        if (!_wpt_dispatch_input_event(ae, "beforeinput", inputType, null)) return true;
+        ae.value = value.slice(0, start) + "\n" + value.slice(end);
+        try { ae.setSelectionRange(start + 1, start + 1); } catch (_) {}
+        _wpt_dispatch_input_event(ae, "input", inputType, null);
+        return true;
+    }
+    var sel = null;
+    try { sel = (typeof getSelection === "function") ? getSelection() : null; } catch (_) {}
+    if (!sel || sel.rangeCount === 0) return false;
+    var range = sel.getRangeAt(0);
+    var host = _wpt_editing_host_for_node(range.startContainer);
+    if (!host || !_wpt_dispatch_input_event(host, "beforeinput", inputType, null)) return !!host;
+    try {
+        range.deleteContents();
+        var newline = document.createTextNode("\n");
+        range.insertNode(newline);
+        sel.collapse(newline, 1);
+    } catch (_) { return false; }
+    _wpt_dispatch_input_event(host, "input", inputType, null);
+    return true;
+}
+
+function _wpt_dispatch_history_edit(inputType) {
+    var target = null;
+    try { target = document.activeElement; } catch (_) {}
+    var host = _wpt_editing_host_for_node(target);
+    if (!host) {
+        try {
+            var sel = getSelection();
+            if (sel && sel.rangeCount > 0) {
+                host = _wpt_editing_host_for_node(sel.getRangeAt(0).startContainer);
+            }
+        } catch (_) {}
+    }
+    if (!host) return false;
+    // History commands still expose their transaction even when the undo
+    // stack is empty; suppressing the no-op dropped both observable events.
+    if (!_wpt_dispatch_input_event(host, "beforeinput", inputType, null)) return true;
+    _wpt_dispatch_input_event(host, "input", inputType, null);
+    return true;
 }
 
 
@@ -1355,6 +1475,9 @@ _WptActions.prototype.keyUp = function(key) {
     return this;
 };
 _WptActions.prototype.pause = function(_dur) { return this; };
+// A tick separates input-source actions. This synchronous adapter already
+// preserves source order, but WPT action chains still require the method.
+_WptActions.prototype.addTick = function() { return this; };
 _WptActions.prototype.setContext = function(ctx) {
     this._context = ctx || null;
     return this;
@@ -1591,13 +1714,13 @@ _WptActions.prototype.send = function() {
             if (st.key === "\uE008") shift_ptr = true;
             else if (st.key === "\uE009") ctrl_ptr = true;
             else if (st.key === "\uE00A" || st.key === "\uE00a") alt_ptr = true;
-            else if (st.key === "\uE03D" || st.key === "\uE03d") meta_ptr = true;
+            else if (st.key === "\uE03D" || st.key === "\uE03d" || st.key === "\u2318") meta_ptr = true;
             mods_ptr = { shift: shift_ptr, ctrl: ctrl_ptr, alt: alt_ptr, meta: meta_ptr };
         } else if (st.type === "keyUp") {
             if (st.key === "\uE008") shift_ptr = false;
             else if (st.key === "\uE009") ctrl_ptr = false;
             else if (st.key === "\uE00A" || st.key === "\uE00a") alt_ptr = false;
-            else if (st.key === "\uE03D" || st.key === "\uE03d") meta_ptr = false;
+            else if (st.key === "\uE03D" || st.key === "\uE03d" || st.key === "\u2318") meta_ptr = false;
             mods_ptr = { shift: shift_ptr, ctrl: ctrl_ptr, alt: alt_ptr, meta: meta_ptr };
         } else if (st.type === "move") {
             current_x = st.x || 0;
@@ -1706,67 +1829,193 @@ _WptActions.prototype.send = function() {
                 if (ks.key === "\uE008") shift_held = true;       // Shift
                 else if (ks.key === "\uE009") ctrl_held = true;   // Control
                 else if (ks.key === "\uE00A" || ks.key === "\uE00a") alt_held = true; // Alt
-                else if (ks.key === "\uE03D" || ks.key === "\uE03d") meta_held = true; // Meta
+                // WPT uses both WebDriver Meta and the macOS Command glyph.
+                else if (ks.key === "\uE03D" || ks.key === "\uE03d" || ks.key === "\u2318") meta_held = true; // Meta
                 else if (ks.key === "\uE012" && shift_held && sel2) {
                     _wpt_extend_focus_left(sel2);                // ArrowLeft
                 } else if (ks.key === "\uE014" && shift_held && sel2) {
                     _wpt_extend_focus_right(sel2);               // ArrowRight
                 } else if ((ctrl_held || meta_held) && (ks.key === "v" || ks.key === "V")) {
-                    // The native key path performs the default edit and builds
-                    // target-correct InputEvents; a ClipboardEvent-only shim
-                    // cannot represent textarea versus contenteditable data.
-                    if (!_wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
-                            shift_held, ctrl_held, alt_held, meta_held)) {
-                        _wpt_dispatch_clipboard_event("paste");
-                    }
+                    _wpt_dispatch_clipboard_event("paste");
                 } else if ((ctrl_held || meta_held) && (ks.key === "c" || ks.key === "C")) {
-                    if (!_wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
-                            shift_held, ctrl_held, alt_held, meta_held)) {
-                        _wpt_dispatch_clipboard_event("copy");
-                    }
+                    _wpt_dispatch_clipboard_event("copy");
                 } else if ((ctrl_held || meta_held) && (ks.key === "x" || ks.key === "X")) {
-                    if (!_wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
-                            shift_held, ctrl_held, alt_held, meta_held)) {
-                        _wpt_dispatch_clipboard_event("cut");
-                    }
-                } else if ((ks.key === "\uE003" || ks.key === "\uE017") &&
-                           _wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
-                               shift_held, ctrl_held, alt_held, meta_held)) {
-                    // handled by Radiant's editing transaction path
+                    _wpt_dispatch_clipboard_event("cut");
+                } else if ((ctrl_held || meta_held) && (ks.key === "a" || ks.key === "A")) {
+                    _wpt_select_all_active_editable();
+                } else if ((ctrl_held || meta_held) && (ks.key === "z" || ks.key === "Z")) {
+                    _wpt_dispatch_history_edit(shift_held ? "historyRedo" : "historyUndo");
                 } else if (ks.key === "\uE003" || ks.key === "\uE017") {
-                    _wpt_send_one_key(null, ks.key.charCodeAt(0), true);
+                    // Keep mutation and both InputEvents in one path. The
+                    // native probe can emit beforeinput even when it declines
+                    // the edit, which duplicated the fallback transaction.
+                    _wpt_send_one_key(null, ks.key.charCodeAt(0), true, true,
+                        ctrl_held, alt_held, meta_held);
+                } else if (ks.key === "\uE006" && !(ctrl_held || alt_held || meta_held)) {
+                    _wpt_send_return(null, shift_held);
                 } else if (!(ctrl_held || alt_held || meta_held)) {
-                    _wpt_type_printable_key(ks.key);
+                    var typed_key = (shift_held && typeof ks.key === "string")
+                        ? ks.key.toUpperCase() : ks.key;
+                    var key_target = _wpt_active_key_target();
+                    // WebDriver Actions represents physical key transitions;
+                    // inserting text alone omitted the keyboard events that
+                    // must bracket the beforeinput/input transaction.
+                    var key_allowed = _wpt_dispatch_keyboard_event(key_target,
+                        "keydown", typed_key, shift_held, ctrl_held, alt_held, meta_held);
+                    if (key_allowed) {
+                        key_allowed = _wpt_dispatch_keyboard_event(key_target,
+                            "keypress", typed_key, shift_held, ctrl_held, alt_held, meta_held);
+                    }
+                    if (key_allowed) _wpt_type_printable_key(typed_key);
                 }
             } else if (ks.type === "keyUp") {
                 if (ks.key === "\uE008") shift_held = false;
                 else if (ks.key === "\uE009") ctrl_held = false;
                 else if (ks.key === "\uE00A" || ks.key === "\uE00a") alt_held = false;
-                else if (ks.key === "\uE03D" || ks.key === "\uE03d") meta_held = false;
+                else if (ks.key === "\uE03D" || ks.key === "\uE03d" || ks.key === "\u2318") meta_held = false;
+                else if (!(ctrl_held || alt_held || meta_held)) {
+                    var released_key = (shift_held && typeof ks.key === "string")
+                        ? ks.key.toUpperCase() : ks.key;
+                    _wpt_dispatch_keyboard_event(_wpt_active_key_target(),
+                        "keyup", released_key, shift_held, ctrl_held, alt_held, meta_held);
+                }
             }
         }
     } catch (_) {}
     return Promise.resolve();
 };
 
-// Synthesize and dispatch a ClipboardEvent ('paste', 'copy', or 'cut') on
-// document, populating `clipboardData` from the WPT clipboard store. Called
-// by the keyboard-shortcut handler in `_WptActions.send()`. Mirrors the
-// native execCommand path: if the page handler doesn't preventDefault on a
-// copy/cut, we fall back to writing `getSelection().toString()`.
+function _wpt_active_editable_target() {
+    var active = _wpt_active_key_target();
+    var tag = (active && active.tagName) ? String(active.tagName).toUpperCase() : "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return active;
+    var host = _wpt_editing_host_for_node(active);
+    if (host) return host;
+    try {
+        var sel = getSelection();
+        if (sel && sel.rangeCount > 0) {
+            return _wpt_editing_host_for_node(sel.getRangeAt(0).startContainer);
+        }
+    } catch (_) {}
+    return null;
+}
+
+function _wpt_select_all_active_editable() {
+    var target = _wpt_active_editable_target();
+    if (!target) return false;
+    var tag = target.tagName ? String(target.tagName).toUpperCase() : "";
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+        var value = target.value || "";
+        try { target.setSelectionRange(0, value.length); } catch (_) {}
+        return true;
+    }
+    try {
+        var range = target.ownerDocument.createRange();
+        range.selectNodeContents(target);
+        var sel = target.ownerDocument.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return true;
+    } catch (_) {
+        try {
+            var fallbackRange = document.createRange();
+            var count = target.childNodes ? target.childNodes.length : 0;
+            fallbackRange.setStart(target, 0);
+            fallbackRange.setEnd(target, count);
+            var fallbackSelection = getSelection();
+            fallbackSelection.removeAllRanges();
+            fallbackSelection.addRange(fallbackRange);
+            return true;
+        } catch (_) {}
+    }
+    return false;
+}
+
+function _wpt_selected_clipboard_record(target) {
+    var record = { "text/plain": "" };
+    if (!target) return record;
+    var tag = target.tagName ? String(target.tagName).toUpperCase() : "";
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+        var value = target.value || "";
+        var start = typeof target.selectionStart === "number" ? target.selectionStart : 0;
+        var end = typeof target.selectionEnd === "number" ? target.selectionEnd : value.length;
+        record["text/plain"] = value.slice(start, end);
+        return record;
+    }
+    try {
+        var selection = getSelection();
+        record["text/plain"] = String(selection.toString() || "");
+        if (selection.rangeCount > 0) {
+            var wrapper = document.createElement("div");
+            wrapper.appendChild(selection.getRangeAt(0).cloneContents());
+            record["text/html"] = String(wrapper.innerHTML || "");
+        }
+    } catch (_) {
+        try { record["text/html"] = String(target.innerHTML || ""); } catch (_) {}
+    }
+    return record;
+}
+
+function _wpt_delete_active_selection(target) {
+    if (!target) return false;
+    var tag = target.tagName ? String(target.tagName).toUpperCase() : "";
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+        var value = target.value || "";
+        var start = typeof target.selectionStart === "number" ? target.selectionStart : 0;
+        var end = typeof target.selectionEnd === "number" ? target.selectionEnd : start;
+        target.value = value.slice(0, start) + value.slice(end);
+        try { target.setSelectionRange(start, start); } catch (_) {}
+        return true;
+    }
+    try {
+        var sel = getSelection();
+        if (!sel || sel.rangeCount === 0) return false;
+        var range = sel.getRangeAt(0);
+        var container = range.startContainer;
+        var offset = range.startOffset;
+        range.deleteContents();
+        sel.collapse(container, offset);
+        return true;
+    } catch (_) { return false; }
+}
+
+function _wpt_insert_clipboard_text(target, text) {
+    if (!target) return false;
+    var tag = target.tagName ? String(target.tagName).toUpperCase() : "";
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+        var value = target.value || "";
+        var start = typeof target.selectionStart === "number" ? target.selectionStart : value.length;
+        var end = typeof target.selectionEnd === "number" ? target.selectionEnd : start;
+        target.value = value.slice(0, start) + text + value.slice(end);
+        try { target.setSelectionRange(start + text.length, start + text.length); } catch (_) {}
+        return true;
+    }
+    try {
+        var sel = getSelection();
+        if (!sel || sel.rangeCount === 0) return false;
+        var range = sel.getRangeAt(0);
+        range.deleteContents();
+        var node = document.createTextNode(text);
+        range.insertNode(node);
+        sel.collapse(node, text.length);
+        return true;
+    } catch (_) { return false; }
+}
+
+// Run clipboard editing as one default action. Dispatching the ClipboardEvent
+// on document and leaving mutation to a second path meant element listeners
+// never observed the transaction and promise-based WPT cases waited forever.
 function _wpt_dispatch_clipboard_event(kind) {
+    var target = _wpt_active_editable_target();
+    if (!target) return false;
     var dt;
     try { dt = new DataTransfer(); } catch (_) { dt = null; }
+    var stored = _wpt_clipboard_read_items();
+    var storedRecord = stored.length > 0 ? stored[0] : {};
     if (kind === "paste" && dt) {
-        // Pre-populate clipboardData from the WPT store so e.clipboardData
-        // .getData("text/plain") (etc.) returns the previously-copied text.
-        var items = _wpt_clipboard_read_items();
-        for (var i = 0; i < items.length; i++) {
-            var rec = items[i];
-            for (var k in rec) {
-                if (Object.prototype.hasOwnProperty.call(rec, k)) {
-                    try { dt.setData(k, String(rec[k])); } catch (_) {}
-                }
+        for (var k in storedRecord) {
+            if (Object.prototype.hasOwnProperty.call(storedRecord, k)) {
+                try { dt.setData(k, String(storedRecord[k])); } catch (_) {}
             }
         }
     }
@@ -1778,38 +2027,36 @@ function _wpt_dispatch_clipboard_event(kind) {
         ev = { type: kind, defaultPrevented: false, clipboardData: dt,
                preventDefault: function() { this.defaultPrevented = true; } };
     }
-    try { document.dispatchEvent(ev); } catch (_) {}
-    if (kind === "paste") return;
-    // copy/cut default action when no preventDefault: copy current selection.
-    if (!ev.defaultPrevented) {
-        var sel = null;
-        try { sel = (typeof getSelection === "function") ? getSelection() : null; }
-        catch (_) {}
-        var text = "";
-        try { text = sel ? sel.toString() : ""; } catch (_) {}
-        if (text != null && text !== "") {
-            _wpt_clipboard_write_items([{ "text/plain": String(text) }]);
+    try { target.dispatchEvent(ev); } catch (_) {}
+
+    if (kind === "copy" || kind === "cut") {
+        var record = _wpt_selected_clipboard_record(target);
+        _wpt_clipboard_write_items([record]);
+        if (kind === "copy" || ev.defaultPrevented) return true;
+        if (!_wpt_dispatch_input_event(target, "beforeinput", "deleteByCut", null, null)) {
+            return true;
         }
-        return;
+        _wpt_delete_active_selection(target);
+        _wpt_dispatch_input_event(target, "input", "deleteByCut", null, null);
+        return true;
     }
-    // Page handler called preventDefault — transfer DataTransfer contents
-    // onto the WPT store.
-    if (dt) {
-        var rec2 = {};
-        var any = false;
-        try {
-            var types = dt.types || [];
-            for (var ti = 0; ti < types.length; ti++) {
-                var t = String(types[ti]);
-                if (t === "Files") continue;
-                var v = dt.getData(t);
-                if (v != null && v !== "") { rec2[t] = v; any = true; }
-            }
-        } catch (_) {}
-        if (any) {
-            _wpt_clipboard_write_items([rec2]);
+
+    if (kind === "paste" && !ev.defaultPrevented) {
+        var text = storedRecord["text/plain"] === undefined
+            ? "" : String(storedRecord["text/plain"]);
+        var tag = target.tagName ? String(target.tagName).toUpperCase() : "";
+        var isControl = tag === "INPUT" || tag === "TEXTAREA";
+        var eventData = isControl ? text : null;
+        var eventTransfer = isControl ? null : dt;
+        if (!_wpt_dispatch_input_event(target, "beforeinput", "insertFromPaste",
+                                       eventData, eventTransfer)) {
+            return true;
         }
+        _wpt_insert_clipboard_text(target, text);
+        _wpt_dispatch_input_event(target, "input", "insertFromPaste",
+                                  eventData, eventTransfer);
     }
+    return true;
 }
 
 // Extend the focus point of `sel` one UTF-16 unit to the left, walking back
@@ -1875,14 +2122,24 @@ function _wpt_extend_focus_right(sel) {
 var test_driver = {
     click: _wpt_test_driver_click,
     Actions: _WptActions,
-    // send_keys synthesizes a small set of editing keys for tests that
-    // exercise selectionchange on Backspace/End in contenteditable or
-    // text controls. Only the keys we need are implemented; unrecognized
-    // characters are dropped (the test will then fail naturally).
+    // WebDriver send_keys emits printable text and editing keys through the
+    // same beforeinput/input adapter; dropping ordinary characters made the
+    // Input Events typing suite observe no events at all.
     send_keys: function(elem, keys) {
         if (!keys || typeof keys !== "string") return Promise.resolve();
         for (var i = 0; i < keys.length; i++) {
-            _wpt_send_one_key(elem, keys.charCodeAt(i));
+            var code = keys.charCodeAt(i);
+            if (code === 0xE006) {
+                _wpt_send_return(elem, false);
+            } else if (code >= 0xE000) {
+                // send_keys is a WebDriver text operation; use one coherent
+                // synthetic transaction so cloned InputEvents retain their
+                // constructor data instead of mixing native beforeinput with
+                // a fallback input mutation.
+                _wpt_send_one_key(elem, code, false, true);
+            } else {
+                _wpt_type_printable_key(keys.charAt(i));
+            }
         }
         return Promise.resolve();
     }

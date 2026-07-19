@@ -50,8 +50,10 @@ NPROCS := $(shell n="$(NPROCS)"; if expr "$$n" : '^[1-9][0-9]*$$' >/dev/null; th
 # the OS and browser/reference helpers.
 RADIANT_RENDER_JOBS := $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); else echo 1; fi)
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1
-RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest test_wpt_dom_ranges_gtest test_wpt_html_reflection_gtest
-RADIANT_DOM2_WPT_RUNNERS := input_events dom_ranges html_reflection
+# Ranges and reflection remain extended `make test` coverage; their large
+# known-failure inventories are not part of the fast Radiant baseline gate.
+RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
+RADIANT_DOM2_WPT_RUNNERS := input_events
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
