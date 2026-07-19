@@ -573,6 +573,7 @@ typedef struct FnCapture {
     String* lambda_name;
     NameEntry* entry;
     int scope_env_slot;
+    int private_env_slot;
     int grandparent_slot;
     int parent_env_link_slot_override;
     bool is_mutable;

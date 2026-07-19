@@ -2874,21 +2874,28 @@ static bool js_dom_transfer_document_storage(DomDocument* source,
     return true;
 }
 
-static void js_dom_rebind_subtree_document(DomNode* node,
+static bool js_dom_rebind_subtree_document(DomNode* node,
+                                           DomDocument* source,
                                            DomDocument* destination) {
-    if (!node || !destination) return;
-    node->id = destination->next_node_id++;
+    if (!node || !source || !destination) return false;
+    uint32_t destination_id = destination->next_node_id++;
+    if (!dom_node_registry_transfer(source, destination, node, destination_id)) {
+        return false;
+    }
+    node->id = destination_id;
     node->view_state_ref = nullptr;
-    if (!node->is_element()) return;
+    if (!node->is_element()) return true;
 
     DomElement* elem = node->as_element();
     elem->doc = destination;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        js_dom_rebind_subtree_document(child, destination);
+        if (!js_dom_rebind_subtree_document(child, source, destination)) return false;
     }
     if (elem->shadow_root_element()) {
-        js_dom_rebind_subtree_document((DomNode*)elem->shadow_root_element(), destination);
+        if (!js_dom_rebind_subtree_document(
+                (DomNode*)elem->shadow_root_element(), source, destination)) return false;
     }
+    return true;
 }
 
 static bool js_dom_prepare_cross_document_insertion(DomNode* node,
@@ -2896,11 +2903,18 @@ static bool js_dom_prepare_cross_document_insertion(DomNode* node,
     if (!node || !parent || !parent->doc) return false;
     DomDocument* source = js_dom_node_owner_document(node);
     DomDocument* destination = parent->doc;
-    if (!source || source == destination) return true;
-    // Adopted nodes retain allocations from their source arena. Transfer that
-    // arena's lifetime before rebinding so shutdown cannot free a live subtree.
-    if (!js_dom_transfer_document_storage(source, destination)) return false;
-    js_dom_rebind_subtree_document(node, destination);
+    if (!source) return true;
+    bool cross_document = source != destination;
+    if (cross_document &&
+        !js_dom_transfer_document_storage(source, destination)) return false;
+    // Detach while the source document and lifecycle ids are still current;
+    // rebinding first makes removal pins target two incompatible registries.
+    if (node->parent) {
+        dom_pre_remove(node);
+        node->parent->remove_child(node);
+    }
+    if (cross_document &&
+        !js_dom_rebind_subtree_document(node, source, destination)) return false;
     return true;
 }
 
@@ -11837,8 +11851,6 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
                 if (!js_dom_prepare_cross_document_insertion(frag_child, elem)) {
                     return ItemNull;
                 }
-                dom_pre_remove(frag_child);
-                child_elem->remove_child(frag_child);
                 ((DomNode*)elem)->append_child(frag_child);
                 dom_post_insert((DomNode*)elem, frag_child);
                 frag_child = next;
@@ -11848,13 +11860,6 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         }
     }
     if (!js_dom_prepare_cross_document_insertion(child_node, elem)) return ItemNull;
-    if (child_node->parent) {
-        DomNode* old_parent = child_node->parent;
-        if (old_parent->is_element()) {
-            dom_pre_remove(child_node);
-            old_parent->remove_child(child_node);
-        }
-    }
     ((DomNode*)elem)->append_child(child_node);
     dom_post_insert((DomNode*)elem, child_node);
     if (child_node->is_element() && child_node->as_element()->tag() == HTM_TAG_OPTION &&
@@ -11917,8 +11922,6 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
                 if (!js_dom_prepare_cross_document_insertion(frag_child, elem)) {
                     return ItemNull;
                 }
-                dom_pre_remove(frag_child);
-                new_elem->remove_child(frag_child);
                 if (parent_node->insert_before(frag_child, ref_child)) {
                     dom_post_insert(parent_node, frag_child);
                     mutated = true;
@@ -11930,10 +11933,6 @@ extern "C" Item js_dom_insert_before_bridge(void* parent_ptr, Item new_child_arg
         }
     }
     if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
-    if (new_child->parent) {
-        dom_pre_remove(new_child);
-        new_child->parent->remove_child(new_child);
-    }
     if (!parent_node->insert_before(new_child, ref_child)) {
         return ItemNull;
     }
@@ -12178,10 +12177,6 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         return old_child_arg;
     }
     if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
-    if (new_child->parent) {
-        dom_pre_remove(new_child);
-        new_child->parent->remove_child(new_child);
-    }
     ((DomNode*)elem)->insert_before(new_child, old_child);
     dom_post_insert((DomNode*)elem, new_child);
     dom_pre_remove(old_child);
@@ -12217,10 +12212,6 @@ extern "C" Item js_dom_replace_with_bridge(void* node_ptr, Item* args, int argc)
         if (!a) continue;
         if (!js_dom_prepare_cross_document_insertion(a, parent->as_element())) {
             return ItemNull;
-        }
-        if (a->parent) {
-            dom_pre_remove(a);
-            a->parent->remove_child(a);
         }
         if (viable_next && viable_next->parent == parent) {
             parent->insert_before(a, viable_next);

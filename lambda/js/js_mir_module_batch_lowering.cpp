@@ -237,6 +237,14 @@ static bool jm_capture_is_transitive_through_parent(JsFuncCollected* parent,
     return false;
 }
 
+static void jm_collect_function_private_self_name(JsFunctionNode* fn,
+        struct hashmap* locals) {
+    if (!fn || !locals || fn->node_type != JS_AST_NODE_FUNCTION_EXPRESSION || !fn->name) return;
+    char self_name[128];
+    snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
+    jm_name_set_add(locals, self_name);
+}
+
 static int jm_parent_link_slot_after_captures(JsFuncCollected* child,
         int shared_slot_count) {
     if (!child) return shared_slot_count;
@@ -248,6 +256,8 @@ static int jm_parent_link_slot_after_captures(JsFuncCollected* child,
     for (int k = 0; k < child->capture_count; k++) {
         int capture_slot = child->captures[k].scope_env_slot;
         if (capture_slot >= link_slot) link_slot = capture_slot + 1;
+        int private_slot = child->captures[k].private_env_slot;
+        if (private_slot >= link_slot) link_slot = private_slot + 1;
     }
     return link_slot;
 }
@@ -267,6 +277,9 @@ static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollect
             // collect all body locals so they are not mistaken for transitive cells.
             jm_collect_body_locals(parent->node->body, parent_locals, false);
         }
+        // A named function expression's self name is local to that activation;
+        // treating it as transitive resolves recursive child closures globally.
+        jm_collect_function_private_self_name(parent->node, parent_locals);
     }
     bool has_loop_private = false;
     bool has_shared_parent = false;
@@ -4463,8 +4476,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // so we can detect when a parent function's local shadows a module constant.
             struct hashmap* ancestor_func_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
-            jm_collect_enclosing_lexicals_for_target((JsAstNode*)program,
-                (JsAstNode*)fc->node, ancestor_func_locals);
+            // Module lexicals are already represented by the module scope. Adding
+            // them here falsely forces descendant-only captures into a TDZ snapshot
+            // instead of the live module cell; only real ancestor functions belong.
             int ancestor_idx = fc->parent_index;
             while (ancestor_idx >= 0 && ancestor_idx < mt->func_count) {
                 JsFuncCollected* anc = &mt->func_entries[ancestor_idx];
@@ -4791,6 +4805,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         snprintf(parent->captures[parent->capture_count].scope_env_key, 128, "%s",
                             child->captures[ci].scope_env_key[0] ? child->captures[ci].scope_env_key : cap_name);
                         parent->captures[parent->capture_count].scope_env_slot = -1;
+                        parent->captures[parent->capture_count].private_env_slot = -1;
                         parent->captures[parent->capture_count].grandparent_slot = -1;
                         parent->captures[parent->capture_count].parent_env_link_slot_override = -1;
                         parent->captures[parent->capture_count].is_let_const = child->captures[ci].is_let_const;
@@ -5150,17 +5165,22 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             return true;
         };
 
-        auto closure_has_mixed_loop_captures = [&](JsFuncCollected* child) -> bool {
+        auto capture_needs_private_module_slot = [&](JsFuncCollected* child,
+                FnCapture* cap) -> bool {
+            return !capture_is_shared_module_binding(child, cap) &&
+                !jm_capture_uses_live_module_var(mt, cap);
+        };
+
+        auto closure_needs_mixed_module_env = [&](JsFuncCollected* child) -> bool {
             if (!child) return false;
             bool has_private = false;
             bool has_shared = false;
             for (int k = 0; k < child->capture_count; k++) {
                 FnCapture* cap = &child->captures[k];
-                if (!capture_qualifies(child, cap)) continue;
-                if (cap->force_env_capture || jm_name_set_has(for_init_lets, cap->name)) {
-                    has_private = true;
-                } else {
+                if (capture_is_shared_module_binding(child, cap)) {
                     has_shared = true;
+                } else if (capture_needs_private_module_slot(child, cap)) {
+                    has_private = true;
                 }
             }
             return has_private && has_shared;
@@ -5184,12 +5204,27 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
         int total = (int)hashmap_count(scope_vars);
         if (total > 0) {
+            int scope_env_capacity = total + 2;
+            for (int ci = 0; ci < mt->func_count; ci++) {
+                JsFuncCollected* child = &mt->func_entries[ci];
+                if (child->parent_index != -1 || !closure_qualifies(child) ||
+                    !closure_needs_mixed_module_env(child)) continue;
+                int private_count = 0;
+                for (int k = 0; k < child->capture_count; k++) {
+                    if (capture_needs_private_module_slot(child, &child->captures[k])) {
+                        private_count++;
+                    }
+                }
+                int required = total + private_count + 1;
+                if (child->capture_count + 1 > required) required = child->capture_count + 1;
+                if (required > scope_env_capacity) scope_env_capacity = required;
+            }
             mt->module_fc.has_scope_env = true;
             mt->module_fc.scope_env_count = total;
             mt->module_fc.scope_env_normal_count = total;
             mt->module_fc.parent_index = -2;  // sentinel: module body
             mt->module_fc.scope_env_names = (char(*)[64])mem_calloc(
-                total + 2, 64, MEM_CAT_JS_RUNTIME);
+                scope_env_capacity, 64, MEM_CAT_JS_RUNTIME);
 
             // Deterministic fill: iterate children in collection order
             hashmap_clear(scope_vars, false);
@@ -5228,14 +5263,23 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         }
                     }
                 }
-                if (closure_has_mixed_loop_captures(child)) {
+                if (closure_needs_mixed_module_env(child)) {
+                    // A closure that also has private captures cannot reuse the
+                    // module env directly; link its copied env back so shared
+                    // lexical cells remain live instead of freezing their TDZ value.
+                    int private_slot = total;
+                    for (int k = 0; k < child->capture_count; k++) {
+                        FnCapture* cap = &child->captures[k];
+                        if (capture_needs_private_module_slot(child, cap)) {
+                            cap->private_env_slot = private_slot++;
+                        }
+                    }
                     child->closure_env_has_parent_link = true;
                     child->closure_env_parent_link_slot =
                         jm_parent_link_slot_after_captures(child, total);
                     if (child->closure_env_parent_link_slot >= mt->module_fc.scope_env_count) {
-                        // Immediate mixed-loop callbacks may reuse the module env.
-                        // Their generated transitive loads still require the
-                        // parent-link tail, so reserve it in the shared env too.
+                        // Generated transitive loads address the parent-link tail
+                        // by layout, so reserve that tail in the module env too.
                         mt->module_fc.has_parent_env_link = true;
                         mt->module_fc.scope_env_count =
                             child->closure_env_parent_link_slot + 1;
@@ -5251,7 +5295,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             cap->grandparent_slot = cap->scope_env_slot;
                         }
                     }
-                    log_debug("js-mir: module mixed loop closure '%s' uses parent env slot %d",
+                    log_debug("js-mir: module mixed closure '%s' uses parent env slot %d",
                         child->name, child->closure_env_parent_link_slot);
                 }
             }
@@ -5314,7 +5358,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             // Find this scope_env var in parent_fc's own captures to get grandparent slot
             for (int c = 0; c < parent_fc->capture_count; c++) {
                 if (strcmp(sname, parent_fc->captures[c].name) == 0) {
-                    int grandparent_slot = parent_fc->captures[c].scope_env_slot;
+                    // Propagated captures in a mixed module closure can live in
+                    // private tail slots. Its nested closures reuse that actual
+                    // incoming layout, not the original module scope slot.
+                    int grandparent_slot = jm_capture_env_slot(
+                        &parent_fc->captures[c], c);
                     if (grandparent_slot < 0) {
                         // Can't remap — grandparent doesn't use scope_env for this var
                         parent_fc->reuse_parent_env = false;
@@ -5382,6 +5430,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 pp = pp->next;
             }
+            jm_collect_function_private_self_name(parent_fn, parent_locals);
         }
 
         // Check if scope env has any transitive captures (vars that are also in parent_fc's captures)
@@ -5451,6 +5500,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 pp2 = pp2->next;
             }
+            jm_collect_function_private_self_name(parent_fn, parent_locals2);
         }
 
         // For transitive captures in direct children, set grandparent_slot

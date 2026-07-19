@@ -1,3 +1,4 @@
+// @document dom2_library_probe.html
 (0, eval)(require('fs').readFileSync('test/js/htmx.min.js', 'utf8'));
 
 var htmxAfterSwap = 0;

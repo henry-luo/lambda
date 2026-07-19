@@ -31,6 +31,23 @@ uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1) 
         strlen(((JsModuleConstEntry*)item)->name), seed0, seed1);
 }
 
+bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture) {
+    if (!mt || !capture || !mt->module_consts || capture->force_env_capture) return false;
+    JsModuleConstEntry lookup;
+    memset(&lookup, 0, sizeof(lookup));
+    snprintf(lookup.name, sizeof(lookup.name), "%s", capture->name);
+    JsModuleConstEntry* entry =
+        (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+    return entry && entry->const_type == MCONST_MODVAR;
+}
+
+int jm_capture_env_slot(FnCapture* capture, int dense_slot) {
+    if (!capture) return dense_slot;
+    if (capture->private_env_slot >= 0) return capture->private_env_slot;
+    if (capture->scope_env_slot >= 0) return capture->scope_env_slot;
+    return dense_slot;
+}
+
 JsMirTranspiler* jm_create_mir_transpiler(
     JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
     int import_capacity, int local_func_capacity, int var_scope_capacity,

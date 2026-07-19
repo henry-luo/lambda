@@ -19,6 +19,7 @@ extern "C" {
 #include "../lib/test_utils.h"
 
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../radiant/event.hpp"
 
 #include <cstring>
@@ -71,8 +72,11 @@ protected:
         fake_state.live_ranges = nullptr;
         fake_state.range_freelist = nullptr;
         state = reinterpret_cast<DocState*>(&fake_state);
-        doc_storage.pool = pool;
-        doc_storage.arena = arena;
+        // generated nodes require canonical ownership fields and the lifecycle
+        // registry after the legacy document aliases were removed.
+        doc_storage.document_pool = pool;
+        doc_storage.node_arena = arena;
+        ASSERT_TRUE(dom_lifecycle_init(&doc_storage));
 
         div   = make_element();
         span  = make_element();

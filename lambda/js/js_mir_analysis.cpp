@@ -1946,12 +1946,23 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         snprintf(self_name, sizeof(self_name), "_js_%.*s", (int)fn->name->len, fn->name->chars);
     }
     bool is_method_syntax = jm_analysis_function_is_method_syntax(fn);
+    bool is_func_expr = fn->node_type == JS_AST_NODE_FUNCTION_EXPRESSION;
 
     size_t iter = 0;
     void* item;
     while (hashmap_iter(refs, &iter, &item)) {
         JsNameSetEntry* ref = (JsNameSetEntry*)item;
+        // A parameter shadows every outer/self binding. Testing the function
+        // name first made `function r(t, e, r)` overwrite the outer `r` cell
+        // with its numeric argument and later attempt to call that number.
         if (jm_name_set_has(params, ref->name)) continue;    // local param
+        // The AST now resolves an NFE self name to its private function scope,
+        // but MIR still represents recursion through the closure environment.
+        if (!fc->is_class_method && !is_method_syntax &&
+            self_name[0] && strcmp(ref->name, self_name) == 0) {
+            has_self_ref = true;
+            continue;
+        }
         // A function-wide name set cannot distinguish an outer capture from a
         // same-named lexical declared later in a nested for/block. Binding
         // ranges identify declarations owned by this function without making
@@ -1970,13 +1981,6 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
             // environment. Treating it as an outer capture makes propagation
             // demand a nonexistent binding from the enclosing expression scope.
             continue;
-        }
-        // NFE self-reference: check before outer_scope guard since NFE name
-        // is not in outer scope but still needs to be captured
-        if (!fc->is_class_method && !is_method_syntax &&
-            self_name[0] && strcmp(ref->name, self_name) == 0) {
-            has_self_ref = true;
-            continue; // handle after we know if there are other captures
         }
         if (!jm_name_set_has(outer_scope_names, ref->name)) continue;  // not in outer scope
         // Skip module-level bindings; identifier lowering resolves them via
@@ -2010,6 +2014,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
                 snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "%s", ref->name);
             }
             fc->captures[fc->capture_count].scope_env_slot = -1;
+            fc->captures[fc->capture_count].private_env_slot = -1;
             fc->captures[fc->capture_count].grandparent_slot = -1;
             fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
             // Binding metadata is authoritative when scope analysis resolved
@@ -2043,7 +2048,6 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     // Keeping top-level functions capture-free preserves tail-call optimization.
     // Exception: function EXPRESSIONS always need self-capture for NFE name binding,
     // since their name is not in the module var table even when top-level.
-    bool is_func_expr = fn->node_type == JS_AST_NODE_FUNCTION_EXPRESSION;
     bool is_block_func_decl = fn->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
         !jm_analysis_function_decl_is_direct_binding(fn);
     if (has_self_ref && self_name[0] && (fc->parent_index >= 0 || is_func_expr || is_block_func_decl)) {
@@ -2051,6 +2055,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         snprintf(fc->captures[fc->capture_count].name, 128, "%s", self_name);
         snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "%s", self_name);
         fc->captures[fc->capture_count].scope_env_slot = -1;
+        fc->captures[fc->capture_count].private_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
         fc->captures[fc->capture_count].is_let_const = false;
@@ -2068,6 +2073,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         snprintf(fc->captures[fc->capture_count].name, 128, "_js_this");
         snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "_js_this");
         fc->captures[fc->capture_count].scope_env_slot = -1;
+        fc->captures[fc->capture_count].private_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
         fc->captures[fc->capture_count].is_let_const = false;
@@ -2086,6 +2092,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         snprintf(fc->captures[fc->capture_count].name, 128, "_js_new.target");
         snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "_js_new.target");
         fc->captures[fc->capture_count].scope_env_slot = -1;
+        fc->captures[fc->capture_count].private_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
         fc->captures[fc->capture_count].is_let_const = false;
@@ -2101,6 +2108,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         snprintf(fc->captures[fc->capture_count].name, 128, "_js_arguments");
         snprintf(fc->captures[fc->capture_count].scope_env_key, 128, "_js_arguments");
         fc->captures[fc->capture_count].scope_env_slot = -1;
+        fc->captures[fc->capture_count].private_env_slot = -1;
         fc->captures[fc->capture_count].grandparent_slot = -1;
         fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
         fc->captures[fc->capture_count].is_let_const = false;

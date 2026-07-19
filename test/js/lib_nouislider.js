@@ -1,3 +1,4 @@
+// @document dom2_library_probe.html
 (0, eval)(require('fs').readFileSync('test/js/nouislider.min.js', 'utf8'));
 
 var sliderElement = document.getElementById('slider');

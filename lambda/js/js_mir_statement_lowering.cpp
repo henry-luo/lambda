@@ -2459,10 +2459,31 @@ static JsClassEntry* jm_find_class_for_identifier_binding(JsMirTranspiler* mt, J
             JsClassEntry* ce = &mt->class_entries[ci];
             if (!ce->node || ts_node_is_null(ce->node->node)) continue;
             TSNode class_name = ts_node_child_by_field_name(ce->node->node, "name", 4);
-            if (ts_node_is_null(class_name)) continue;
-            if (ts_node_start_byte(class_name) == bind_start &&
+            if (!ts_node_is_null(class_name) &&
+                ts_node_start_byte(class_name) == bind_start &&
                 ts_node_end_byte(class_name) == bind_end) {
                 return ce;
+            }
+            String* binding_name = ce->alias_name ? ce->alias_name : ce->name;
+            if (!binding_name || !id->name || binding_name->len != id->name->len ||
+                strncmp(binding_name->chars, id->name->chars, id->name->len) != 0) {
+                continue;
+            }
+            TSNode parent = ts_node_parent(ce->node->node);
+            if (!ts_node_is_null(parent) &&
+                strcmp(ts_node_type(parent), "variable_declarator") == 0) {
+                TSNode declarator_name = ts_node_child_by_field_name(parent, "name", 4);
+                bool binding_is_declarator = ts_node_start_byte(parent) == bind_start &&
+                    ts_node_end_byte(parent) == bind_end;
+                bool binding_is_name = !ts_node_is_null(declarator_name) &&
+                    ts_node_start_byte(declarator_name) == bind_start &&
+                    ts_node_end_byte(declarator_name) == bind_end;
+                if (binding_is_declarator || binding_is_name) {
+                    // Anonymous class aliases store the declarator range on the
+                    // binding identifier; match that exact declaration so its
+                    // generated non-literal field initializers are not bypassed.
+                    return ce;
+                }
             }
         }
     }

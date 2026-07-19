@@ -258,8 +258,10 @@ protected:
     void SetUp() override {
         pool = tu_setup_pool();
         arena = arena_create_default(pool);
-        doc_storage.pool = pool;
-        doc_storage.arena = arena;
+        // fixtures must initialize canonical document ownership after the
+        // legacy pool/arena aliases were removed.
+        doc_storage.document_pool = pool;
+        doc_storage.node_arena = arena;
 
         root  = make_element();
         para  = make_element();

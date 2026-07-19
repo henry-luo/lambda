@@ -1,3 +1,4 @@
+// @document dom2_library_probe.html
 (0, eval)(require('fs').readFileSync('test/js/sortable.min.js', 'utf8'));
 
 var sortableEnd = '';

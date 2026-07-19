@@ -2381,7 +2381,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         (int)fn->name->len, fn->name->chars);
                 }
                 for (int ci = 0; ci < fc->capture_count; ci++) {
-                    int src_slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
+                    int src_slot = jm_capture_env_slot(&fc->captures[ci], ci);
                     MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[ci].name, MIR_T_I64);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, cap_reg),
@@ -2461,7 +2461,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (has_captures) {
             MIR_reg_t outer_env = MIR_reg(mt->ctx, closure_env_param_name, func);
             for (int ci = 0; ci < fc->capture_count; ci++) {
-                int src_slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
+                int src_slot = jm_capture_env_slot(&fc->captures[ci], ci);
                 MIR_reg_t cap_val = jm_new_reg(mt, "gcap", MIR_T_I64);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, cap_val),
@@ -2599,7 +2599,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (has_captures) {
             MIR_reg_t outer_env = MIR_reg(mt->ctx, closure_env_param_name, func);
             for (int ci = 0; ci < fc->capture_count; ci++) {
-                int src_slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
+                int src_slot = jm_capture_env_slot(&fc->captures[ci], ci);
                 MIR_reg_t cap_val = jm_new_reg(mt, "acap", MIR_T_I64);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, cap_val),
@@ -2760,7 +2760,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
 
                 // Use scope_env_slot if remapped, otherwise use dense index
-                int slot = fc->captures[i].scope_env_slot >= 0 ? fc->captures[i].scope_env_slot : i;
+                int slot = jm_capture_env_slot(&fc->captures[i], i);
                 MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[i].name, MIR_T_I64);
 
                 // v29: For transitive captures with grandparent_slot, read through the
@@ -2821,7 +2821,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[i].name);
                 entry.var.reg = cap_reg;
                 entry.var.from_env = true;
-                entry.var.from_shared_env = (has_scope_slot && gp_slot < 0);
+                entry.var.from_shared_env =
+                    ((has_scope_slot || fc->captures[i].private_env_slot >= 0) && gp_slot < 0);
                 // v29: For grandparent reads, store the grandparent env info
                 // so scope_env_reload_vars and write-back use the correct env
                 if (gp_slot >= 0) {

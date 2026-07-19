@@ -47,6 +47,8 @@ bool dom_lifecycle_init(DomDocument* doc);
 void dom_lifecycle_destroy(DomDocument* doc);
 bool dom_node_registry_register(DomDocument* doc, DomNode* node,
                                 size_t primary_size, bool recyclable);
+bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
+                                DomNode* node, uint32_t destination_id);
 void dom_node_registry_set_backing_source(DomDocument* doc, DomNode* node,
                                           Element* backing_source);
 Element* dom_node_registry_backing_source(DomDocument* doc, DomNode* node);

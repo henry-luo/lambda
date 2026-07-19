@@ -1414,6 +1414,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
 
     JsFunctionNode* func = (JsFunctionNode*)alloc_js_ast_node(tp, ast_type, func_node, sizeof(JsFunctionNode));
 
+    func->type = &TYPE_FUNC;
     func->is_arrow = is_arrow;
     func->is_generator = is_generator;
     func->has_use_strict_directive = false;
@@ -1467,6 +1468,12 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     JsScope* fn_scope = js_scope_create(tp, JS_SCOPE_FUNCTION, tp->current_scope);
     func->vars = fn_scope;
     js_scope_push(tp, fn_scope);
+    if (func->name && is_expression && !is_arrow) {
+        // A named function expression owns a private self binding. Publishing
+        // it to the enclosing scope rebinds later call arguments such as
+        // `function n() {}(n(x))` away from the outer `n`.
+        js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
+    }
 
     // Get parameters - arrow functions can have "parameter" (singular) for single-param without parens
     // or "parameters" (plural) for multiple params or parens
@@ -1587,7 +1594,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     // Add function to scope if it has a name — but NOT for class method definitions,
     // which should not pollute the enclosing scope with their method names.
     bool is_method_def = (strcmp(node_type, "method_definition") == 0);
-    if (func->name && !is_method_def) {
+    if (func->name && !is_method_def && !is_expression) {
         js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
 
@@ -4330,6 +4337,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
         ast_type, func_node, sizeof(TsFunctionNode));
     JsFunctionNode* func = ts_func;
 
+    func->type = &TYPE_FUNC;
     func->is_arrow = is_arrow;
     func->is_generator = is_generator;
 
@@ -4359,6 +4367,11 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
     JsScope* fn_scope = js_scope_create(tp, JS_SCOPE_FUNCTION, tp->current_scope);
     func->vars = fn_scope;
     js_scope_push(tp, fn_scope);
+    if (func->name && is_expression && !is_arrow) {
+        // Keep the TypeScript-compatible builder on the same private NFE-name
+        // invariant as the JavaScript builder.
+        js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
+    }
 
     // return type annotation (TS-specific)
     TSNode return_type_node = ts_node_child_by_field_name(func_node, "return_type", 11);
@@ -4431,7 +4444,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
     js_scope_pop(tp);
 
     bool is_method_def = (strcmp(node_type, "method_definition") == 0);
-    if (func->name && !is_method_def) {
+    if (func->name && !is_method_def && !is_expression) {
         js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
 

@@ -12213,6 +12213,8 @@ int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has
     for (int ci = 0; ci < fc->capture_count; ci++) {
         int slot = fc->captures[ci].scope_env_slot;
         if (slot >= 0 && slot + 1 > env_size) env_size = slot + 1;
+        slot = fc->captures[ci].private_env_slot;
+        if (slot >= 0 && slot + 1 > env_size) env_size = slot + 1;
     }
     if (fc->closure_env_has_parent_link &&
         fc->closure_env_parent_link_slot + 1 > env_size) {
@@ -12233,7 +12235,8 @@ int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has
 static bool jm_closure_has_scope_env_slot(JsFuncCollected* fc) {
     if (!fc) return false;
     for (int ci = 0; ci < fc->capture_count; ci++) {
-        if (fc->captures[ci].scope_env_slot >= 0) return true;
+        if (fc->captures[ci].scope_env_slot >= 0 ||
+            fc->captures[ci].private_env_slot >= 0) return true;
     }
     return false;
 }
@@ -12335,8 +12338,7 @@ static void jm_track_last_closure_env(JsMirTranspiler* mt, MIR_reg_t env,
         snprintf(mt->last_closure_capture_names[ci],
             sizeof(mt->last_closure_capture_names[ci]), "%s", fc->captures[ci].name);
         mt->last_closure_capture_slots[ci] =
-            use_capture_slots && fc->captures[ci].scope_env_slot >= 0 ?
-                fc->captures[ci].scope_env_slot : ci;
+            use_capture_slots ? jm_capture_env_slot(&fc->captures[ci], ci) : ci;
         mt->last_closure_capture_is_transitive[ci] =
             fc->captures[ci].grandparent_slot >= 0;
         mt->last_closure_capture_is_nfe[ci] = fc->captures[ci].is_nfe_binding;
@@ -12451,7 +12453,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // variables.  But in loops, if any captured variable is let/const, we must
         // NOT share — let/const need per-iteration binding semantics.
         bool force_copied_field_env = jm_force_copied_env_for_field_initializer(mt, fc);
-        bool use_scope_env = (!force_copied_field_env &&
+        bool use_scope_env = (!force_copied_field_env && !fc->closure_env_has_parent_link &&
             mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
@@ -12464,6 +12466,7 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     break;
                 }
                 if (fc->captures[ci].scope_env_slot < 0) {
+                    if (jm_capture_uses_live_module_var(mt, &fc->captures[ci])) continue;
                     use_scope_env = false;
                     break;
                 }
@@ -12513,8 +12516,8 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
             if (fc->closure_env_has_parent_link && mt->scope_env_reg != 0) {
-                // mixed loop closures need private slots for loop lets while
-                // captured outer lets still write through to the parent cell.
+                // Mixed closures keep private captures local while shared
+                // lexical captures read and write through the parent cell.
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64,
                         fc->closure_env_parent_link_slot * (int)sizeof(uint64_t), env, 0, 1),
@@ -12522,7 +12525,9 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
 
             for (int ci = 0; ci < fc->capture_count; ci++) {
-                int slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
+                if (fc->captures[ci].scope_env_slot < 0 &&
+                    jm_capture_uses_live_module_var(mt, &fc->captures[ci])) continue;
+                int slot = jm_capture_env_slot(&fc->captures[ci], ci);
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation
@@ -12685,12 +12690,13 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             }
         }
         bool force_copied_field_env = jm_force_copied_env_for_field_initializer(mt, fc);
-        bool use_scope_env = (!force_copied_field_env &&
+        bool use_scope_env = (!force_copied_field_env && !fc->closure_env_has_parent_link &&
             mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0);
         if (use_scope_env) {
             for (int ci = 0; ci < fc->capture_count; ci++) {
                 JsMirVarEntry* cv = jm_find_var(mt, fc->captures[ci].name);
                 if (fc->captures[ci].scope_env_slot < 0) {
+                    if (jm_capture_uses_live_module_var(mt, &fc->captures[ci])) continue;
                     use_scope_env = false;
                     break;
                 }
@@ -12775,8 +12781,8 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             MIR_reg_t env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, env_alloc_size));
             if (fc->closure_env_has_parent_link && mt->scope_env_reg != 0) {
-                // mixed loop closures need private slots for loop lets while
-                // captured outer lets still write through to the parent cell.
+                // Mixed closures keep private captures local while shared
+                // lexical captures read and write through the parent cell.
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64,
                         fc->closure_env_parent_link_slot * (int)sizeof(uint64_t), env, 0, 1),
@@ -12784,7 +12790,9 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             }
 
             for (int i = 0; i < fc->capture_count; i++) {
-                    int slot = fc->captures[i].scope_env_slot >= 0 ? fc->captures[i].scope_env_slot : i;
+                if (fc->captures[i].scope_env_slot < 0 &&
+                    jm_capture_uses_live_module_var(mt, &fc->captures[i])) continue;
+                int slot = jm_capture_env_slot(&fc->captures[i], i);
                 if (slot < 0) continue;
 
                 // Skip self-capture — will be patched after closure creation

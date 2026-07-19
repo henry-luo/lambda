@@ -370,6 +370,29 @@ struct JsTestParam {
     std::string test_name;   // sanitised for GTest (alphanumeric + underscore)
 };
 
+static bool read_js_document_fixture(const char* script_path,
+        char* fixture_name, size_t fixture_name_size) {
+    if (!script_path || !fixture_name || fixture_name_size == 0) return false;
+    fixture_name[0] = '\0';
+    FILE* file = fopen(script_path, "r");
+    if (!file) return false;
+    char line[512];
+    const char* prefix = "// @document ";
+    bool found = false;
+    for (int line_count = 0; line_count < 8 && fgets(line, sizeof(line), file); line_count++) {
+        if (strncmp(line, prefix, strlen(prefix)) != 0) continue;
+        const char* value = line + strlen(prefix);
+        size_t value_len = strcspn(value, "\r\n");
+        if (value_len == 0 || value_len >= fixture_name_size) break;
+        memcpy(fixture_name, value, value_len);
+        fixture_name[value_len] = '\0';
+        found = true;
+        break;
+    }
+    fclose(file);
+    return found;
+}
+
 // Discover .js test files in a single directory (one level, no recursion).
 // Convention: foo.js + foo.txt = test case.  foo.js + foo.html + foo.txt = DOM test.
 static std::vector<JsTestParam> discover_js_tests_in_dir(const char* dir_path) {
@@ -418,6 +441,20 @@ static std::vector<JsTestParam> discover_js_tests_in_dir(const char* dir_path) {
         std::string html = dir_str + "/" + base + ".html";
         if (access(html.c_str(), F_OK) == 0) {
             p.html_path = html;
+        } else {
+            char fixture_name[256];
+            if (read_js_document_fixture(p.script_path.c_str(), fixture_name,
+                    sizeof(fixture_name))) {
+                char shared_html[1024];
+                int shared_len = snprintf(shared_html, sizeof(shared_html), "%s/%s",
+                    dir_path, fixture_name);
+                // DOM library probes intentionally share one document; without
+                // the explicit fixture directive they were batched without a DOM.
+                if (shared_len > 0 && shared_len < (int)sizeof(shared_html) &&
+                    access(shared_html, F_OK) == 0) {
+                    p.html_path = shared_html;
+                }
+            }
         }
 
         params.push_back(p);

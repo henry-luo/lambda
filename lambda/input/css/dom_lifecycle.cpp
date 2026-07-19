@@ -129,11 +129,11 @@ void dom_lifecycle_destroy(DomDocument* doc) {
     doc->services.node_registry = nullptr;
 }
 
-bool dom_node_registry_register(DomDocument* doc, DomNode* node,
-                                size_t primary_size, bool recyclable) {
+static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
+        Arena* primary_arena, uint32_t id, DomNodeType type,
+        size_t primary_size, bool recyclable, Element* backing_source) {
     DomNodeRegistry* registry = dom_registry(doc);
-    if (!registry || !node || !node->id || !primary_size) return false;
-    Arena* primary_arena = dom_node_primary_arena(doc, node);
+    if (!registry || !node || !id || !primary_size) return false;
     if (recyclable && !primary_arena) {
         log_error("DOM_LIFECYCLE_INVARIANT: recyclable node %p has no owning arena",
                   (void*)node);
@@ -142,20 +142,20 @@ bool dom_node_registry_register(DomDocument* doc, DomNode* node,
     DomNodeRecord* record = dom_record_find(registry, node);
     if (record) {
         if (record->state != DOM_NODE_RETIRED) {
-            if (record->id == node->id && record->primary_size == primary_size) return true;
+            if (record->id == id && record->primary_size == primary_size) return true;
             dom_lifecycle_fail("duplicate-live-register", dom_node_ref(node),
                                DOM_NODE_PIN_EXTERNAL);
             return false;
         }
         memset(record->pins, 0, sizeof(record->pins));
-        record->id = node->id;
+        record->id = id;
         record->primary_arena = primary_arena;
-        record->type = node->node_type;
+        record->type = type;
         record->state = DOM_NODE_LIVE;
         record->recyclable = recyclable;
         record->candidate = false;
         record->primary_size = primary_size;
-        record->backing_source = nullptr;
+        record->backing_source = backing_source;
         registry->stats.reused_addresses++;
         registry->stats.registered_nodes++;
         return true;
@@ -168,11 +168,12 @@ bool dom_node_registry_register(DomDocument* doc, DomNode* node,
     if (!record) return false;
     record->address = node;
     record->primary_arena = primary_arena;
-    record->id = node->id;
-    record->type = node->node_type;
+    record->id = id;
+    record->type = type;
     record->state = DOM_NODE_LIVE;
     record->recyclable = recyclable;
     record->primary_size = primary_size;
+    record->backing_source = backing_source;
     size_t bucket = dom_node_bucket(registry, node);
     record->bucket_next = registry->buckets[bucket];
     registry->buckets[bucket] = record;
@@ -180,6 +181,36 @@ bool dom_node_registry_register(DomDocument* doc, DomNode* node,
     registry->all_records = record;
     registry->record_count++;
     registry->stats.registered_nodes++;
+    return true;
+}
+
+bool dom_node_registry_register(DomDocument* doc, DomNode* node,
+                                size_t primary_size, bool recyclable) {
+    Arena* primary_arena = dom_node_primary_arena(doc, node);
+    return dom_node_registry_register_owned(doc, node, primary_arena,
+        node ? node->id : 0, node ? node->node_type : DOM_NODE_ELEMENT,
+        primary_size, recyclable, nullptr);
+}
+
+bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
+                                DomNode* node, uint32_t destination_id) {
+    if (!source || !destination || !node || !destination_id) return false;
+    DomNodeRecord* source_record = dom_record_find(dom_registry(source), node);
+    if (!source_record || source_record->state == DOM_NODE_RETIRED ||
+        source_record->id != node->id) {
+        log_error("DOM_LIFECYCLE_TRANSFER: source record is stale for node %p", (void*)node);
+        return false;
+    }
+    if (!dom_node_registry_register_owned(destination, node,
+            source_record->primary_arena, destination_id, source_record->type,
+            source_record->primary_size, source_record->recyclable,
+            source_record->backing_source)) {
+        return false;
+    }
+    // The source registry may still own wrapper/expando pins that must unpin
+    // normally, but its detached candidate must never recycle adopted storage.
+    source_record->candidate = false;
+    source_record->state = DOM_NODE_LIVE;
     return true;
 }
 
