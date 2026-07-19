@@ -568,8 +568,8 @@ Key log prefixes for tracing:
 Inspect view tree:
 
 ```bash
-grep "view-block:div" view_tree.txt | head -20
-grep "hg:0.0" view_tree.txt          # find zero-height containers
+rg '"tag": "div"' temp/view_tree.json | head -20
+rg '"height": 0.0' temp/view_tree.json # find zero-height containers
 grep "AUTO-HEIGHT" log.txt
 grep "Phase 7" log.txt
 ```

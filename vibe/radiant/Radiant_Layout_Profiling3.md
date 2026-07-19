@@ -2,6 +2,13 @@
 
 ## Date: March 21, 2026
 
+> **Historical profile:** the paths and implementation sketches below describe the
+> pre-optimization state measured in March 2026. As of Radiant Clean-Up 3,
+> `print_view_tree()` delegates directly to JSON serialization; the legacy
+> human-readable `view_tree.txt` formatter and its side-channel writes no longer
+> exist. `print_caret_state()` remains a separate event-simulator diagnostic and
+> may still write `view_tree.txt` when explicitly requested.
+
 ---
 
 ## 1. Current Baseline
@@ -370,13 +377,15 @@ Alternatively: pre-size the StrBuf based on DOM element count × average bytes-p
 
 ---
 
-### 4.10 `strbuf` in `print_view_tree` (Text Format) — Skip Entirely in Batch Mode
+### 4.10 `strbuf` in `print_view_tree` (Text Format) — Removed
 
 **Category:** Lambda executable (C++ fix)
 **Impact:** Part of 4.3 benefit
 **Effort:** Small
 
-`print_view_tree()` currently builds a text-format view tree string (`StrBuf*`) even in batch mode where nobody reads it. The string is `log_debug`-ed (already a no-op when logging is off) then written to `./view_tree.txt` anyway.
+At the time of this profile, `print_view_tree()` built a text-format view tree
+string (`StrBuf*`) even in batch mode where nobody read it. Radiant Clean-Up 3
+removed that formatter completely; JSON is now the sole view-tree output.
 
 ```cpp
 StrBuf* buf = strbuf_new_cap(1024);
@@ -385,7 +394,7 @@ print_view_block((ViewBlock*)view_root, buf, 0);
 write_string_to_file("./view_tree.txt", buf->str);  // wasteful in batch
 ```
 
-**Fix:** Guard the entire text-format generation behind `if (!output_path)` — when an explicit batch output path is given, skip building the text string. Only build + write the JSON.
+**Implemented:** the whole text-format branch was deleted rather than gated.
 
 ---
 

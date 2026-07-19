@@ -992,89 +992,6 @@ static void resolve_grid_line_longhand(LayoutContext* lycon, ViewSpan* span,
     }
 }
 
-static bool css_font_face_source_is_available(const char* path) {
-    if (!path || !*path) return false;
-    if (strncmp(path, "data:", 5) == 0) return true;
-    if (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0) {
-        return false;
-    }
-
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
-}
-
-static bool css_font_face_descriptor_is_available(FontFaceDescriptor* desc) {
-    if (!desc) return false;
-    if (desc->src_entries && desc->src_count > 0) {
-        for (int i = 0; i < desc->src_count; i++) {
-            if (css_font_face_source_is_available(desc->src_entries[i].path)) {
-                return true;
-            }
-        }
-    }
-    return css_font_face_source_is_available(desc->src_local_path);
-}
-
-static bool css_font_context_family_has_available_source(FontContext* font_ctx,
-                                                         const char* family) {
-    if (!font_ctx || !family) return false;
-    const FontFaceDesc* faces[16];
-    int count = font_face_list(font_ctx, family, faces, 16);
-    for (int i = 0; i < count; i++) {
-        const FontFaceDesc* face = faces[i];
-        if (!face || !face->sources || face->source_count <= 0) continue;
-        for (int s = 0; s < face->source_count; s++) {
-            if (css_font_face_source_is_available(face->sources[s].path)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-bool css_font_family_is_available(LayoutContext* lycon, const char* family,
-                                  bool require_loadable_face_source) {
-    if (!family) return false;
-    size_t flen = strlen(family);
-    if (str_ieq(family, flen, "serif", 5) ||
-        str_ieq(family, flen, "sans-serif", 10) ||
-        str_ieq(family, flen, "monospace", 9) ||
-        str_ieq(family, flen, "cursive", 7) ||
-        str_ieq(family, flen, "fantasy", 7) ||
-        str_ieq(family, flen, "system-ui", 9) ||
-        str_ieq(family, flen, "ui-serif", 8) ||
-        str_ieq(family, flen, "ui-sans-serif", 13) ||
-        str_ieq(family, flen, "ui-monospace", 12) ||
-        str_ieq(family, flen, "ui-rounded", 10) ||
-        str_ieq(family, flen, "BlinkMacSystemFont", 18)) {
-        return true;
-    }
-    if (lycon && lycon->ui_context && lycon->ui_context->font_faces &&
-        lycon->ui_context->font_face_count > 0) {
-        for (int i = 0; i < lycon->ui_context->font_face_count; i++) {
-            FontFaceDescriptor* desc = lycon->ui_context->font_faces[i];
-            if (desc && desc->family_name &&
-                str_ieq(desc->family_name, strlen(desc->family_name), family, flen) &&
-                (!require_loadable_face_source || css_font_face_descriptor_is_available(desc))) {
-                return true;
-            }
-        }
-    }
-    if (lycon && lycon->ui_context && lycon->ui_context->font_ctx) {
-        if (font_face_family_registered(lycon->ui_context->font_ctx, family)) {
-            // Async webfonts are registered in FontContext before layout; treating
-            // only installed database faces as available drops them to generic fallback.
-            // When selecting a concrete family for immediate layout, an unloadable
-            // @font-face must not stop the CSS fallback list at a dead source, but
-            // downloaded cache files registered by the network loader are usable.
-            return !require_loadable_face_source ||
-                css_font_context_family_has_available_source(lycon->ui_context->font_ctx, family);
-        }
-        return font_family_exists(lycon->ui_context->font_ctx, family);
-    }
-    return false;
-}
-
 static bool css_is_content_alignment_keyword(CssEnum value) {
     switch (value) {
         case CSS_VALUE_NORMAL:
@@ -5835,6 +5752,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         default: break;
     }
 
+    // centralized entry tracing keeps ordinary debug builds informative while cases log only extra context.
+    log_debug("[CSS] Processing property %d (%s), value type=%d",
+        prop_id, css_property_name_from_id(prop_id), value->type);
+
     // Dispatch based on property ID
     // Parallel implementation to resolve_element_style() in resolve_style.cpp
     ViewSpan* span = lam::view_require_element(lycon->view);
@@ -5843,7 +5764,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
     switch (prop_id) {
         // ===== GROUP 1: Core Typography & Color =====
         case CSS_PROPERTY_COLOR: {
-            log_debug("[CSS] Processing color property");
             span->ensure_inline(lycon);
 
             span->in_line->color = resolve_color_value(lycon, value);
@@ -5852,7 +5772,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ACCENT_COLOR: {
-            log_debug("[CSS] Processing accent-color property");
             span->ensure_inline(lycon);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
@@ -5866,7 +5785,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FILL: {
-            log_debug("[CSS] Processing SVG fill property");
             span->ensure_inline(lycon);
 
             span->in_line->has_svg_fill = true;
@@ -5880,7 +5798,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_STROKE: {
-            log_debug("[CSS] Processing SVG stroke property");
             span->ensure_inline(lycon);
 
             span->in_line->has_svg_stroke = true;
@@ -5894,7 +5811,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_STROKE_WIDTH: {
-            log_debug("[CSS] Processing SVG stroke-width property");
             span->ensure_inline(lycon);
 
             float width = resolve_length_value(lycon, CSS_PROPERTY_STROKE_WIDTH, value);
@@ -5907,7 +5823,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // ===== Font Shorthand (must be before individual font properties) =====
         case CSS_PROPERTY_FONT: {
-            log_debug("[CSS] Processing font shorthand property");
             span->ensure_font(lycon);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD &&
@@ -6191,7 +6106,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FONT_SIZE: {
-            log_debug("[CSS] Processing font-size property");
             if (shorthand_overrides_longhand(
                     lycon, CSS_PROPERTY_FONT, decl, "font-size")) break;
             span->ensure_font(lycon);
@@ -6294,7 +6208,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FONT_WEIGHT: {
-            log_debug("[CSS] Processing font-weight property");
             if (shorthand_overrides_longhand(
                     lycon, CSS_PROPERTY_FONT, decl, "font-weight")) break;
             span->ensure_font(lycon);
@@ -6305,7 +6218,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FONT_FAMILY: {
-            log_debug("[CSS] Processing font-family property");
             if (shorthand_overrides_longhand(
                     lycon, CSS_PROPERTY_FONT, decl, "font-family")) break;
             span->ensure_font(lycon);
@@ -6351,7 +6263,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_LINE_HEIGHT: {
-            log_debug("[CSS] Processing line-height property");
             if (shorthand_overrides_longhand(
                     lycon, CSS_PROPERTY_FONT, decl, "line-height")) break;
             ensure_span_block(lycon, span);
@@ -6361,7 +6272,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // ===== GROUP 5: Text Properties =====
         case CSS_PROPERTY_TEXT_ALIGN: {
-            log_debug("[CSS] Processing text-align property");
             if (!block) break;
             ensure_span_block(lycon, block);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6440,7 +6350,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_DIRECTION: {
-            log_debug("[CSS] Processing direction property");
             if (!block) {
                 // direction also applies to inline elements (span) for bidi
                 ViewSpan* span = lycon->view->is_element() ? lam::view_require_element(lycon->view) : nullptr;
@@ -6490,7 +6399,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TEXT_ALIGN_LAST: {
-            log_debug("[CSS] Processing text-align-last property");
             if (!block) break;
             ensure_span_block(lycon, block);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6504,7 +6412,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TEXT_INDENT: {
-            log_debug("[CSS] Processing text-indent property");
             if (!block) break;
             ensure_span_block(lycon, block);
             // text-indent can be a length or percentage
@@ -6550,7 +6457,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TEXT_DECORATION: {
-            log_debug("[CSS] Processing text-decoration property");
             span->ensure_font(lycon);
 
 
@@ -6598,7 +6504,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TEXT_DECORATION_LINE: {
-            log_debug("[CSS] Processing text-decoration-line property");
             span->ensure_font(lycon);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6612,7 +6517,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TEXT_DECORATION_STYLE: {
-            log_debug("[CSS] Processing text-decoration-style property");
             span->ensure_font(lycon);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6626,7 +6530,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TEXT_DECORATION_COLOR: {
-            log_debug("[CSS] Processing text-decoration-color property");
             span->ensure_font(lycon);
 
             Color c = resolve_color_value(lycon, value);
@@ -6638,7 +6541,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TEXT_DECORATION_THICKNESS: {
-            log_debug("[CSS] Processing text-decoration-thickness property");
             span->ensure_font(lycon);
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
@@ -6652,7 +6554,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_VERTICAL_ALIGN: {
-            log_debug("[CSS] Processing vertical-align property");
             span->ensure_inline(lycon);
 
 
@@ -6725,7 +6626,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_CURSOR: {
-            log_debug("[CSS] Processing cursor property");
             span->ensure_inline(lycon);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6740,7 +6640,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_CARET_SHAPE: {
-            log_debug("[CSS] Processing caret-shape property");
             span->ensure_inline(lycon);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -6759,7 +6658,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // ===== GROUP 2: Box Model Basics =====
 
         case CSS_PROPERTY_WIDTH: {
-            log_debug("[CSS] Processing width property");
             // CSS 'width: auto' should be represented as -1, not 0
             // This distinguishes from explicit 'width: 0'
             // Same for 'max-content', 'min-content', 'fit-content' - these are intrinsic sizing keywords
@@ -6805,7 +6703,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_HEIGHT: {
-            log_debug("[CSS] Processing height property");
             // CSS 'height: auto' should be represented as -1, not 0
             // This distinguishes from explicit 'height: 0'
             // Same for 'max-content', 'min-content', 'fit-content' - these are intrinsic sizing keywords
@@ -6866,29 +6763,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_PADDING: {
-            log_debug("[CSS] Processing padding shorthand property");
             ensure_span_bound(lycon, span);
             resolve_spacing_prop(lycon, CSS_PROPERTY_PADDING, value, specificity, &span->boundary_mut()->padding);
             break;
         }
 
         case CSS_PROPERTY_MARGIN_TOP: {
-            log_debug("[CSS] Processing margin-top property");
             resolve_margin_side(lycon, span, CSS_BOX_SIDE_TOP, CSS_PROPERTY_MARGIN_TOP, value, specificity);
             break;
         }
         case CSS_PROPERTY_MARGIN_RIGHT: {
-            log_debug("[CSS] Processing margin-right property");
             resolve_margin_side(lycon, span, CSS_BOX_SIDE_RIGHT, CSS_PROPERTY_MARGIN_RIGHT, value, specificity);
             break;
         }
         case CSS_PROPERTY_MARGIN_BOTTOM: {
-            log_debug("[CSS] Processing margin-bottom property");
             resolve_margin_side(lycon, span, CSS_BOX_SIDE_BOTTOM, CSS_PROPERTY_MARGIN_BOTTOM, value, specificity);
             break;
         }
         case CSS_PROPERTY_MARGIN_LEFT: {
-            log_debug("[CSS] Processing margin-left property");
             resolve_margin_side(lycon, span, CSS_BOX_SIDE_LEFT, CSS_PROPERTY_MARGIN_LEFT, value, specificity);
             break;
         }
@@ -6931,7 +6823,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_MARGIN_TRIM: {
-            log_debug("[CSS] Processing margin-trim property");
             // CSS Box 4 §3.1: margin-trim is spec-correct but Chrome does not
             // support it yet. Disabled to match browser reference output.
             // Re-enable when browser support catches up and references are
@@ -7075,22 +6966,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_PADDING_TOP: {
-            log_debug("[CSS] Processing padding-top property");
             resolve_padding_side(lycon, span, CSS_BOX_SIDE_TOP, CSS_PROPERTY_PADDING_TOP, value, specificity);
             break;
         }
         case CSS_PROPERTY_PADDING_RIGHT: {
-            log_debug("[CSS] Processing padding-right property");
             resolve_padding_side(lycon, span, CSS_BOX_SIDE_RIGHT, CSS_PROPERTY_PADDING_RIGHT, value, specificity);
             break;
         }
         case CSS_PROPERTY_PADDING_BOTTOM: {
-            log_debug("[CSS] Processing padding-bottom property");
             resolve_padding_side(lycon, span, CSS_BOX_SIDE_BOTTOM, CSS_PROPERTY_PADDING_BOTTOM, value, specificity);
             break;
         }
         case CSS_PROPERTY_PADDING_LEFT: {
-            log_debug("[CSS] Processing padding-left property");
             resolve_padding_side(lycon, span, CSS_BOX_SIDE_LEFT, CSS_PROPERTY_PADDING_LEFT, value, specificity);
             break;
         }
@@ -7211,7 +7098,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // ===== GROUP 16: Background Advanced Properties =====
         case CSS_PROPERTY_BACKGROUND_ATTACHMENT: {
-            log_debug("[CSS] Processing background-attachment property");
             ensure_span_background(lycon, span);
             resolve_keyword_slot(value, &span->boundary_mut()->background->bg_attachment,
                                  "background-attachment");
@@ -7219,7 +7105,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BACKGROUND_ORIGIN: {
-            log_debug("[CSS] Processing background-origin property");
             ensure_span_background(lycon, span);
             resolve_keyword_slot(value, &span->boundary_mut()->background->bg_origin,
                                  "background-origin");
@@ -7227,7 +7112,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BACKGROUND_CLIP: {
-            log_debug("[CSS] Processing background-clip property");
             ensure_span_background(lycon, span);
             resolve_keyword_slot(value, &span->boundary_mut()->background->bg_clip,
                                  "background-clip");
@@ -7235,7 +7119,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BACKGROUND_POSITION_X: {
-            log_debug("[CSS] Processing background-position-x property");
             ensure_span_background(lycon, span);
             resolve_background_position_axis(
                 lycon, prop_id, value, span->boundary()->background, true);
@@ -7243,7 +7126,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BACKGROUND_POSITION_Y: {
-            log_debug("[CSS] Processing background-position-y property");
             ensure_span_background(lycon, span);
             resolve_background_position_axis(
                 lycon, prop_id, value, span->boundary()->background, false);
@@ -7251,7 +7133,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BACKGROUND_BLEND_MODE: {
-            log_debug("[CSS] Processing background-blend-mode property");
             ensure_span_background(lycon, span);
             resolve_keyword_slot(value, &span->boundary_mut()->background->blend_mode,
                                  "background-blend-mode");
@@ -7259,7 +7140,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_MIX_BLEND_MODE: {
-            log_debug("[CSS] Processing mix-blend-mode property");
             span->ensure_inline(lycon);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -7273,7 +7153,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BACKGROUND_SIZE: {
-            log_debug("[CSS] Processing background-size property");
             ensure_span_background(lycon, span);
             BackgroundProp* bg = span->boundary()->background;
 
@@ -7339,7 +7218,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BACKGROUND_REPEAT: {
-            log_debug("[CSS] Processing background-repeat property");
             ensure_span_background(lycon, span);
             BackgroundProp* bg = span->boundary()->background;
 
@@ -7367,7 +7245,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BACKGROUND_POSITION: {
-            log_debug("[CSS] Processing background-position property");
             ensure_span_background(lycon, span);
             BackgroundProp* bg = span->boundary()->background;
             bg->bg_position_set = 1;
@@ -8068,7 +7945,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // ========================================================================
 
         case CSS_PROPERTY_COLUMN_COUNT: {
-            log_debug("[CSS] Processing column-count property");
             if (!block) {
                 log_debug("[CSS] column-count: Cannot apply to non-block element");
                 break;
@@ -8090,7 +7966,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COLUMN_WIDTH: {
-            log_debug("[CSS] Processing column-width property");
             if (!block) {
                 log_debug("[CSS] column-width: Cannot apply to non-block element");
                 break;
@@ -8116,7 +7991,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // A single integer → column-count; a single length → column-width;
         // 'auto' resets both to auto.
         case CSS_PROPERTY_COLUMNS: {
-            log_debug("[CSS] Processing columns shorthand property");
             if (!block) {
                 log_debug("[CSS] columns: Cannot apply to non-block element");
                 break;
@@ -8174,7 +8048,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // column-rule shorthand: <column-rule-width> || <column-rule-style> || <column-rule-color>
         case CSS_PROPERTY_COLUMN_RULE: {
-            log_debug("[CSS] Processing column-rule shorthand property");
             if (!block) break;
 
             ensure_multicol_prop(lycon, block);
@@ -8199,7 +8072,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COLUMN_RULE_WIDTH: {
-            log_debug("[CSS] Processing column-rule-width property");
             if (!block) break;
 
             ensure_multicol_prop(lycon, block);
@@ -8219,7 +8091,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COLUMN_RULE_STYLE: {
-            log_debug("[CSS] Processing column-rule-style property");
             if (!block) break;
 
             ensure_multicol_prop(lycon, block);
@@ -8233,7 +8104,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COLUMN_RULE_COLOR: {
-            log_debug("[CSS] Processing column-rule-color property");
             if (!block) break;
 
             ensure_multicol_prop(lycon, block);
@@ -8251,7 +8121,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COLUMN_SPAN: {
-            log_debug("[CSS] Processing column-span property");
             if (!block) break;
 
             ensure_multicol_prop(lycon, block);
@@ -8271,7 +8140,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_BREAK_BEFORE:
         case CSS_PROPERTY_PAGE_BREAK_BEFORE: {
-            log_debug("[CSS] Processing break-before property");
             if (!block) break;
             ensure_span_block(lycon, block);
 
@@ -8285,7 +8153,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_BREAK_AFTER:
         case CSS_PROPERTY_PAGE_BREAK_AFTER: {
-            log_debug("[CSS] Processing break-after property");
             if (!block) break;
             ensure_span_block(lycon, block);
 
@@ -8298,7 +8165,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ORPHANS: {
-            log_debug("[CSS] Processing orphans property");
             if (!block) break;
             ensure_span_block(lycon, block);
 
@@ -8313,7 +8179,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_WIDOWS: {
-            log_debug("[CSS] Processing widows property");
             if (!block) break;
             ensure_span_block(lycon, block);
 
@@ -8328,7 +8193,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BOX_DECORATION_BREAK: {
-            log_debug("[CSS] Processing box-decoration-break property");
             if (!block) break;
             ensure_span_block(lycon, block);
 
@@ -8343,7 +8207,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COLUMN_FILL: {
-            log_debug("[CSS] Processing column-fill property");
             if (!block) break;
 
             ensure_multicol_prop(lycon, block);
@@ -8362,7 +8225,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COLUMN_HEIGHT: {
-            log_debug("[CSS] Processing column-height property");
             if (!block) break;
 
             ensure_multicol_prop(lycon, block);
@@ -8381,7 +8243,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_COLUMN_WRAP: {
-            log_debug("[CSS] Processing column-wrap property");
             if (!block) break;
 
             ensure_multicol_prop(lycon, block);
@@ -8402,76 +8263,63 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BORDER_TOP_WIDTH: {
-            log_debug("[CSS] Processing border-top-width property");
             resolve_border_side_width(lycon, span, CSS_BOX_SIDE_TOP, prop_id, value, specificity);
             break;
         }
 
         case CSS_PROPERTY_BORDER_RIGHT_WIDTH: {
-            log_debug("[CSS] Processing border-right-width property");
             resolve_border_side_width(lycon, span, CSS_BOX_SIDE_RIGHT, prop_id, value, specificity);
             break;
         }
 
         case CSS_PROPERTY_BORDER_BOTTOM_WIDTH: {
-            log_debug("[CSS] Processing border-bottom-width property");
             resolve_border_side_width(lycon, span, CSS_BOX_SIDE_BOTTOM, prop_id, value, specificity);
             break;
         }
 
         case CSS_PROPERTY_BORDER_LEFT_WIDTH: {
-            log_debug("[CSS] Processing border-left-width property");
             resolve_border_side_width(lycon, span, CSS_BOX_SIDE_LEFT, prop_id, value, specificity);
             break;
         }
 
         case CSS_PROPERTY_BORDER_TOP_STYLE: {
-            log_debug("[CSS] Processing border-top-style property");
             resolve_border_side_style(lycon, span, CSS_BOX_SIDE_TOP, value, specificity);
             break;
         }
 
         case CSS_PROPERTY_BORDER_RIGHT_STYLE: {
-            log_debug("[CSS] Processing border-right-style property");
             resolve_border_side_style(lycon, span, CSS_BOX_SIDE_RIGHT, value, specificity);
             break;
         }
 
         case CSS_PROPERTY_BORDER_BOTTOM_STYLE: {
-            log_debug("[CSS] Processing border-bottom-style property");
             resolve_border_side_style(lycon, span, CSS_BOX_SIDE_BOTTOM, value, specificity);
             break;
         }
 
         case CSS_PROPERTY_BORDER_LEFT_STYLE: {
-            log_debug("[CSS] Processing border-left-style property");
             resolve_border_side_style(lycon, span, CSS_BOX_SIDE_LEFT, value, specificity);
             break;
         }
 
         case CSS_PROPERTY_BORDER_TOP_COLOR: {
-            log_debug("[CSS] Processing border-top-color property");
             resolve_border_side_color(lycon, span, CSS_BOX_SIDE_TOP, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_RIGHT_COLOR: {
-            log_debug("[CSS] Processing border-right-color property");
             resolve_border_side_color(lycon, span, CSS_BOX_SIDE_RIGHT, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BOTTOM_COLOR: {
-            log_debug("[CSS] Processing border-bottom-color property");
             resolve_border_side_color(lycon, span, CSS_BOX_SIDE_BOTTOM, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_LEFT_COLOR: {
-            log_debug("[CSS] Processing border-left-color property");
             resolve_border_side_color(lycon, span, CSS_BOX_SIDE_LEFT, value, specificity);
             break;
         }
 
         case CSS_PROPERTY_BORDER_IMAGE_SOURCE: {
-            log_debug("[CSS] Processing border-image-source property");
             ensure_span_border(lycon, span);
 
             LinearGradient* gradient = nullptr;
@@ -8488,7 +8336,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BORDER_IMAGE_WIDTH: {
-            log_debug("[CSS] Processing border-image-width property");
             ensure_span_border(lycon, span);
             if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 float width = value->type == CSS_VALUE_TYPE_NUMBER
@@ -8504,7 +8351,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BORDER_IMAGE_REPEAT: {
-            log_debug("[CSS] Processing border-image-repeat property");
             ensure_span_border(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 span->boundary_mut()->border->border_image_repeat = value->data.keyword;
@@ -8520,7 +8366,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BORDER: {
-            log_debug("[CSS] Processing border shorthand property");
             ensure_span_border(lycon, span);
 
             // Handle inherit keyword for border shorthand
@@ -8683,22 +8528,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BORDER_TOP: {
-            log_debug("[CSS] Processing border-top shorthand property");
             apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_TOP, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_RIGHT: {
-            log_debug("[CSS] Processing border-right shorthand property");
             apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_RIGHT, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BOTTOM: {
-            log_debug("[CSS] Processing border-bottom shorthand property");
             apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_BOTTOM, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_LEFT: {
-            log_debug("[CSS] Processing border-left shorthand property");
             apply_border_side_shorthand(lycon, span, CSS_BOX_SIDE_LEFT, value, specificity);
             break;
         }
@@ -8789,7 +8630,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BORDER_STYLE: {
-            log_debug("[CSS] Processing border-style shorthand property");
             ensure_span_border(lycon, span);
 
             // CSS border-style shorthand: 1-4 keyword values
@@ -8868,7 +8708,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BORDER_WIDTH: {
-            log_debug("[CSS] Processing border-width shorthand property");
             ensure_span_border(lycon, span);
             resolve_spacing_prop(lycon, CSS_PROPERTY_BORDER_WIDTH, value, specificity, &span->boundary_mut()->border->width);
             break;
@@ -8876,7 +8715,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BORDER_COLOR: {
-            log_debug("[CSS] Processing border-color shorthand property");
             ensure_span_border(lycon, span);
 
             // CSS border-color shorthand: 1-4 color values
@@ -8992,7 +8830,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_BORDER_RADIUS: {
-            log_debug("[CSS] Processing border-radius shorthand property");
             ensure_span_border(lycon, span);
             apply_border_radius_shorthand(lycon, prop_id, &span->boundary_mut()->border->radius, value, specificity);
             break;
@@ -9000,25 +8837,21 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // ===== GROUP 15: Additional Border Properties =====
         case CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS: {
-            log_debug("[CSS] Processing border-top-left-radius property");
             ensure_span_border(lycon, span);
             apply_corner_radius_value(lycon, prop_id, &span->boundary_mut()->border->radius, 0, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS: {
-            log_debug("[CSS] Processing border-top-right-radius property");
             ensure_span_border(lycon, span);
             apply_corner_radius_value(lycon, prop_id, &span->boundary_mut()->border->radius, 1, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS: {
-            log_debug("[CSS] Processing border-bottom-right-radius property");
             ensure_span_border(lycon, span);
             apply_corner_radius_value(lycon, prop_id, &span->boundary_mut()->border->radius, 2, value, specificity);
             break;
         }
         case CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS: {
-            log_debug("[CSS] Processing border-bottom-left-radius property");
             ensure_span_border(lycon, span);
             apply_corner_radius_value(lycon, prop_id, &span->boundary_mut()->border->radius, 3, value, specificity);
             break;
@@ -9032,7 +8865,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_POSITION: {
-            log_debug("[CSS] Processing position property");
             ensure_span_position(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
@@ -9100,28 +8932,23 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TOP: {
-            log_debug("[CSS] Processing top property");
             resolve_inset_side(lycon, span, CSS_BOX_SIDE_TOP, CSS_PROPERTY_TOP, value, true);
             break;
         }
         case CSS_PROPERTY_LEFT: {
-            log_debug("[CSS] Processing left property");
             resolve_inset_side(lycon, span, CSS_BOX_SIDE_LEFT, CSS_PROPERTY_LEFT, value, true);
             break;
         }
         case CSS_PROPERTY_RIGHT: {
-            log_debug("[CSS] Processing right property");
             resolve_inset_side(lycon, span, CSS_BOX_SIDE_RIGHT, CSS_PROPERTY_RIGHT, value, true);
             break;
         }
         case CSS_PROPERTY_BOTTOM: {
-            log_debug("[CSS] Processing bottom property");
             resolve_inset_side(lycon, span, CSS_BOX_SIDE_BOTTOM, CSS_PROPERTY_BOTTOM, value, true);
             break;
         }
 
         case CSS_PROPERTY_Z_INDEX: {
-            log_debug("[CSS] Processing z-index property");
             ensure_span_position(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int z = (int)value->data.number.value;
@@ -9138,7 +8965,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // ===== GROUP 7: Float and Clear =====
 
         case CSS_PROPERTY_FLOAT: {
-            log_debug("[CSS] Processing float property");
             if (!block) break;
             block->ensure_position(lycon);
 
@@ -9165,7 +8991,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_CLEAR: {
-            log_debug("[CSS] Processing clear property");
             if (!block) break;
             block->ensure_position(lycon);
 
@@ -9219,7 +9044,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // ===== GROUP 9: White-space Property =====
 
         case CSS_PROPERTY_WHITE_SPACE: {
-            log_debug("[CSS] Processing white-space property");
             ensure_span_block(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum whitespace_value = value->data.keyword;
@@ -9233,7 +9057,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // ===== GROUP 10: Visibility and Opacity =====
         case CSS_PROPERTY_VISIBILITY: {
-            log_debug("[CSS] Processing visibility property");
             span->ensure_inline(lycon);
 
             // Visibility applies to all elements, stored in ViewSpan
@@ -9253,7 +9076,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_OPACITY: {
-            log_debug("[CSS] Processing opacity property");
             span->ensure_inline(lycon);
 
 
@@ -9276,7 +9098,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_CLIP: {
-            log_debug("[CSS] Processing clip property");
             if (!block) break;
             block->ensure_scroll(lycon);
 
@@ -9290,7 +9111,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // ===== GROUP 11: Box Sizing =====
         case CSS_PROPERTY_BOX_SIZING: {
-            log_debug("[CSS] Processing box-sizing property");
             if (!block) break;
             ensure_span_block(lycon, block);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -9315,7 +9135,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ASPECT_RATIO: {
-            log_debug("[CSS] Processing aspect-ratio property");
             // aspect-ratio can apply to block-level and flex/grid items
             // For grid items, aspect-ratio is read from specified_style during layout
             // (fi and gi are in a union, so we can't store aspect_ratio in fi for grid items)
@@ -9374,7 +9193,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // ===== GROUP 12: Advanced Typography Properties =====
 
         case CSS_PROPERTY_FONT_STYLE: {
-            log_debug("[CSS] Processing font-style property");
             if (shorthand_overrides_longhand(
                     lycon, CSS_PROPERTY_FONT, decl, "font-style")) break;
             span->ensure_font(lycon);
@@ -9383,21 +9201,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TEXT_TRANSFORM: {
-            log_debug("[CSS] Processing text-transform property");
             ensure_span_block(lycon, span);
             resolve_keyword_slot(value, &span->block_mut()->text_transform, "text-transform");
             break;
         }
 
         case CSS_PROPERTY_TEXT_WRAP_STYLE: {
-            log_debug("[CSS] Processing text-wrap-style property");
             ensure_span_block(lycon, span);
             resolve_keyword_slot(value, &span->block_mut()->text_wrap_style, "text-wrap-style");
             break;
         }
 
         case CSS_PROPERTY_TEXT_OVERFLOW: {
-            log_debug("[CSS] Processing text-overflow property");
             if (!block) {
                 log_debug("[CSS] text-overflow: Cannot apply to inline element without block context");
                 break;
@@ -9409,7 +9224,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_LINE_CLAMP:
         case CSS_PROPERTY_WEBKIT_LINE_CLAMP: {
-            log_debug("[CSS] Processing line-clamp property");
             if (!block) {
                 break;
             }
@@ -9434,21 +9248,18 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_WORD_BREAK: {
-            log_debug("[CSS] Processing word-break property");
             ensure_span_block(lycon, span);
             resolve_keyword_slot(value, &span->block_mut()->word_break, "word-break");
             break;
         }
 
         case CSS_PROPERTY_LINE_BREAK: {
-            log_debug("[CSS] Processing line-break property");
             ensure_span_block(lycon, span);
             resolve_keyword_slot(value, &span->block_mut()->line_break, "line-break");
             break;
         }
 
         case CSS_PROPERTY_TAB_SIZE: {
-            log_debug("[CSS] Processing tab-size property");
             ensure_span_block(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int ts = (int)value->data.number.value; // INT_CAST_OK: tab-size is a count of spaces
@@ -9462,14 +9273,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_WORD_WRAP:
         case CSS_PROPERTY_OVERFLOW_WRAP: {
-            log_debug("[CSS] Processing overflow-wrap/word-wrap property");
             ensure_span_block(lycon, span);
             resolve_keyword_slot(value, &span->block_mut()->overflow_wrap, "overflow-wrap");
             break;
         }
 
         case CSS_PROPERTY_FONT_VARIANT: {
-            log_debug("[CSS] Processing font-variant property");
             if (shorthand_overrides_longhand(
                     lycon, CSS_PROPERTY_FONT, decl, "font-variant")) break;
             span->ensure_font(lycon);
@@ -9501,7 +9310,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FONT_KERNING: {
-            log_debug("[CSS] Processing font-kerning property");
             span->ensure_font(lycon);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
@@ -9514,7 +9322,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_LETTER_SPACING: {
-            log_debug("[CSS] Processing letter-spacing property");
             span->ensure_font(lycon);
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
@@ -9529,7 +9336,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_WORD_SPACING: {
-            log_debug("[CSS] Processing word-spacing property");
             span->ensure_font(lycon);
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float spacing = resolve_length_value(lycon, prop_id, value);
@@ -9543,7 +9349,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_TEXT_SHADOW: {
-            log_debug("[CSS] Processing text-shadow property");
             if (!span->font) {
                 log_debug("[CSS] text-shadow: FontProp is NULL");
                 break;
@@ -9620,7 +9425,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // ===== GROUP 13: Flexbox Properties =====
 
         case CSS_PROPERTY_FLEX_DIRECTION: {
-            log_debug("[CSS] Processing flex-direction property");
             if (!block) {
                 log_debug("[CSS] flex-direction: Cannot apply to non-block element");
                 break;
@@ -9633,7 +9437,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FLEX_WRAP: {
-            log_debug("[CSS] Processing flex-wrap property");
             if (!block) {
                 log_debug("[CSS] flex-wrap: Cannot apply to non-block element");
                 break;
@@ -9644,7 +9447,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_JUSTIFY_CONTENT: {
-            log_debug("[CSS] Processing justify-content property");
             if (!block) {
                 log_debug("[CSS] justify-content: Cannot apply to non-block element");
                 break;
@@ -9663,7 +9465,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ALIGN_ITEMS: {
-            log_debug("[CSS] Processing align-items property");
             if (!block) {
                 log_debug("[CSS] align-items: Cannot apply to non-block element");
                 break;
@@ -9682,7 +9483,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ALIGN_CONTENT: {
-            log_debug("[CSS] Processing align-content property");
             if (!block) {
                 log_debug("[CSS] align-content: Cannot apply to non-block element");
                 break;
@@ -9713,7 +9513,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // grid-row-gap is the legacy name for row-gap (CSS Grid Level 1)
         case CSS_PROPERTY_GRID_ROW_GAP:
         case CSS_PROPERTY_ROW_GAP: {
-            log_debug("[CSS] Processing row-gap property");
             if (!block) {
                 log_debug("[CSS] row-gap: Cannot apply to non-block element");
                 break;
@@ -9747,7 +9546,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         // grid-column-gap is the legacy name for column-gap (CSS Grid Level 1)
         case CSS_PROPERTY_GRID_COLUMN_GAP:
         case CSS_PROPERTY_COLUMN_GAP: {
-            log_debug("[CSS] Processing column-gap property");
             if (!block) {
                 log_debug("[CSS] column-gap: Cannot apply to non-block element");
                 break;
@@ -9828,7 +9626,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_GRID_TEMPLATE_AREAS: {
-            log_debug("[CSS] Processing grid-template-areas property");
             if (!block) {
                 log_debug("[CSS] grid-template-areas: Cannot apply to non-block element");
                 break;
@@ -9892,7 +9689,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_GRID_AREA: {
-            log_debug("[CSS] Processing grid-area property");
             alloc_grid_item_prop(lycon, span);
 
             // grid-area can be:
@@ -10003,7 +9799,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_GRID_AUTO_FLOW: {
-            log_debug("[CSS] Processing grid-auto-flow property");
             if (!block) {
                 log_debug("[CSS] grid-auto-flow: Cannot apply to non-block element");
                 break;
@@ -10018,7 +9813,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_GRID_AUTO_ROWS: {
-            log_debug("[CSS] Processing grid-auto-rows property");
             if (!block) {
                 log_debug("[CSS] grid-auto-rows: Cannot apply to non-block element");
                 break;
@@ -10066,7 +9860,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_GRID_AUTO_COLUMNS: {
-            log_debug("[CSS] Processing grid-auto-columns property");
             if (!block) {
                 log_debug("[CSS] grid-auto-columns: Cannot apply to non-block element");
                 break;
@@ -10114,7 +9907,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_JUSTIFY_ITEMS: {
-            log_debug("[CSS] Processing justify-items property");
             if (!block) {
                 log_debug("[CSS] justify-items: Cannot apply to non-block element");
                 break;
@@ -10129,7 +9921,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_JUSTIFY_SELF: {
-            log_debug("[CSS] Processing justify-self property");
             alloc_grid_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum align = value->data.keyword;
@@ -10143,7 +9934,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // place-items is a shorthand for align-items and justify-items
             // Syntax: place-items: <align-items> <justify-items>?
             // If only one value, it applies to both
-            log_debug("[CSS] Processing place-items shorthand property");
             if (!block) {
                 log_debug("[CSS] place-items: Cannot apply to non-block element");
                 break;
@@ -10172,7 +9962,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // place-self is a shorthand for align-self and justify-self
             // Syntax: place-self: <align-self> <justify-self>?
             // If only one value, it applies to both
-            log_debug("[CSS] Processing place-self shorthand property");
 
             CssEnum align_val = CSS_VALUE_AUTO;
             CssEnum justify_val = CSS_VALUE_AUTO;
@@ -10201,7 +9990,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FLEX_GROW: {
-            log_debug("[CSS] Processing flex-grow property");
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float grow_value = (float)value->data.number.value;
                 alloc_flex_item_prop(lycon, span);
@@ -10212,7 +10000,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FLEX_SHRINK: {
-            log_debug("[CSS] Processing flex-shrink property");
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float shrink_value = (float)value->data.number.value;
                 alloc_flex_item_prop(lycon, span);
@@ -10223,7 +10010,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FLEX_BASIS: {
-            log_debug("[CSS] Processing flex-basis property");
             alloc_flex_item_prop(lycon, span);
             if (!span->flex_item()) break;
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
@@ -10253,7 +10039,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ORDER: {
-            log_debug("[CSS] Processing order property");
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int order_value = (int)value->data.number.value;
                 // order applies to both flex and grid items
@@ -10273,7 +10058,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ALIGN_SELF: {
-            log_debug("[CSS] Processing align-self property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
@@ -10299,7 +10083,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FLEX_FLOW: {
-            log_debug("[CSS] Processing flex-flow shorthand property");
             if (!block) {
                 log_debug("[CSS] flex-flow: Cannot apply to non-block element");
                 break;
@@ -10346,7 +10129,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_FLEX: {
-            log_debug("[CSS] Processing flex shorthand property");
             alloc_flex_item_prop(lycon, span);
             if (!span->flex_item()) break;
             // flex is a shorthand for flex-grow, flex-shrink, and flex-basis
@@ -10467,7 +10249,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // Animation Properties (Group 14)
         case CSS_PROPERTY_ANIMATION: {
-            log_debug("[CSS] Processing animation shorthand property");
             // Note: Animation shorthand would be parsed into individual properties
             // For now, just log the value
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -10477,7 +10258,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ANIMATION_NAME: {
-            log_debug("[CSS] Processing animation-name property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (value->data.keyword == CSS_VALUE_NONE) {
                     log_debug("[CSS] animation-name: none");
@@ -10492,7 +10272,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ANIMATION_DURATION: {
-            log_debug("[CSS] Processing animation-duration property");
             if (value->type == CSS_VALUE_TYPE_TIME) {
                 float duration = (float)value->data.length.value;
                 log_debug("[CSS] animation-duration: %.3fs", duration);
@@ -10501,7 +10280,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION: {
-            log_debug("[CSS] Processing animation-timing-function property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum timing = value->data.keyword;
                 if (timing > 0) {
@@ -10516,7 +10294,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ANIMATION_DELAY: {
-            log_debug("[CSS] Processing animation-delay property");
             if (value->type == CSS_VALUE_TYPE_TIME) {
                 float delay = (float)value->data.length.value;
                 log_debug("[CSS] animation-delay: %.3fs", delay);
@@ -10525,7 +10302,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ANIMATION_ITERATION_COUNT: {
-            log_debug("[CSS] Processing animation-iteration-count property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const CssEnumInfo* info = css_enum_info(value->data.keyword);
                 log_debug("[CSS] animation-iteration-count: %s", css_enum_name_or_unknown(info));
@@ -10537,7 +10313,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ANIMATION_DIRECTION: {
-            log_debug("[CSS] Processing animation-direction property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum direction = value->data.keyword;
                 if (direction > 0) {
@@ -10552,7 +10327,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ANIMATION_FILL_MODE: {
-            log_debug("[CSS] Processing animation-fill-mode property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum fill_mode = value->data.keyword;
                 if (fill_mode > 0) {
@@ -10567,7 +10341,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_ANIMATION_PLAY_STATE: {
-            log_debug("[CSS] Processing animation-play-state property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const CssEnumInfo* info = css_enum_info(value->data.keyword);
                 log_debug("[CSS] animation-play-state: %s", css_enum_name_or_unknown(info));
@@ -10577,7 +10350,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // List Properties (Group 18)
         case CSS_PROPERTY_LIST_STYLE_TYPE: {
-            log_debug("[CSS] Processing list-style-type property");
             ensure_span_block(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum type = value->data.keyword;
@@ -10607,7 +10379,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_LIST_STYLE_POSITION: {
-            log_debug("[CSS] Processing list-style-position property");
             ensure_span_block(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum position = value->data.keyword;
@@ -10636,7 +10407,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_LIST_STYLE_IMAGE: {
-            log_debug("[CSS] Processing list-style-image property");
             ensure_span_block(lycon, span);
             // Extract URL from either CSS_VALUE_TYPE_URL or CSS_VALUE_TYPE_FUNCTION(url)
             const char* img_url = nullptr;
@@ -11599,7 +11369,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_OBJECT_FIT: {
-            log_debug("[CSS] Processing object-fit property");
             if (!block) break;
             if (!block->embed) {
                 block->ensure_embed(lycon);
@@ -11618,7 +11387,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         }
 
         case CSS_PROPERTY_OBJECT_POSITION: {
-            log_debug("[CSS] Processing object-position property");
             if (!block) break;
             if (!block->embed) {
                 block->ensure_embed(lycon);
@@ -11686,7 +11454,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // ===== Outline Properties =====
         case CSS_PROPERTY_OUTLINE_STYLE: {
-            log_debug("[CSS] Processing outline-style property");
             ensure_span_outline(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 span->boundary_mut()->outline->style = value->data.keyword;
@@ -11695,7 +11462,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
         case CSS_PROPERTY_OUTLINE_WIDTH: {
-            log_debug("[CSS] Processing outline-width property");
             ensure_span_outline(lycon, span);
             float width = resolve_length_value(lycon, prop_id, value);
             span->boundary_mut()->outline->width = width;
@@ -11703,7 +11469,6 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
         case CSS_PROPERTY_OUTLINE_COLOR: {
-            log_debug("[CSS] Processing outline-color property");
             ensure_span_outline(lycon, span);
             span->boundary_mut()->outline->color = resolve_color_value(lycon, value);
             log_debug("[CSS] outline-color: #%02x%02x%02x%02x",
@@ -11712,14 +11477,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
         case CSS_PROPERTY_OUTLINE_OFFSET: {
-            log_debug("[CSS] Processing outline-offset property");
             ensure_span_outline(lycon, span);
             span->boundary_mut()->outline->offset = resolve_length_value(lycon, prop_id, value);
             log_debug("[CSS] outline-offset: %.1fpx", span->boundary()->outline->offset);
             break;
         }
         case CSS_PROPERTY_OUTLINE: {
-            log_debug("[CSS] Processing outline shorthand property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 if (span->bound && span->boundary_mut()->outline) {
                     span->boundary_mut()->outline->style = CSS_VALUE_NONE;

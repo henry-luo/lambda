@@ -15,33 +15,7 @@ static float layout_abs_child_aspect_ratio(ViewBlock* block) {
         block->specified_style, CSS_PROPERTY_ASPECT_RATIO);
     if (!ar_decl || !ar_decl->value) return 0.0f;
 
-    CssValue* value = ar_decl->value;
-    if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        return (float)value->data.number.value;
-    }
-    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.count < 1) {
-        return 0.0f;
-    }
-
-    double numerator = 0.0;
-    double denominator = 0.0;
-    bool got_numerator = false;
-    bool got_denominator = false;
-    for (int i = 0; i < value->data.list.count && !got_denominator; i++) {
-        CssValue* part = value->data.list.values[i];
-        if (!part || part->type != CSS_VALUE_TYPE_NUMBER) continue;
-        if (!got_numerator) {
-            numerator = part->data.number.value;
-            got_numerator = true;
-        } else {
-            denominator = part->data.number.value;
-            got_denominator = true;
-        }
-    }
-    if (got_numerator && got_denominator && denominator > 0.0) {
-        return (float)(numerator / denominator);
-    }
-    return got_numerator ? (float)numerator : 0.0f;
+    return layout_aspect_ratio_value(ar_decl->value);
 }
 
 static void layout_apply_abs_child_aspect_ratio(AbsChildLayoutState* state) {

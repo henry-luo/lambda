@@ -1,4 +1,4 @@
-#include "resource_resolver.hpp"
+#include "radiant.hpp"
 
 #include "../lib/mem.h"
 #include "../lib/url.h"

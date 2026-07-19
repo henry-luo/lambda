@@ -228,10 +228,6 @@ ClipboardBackend* clipboard_backend_glfw(void) { return clipboard_backend_inmemo
 // Public store API
 // ---------------------------------------------------------------------------
 
-void clipboard_store_init(void) {
-    g_store.init();
-}
-
 void clipboard_store_shutdown(void) {
     g_store.destroy();
 }
@@ -352,7 +348,6 @@ ArrayList* ClipboardStore::read_items() {
     return clone_items(items);
 }
 
-void clipboard_store_write_mime(const char* mime, const char* text) { g_store.write_mime(mime, text); }
 void clipboard_store_write_text(const char* text) { g_store.write_text(text); }
 void clipboard_store_write_html(const char* html, const char* plain_text) { g_store.write_html(html, plain_text); }
 const char* clipboard_store_read_mime(const char* mime) { return g_store.read_mime(mime); }

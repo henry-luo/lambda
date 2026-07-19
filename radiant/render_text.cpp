@@ -164,14 +164,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
     // Legacy glyph-by-glyph selection code remains disabled.
     int sel_start = 0, sel_end = 0;
-    (void)sel_start; (void)sel_end;
-
-    // Calculate total text length for cross-view selection check
-    int total_text_length = 0;
-    if (str) {
-        total_text_length = strlen((const char*)str);
-    }
-    (void)total_text_length;
 
     bool has_selection = false;
 

@@ -3,82 +3,8 @@
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_style.hpp"
-#include <stdlib.h>
 #include <cfloat>
 #include <cmath>
-
-static bool extract_aspect_ratio_number_for_positioned(const char* text, double* out_value) {
-    if (!text || !out_value) return false;
-    const char* cursor = text;
-    char* end = nullptr;
-    double first = strtod(cursor, &end);
-    if (end == cursor || first <= 0.0) return false;
-    cursor = end;
-    double second = 0.0;
-    bool has_second = false;
-    while (*cursor) {
-        char* next_end = nullptr;
-        double value = strtod(cursor, &next_end);
-        if (next_end != cursor) {
-            second = value;
-            has_second = true;
-            break;
-        }
-        cursor++;
-    }
-    if (has_second) {
-        if (second <= 0.0) return false;
-        *out_value = first / second;
-    } else {
-        *out_value = first;
-    }
-    return true;
-}
-
-static float get_preferred_aspect_ratio_for_positioned(ViewBlock* block) {
-    if (!block) return 0.0f;
-    if (block->flex_item() && block->fi->aspect_ratio > 0.0f) return block->fi->aspect_ratio;
-    DomElement* element = block->as_element();
-    if (!element) return 0.0f;
-    CssDeclaration* decl = dom_element_get_specified_value(element, CSS_PROPERTY_ASPECT_RATIO);
-    if (!decl || !decl->value) return 0.0f;
-    CssValue* value = decl->value;
-    if (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value > 0.0) {
-        return (float)value->data.number.value;
-    }
-    if (value->type == CSS_VALUE_TYPE_STRING) {
-        double ratio = 0.0;
-        return extract_aspect_ratio_number_for_positioned(value->data.string, &ratio) ? (float)ratio : 0.0f;
-    }
-    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-        double ratio = 0.0;
-        return extract_aspect_ratio_number_for_positioned(value->data.custom_property.name, &ratio) ? (float)ratio : 0.0f;
-    }
-    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        double numerator = 0.0;
-        double denominator = 0.0;
-        bool got_numerator = false;
-        bool got_denominator = false;
-        for (int i = 0; i < value->data.list.count && !got_denominator; i++) {
-            CssValue* item = value->data.list.values[i];
-            if (!item) continue;
-            if (item->type == CSS_VALUE_TYPE_NUMBER) {
-                if (!got_numerator) {
-                    numerator = item->data.number.value;
-                    got_numerator = true;
-                } else {
-                    denominator = item->data.number.value;
-                    got_denominator = true;
-                }
-            }
-        }
-        if (got_numerator && got_denominator && numerator > 0.0 && denominator > 0.0) {
-            return (float)(numerator / denominator);
-        }
-        if (got_numerator && numerator > 0.0) return (float)numerator;
-    }
-    return 0.0f;
-}
 
 static bool view_tree_has_table_flow(View* view) {
     if (!view || !view->is_element()) return false;
@@ -1031,10 +957,10 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     if (has_height) {
         content_height = lycon->block.given_height;
         log_debug("[ABS POS] using explicit height: %.1f", content_height);
-    } else if (get_preferred_aspect_ratio_for_positioned(block) > 0.0f && content_width > 0.0f) {
+    } else if (layout_preferred_aspect_ratio(block) > 0.0f && content_width > 0.0f) {
         // CSS Sizing: a preferred aspect ratio transfers a definite width to
         // the auto height before abspos vertical constraint resolution.
-        float aspect_ratio = get_preferred_aspect_ratio_for_positioned(block);
+        float aspect_ratio = layout_preferred_aspect_ratio(block);
         content_height = content_width / aspect_ratio;
         lycon->block.given_height = content_height;
         block->ensure_block(lycon);
@@ -1077,7 +1003,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // Same rationale as horizontal: bottom-positioned elements need the clamped height.
     content_height = adjust_min_max_height(block, content_height);
 
-    float preferred_aspect_ratio = get_preferred_aspect_ratio_for_positioned(block);
+    float preferred_aspect_ratio = layout_preferred_aspect_ratio(block);
     if (!has_width && preferred_aspect_ratio > 0.0f && content_height > 0.0f &&
         !(block->positionp()->has_left && block->positionp()->has_right && !is_intrinsic_width && !is_replaced)) {
         float aspect_width = content_height * preferred_aspect_ratio;

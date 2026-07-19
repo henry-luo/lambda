@@ -1675,8 +1675,6 @@ bool te_prepare_paste_replacement(DomElement* elem, DocState* state,
 void te_ime_begin (DomElement* elem);
 void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
                    uint32_t caret_cp);
-void te_ime_commit(DomElement* elem, DocState* state, void* target,
-                   const char* committed, uint32_t len);
 void te_ime_cancel(DomElement* elem);
 
 // Split form IME commit into reusable phases so the unified editing
@@ -1754,7 +1752,6 @@ typedef struct ClipboardBackend {
 
 // Global store API ----------------------------------------------------------
 
-void  clipboard_store_init(void);
 void  clipboard_store_shutdown(void);
 
 // Built-in backends.
@@ -1770,9 +1767,6 @@ void   clipboard_store_write_text(const char* text);
 // Read the clipboard's text/plain representation. Returned pointer is
 // owned by the store and valid until the next clipboard write/clear.
 const char* clipboard_store_read_text(void);
-
-// Copy text under a specific MIME type ("text/plain", "text/html"...).
-void   clipboard_store_write_mime(const char* mime, const char* text);
 
 // Copy HTML plus a plain-text fallback as one multi-MIME clipboard item.
 void   clipboard_store_write_html(const char* html, const char* plain_text);

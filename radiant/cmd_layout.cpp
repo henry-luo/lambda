@@ -86,7 +86,6 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../radiant/view.hpp"
 #include "render.hpp"
 #include "../radiant/layout.hpp"
-#include "resource_resolver.hpp"
 #include "view.hpp"
 #include "render.hpp"
 #include "event.hpp"
@@ -1970,19 +1969,6 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     log_debug("[CSS] Collected %d stylesheet(s) from HTML (%d linked, %d inline)",
               *stylesheet_count, linked_count, inline_count);
     return stylesheets;
-}
-
-/**
- * Extract inline CSS from <style> tags in the HTML document
- * Returns concatenated CSS text or nullptr if none found
- * DEPRECATED: Use extract_and_apply_all_css instead
- */
-const char* extract_inline_css(Element* root) {
-    if (!root) return nullptr;
-
-    // TODO: Implement style tag extraction
-    // For now, return nullptr - external CSS via -c flag will work
-    return nullptr;
 }
 
 /**

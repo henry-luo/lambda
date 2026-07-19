@@ -621,8 +621,8 @@ After each group implementation, create a test HTML file:
 3. **Log Check**: `tail -300 log.txt | grep -E "(Property names)"`
    - Expected: Values being set with correct types
 
-4. **View Tree Check**: `cat view_tree.txt | head -30`
-   - Expected: Properties visible in view tree output
+4. **View Tree Check**: `head -30 temp/view_tree.json`
+   - Expected: Computed geometry and serialized properties visible in JSON output
 
 5. **Incremental Testing**: Test after EACH group before proceeding to next
 
@@ -669,20 +669,9 @@ case CSS_PROPERTY_XXX: {
 }
 ```
 
-**Step 3: Add View Tree Printing**
-In `radiant/view_pool.cpp`, update printing functions:
-
-```cpp
-// For inline properties (typography, color, etc.)
-if (property_exists) {
-    strbuf_append_format(buf, "property:%.1f ", value);
-}
-
-// For block properties (layout, position, etc.)
-if (block->property) {
-    strbuf_append_format(buf, "property:%s ", value);
-}
-```
+**Step 3: Add computed-style serialization when required**
+Use the descriptor/derived serializer in `radiant/css_prop_table.cpp`; the legacy
+human-readable `view_tree.txt` formatter no longer exists.
 
 **Step 4: Create Test File**
 Create `temp/test_[group].html` with properties to test
@@ -691,7 +680,7 @@ Create `temp/test_[group].html` with properties to test
 ```bash
 make build
 ./lambda.exe layout temp/test_[group].html
-cat view_tree.txt | head -30
+head -30 temp/view_tree.json
 tail -200 log.txt | grep "CSS"
 ```
 

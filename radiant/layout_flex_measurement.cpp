@@ -1580,32 +1580,14 @@ void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
         return;
     }
 
-    // Measure using actual font metrics
-    measure_text_run(lycon, text_data, text_length, min_width, max_width, height);
-
-    log_debug("Measured text accurately: min=%d, max=%d, height=%d (\"%.*s\")",
-              *min_width, *max_width, *height, (int)min(text_length, 20), text_data); // INT_CAST_OK: text length for log
-}
-
-// Measure a text run with actual font metrics
-// REFACTORED: Now uses unified intrinsic_sizing.hpp for text measurement
-void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
-                     int* min_width, int* max_width, int* height) {
-    if (!text || length == 0) {
-        *min_width = *max_width = *height = 0;
-        return;
-    }
-
-    // Use unified intrinsic sizing API
-    TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, length);
-
+    TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text_data, text_length);
     *max_width = widths.max_content;
     *min_width = widths.min_content;
     *height = (lycon->font.style && lycon->font.style->font_size > 0) ?
-              (int)(lycon->font.style->font_size + 0.5f) : 20; // INT_CAST_OK: font size for char width calc
+              (int)(lycon->font.style->font_size + 0.5f) : 20; // INT_CAST_OK: font size for text height
 
-    log_debug("measure_text_run (unified): text_length=%zu, min=%d, max=%d, height=%d",
-              length, *min_width, *max_width, *height);
+    log_debug("Measured text accurately: min=%d, max=%d, height=%d (\"%.*s\")",
+              *min_width, *max_width, *height, (int)min(text_length, 20), text_data); // INT_CAST_OK: text length for log
 }
 
 // Create lightweight View for flex item element only (no child processing)

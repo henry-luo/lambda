@@ -269,6 +269,10 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
     CssEnum word_break = CSS_VALUE_NORMAL,
     const char* log_context = nullptr);
 
+// Normalize every accepted aspect-ratio representation before layout policy consumes it.
+float layout_aspect_ratio_value(const CssValue* value);
+float layout_preferred_aspect_ratio(ViewBlock* block);
+
 namespace radiant {
 
 enum class RunMode : uint8_t {
@@ -1656,8 +1660,6 @@ void calculate_intrinsic_sizes(ViewBlock* view, LayoutContext* lycon);
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
 void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
     int* min_width, int* max_width, int* height);
-void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
-    int* min_width, int* max_width, int* height);
 void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
 void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
@@ -2256,25 +2258,6 @@ void block_context_calc_bfc_offset(ViewElement* view, BlockContext* bfc, float* 
 // ============================================================================
 // Property Allocation
 // ============================================================================
-
-static inline void position_prop_init_defaults(PositionProp* prop) {
-    if (!prop) return;
-    prop->position = CSS_VALUE_STATIC;
-    prop->top = prop->right = prop->bottom = prop->left = 0.0f;
-    prop->top_percent = prop->right_percent = prop->bottom_percent = prop->left_percent = NAN;
-    prop->z_index = 0;
-    prop->custom_layout_z_index = 0;
-    prop->has_top = prop->has_right = prop->has_bottom = prop->has_left = false;
-    prop->has_custom_layout_z_index = false;
-    prop->clear = CSS_VALUE_NONE;
-    prop->float_prop = CSS_VALUE_NONE;
-    prop->static_x_needs_parent_offset = false;
-    prop->static_y_needs_parent_offset = false;
-    prop->has_static_parent_offset_x = false;
-    prop->has_static_parent_offset_y = false;
-    prop->static_parent_offset_x = 0.0f;
-    prop->static_parent_offset_y = 0.0f;
-}
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
 FontProp* alloc_font_prop(LayoutContext* lycon);

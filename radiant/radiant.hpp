@@ -7,6 +7,7 @@
 
 #include "../lib/url.h"
 
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -107,6 +108,11 @@ double radiant_frame_clock_next_timeout(RadiantFrameClock* clock, double now,
                                         bool frame_driven, bool needs_redraw);
 void radiant_frame_clock_mark_presented(RadiantFrameClock* clock, double frame_time);
 const char* radiant_frame_clock_mode_name(const RadiantFrameClock* clock);
+
+// ===== resource resolution =====
+
+bool radiant_resolve_shared_data_resource_path(const char* href, const char* base_path,
+                                               char* out_path, size_t out_size);
 
 // ===== script runner =====
 

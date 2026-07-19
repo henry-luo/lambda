@@ -775,22 +775,6 @@ void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
     log_debug("te_ime_update: %u bytes preedit, caret=%u", len, caret_cp);
 }
 
-void te_ime_commit(DomElement* elem, DocState* state, void* target,
-                   const char* committed, uint32_t len) {
-    uint32_t a = 0, b = 0;
-    bool should_mutate = false;
-    if (!te_ime_commit_prepare(elem, state, committed, len, &a, &b,
-                               &should_mutate)) {
-        return;
-    }
-
-    if (should_mutate && target) {
-        te_replace_byte_range(elem, state, target, a, b, committed, len);
-    }
-
-    te_ime_commit_finish(elem, committed, len);
-}
-
 bool te_ime_commit_prepare(DomElement* elem, DocState* state,
                            const char* committed, uint32_t len,
                            uint32_t* out_start, uint32_t* out_end,

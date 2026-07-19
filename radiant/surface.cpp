@@ -1,6 +1,6 @@
 #include "view.hpp"
 #include "render.hpp"
-#include "resource_resolver.hpp"
+#include "radiant.hpp"
 #include "render.hpp"
 #include "event.hpp"
 #include "render.hpp"

@@ -403,7 +403,7 @@ Removed debug/diagnostic side-channel file writes from release builds:
 
 | File | Change |
 |------|--------|
-| `radiant/view_pool.cpp` `print_view_tree()` | `./view_tree.txt` and `./test_output/view_tree_*.txt` writes wrapped in `#ifndef NDEBUG` |
+| `radiant/view_pool.cpp` `print_view_tree()` | Human-readable text dump removed by Radiant Clean-Up 3; JSON serialization retained |
 | `radiant/view_pool.cpp` `print_view_tree_json()` | `./test_output/view_tree_*.json` write wrapped in `#ifndef NDEBUG`; default output changed from `/tmp/view_tree.json` to `./temp/view_tree.json` (only in debug) |
 | `lambda/shape_pool.cpp` `shape_pool_print_stats()` | Replaced `printf()` with `log_debug()`, wrapped in `#ifndef NDEBUG` |
 | `radiant/ui_context.cpp` | Replaced diagnostic `printf()` for framebuffer/viewport info with `log_info()` |
@@ -459,8 +459,8 @@ These files contain AST/debug print functions that have **no external callers**.
 | `lambda/rb/transpile_rb_mir.cpp` | ~3663 | `temp/rb_mir_dump.txt` | — |
 | `lambda/bash/transpile_bash_mir.cpp` | ~4964 | `temp/bash_mir_dump.txt` | — |
 
-**View tree dumps** — guarded with `#ifndef NDEBUG`:
-- `radiant/view_pool.cpp` `print_view_tree()` → `./view_tree.txt`, `./test_output/view_tree_*.txt`
+**View tree dumps:**
+- `radiant/view_pool.cpp` `print_view_tree()` delegates to the JSON serializer; the legacy text side-channel was removed by Radiant Clean-Up 3
 - `radiant/view_pool.cpp` `print_view_tree_json()` → `./temp/view_tree.json`, `./test_output/view_tree_*.json`
 
 **Shape pool stats** — guarded with `#ifndef NDEBUG`:

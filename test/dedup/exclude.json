@@ -553,11 +553,6 @@
           "end": "@implementation LambdaSchemeHandler"
         },
         {
-          "file": "radiant/webview_layer_mac.mm",
-          "start": "void webview_layer_platform_eval_js(",
-          "end": "void webview_layer_platform_resize("
-        },
-        {
           "file": "radiant/webview_child_mac.mm",
           "start": "void webview_platform_eval_js(",
           "end": "void webview_platform_set_bounds("
