@@ -52,8 +52,8 @@
 "=== Error Cases ==="
 [inf, inf, inf]
 [3, inf, 5]
-[0, 0, 0]
-[0, 0]
+error
+error
 "=== Vector Comparisons ==="
 true
 false
@@ -71,16 +71,8 @@ false
 3
 4
 5
-2
-4
-6
-8
-10
-11
-12
-13
-14
-15
+[2, 4, 6, 8, 10]
+[11, 12, 13, 14, 15]
 "=== Memory and Performance Edge Cases ==="
 [4, 8, 12]
 "=== Type System Integration ==="

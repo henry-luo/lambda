@@ -2,6 +2,7 @@
 // Implements element-wise arithmetic between scalars, arrays, lists, and ranges
 
 #include "transpiler.hpp"
+#include "lambda-number-runtime.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/sort.h"
@@ -31,33 +32,12 @@ static int cmp_double_asc(const void* a, const void* b, void* udata) {
     return (da > db) - (da < db);
 }
 
-static bool item_to_integral_index(Item item, int64_t* out) {
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT) {
-        *out = item.get_int56();
-        return true;
-    }
-    if (type == LMD_TYPE_INT64) {
-        *out = item.get_int64();
-        return true;
-    }
-    if (type == LMD_TYPE_FLOAT) {
-        double val = item.get_double();
-        if (isnan(val) || isinf(val)) return false;
-        if (val < (double)LLONG_MIN || val > (double)LLONG_MAX) return false;
-        int64_t int_val = (int64_t)val;
-        if ((double)int_val != val) return false;
-        *out = int_val;
-        return true;
-    }
-    return false;
-}
-
 extern __thread EvalContext* context;
 
 // Forward declarations from lambda-eval-num.cpp
 Item push_d(double val);
 Item box_int64_value(int64_t val);
+Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out);
 
 //==============================================================================
 // Type Detection Helpers
@@ -1046,89 +1026,320 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
 // These are called from fn_add, fn_sub, etc. when vector types are detected
 //==============================================================================
 
-Item vec_add(Item a, Item b) {
-    GUARD_ERROR2(a, b);
-    TypeId ta = get_type_id(a);
-    TypeId tb = get_type_id(b);
+// Keep vector arithmetic as a container policy around the scalar operation.
+// This guarantees that lane selection, overflow, exact domain entry, and error
+// behavior cannot become a second numeric language in the vector subsystem.
+static LambdaNumericOpFamily vector_numeric_family(int op) {
+    switch (op) {
+    case 0: return LAMBDA_NUM_OP_ADD;
+    case 1: return LAMBDA_NUM_OP_SUB;
+    case 2: return LAMBDA_NUM_OP_MUL;
+    case 3: return LAMBDA_NUM_OP_TRUE_DIV;
+    case 4: return LAMBDA_NUM_OP_MOD;
+    case 6: return LAMBDA_NUM_OP_IDIV;
+    default: return LAMBDA_NUM_OP_ADD;
+    }
+}
 
-    if (is_scalar_numeric(ta) && is_vector_type(tb)) {
-        return vec_scalar_op(b, a, 0, true);
+static Item vector_numeric_apply(Item left, Item right, int op) {
+    switch (op) {
+    case 0: return fn_add(left, right);
+    case 1: return fn_sub(left, right);
+    case 2: return fn_mul(left, right);
+    case 3: return fn_div(left, right);
+    case 4: return fn_mod(left, right);
+    case 5: return fn_pow(left, right);
+    case 6: return fn_idiv(left, right);
+    default: return ItemError;
     }
-    if (is_vector_type(ta) && is_scalar_numeric(tb)) {
-        return vec_scalar_op(a, b, 0, false);
+}
+
+static LambdaNumericKind vector_static_numeric_kind(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        return lambda_numeric_kind_from_elem_type(value.array_num->get_elem_type());
     }
-    if (is_vector_type(ta) && is_vector_type(tb)) {
-        return vec_vec_op(a, b, 0);
+    if (type == LMD_TYPE_RANGE) return LAMBDA_NUM_INT;
+    if (is_scalar_numeric(type)) return lambda_numeric_kind_from_item(value);
+    return LAMBDA_NUM_INVALID;
+}
+
+static LambdaNumericDecision vector_numeric_decision(Item left, Item right, int op) {
+    if (op == 5) {
+        return (LambdaNumericDecision){
+            0, LAMBDA_NUM_INVALID, LAMBDA_NUM_INVALID,
+            LAMBDA_NUM_INVALID, LAMBDA_NUM_OVERFLOW_EXACT
+        };
+    }
+    return lambda_numeric_classify(vector_numeric_family(op),
+        vector_static_numeric_kind(left), vector_static_numeric_kind(right));
+}
+
+static bool vector_decision_has_typed_result(
+        const LambdaNumericDecision* decision, int op, ArrayNumElemType* elem_type) {
+    if (!decision || !decision->valid) return false;
+    // Flex-int +,-,* can cross to float per element, so no one typed lane can
+    // represent the scalar results without changing their types.
+    if (decision->result == LAMBDA_NUM_INT &&
+        op != 4 && op != 6) return false;
+    return lambda_numeric_kind_to_elem_type(decision->result, elem_type);
+}
+
+static bool vector_can_use_native_float_path(
+        const LambdaNumericDecision* decision, LambdaNumericKind left,
+        LambdaNumericKind right, int op) {
+    if (!decision || !decision->valid || decision->result != LAMBDA_NUM_FLOAT) return false;
+    if (op < 0 || op > 3) return false;
+    bool left_native = left == LAMBDA_NUM_INT || left == LAMBDA_NUM_FLOAT;
+    bool right_native = right == LAMBDA_NUM_INT || right == LAMBDA_NUM_FLOAT;
+    return left_native && right_native;
+}
+
+static Item vector_allocate_result(int64_t len, bool typed,
+        ArrayNumElemType elem_type) {
+    if (typed) return (Item){.array_num = array_num_new(elem_type, len)};
+    return (Item){.array = array()};
+}
+
+static bool vector_store_result(Rooted<Item>* rooted_result, bool typed,
+        int64_t index, Item value) {
+    if (get_type_id(value) == LMD_TYPE_ERROR && typed) return false;
+    if (typed) {
+        array_num_set_item(rooted_result->get().array_num, index, value);
+    } else {
+        Array* result = rooted_result->get().array;
+        while (result->length < index) {
+            array_push(result, ItemNull);
+            result = rooted_result->get().array;
+        }
+        if (index < result->length) result->items[index] = value;
+        else array_push(result, value);
+    }
+    return true;
+}
+
+static Item vector_finalize_result(Rooted<Item>* rooted_result, bool typed,
+        int ndim, const int64_t* shape) {
+    if (typed || !rooted_result || get_type_id(rooted_result->get()) != LMD_TYPE_ARRAY) {
+        return rooted_result ? rooted_result->get() : ItemError;
+    }
+    Array* generic = rooted_result->get().array;
+    if (!generic || generic->length == 0) return rooted_result->get();
+
+    // Flex-int operations need a generic staging buffer because any element may
+    // overflow to float. Compact the completed homogeneous result only after all
+    // scalar decisions are known, so safe results retain typed-array shape while
+    // mixed results keep their per-element semantic types.
+    Item compact = array_end(generic);
+    rooted_result->set(compact);
+    if (get_type_id(compact) != LMD_TYPE_ARRAY_NUM || ndim < 2 || !shape) {
+        return rooted_result->get();
+    }
+
+    ArrayNum* flat = rooted_result->get().array_num;
+    ArrayNum* shaped = alloc_ndim_arraynum(flat->get_elem_type(), ndim, shape);
+    if (!shaped || shaped->length != flat->length) return ItemError;
+    for (int64_t i = 0; i < flat->length; i++) {
+        array_num_set_item(shaped, i, array_num_read_item(flat, i));
+    }
+    rooted_result->set((Item){.array_num = shaped});
+    return rooted_result->get();
+}
+
+static Item vec_classified_scalar_op(Item vec, Item scalar, int op,
+        bool scalar_first) {
+    int64_t len = vector_length(vec);
+    if (len < 0) return ItemError;
+
+    Item static_left = scalar_first ? scalar : vec;
+    Item static_right = scalar_first ? vec : scalar;
+    LambdaNumericDecision decision = vector_numeric_decision(static_left, static_right, op);
+    LambdaNumericKind left_kind = vector_static_numeric_kind(static_left);
+    LambdaNumericKind right_kind = vector_static_numeric_kind(static_right);
+    if (get_type_id(vec) == LMD_TYPE_ARRAY_NUM &&
+        vector_can_use_native_float_path(&decision, left_kind, right_kind, op)) {
+        return vec_scalar_op(vec, scalar, op, scalar_first);
+    }
+
+    ArrayNumElemType result_elem = ELEM_INT;
+    bool typed = vector_decision_has_typed_result(&decision, op, &result_elem);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> rooted_vec(roots, vec);
+    Rooted<Item> rooted_scalar(roots, scalar);
+    Rooted<Item> rooted_result(roots, ItemNull);
+    rooted_result.set(vector_allocate_result(len, typed, result_elem));
+    if (get_type_id(rooted_result.get()) == LMD_TYPE_NULL) return ItemError;
+
+    int64_t shape[32], strides[32], index[32] = {0};
+    int ndim = get_type_id(rooted_vec.get()) == LMD_TYPE_ARRAY_NUM ?
+        get_shape_strides(rooted_vec.get().array_num, shape, strides) : 1;
+    int64_t source_offset = 0;
+    for (int64_t i = 0; i < len; i++) {
+        Item element = get_type_id(rooted_vec.get()) == LMD_TYPE_ARRAY_NUM ?
+            array_num_read_item(rooted_vec.get().array_num, source_offset) :
+            vector_get(rooted_vec.get(), i);
+        Item result = scalar_first ?
+            vector_numeric_apply(rooted_scalar.get(), element, op) :
+            vector_numeric_apply(element, rooted_scalar.get(), op);
+        // Integral div/mod poison the whole vector on zero instead of storing
+        // an invented zero in the failed lane.
+        if (get_type_id(result) == LMD_TYPE_ERROR && decision.valid &&
+                (op == 4 || op == 6)) return ItemError;
+        if (!vector_store_result(&rooted_result, typed, i, result)) return ItemError;
+        if (get_type_id(rooted_vec.get()) == LMD_TYPE_ARRAY_NUM) {
+            for (int axis = ndim - 1; axis >= 0; axis--) {
+                index[axis]++;
+                source_offset += strides[axis];
+                if (index[axis] < shape[axis]) break;
+                source_offset -= index[axis] * strides[axis];
+                index[axis] = 0;
+            }
+        }
+    }
+    return vector_finalize_result(&rooted_result, typed, ndim, shape);
+}
+
+static Item vec_classified_broadcast_op(ArrayNum* left, ArrayNum* right,
+        int op, const LambdaNumericDecision* decision) {
+    int64_t left_shape[32], left_stride[32], right_shape[32], right_stride[32];
+    int left_ndim = get_shape_strides(left, left_shape, left_stride);
+    int right_ndim = get_shape_strides(right, right_shape, right_stride);
+    int64_t out_shape[32], left_effective[32], right_effective[32];
+    int out_ndim = compute_broadcast_shape(left_ndim, left_shape, left_stride,
+        right_ndim, right_shape, right_stride, out_shape,
+        left_effective, right_effective);
+    if (out_ndim < 0) {
+        log_error("vec numeric: incompatible broadcast shapes");
+        return ItemError;
+    }
+
+    int64_t total = 1;
+    for (int axis = 0; axis < out_ndim; axis++) total *= out_shape[axis];
+    ArrayNumElemType result_elem = ELEM_INT;
+    bool typed = vector_decision_has_typed_result(decision, op, &result_elem);
+
+    RootFrame roots((Context*)context, 3);
+    Rooted<ArrayNum*> rooted_left(roots, left);
+    Rooted<ArrayNum*> rooted_right(roots, right);
+    Rooted<Item> rooted_result(roots, ItemNull);
+    Item result_item = typed ?
+        (Item){.array_num = alloc_ndim_arraynum(result_elem, out_ndim, out_shape)} :
+        (Item){.array = array()};
+    rooted_result.set(result_item);
+
+    int64_t index[32] = {0};
+    for (int64_t output = 0; output < total; output++) {
+        int64_t left_offset = 0, right_offset = 0;
+        for (int axis = 0; axis < out_ndim; axis++) {
+            left_offset += index[axis] * left_effective[axis];
+            right_offset += index[axis] * right_effective[axis];
+        }
+        Item left_item = array_num_read_item(rooted_left.get(), left_offset);
+        Item right_item = array_num_read_item(rooted_right.get(), right_offset);
+        Item value = vector_numeric_apply(left_item, right_item, op);
+        if (get_type_id(value) == LMD_TYPE_ERROR && decision->valid &&
+                (op == 4 || op == 6)) return ItemError;
+        if (!vector_store_result(&rooted_result, typed, output, value)) return ItemError;
+
+        for (int axis = out_ndim - 1; axis >= 0; axis--) {
+            index[axis]++;
+            if (index[axis] < out_shape[axis]) break;
+            index[axis] = 0;
+        }
+    }
+    return vector_finalize_result(&rooted_result, typed, out_ndim, out_shape);
+}
+
+static Item vec_classified_vec_op(Item left, Item right, int op) {
+    int64_t left_len = vector_length(left), right_len = vector_length(right);
+    if (left_len < 0 || right_len < 0) return ItemError;
+
+    LambdaNumericDecision decision = vector_numeric_decision(left, right, op);
+    LambdaNumericKind left_kind = vector_static_numeric_kind(left);
+    LambdaNumericKind right_kind = vector_static_numeric_kind(right);
+    if (get_type_id(left) == LMD_TYPE_ARRAY_NUM &&
+        get_type_id(right) == LMD_TYPE_ARRAY_NUM) {
+        if (vector_can_use_native_float_path(&decision, left_kind, right_kind, op)) {
+            return vec_vec_op(left, right, op);
+        }
+        // The broadcast walker is also the representation-correct same-shape
+        // path: it honors view strides and retains N-D shape for generic staged
+        // flex-int results instead of flattening them through vector_get().
+        return vec_classified_broadcast_op(left.array_num, right.array_num,
+            op, &decision);
+    }
+
+    if (left_len == 1 && right_len > 1) {
+        return vec_classified_scalar_op(right, vector_get(left, 0), op, true);
+    }
+    if (right_len == 1 && left_len > 1) {
+        return vec_classified_scalar_op(left, vector_get(right, 0), op, false);
+    }
+    if (left_len != right_len) {
+        log_error("vec numeric: size mismatch: %ld vs %ld", left_len, right_len);
+        return ItemError;
+    }
+
+    ArrayNumElemType result_elem = ELEM_INT;
+    bool typed = vector_decision_has_typed_result(&decision, op, &result_elem);
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> rooted_left(roots, left);
+    Rooted<Item> rooted_right(roots, right);
+    Rooted<Item> rooted_result(roots, ItemNull);
+    rooted_result.set(vector_allocate_result(left_len, typed, result_elem));
+    for (int64_t i = 0; i < left_len; i++) {
+        Item left_item = vector_get(rooted_left.get(), i);
+        Item right_item = vector_get(rooted_right.get(), i);
+        Item value = vector_numeric_apply(left_item, right_item, op);
+        if (get_type_id(value) == LMD_TYPE_ERROR && decision.valid &&
+                (op == 4 || op == 6)) return ItemError;
+        if (!vector_store_result(&rooted_result, typed, i, value)) return ItemError;
+    }
+    return vector_finalize_result(&rooted_result, typed, 1, NULL);
+}
+
+static Item vec_model_op(Item left, Item right, int op) {
+    TypeId left_type = get_type_id(left), right_type = get_type_id(right);
+    if (is_scalar_numeric(left_type) && is_vector_type(right_type)) {
+        return vec_classified_scalar_op(right, left, op, true);
+    }
+    if (is_vector_type(left_type) && is_scalar_numeric(right_type)) {
+        return vec_classified_scalar_op(left, right, op, false);
+    }
+    if (is_vector_type(left_type) && is_vector_type(right_type)) {
+        return vec_classified_vec_op(left, right, op);
     }
     return ItemError;
+}
+
+Item vec_add(Item a, Item b) {
+    GUARD_ERROR2(a, b);
+    return vec_model_op(a, b, 0);
 }
 
 Item vec_sub(Item a, Item b) {
     GUARD_ERROR2(a, b);
-    TypeId ta = get_type_id(a);
-    TypeId tb = get_type_id(b);
-
-    if (is_scalar_numeric(ta) && is_vector_type(tb)) {
-        return vec_scalar_op(b, a, 1, true);
-    }
-    if (is_vector_type(ta) && is_scalar_numeric(tb)) {
-        return vec_scalar_op(a, b, 1, false);
-    }
-    if (is_vector_type(ta) && is_vector_type(tb)) {
-        return vec_vec_op(a, b, 1);
-    }
-    return ItemError;
+    return vec_model_op(a, b, 1);
 }
 
 Item vec_mul(Item a, Item b) {
     GUARD_ERROR2(a, b);
-    TypeId ta = get_type_id(a);
-    TypeId tb = get_type_id(b);
-
-    if (is_scalar_numeric(ta) && is_vector_type(tb)) {
-        return vec_scalar_op(b, a, 2, true);
-    }
-    if (is_vector_type(ta) && is_scalar_numeric(tb)) {
-        return vec_scalar_op(a, b, 2, false);
-    }
-    if (is_vector_type(ta) && is_vector_type(tb)) {
-        return vec_vec_op(a, b, 2);
-    }
-    return ItemError;
+    return vec_model_op(a, b, 2);
 }
 
 Item vec_div(Item a, Item b) {
     GUARD_ERROR2(a, b);
-    TypeId ta = get_type_id(a);
-    TypeId tb = get_type_id(b);
-
-    if (is_scalar_numeric(ta) && is_vector_type(tb)) {
-        return vec_scalar_op(b, a, 3, true);
-    }
-    if (is_vector_type(ta) && is_scalar_numeric(tb)) {
-        return vec_scalar_op(a, b, 3, false);
-    }
-    if (is_vector_type(ta) && is_vector_type(tb)) {
-        return vec_vec_op(a, b, 3);
-    }
-    return ItemError;
+    return vec_model_op(a, b, 3);
 }
 
 Item vec_mod(Item a, Item b) {
     GUARD_ERROR2(a, b);
-    TypeId ta = get_type_id(a);
-    TypeId tb = get_type_id(b);
+    return vec_model_op(a, b, 4);
+}
 
-    if (is_scalar_numeric(ta) && is_vector_type(tb)) {
-        return vec_scalar_op(b, a, 4, true);
-    }
-    if (is_vector_type(ta) && is_scalar_numeric(tb)) {
-        return vec_scalar_op(a, b, 4, false);
-    }
-    if (is_vector_type(ta) && is_vector_type(tb)) {
-        return vec_vec_op(a, b, 4);
-    }
-    return ItemError;
+Item vec_idiv(Item a, Item b) {
+    GUARD_ERROR2(a, b);
+    return vec_model_op(a, b, 6);
 }
 
 Item vec_pow(Item a, Item b) {
@@ -1171,210 +1382,49 @@ static bool vector_number_or_null(Item item, double* out, bool* is_null) {
 
 // prod(vec) - product of all elements
 Item fn_math_prod(Item item) {
-    GUARD_ERROR1(item);
-    TypeId type = get_type_id(item);
-    log_debug("fn_math_prod: type=%d", type);
-
-    if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (arr->length == 0) {
-            return is_float_elem_type(arr->get_elem_type()) ? push_d(1.0) : Item{ .item = i2it(1) };
-        }
-        if (arr->get_elem_type() == ELEM_FLOAT64) {
-            double prod = 1.0;
-            for (int64_t i = 0; i < arr->length; i++) {
-                prod *= arr->float_items[i];
-            }
-            return push_d(prod);
-        } else if (arr->get_elem_type() == ELEM_INT || arr->get_elem_type() == ELEM_INT64) {
-            int64_t prod = 1;
-            for (int64_t i = 0; i < arr->length; i++) {
-                prod *= arr->items[i];
-            }
-            return box_int64_value(prod);
-        } else if (is_float_elem_type(arr->get_elem_type())) {
-            double prod = 1.0;
-            for (int64_t i = 0; i < arr->length; i++) {
-                prod *= array_num_read_double(arr, i);
-            }
-            return push_d(prod);
-        } else {
-            // compact integer types
-            int64_t prod = 1;
-            for (int64_t i = 0; i < arr->length; i++) {
-                prod *= (int64_t)array_num_read_double(arr, i);
-            }
-            return box_int64_value(prod);
-        }
-    }
-    else if (type == LMD_TYPE_ARRAY) {
-        List* lst = item.array;
-        if (!lst || lst->length == 0) return { .item = i2it(1) };
-        double prod = 1.0;
-        bool has_float = false;
-        for (int64_t i = 0; i < lst->length; i++) {
-            Item elem = lst->items[i];
-            double val = 0.0;
-            bool is_null = false;
-            if (!vector_number_or_null(elem, &val, &is_null)) {
-                log_error("fn_math_prod: non-numeric element at index %ld", i);
-                return ItemError;
-            }
-            // null in aggregate inputs is an unknown value; propagate it in strict aggregates.
-            if (is_null) return ItemNull;
-            prod *= val;
-            if (get_type_id(elem) == LMD_TYPE_FLOAT) has_float = true;
-        }
-        if (has_float) return push_d(prod);
-        return { .item = i2it((int64_t)prod) };
-    }
-    else if (type == LMD_TYPE_RANGE) {
-        Range* r = item.range;
-        if (r->length == 0) return { .item = i2it(1) };
-        int64_t prod = 1;
-        for (int64_t i = r->start; i <= r->end; i++) {
-            prod *= i;
-        }
-        return box_int64_value(prod);
-    }
-
-    log_error("fn_math_prod: unsupported type %s", get_type_name(type));
-    return ItemError;
+    int64_t count = 0;
+    return fn_numeric_fold(item, 1, 0, &count);
 }
 
 // cumsum(vec) - cumulative sum
-Item fn_math_cumsum(Item item) {
-    GUARD_ERROR1(item);
+static Item vector_cumulative_model(Item item, int op) {
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
-    if (len == 0) {
-        List* result = list();
-        result->is_content = 1;
-        return { .array = result };
-    }
+    if (len == 0) return (Item){.array = array()};
 
-    TypeId type = get_type_id(item);
+    LambdaNumericKind kind = vector_static_numeric_kind(item);
+    LambdaNumericDecision decision = lambda_numeric_classify(
+        vector_numeric_family(op), kind, kind);
+    ArrayNumElemType result_elem = ELEM_INT;
+    bool typed = vector_decision_has_typed_result(&decision, op, &result_elem);
 
-    if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (arr->get_elem_type() == ELEM_FLOAT64) {
-            ArrayNum* result = array_float_new(len);
-            double sum = 0.0;
-            for (int64_t i = 0; i < len; i++) {
-                sum += arr->float_items[i];
-                result->float_items[i] = sum;
-            }
-            return { .array_num = result };
-        } else if (arr->get_elem_type() == ELEM_INT || arr->get_elem_type() == ELEM_INT64) {
-            ArrayNum* result = array_int64_new(len);
-            int64_t sum = 0;
-            for (int64_t i = 0; i < len; i++) {
-                sum += arr->items[i];
-                result->items[i] = sum;
-            }
-            return { .array_num = result };
-        } else if (is_float_elem_type(arr->get_elem_type())) {
-            ArrayNum* result = array_float_new(len);
-            double sum = 0.0;
-            for (int64_t i = 0; i < len; i++) {
-                sum += array_num_read_double(arr, i);
-                result->float_items[i] = sum;
-            }
-            return { .array_num = result };
-        } else {
-            // compact integer types → int64 cumsum
-            ArrayNum* result = array_int64_new(len);
-            int64_t sum = 0;
-            for (int64_t i = 0; i < len; i++) {
-                sum += (int64_t)array_num_read_double(arr, i);
-                result->items[i] = sum;
-            }
-            return { .array_num = result };
-        }
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> rooted_source(roots, item);
+    Rooted<Item> accumulator(roots, vector_get(item, 0));
+    Rooted<Item> rooted_result(roots, vector_allocate_result(len, typed, result_elem));
+    if (!vector_store_result(&rooted_result, typed, 0, accumulator.get())) return ItemError;
+    for (int64_t i = 1; i < len; i++) {
+        Item element = vector_get(rooted_source.get(), i);
+        Item next = vector_numeric_apply(accumulator.get(), element, op);
+        if (get_type_id(next) == LMD_TYPE_ERROR) return ItemError;
+        accumulator.set(next);
+        if (!vector_store_result(&rooted_result, typed, i, accumulator.get())) return ItemError;
     }
-    else {
-        // heterogeneous list
-        ArrayNum* result = array_float_new(len);
-        double sum = 0.0;
-        for (int64_t i = 0; i < len; i++) {
-            Item elem = vector_get(item, i);
-            double val = item_to_double(elem);
-            if (std::isnan(val)) {
-                result->float_items[i] = NAN;
-            } else {
-                sum += val;
-                result->float_items[i] = sum;
-            }
-        }
-        return { .array_num = result };
-    }
+    int64_t shape[32], strides[32];
+    int ndim = get_type_id(rooted_source.get()) == LMD_TYPE_ARRAY_NUM ?
+        get_shape_strides(rooted_source.get().array_num, shape, strides) : 1;
+    return vector_finalize_result(&rooted_result, typed, ndim, shape);
+}
+
+Item fn_math_cumsum(Item item) {
+    GUARD_ERROR1(item);
+    return vector_cumulative_model(item, 0);
 }
 
 // cumprod(vec) - cumulative product
 Item fn_math_cumprod(Item item) {
     GUARD_ERROR1(item);
-    int64_t len = vector_length(item);
-    if (len < 0) return ItemError;
-    if (len == 0) {
-        List* result = list();
-        result->is_content = 1;
-        return { .array = result };
-    }
-
-    TypeId type = get_type_id(item);
-
-    if (type == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (arr->get_elem_type() == ELEM_FLOAT64) {
-            ArrayNum* result = array_float_new(len);
-            double prod = 1.0;
-            for (int64_t i = 0; i < len; i++) {
-                prod *= arr->float_items[i];
-                result->float_items[i] = prod;
-            }
-            return { .array_num = result };
-        } else if (arr->get_elem_type() == ELEM_INT || arr->get_elem_type() == ELEM_INT64) {
-            ArrayNum* result = array_int64_new(len);
-            int64_t prod = 1;
-            for (int64_t i = 0; i < len; i++) {
-                prod *= arr->items[i];
-                result->items[i] = prod;
-            }
-            return { .array_num = result };
-        } else if (is_float_elem_type(arr->get_elem_type())) {
-            ArrayNum* result = array_float_new(len);
-            double prod = 1.0;
-            for (int64_t i = 0; i < len; i++) {
-                prod *= array_num_read_double(arr, i);
-                result->float_items[i] = prod;
-            }
-            return { .array_num = result };
-        } else {
-            // compact integer types → int64 cumprod
-            ArrayNum* result = array_int64_new(len);
-            int64_t prod = 1;
-            for (int64_t i = 0; i < len; i++) {
-                prod *= (int64_t)array_num_read_double(arr, i);
-                result->items[i] = prod;
-            }
-            return { .array_num = result };
-        }
-    }
-    else {
-        ArrayNum* result = array_float_new(len);
-        double prod = 1.0;
-        for (int64_t i = 0; i < len; i++) {
-            Item elem = vector_get(item, i);
-            double val = item_to_double(elem);
-            if (std::isnan(val)) {
-                result->float_items[i] = NAN;
-            } else {
-                prod *= val;
-                result->float_items[i] = prod;
-            }
-        }
-        return { .array_num = result };
-    }
+    return vector_cumulative_model(item, 2);
 }
 
 // argmin(vec) - index of minimum element
@@ -1387,12 +1437,21 @@ Item fn_argmin(Item item) {
     }
 
     int64_t min_idx = 0;
-    double min_val = item_to_double(vector_get(item, 0));
-
+    Item min_item = vector_get(item, 0);
     for (int64_t i = 1; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
-        if (!std::isnan(val) && (std::isnan(min_val) || val < min_val)) {
-            min_val = val;
+        Item candidate = vector_get(item, i);
+        LambdaNumericComparison comparison = lambda_numeric_compare(candidate, min_item);
+        if (!comparison.valid) return ItemError;
+        LambdaNumericRuntimePart candidate_part;
+        LambdaNumericRuntimePart min_part;
+        bool candidate_simple = lambda_numeric_runtime_part(candidate, &candidate_part);
+        bool min_simple = lambda_numeric_runtime_part(min_item, &min_part);
+        bool candidate_nan = candidate_simple && candidate_part.kind == LAMBDA_NUM_PART_FLOAT &&
+            isnan(candidate_part.float_value);
+        bool min_nan = min_simple && min_part.kind == LAMBDA_NUM_PART_FLOAT &&
+            isnan(min_part.float_value);
+        if (!candidate_nan && (min_nan || (!comparison.unordered && comparison.order < 0))) {
+            min_item = candidate;
             min_idx = i;
         }
     }
@@ -1410,12 +1469,21 @@ Item fn_argmax(Item item) {
     }
 
     int64_t max_idx = 0;
-    double max_val = item_to_double(vector_get(item, 0));
-
+    Item max_item = vector_get(item, 0);
     for (int64_t i = 1; i < len; i++) {
-        double val = item_to_double(vector_get(item, i));
-        if (!std::isnan(val) && (std::isnan(max_val) || val > max_val)) {
-            max_val = val;
+        Item candidate = vector_get(item, i);
+        LambdaNumericComparison comparison = lambda_numeric_compare(candidate, max_item);
+        if (!comparison.valid) return ItemError;
+        LambdaNumericRuntimePart candidate_part;
+        LambdaNumericRuntimePart max_part;
+        bool candidate_simple = lambda_numeric_runtime_part(candidate, &candidate_part);
+        bool max_simple = lambda_numeric_runtime_part(max_item, &max_part);
+        bool candidate_nan = candidate_simple && candidate_part.kind == LAMBDA_NUM_PART_FLOAT &&
+            isnan(candidate_part.float_value);
+        bool max_nan = max_simple && max_part.kind == LAMBDA_NUM_PART_FLOAT &&
+            isnan(max_part.float_value);
+        if (!candidate_nan && (max_nan || (!comparison.unordered && comparison.order > 0))) {
+            max_item = candidate;
             max_idx = i;
         }
     }
@@ -1426,14 +1494,11 @@ Item fn_argmax(Item item) {
 // fill(n, value) - create vector of n copies of value
 Item fn_fill(Item n_item, Item value) {
     GUARD_ERROR2(n_item, value);
-    if (get_type_id(n_item) != LMD_TYPE_INT && get_type_id(n_item) != LMD_TYPE_INT64) {
-        log_error("fn_fill: first argument must be integer");
+    int64_t n = 0;
+    if (!lambda_item_to_int64_exact(n_item, &n)) {
+        log_error("fn_fill: first argument must be an integer-valued number");
         return ItemError;
     }
-
-    int64_t n = (get_type_id(n_item) == LMD_TYPE_INT)
-                ? n_item.get_int56()
-                : n_item.get_int64();
 
     if (n < 0) {
         log_error("fn_fill: count must be non-negative");
@@ -1491,18 +1556,28 @@ Item fn_math_dot(Item a, Item b) {
 
     if (len_a == 0) return push_d(0.0);
 
-    double sum = 0.0;
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> rooted_a(roots, a);
+    Rooted<Item> rooted_b(roots, b);
+    Rooted<Item> product(roots, ItemNull);
+    Rooted<Item> sum(roots, ItemNull);
     for (int64_t i = 0; i < len_a; i++) {
-        double va = item_to_double(vector_get(a, i));
-        double vb = item_to_double(vector_get(b, i));
-        if (std::isnan(va) || std::isnan(vb)) {
+        Item left = vector_get(rooted_a.get(), i);
+        Item right = vector_get(rooted_b.get(), i);
+        if (!IS_NUMERIC_ID(get_type_id(left)) || !IS_NUMERIC_ID(get_type_id(right))) {
             log_error("fn_math_dot: non-numeric element at index %ld", i);
             return ItemError;
         }
-        sum += va * vb;
+        product.set(fn_mul(left, right));
+        if (get_type_id(product.get()) == LMD_TYPE_ERROR) return ItemError;
+        if (i == 0) sum.set(product.get());
+        else {
+            sum.set(fn_add(sum.get(), product.get()));
+            if (get_type_id(sum.get()) == LMD_TYPE_ERROR) return ItemError;
+        }
     }
 
-    return push_d(sum);
+    return sum.get();
 }
 
 // norm(vec) - Euclidean norm (L2 norm)
@@ -2718,13 +2793,11 @@ Item fn_take(Item vec, Item n_item) {
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
 
-    TypeId n_type = get_type_id(n_item);
-    if (n_type != LMD_TYPE_INT && n_type != LMD_TYPE_INT64) {
-        log_error("fn_take: n must be integer");
+    int64_t n = 0;
+    if (!lambda_item_to_int64_exact(n_item, &n)) {
+        log_error("fn_take: n must be an integer-valued number");
         return ItemError;
     }
-
-    int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
     if (n < 0) {
         // C15 forbids negative counts so callers must spell tail-relative intent with `last`.
         log_error("fn_take: n must be non-negative");
@@ -2762,13 +2835,11 @@ Item fn_take(Item vec, Item n_item) {
 Item fn_take_last(Item vec, Item n_item) {
     GUARD_ERROR2(vec, n_item);
 
-    TypeId n_type = get_type_id(n_item);
-    if (n_type != LMD_TYPE_INT && n_type != LMD_TYPE_INT64) {
-        log_error("fn_take_last: n must be integer");
+    int64_t n = 0;
+    if (!lambda_item_to_int64_exact(n_item, &n)) {
+        log_error("fn_take_last: n must be an integer-valued number");
         return ItemError;
     }
-
-    int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
     if (n < 0) {
         // C15 tail counts are explicit counts, not negative-limit sign puns.
         log_error("fn_take_last: n must be non-negative");
@@ -2798,13 +2869,11 @@ Item fn_drop(Item vec, Item n_item) {
     int64_t len = vector_length(vec);
     if (len < 0) return ItemError;
 
-    TypeId n_type = get_type_id(n_item);
-    if (n_type != LMD_TYPE_INT && n_type != LMD_TYPE_INT64) {
-        log_error("fn_drop: n must be integer");
+    int64_t n = 0;
+    if (!lambda_item_to_int64_exact(n_item, &n)) {
+        log_error("fn_drop: n must be an integer-valued number");
         return ItemError;
     }
-
-    int64_t n = (n_type == LMD_TYPE_INT) ? n_item.get_int56() : n_item.get_int64();
     if (n < 0) {
         // C15 forbids negative counts so slicing direction is never hidden in the sign.
         log_error("fn_drop: n must be non-negative");
@@ -2859,8 +2928,8 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
 
     int64_t start = 0;
     int64_t end = 0;
-    if (!item_to_integral_index(start_item, &start) ||
-        !item_to_integral_index(end_item, &end)) {
+    if (!lambda_item_to_int64_exact(start_item, &start) ||
+        !lambda_item_to_int64_exact(end_item, &end)) {
         log_error("fn_slice: start and end must be integer-valued numbers");
         return ItemError;
     }
@@ -2949,15 +3018,12 @@ Item fn_subview(Item vec, Item start_item, Item end_item) {
         log_error("fn_view: cannot view arena-backed array; copy() first to get a heap array");
         return ItemError;
     }
-    TypeId st = get_type_id(start_item);
-    TypeId et = get_type_id(end_item);
-    if ((st != LMD_TYPE_INT && st != LMD_TYPE_INT64) ||
-        (et != LMD_TYPE_INT && et != LMD_TYPE_INT64)) {
-        log_error("fn_view: start and end must be integers");
+    int64_t start = 0, end = 0;
+    if (!lambda_item_to_int64_exact(start_item, &start) ||
+            !lambda_item_to_int64_exact(end_item, &end)) {
+        log_error("fn_view: start and end must be integer-valued numbers");
         return ItemError;
     }
-    int64_t start = (st == LMD_TYPE_INT) ? start_item.get_int56() : start_item.get_int64();
-    int64_t end   = (et == LMD_TYPE_INT) ? end_item.get_int56()   : end_item.get_int64();
     int64_t len = base->length;
     if (start < 0) start = len + start;
     if (end < 0) end = len + end;
@@ -3046,12 +3112,9 @@ Item fn_reshape(Item vec, Item shape_item) {
     int64_t dims_stack[32];
     for (int64_t i = 0; i < st_len; i++) {
         Item d = vector_get(shape_item, i);
-        TypeId dt = get_type_id(d);
         int64_t dim;
-        if (dt == LMD_TYPE_INT) dim = d.get_int56();
-        else if (dt == LMD_TYPE_INT64) dim = d.get_int64();
-        else {
-            log_error("fn_reshape: shape entries must be integers");
+        if (!lambda_item_to_int64_exact(d, &dim)) {
+            log_error("fn_reshape: shape entries must be integer-valued numbers");
             return ItemError;
         }
         if (dim < 0) {
@@ -3621,27 +3684,6 @@ static double reduce_contig_dispatch(ArrayNum* arr, int64_t base_off, int64_t le
     return (op == RED_PROD) ? 1.0 : 0.0;  // unreachable for contig-reducible types
 }
 
-// Reduce one lane: elements at base_off, base_off+stride, … (len of them).
-static double reduce_lane(ArrayNum* arr, int64_t base_off, int64_t stride, int64_t len, int op) {
-    if (len <= 0) return (op == RED_PROD) ? 1.0 : 0.0;
-    // contiguous fast path: a unit-stride lane over a native type vectorizes.
-    if (stride == 1 && is_contig_reducible(arr->get_elem_type())) {
-        return reduce_contig_dispatch(arr, base_off, len, op);
-    }
-    double acc = array_num_read_double(arr, base_off);
-    for (int64_t k = 1; k < len; k++) {
-        double v = array_num_read_double(arr, base_off + k * stride);
-        switch (op) {
-            case RED_SUM: case RED_AVG: acc += v; break;
-            case RED_PROD:              acc *= v; break;
-            case RED_MIN: if (v < acc)  acc = v;  break;
-            case RED_MAX: if (v > acc)  acc = v;  break;
-        }
-    }
-    if (op == RED_AVG) acc /= (double)len;
-    return acc;
-}
-
 // Whole-array reduction → double accumulator, correct for every element type.
 // Owned arrays (contiguous in storage) use the vectorized contiguous kernel;
 // strided views (and FLOAT16/BOOL) fall back to a correct n-d strided walk.
@@ -3681,14 +3723,54 @@ double array_num_reduce_double(ArrayNum* arr, int op) {
 
 // Read the axis argument as an int64 (returns INT64_MIN sentinel on bad type).
 static int64_t parse_axis(Item axis_item) {
-    TypeId t = get_type_id(axis_item);
-    if (t == LMD_TYPE_INT)   return axis_item.get_int56();
-    if (t == LMD_TYPE_INT64) return axis_item.get_int64();
-    return INT64_MIN;
+    int64_t axis = INT64_MIN;
+    return lambda_item_to_int64_exact(axis_item, &axis) ? axis : INT64_MIN;
 }
 
 // Collapse `axis` of a typed array via the reduction op.  Result is an
 // (ndim-1)-D ArrayNum, or a scalar Item when the input is 1-D.
+static Item reduce_lane_model(ArrayNum* arr, int64_t base_offset,
+        int64_t stride, int64_t length, int op) {
+    if (length <= 0) return ItemNull;
+    RootFrame roots((Context*)context, 2);
+    Rooted<ArrayNum*> rooted_arr(roots, arr);
+    Rooted<Item> accumulator(roots, array_num_read_item(arr, base_offset));
+    for (int64_t i = 1; i < length; i++) {
+        Item element = array_num_read_item(rooted_arr.get(), base_offset + i * stride);
+        Item next;
+        if (op == RED_SUM || op == RED_AVG) next = fn_add(accumulator.get(), element);
+        else if (op == RED_PROD) next = fn_mul(accumulator.get(), element);
+        else {
+            Bool replace = op == RED_MIN ? fn_lt_scalar(element, accumulator.get()) :
+                                           fn_gt_scalar(element, accumulator.get());
+            next = replace == BOOL_TRUE ? element : accumulator.get();
+        }
+        if (get_type_id(next) == LMD_TYPE_ERROR) return ItemError;
+        accumulator.set(next);
+    }
+    if (op == RED_AVG) {
+        Item count = (Item){.item = i2it(length)};
+        return fn_div(accumulator.get(), count);
+    }
+    return accumulator.get();
+}
+
+static LambdaNumericDecision reduce_result_decision(
+        LambdaNumericKind element_kind, int op) {
+    if (op == RED_MIN || op == RED_MAX) {
+        return (LambdaNumericDecision){
+            1, element_kind, element_kind, element_kind,
+            LAMBDA_NUM_OVERFLOW_EXACT
+        };
+    }
+    LambdaNumericDecision fold = lambda_numeric_classify(
+        op == RED_PROD ? LAMBDA_NUM_OP_MUL : LAMBDA_NUM_OP_ADD,
+        element_kind, element_kind);
+    if (op != RED_AVG || !fold.valid) return fold;
+    return lambda_numeric_classify(LAMBDA_NUM_OP_TRUE_DIV,
+        fold.result, LAMBDA_NUM_INT);
+}
+
 static Item array_num_reduce_axis(Item arr_item, Item axis_item, int op, const char* name) {
     GUARD_ERROR1(arr_item);
     if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
@@ -3706,12 +3788,12 @@ static Item array_num_reduce_axis(Item arr_item, Item axis_item, int op, const c
         return ItemError;
     }
     int64_t axis_len = shp[axis], axis_str = str[axis];
-    bool result_float = !elem_is_int(arr->get_elem_type()) || op == RED_AVG;
+    LambdaNumericDecision decision = reduce_result_decision(
+        lambda_numeric_kind_from_elem_type(arr->get_elem_type()), op);
 
     // 1-D input → scalar
     if (ndim == 1) {
-        double acc = reduce_lane(arr, 0, axis_str, axis_len, op);
-        return result_float ? push_d(acc) : box_int64_value((int64_t)acc);
+        return reduce_lane_model(arr, 0, axis_str, axis_len, op);
     }
 
     // build output shape and the non-axis dims/strides (same order)
@@ -3727,24 +3809,34 @@ static Item array_num_reduce_axis(Item arr_item, Item axis_item, int op, const c
     int64_t out_total = 1;
     for (int d = 0; d < out_ndim; d++) out_total *= out_shape[d];
 
-    ArrayNumElemType ret_et = result_float ? ELEM_FLOAT64 : ELEM_INT64;
-    ArrayNum* result = (out_ndim >= 2) ? alloc_ndim_arraynum(ret_et, out_ndim, out_shape)
-                                       : array_num_new(ret_et, out_shape[0]);
-    if (!result) return ItemError;
+    ArrayNumElemType result_elem = ELEM_INT;
+    int vector_op = op == RED_PROD ? 2 : op == RED_AVG ? 3 : 0;
+    bool typed = (op == RED_MIN || op == RED_MAX) ?
+        lambda_numeric_kind_to_elem_type(decision.result, &result_elem) :
+        vector_decision_has_typed_result(&decision, vector_op, &result_elem);
+    RootFrame roots((Context*)context, 2);
+    Rooted<ArrayNum*> rooted_arr(roots, arr);
+    Rooted<Item> rooted_result(roots, ItemNull);
+    Item result_item = typed ?
+        (Item){.array_num = ((out_ndim >= 2) ?
+            alloc_ndim_arraynum(result_elem, out_ndim, out_shape) :
+            array_num_new(result_elem, out_shape[0]))} :
+        (Item){.array = array()};
+    rooted_result.set(result_item);
 
     int64_t idx[32] = {0};
     int64_t base_off = 0;
     for (int64_t o = 0; o < out_total; o++) {
-        double acc = reduce_lane(arr, base_off, axis_str, axis_len, op);
-        if (result_float) result->float_items[o] = acc;
-        else              result->items[o] = (int64_t)acc;
+        Item reduced = reduce_lane_model(rooted_arr.get(), base_off,
+            axis_str, axis_len, op);
+        if (!vector_store_result(&rooted_result, typed, o, reduced)) return ItemError;
         for (int d = out_ndim - 1; d >= 0; d--) {
             idx[d]++; base_off += na_str[d];
             if (idx[d] < na_shape[d]) break;
             idx[d] = 0; base_off -= na_shape[d] * na_str[d];
         }
     }
-    return { .array_num = result };
+    return vector_finalize_result(&rooted_result, typed, out_ndim, out_shape);
 }
 
 // Running scan along `axis` (cumsum/cumprod) — same-shape owned result.
@@ -3764,15 +3856,27 @@ static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_pro
         log_error("%s: axis %lld out of range for %d-D array", name, (long long)axis, ndim);
         return ItemError;
     }
-    bool result_float = !elem_is_int(arr->get_elem_type());
-    ArrayNumElemType ret_et = result_float ? ELEM_FLOAT64 : ELEM_INT64;
+    int vector_op = is_prod ? 2 : 0;
+    LambdaNumericKind element_kind = lambda_numeric_kind_from_elem_type(arr->get_elem_type());
+    LambdaNumericDecision decision = lambda_numeric_classify(
+        is_prod ? LAMBDA_NUM_OP_MUL : LAMBDA_NUM_OP_ADD,
+        element_kind, element_kind);
+    ArrayNumElemType result_elem = ELEM_INT;
+    bool typed = vector_decision_has_typed_result(&decision, vector_op, &result_elem);
 
     // result: same shape, owned C-contiguous
     int64_t full_shape[32];
     for (int d = 0; d < ndim; d++) full_shape[d] = shp[d];
-    ArrayNum* result = (ndim >= 2) ? alloc_ndim_arraynum(ret_et, ndim, full_shape)
-                                   : array_num_new(ret_et, shp[0]);
-    if (!result) return ItemError;
+    RootFrame roots((Context*)context, 3);
+    Rooted<ArrayNum*> rooted_arr(roots, arr);
+    Rooted<Item> accumulator(roots, ItemNull);
+    Rooted<Item> rooted_result(roots, ItemNull);
+    Item result_item = typed ?
+        (Item){.array_num = ((ndim >= 2) ?
+            alloc_ndim_arraynum(result_elem, ndim, full_shape) :
+            array_num_new(result_elem, shp[0]))} :
+        (Item){.array = array()};
+    rooted_result.set(result_item);
 
     // result C-order strides
     int64_t res_str[32];
@@ -3796,13 +3900,19 @@ static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_pro
     int64_t idx[32] = {0};
     int64_t src_base = 0, res_base = 0;
     for (int64_t lane = 0; lane < na_total; lane++) {
-        double running = is_prod ? 1.0 : 0.0;
         for (int64_t a = 0; a < axis_len; a++) {
-            double v = array_num_read_double(arr, src_base + a * src_axis_str);
-            running = is_prod ? running * v : running + v;
+            Item value = array_num_read_item(rooted_arr.get(),
+                src_base + a * src_axis_str);
+            if (a == 0) accumulator.set(value);
+            else {
+                Item next = is_prod ? fn_mul(accumulator.get(), value) :
+                                      fn_add(accumulator.get(), value);
+                if (get_type_id(next) == LMD_TYPE_ERROR) return ItemError;
+                accumulator.set(next);
+            }
             int64_t ro = res_base + a * res_axis_str;
-            if (result_float) result->float_items[ro] = running;
-            else              result->items[ro] = (int64_t)running;
+            if (!vector_store_result(&rooted_result, typed, ro,
+                    accumulator.get())) return ItemError;
         }
         for (int d = na_ndim - 1; d >= 0; d--) {
             idx[d]++; src_base += na_src[d]; res_base += na_res[d];
@@ -3810,7 +3920,7 @@ static Item array_num_cumulative_axis(Item arr_item, Item axis_item, bool is_pro
             idx[d] = 0; src_base -= na_shape[d] * na_src[d]; res_base -= na_shape[d] * na_res[d];
         }
     }
-    return { .array_num = result };
+    return vector_finalize_result(&rooted_result, typed, ndim, full_shape);
 }
 
 Item fn_min_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_MIN,  "min");  }
@@ -3936,10 +4046,9 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
     // apply to typed numeric arrays. fn_array_set handles negatives and bounds.
     {
         TypeId arr_tid = get_type_id(arr_item);
-        TypeId idx_tid = get_type_id(idx_item);
+        int64_t i = 0;
         if (arr_tid == LMD_TYPE_ARRAY &&
-            is_integer_type_id(idx_tid)) {
-            int64_t i = (idx_tid == LMD_TYPE_INT) ? idx_item.get_int56() : idx_item.get_int64();
+                lambda_item_to_int64_exact(idx_item, &i)) {
             fn_array_set(arr_item.array, i, val_item);
             return;
         }
@@ -3956,8 +4065,9 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
     TypeId it = get_type_id(idx_item);
     // plain integer index — element write (this path is reached when the index is
     // dynamically typed (ANY), e.g. an index variable, that turns out to be an int).
-    if (is_integer_type_id(it)) {
-        int64_t i = (it == LMD_TYPE_INT) ? idx_item.get_int56() : idx_item.get_int64();
+    int64_t scalar_index = 0;
+    if (lambda_item_to_int64_exact(idx_item, &scalar_index)) {
+        int64_t i = scalar_index;
         if (i >= 0 && i < arr->length) array_num_set_item(arr, i, val_item);
         return;
     }
@@ -4144,10 +4254,8 @@ static ArrayNum* stencil_box_kernel(int64_t ksize) {
 }
 
 static int64_t stencil_ksize_arg(Item ksize_item) {
-    TypeId t = get_type_id(ksize_item);
-    if (t == LMD_TYPE_INT)   return ksize_item.get_int56();
-    if (t == LMD_TYPE_INT64) return ksize_item.get_int64();
-    return 3;  // sensible default
+    int64_t ksize = 0;
+    return lambda_item_to_int64_exact(ksize_item, &ksize) ? ksize : 3;
 }
 
 // thin wrappers — each is a single stencil call (the whole toolkit stands on these).

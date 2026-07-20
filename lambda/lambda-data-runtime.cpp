@@ -1260,14 +1260,17 @@ static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, 
         Array* a = it.array;
         if (!a || a->is_spreadable || a->is_content) return false;
         if (a->length == 0) return false;
-        // Scan items: all must be numeric; if any is float, etype = ELEM_FLOAT64, else ELEM_INT64
+        // Scan items: retain flex-int storage unless a full-width value or a
+        // float actually requires a wider semantic lane.
         bool any_float = false;
+        bool any_int64 = false;
         for (int64_t i = 0; i < a->length; i++) {
             TypeId it_tid = get_type_id(a->items[i]);
             if (it_tid == LMD_TYPE_FLOAT) any_float = true;
-            else if (it_tid != LMD_TYPE_INT && it_tid != LMD_TYPE_INT64) return false;
+            else if (it_tid == LMD_TYPE_INT64) any_int64 = true;
+            else if (it_tid != LMD_TYPE_INT) return false;
         }
-        *etype_out = any_float ? ELEM_FLOAT64 : ELEM_INT64;
+        *etype_out = any_float ? ELEM_FLOAT64 : any_int64 ? ELEM_INT64 : ELEM_INT;
         *len_out = a->length;
         *is_arr_num = false;
         return true;
@@ -1347,19 +1350,21 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
         shape_stack[1] = inner_len;
         out_ndim = 2;
         bool any_float = (etype == ELEM_FLOAT64);
+        bool any_int64 = (etype == ELEM_INT64);
         for (int64_t i = 1; i < arr->length; i++) {
             ArrayNumElemType e2; int64_t l2; bool an2;
             if (!row_summary(arr->items[i], &e2, &l2, &an2)) return NULL;
             if (l2 != inner_len) return NULL;
             // widen to float if any row is float
             if (e2 == ELEM_FLOAT64) any_float = true;
-            else if (e2 != etype && e2 != ELEM_INT && e2 != ELEM_INT64) {
+            else if (e2 == ELEM_INT64) any_int64 = true;
+            else if (e2 != etype && e2 != ELEM_INT) {
                 // refuse exotic compact mixes for simplicity
                 return NULL;
             }
         }
         if (any_float) etype = ELEM_FLOAT64;
-        else if (etype == ELEM_INT) etype = ELEM_INT64;  // standardize int promotion to INT64 for storage
+        else if (any_int64) etype = ELEM_INT64;
     }
 
     // Allocate promoted N-D ArrayNum
@@ -1384,6 +1389,11 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
 static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
     int64_t n = arr->length;
     bool any_float = false;
+    bool any_int64 = false;
+    bool any_sized = false;
+    bool mixed_sized = false;
+    NumSizedType sized_type = NUM_INT8;
+    int64_t sized_count = 0;
     int64_t bool_count = 0, num_count = 0;
     for (int64_t i = 0; i < n; i++) {
         TypeId t = get_type_id(arr->items[i]);
@@ -1391,11 +1401,16 @@ static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
             bool_count++;
         } else if (t == LMD_TYPE_FLOAT) {
             any_float = true; num_count++;
+        } else if (t == LMD_TYPE_INT64) {
+            any_int64 = true; num_count++;
         } else if (t == LMD_TYPE_NUM_SIZED) {
             NumSizedType st = arr->items[i].get_num_type();
-            if (st == NUM_FLOAT16 || st == NUM_FLOAT32) any_float = true;
+            if (!any_sized) sized_type = st;
+            else if (st != sized_type) mixed_sized = true;
+            any_sized = true;
+            sized_count++;
             num_count++;
-        } else if (is_integer_type_id(t)) {
+        } else if (t == LMD_TYPE_INT) {
             num_count++;
         } else {
             return NULL;  // a non-numeric, non-bool element — keep generic
@@ -1404,7 +1419,17 @@ static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
     // all-bool → ELEM_BOOL (mask); all-numeric → int/float; mixed → keep generic
     ArrayNumElemType et;
     if (bool_count == n)     et = ELEM_BOOL;
-    else if (num_count == n) et = any_float ? ELEM_FLOAT64 : ELEM_INT64;
+    else if (num_count == n) {
+        // A typed array is observable through subsequent arithmetic. Only
+        // compact when the destination lane exactly preserves every element.
+        if (any_sized) {
+            if (mixed_sized || sized_count != n) return NULL;
+            et = num_sized_to_elem_type(sized_type);
+        } else {
+            if (any_float && any_int64) return NULL;
+            et = any_float ? ELEM_FLOAT64 : any_int64 ? ELEM_INT64 : ELEM_INT;
+        }
+    }
     else return NULL;
     ArrayNum* result = array_num_new(et, n);
     if (!result) return NULL;

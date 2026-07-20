@@ -254,6 +254,21 @@ TEST_F(MarkReaderTest, ArrayReaderMixedTypes) {
     EXPECT_TRUE(item3.asBool());
 }
 
+TEST_F(MarkReaderTest, ArrayReaderPreservesWideUint64Lane) {
+    uint64_t lane = UINT64_MAX;
+    ArrayNum typed = {};
+    typed.type_id = LMD_TYPE_ARRAY_NUM;
+    typed.set_elem_type(ELEM_UINT64);
+    typed.data = &lane;
+    typed.length = 1;
+    typed.capacity = 1;
+
+    ArrayReader arr(ArrayNumView{&typed, 0, 0});
+    ItemReader value = arr.get(0);
+    EXPECT_EQ(value.getType(), LMD_TYPE_UINT64);
+    EXPECT_EQ(value.item().get_uint64(), UINT64_MAX);
+}
+
 // ==============================================================================
 // MapReader Tests
 // ==============================================================================

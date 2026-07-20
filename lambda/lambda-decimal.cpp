@@ -935,11 +935,12 @@ static Item decimal_division_apply(Item a, Item b, EvalContext* ctx,
         return ItemError;
     }
     
-    if (op == DECIMAL_REMAINDER && decimal_binary_result_is_bigint(a, b)) {
+    if ((op == DECIMAL_INTEGER_DIVIDE || op == DECIMAL_REMAINDER) &&
+        decimal_binary_result_is_bigint(a, b)) {
         return decimal_push_bigint_result(result);
     }
-    // Division and integer division exit the fixed-width lane; the quotient
-    // remains decimal even when its digits happen to fit in int64.
+    // True division exits the integer domain; integral division and remainder
+    // preserve it when both inputs are integer carriers.
     return decimal_push_result(result, is_unlimited);
 }
 
@@ -1217,6 +1218,21 @@ int64_t decimal_to_int64(Item item) {
     return result;
 }
 
+bool decimal_to_int64_exact(Item item, int64_t* out) {
+    if (!out || !decimal_is_any(item)) return false;
+    Decimal* decimal = item.get_decimal();
+    if (!decimal || !decimal->dec_val || !mpd_isinteger(decimal->dec_val)) return false;
+
+    // Semantic `integer` now reaches ordinary integral consumers after mixed
+    // full-width arithmetic; reject out-of-range values instead of inheriting
+    // bigint_to_int64's intentional clamping behavior.
+    uint32_t status = 0;
+    mpd_ssize_t value = mpd_qget_ssize(decimal->dec_val, &status);
+    if (status & MPD_Invalid_operation) return false;
+    *out = (int64_t)value;
+    return true;
+}
+
 // ═════════════════════════════════════════════════════════════════════
 // BigInt Support — JS BigInt backed by libmpdec integer arithmetic
 // ═════════════════════════════════════════════════════════════════════
@@ -1286,6 +1302,16 @@ Item bigint_from_int64(int64_t val) {
     mpd_t* dec_val = mpd_new(ctx);
     if (!dec_val) return ItemError;
     mpd_set_ssize(dec_val, (mpd_ssize_t)val, ctx);
+    return bigint_push_result(dec_val);
+}
+
+Item bigint_from_uint64(uint64_t val) {
+    mpd_context_t* ctx = bigint_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemError;
+    // Preserve the full unsigned domain; a signed cast would corrupt values
+    // above INT64_MAX before the integer carrier ever sees them.
+    mpd_set_u64(dec_val, val, ctx);
     return bigint_push_result(dec_val);
 }
 

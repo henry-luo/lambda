@@ -6,8 +6,8 @@
   both full-width integer types use number homes while transient,
   caller-donated homes for generated Item returns, and destination-owned
   scalar storage when retained. `ushr` is implemented. The later
-  type-directed sized/non-sized arithmetic decision supersedes the completed
-  value-based `u64` fold and is pending under `Lambda_Impl_Numbers.md`.
+  type-directed sized/non-sized arithmetic decision supersedes the historical
+  value-based `u64` fold and is implemented under `Lambda_Impl_Numbers.md`.
 - **Scope:** Lambda scalar sized integer annotations, literals, and builtins
   (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), plus the runtime
   representation of the `int` / `int64` / `uint64` scalar family.
@@ -181,16 +181,15 @@ shift count is an error, and a count at least the operand width returns zero.
 subtype byte plus the low 32 raw bits under the `LMD_TYPE_NUM_SIZED` tag
 (`lambda/lambda.h`, `NUM_SIZED_PACK`). They are never heap- or
 stack-allocated, never GC-visible, and never interact with the scalar return
-lane. `normalize_sized()` (`lambda/lambda-eval-num.cpp`) promotes them to
-`INT64` (or `FLOAT` for `f16`/`f32`) before the *ordinary* arithmetic ladders
-run; the *sized* ladders operate on them directly, preserving width and
-signedness.
+lane. The shared numeric classifier keeps them in a selected sized lane for
+sized integral operations. At a sized/non-sized boundary, compact integer
+lanes convert to `int` and `f16`/`f32` convert to `float` before the selected
+semantic-domain operation.
 
 `i64` and `u64` do not fit the 32-bit NUM_SIZED payload and have their own
-representations — the subject of §5. When ordinary arithmetic mixes a compact
-sized integer with a non-sized value, the target semantics map it to `int`,
-not `int64`; the live `normalize_sized()` implementation still collapses it to
-`INT64` and is an implementation gap tracked in `Lambda_Impl_Numbers.md`.
+representations — the subject of §5. Ordinary arithmetic maps a compact sized
+integer mixed with a non-sized value to `int`, never to `int64`; this is now
+implemented consistently in the evaluator, AST, MIR, vectors, and reductions.
 
 ---
 
@@ -268,7 +267,7 @@ BigInt, type-directed.
 | NUM_SIZED packing, `INT56_MAX`, full-width `i64`/`u64` Item tagging | `lambda/lambda.h` |
 | Sized literal parsing (unsigned parse for `u64`) | `lambda/build_ast.cpp` |
 | Callable conversions, constant-overflow diagnostic E108 | `lambda/build_ast.cpp` (sized type names), `lambda/transpile-mir.cpp` |
-| Current `normalize_sized` shortcut; target type-directed entry mapping; sized arithmetic/bitwise/`ushr` | `lambda/lambda-eval-num.cpp`, `lambda/lambda-decimal.cpp`, `vibe/Lambda_Impl_Numbers.md` |
+| Shared type-directed entry mapping; sized arithmetic/bitwise/`ushr` | `lambda/lambda-number.hpp`, `lambda/lambda-number-types.hpp`, `lambda/lambda-number-runtime.hpp`, `lambda/lambda-eval-num.cpp` |
 | Shared scalar-home return classification and typed bitwise lowering | `lambda/transpile-mir.cpp`, `lambda/mir_emitter_shared.hpp` |
 | Destination scalar storage and typed-array materialization | `lambda/lambda-data-runtime.cpp`, `lambda/lambda-data.cpp`, `lambda/vmap.cpp` |
 | Full-domain number-home boxing, caller-home adoption, ownerless fallback counter | `lambda/lambda-mem.cpp` |
@@ -279,7 +278,7 @@ BigInt, type-directed.
    policy subsequently superseded.** The completed threshold fold fixed signed
    reinterpretation and the `INT64_MAX` sentinel crash. The latest number model
    removes that magnitude branch entirely: all `u64` mixed with non-sized
-   values enter `integer`. Replacement work is tracked in
+   values enter `integer`. The replacement is implemented and verified in
    `Lambda_Impl_Numbers.md`.
 2. **JS-style `ushr` — DONE 2026-07-20.** The builtin performs a logical
    width-preserving shift, changes signed operands to their unsigned
@@ -309,9 +308,8 @@ Current arithmetic realignment plan: `vibe/Lambda_Impl_Numbers.md`.
 - `test/lambda/sized_numeric_type_annot.ls`,
   `test/lambda/sized_numeric_mixed_expr.ls`,
   `test/lambda/compact_typed_arrays.ls` — pre-existing coverage.
-- `test/lambda/sized_numeric_u64_mixed.ls` — historical threshold-fold and
-  crash coverage. `Lambda_Impl_Numbers.md` must replace its result-type
-  expectations with magnitude-independent `integer` promotion while retaining
-  the sentinel, same-width wrap, negation, comparison, and Item-tag regressions.
+- `test/lambda/sized_numeric_u64_mixed.ls` — magnitude-independent `integer`
+  promotion plus the historical sentinel, same-width wrap, negation,
+  comparison, and Item-tag regressions.
 - `test/lambda/sized_numeric_ushr.ls` — signed/unsigned and plain-`int`
   logical shift results, zero and width-edge counts, plus `u64` maximum.

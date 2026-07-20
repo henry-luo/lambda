@@ -1,6 +1,7 @@
 
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
+#include "lambda-number-runtime.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
@@ -35,34 +36,6 @@ Item push_c(int64_t cval) {
 #define IS_SCALAR_NUMERIC(t) (is_integer_type_id((TypeId)(t)) || is_float_type_id((TypeId)(t)) || \
                               (t) == LMD_TYPE_DECIMAL || \
                               (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
-
-// Promote NUM_SIZED / UINT64 without changing their mathematical value before
-// the ordinary arithmetic ladders choose the final result type.
-static inline void normalize_sized(Item &item, TypeId &type) {
-    if (type == LMD_TYPE_NUM_SIZED) {
-        NumSizedType st = item.get_num_type();
-        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
-            item = push_d(item.get_num_sized_as_double());
-            type = LMD_TYPE_FLOAT;
-        } else {
-            item = box_int64_value(item.get_num_sized_as_int64());
-            type = LMD_TYPE_INT64;
-        }
-    } else if (type == LMD_TYPE_UINT64) {
-        uint64_t value = item.get_uint64();
-        if (value <= (uint64_t)INT64_MAX) {
-            item = box_int64_value((int64_t)value);
-            type = LMD_TYPE_INT64;
-        } else {
-            // A signed cast changes u64's value and INT64_MAX is also the
-            // legacy error sentinel. Promote the wide unsigned value directly.
-            item = decimal_from_uint64(value, context);
-            type = LMD_TYPE_DECIMAL;
-        }
-    } else if (type == LMD_TYPE_FLOAT64) {
-        type = LMD_TYPE_FLOAT;
-    }
-}
 
 struct SizedIntegerValue {
     bool is_unsigned;
@@ -149,34 +122,15 @@ static bool read_sized_integer(Item item, TypeId type, SizedIntegerValue* out) {
     return false;
 }
 
-static inline int next_signed_width_for_unsigned(int unsigned_bits) {
-    if (unsigned_bits < 8) return 8;
-    if (unsigned_bits < 16) return 16;
-    if (unsigned_bits < 32) return 32;
-    if (unsigned_bits < 64) return 64;
-    return 64;
-}
-
 static void sized_integer_result_type(const SizedIntegerValue* a, const SizedIntegerValue* b,
         bool* is_unsigned, int* bits) {
-    if (a->is_unsigned == b->is_unsigned) {
-        *is_unsigned = a->is_unsigned;
-        *bits = a->bits > b->bits ? a->bits : b->bits;
-        return;
-    }
-    SizedIntegerValue signed_value = a->is_unsigned ? *b : *a;
-    SizedIntegerValue unsigned_value = a->is_unsigned ? *a : *b;
-    if (signed_value.bits > unsigned_value.bits) {
-        *is_unsigned = false;
-        *bits = signed_value.bits;
-    } else if (unsigned_value.bits < 64) {
-        *is_unsigned = false;
-        *bits = next_signed_width_for_unsigned(unsigned_value.bits);
-        if (*bits < signed_value.bits) *bits = signed_value.bits;
-    } else {
-        *is_unsigned = true;
-        *bits = 64;
-    }
+    LambdaNumericKind left = lambda_numeric_sized_kind(a->is_unsigned, a->bits);
+    LambdaNumericKind right = lambda_numeric_sized_kind(b->is_unsigned, b->bits);
+    LambdaNumericDecision decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_ADD, left, right);
+    // read_sized_integer guarantees the classifier's sized-lane precondition.
+    *is_unsigned = lambda_numeric_sized_is_unsigned(decision.result);
+    *bits = lambda_numeric_sized_bits(decision.result);
 }
 
 static inline int64_t sized_signed_operand(const SizedIntegerValue* value, int bits) {
@@ -273,20 +227,225 @@ static bool sized_float_arithmetic(Item item_a, TypeId type_a, Item item_b, Type
     if (op == SIZED_FLOAT_ADD) value = a + b;
     else if (op == SIZED_FLOAT_SUB) value = a - b;
     else if (op == SIZED_FLOAT_MUL) value = a * b;
-    else {
-        if (b == 0.0) {
-            log_error("sized float division by zero error");
-            *result = ItemError;
-            return true;
-        }
-        value = a / b;
-    }
+    else value = a / b;
 
     // Mixed sized-float lanes keep the smallest explicit lane that contains both operands.
     *result = (st_a == NUM_FLOAT32 || st_b == NUM_FLOAT32)
         ? (Item){ .item = f32_to_item((float)value) }
         : (Item){ .item = f16_to_item((float)value) };
     return true;
+}
+
+static int64_t runtime_integral_as_int64(Item item, LambdaNumericKind kind) {
+    switch (kind) {
+    case LAMBDA_NUM_INT: return item.get_int56();
+    case LAMBDA_NUM_I8: return item.get_i8();
+    case LAMBDA_NUM_I16: return item.get_i16();
+    case LAMBDA_NUM_I32: return item.get_i32();
+    case LAMBDA_NUM_I64: return item.get_int64();
+    case LAMBDA_NUM_U8: return item.get_u8();
+    case LAMBDA_NUM_U16: return item.get_u16();
+    case LAMBDA_NUM_U32: return item.get_u32();
+    default: return 0;
+    }
+}
+
+static double runtime_numeric_as_double(Item item, LambdaNumericKind kind) {
+    switch (kind) {
+    case LAMBDA_NUM_FLOAT: return item.get_double();
+    case LAMBDA_NUM_F16: case LAMBDA_NUM_F32:
+        return item.get_num_sized_as_double();
+    default:
+        return (double)runtime_integral_as_int64(item, kind);
+    }
+}
+
+static Item runtime_numeric_to_integer(Item item, LambdaNumericKind kind) {
+    switch (kind) {
+    case LAMBDA_NUM_INTEGER:
+        return item;
+    case LAMBDA_NUM_U64:
+        return bigint_from_uint64(item.get_uint64());
+    case LAMBDA_NUM_I64:
+        return bigint_from_int64(item.get_int64());
+    case LAMBDA_NUM_INT: case LAMBDA_NUM_I8: case LAMBDA_NUM_I16:
+    case LAMBDA_NUM_I32: case LAMBDA_NUM_U8: case LAMBDA_NUM_U16:
+    case LAMBDA_NUM_U32:
+        return bigint_from_int64(runtime_integral_as_int64(item, kind));
+    default:
+        return ItemError;
+    }
+}
+
+static Item runtime_numeric_decimal_operand(Item item, LambdaNumericKind kind) {
+    // Full-width sized integers enter the semantic tower through integer even
+    // when the final common domain is decimal.  This avoids any binary64 or
+    // signed-cast detour and makes small and large u64 values take one route.
+    if (kind == LAMBDA_NUM_I64 || kind == LAMBDA_NUM_U64 ||
+        kind == LAMBDA_NUM_INTEGER) {
+        return runtime_numeric_to_integer(item, kind);
+    }
+    return item;
+}
+
+static Item apply_decimal_numeric(Item item_a, LambdaNumericKind kind_a,
+        Item item_b, LambdaNumericKind kind_b, LambdaNumericKind result_kind,
+        LambdaNumericOpFamily op) {
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_a(roots, item_a);
+    Rooted<Item> rooted_b(roots, item_b);
+
+    Item converted_a = result_kind == LAMBDA_NUM_INTEGER ?
+        runtime_numeric_to_integer(rooted_a.get(), kind_a) :
+        runtime_numeric_decimal_operand(rooted_a.get(), kind_a);
+    if (get_type_id(converted_a) == LMD_TYPE_ERROR) return ItemError;
+    rooted_a.set(converted_a);
+
+    Item converted_b = result_kind == LAMBDA_NUM_INTEGER ?
+        runtime_numeric_to_integer(rooted_b.get(), kind_b) :
+        runtime_numeric_decimal_operand(rooted_b.get(), kind_b);
+    if (get_type_id(converted_b) == LMD_TYPE_ERROR) return ItemError;
+    rooted_b.set(converted_b);
+
+    switch (op) {
+    case LAMBDA_NUM_OP_ADD: return decimal_add(rooted_a.get(), rooted_b.get(), context);
+    case LAMBDA_NUM_OP_SUB: return decimal_sub(rooted_a.get(), rooted_b.get(), context);
+    case LAMBDA_NUM_OP_MUL: return decimal_mul(rooted_a.get(), rooted_b.get(), context);
+    case LAMBDA_NUM_OP_TRUE_DIV: return decimal_div(rooted_a.get(), rooted_b.get(), context);
+    case LAMBDA_NUM_OP_IDIV: return decimal_idiv(rooted_a.get(), rooted_b.get(), context);
+    case LAMBDA_NUM_OP_MOD: return decimal_mod(rooted_a.get(), rooted_b.get(), context);
+    default: return ItemError;
+    }
+}
+
+static bool apply_classified_numeric(Item item_a, TypeId type_a,
+        Item item_b, TypeId type_b, LambdaNumericOpFamily op, Item* result) {
+    bool int_a = type_a == LMD_TYPE_INT;
+    bool int_b = type_b == LMD_TYPE_INT;
+    bool float_a = is_float_type_id(type_a);
+    bool float_b = is_float_type_id(type_b);
+
+    bool common_a = int_a || float_a;
+    bool common_b = int_b || float_b;
+    if (common_a && common_b) {
+        LambdaNumericKind common_kind_a = int_a ? LAMBDA_NUM_INT : LAMBDA_NUM_FLOAT;
+        LambdaNumericKind common_kind_b = int_b ? LAMBDA_NUM_INT : LAMBDA_NUM_FLOAT;
+        LambdaNumericDecision common = lambda_numeric_classify(
+            op, common_kind_a, common_kind_b);
+        if (!common.valid) return false;
+
+        // These are the classifier's most frequent closed result cells. Avoid
+        // generalized sized/decimal conversion after the classifier has fixed
+        // their domain, or boxed numeric loops pay promotion overhead per item.
+        if (common.result == LAMBDA_NUM_FLOAT) {
+            double left = int_a ? (double)item_a.get_int56() : item_a.get_double();
+            double right = int_b ? (double)item_b.get_int56() : item_b.get_double();
+            double value;
+            if (op == LAMBDA_NUM_OP_ADD) value = left + right;
+            else if (op == LAMBDA_NUM_OP_SUB) value = left - right;
+            else if (op == LAMBDA_NUM_OP_MUL) value = left * right;
+            else if (op == LAMBDA_NUM_OP_TRUE_DIV) value = left / right;
+            else return false;
+            *result = push_d(value);
+            return true;
+        }
+        if (common.result != LAMBDA_NUM_INT) return false;
+
+        int64_t left = item_a.get_int56();
+        int64_t right = item_b.get_int56();
+        if (op == LAMBDA_NUM_OP_ADD) {
+            *result = pack_compact_int_or_float((__int128)left + (__int128)right);
+        } else if (op == LAMBDA_NUM_OP_SUB) {
+            *result = pack_compact_int_or_float((__int128)left - (__int128)right);
+        } else if (op == LAMBDA_NUM_OP_MUL) {
+            *result = pack_compact_int_or_float((__int128)left * (__int128)right);
+        } else if (op == LAMBDA_NUM_OP_TRUE_DIV) {
+            *result = push_d((double)left / (double)right);
+        } else if (right == 0 &&
+                (op == LAMBDA_NUM_OP_IDIV || op == LAMBDA_NUM_OP_MOD)) {
+            log_error("integer arithmetic zero divisor");
+            *result = ItemError;
+        } else if (op == LAMBDA_NUM_OP_IDIV) {
+            *result = (Item){.item = i2it(left / right)};
+        } else if (op == LAMBDA_NUM_OP_MOD) {
+            *result = (Item){.item = i2it(left % right)};
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    LambdaNumericKind kind_a = lambda_numeric_kind_from_item_type(item_a, type_a);
+    LambdaNumericKind kind_b = lambda_numeric_kind_from_item_type(item_b, type_b);
+    if (kind_a == LAMBDA_NUM_INVALID || kind_b == LAMBDA_NUM_INVALID) return false;
+
+    LambdaNumericDecision decision = lambda_numeric_classify(op, kind_a, kind_b);
+    if (!decision.valid) return false;
+
+    if (lambda_numeric_is_sized_integer(decision.result)) {
+        SizedIntegerOp sized_op;
+        if (op == LAMBDA_NUM_OP_ADD) sized_op = SIZED_INTEGER_ADD;
+        else if (op == LAMBDA_NUM_OP_SUB) sized_op = SIZED_INTEGER_SUB;
+        else if (op == LAMBDA_NUM_OP_MUL) sized_op = SIZED_INTEGER_MUL;
+        else if (op == LAMBDA_NUM_OP_IDIV) sized_op = SIZED_INTEGER_DIV;
+        else if (op == LAMBDA_NUM_OP_MOD) sized_op = SIZED_INTEGER_MOD;
+        else return false;
+        return sized_integer_arithmetic(item_a, type_a, item_b,
+            type_b, sized_op, result);
+    }
+
+    if (lambda_numeric_is_sized_float(decision.result)) {
+        SizedFloatOp sized_op = op == LAMBDA_NUM_OP_ADD ? SIZED_FLOAT_ADD :
+            op == LAMBDA_NUM_OP_SUB ? SIZED_FLOAT_SUB :
+            op == LAMBDA_NUM_OP_MUL ? SIZED_FLOAT_MUL : SIZED_FLOAT_DIV;
+        return sized_float_arithmetic(item_a, type_a, item_b,
+            type_b, sized_op, result);
+    }
+
+    if (decision.result == LAMBDA_NUM_INT) {
+        int64_t left = runtime_integral_as_int64(item_a, kind_a);
+        int64_t right = runtime_integral_as_int64(item_b, kind_b);
+        if (op == LAMBDA_NUM_OP_ADD) {
+            *result = pack_compact_int_or_float((__int128)left + (__int128)right);
+        } else if (op == LAMBDA_NUM_OP_SUB) {
+            *result = pack_compact_int_or_float((__int128)left - (__int128)right);
+        } else if (op == LAMBDA_NUM_OP_MUL) {
+            *result = pack_compact_int_or_float((__int128)left * (__int128)right);
+        } else {
+            if (right == 0) {
+                log_error("integer arithmetic zero divisor");
+                *result = ItemError;
+            } else if (op == LAMBDA_NUM_OP_IDIV) {
+                *result = (Item){.item = i2it(left / right)};
+            } else if (op == LAMBDA_NUM_OP_MOD) {
+                *result = (Item){.item = i2it(left % right)};
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if (decision.result == LAMBDA_NUM_FLOAT) {
+        double left = runtime_numeric_as_double(item_a, kind_a);
+        double right = runtime_numeric_as_double(item_b, kind_b);
+        double value;
+        if (op == LAMBDA_NUM_OP_ADD) value = left + right;
+        else if (op == LAMBDA_NUM_OP_SUB) value = left - right;
+        else if (op == LAMBDA_NUM_OP_MUL) value = left * right;
+        else if (op == LAMBDA_NUM_OP_TRUE_DIV) value = left / right;
+        else return false;
+        *result = push_d(value);
+        return true;
+    }
+
+    if (decision.result == LAMBDA_NUM_INTEGER ||
+        decision.result == LAMBDA_NUM_DECIMAL) {
+        *result = apply_decimal_numeric(item_a, kind_a, item_b, kind_b,
+            decision.result, op);
+        return true;
+    }
+    return false;
 }
 
 static bool sized_integer_neg(Item item, TypeId type, Item* result) {
@@ -409,11 +568,99 @@ static bool sized_shift(Item item_a, Item item_b, bool shift_left, Item* result)
     return true;
 }
 
+static bool apply_classified_bitwise(Item item_a, Item item_b,
+        SizedBitwiseOp op, Item* result) {
+    LambdaNumericKind kind_a = lambda_numeric_kind_from_item(item_a);
+    LambdaNumericKind kind_b = lambda_numeric_kind_from_item(item_b);
+    LambdaNumericDecision decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_BITWISE, kind_a, kind_b);
+    if (!decision.valid) return false;
+
+    if (lambda_numeric_is_sized_integer(decision.result)) {
+        return sized_bitwise_binary(item_a, item_b, op, result);
+    }
+    if (decision.result == LAMBDA_NUM_INT) {
+        int64_t left = runtime_integral_as_int64(item_a, kind_a);
+        int64_t right = runtime_integral_as_int64(item_b, kind_b);
+        uint64_t raw = op == SIZED_BITWISE_AND ? (uint64_t)left & (uint64_t)right :
+            op == SIZED_BITWISE_OR ? (uint64_t)left | (uint64_t)right :
+                                     (uint64_t)left ^ (uint64_t)right;
+        *result = pack_compact_int_or_float((__int128)int64_from_bits(raw));
+        return true;
+    }
+    if (decision.result == LAMBDA_NUM_INTEGER) {
+        RootFrame roots((Context*)context, 2);
+        Rooted<Item> left(roots, item_a);
+        Rooted<Item> right(roots, item_b);
+        left.set(runtime_numeric_to_integer(left.get(), kind_a));
+        if (get_type_id(left.get()) == LMD_TYPE_ERROR) {
+            *result = ItemError;
+            return true;
+        }
+        right.set(runtime_numeric_to_integer(right.get(), kind_b));
+        if (get_type_id(right.get()) == LMD_TYPE_ERROR) {
+            *result = ItemError;
+            return true;
+        }
+        *result = op == SIZED_BITWISE_AND ? bigint_bitwise_and(left.get(), right.get()) :
+            op == SIZED_BITWISE_OR ? bigint_bitwise_or(left.get(), right.get()) :
+                                    bigint_bitwise_xor(left.get(), right.get());
+        return true;
+    }
+    return false;
+}
+
+static bool apply_classified_shift(Item item_a, Item item_b,
+        bool shift_left, Item* result) {
+    LambdaNumericKind kind_a = lambda_numeric_kind_from_item(item_a);
+    LambdaNumericKind kind_b = lambda_numeric_kind_from_item(item_b);
+    LambdaNumericDecision decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_SHIFT, kind_a, kind_b);
+    if (!decision.valid) return false;
+
+    if (lambda_numeric_is_sized_integer(decision.result)) {
+        return sized_shift(item_a, item_b, shift_left, result);
+    }
+    if (decision.result == LAMBDA_NUM_INT) {
+        int64_t left = runtime_integral_as_int64(item_a, kind_a);
+        int64_t count = runtime_integral_as_int64(item_b, kind_b);
+        if (count < 0) {
+            log_error("integer negative shift count");
+            *result = ItemError;
+            return true;
+        }
+        uint64_t raw = count >= 64 ? 0 : shift_left ?
+            (uint64_t)left << count : (uint64_t)(left >> count);
+        *result = pack_compact_int_or_float((__int128)int64_from_bits(raw));
+        return true;
+    }
+    if (decision.result == LAMBDA_NUM_INTEGER) {
+        RootFrame roots((Context*)context, 2);
+        Rooted<Item> left(roots, item_a);
+        Rooted<Item> right(roots, item_b);
+        left.set(runtime_numeric_to_integer(left.get(), kind_a));
+        if (get_type_id(left.get()) == LMD_TYPE_ERROR) {
+            *result = ItemError;
+            return true;
+        }
+        right.set(runtime_numeric_to_integer(right.get(), kind_b));
+        if (get_type_id(right.get()) == LMD_TYPE_ERROR) {
+            *result = ItemError;
+            return true;
+        }
+        *result = shift_left ? bigint_left_shift(left.get(), right.get()) :
+                               bigint_right_shift(left.get(), right.get());
+        return true;
+    }
+    return false;
+}
+
 // forward declarations for vector ops (defined in lambda-vector.cpp)
 Item vec_add(Item a, Item b);
 Item vec_sub(Item a, Item b);
 Item vec_mul(Item a, Item b);
 Item vec_div(Item a, Item b);
+Item vec_idiv(Item a, Item b);
 Item vec_mod(Item a, Item b);
 Item vec_pow(Item a, Item b);
 
@@ -432,15 +679,8 @@ static int64_t vector_length(Item item) {
 static Item vector_get(Item item, int64_t index) {
     TypeId type = get_type_id(item);
     switch (type) {
-        case LMD_TYPE_ARRAY_NUM: {
-            ArrayNum* arr = item.array_num;
-            switch (arr->get_elem_type()) {
-                case ELEM_INT:   return { .item = i2it(arr->items[index]) };
-                case ELEM_INT64: return box_int64_value(arr->items[index]);
-                case ELEM_FLOAT64: return push_d(arr->float_items[index]);
-                default: return ItemError;
-            }
-        }
+        case LMD_TYPE_ARRAY_NUM:
+            return array_num_read_item(item.array_num, index);
         case LMD_TYPE_ARRAY:
             return item.array->items[index];
         case LMD_TYPE_RANGE:
@@ -450,23 +690,50 @@ static Item vector_get(Item item, int64_t index) {
     }
 }
 
-static bool aggregate_number_value(Item item, double* out, bool* is_float) {
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_NULL) return false;
-    if (type == LMD_TYPE_INT) {
-        *out = (double)item.get_int56();
-        return true;
+Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out) {
+    GUARD_ERROR1(item);
+    int64_t length = vector_length(item);
+    if (length < 0) {
+        if (count_out) *count_out = IS_NUMERIC_ID(get_type_id(item)) ? 1 : 0;
+        return IS_NUMERIC_ID(get_type_id(item)) ? item : ItemError;
     }
-    if (type == LMD_TYPE_INT64) {
-        *out = (double)item.get_int64();
-        return true;
+
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_source(roots, item);
+    Rooted<Item> accumulator(roots, ItemNull);
+    int64_t count = 0;
+    for (int64_t i = 0; i < length; i++) {
+        Item element = vector_get(rooted_source.get(), i);
+        TypeId element_type = get_type_id(element);
+        if (element_type == LMD_TYPE_NULL) {
+            if (skip_null) continue;
+            if (count_out) *count_out = count;
+            return ItemNull;
+        }
+        if (!multiply && element_type == LMD_TYPE_BOOL) {
+            // Boolean masks are numeric counts for sum(); retain the established
+            // mask-reduction contract while the fold shares scalar arithmetic.
+            element = (Item){.item = i2it(element.bool_val ? 1 : 0)};
+            element_type = LMD_TYPE_INT;
+        }
+        if (!IS_NUMERIC_ID(element_type)) {
+            log_error("numeric fold: non-numeric element at index %ld", i);
+            return ItemError;
+        }
+        if (count == 0) {
+            accumulator.set(element);
+        } else {
+            Item next = multiply ? fn_mul(accumulator.get(), element) :
+                                   fn_add(accumulator.get(), element);
+            if (get_type_id(next) == LMD_TYPE_ERROR) return ItemError;
+            accumulator.set(next);
+        }
+        count++;
     }
-    if (is_float_type_id(type)) {
-        *out = item.get_double();
-        *is_float = true;
-        return true;
-    }
-    return false;
+    if (count_out) *count_out = count;
+    return count == 0 ? (skip_null ? ItemNull :
+        (multiply ? (Item){.item = i2it(1)} : (Item){.item = i2it(0)})) :
+        accumulator.get();
 }
 
 Item fn_add(Item item_a, Item item_b) {
@@ -482,81 +749,10 @@ Item fn_add(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_add(item_a, item_b);
     }
-
-    Item sized_result;
-    if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_ADD, &sized_result)) {
-        return sized_result;
-    }
-    if (sized_float_arithmetic(item_a, type_a, item_b, type_b, SIZED_FLOAT_ADD, &sized_result)) {
-        return sized_result;
-    }
-
-    normalize_sized(item_a, type_a);
-    normalize_sized(item_b, type_b);
-
-    if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
-        int64_t a = item_a.get_int56();
-        int64_t b = item_b.get_int56();
-        return pack_compact_int_or_float((__int128)a + (__int128)b);
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
-        return box_int64_value(item_a.get_int64() + item_b.get_int64());
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
-        return box_int64_value(item_a.get_int56() + item_b.get_int64());
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
-        return box_int64_value(item_a.get_int64() + item_b.get_int56());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        return push_d(item_a.get_double() + item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.get_int56() + item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
-        return push_d(item_a.get_double() + (double)item_b.get_int56());
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.get_int64() + item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
-        return push_d(item_a.get_double() + (double)item_b.get_int64());
-    }
-    // decimal support - delegate to centralized decimal handling
-    else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
-        return decimal_add(item_a, item_b, context);
-    }
-
-    // vectorized addition for Arrays
-    // todo: array + number
-    // ArrayInt and ArrayInt64 support
-    else if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr_a = item_a.array_num;
-        ArrayNum* arr_b = item_b.array_num;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in addition");
-            return ItemError;
-        }
-        ArrayNumElemType et = arr_a->get_elem_type();
-        if (et == ELEM_FLOAT64) {
-            ArrayNum* result = array_float_new(arr_a->length);
-            for (int64_t i = 0; i < arr_a->length; i++) {
-                result->float_items[i] = arr_a->float_items[i] + arr_b->float_items[i];
-            }
-            return { .array_num = result };
-        } else {
-            ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(arr_a->length) : array_int_new(arr_a->length);
-            for (int64_t i = 0; i < arr_a->length; i++) {
-                result->items[i] = arr_a->items[i] + arr_b->items[i];
-            }
-            return { .array_num = result };
-        }
-    }
-    // todo: mixed array types
-    else {
-        log_error("unknown add type: %d, %d", get_type_id(item_a), get_type_id(item_b));
-    }
+    Item result;
+    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
+            LAMBDA_NUM_OP_ADD, &result)) return result;
+    log_error("unknown add type: %d, %d", type_a, type_b);
     return ItemError;
 }
 
@@ -573,86 +769,10 @@ Item fn_mul(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_mul(item_a, item_b);
     }
-
-    Item sized_result;
-    if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_MUL, &sized_result)) {
-        return sized_result;
-    }
-    if (sized_float_arithmetic(item_a, type_a, item_b, type_b, SIZED_FLOAT_MUL, &sized_result)) {
-        return sized_result;
-    }
-
-    normalize_sized(item_a, type_a);
-    normalize_sized(item_b, type_b);
-
-    if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
-        int64_t a = item_a.get_int56();
-        int64_t b = item_b.get_int56();
-        return pack_compact_int_or_float((__int128)a * (__int128)b);
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
-        return box_int64_value(item_a.get_int64() * item_b.get_int64());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        return push_d(item_a.get_double() * item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.get_int56() * item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
-        return push_d(item_a.get_double() * (double)item_b.get_int56());
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.get_int64() * item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
-        return push_d(item_a.get_double() * (double)item_b.get_int64());
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
-        return box_int64_value(item_a.get_int56() * item_b.get_int64());
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
-        return box_int64_value(item_a.get_int64() * item_b.get_int56());
-    }
-    // else if (type_a == LMD_TYPE_STRING && type_b == LMD_TYPE_INT) {
-    //     String* str_a = (String*)item_a.pointer;
-    //     String* result = str_repeat(str_a, item_b.int_val);
-    //     return { .item = s2it(result) };
-    // }
-    // else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_STRING) {
-    //     String* str_b = (String*)item_b.pointer;
-    //     String* result = str_repeat(str_b, item_a.int_val);
-    //     return { .item = s2it(result) };
-    // }
-    // decimal support - delegate to centralized decimal handling
-    else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
-        return decimal_mul(item_a, item_b, context);
-    }
-    else if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr_a = item_a.array_num;
-        ArrayNum* arr_b = item_b.array_num;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in multiplication");
-            return ItemError;
-        }
-        ArrayNumElemType et = arr_a->get_elem_type();
-        if (et == ELEM_FLOAT64) {
-            ArrayNum* result = array_float_new(arr_a->length);
-            for (int64_t i = 0; i < arr_a->length; i++) {
-                result->float_items[i] = arr_a->float_items[i] * arr_b->float_items[i];
-            }
-            return { .array_num = result };
-        } else {
-            ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(arr_a->length) : array_int_new(arr_a->length);
-            for (int64_t i = 0; i < arr_a->length; i++) {
-                result->items[i] = arr_a->items[i] * arr_b->items[i];
-            }
-            return { .array_num = result };
-        }
-    }
-    else {
-        log_error("unknown mul type: %d, %d", get_type_id(item_a), get_type_id(item_b));
-    }
+    Item result;
+    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
+            LAMBDA_NUM_OP_MUL, &result)) return result;
+    log_error("unknown mul type: %d, %d", type_a, type_b);
     return ItemError;
 }
 
@@ -669,76 +789,10 @@ Item fn_sub(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_sub(item_a, item_b);
     }
-
-    Item sized_result;
-    if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_SUB, &sized_result)) {
-        return sized_result;
-    }
-    if (sized_float_arithmetic(item_a, type_a, item_b, type_b, SIZED_FLOAT_SUB, &sized_result)) {
-        return sized_result;
-    }
-
-    normalize_sized(item_a, type_a);
-    normalize_sized(item_b, type_b);
-
-    if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
-        int64_t a = item_a.get_int56();
-        int64_t b = item_b.get_int56();
-        return pack_compact_int_or_float((__int128)a - (__int128)b);
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
-        return box_int64_value(item_a.get_int64() - item_b.get_int64());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        return push_d(item_a.get_double() - item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.get_int56() - item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
-        return push_d(item_a.get_double() - (double)item_b.get_int56());
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
-        return box_int64_value(item_a.get_int56() - item_b.get_int64());
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
-        return box_int64_value(item_a.get_int64() - item_b.get_int56());
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.get_int64() - item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
-        return push_d(item_a.get_double() - (double)item_b.get_int64());
-    }
-    // decimal support - delegate to centralized decimal handling
-    else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
-        return decimal_sub(item_a, item_b, context);
-    }
-    else if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr_a = item_a.array_num;
-        ArrayNum* arr_b = item_b.array_num;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in subtraction");
-            return ItemError;
-        }
-        ArrayNumElemType et = arr_a->get_elem_type();
-        if (et == ELEM_FLOAT64) {
-            ArrayNum* result = array_float_new(arr_a->length);
-            for (int64_t i = 0; i < arr_a->length; i++) {
-                result->float_items[i] = arr_a->float_items[i] - arr_b->float_items[i];
-            }
-            return { .array_num = result };
-        } else {
-            ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(arr_a->length) : array_int_new(arr_a->length);
-            for (int64_t i = 0; i < arr_a->length; i++) {
-                result->items[i] = arr_a->items[i] - arr_b->items[i];
-            }
-            return { .array_num = result };
-        }
-    }
-    else {
-        log_error("unknown sub type: %d, %d", get_type_id(item_a), get_type_id(item_b));
-    }
+    Item result;
+    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
+            LAMBDA_NUM_OP_SUB, &result)) return result;
+    log_error("unknown sub type: %d, %d", type_a, type_b);
     return ItemError;
 }
 
@@ -755,119 +809,10 @@ Item fn_div(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_div(item_a, item_b);
     }
-
-    Item sized_result;
-    if (sized_float_arithmetic(item_a, type_a, item_b, type_b, SIZED_FLOAT_DIV, &sized_result)) {
-        return sized_result;
-    }
-
-    normalize_sized(item_a, type_a);
-    normalize_sized(item_b, type_b);
-
-    if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
-        int64_t b = item_b.get_int56();
-        if (b == 0) {
-            log_error("division by zero error");
-            return ItemError;
-        }
-        // always promote to double for division
-        return push_d((double)item_a.get_int56() / (double)b);
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
-        if (item_b.get_int64() == 0) {
-            log_error("division by zero error");
-            return ItemError;
-        }
-        return push_d((double)item_a.get_int64() / (double)item_b.get_int64());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        if (item_b.get_double() == 0.0) {
-            log_error("division by zero error");
-            return ItemError;
-        }
-        return push_d(item_a.get_double() / item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
-        if (item_b.get_double() == 0.0) {
-            log_error("division by zero error");
-            return ItemError;
-        }
-        return push_d((double)item_a.get_int56() / item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
-        int64_t b = item_b.get_int56();
-        if (b == 0) {
-            log_error("division by zero error");
-            return ItemError;
-        }
-        return push_d(item_a.get_double() / (double)b);
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
-        int64_t a_val = item_a.get_int64();
-        if (item_b.get_double() == 0.0) {
-            log_error("float division by zero error");
-            return ItemError;
-        }
-        return push_d((double)a_val / item_b.get_double());
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
-        int64_t b_val = item_b.get_int64();
-        if (b_val == 0) {
-            log_error("division by zero error");
-            return ItemError;
-        }
-        return push_d(item_a.get_double() / (double)b_val);
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
-        if (item_b.get_int64() == 0) {
-            log_error("division by zero error");
-            return ItemError;
-        }
-        return push_d((double)item_a.get_int56() / (double)item_b.get_int64());
-    }
-    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
-        int64_t b = item_b.get_int56();
-        if (b == 0) {
-            log_error("division by zero error");
-            return ItemError;
-        }
-        return push_d((double)item_a.get_int64() / (double)b);
-    }
-    // decimal support - delegate to centralized decimal handling
-    else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
-        return decimal_div(item_a, item_b, context);
-    }
-    else if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr_a = item_a.array_num;
-        ArrayNum* arr_b = item_b.array_num;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in division");
-            return ItemError;
-        }
-        ArrayNumElemType et = arr_a->get_elem_type();
-        ArrayNum* result = array_float_new(arr_a->length);
-        if (et == ELEM_FLOAT64) {
-            for (int64_t i = 0; i < arr_a->length; i++) {
-                if (arr_b->float_items[i] == 0.0) {
-                    log_error("float division by zero error in array element %" PRId64, i);
-                    return ItemError;
-                }
-                result->float_items[i] = arr_a->float_items[i] / arr_b->float_items[i];
-            }
-        } else {
-            for (int64_t i = 0; i < arr_a->length; i++) {
-                if (arr_b->items[i] == 0) {
-                    log_error("integer division by zero error in array element %" PRId64, i);
-                    return ItemError;
-                }
-                result->float_items[i] = (double)arr_a->items[i] / (double)arr_b->items[i];
-            }
-        }
-        return { .array_num = result };
-    }
-    else {
-        log_error("unknown div type: %d, %d\n", get_type_id(item_a), get_type_id(item_b));
-    }
+    Item result;
+    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
+            LAMBDA_NUM_OP_TRUE_DIV, &result)) return result;
+    log_error("unknown div type: %d, %d", type_a, type_b);
     return ItemError;
 }
 
@@ -878,53 +823,16 @@ Item fn_idiv(Item item_a, Item item_b) {
     TypeId ta = get_type_id(item_a), tb = get_type_id(item_b);
     if (ta == LMD_TYPE_NULL || tb == LMD_TYPE_NULL) return ItemNull;
 
-    Item sized_result;
-    if (sized_integer_arithmetic(item_a, ta, item_b, tb, SIZED_INTEGER_DIV, &sized_result)) {
-        return sized_result;
+    if ((IS_SCALAR_NUMERIC(ta) && IS_VECTOR_TYPE(tb)) ||
+        (IS_VECTOR_TYPE(ta) && IS_SCALAR_NUMERIC(tb)) ||
+        (IS_VECTOR_TYPE(ta) && IS_VECTOR_TYPE(tb))) {
+        return vec_idiv(item_a, item_b);
     }
 
-    normalize_sized(item_a, ta);
-    normalize_sized(item_b, tb);
-
-    if (get_type_id(item_a) == LMD_TYPE_DECIMAL || get_type_id(item_b) == LMD_TYPE_DECIMAL) {
-        // A wide u64 normalizes to decimal; preserve its exact integer quotient
-        // instead of falling through the legacy int64-only idiv ladder.
-        return decimal_idiv(item_a, item_b, context);
-    }
-
-    // Check for division by zero
-    bool is_zero = false;
-    if (get_type_id(item_b) == LMD_TYPE_INT) {
-        is_zero = (item_b.get_int56() == 0);
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_INT64 && item_b.get_int64() == 0) {
-        is_zero = true;
-    }
-
-    if (is_zero) {
-        log_error("integer division by zero error");
-        return ItemError;
-    }
-
-    if (get_type_id(item_a) == LMD_TYPE_INT && get_type_id(item_b) == LMD_TYPE_INT) {
-        int64_t a_val = item_a.get_int56();
-        int64_t b_val = item_b.get_int56();
-        return (Item) { .item = i2it(a_val / b_val) };
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_INT64 && get_type_id(item_b) == LMD_TYPE_INT64) {
-        return box_int64_value(item_a.get_int64() / item_b.get_int64());
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_INT && get_type_id(item_b) == LMD_TYPE_INT64) {
-        int64_t a_val = item_a.get_int56();
-        return box_int64_value(a_val / item_b.get_int64());
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_INT64 && get_type_id(item_b) == LMD_TYPE_INT) {
-        int64_t b_val = item_b.get_int56();
-        return box_int64_value(item_a.get_int64() / b_val);
-    }
-    else {
-        log_error("unknown idiv type: %d, %d\n", get_type_id(item_a), get_type_id(item_b));
-    }
+    Item result;
+    if (apply_classified_numeric(item_a, ta, item_b, tb,
+            LAMBDA_NUM_OP_IDIV, &result)) return result;
+    log_error("unknown idiv type: %d, %d", ta, tb);
     return ItemError;
 }
 
@@ -952,46 +860,30 @@ Item fn_pow(Item item_a, Item item_b) {
         return vec_pow(item_a, item_b);
     }
 
-    normalize_sized(item_a, type_a);
-    normalize_sized(item_b, type_b);
-
-    if (get_type_id(item_a) == LMD_TYPE_DECIMAL || get_type_id(item_b) == LMD_TYPE_DECIMAL) {
-        return decimal_pow(item_a, item_b, context);
-    }
-
-    // non-decimal logic
-    double base = 0.0, exponent = 0.0;
-
-    // convert first argument to double
-    if (get_type_id(item_a) == LMD_TYPE_INT) {
-        base = (double)item_a.get_int56();
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_INT64) {
-        base = (double)item_a.get_int64();
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_FLOAT) {
-        base = item_a.get_double();
-    }
-    else {
-        log_error("unknown pow base type: %d", get_type_id(item_a));
+    LambdaNumericKind kind_a = lambda_numeric_kind_from_item(item_a);
+    LambdaNumericKind kind_b = lambda_numeric_kind_from_item(item_b);
+    if (kind_a == LAMBDA_NUM_INVALID || kind_b == LAMBDA_NUM_INVALID) {
+        log_error("unknown pow types: %d, %d", type_a, type_b);
         return ItemError;
     }
 
-    // convert second argument to double
-    if (get_type_id(item_b) == LMD_TYPE_INT) {
-        exponent = (double)item_b.get_int56();
+    bool decimal_domain = kind_a == LAMBDA_NUM_INTEGER || kind_b == LAMBDA_NUM_INTEGER ||
+        kind_a == LAMBDA_NUM_DECIMAL || kind_b == LAMBDA_NUM_DECIMAL ||
+        kind_a == LAMBDA_NUM_I64 || kind_b == LAMBDA_NUM_I64 ||
+        kind_a == LAMBDA_NUM_U64 || kind_b == LAMBDA_NUM_U64;
+    if (decimal_domain) {
+        RootFrame roots((Context*)context, 2);
+        Rooted<Item> rooted_a(roots, item_a);
+        Rooted<Item> rooted_b(roots, item_b);
+        rooted_a.set(runtime_numeric_decimal_operand(rooted_a.get(), kind_a));
+        if (get_type_id(rooted_a.get()) == LMD_TYPE_ERROR) return ItemError;
+        rooted_b.set(runtime_numeric_decimal_operand(rooted_b.get(), kind_b));
+        if (get_type_id(rooted_b.get()) == LMD_TYPE_ERROR) return ItemError;
+        return decimal_pow(rooted_a.get(), rooted_b.get(), context);
     }
-    else if (get_type_id(item_b) == LMD_TYPE_INT64) {
-        exponent = (double)item_b.get_int64();
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_FLOAT) {
-        exponent = item_b.get_double();
-    }
-    else {
-        log_error("unknown pow exponent type: %d", get_type_id(item_b));
-        return ItemError;
-    }
-    return push_d(pow(base, exponent));
+
+    return push_d(pow(runtime_numeric_as_double(item_a, kind_a),
+                      runtime_numeric_as_double(item_b, kind_b)));
 }
 
 Item fn_mod(Item item_a, Item item_b) {
@@ -1007,75 +899,11 @@ Item fn_mod(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_mod(item_a, item_b);
     }
-
-    Item sized_result;
-    if (sized_integer_arithmetic(item_a, type_a, item_b, type_b, SIZED_INTEGER_MOD, &sized_result)) {
-        return sized_result;
-    }
-
-    normalize_sized(item_a, type_a);
-    normalize_sized(item_b, type_b);
-
-    // Handle decimal types - delegate to centralized decimal handling
-    if (get_type_id(item_a) == LMD_TYPE_DECIMAL || get_type_id(item_b) == LMD_TYPE_DECIMAL) {
-        return decimal_mod(item_a, item_b, context);
-    }
-
-    // Original non-decimal logic for integer mod
-    if (get_type_id(item_a) == LMD_TYPE_INT && get_type_id(item_b) == LMD_TYPE_INT) {
-        int64_t a_val = item_a.get_int56();
-        int64_t b_val = item_b.get_int56();
-        if (b_val == 0) {
-            log_error("modulo by zero error");
-            return ItemError;
-        }
-        return (Item) { .item = i2it(a_val % b_val) };
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_INT64 && get_type_id(item_b) == LMD_TYPE_INT64) {
-        int64_t a_val = item_a.get_int64(), b_val = item_b.get_int64();
-        if (b_val == 0) {
-            log_error("modulo by zero error");
-            return ItemError;
-        }
-        return box_int64_value(a_val % b_val);
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_INT && get_type_id(item_b) == LMD_TYPE_INT64) {
-        int64_t a_val = item_a.get_int56(), b_val = item_b.get_int64();
-        if (b_val == 0) {
-            log_error("modulo by zero error");
-            return ItemError;
-        }
-        return box_int64_value(a_val % b_val);
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_INT64 && get_type_id(item_b) == LMD_TYPE_INT) {
-        int64_t a_val = item_a.get_int64(), b_val = item_b.get_int56();
-        if (b_val == 0) {
-            log_error("modulo by zero error");
-            return ItemError;
-        }
-        return box_int64_value(a_val % b_val);
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_FLOAT || get_type_id(item_b) == LMD_TYPE_FLOAT) {
-        // float modulo: promote both operands to double, use fmod()
-        double a_val = 0.0, b_val = 0.0;
-        if (get_type_id(item_a) == LMD_TYPE_INT)        a_val = (double)item_a.get_int56();
-        else if (get_type_id(item_a) == LMD_TYPE_INT64)  a_val = (double)item_a.get_int64();
-        else if (get_type_id(item_a) == LMD_TYPE_FLOAT)  a_val = item_a.get_double();
-
-        if (get_type_id(item_b) == LMD_TYPE_INT)        b_val = (double)item_b.get_int56();
-        else if (get_type_id(item_b) == LMD_TYPE_INT64)  b_val = (double)item_b.get_int64();
-        else if (get_type_id(item_b) == LMD_TYPE_FLOAT)  b_val = item_b.get_double();
-
-        if (b_val == 0.0) {
-            log_error("float modulo by zero error");
-            return ItemError;
-        }
-        return push_d(fmod(a_val, b_val));
-    }
-    else {
-        log_error("unknown mod type: %d, %d\n", get_type_id(item_a), get_type_id(item_b));
-        return ItemError;
-    }
+    Item result;
+    if (apply_classified_numeric(item_a, type_a, item_b, type_b,
+            LAMBDA_NUM_OP_MOD, &result)) return result;
+    log_error("unknown mod type: %d, %d", type_a, type_b);
+    return ItemError;
 }
 
 // Numeric system functions implementation
@@ -1084,7 +912,20 @@ Item fn_abs(Item item) {
     GUARD_ERROR1(item);
     // abs() - absolute value of a number or element-wise for arrays
     TypeId type = get_type_id(item);
-    normalize_sized(item, type);
+    LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
+    if (lambda_numeric_is_sized_integer(kind)) {
+        if (lambda_numeric_sized_is_unsigned(kind)) return item;
+        int64_t value = runtime_integral_as_int64(item, kind);
+        if (value >= 0) return item;
+        Item result;
+        return sized_integer_neg(item, type, &result) ? result : ItemError;
+    }
+    if (lambda_numeric_is_sized_float(kind)) {
+        double value = fabs(item.get_num_sized_as_double());
+        return kind == LAMBDA_NUM_F32 ?
+            (Item){.item = f32_to_item((float)value)} :
+            (Item){.item = f16_to_item((float)value)};
+    }
     if (type == LMD_TYPE_INT) {
         int64_t val = item.get_int56();
         return (Item) { .item = i2it(val < 0 ? -val : val) };
@@ -1116,6 +957,10 @@ Item fn_abs(Item item) {
                 result->float_items[i] = (double)(val < 0 ? -val : val);
             } else if (elem_type == LMD_TYPE_FLOAT) {
                 result->float_items[i] = fabs(elem.get_double());
+            } else if (elem_type == LMD_TYPE_NUM_SIZED) {
+                // Compact typed-array arithmetic keeps its sized lane, so unary
+                // consumers must read that representation instead of rejecting it.
+                result->float_items[i] = fabs(elem.get_num_sized_as_double());
             } else {
                 log_error("abs: non-numeric element at index %ld, type: %d", i, elem_type);
                 return ItemError;
@@ -1136,10 +981,14 @@ Item fn_round(Item item) {
     GUARD_ERROR1(item);
     // round() - round to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
-    normalize_sized(item, type);
-    if (is_integer_type_id(type)) {
+    LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
+    if (kind == LAMBDA_NUM_INT || kind == LAMBDA_NUM_INTEGER ||
+        lambda_numeric_is_sized_integer(kind)) {
         // Already an integer, return as-is
         return item;
+    }
+    else if (lambda_numeric_is_sized_float(kind)) {
+        return push_d(round(item.get_num_sized_as_double()));
     }
     else if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
@@ -1182,9 +1031,13 @@ Item fn_floor(Item item) {
     GUARD_ERROR1(item);
     // floor() - round down to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
-    normalize_sized(item, type);
-    if (is_integer_type_id(type)) {
+    LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
+    if (kind == LAMBDA_NUM_INT || kind == LAMBDA_NUM_INTEGER ||
+        lambda_numeric_is_sized_integer(kind)) {
         return item;  // return as-is
+    }
+    else if (lambda_numeric_is_sized_float(kind)) {
+        return push_d(floor(item.get_num_sized_as_double()));
     }
     else if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
@@ -1227,9 +1080,13 @@ Item fn_ceil(Item item) {
     GUARD_ERROR1(item);
     // ceil() - round up to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
-    normalize_sized(item, type);
-    if (is_integer_type_id(type)) {
+    LambdaNumericKind kind = lambda_numeric_kind_from_item(item);
+    if (kind == LAMBDA_NUM_INT || kind == LAMBDA_NUM_INTEGER ||
+        lambda_numeric_is_sized_integer(kind)) {
         return item;  // return as-is
+    }
+    else if (lambda_numeric_is_sized_float(kind)) {
+        return push_d(ceil(item.get_num_sized_as_double()));
     }
     else if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
@@ -1268,592 +1125,109 @@ Item fn_ceil(Item item) {
     }
 }
 
+static Item numeric_extreme_pair(Item left, Item right, bool minimum, bool* valid) {
+    LambdaNumericComparison comparison = lambda_numeric_compare(left, right);
+    if (!comparison.valid) {
+        if (valid) *valid = false;
+        return ItemError;
+    }
+    if (valid) *valid = true;
+
+    LambdaNumericRuntimePart left_part;
+    LambdaNumericRuntimePart right_part;
+    bool left_simple = lambda_numeric_runtime_part(left, &left_part);
+    bool right_simple = lambda_numeric_runtime_part(right, &right_part);
+    bool left_float = left_simple && left_part.kind == LAMBDA_NUM_PART_FLOAT;
+    bool right_float = right_simple && right_part.kind == LAMBDA_NUM_PART_FLOAT;
+    if (comparison.unordered) {
+        // Preserve the originating NaN and its sized-float payload when possible.
+        return left_float && isnan(left_part.float_value) ? left : right;
+    }
+
+    if (comparison.order == 0 && (left_float || right_float)) {
+        double left_value = left_float ? left_part.float_value : 0.0;
+        double right_value = right_float ? right_part.float_value : 0.0;
+        if (left_value == 0.0 && right_value == 0.0) {
+            bool negative = minimum ? signbit(left_value) || signbit(right_value) :
+                                      signbit(left_value) && signbit(right_value);
+            if (left_float && signbit(left_value) == negative) return left;
+            if (right_float && signbit(right_value) == negative) return right;
+            // Mixed integer zero and -0 need a synthesized +0 for max.
+            return push_d(negative ? -0.0 : 0.0);
+        }
+    }
+
+    return minimum ? (comparison.order <= 0 ? left : right) :
+                     (comparison.order >= 0 ? left : right);
+}
+
+static Item numeric_extreme_collection(Item item, bool minimum) {
+    int64_t length = vector_length(item);
+    if (length == 0) return ItemNull;
+    if (length < 0) return IS_NUMERIC_ID(get_type_id(item)) ? item : ItemError;
+
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_source(roots, item);
+    Rooted<Item> selected(roots, vector_get(item, 0));
+    if (get_type_id(selected.get()) == LMD_TYPE_NULL) return ItemNull;
+    if (!IS_NUMERIC_ID(get_type_id(selected.get()))) return ItemError;
+
+    for (int64_t i = 1; i < length; i++) {
+        Item element = vector_get(rooted_source.get(), i);
+        if (get_type_id(element) == LMD_TYPE_NULL) return ItemNull;
+        bool valid = false;
+        Item next = numeric_extreme_pair(selected.get(), element, minimum, &valid);
+        if (!valid) return ItemError;
+        selected.set(next);
+    }
+    return selected.get();
+}
+
 Item fn_min2(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
-    // axis reduction: min(arr, axis) — the scalar pairwise path never accepted an
-    // array first arg, so an ArrayNum here unambiguously means an axis reduce.
-    // (Also reached by min(arr, axis: N) — the named value lands in this slot.)
-    if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) {
-        return fn_min_axis(item_a, item_b);
-    }
-    // two argument scalar min case
-    double a_val = 0.0, b_val = 0.0;
-    bool is_float = false;
-
-    // Convert first argument
-    if (get_type_id(item_a) == LMD_TYPE_INT) {
-        a_val = (double)item_a.get_int56();
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_INT64) {
-        a_val = (double)item_a.get_int64();
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_FLOAT) {
-        a_val = item_a.get_double();
-        is_float = true;
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_NUM_SIZED) {
-        NumSizedType st = item_a.get_num_type();
-        a_val = item_a.get_num_sized_as_double();
-        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) is_float = true;
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_UINT64) {
-        a_val = (double)item_a.get_uint64();
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_DECIMAL) {
-        log_error("decimal not supported yet in fn_min");
-        return ItemError;
-    }
-    else {
-        log_debug("min not supported for type: %d", get_type_id(item_a));
-        return ItemError;
-    }
-
-    // convert second argument
-    if (get_type_id(item_b) == LMD_TYPE_INT) {
-        b_val = (double)item_b.get_int56();
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_INT64) {
-        b_val = (double)item_b.get_int64();
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_FLOAT) {
-        b_val = item_b.get_double();
-        is_float = true;
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_NUM_SIZED) {
-        NumSizedType st = item_b.get_num_type();
-        b_val = item_b.get_num_sized_as_double();
-        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) is_float = true;
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_UINT64) {
-        b_val = (double)item_b.get_uint64();
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_DECIMAL) {
-        log_error("decimal not supported yet in fn_min");
-        return ItemError;
-    }
-    else {
-        log_debug("min not supported for type: %d", get_type_id(item_b));
-        return ItemError;
-    }
-
-    double result;
-    if (isnan(a_val) || isnan(b_val)) {
-        result = NAN;
-        is_float = true;
-    } else if (a_val == 0.0 && b_val == 0.0) {
-        result = (signbit(a_val) || signbit(b_val)) ? -0.0 : 0.0;
-        is_float = true;
-    } else {
-        result = a_val < b_val ? a_val : b_val;
-    }
-    // Return as integer if both inputs were integers
-    if (!is_float) {
-        // Convert back to Item int directly to match input type
-        return { .item = i2it((int64_t)result) };
-    }
-    else {
-        return push_d(result);
-    }
+    // ArrayNum in the first slot is the established min(arr, axis) overload.
+    if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) return fn_min_axis(item_a, item_b);
+    bool valid = false;
+    Item result = numeric_extreme_pair(item_a, item_b, true, &valid);
+    if (!valid) log_debug("min not supported for types: %d, %d",
+        get_type_id(item_a), get_type_id(item_b));
+    return valid ? result : ItemError;
 }
 
 Item fn_min1(Item item_a) {
     GUARD_ERROR1(item_a);
-    // single argument min case
-    TypeId type_id = get_type_id(item_a);
-    // string/symbol passthrough: strings are singular, not iterable
-    if (is_text_type_id(type_id)) return item_a;
-    if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item_a.array_num;
-        if (arr->length == 0) {
-            return ItemNull; // identity-less aggregate over absence yields null
-        }
-        ArrayNumElemType et = arr->get_elem_type();
-        if (et == ELEM_FLOAT64) {
-            double min_val = arr->float_items[0];
-            for (size_t i = 1; i < (size_t)arr->length; i++) {
-                if (arr->float_items[i] < min_val) {
-                    min_val = arr->float_items[i];
-                }
-            }
-            return push_d(min_val);
-        } else if (et == ELEM_INT64 || et == ELEM_INT) {
-            // INT/INT64 store in `items`: exact int64 min.
-            int64_t min_val = arr->items[0];
-            for (size_t i = 1; i < (size_t)arr->length; i++) {
-                if (arr->items[i] < min_val) min_val = arr->items[i];
-            }
-            return (et == ELEM_INT64) ? box_int64_value(min_val) : (Item) { .item = i2it(min_val) };
-        } else {
-            // compact element types (i8/u8/i16/u16/i32/u32/f32/f16/f64): read by true type.
-            double acc = array_num_reduce_double(arr, ARRAY_RED_MIN);
-            if (et == ELEM_FLOAT32 || et == ELEM_FLOAT16 || et == ELEM_FLOAT64) {
-                return push_d(acc);
-            }
-            int64_t v = (int64_t)acc;
-            return (v > INT_MAX || v < INT_MIN) ? box_int64_value(v)
-                                                : (Item) { .item = i2it((int32_t)v) };
-        }
-    }
-    else if (type_id == LMD_TYPE_ARRAY) {
-        List* arr = item_a.array;
-        if (!arr || arr->length == 0) {
-            return ItemNull; // identity-less aggregate over absence yields null
-        }
-        Item min_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, 0) : array_get(arr, 0);
-        double min_val = 0.0;
-        bool is_float = false;
-
-        // null in aggregate inputs is an unknown value; propagate it instead of treating it as non-numeric.
-        if (get_type_id(min_item) == LMD_TYPE_NULL) {
-            return ItemNull;
-        }
-        else if (!aggregate_number_value(min_item, &min_val, &is_float)) {
-            if (get_type_id(min_item) == LMD_TYPE_DECIMAL) {
-            log_error("decimal not supported yet in fn_min");
-            }
-            else {
-            log_error("non-numeric array element type: %d", get_type_id(min_item));
-            }
-            return ItemError;
-        }
-
-        // find minimum
-        for (size_t i = 1; i < (size_t)arr->length; i++) {
-            Item elem_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, i) : array_get(arr, i);
-            double elem_val = 0.0;
-
-            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
-                return ItemNull;
-            }
-            else if (!aggregate_number_value(elem_item, &elem_val, &is_float)) {
-                if (get_type_id(elem_item) == LMD_TYPE_DECIMAL) {
-                log_error("decimal not supported yet in fn_min");
-                }
-                return ItemError;
-            }
-            if (elem_val < min_val) {
-                min_val = elem_val;
-            }
-        }
-        if (is_float) {
-            return push_d(min_val);
-        }
-        else {
-            int64_t ival = (int64_t)min_val;
-            if (ival > INT_MAX || ival < INT_MIN) {
-                return box_int64_value(ival);
-            } else {
-                return {.item = i2it((int32_t)ival)};
-            }
-        }
-    }
-    else if (type_id == LMD_TYPE_RANGE) {
-        Range* rng = item_a.range;
-        if (!rng || rng->length == 0) {
-            return ItemNull;
-        }
-        // For a range, min is the smaller of start or end
-        int64_t min_val = (rng->start < rng->end) ? rng->start : rng->end;
-        return box_int64_value(min_val);
-    }
-    else if (IS_NUMERIC_ID(type_id)) {
-        // single numeric value, return as-is
-        return item_a;
-    }
-    else {
-        log_debug("min not supported for single argument type: %d", type_id);
-        return ItemError;
-    }
+    if (is_text_type_id(get_type_id(item_a))) return item_a;
+    return numeric_extreme_collection(item_a, true);
 }
 
 Item fn_max2(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
-    // axis reduction: max(arr, axis) — see fn_min2 note.
-    if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) {
-        return fn_max_axis(item_a, item_b);
-    }
-    // two argument max case
-    double a_val = 0.0, b_val = 0.0;
-    bool is_float = false;
-
-    // Convert first argument
-    if (get_type_id(item_a) == LMD_TYPE_INT) {
-        a_val = (double)item_a.get_int56();
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_INT64) {
-        a_val = (double)item_a.get_int64();
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_FLOAT) {
-        a_val = item_a.get_double();
-        is_float = true;
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_NUM_SIZED) {
-        NumSizedType st = item_a.get_num_type();
-        a_val = item_a.get_num_sized_as_double();
-        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) is_float = true;
-    }
-    else if (get_type_id(item_a) == LMD_TYPE_UINT64) {
-        a_val = (double)item_a.get_uint64();
-    }
-    else {
-        log_debug("max not supported for type: %d", get_type_id(item_a));
-        return ItemError;
-    }
-
-    // Convert second argument
-    if (get_type_id(item_b) == LMD_TYPE_INT) {
-        b_val = (double)item_b.get_int56();
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_INT64) {
-        b_val = (double)item_b.get_int64();
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_FLOAT) {
-        b_val = item_b.get_double();
-        is_float = true;
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_NUM_SIZED) {
-        NumSizedType st = item_b.get_num_type();
-        b_val = item_b.get_num_sized_as_double();
-        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) is_float = true;
-    }
-    else if (get_type_id(item_b) == LMD_TYPE_UINT64) {
-        b_val = (double)item_b.get_uint64();
-    }
-    else {
-        log_debug("max not supported for type: %d", get_type_id(item_b));
-        return ItemError;
-    }
-
-    double result;
-    if (isnan(a_val) || isnan(b_val)) {
-        result = NAN;
-        is_float = true;
-    } else if (a_val == 0.0 && b_val == 0.0) {
-        result = (signbit(a_val) && signbit(b_val)) ? -0.0 : 0.0;
-        is_float = true;
-    } else {
-        result = a_val > b_val ? a_val : b_val;
-    }
-    // Return as integer if both inputs were integers
-    if (!is_float) {
-        // Convert back to Item int directly to match input type
-        return { .item = i2it((int64_t)result) };
-    }
-    else {
-        return push_d(result);
-    }
+    if (get_type_id(item_a) == LMD_TYPE_ARRAY_NUM) return fn_max_axis(item_a, item_b);
+    bool valid = false;
+    Item result = numeric_extreme_pair(item_a, item_b, false, &valid);
+    if (!valid) log_debug("max not supported for types: %d, %d",
+        get_type_id(item_a), get_type_id(item_b));
+    return valid ? result : ItemError;
 }
 
 Item fn_max1(Item item_a) {
     GUARD_ERROR1(item_a);
-    // single argument max case
-    TypeId type_id = get_type_id(item_a);
-    // string/symbol passthrough: strings are singular, not iterable
-    if (is_text_type_id(type_id)) return item_a;
-    if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item_a.array_num;
-        if (arr->length == 0) {
-            return ItemNull; // identity-less aggregate over absence yields null
-        }
-        ArrayNumElemType et = arr->get_elem_type();
-        if (et == ELEM_FLOAT64) {
-            double max_val = arr->float_items[0];
-            for (size_t i = 1; i < (size_t)arr->length; i++) {
-                if (arr->float_items[i] > max_val) {
-                    max_val = arr->float_items[i];
-                }
-            }
-            return push_d(max_val);
-        } else if (et == ELEM_INT64 || et == ELEM_INT) {
-            // INT/INT64 store in `items`: exact int64 max.
-            int64_t max_val = arr->items[0];
-            for (size_t i = 1; i < (size_t)arr->length; i++) {
-                if (arr->items[i] > max_val) max_val = arr->items[i];
-            }
-            return (et == ELEM_INT64) ? box_int64_value(max_val) : (Item) { .item = i2it(max_val) };
-        } else {
-            // compact element types (i8/u8/i16/u16/i32/u32/f32/f16/f64): read by true type.
-            double acc = array_num_reduce_double(arr, ARRAY_RED_MAX);
-            if (et == ELEM_FLOAT32 || et == ELEM_FLOAT16 || et == ELEM_FLOAT64) {
-                return push_d(acc);
-            }
-            int64_t v = (int64_t)acc;
-            return (v > INT_MAX || v < INT_MIN) ? box_int64_value(v)
-                                                : (Item) { .item = i2it((int32_t)v) };
-        }
-    }
-    else if (type_id == LMD_TYPE_ARRAY) {
-        Array* arr = item_a.array;
-        if (!arr || arr->length == 0) {
-            return ItemNull; // identity-less aggregate over absence yields null
-        }
-        Item max_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, 0) : array_get(arr, 0);
-        double max_val = 0.0;
-        bool is_float = false;
-
-        // null in aggregate inputs is an unknown value; propagate it instead of treating it as non-numeric.
-        if (get_type_id(max_item) == LMD_TYPE_NULL) {
-            return ItemNull;
-        }
-        else if (!aggregate_number_value(max_item, &max_val, &is_float)) {
-            return ItemError;
-        }
-
-        // Find maximum
-        for (size_t i = 1; i < (size_t)arr->length; i++) {
-            Item elem_item = type_id == LMD_TYPE_ARRAY ? list_get(arr, i) : array_get(arr, i);
-            double elem_val = 0.0;
-
-            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
-                return ItemNull;
-            }
-            else if (!aggregate_number_value(elem_item, &elem_val, &is_float)) {
-                return ItemError;
-            }
-
-            if (elem_val > max_val) {
-                max_val = elem_val;
-            }
-        }
-        if (is_float) {
-            return push_d(max_val);
-        }
-        else {
-            int64_t ival = (int64_t)max_val;
-            if (ival > INT_MAX || ival < INT_MIN) {
-                return box_int64_value(ival);
-            } else {
-                return {.item = i2it((int32_t)ival)};
-            }
-        }
-    }
-    else if (type_id == LMD_TYPE_RANGE) {
-        Range* rng = item_a.range;
-        if (!rng || rng->length == 0) {
-            return ItemNull;
-        }
-        // For a range, max is the larger of start or end
-        int64_t max_val = (rng->start > rng->end) ? rng->start : rng->end;
-        return box_int64_value(max_val);
-    }
-    else if (IS_NUMERIC_ID(type_id)) {
-        // single numeric value, return as-is
-        return item_a;
-    }
-    else {
-        log_debug("max not supported for single argument type: %d", type_id);
-        return ItemError;
-    }
+    if (is_text_type_id(get_type_id(item_a))) return item_a;
+    return numeric_extreme_collection(item_a, false);
 }
 
 Item fn_sum(Item item) {
-    GUARD_ERROR1(item);
-    // sum() - sum of all elements in an array or list
-    TypeId type_id = get_type_id(item);
-    if (type_id == LMD_TYPE_ARRAY) {
-        Array* arr = item.array;  // Use item.array, not item.pointer
-        if (!arr || arr->length == 0) {
-            return (Item) { .item = i2it(0) };  // Empty array sums to 0
-        }
-        double sum = 0.0;
-        bool has_float = false;
-        for (size_t i = 0; i < (size_t)arr->length; i++) {
-            Item elem_item = array_get(arr, i);
-            double val = 0.0;
-            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
-                // null in aggregate inputs is an unknown value; propagate it unless a skip_null variant is used.
-                return ItemNull;
-            }
-            else if (aggregate_number_value(elem_item, &val, &has_float)) {
-                sum += val;
-            }
-            else {
-                log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, get_type_id(elem_item));
-                return ItemError;
-            }
-        }
-        if (has_float) {
-            return push_d(sum);
-        }
-        else {
-            if (sum > INT_MAX || sum < INT_MIN) {
-                return box_int64_value((int64_t)sum);
-            } else {
-                return {.item = i2it((int32_t)sum)};
-            }
-        }
-    }
-    else if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        ArrayNumElemType et = arr->get_elem_type();
-        if (et == ELEM_FLOAT64) {
-            if (arr->length == 0) {
-                return push_d(0.0);
-            }
-            double sum = 0.0;
-            for (size_t i = 0; i < (size_t)arr->length; i++) {
-                sum += arr->float_items[i];
-            }
-            return push_d(sum);
-        } else if (et == ELEM_INT || et == ELEM_INT64) {
-            // INT/INT64 store in `items`: exact int64 accumulation.
-            if (arr->length == 0) {
-                return (Item) { .item = i2it(0) };
-            }
-            int64_t sum = 0;
-            for (size_t i = 0; i < (size_t)arr->length; i++) {
-                sum += arr->items[i];
-            }
-            return box_int64_value(sum);
-        } else {
-            // compact element types (i8/u8/i16/u16/i32/u32/f32/f16/f64): the
-            // generic reducer reads each element by its true type and vectorizes.
-            double acc = array_num_reduce_double(arr, ARRAY_RED_SUM);
-            if (et == ELEM_FLOAT32 || et == ELEM_FLOAT16 || et == ELEM_FLOAT64) {
-                return push_d(acc);
-            }
-            int64_t s = (int64_t)acc;
-            return (s > INT_MAX || s < INT_MIN) ? box_int64_value(s)
-                                                : (Item) { .item = i2it((int32_t)s) };
-        }
-    }
-    else if (type_id == LMD_TYPE_ARRAY) {
-        List* list = item.array;
-        if (!list || list->length == 0) {
-            return (Item) { .item = i2it(0) };  // Empty list sums to 0
-        }
-        double sum = 0.0;
-        bool has_float = false;
-        for (size_t i = 0; i < (size_t)list->length; i++) {
-            Item elem_item = list_get(list, i);
-            double val = 0.0;
-            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
-                // null in aggregate inputs is an unknown value; propagate it unless a skip_null variant is used.
-                return ItemNull;
-            }
-            else if (aggregate_number_value(elem_item, &val, &has_float)) {
-                sum += val;
-            }
-            else {
-                log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, get_type_id(elem_item));
-                return ItemError;
-            }
-        }
-        if (has_float) {
-            return push_d(sum);
-        }
-        else {
-            if (sum > INT_MAX || sum < INT_MIN) {
-                return box_int64_value(sum);
-            } else{
-                return {.item = i2it((int32_t)sum)};
-            }
-        }
-    }
-    else if (type_id == LMD_TYPE_RANGE) {
-        Range* rng = item.range;
-        if (!rng || rng->length == 0) {
-            return { .item = i2it(0) };
-        }
-        // Sum of arithmetic sequence: n * (first + last) / 2
-        int64_t n = rng->length;
-        int64_t sum = n * (rng->start + rng->end) / 2;
-        return box_int64_value(sum);
-    }
-    else if (IS_NUMERIC_ID(type_id)) {
-        // single numeric value, return as-is
-        return item;
-    }
-    else {
-        log_debug("DEBUG fn_sum: sum not supported for type: %d", type_id);
-        return ItemError;
-    }
+    int64_t count = 0;
+    return fn_numeric_fold(item, 0, 0, &count);
 }
 
 Item fn_avg_skip_null(Item item, bool skip_null) {
-    GUARD_ERROR1(item);
-    // avg() - average of all elements in an array or list
-    TypeId type_id = get_type_id(item);
-    if (type_id == LMD_TYPE_ARRAY) {
-        Array* arr = item.array;  // Use item.array, not item.pointer
-        if (!arr || arr->length == 0) {
-            return ItemNull;
-        }
-        double sum = 0.0;
-        int64_t count = 0;
-        for (size_t i = 0; i < (size_t)arr->length; i++) {
-            Item elem_item = array_get(arr, i);
-            double val = 0.0;
-            bool elem_is_float = false;
-            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
-                if (skip_null) continue;
-                // null in aggregate inputs is an unknown value; strict avg propagates it.
-                return ItemNull;
-            }
-            else if (aggregate_number_value(elem_item, &val, &elem_is_float)) {
-                sum += val;
-                count++;
-            }
-            else {
-                log_debug("avg: non-numeric element at index %zu, type: %d", i, get_type_id(elem_item));
-                return ItemError;
-            }
-        }
-        return count == 0 ? ItemNull : push_d(sum / (double)count);
-    }
-    else if (type_id == LMD_TYPE_ARRAY_NUM) {
-        ArrayNum* arr = item.array_num;
-        if (!arr || arr->length == 0) {
-            return ItemNull;
-        }
-        // generic reducer reads every element type correctly (the old else
-        // branch mis-read compact buffers via `items`); bit-identical for FLOAT/INT.
-        return push_d(array_num_reduce_double(arr, ARRAY_RED_AVG));
-    }
-    else if (type_id == LMD_TYPE_ARRAY) {
-        List* list = item.array;
-        if (!list || list->length == 0) {
-            return ItemNull;
-        }
-        double sum = 0.0;
-        int64_t count = 0;
-        for (size_t i = 0; i < (size_t)list->length; i++) {
-            Item elem_item = list_get(list, i);
-            double val = 0.0;
-            bool elem_is_float = false;
-            if (get_type_id(elem_item) == LMD_TYPE_NULL) {
-                if (skip_null) continue;
-                // null in aggregate inputs is an unknown value; strict avg propagates it.
-                return ItemNull;
-            }
-            else if (aggregate_number_value(elem_item, &val, &elem_is_float)) {
-                sum += val;
-                count++;
-            }
-            else {
-                log_debug("avg: non-numeric element at index %zu, type: %d", i, get_type_id(elem_item));
-                return ItemError;
-            }
-        }
-        return count == 0 ? ItemNull : push_d(sum / (double)count);
-    }
-    else if (type_id == LMD_TYPE_RANGE) {
-        Range* rng = item.range;
-        if (!rng || rng->length == 0) {
-            return ItemNull;
-        }
-        // Average of arithmetic sequence: (first + last) / 2
-        double avg = (double)(rng->start + rng->end) / 2.0;
-        return push_d(avg);
-    }
-    else if (IS_NUMERIC_ID(type_id)) {
-        // single numeric value, return as-is
-        return item;
-    }
-    else {
-        log_debug("avg not supported for type: %d", type_id);
-        return ItemError;
-    }
+    int64_t count = 0;
+    Item sum = fn_numeric_fold(item, 0, skip_null ? 1 : 0, &count);
+    if (get_type_id(sum) == LMD_TYPE_ERROR || get_type_id(sum) == LMD_TYPE_NULL) return sum;
+    // Average is the scalar fold followed by the model's true division. Full
+    // sized lanes therefore enter decimal, while compact/int lanes enter float.
+    return count == 0 ? ItemNull : fn_div(sum, (Item){.item = i2it(count)});
 }
 
 Item fn_avg(Item item) {
@@ -2740,7 +2114,7 @@ extern "C" int64_t fn_band(int64_t a, int64_t b) {
 
 extern "C" Item fn_band_item(Item a, Item b) {
     Item result;
-    if (sized_bitwise_binary(a, b, SIZED_BITWISE_AND, &result)) return result;
+    if (apply_classified_bitwise(a, b, SIZED_BITWISE_AND, &result)) return result;
     return box_int64_value(fn_band(_barg(a), _barg(b)));
 }
 
@@ -2750,7 +2124,7 @@ extern "C" int64_t fn_bor(int64_t a, int64_t b) {
 
 extern "C" Item fn_bor_item(Item a, Item b) {
     Item result;
-    if (sized_bitwise_binary(a, b, SIZED_BITWISE_OR, &result)) return result;
+    if (apply_classified_bitwise(a, b, SIZED_BITWISE_OR, &result)) return result;
     return box_int64_value(fn_bor(_barg(a), _barg(b)));
 }
 
@@ -2760,7 +2134,7 @@ extern "C" int64_t fn_bxor(int64_t a, int64_t b) {
 
 extern "C" Item fn_bxor_item(Item a, Item b) {
     Item result;
-    if (sized_bitwise_binary(a, b, SIZED_BITWISE_XOR, &result)) return result;
+    if (apply_classified_bitwise(a, b, SIZED_BITWISE_XOR, &result)) return result;
     return box_int64_value(fn_bxor(_barg(a), _barg(b)));
 }
 
@@ -2771,6 +2145,11 @@ extern "C" int64_t fn_bnot(int64_t a) {
 extern "C" Item fn_bnot_item(Item a) {
     Item result;
     if (sized_bitwise_not(a, &result)) return result;
+    if (lambda_numeric_kind_from_item(a) == LAMBDA_NUM_INTEGER) {
+        // Integer is unbounded, so preserve its two's-complement identity in
+        // the bigint domain instead of truncating it through an int64 lane.
+        return bigint_bitwise_not(a);
+    }
     return box_int64_value(fn_bnot(_barg(a)));
 }
 
@@ -2785,7 +2164,7 @@ extern "C" int64_t fn_shl(int64_t a, int64_t b) {
 
 extern "C" Item fn_shl_item(Item a, Item b) {
     Item result;
-    if (sized_shift(a, b, true, &result)) return result;
+    if (apply_classified_shift(a, b, true, &result)) return result;
     if (_barg(b) < 0) {
         log_error("integer negative shift count");
         return ItemError;
@@ -2804,7 +2183,7 @@ extern "C" int64_t fn_shr(int64_t a, int64_t b) {
 
 extern "C" Item fn_shr_item(Item a, Item b) {
     Item result;
-    if (sized_shift(a, b, false, &result)) return result;
+    if (apply_classified_shift(a, b, false, &result)) return result;
     if (_barg(b) < 0) {
         log_error("integer negative shift count");
         return ItemError;

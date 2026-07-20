@@ -1,0 +1,1 @@
+integral division or remainder by literal zero

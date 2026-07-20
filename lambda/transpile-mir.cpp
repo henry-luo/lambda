@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "lambda-number-types.hpp"
 #include "re2_wrapper.hpp"
 #include "mark_builder.hpp"
 #include "safety_analyzer.hpp"
@@ -490,6 +491,7 @@ static bool should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
     if (mir_type == MIR_T_P) return true;
     switch (type_id) {
     case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_DTIME:
     case LMD_TYPE_SYMBOL:
     case LMD_TYPE_STRING:
     case LMD_TYPE_BINARY:
@@ -1686,7 +1688,6 @@ static ValueRep lambda_value_rep(TypeId type_id) {
     case LMD_TYPE_STRING:
     case LMD_TYPE_SYMBOL:
     case LMD_TYPE_BINARY:
-    case LMD_TYPE_DECIMAL:
     case LMD_TYPE_PATH:
     case LMD_TYPE_RANGE:
     case LMD_TYPE_ARRAY_NUM:
@@ -1699,6 +1700,11 @@ static ValueRep lambda_value_rep(TypeId type_id) {
     case LMD_TYPE_FUNC:
         // These I64 carriers hold raw managed pointers and still need boxing.
         return VALUE_REP_RAW_GC_POINTER;
+    case LMD_TYPE_DECIMAL:
+        // Integer and decimal runtime helpers return tagged Items. Keeping the
+        // carrier boxed makes literals, variables, calls, and GC roots use one
+        // representation instead of reconstructing it from a MIR register.
+        return VALUE_REP_ITEM;
     default:
         return VALUE_REP_ITEM;
     }
@@ -2437,7 +2443,7 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
         }
         case LMD_TYPE_DECIMAL: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
+            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_DECIMAL);
         }
         case LMD_TYPE_BINARY: {
             TypeConst* tc = (TypeConst*)node->type;
@@ -2826,6 +2832,44 @@ static MIR_reg_t emit_bool_const(MirTranspiler* mt, bool value) {
     return result;
 }
 
+// Classify the bitwise system-call lane once for both representation probing
+// and lowering.  Runtime helpers return a boxed Item outside the compact-int
+// lane, so consumers must not infer a raw register solely from the AST type.
+static bool mir_bitwise_binary_decision(AstCallNode* call,
+        LambdaNumericDecision* decision, bool* native_int_path) {
+    if (!call || !call->function ||
+            call->function->node_type != AST_NODE_SYS_FUNC) return false;
+    AstSysFuncNode* sys = (AstSysFuncNode*)call->function;
+    if (!sys->fn_info) return false;
+    LambdaNumericOpFamily family;
+    switch (sys->fn_info->fn) {
+    case SYSFUNC_BAND: case SYSFUNC_BOR: case SYSFUNC_BXOR:
+        family = LAMBDA_NUM_OP_BITWISE;
+        break;
+    case SYSFUNC_SHL: case SYSFUNC_SHR:
+        family = LAMBDA_NUM_OP_SHIFT;
+        break;
+    default:
+        return false;
+    }
+    AstNode* first = call->argument;
+    AstNode* second = first ? first->next : NULL;
+    if (!first || !second) return false;
+    LambdaNumericDecision resolved = lambda_numeric_classify(family,
+        lambda_numeric_kind_from_type(first->type),
+        lambda_numeric_kind_from_type(second->type));
+    if (decision) *decision = resolved;
+    if (native_int_path) {
+        *native_int_path = resolved.valid && resolved.result == LAMBDA_NUM_INT &&
+            lambda_numeric_kind_from_type(first->type) == LAMBDA_NUM_INT &&
+            lambda_numeric_kind_from_type(second->type) == LAMBDA_NUM_INT;
+    }
+    return true;
+}
+
+static bool mir_binary_numeric_decision(
+        AstBinaryNode* binary, LambdaNumericDecision* decision);
+
 // Get effective runtime type for a node. If the node is an identifier whose
 // variable is stored as boxed (ANY) — e.g. optional params — return ANY instead
 // of the AST-declared type. This prevents native op dispatch on boxed values.
@@ -2844,6 +2888,32 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
     TypeId tid = node->type ? node->type->type_id : LMD_TYPE_ANY;
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
+        LambdaNumericDecision bitwise_decision;
+        bool native_int_path = false;
+        if (mir_bitwise_binary_decision(call, &bitwise_decision,
+                &native_int_path) && !native_int_path) {
+            if (bitwise_decision.valid &&
+                    bitwise_decision.result == LAMBDA_NUM_I64) {
+                // Lowering unboxes the helper result into a number-home lane.
+                return LMD_TYPE_INT64;
+            }
+            // Unknown and mixed bitwise calls both use the boxed runtime helper.
+            // Reporting the registry's nominal int type here double-boxes its
+            // self-describing result at an untyped function return boundary.
+            return LMD_TYPE_ANY;
+        }
+        if (call->function && call->function->node_type == AST_NODE_SYS_FUNC) {
+            AstSysFuncNode* sys = (AstSysFuncNode*)call->function;
+            if (sys->fn_info && sys->fn_info->fn == SYSFUNC_BNOT &&
+                    lambda_numeric_kind_from_type(call->argument ?
+                        call->argument->type : NULL) != LAMBDA_NUM_INT) {
+                if (lambda_numeric_kind_from_type(call->argument ?
+                        call->argument->type : NULL) == LAMBDA_NUM_I64) {
+                    return LMD_TYPE_INT64;
+                }
+                return LMD_TYPE_ANY;
+            }
+        }
         Type* target_type = call->function ? call->function->type : NULL;
         bool can_raise = target_type && target_type->type_id == LMD_TYPE_FUNC &&
             ((TypeFunc*)target_type)->can_raise;
@@ -2999,14 +3069,6 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             bool both_int_idiv = (idiv_lt == LMD_TYPE_INT) && (idiv_rt == LMD_TYPE_INT);
             if (both_int_idiv)
                 return LMD_TYPE_INT;
-            // Float MOD uses fmod() which returns double
-            if (bi->op == OPERATOR_MOD) {
-                bool has_float = (idiv_lt == LMD_TYPE_FLOAT || idiv_rt == LMD_TYPE_FLOAT);
-                bool other_numeric = (idiv_lt == LMD_TYPE_INT || idiv_lt == LMD_TYPE_FLOAT) &&
-                                     (idiv_rt == LMD_TYPE_INT || idiv_rt == LMD_TYPE_FLOAT);
-                if (has_float && other_numeric)
-                    return LMD_TYPE_FLOAT;
-            }
             return LMD_TYPE_ANY;
         }
 
@@ -3047,23 +3109,23 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
             }
         }
 
-        if (lt == LMD_TYPE_ANY || rt == LMD_TYPE_ANY) return LMD_TYPE_ANY;
-
-        // INT64 arithmetic (with INT or INT64) goes through boxed fn_add/fn_sub/fn_mul
-        // runtime path (transpile_binary skips native arithmetic for INT64 due to
-        // inconsistent representation — raw int64 from some paths, tagged Items from
-        // others). The boxed runtime returns tagged Items, so effective type is ANY.
-        // Without this, the AST type (often INT) would be returned, causing
-        // transpile_assign_stam to treat the tagged Item as a raw int → infinite loops.
-        {
-            bool has_int64 = (lt == LMD_TYPE_INT64 || rt == LMD_TYPE_INT64);
-            bool other_int = is_integer_type_id(lt) && is_integer_type_id(rt);
-            if (has_int64 && other_int) {
-                int op64 = bi->op;
-                if (op64 == OPERATOR_ADD || op64 == OPERATOR_SUB || op64 == OPERATOR_MUL ||
-                    op64 == OPERATOR_DIV || op64 == OPERATOR_POW)
-                    return LMD_TYPE_ANY;
+        if (lt == LMD_TYPE_ANY || rt == LMD_TYPE_ANY) {
+            LambdaNumericDecision fallback_decision;
+            if (mir_binary_numeric_decision(bi, &fallback_decision)) {
+                // A nested flex-int expression may be boxed because it can
+                // overflow, while the enclosing operation's complete domain is
+                // still unconditionally float.  Its fallback is unboxed by
+                // transpile_binary, so report that native representation here.
+                if (fallback_decision.result == LAMBDA_NUM_FLOAT) {
+                    return LMD_TYPE_FLOAT;
+                }
+                if (fallback_decision.result == LAMBDA_NUM_I64 &&
+                        (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
+                         bi->op == OPERATOR_MUL)) {
+                    return LMD_TYPE_INT64;
+                }
             }
+            return LMD_TYPE_ANY;
         }
 
         // Infer result type from operand types when AST type is not set.
@@ -3127,7 +3189,10 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
                 MirVarEntry* ov = find_var(mt, oname);
                 if (ov && ov->elem_type != LMD_TYPE_ANY) return ov->elem_type;
             }
-            return LMD_TYPE_INT;  // default for ARRAY_NUM without known elem_type
+            // ArrayNum carries its lane tag at runtime. Guessing INT here made
+            // callers re-box the already-boxed fn_index result when a vector
+            // expression produced u8, u64, or float storage.
+            return LMD_TYPE_ANY;
         }
         // ARRAY with nested=INT + INT index: return type is ANY (not INT)
         // because the array may have been converted from ArrayInt to generic
@@ -3139,7 +3204,13 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         AstIfNode* if_node = (AstIfNode*)node;
         TypeId then_eff = if_node->then ? get_effective_type(mt, if_node->then) : LMD_TYPE_ANY;
         TypeId else_eff = if_node->otherwise ? get_effective_type(mt, if_node->otherwise) : LMD_TYPE_ANY;
-        if (then_eff == LMD_TYPE_ANY || else_eff == LMD_TYPE_ANY) return LMD_TYPE_ANY;
+        // Different semantic types can share MIR_T_I64 while using incompatible
+        // representations (for example native int64 versus a boxed integer Item).
+        // Join them as Items so the selected branch is never consumed as raw bits.
+        if (then_eff == LMD_TYPE_ANY || else_eff == LMD_TYPE_ANY ||
+                then_eff != else_eff) {
+            return LMD_TYPE_ANY;
+        }
     }
     // For UNARY nodes: infer result type from operand's effective type.
     // transpile_unary returns native values for NEG(INT) → INT, NEG(FLOAT) → FLOAT,
@@ -3165,6 +3236,44 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         }
     }
     return tid;
+}
+
+static bool mir_binary_numeric_decision(
+        AstBinaryNode* binary, LambdaNumericDecision* decision) {
+    if (!binary || !decision) return false;
+    LambdaNumericOpFamily family;
+    switch (binary->op) {
+    case OPERATOR_ADD: family = LAMBDA_NUM_OP_ADD; break;
+    case OPERATOR_SUB: family = LAMBDA_NUM_OP_SUB; break;
+    case OPERATOR_MUL: family = LAMBDA_NUM_OP_MUL; break;
+    case OPERATOR_DIV: family = LAMBDA_NUM_OP_TRUE_DIV; break;
+    case OPERATOR_IDIV: family = LAMBDA_NUM_OP_IDIV; break;
+    case OPERATOR_MOD: family = LAMBDA_NUM_OP_MOD; break;
+    default: return false;
+    }
+    *decision = lambda_numeric_classify(family,
+        lambda_numeric_kind_from_type(binary->left ? binary->left->type : NULL),
+        lambda_numeric_kind_from_type(binary->right ? binary->right->type : NULL));
+    return decision->valid;
+}
+
+static MIR_reg_t mir_unbox_exact_native_numeric_result(
+        MirTranspiler* mt, AstBinaryNode* binary, MIR_reg_t boxed) {
+    LambdaNumericDecision decision;
+    if (!mir_binary_numeric_decision(binary, &decision)) return boxed;
+    if (decision.result == LAMBDA_NUM_FLOAT) {
+        // Float-domain runtime fallbacks (for example i8 / int) cannot fail and
+        // should re-enter MIR as a native double instead of carrying a boxed Item.
+        return emit_unbox(mt, boxed, LMD_TYPE_FLOAT);
+    }
+    if (decision.result == LAMBDA_NUM_I64 &&
+        (binary->op == OPERATOR_ADD || binary->op == OPERATOR_SUB ||
+         binary->op == OPERATOR_MUL)) {
+        // Sized +,-,* cannot produce error Items; recover the raw number-home
+        // payload immediately so typed locals do not become generic GC roots.
+        return emit_unbox(mt, boxed, LMD_TYPE_INT64);
+    }
+    return boxed;
 }
 
 static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
@@ -3205,33 +3314,6 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
             return emit_call_2(mt, fn_name, MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, right));
-        }
-        // Float MOD: use fmod(double, double) -> double
-        // Requires at least one FLOAT operand and the other being INT or FLOAT
-        if (bi->op == OPERATOR_MOD) {
-            bool has_float = (left_tid == LMD_TYPE_FLOAT || right_tid == LMD_TYPE_FLOAT);
-            bool both_numeric = has_float &&
-                                (left_tid == LMD_TYPE_INT || left_tid == LMD_TYPE_FLOAT) &&
-                                (right_tid == LMD_TYPE_INT || right_tid == LMD_TYPE_FLOAT);
-            if (both_numeric) {
-                MIR_reg_t left = transpile_expr(mt, bi->left);
-                MIR_reg_t right = transpile_expr(mt, bi->right);
-                // Convert to double if needed
-                MIR_reg_t dl = left, dr = right;
-                if (left_tid == LMD_TYPE_INT) {
-                    dl = new_reg(mt, "i2d_ml", MIR_T_D);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dl),
-                        MIR_new_reg_op(mt->ctx, left)));
-                }
-                if (right_tid == LMD_TYPE_INT) {
-                    dr = new_reg(mt, "i2d_mr", MIR_T_D);
-                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dr),
-                        MIR_new_reg_op(mt->ctx, right)));
-                }
-                return emit_call_2(mt, "fmod", MIR_T_D,
-                    MIR_T_D, MIR_new_reg_op(mt->ctx, dl),
-                    MIR_T_D, MIR_new_reg_op(mt->ctx, dr));
-            }
         }
         // Fallback: boxed runtime for unknown/mixed types
         MIR_reg_t boxl = transpile_box_item(mt, bi->left);
@@ -3721,6 +3803,12 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
 
+    if (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
+        bi->op == OPERATOR_MUL || bi->op == OPERATOR_DIV ||
+        bi->op == OPERATOR_IDIV || bi->op == OPERATOR_MOD) {
+        result = mir_unbox_exact_native_numeric_result(mt, bi, result);
+    }
+
     // fn_eq/fn_ne still return Bool (uint8_t) but we declare MIR_T_I64 as the
     // return type; on some ABIs the upper bytes may be garbage, so mask to 0xFF
     // for a clean native bool.  Ordered comparisons (fn_lt/fn_gt/fn_le/fn_ge) now
@@ -3739,6 +3827,41 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     // POW with int operands can return float (negative exponent), so we do NOT
     // unbox POW results — they remain boxed Items from the runtime.
     return result;
+}
+
+static bool mir_binary_arithmetic_result_is_boxed(MirTranspiler* mt,
+        AstBinaryNode* binary) {
+    (void)mt;
+    if (binary->op == OPERATOR_POW) return true;
+    LambdaNumericDecision decision;
+    if (!mir_binary_numeric_decision(binary, &decision)) return false;
+
+    if (decision.result == LAMBDA_NUM_FLOAT) return false;
+    if (decision.result == LAMBDA_NUM_I64 &&
+        (binary->op == OPERATOR_ADD || binary->op == OPERATOR_SUB ||
+         binary->op == OPERATOR_MUL)) return false;
+
+    LambdaNumericKind left = lambda_numeric_kind_from_type(binary->left->type);
+    LambdaNumericKind right = lambda_numeric_kind_from_type(binary->right->type);
+    if (decision.result == LAMBDA_NUM_INT &&
+        (binary->op == OPERATOR_IDIV || binary->op == OPERATOR_MOD) &&
+        left == LAMBDA_NUM_INT && right == LAMBDA_NUM_INT) return false;
+
+    // Flex-int +,-,* can change runtime representation on overflow; sized
+    // Items and integer/decimal carriers are boxed by definition.
+    return true;
+}
+
+static MIR_reg_t mir_box_evaluated_node(MirTranspiler* mt, AstNode* node,
+        MIR_reg_t value, TypeId type_id) {
+    if (node && node->node_type == AST_NODE_BINARY &&
+        mir_binary_arithmetic_result_is_boxed(mt, (AstBinaryNode*)node)) {
+        // Runtime arithmetic helpers return a complete Item. Re-tagging that
+        // register from the static semantic type corrupts decimal pointers and
+        // adds dead branches to every container insertion.
+        return value;
+    }
+    return emit_box(mt, value, type_id);
 }
 
 // ============================================================================
@@ -5755,7 +5878,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
 
         if (item->node_type == AST_NODE_PIPE) {
             // pipe/that/where exprs in array literals spread their array results
-            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            MIR_reg_t boxed = mir_box_evaluated_node(mt, item, val, val_tid);
             int item_root = create_gc_root_slot(mt, boxed);
             boxed = load_gc_root_slot(mt, item_root, "arr_item");
             arr = load_gc_root_slot(mt, arr_root, "arrb");
@@ -5764,7 +5887,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
         } else if (has_spreadable) {
             // When any child is spreadable, use array_push_spread for ALL children
-            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            MIR_reg_t boxed = mir_box_evaluated_node(mt, item, val, val_tid);
             int item_root = create_gc_root_slot(mt, boxed);
             boxed = load_gc_root_slot(mt, item_root, "arr_item");
             arr = load_gc_root_slot(mt, arr_root, "arrb");
@@ -5780,7 +5903,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
                 MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
         } else {
-            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            MIR_reg_t boxed = mir_box_evaluated_node(mt, item, val, val_tid);
             int item_root = create_gc_root_slot(mt, boxed);
             boxed = load_gc_root_slot(mt, item_root, "arr_item");
             arr = load_gc_root_slot(mt, arr_root, "arrb");
@@ -7265,8 +7388,11 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             MIR_reg_t val = transpile_expr(mt, it);
             TypeId vt = get_effective_type(mt, it);
             if (!is_integer_type_id(vt)) {
-                // unbox boxed Item to int64
-                val = emit_unbox(mt, val, LMD_TYPE_INT);
+                // Semantic integer and exactly integral float indices are boxed;
+                // tag stripping would reinterpret their payload as an address.
+                MIR_reg_t boxed = transpile_box_item(mt, it);
+                val = emit_call_1(mt, "fn_int64_index", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_mem_op(mt->ctx, MIR_T_I64,
@@ -7343,6 +7469,22 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
         return emit_call_2(mt, "fn_index", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+    }
+
+    if (lambda_numeric_kind_from_type(field_node->field->type) == LAMBDA_NUM_INTEGER) {
+        // Flexible-int arithmetic is boxed as semantic `integer`. Runtime index
+        // dispatch accepts it, then scalar element loads must be restored to the
+        // native representation promised by get_effective_type().
+        MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
+        MIR_reg_t boxed_idx = transpile_box_item(mt, field_node->field);
+        MIR_reg_t result = emit_call_2(mt, "fn_index", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
+        TypeId result_tid = get_effective_type(mt, (AstNode*)field_node);
+        if (is_native_numeric_type_id(result_tid) || result_tid == LMD_TYPE_BOOL) {
+            return emit_unbox(mt, result, result_tid);
+        }
+        return result;
     }
 
     if (!is_integer_type_id(idx_tid) && idx_tid != LMD_TYPE_ANY) {
@@ -7904,8 +8046,13 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL ||
             info->fn == SYSFUNC_SHR) {
             arg = call_node->argument;
-            TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
-            if (call_tid == LMD_TYPE_NUM_SIZED || call_tid == LMD_TYPE_UINT64) {
+            LambdaNumericDecision decision;
+            bool native_int_path = false;
+            bool classified = mir_bitwise_binary_decision(call_node,
+                &decision, &native_int_path);
+            if (!native_int_path) {
+                // Full/sized lanes and bigint results need the shared runtime
+                // classifier; MIR register width alone cannot encode the domain.
                 const char* boxed_fn = NULL;
                 switch (info->fn) {
                     case SYSFUNC_BAND: boxed_fn = "fn_band_item"; break;
@@ -7918,9 +8065,15 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
                 arg = arg->next;
                 MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
-                return emit_call_2(mt, boxed_fn, MIR_T_I64,
+                MIR_reg_t boxed_result = emit_call_2(mt, boxed_fn, MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
+                // Keep full i64 in a native number-home register.  Other
+                // sized/full results are represented as self-describing Items.
+                if (classified && decision.result == LAMBDA_NUM_I64) {
+                    return emit_unbox(mt, boxed_result, LMD_TYPE_INT64);
+                }
+                return boxed_result;
             }
 
             MIR_reg_t a1 = transpile_expr(mt, arg);
@@ -7996,11 +8149,16 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         }
         if (info->fn == SYSFUNC_BNOT) {
             arg = call_node->argument;
-            TypeId call_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
-            if (call_tid == LMD_TYPE_NUM_SIZED || call_tid == LMD_TYPE_UINT64) {
+            LambdaNumericKind arg_kind = lambda_numeric_kind_from_type(
+                arg ? arg->type : NULL);
+            if (arg_kind != LAMBDA_NUM_INT) {
                 MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-                return emit_call_1(mt, "fn_bnot_item", MIR_T_I64,
+                MIR_reg_t boxed_result = emit_call_1(mt, "fn_bnot_item", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
+                if (arg_kind == LAMBDA_NUM_I64) {
+                    return emit_unbox(mt, boxed_result, LMD_TYPE_INT64);
+                }
+                return boxed_result;
             }
 
             MIR_reg_t a1 = transpile_expr(mt, arg);
@@ -9805,6 +9963,11 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         return val;
     }
 
+    if (node->node_type == AST_NODE_BINARY &&
+        mir_binary_arithmetic_result_is_boxed(mt, (AstBinaryNode*)node)) {
+        return val;
+    }
+
     // For BINARY/UNARY nodes: check if the result is already a boxed Item
     // from the runtime fallback path (not native handling).
     // transpile_binary returns NATIVE values only for specific type+op combos;
@@ -9870,14 +10033,21 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             }
         }
 
-        // 3b. INT64 binary results: all INT64 ops go through the boxed fallback
-        //     (no native INT64 handling), so results are already boxed Items.
-        //     Comparisons already handled by is_cmp above.
+        LambdaNumericDecision numeric_decision;
+        if (mir_binary_numeric_decision(bi, &numeric_decision) &&
+            numeric_decision.result == LAMBDA_NUM_I64 &&
+            (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL)) {
+            return emit_box_int64(mt, val);
+        }
+
+        // 3b. Exact sized i64 +,-,* is unboxed immediately after the shared
+        // runtime helper, so boxing a surrounding expression donates a fresh
+        // scalar home. Error-capable and semantic-tower results stayed boxed.
         bool left_int64_b = (lt == LMD_TYPE_INT64);
         bool right_int64_b = (rt == LMD_TYPE_INT64);
         bool has_int64_b = left_int64_b || right_int64_b;
         if (has_int64_b) {
-            return val; // already a boxed Item from the generic fallback
+            return val;
         }
 
         // 4. both_float: ADD,SUB,MUL,DIV,MOD → native float
@@ -9907,6 +10077,12 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         // 6. JOIN with both_string → native String*
         if (op == OPERATOR_JOIN && both_string) {
             return emit_box_string(mt, val);
+        }
+
+        LambdaNumericDecision fallback_decision;
+        if (mir_binary_numeric_decision(bi, &fallback_decision) &&
+            fallback_decision.result == LAMBDA_NUM_FLOAT) {
+            return emit_box_float(mt, val);
         }
 
         // Everything else: transpile_binary used boxed runtime → result is already boxed Item
@@ -11450,11 +11626,6 @@ static void gather_evidence_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_
                     if (left_is_tracked || right_is_tracked) {
                         ctxs[c].evidence |= INFER_NUMERIC_USE;
                         if (is_arith) ctxs[c].evidence |= INFER_ARITH_USE;
-                        // true division (`/`) always yields float in Lambda (e.g. 4/2 → 2.0),
-                        // so a param used as a `/` operand is float-natured. Mark float context
-                        // to suppress the speculative pn INT inference, which would otherwise
-                        // truncate float args at the call site (e.g. a timestep dt = 0.01 → 0).
-                        if (op == OPERATOR_DIV) ctxs[c].evidence |= INFER_FLOAT_CONTEXT;
                     }
                     if ((left_is_tracked || right_is_tracked) &&
                         !(ctxs[c].evidence & (INFER_INT | INFER_FLOAT))) {

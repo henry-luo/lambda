@@ -35,8 +35,9 @@ type(1.0f16 + 1.0f32)
 type(1.0f32 + 1)
 
 "=== div mod shift ==="
-1u8 div 0u8
-1u8 % 0u8
+let runtime_zero = 0u8
+1u8 div runtime_zero
+1u8 % runtime_zero
 shl(1u8, -1)
 shl(1, -1)
 shl(1u8, 8)

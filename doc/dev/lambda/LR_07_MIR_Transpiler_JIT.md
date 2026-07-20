@@ -1,21 +1,17 @@
 # Lambda Runtime — The MIR Direct Transpiler & JIT
 
-> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the default code-generation backend: how the typed AST is lowered **directly to MIR IR** (no intermediate C text), how values are kept native or boxed under MIR's immutable-register constraint, the function calling convention and parameter-type inference, the root/number execution side frames, and the `mir.c` JIT integration that links and generates native code. The legacy C-text backend is covered separately in [LR_06 — The C Transpiler](LR_06_C_Transpiler.md).
+> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the supported code-generation backend: how the typed AST is lowered **directly to MIR IR** (no intermediate C text), how values are kept native or boxed under MIR's immutable-register constraint, the function calling convention and parameter-type inference, the root/number execution side frames, and the `mir.c` JIT integration that links and generates native code. The retired C-text backend is archived in [LR_06 — The C Transpiler](LR_06_C_Transpiler.md).
 >
-> **Primary sources:** `lambda/transpile-mir.cpp` (the `MirTranspiler`, all node lowerings, boxing, rooting, inference), `lambda/mir.c` (import resolution, `jit_init`/`jit_gen_func`, BSS root registration, debug table), `lambda/transpile_shared.cpp` (naming/wrapper helpers shared with C2MIR), `lambda/lambda.h` (the runtime C-API the generated code calls).
+> **Primary sources:** `lambda/transpile-mir.cpp` (the `MirTranspiler`, all node lowerings, boxing, rooting, inference), `lambda/mir.c` (import resolution, `jit_init`/`jit_gen_func`, BSS root registration, debug table), `lambda/transpile_shared.cpp` (shared naming/wrapper helpers), `lambda/lambda.h` (the runtime C-API the generated code calls).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names. This is the most workaround-dense area of the runtime; the Known Issues section is correspondingly long and is part of the design record, not an afterthought.
 
 ---
 
 ## 1. Purpose & scope
 
-Lambda is **JIT-only** — there is no tree-walking interpreter. A script becomes native code through one of two backends that share a single runtime: the legacy **C2MIR** path emits C source text and feeds it to an embedded C compiler ([LR_06](LR_06_C_Transpiler.md)), while the default **MIR Direct** path — the subject of this document — lowers the AST straight to [MIR](https://github.com/vnmakarov/mir) intermediate representation and hands it to the MIR generator. The path is chosen by the `runtime->use_mir_direct` flag; `--c2mir` clears it (`main.cpp:3508`), and `runner.cpp:594` routes the default to `compile_script_as_mir_direct`.
+Lambda is **JIT-only** — there is no tree-walking interpreter. Supported builds lower the AST straight to [MIR](https://github.com/vnmakarov/mir) intermediate representation and hand it to the MIR generator. The old C2MIR sources remain archived but are excluded from core and Jube build configurations.
 
 This doc owns the AST → MIR lowering and the JIT mechanics. The *value representation* the generated code manipulates is owned by [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); the *memory and GC* the rooting machinery protects is owned by [LR_08 — Memory Management & Garbage Collection](LR_08_Memory_and_GC.md); the *runtime functions* the generated code calls (`fn_*`, `array_*`, `push_*`) are owned by [LR_09 — Runtime Builtins](LR_09_Runtime_Builtins.md); the *AST* it consumes is produced by [LR_02 — Parsing & AST Construction](LR_02_Parsing_AST.md).
-
-<img alt="The two code-generation backends" src="diagram/d07_two_backends.svg" width="586">
-
----
 
 ## 2. The `MirTranspiler` and its state
 
@@ -85,11 +81,11 @@ The two transpilers emit through `mir_emitter_shared.hpp`; the old heap `JitGcRo
 `mir.c` (523 lines) is the thin C layer between the transpiler's MIR module and executable native code:
 
 - **Import resolution (O(1)).** `init_func_map` (`:50`) builds a hashmap from the `sys_func_defs[]` table (each entry's `c_func`/`native_func`) and the `jit_runtime_imports[]` list. `import_resolver` (`:106`) consults a thread-local `dynamic_import_map` first (cross-module functions and variables, registered by `register_dynamic_import`, `:91`) and then the static map; a miss logs `failed to resolve native fn/pn`.
-- **Init / teardown.** `jit_init` (`:128`) builds the map, calls `MIR_init`, optionally `c2mir_init` (only under `#ifdef LAMBDA_C2MIR`), then `MIR_gen_init` and sets the optimization level. The environment variable `JS_MIR_INTERP=1` flips `g_mir_interp_mode` to run the MIR *interpreter* instead of JIT-generating native code — useful for debugging codegen. `jit_cleanup` (`:345`) tears it down.
+- **Init / teardown.** `jit_init` (`:128`) builds the map, calls `MIR_init`, then `MIR_gen_init` and sets the optimization level. The environment variable `JS_MIR_INTERP=1` flips `g_mir_interp_mode` to run the MIR *interpreter* instead of JIT-generating native code — useful for debugging codegen. `jit_cleanup` (`:345`) tears it down.
 - **Codegen.** `jit_gen_func` (`:252`) loads each module, calls `MIR_link(ctx, MIR_set_gen_interface, import_resolver)` to bind imports, and runs `MIR_gen` on the target function to produce native code.
 - **Symbol lookup & debug.** `find_func`/`find_func_prefix`/`find_import`/`find_data` (`:294`–`327`) locate generated symbols; `build_debug_info_table` (`:420`) collects function addresses, sorts them, and derives end addresses for native-stack symbolication (used by the error/stack-trace machinery in [LR_10](LR_10_Error_Handling.md)).
 
-The C2MIR compile entry `jit_compile_to_mir` (`:151`) also lives here but is wholly guarded by `#ifdef LAMBDA_C2MIR`; in a default build it is compiled out, so MIR Direct is the only live path.
+The retired C2MIR entry remains guarded source only; no supported build defines `LAMBDA_C2MIR`.
 
 ---
 

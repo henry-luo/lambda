@@ -1,7 +1,7 @@
 # Lambda Number Model Realignment — Implementation Plan
 
-**Status:** OPEN — implementation source of truth for the 2026-07-20 numeric
-arithmetic realignment
+**Status:** IMPLEMENTED — completed 2026-07-20; this document retains the task
+inventory and final verification record for the numeric arithmetic realignment
 **Design authorities:** `Lambda_Semantics_Number_Model.md` Part 1,
 `../doc/Lambda_Formal_Semantics.md` §4, and
 `Lambda_Design_Stack_API.md` Phase 7
@@ -64,9 +64,11 @@ domain must be exact. Only the documented operation itself may round or wrap.
 
 ---
 
-## 1. Verified implementation gaps
+## 1. Pre-implementation gap inventory
 
-The following inventory was checked against the live tree on 2026-07-20.
+The following inventory was checked against the starting tree on 2026-07-20
+and is retained to explain the work packages. These are historical starting
+conditions, not gaps in the completed tree.
 
 - `lambda/lambda-eval-num.cpp::normalize_sized` collapses every compact sized
   integer to `INT64`, converts a small `UINT64` to `INT64`, and converts only a
@@ -92,14 +94,14 @@ The following inventory was checked against the live tree on 2026-07-20.
   binary lowering, boxing, and inference evidence. `OPERATOR_DIV` still adds
   universal float evidence in paths where an integer/decimal result is
   required.
-- The legacy C transpiler has independent native arithmetic, division, and
-  result-boxing decisions. It must not remain a second numeric language.
+- The legacy C2MIR transpiler is excluded from supported builds. Its archived
+  source is not a second numeric implementation or an acceptance target.
 - Vector/reduction paths specialize `ArrayLong`/`ArrayInt64`/`ArrayFloat` and
   can silently select float for division. Full-width integer true division
   needs a decimal-capable result container, while integral `div` and `%` stay
   in their selected lane.
 - Phase 7 made datetime always GC-owned, but direct typed-field, formatter,
-  parser, C2MIR, and embedding paths still need an implementation audit for
+  parser and embedding paths still need an implementation audit for
   retired one-word embedded-`DateTime` assumptions.
 
 ---
@@ -111,159 +113,159 @@ the final baseline run.
 
 ### N0 — Baseline and discriminating probes
 
-- [ ] Record the current branch, dirty-worktree inventory, and baseline status
+- [x] Record the current branch, dirty-worktree inventory, and baseline status
   without modifying unrelated user files.
-- [ ] Add focused scalar probes that print both `type(value)` and value for the
+- [x] Add focused scalar probes that print both `type(value)` and value for the
   matrix in §0.1. Include both operand orders.
-- [ ] Pin magnitude independence with `u64` values on both sides of
+- [x] Pin magnitude independence with `u64` values on both sides of
   `INT64_MAX`, including the same expression shape with only the literal value
   changed.
-- [ ] Capture before-change MIR instruction/local counts for representative
+- [x] Capture before-change MIR instruction/local counts for representative
   Lambda and LambdaJS numeric frames. Use the same implementation bodies for
   the final comparison.
 
 ### N1 — One shared numeric classifier
 
-- [ ] Introduce a C-compatible numeric-kind descriptor that distinguishes
+- [x] Introduce a C-compatible numeric-kind descriptor that distinguishes
   `int`, `integer`, `float`, `decimal`, each compact sized subtype, `int64`,
   and `uint64`. Do not encode semantic joins as `TypeId` ordering.
-- [ ] Provide one pure classifier for operation family, operand kinds, selected
+- [x] Provide one pure classifier for operation family, operand kinds, selected
   sized lane or semantic domain, result kind, and overflow policy.
-- [ ] Give the evaluator and both transpilers thin adapters into the same
+- [x] Give the evaluator and active MIR-Direct transpiler thin adapters into the same
   classifier. At the third near-identical decision path, extract the shared
   table/helper rather than copying another switch.
-- [ ] Make runtime classification inspect the complete `Item`, including the
+- [x] Make runtime classification inspect the complete `Item`, including the
   bigint-vs-decimal carrier. Make static classification inspect the complete
   `Type*`; a bare `TypeId` must not erase `integer`.
-- [ ] Add table-driven unit tests for every pair, both operand orders, and each
+- [x] Add table-driven unit tests for every pair, both operand orders, and each
   arithmetic family before changing execution code.
 
 ### N2 — Exact semantic-domain entry conversions
 
-- [ ] Replace `normalize_sized` with explicit, destination-named conversions:
+- [x] Replace `normalize_sized` with explicit, destination-named conversions:
   compact sized integer to `int`, `i64` to `integer`, `u64` to `integer`, and
   sized float to its required float lane/domain.
-- [ ] Add a shared exact `bigint_from_uint64` implementation beside
+- [x] Add a shared exact `bigint_from_uint64` implementation beside
   `bigint_from_int64`; do not route `u64` through ordinary decimal and do not
   signed-cast values above `INT64_MAX`.
-- [ ] Reuse the canonical float-to-decimal conversion so mixed
+- [x] Reuse the canonical float-to-decimal conversion so mixed
   `integer/float` operations follow the shortest-round-trip rule rather than a
   binary approximation or formatter-specific path.
-- [ ] Audit allocation/rooting at every entry conversion. Creating an integer
+- [x] Audit allocation/rooting at every entry conversion. Creating an integer
   or decimal is a GC allocation; the other operand and intermediate values
   must remain live through it. Numeric number-home pointers are not GC roots.
-- [ ] Keep the Phase 7 scalar storage ABI intact: exact conversion into
+- [x] Keep the Phase 7 scalar storage ABI intact: exact conversion into
   `integer` is a semantic-domain exit, not a new heap representation for the
   original `i64/u64` value.
 
 ### N3 — Runtime scalar arithmetic
 
-- [ ] Route `fn_add`, `fn_sub`, `fn_mul`, `fn_div`, `fn_idiv`, and `fn_mod`
+- [x] Route `fn_add`, `fn_sub`, `fn_mul`, `fn_div`, `fn_idiv`, and `fn_mod`
   through the shared result decision before converting either operand.
-- [ ] Preserve `sized_integer_arithmetic` behavior for sized × sized integral
+- [x] Preserve `sized_integer_arithmetic` behavior for sized × sized integral
   operations, including signed/unsigned lane selection, wrap, `MinInt div -1`,
   and zero-divisor errors.
-- [ ] Remove the `UINT64 <= INT64_MAX` branch and every equivalent magnitude
+- [x] Remove the `UINT64 <= INT64_MAX` branch and every equivalent magnitude
   test from promotion paths.
-- [ ] Implement compact-sized × non-sized entry through `int`, including the
+- [x] Implement compact-sized × non-sized entry through `int`, including the
   existing flex-`int` overflow-to-float result rule.
-- [ ] Implement `i64/u64` × non-sized entry through `integer`, preserving exact
+- [x] Implement `i64/u64` × non-sized entry through `integer`, preserving exact
   results for `+ - * div %` and producing decimal for true `/`.
-- [ ] Make `i64/u64` mixed with float enter decimal symmetrically, without a
+- [x] Make `i64/u64` mixed with float enter decimal symmetrically, without a
   binary64 round trip of the integer operand.
-- [ ] Correct true division by domain: `int/int` and float-domain division
+- [x] Correct true division by domain: `int/int` and float-domain division
   return float; `integer/integer` and integer/float-domain joins return decimal.
   Float-domain zero division follows the normative IEEE result rather than the
   current generic integer-zero error path; integral `div`/`%` retain
   `error()`.
-- [ ] Audit unary negation, `abs`, power, comparisons, equality, conversions,
+- [x] Audit unary negation, `abs`, power, comparisons, equality, conversions,
   and min/max for accidental use of the retired normalization helper. Change
   only behavior implied by the normative model and add a pin for each change.
 
 ### N4 — AST typing and diagnostics
 
-- [ ] Replace enum-order numeric promotion in `build_binary_expr` with the
+- [x] Replace enum-order numeric promotion in `build_binary_expr` with the
   shared classifier. Preserve the complete result `Type*`, especially the
   distinction between `integer` and ordinary decimal.
-- [ ] Infer the selected sized lane for sized × sized integral operators and
+- [x] Infer the selected sized lane for sized × sized integral operators and
   the mapped semantic result for sized × non-sized expressions.
-- [ ] Infer `/` as float only for the int/float domain and as decimal for the
+- [x] Infer `/` as float only for the int/float domain and as decimal for the
   integer/decimal domain. `i64/u64` true division must infer decimal.
-- [ ] Apply the same result rules to constant folding and conditional/common
+- [x] Apply the same result rules to constant folding and conditional/common
   numeric joins where they currently depend on enum order.
-- [ ] Route value-parameter and annotated-assignment compatibility through the
+- [x] Route value-parameter and annotated-assignment compatibility through the
   exact-embedding lattice. Preserve exact `int -> float`/`int -> int64`
   widening; reject implicit `int64/u64 -> float` and narrowing conversions.
-- [ ] Keep literal-zero diagnostics aligned with the formal semantics: static
+- [x] Keep literal-zero diagnostics aligned with the formal semantics: static
   zero for integral `div`/`%` is a compile error; runtime computed zero returns
   `error()`.
 
-### N5 — MIR-Direct and legacy C lowering
+### N5 — MIR-Direct lowering
 
-- [ ] Feed the AST's complete numeric kind into MIR effective-type and boxing
+- [x] Feed the AST's complete numeric kind into MIR effective-type and boxing
   decisions; do not reconstruct semantics from a physical MIR register type.
-- [ ] Remove universal `OPERATOR_DIV -> FLOAT` inference evidence. Select
+- [x] Remove universal `OPERATOR_DIV -> FLOAT` inference evidence. Select
   native float, sized integer, integer carrier, or decimal helper lowering from
   the shared result decision.
-- [ ] Emit native arithmetic only when it implements the selected semantic
+- [x] Emit native arithmetic only when it implements the selected semantic
   result exactly. In particular, do not lower full-width integer/float mixes
   through a double register and do not lower `integer/integer /` as native
   float division.
-- [ ] Preserve caller-donated homes for actual `INT64`/`UINT64` sized results.
+- [x] Preserve caller-donated homes for actual `INT64`/`UINT64` sized results.
   Integer/decimal results are GC objects and follow ordinary root publication.
-- [ ] Apply the same rules to the legacy C transpiler and C2MIR boxing path.
-  Add JIT, MIR-interpreter where available, and `--c2mir` parity tests.
-- [ ] Consolidate duplicated result/boxing switches after the new path is
+- [x] Remove the retired C2MIR backend from active build and test
+  configuration. Its archived source is outside this implementation gate.
+- [x] Consolidate duplicated result/boxing switches after the new path is
   working; do not leave old and new promotion systems selectable in one build.
 
 ### N6 — Arrays, vectors, and reductions
 
-- [ ] Route scalar-vector and vector-vector result selection through the scalar
+- [x] Route scalar-vector and vector-vector result selection through the scalar
   numeric classifier, including mixed element lanes.
-- [ ] Keep sized `+ - * div %` in the selected typed lane with Go wrap and
+- [x] Keep sized `+ - * div %` in the selected typed lane with Go wrap and
   whole-operation poison on an integral zero divisor.
-- [ ] Materialize compact-integer true division in a float-capable result lane.
+- [x] Materialize compact-integer true division in a float-capable result lane.
   Materialize any true division whose mapped domain is decimal in a generic or
   decimal-capable result container; never truncate it into `ArrayInt64` or
   silently use `ArrayFloat`.
-- [ ] Make reductions behave like the corresponding scalar fold: integer-lane
+- [x] Make reductions behave like the corresponding scalar fold: integer-lane
   sums/products stay in the lane, and averages/true divisions use the selected
   float or decimal domain.
-- [ ] Audit typed-array assignment/conversion separately from arithmetic.
+- [x] Audit typed-array assignment/conversion separately from arithmetic.
   Explicit destination narrowing may truncate/wrap as documented; it must not
   leak backward into expression result promotion.
 
 ### N7 — Phase 7 storage-boundary audit
 
-- [ ] Verify that small and wide `INT64`/`UINT64` take identical number-home,
+- [x] Verify that small and wide `INT64`/`UINT64` take identical number-home,
   caller-return, destination-owner, and ownerless-fallback paths.
-- [ ] Verify typed maps/objects, arrays, closure environments, module/global
+- [x] Verify typed maps/objects, arrays, closure environments, module/global
   bindings, async/generator state, tasks/promises, and exception/completion
   records own persistent `INT64`/`UINT64` payloads rather than retaining an
   activation pointer.
-- [ ] Remove any surviving direct-field or legacy-C assumption that a datetime
+- [x] Remove any surviving direct-field or legacy-C assumption that a datetime
   is an embedded one-word value. Store the GC-owned datetime pointer and use
   accessors that permit the object layout to grow.
-- [ ] Confirm GC classification roots `DTIME` but does not treat number-home
+- [x] Confirm GC classification roots `DTIME` but does not treat number-home
   `DOUBLE`/`INT64`/`UINT64` payload pointers as independent GC objects. Retain
   the explicit counted fallback for ownerless persistent numeric slots.
 
 ### N8 — Regression matrix and cleanup
 
-- [ ] Add Lambda integration cases and expected `.txt` files for every new
+- [x] Add Lambda integration cases and expected `.txt` files for every new
   `.ls` script. Cover values, `type()`, both operand orders, and error paths.
-- [ ] Cover all sized lanes, mixed signedness, same/different widths, safe-band
+- [x] Cover all sized lanes, mixed signedness, same/different widths, safe-band
   edges, `INT64_MIN/MAX`, `UINT64_MAX`, and values immediately around
   `INT64_MAX`.
-- [ ] Cover locals, arguments, generated returns, closures, arrays/maps,
+- [x] Cover locals, arguments, generated returns, closures, arrays/maps,
   persistent ownerless slots, and repeated calls so arithmetic changes also
   exercise the Phase 7 lifetime rules.
-- [ ] Add direct evaluator/unit tests for the result classifier and exact
+- [x] Add direct evaluator/unit tests for the result classifier and exact
   `u64 -> integer` conversion.
-- [ ] Remove `normalize_sized`, retired threshold helpers, stale comments,
+- [x] Remove `normalize_sized`, retired threshold helpers, stale comments,
   disabled duplicate decimal branches, and now-unreachable boxing/lowering
   cases. Grep for the old `INT64_MAX` promotion condition after cleanup.
-- [ ] Update the status/gap tables in the number-model, sized-int, runtime, and
+- [x] Update the status/gap tables in the number-model, sized-int, runtime, and
   Stack API documents with the final symbols, tests, and gate evidence.
 
 ---
@@ -300,24 +302,54 @@ Every row needs a result-type assertion, not only a printed numeric value.
 The implementation is not complete until all of these are recorded with the
 final change, not inferred from focused tests:
 
-- [ ] `make build`
-- [ ] `make build-test`
-- [ ] focused numeric unit and Lambda integration tests: zero failures
-- [ ] JIT/MIR-Direct and legacy `--c2mir` parity probes: zero mismatches
-- [ ] `make test-lambda-baseline`: **0 failed tests**
-- [ ] `make test262-baseline`: **0 failed tests and 0 retries**
-- [ ] relevant LambdaJS/Node preliminary or baseline gate when shared runtime
+- [x] `make build`
+- [x] `make build-test`
+- [x] focused numeric unit and Lambda integration tests: zero failures
+- [x] JIT/MIR-Direct and MIR-interpreter parity probes: zero mismatches
+- [x] `make test-lambda-baseline`: **0 failed tests**
+- [x] `make test262-baseline`: **0 failed tests and 0 retries**
+- [x] relevant LambdaJS/Node preliminary or baseline gate when shared runtime
   code changes: zero regressions
-- [ ] forced-GC/lifetime probes for integer/decimal conversions and Phase 7
+- [x] forced-GC/lifetime probes for integer/decimal conversions and Phase 7
   storage boundaries: zero stale-home or rooting failures
-- [ ] release build (`make release`) performance comparison; never use a debug
+- [x] release build (`make release`) performance comparison; never use a debug
   build for performance conclusions
-- [ ] MIR instruction counts per representative Lambda and LambdaJS frame are
+- [x] MIR instruction counts per representative Lambda and LambdaJS frame are
   lower than the captured N0 controls, with the exact bodies, instruction
   counts, local counts, and percentage reductions recorded
-- [ ] final grep proves the magnitude-directed `u64 <= INT64_MAX` promotion and
+- [x] final grep proves the magnitude-directed `u64 <= INT64_MAX` promotion and
   retired normalization paths are absent
-- [ ] documentation status tables and this checklist reflect the landed tree
+- [x] documentation status tables and this checklist reflect the landed tree
+
+### 4.1 Completion record — 2026-07-20
+
+- Scope was implemented on `master` while preserving the pre-existing dirty
+  worktree. The pre-change MIR controls remain in `temp/stack_api_baseline_lambda.mir`
+  and `temp/stack_api_baseline_js.mir` for local review.
+- `make build`, `make build-test`, the C2MIR-free `make build-jube`, and the
+  final release build completed successfully. The legacy C2MIR sources remain
+  archived but are excluded from the main, Jube, and test configurations.
+- Focused verification passed: 18/18 number-stack/classifier unit tests, 17/17
+  numeric Lambda/procedural integrations, 2/2 new negative semantic tests,
+  and the wide-`uint64` MarkReader regression.
+- JIT, MIR-interpreter, and procedural forced-GC number-model probes matched
+  their goldens. The complete root gate passed with 31 `NO_GC` imports and
+  12,215 audited native functions.
+- `make test-lambda-baseline` passed 3,498/3,498 tests: 2,105 input-parser
+  cases and 1,393 Lambda runtime cases, including 559 Lambda, 385 LambdaJS,
+  and 110 Node preliminary tests.
+- `make test262-baseline` fully passed 40,261/40,261 runnable tests with zero
+  non-fully-passing tests, zero failures, zero regressions, and `retry 0.0s`.
+- Release `test/benchmark/kostya/matmul.ls`, measured as eight alternating
+  runs against the pre-change release, improved from a 797.009 ms median to
+  741.037 ms (7.0% lower). Both binaries produced `matmul: sum=-29562`.
+- For the exact representative bodies, Lambda frame `_frame_review_0` fell
+  from 101 instructions / 47 locals to 78 / 43 (22.8% fewer instructions),
+  and LambdaJS frame `_js_frameReview_149` fell from 136 / 53 to body frame
+  `_js_frameReview_149_body` at 104 / 49 (23.5% fewer instructions).
+- Final source search finds no live `normalize_sized` symbol or magnitude-based
+  `UINT64 <= INT64_MAX` promotion branch. Historical design records retain the
+  old spelling only when explicitly labeling the retired policy.
 
 ---
 

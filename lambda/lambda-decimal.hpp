@@ -209,6 +209,9 @@ Item decimal_trunc(Item a, EvalContext* ctx);
 // Convert decimal Item to int64 (truncates toward zero)
 int64_t decimal_to_int64(Item item);
 
+// Extract an exactly integral in-range int64 without truncation or clamping.
+bool decimal_to_int64_exact(Item item, int64_t* out);
+
 // ─────────────────────────────────────────────────────────────────────
 // Comparison
 // ─────────────────────────────────────────────────────────────────────
@@ -258,6 +261,7 @@ extern "C" {
 
 // Creation
 Item bigint_from_int64(int64_t val);
+Item bigint_from_uint64(uint64_t val);
 Item bigint_from_double(double val);          // must be exact integer, else returns ItemError
 Item bigint_from_string(const char* str, int len);  // decimal string (no "n" suffix)
 

@@ -14,7 +14,7 @@ lambda <command> [options] [arguments]      # Run a subcommand
 
 When invoked with no arguments, Lambda starts the **REPL** (Read-Eval-Print Loop).
 
-When invoked with a `.ls` script file (and no subcommand), Lambda compiles and executes the script using JIT compilation (C2MIR).
+When invoked with a `.ls` script file (and no subcommand), Lambda compiles and executes the script using MIR Direct JIT compilation.
 
 ---
 
@@ -25,9 +25,6 @@ These options apply when running a script directly (i.e., `lambda <script.ls>`).
 | Flag | Long Form | Description | Default |
 |------|-----------|-------------|---------|
 | `-h` | `--help` | Show help message | |
-| | `--c2mir` | Use C2MIR JIT compilation instead of MIR Direct | `false` |
-| | `--transpile-only` | Transpile to C code only (no execution) | `false` |
-| | `--transpile-dir DIR` | Directory for transpiled C output files | `temp` |
 | | `--max-errors N` | Max type errors before stopping (0 = unlimited) | `10` |
 | | `--optimize=N` | MIR JIT optimization level | `2` |
 | `-O0` | | Optimization level 0 (debug, stack traces) | |
@@ -107,14 +104,11 @@ lambda run [options] <script.ls>
 | Flag | Long Form | Description |
 |------|-----------|-------------|
 | `-h` | `--help` | Show help |
-| | `--c2mir` | Use C2MIR JIT compilation |
-| | `--transpile-dir DIR` | Directory for transpiled C output |
 
 **Example:**
 
 ```bash
 lambda run script.ls
-lambda run --c2mir script.ls
 ```
 
 ---

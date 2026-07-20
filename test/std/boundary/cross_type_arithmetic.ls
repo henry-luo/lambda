@@ -79,10 +79,8 @@ null / null
 // Only int × int works
 42 % 5
 -7 % 3
-// Invalid modulo combinations
-42 % 5.0
-3.14 % 2
-3.14 % 2.0
+// Statically known float-domain modulo cases live in the negative semantic suite.
+// The cases below remain dynamic cross-family errors.
 42 % "hello"
 42 % true
 42 % null
@@ -111,9 +109,8 @@ null ** 2
 42 div 5
 -7 div 2
 100 div 3
-// Invalid div combinations
-42 div 5.0
-42.0 div 5
+// Statically known float-domain div cases live in the negative semantic suite.
+// The cases below remain dynamic cross-family errors.
 42 div "hello"
 42 div true
 42 div null
