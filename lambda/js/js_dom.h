@@ -47,10 +47,10 @@ void js_dom_set_ui_context(void* ui_context);
 void* js_dom_get_ui_context(void);
 
 /**
- * Ensure the document has a current layout tree before DOM geometry queries.
- * Returns false when no UI/layout context is active.
+ * Return whether the document has a committed geometry snapshot.
+ * This predicate never performs style resolution or layout.
  */
-bool js_dom_force_layout_for_geometry(void* dom_doc);
+bool js_dom_has_committed_geometry_snapshot(void* dom_doc);
 
 /** Advance the active document's CSS animation scheduler by one headless frame. */
 bool js_dom_tick_headless_animation_frame(void);

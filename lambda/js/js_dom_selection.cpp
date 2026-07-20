@@ -630,7 +630,7 @@ static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
     if (!r) return collector;
     DomDocument* doc = node_owning_doc(r->start.node);
     if (!doc) doc = node_owning_doc(r->end.node);
-    if (doc && !js_dom_force_layout_for_geometry(doc)) return collector;
+    if (doc && !js_dom_has_committed_geometry_snapshot(doc)) return collector;
     if (!dom_range_resolve_layout(r)) return collector;
     dom_range_for_each_rect(r, nullptr, js_range_collect_rect, &collector);
     return collector;

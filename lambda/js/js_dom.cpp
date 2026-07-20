@@ -423,16 +423,13 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* targ
                            attribute_name, old_value);
 }
 
-static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
+extern "C" bool js_dom_has_committed_geometry_snapshot(void* dom_doc) {
+    DomDocument* doc = (DomDocument*)dom_doc;
     // DOM3 geometry is a read-only snapshot of the last committed layout.
     // Forcing layout from a property getter re-entered the host loop during JS
     // dispatch and made ordinary measurements a synchronous reflow hazard.
     // A pending document reflow is consumed by the normal frame/layout phase.
     return doc && doc->view_tree && doc->view_tree->root;
-}
-
-extern "C" bool js_dom_force_layout_for_geometry(void* dom_doc) {
-    return js_dom_ensure_layout_for_geometry((DomDocument*)dom_doc);
 }
 
 extern "C" bool js_dom_tick_headless_animation_frame(void) {
@@ -5287,7 +5284,7 @@ static int64_t js_dom_headless_dimension(DomElement* elem, bool width_axis) {
 
 static int64_t js_dom_geometry_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0;
-    js_dom_ensure_layout_for_geometry(elem->doc);
+    js_dom_has_committed_geometry_snapshot(elem->doc);
     float layout_value = width_axis ? elem->width : elem->height;
     if (layout_value > 0.0f) return (int64_t)(layout_value + 0.5f);
     // Load-time scripts execute before the first host-loop commit. A resolved
@@ -9343,7 +9340,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // clientWidth / clientHeight — border box minus borders
     if (strcmp(prop, "clientWidth") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         float bw = 0;
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
@@ -9351,7 +9348,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)(elem->width - bw))};
     }
     if (strcmp(prop, "clientHeight") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         float bh = 0;
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
@@ -9361,18 +9358,18 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetTop / offsetLeft — position relative to offsetParent
     if (strcmp(prop, "offsetTop") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
-        if (elem->doc && js_dom_ensure_layout_for_geometry(elem->doc))
+        if (elem->doc && js_dom_has_committed_geometry_snapshot(elem->doc))
             return (Item){.item = i2it(js_dom_offset_coordinate(elem, false))};
         return (Item){.item = i2it((int64_t)elem->y)};
     }
     if (strcmp(prop, "offsetLeft") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
-        if (elem->doc && js_dom_ensure_layout_for_geometry(elem->doc))
+        if (elem->doc && js_dom_has_committed_geometry_snapshot(elem->doc))
             return (Item){.item = i2it(js_dom_offset_coordinate(elem, true))};
         if (elem->x == 0.0f) {
             int64_t synthetic_left = js_dom_synthetic_inline_offset_left(elem);
@@ -9385,20 +9382,20 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetParent — nearest positioned ancestor (or body)
     if (strcmp(prop, "offsetParent") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         DomElement* parent = js_dom_offset_parent_element(elem);
         return parent ? js_dom_wrap_element(parent) : ItemNull;
     }
 
     // scrollWidth / scrollHeight — total scrollable content size
     if (strcmp(prop, "scrollWidth") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         float cw = elem->content_width;
         float bw = elem->width;
         return (Item){.item = i2it((int64_t)(cw > bw ? cw : bw))};
     }
     if (strcmp(prop, "scrollHeight") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         float ch = elem->content_height;
         float bh = elem->height;
         return (Item){.item = i2it((int64_t)(ch > bh ? ch : bh))};
@@ -11489,7 +11486,7 @@ static Item js_dom_boundary_from_point(DomElement* elem,
                                        Item y_arg,
                                        Item behavior_arg) {
     if (!elem || !elem->doc || !_js_current_ui_context ||
-        !js_dom_ensure_layout_for_geometry(elem->doc) ||
+        !js_dom_has_committed_geometry_snapshot(elem->doc) ||
         !elem->doc->view_tree || !elem->doc->view_tree->root) {
         return ItemNull;
     }
@@ -11527,7 +11524,7 @@ static Item js_dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
                                                Item y_arg) {
     if (!doc || !_js_current_ui_context ||
-        !js_dom_ensure_layout_for_geometry(doc) ||
+        !js_dom_has_committed_geometry_snapshot(doc) ||
         !doc->view_tree || !doc->view_tree->root) {
         return ItemNull;
     }
@@ -11590,7 +11587,7 @@ static Item js_dom_text_control_boundary_from_point(DomElement* elem,
                                                     Item x_arg,
                                                     Item y_arg) {
     if (!elem || !tc_is_text_control_elem(elem) || !_js_current_ui_context ||
-        !elem->doc || !js_dom_ensure_layout_for_geometry(elem->doc)) {
+        !elem->doc || !js_dom_has_committed_geometry_snapshot(elem->doc)) {
         return ItemNull;
     }
 
@@ -11641,7 +11638,7 @@ extern "C" Item js_dom_boundary_from_point_bridge(void* elem,
 extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return ItemNull;
-    if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
+    if (elem->doc) js_dom_has_committed_geometry_snapshot(elem->doc);
     float abs_x = 0.0f;
     float abs_y = 0.0f;
     js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
@@ -11655,7 +11652,7 @@ extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
 extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return js_array_new(0);
-    if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
+    if (elem->doc) js_dom_has_committed_geometry_snapshot(elem->doc);
 
     float abs_x = 0.0f;
     float abs_y = 0.0f;

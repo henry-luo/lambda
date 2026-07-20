@@ -46,7 +46,7 @@ The highest-leverage phase. Two halves:
 
 ### 1.1 Layout flush on geometry read (#1)
 
-- Add a single module-side entry `radiant_dom_ensure_layout(DomDocument*)` in `lambda/module/radiant/radiant_dom_bridge.cpp`, called by the geometry read cluster (`getBoundingClientRect`, `getClientRects`, `offsetWidth/Height/Top/Left`, `offsetParent`, `client*`, `scroll*` reads, `elementFromPoint`, `scrollIntoView`) **before** reading `DomElement` fields.
+- Add a single module-side entry `radiant_dom_has_committed_geometry_snapshot(DomDocument*)` in `lambda/module/radiant/radiant_dom_bridge.cpp`, called by the geometry read cluster (`getBoundingClientRect`, `getClientRects`, `offsetWidth/Height/Top/Left`, `offsetParent`, `client*`, `scroll*` reads, `elementFromPoint`, `scrollIntoView`) **before** reading `DomElement` fields.
 - Flush = if the document is style/layout dirty (the `js_dom_mutation_notify` spine at `js_dom.cpp:398` already sets dirtiness), run the same resolve+layout path the event loop uses (`layout_event_document_reflow` / `layout_html_doc` in `radiant/event.cpp`). This is the RC1 same-thread synchronous-query contract (`Radiant_Design_Concurrency.md` §2) — a function call, not a message.
 - Guards: no-op when clean (a dirty-generation counter, so back-to-back reads in a jQuery loop flush once); re-entrancy guard (a flush must not re-enter via script callbacks — layout itself runs no script); `log_debug("dom-flush: ...")` counter so thrash is visible in `log.txt`.
 - Before first layout: a geometry read on a loaded-but-never-laid-out document triggers the initial layout rather than returning 0.

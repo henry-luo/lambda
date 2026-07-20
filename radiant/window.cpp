@@ -1039,11 +1039,11 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     // loaded, because load-time inline scripts (e.g. the editor bootstrap) run
     // synchronously inside load_doc_by_format() and may call geometry APIs
     // (getBoundingClientRect/getClientRects). Those route through
-    // js_dom_ensure_layout_for_geometry(), which needs a UiContext to force a
-    // synchronous layout when the DOM has been mutated. In the `view` path this
-    // thread-local was never set (only the headless `lambda.exe js` session set
-    // it), so it bailed and returned stale/zero rects for freshly built
-    // subtrees (e.g. an editor table read by syncColResizers). Every
+    // js_dom_has_committed_geometry_snapshot(); the UiContext associates those
+    // reads and pending mutations with this retained document. In the `view`
+    // path this thread-local was never set (only the headless `lambda.exe js`
+    // session set it), so pre-commit compatibility reads returned stale/zero
+    // rects. Every
     // ui_context_cleanup() below is paired with a matching reset to null since
     // ui_context is a stack local that must not outlive this frame.
     js_dom_set_ui_context(&ui_context);

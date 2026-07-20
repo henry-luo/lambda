@@ -160,7 +160,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_notify_mutation radiant_host_api->dom->notify_mutation
 #define js_dom_notify_mutation_detail radiant_host_api->dom->notify_mutation_detail
 #define js_dom_get_ui_context radiant_host_api->dom->get_ui_context
-#define js_dom_force_layout_for_geometry radiant_host_api->dom->force_layout_for_geometry
+#define js_dom_has_committed_geometry_snapshot radiant_host_api->dom->has_committed_geometry_snapshot
 #define js_call_function radiant_host_api->script->call_function
 #define js_check_exception radiant_host_api->script->check_exception
 
@@ -3666,19 +3666,19 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
     }
 
     if (strcmp(method, "getBoundingClientRect") == 0) {
-        radiant_dom_ensure_layout(elem->doc);
+        radiant_dom_has_committed_geometry_snapshot(elem->doc);
         *out = js_dom_get_bounding_client_rect_bridge((void*)elem);
         return true;
     }
 
     if (strcmp(method, "getClientRects") == 0) {
-        radiant_dom_ensure_layout(elem->doc);
+        radiant_dom_has_committed_geometry_snapshot(elem->doc);
         *out = js_dom_get_client_rects_bridge((void*)elem);
         return true;
     }
 
     if (strcmp(method, "scrollIntoView") == 0) {
-        radiant_dom_ensure_layout(elem->doc);
+        radiant_dom_has_committed_geometry_snapshot(elem->doc);
         *out = js_dom_scroll_into_view_bridge((void*)elem);
         return true;
     }
@@ -3859,7 +3859,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
          strcmp(prop, "offsetTop") == 0 || strcmp(prop, "offsetLeft") == 0 ||
          strcmp(prop, "offsetParent") == 0 || strncmp(prop, "client", 6) == 0 ||
          strncmp(prop, "scroll", 6) == 0)) {
-        radiant_dom_ensure_layout(node->as_element()->doc);
+        radiant_dom_has_committed_geometry_snapshot(node->as_element()->doc);
     }
     return js_dom_get_property_impl(elem_item, prop_name);
 }
@@ -4922,9 +4922,9 @@ RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item) {
     return js_dom_dispatch_event_bridge(radiant_host_api->script->global_this(), event_item);
 }
 
-RADIANT_C_API bool radiant_dom_ensure_layout(DomDocument* doc) {
-    return doc && js_dom_force_layout_for_geometry &&
-        js_dom_force_layout_for_geometry((void*)doc);
+RADIANT_C_API bool radiant_dom_has_committed_geometry_snapshot(DomDocument* doc) {
+    return doc && js_dom_has_committed_geometry_snapshot &&
+        js_dom_has_committed_geometry_snapshot((void*)doc);
 }
 
 static Item radiant_dom_window_dimension(float value) {

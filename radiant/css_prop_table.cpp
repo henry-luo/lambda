@@ -7,8 +7,6 @@
 #include <stdio.h>
 #include <string.h>
 
-extern "C" bool js_dom_force_layout_for_geometry(void* dom_doc);
-
 static bool copy_text(char* out, size_t out_size, const char* text) {
     if (!out || out_size == 0) return false;
     const char* value = text ? text : "";

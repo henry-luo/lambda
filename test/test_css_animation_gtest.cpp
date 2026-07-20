@@ -26,18 +26,6 @@ void radiant_dispatch_css_event(UiContext*, DomElement*, const char*,
     // links event.cpp, while this isolated target only verifies animation state.
 }
 
-static int g_computed_style_flushes = 0;
-
-extern "C" bool js_dom_force_layout_for_geometry(void* dom_doc) {
-    DomDocument* doc = (DomDocument*)dom_doc;
-    g_computed_style_flushes++;
-    if (doc) doc->js.mutation_count = 0;
-    if (doc && doc->root && doc->root->in_line) {
-        doc->root->in_line->opacity = 0.25f;
-    }
-    return doc != nullptr;
-}
-
 TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
     size_t count = 0;
     const CssPropAccessor* rows = css_prop_accessors(&count);
@@ -64,7 +52,7 @@ TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
     }
 }
 
-TEST(CssPropTable, DirtyMutationFlushesBeforeSerialization) {
+TEST(CssPropTable, DirtyMutationDoesNotConsumePendingLayout) {
     DomDocument doc = {};
     DomElement element = {};
     element.node_type = DOM_NODE_ELEMENT;
@@ -76,14 +64,13 @@ TEST(CssPropTable, DirtyMutationFlushesBeforeSerialization) {
     element.set_styles_resolved(true);
     doc.root = &element;
     doc.js.mutation_count = 1;
-    g_computed_style_flushes = 0;
-
     char value[64];
-    ASSERT_TRUE(css_prop_serialize_computed(
+    // A dirty computed-style read cannot consume the pending layout merely to
+    // produce a used value; the next rendering checkpoint owns that commit.
+    EXPECT_TRUE(css_prop_serialize_computed(
         &element, CSS_PROPERTY_OPACITY, 0, value, sizeof(value)));
-    EXPECT_STREQ(value, "0.25");
-    EXPECT_EQ(g_computed_style_flushes, 1);
-    EXPECT_EQ(doc.js.mutation_count, 0);
+    EXPECT_STREQ(value, "");
+    EXPECT_EQ(doc.js.mutation_count, 1);
 }
 
 TEST(CssPropTable, VisibilityUsesRenderEnumNames) {

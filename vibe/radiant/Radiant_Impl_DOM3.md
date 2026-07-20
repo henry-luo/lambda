@@ -1,7 +1,7 @@
 # Radiant DOM Implementation Plan 3 — Modern Page Bootstrap
 
-**Status:** implemented; four blocking review findings resolved; asynchronous
-DOM-golden follow-up remains
+**Status:** implemented; four blocking review findings and asynchronous
+DOM-golden timing failures resolved; browser-compatible geometry freshness deferred
 **Predecessor:** `Radiant_Impl_DOM2.md`
 **Scope contract:** `Radiant_Design_DOM_API.md`
 **Primary outcome:** complete non-forcing geometry reads and asynchronous XHR, then
@@ -12,9 +12,9 @@ the established DOM2 library and conformance baseline.
 
 DOM3 is a completion iteration. It closes three already-started native paths:
 
-1. **Geometry reads:** `js_dom_ensure_layout_for_geometry()` is the common
-   non-forcing snapshot barrier; several layout-dependent getters still bypass
-   it or use a normal-document synthetic fallback.
+1. **Geometry reads:** `js_dom_has_committed_geometry_snapshot()` is the common
+   non-forcing snapshot predicate used by all audited layout-dependent getters;
+   pre-layout compatibility estimates remain explicit.
 2. **XHR:** `js_xhr.cpp` implements request state, URL/header/body handling,
    ready states, response accessors, file resources, synchronous `http_fetch()`,
    and queued document-owned completion for `open(..., true)`.
@@ -138,7 +138,7 @@ Make no engine behavior changes in this phase.
 ### 0.1 Geometry inventory
 
 Create a table in the implementation log listing every layout-dependent native
-read and whether it currently calls `js_dom_ensure_layout_for_geometry()`:
+read and whether it currently calls `js_dom_has_committed_geometry_snapshot()`:
 
 - `offsetWidth/Height/Top/Left`, `offsetParent`;
 - `clientWidth/Height`, `scrollWidth/Height`;
@@ -261,8 +261,10 @@ counter/hook, that every read leaves the normal layout counter unchanged.
 - jQuery, Bootstrap, Floating UI/Tippy, CodeMirror, and Tabulator lifecycle
   fixtures remain green. Same-task popup placement and virtual-range refresh
   are explicitly deferred by the snapshot contract.
-- Geometry moves from **Partial** to **Full** only if the Phase 0 inventory has
-  no unexplained bypass.
+- The non-forcing snapshot implementation is complete only if the Phase 0
+  inventory has no unexplained bypass. Geometry remains **Partial** for browser
+  compatibility because browsers can force style/layout to provide fresh
+  same-task values; resolving that difference belongs to a future DOM iteration.
 
 ## Phase 2 — Queue asynchronous XHR on the document event loop
 
@@ -468,4 +470,4 @@ Populate this section during implementation; do not pre-mark phases complete.
 | 2026-07-20 | 4–5 | Enabled bounded inline and relative external module graphs without the environment gate; added external-import fixture. | Module policy and dependency fixtures green. | Import maps/bare specifiers/CORS parity deferred. |
 | 2026-07-20 | 6 | Updated API scope and compatibility fixtures for DOM3 snapshots and rich-editing non-goals. | `make test-radiant-baseline`: 6,344 passed, 543 baseline-partial, 6 skipped, 0 failed. | — |
 | 2026-07-20 | 6 review | Replaced dynamic event-path reconstruction, whole-document inline-style reparsing, syntax-specific constructor binding, and permanent expando side-table retention with the contracts in §6.1. | DOM UI 49/49; `make test-radiant-baseline`: 6,358 passed, 543 baseline-partial, 6 skipped, 0 failed; Test262: 40,261/40,261, 0 regressions; Radiant no-int-cast lint clean. | The broader `test_js_gtest` run still has six asynchronous layout/event-loop failures: geometry observers, ResizeObserver, transitionend, XHR page ordering, Floating UI, and Tabulator. These are follow-up DOM3 timing work, not regressions in the four review mechanisms. |
-| 2026-07-20 | 6 timing | Added mutation-gated render checkpoints at one-shot headless DOM task boundaries, without making geometry getters reflow. Fixed retained text and generated-pseudo layout ownership so repeated async checkpoints neither double-recycle text rectangles nor reinterpret `MarkerProp` as `BlockProp`. Corrected XHR and Tabulator expectations to their actual asynchronous and virtual-buffer contracts. | Six timing cases plus Bootstrap/flatpickr/Tom Select: 9/9; `test_js_gtest`: 386/386; Lambda baseline: 3,495/3,495; Test262: 40,261/40,261 with 0 regressions; `make test-radiant-baseline`: 6,358 passed, 543 baseline-partial, 6 skipped, 0 failed; Radiant no-int-cast lint clean. | DOM3 timing failures closed. Streaming/CORS/full XHR response types, import maps/bare module specifiers, and other documented deferred scope remain unchanged. |
+| 2026-07-20 | 6 timing | Added mutation-gated render checkpoints at one-shot headless DOM task boundaries, without making geometry getters reflow. Fixed retained text and generated-pseudo layout ownership so repeated async checkpoints neither double-recycle text rectangles nor reinterpret `MarkerProp` as `BlockProp`. Corrected XHR and Tabulator expectations to their actual asynchronous and virtual-buffer contracts. | Six timing cases plus Bootstrap/flatpickr/Tom Select: 9/9; `test_js_gtest`: 386/386; Lambda baseline: 3,495/3,495; Test262: 40,261/40,261 with 0 regressions; `make test-radiant-baseline`: 6,358 passed, 543 baseline-partial, 6 skipped, 0 failed; Radiant no-int-cast lint clean. | DOM3 timing failures closed. Geometry remains non-forcing and therefore partially browser-compatible; synchronous freshness is deferred to a future DOM iteration. Streaming/CORS/full XHR response types, import maps/bare module specifiers, and other documented deferred scope remain unchanged. |
