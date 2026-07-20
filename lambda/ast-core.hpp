@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <tree_sitter/api.h>
 #include "lambda.h"
+#include "value_rep.h"
 
 typedef struct NamePool NamePool;
 typedef struct Script Script;
@@ -685,6 +686,65 @@ typedef struct AstExportSpecifierNode : AstNode {
     String* export_name;
 } AstExportSpecifierNode;
 
+typedef struct FnEffectSummary {
+    bool may_gc;
+    bool may_reenter;
+    bool may_set_exception;
+    bool may_return_error;
+    bool may_suspend;
+    bool has_unknown_call;
+} FnEffectSummary;
+typedef struct FnEntryAnalysis {
+    FnEntryKind kind;
+    bool can_use_bound_context;
+    bool has_dynamic_scope;
+    bool requires_arguments_object;
+    bool is_external_entry;
+} FnEntryAnalysis;
+typedef struct FnReturnLaneAnalysis {
+    TypeId semantic_type;
+    ValueRep abi_rep;
+    ScalarReturnClass scalar_class;
+    bool may_need_caller_scalar_home;
+} FnReturnLaneAnalysis;
+typedef struct FnReturnAnalysis {
+    FnReturnLaneAnalysis normal;
+    FnReturnLaneAnalysis error;
+    FnErrorLane error_lane;
+    uint8_t scalar_home_lane_mask;
+} FnReturnAnalysis;
+typedef struct FnParamAnalysis {
+    TypeId semantic_type;
+    ValueRep canonical_rep;
+    uint32_t demand_mask;
+} FnParamAnalysis;
+typedef struct FnBindingAnalysis {
+    NameEntry* name;
+    TypeId semantic_type;
+    ValueRep canonical_rep;
+    JitValueClass value_class;
+    BindingStorage storage;
+    uint32_t escape_flags;
+} FnBindingAnalysis;
+typedef struct FnValueAnalysis {
+    AstNode* producer;
+    TypeId semantic_type;
+    ValueRep actual_rep;
+    uint32_t demand_mask;
+    bool is_exact_constant;
+    uint64_t constant_bits;
+} FnValueAnalysis;
+typedef struct FnVariantAnalysis {
+    FnEntryAnalysis entry;
+    FnEffectSummary effects;
+    FnReturnAnalysis result;
+    FnParamAnalysis* params;
+    int param_count;
+    FnBindingAnalysis* bindings;
+    int binding_count;
+    FnValueAnalysis* values;
+    int value_count;
+} FnVariantAnalysis;
 typedef struct FnAnalysis {
     FnCapture* captures;
     FnParamEvidence* evidence;
@@ -695,7 +755,20 @@ typedef struct FnAnalysis {
     bool has_indirect_pn_call;
     int await_point_count;
     const char* may_await_cause;
+    FnVariantAnalysis variants[4];
+    int variant_count;
 } FnAnalysis;
+
+static inline FnVariantAnalysis* fn_analysis_variant(
+        FnAnalysis* analysis, FnEntryKind kind) {
+    if (!analysis) return NULL;
+    for (int i = 0; i < analysis->variant_count; i++) {
+        if (analysis->variants[i].entry.kind == kind) {
+            return &analysis->variants[i];
+        }
+    }
+    return NULL;
+}
 
 typedef union FnExt {
     void* lambda;

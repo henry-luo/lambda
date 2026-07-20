@@ -4,6 +4,7 @@
 #pragma once
 
 #include "lambda.h"  // for Type*, TypeId, SysFunc, fn_ptr
+#include "value_rep.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -80,13 +81,60 @@ typedef enum JitReentryEffect {
     JIT_REENTRY_YES,
 } JitReentryEffect;
 
-typedef enum JitValueClass {
-    JIT_VALUE_UNKNOWN = 0,
-    JIT_VALUE_BOXED_ITEM,
-    JIT_VALUE_RAW_GC_POINTER,
-    JIT_VALUE_NON_GC_SCALAR,
-    JIT_VALUE_RAW_NON_GC_POINTER,
-} JitValueClass;
+// Normalized contracts separate ABI, GC, exception, and number-stack effects;
+// emitters materialize this descriptor from compact registry rows.
+typedef enum JitExceptionEffect {
+    JIT_EXCEPTION_MAY_SET = 0,
+    JIT_EXCEPTION_PRESERVES,
+    JIT_EXCEPTION_CLEARS,
+} JitExceptionEffect;
+typedef enum JitNumberStackEffect {
+    JIT_NUMBER_STACK_MAY_ALLOCATE = 0,
+    JIT_NUMBER_STACK_PRESERVES,
+} JitNumberStackEffect;
+typedef enum JitArgEffect {
+    JIT_ARG_BORROWED = 0,
+    JIT_ARG_MAY_CAPTURE = 1u << 0,
+    JIT_ARG_MAY_WRITE_THROUGH = 1u << 1,
+    JIT_ARG_PERSISTENT_STORE = 1u << 2,
+    JIT_ARG_EFFECT_UNKNOWN = 1u << 3,
+} JitArgEffect;
+typedef enum JitReturnTransport {
+    JIT_RETURN_NONE = 0,
+    JIT_RETURN_MIR_RESULT,
+    JIT_RETURN_CONTEXT_ERROR,
+} JitReturnTransport;
+typedef struct JitAbiValue {
+    JitAbiRep abi_rep;
+    JitValueClass value_class;
+} JitAbiValue;
+typedef struct JitAbiArg {
+    JitAbiValue value;
+    uint16_t effects;
+} JitAbiArg;
+typedef struct JitReturnLane {
+    JitAbiValue value;
+    JitReturnTransport transport;
+    ScalarReturnClass scalar_class;
+    bool may_use_scalar_return_home;
+} JitReturnLane;
+typedef struct JitCallEffects {
+    JitGcEffect gc;
+    JitReentryEffect reentry;
+    JitExceptionEffect exception;
+    JitNumberStackEffect number_stack;
+} JitCallEffects;
+typedef struct JitCallMetadata {
+    JitCallEffects effects;
+    JitReturnLane normal_result;
+    JitReturnLane error_result;
+    const JitAbiArg* abi_args;
+    uint16_t abi_arg_count;
+    uint16_t source_arg_count;
+    int16_t scalar_return_home_arg_index;
+    uint8_t scalar_home_lane_mask;
+    uint32_t flags;
+} JitCallMetadata;
 
 #define JIT_ARG_CLASS_BITS 3
 #define JIT_ARG_CLASS(index, value_class) \
@@ -97,7 +145,16 @@ typedef struct JitImportMetadata {
     JitReentryEffect reentry_effect;
     JitValueClass ret_class;
     uint32_t arg_classes;
+    uint32_t flags;
 } JitImportMetadata;
+
+enum {
+    // The returned Item is inline or already persistent/canonical and therefore
+    // cannot expose an activation-temporary scalar payload.
+    JIT_IMPORT_RESULT_SCALAR_STABLE = 1u << 0,
+    JIT_IMPORT_NUMBER_STACK_PRESERVES = 1u << 1,
+    JIT_IMPORT_ARGS_BORROWED_AUDITED = 1u << 2,
+};
 
 static inline JitValueClass jit_import_arg_class(
         const JitImportMetadata* metadata, int index) {

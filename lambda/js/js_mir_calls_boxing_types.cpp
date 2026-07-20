@@ -1,110 +1,52 @@
 #include "js_mir_internal.hpp"
 #include "js_exec_profile.h"
+#include "../../lib/lambda_alloca.h"
 
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
 
-// ============================================================================
-// Tune8 Phase 0 §1.3: opt-in emit telemetry
-//
-// Build with -DJS_MIR_EMIT_TELEMETRY to enable.
-// Counts, per `name` argument to jm_ensure_import, how many times each runtime
-// function is referenced from JIT'd code over the lifetime of the process.
-// Dumped to ./temp/jit_emit_stats.tsv at exit.
-//
-// The counter records ALL calls to jm_ensure_import (cache hits + misses), so
-// the totals reflect emission volume — i.e. how many MIR call insns get
-// produced — not just the unique-name set. Names with count 0 are absent
-// from the dump entirely; cross-reference with sys_func_defs[] to find
-// registry entries that are never imported by JIT'd code.
-// ============================================================================
-#ifdef JS_MIR_EMIT_TELEMETRY
-#include "../../lib/hashmap.h"
-#include <pthread.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-struct JsEmitTelemetryRow {
-    char name[96];
-    uint64_t count;
-};
-
-static uint64_t jm_telemetry_hash(const void* item, uint64_t s0, uint64_t s1) {
-    const JsEmitTelemetryRow* r = (const JsEmitTelemetryRow*)item;
-    return hashmap_sip(r->name, strlen(r->name), s0, s1);
-}
-
-static int jm_telemetry_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((const JsEmitTelemetryRow*)a)->name,
-                  ((const JsEmitTelemetryRow*)b)->name);
-}
-
-static struct hashmap* g_jm_telemetry = NULL;
-static pthread_mutex_t g_jm_telemetry_mu = PTHREAD_MUTEX_INITIALIZER;
-
-static void jm_telemetry_dump(void) {
-    pthread_mutex_lock(&g_jm_telemetry_mu);
-    if (g_jm_telemetry) {
-        // each lambda.exe process writes to its own file under
-        // ./temp/jit_emit_stats/<pid>.tsv so concurrent test262 workers
-        // don't clobber each other. JS_MIR_EMIT_STATS_DIR overrides the dir.
-        const char* dir = getenv("JS_MIR_EMIT_STATS_DIR");
-        if (!dir) dir = "./temp/jit_emit_stats";
-        mkdir(dir, 0755); // best-effort; ignore EEXIST
-        char path[512];
-        snprintf(path, sizeof(path), "%s/%d.tsv", dir, (int)getpid());
-        FILE* f = fopen(path, "w");
-        if (f) {
-            fprintf(f, "name\tcount\n");
-            size_t iter = 0;
-            void* item = NULL;
-            while (hashmap_iter(g_jm_telemetry, &iter, &item)) {
-                JsEmitTelemetryRow* r = (JsEmitTelemetryRow*)item;
-                fprintf(f, "%s\t%llu\n", r->name, (unsigned long long)r->count);
-            }
-            fclose(f);
-        }
+MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
+        int arg_count, MIR_reg_t* arg_regs, bool discard_result) {
+    if (!mt || !callee || !callee->body_func_item || arg_count < 0) return 0;
+    MIR_type_t* types = arg_count > 0 ? LAMBDA_ALLOCA(
+        arg_count, MIR_type_t) : NULL;
+    MIR_op_t* ops = arg_count > 0 ? LAMBDA_ALLOCA(
+        arg_count, MIR_op_t) : NULL;
+    for (int i = 0; i < arg_count; i++) {
+        types[i] = MIR_T_I64;
+        ops[i] = MIR_new_reg_op(mt->ctx, arg_regs[i]);
     }
-    pthread_mutex_unlock(&g_jm_telemetry_mu);
+    MirCallOptions options = {{MIR_FRAME_REF_NONE, 0},
+        discard_result ? 0u : FN_RETURN_HOME_NORMAL, false};
+    FnVariantAnalysis* body = fn_analysis_variant(&callee->analysis,
+        FN_ENTRY_BOXED_BODY);
+    MIR_reg_t result = em_call_direct(&mt->em, callee->body_name,
+        callee->body_func_item, body, arg_count, types, ops,
+        &options).normal.reg;
+    return result;
 }
 
-static void jm_telemetry_record(const char* name) {
-    pthread_mutex_lock(&g_jm_telemetry_mu);
-    if (!g_jm_telemetry) {
-        g_jm_telemetry = hashmap_new(sizeof(JsEmitTelemetryRow), 1024, 0, 0,
-            jm_telemetry_hash, jm_telemetry_cmp, NULL, NULL);
-        atexit(jm_telemetry_dump);
+MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
+        int arg_count, MIR_reg_t* arg_regs) {
+    if (!mt || !callee || !callee->native_func_item || arg_count < 0) return 0;
+    MIR_type_t* types = arg_count > 0
+        ? LAMBDA_ALLOCA(arg_count, MIR_type_t) : NULL;
+    MIR_op_t* ops = arg_count > 0
+        ? LAMBDA_ALLOCA(arg_count, MIR_op_t) : NULL;
+    for (int i = 0; i < arg_count; i++) {
+        types[i] = callee->param_types[i] == LMD_TYPE_FLOAT
+            ? MIR_T_D : MIR_T_I64;
+        ops[i] = MIR_new_reg_op(mt->ctx, arg_regs[i]);
     }
-    JsEmitTelemetryRow probe;
-    memset(&probe, 0, sizeof(probe));
-    snprintf(probe.name, sizeof(probe.name), "%s", name);
-    JsEmitTelemetryRow* existing =
-        (JsEmitTelemetryRow*)hashmap_get(g_jm_telemetry, &probe);
-    if (existing) {
-        existing->count++;
-    } else {
-        probe.count = 1;
-        hashmap_set(g_jm_telemetry, &probe);
-    }
-    pthread_mutex_unlock(&g_jm_telemetry_mu);
+    FnVariantAnalysis* native = fn_analysis_variant(&callee->analysis,
+        FN_ENTRY_NATIVE_BODY);
+    MIR_reg_t result = em_call_direct(&mt->em, callee->name,
+        callee->native_func_item, native, arg_count, types, ops).normal.reg;
+    return result;
 }
-#endif // JS_MIR_EMIT_TELEMETRY
-
-// ============================================================================
-// Import management
-// ============================================================================
 
 JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres) {
-#ifdef JS_MIR_EMIT_TELEMETRY
-    jm_telemetry_record(name);
-#endif
-    jm_sync_emitter_from_compat(mt);
     JsMirImportEntry* entry = em_ensure_import(&mt->em, name, ret_type, nargs, args, nres, true);
-    jm_sync_compat_from_emitter(mt);
     return entry;
 }
 
@@ -123,211 +65,6 @@ JsMirImportEntry* jm_ensure_import_i_i(JsMirTranspiler* mt, const char* name) {
 // Item(void)
 JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name) {
     return jm_ensure_import(mt, name, MIR_T_I64, 0, NULL, 1);
-}
-
-// ============================================================================
-// Emit call helpers
-// ============================================================================
-
-static MIR_reg_t jm_call_with_args(JsMirTranspiler* mt,
-                                   const char* fn_name,
-                                   MIR_type_t ret_type,
-                                   int nargs,
-                                   MIR_type_t* arg_types,
-                                   MIR_op_t* arg_ops) {
-    if (nargs < 0 || nargs > MIR_SHARED_MAX_CALL_ARGS) {
-        log_error("[JS_MIR_CALL] unsupported return-call arity %d for %s", nargs, fn_name);
-        return 0;
-    }
-    JitImportMetadata metadata;
-    jit_import_get_metadata(fn_name, &metadata);
-    for (int i = 0; i < nargs; i++) {
-        if (arg_ops[i].mode == MIR_OP_REG) {
-            em_gc_note_temp_use(&mt->em, arg_ops[i].u.reg,
-                jit_import_arg_class(&metadata, i), fn_name);
-        }
-    }
-    em_gc_note_safepoint(&mt->em, metadata.gc_effect, fn_name);
-    bool may_gc = metadata.gc_effect != JIT_EFFECT_NO_GC;
-    if (may_gc) {
-        mt->side_may_gc_call_count++;
-        if (!mt->side_root_write_back) {
-            jm_write_through_root_live_scope_vars(mt);
-        }
-        for (int i = 0; i < nargs; i++) {
-            JitValueClass value_class = jit_import_arg_class(&metadata, i);
-            if (arg_ops[i].mode == MIR_OP_REG &&
-                    mir_gc_value_needs_root(value_class, arg_types[i])) {
-                jm_create_gc_root_slot(mt, arg_ops[i].u.reg);
-            }
-        }
-    } else {
-        mt->side_no_gc_call_count++;
-    }
-    jm_sync_emitter_from_compat(mt);
-    MIR_reg_t res = em_call_with_args(&mt->em, fn_name, ret_type, nargs,
-        arg_types, arg_ops, true);
-    if (mt->side_root_write_back) {
-        jm_note_gc_call_site(mt,
-            DLIST_TAIL(MIR_insn_t, mt->current_func->insns),
-            metadata.gc_effect);
-    }
-    jm_sync_compat_from_emitter(mt);
-    if (res) {
-        // Call results are born after the safepoint. Recording that order is
-        // required so backward analysis never roots a not-yet-defined value.
-        em_gc_note_temp_definition(&mt->em, res, metadata.ret_class, fn_name);
-    }
-    if (res && mir_gc_value_needs_root(metadata.ret_class, ret_type)) {
-        // Helper results can remain live while later arguments are evaluated;
-        // publish only semantic GC values; scalar/raw-native results are not
-        // collector roots even when their physical carrier is MIR_T_I64.
-        jm_create_gc_root_slot(mt, res);
-    }
-    return res;
-}
-
-static void jm_call_void_with_args(JsMirTranspiler* mt,
-                                   const char* fn_name,
-                                   int nargs,
-                                   MIR_type_t* arg_types,
-                                   MIR_op_t* arg_ops) {
-    if (nargs < 0 || nargs > MIR_SHARED_MAX_CALL_ARGS) {
-        log_error("[JS_MIR_CALL] unsupported void-call arity %d for %s", nargs, fn_name);
-        return;
-    }
-    JitImportMetadata metadata;
-    jit_import_get_metadata(fn_name, &metadata);
-    for (int i = 0; i < nargs; i++) {
-        if (arg_ops[i].mode == MIR_OP_REG) {
-            em_gc_note_temp_use(&mt->em, arg_ops[i].u.reg,
-                jit_import_arg_class(&metadata, i), fn_name);
-        }
-    }
-    em_gc_note_safepoint(&mt->em, metadata.gc_effect, fn_name);
-    bool may_gc = metadata.gc_effect != JIT_EFFECT_NO_GC;
-    if (may_gc) {
-        mt->side_may_gc_call_count++;
-        if (!mt->side_root_write_back) {
-            jm_write_through_root_live_scope_vars(mt);
-        }
-        for (int i = 0; i < nargs; i++) {
-            JitValueClass value_class = jit_import_arg_class(&metadata, i);
-            if (arg_ops[i].mode == MIR_OP_REG &&
-                    mir_gc_value_needs_root(value_class, arg_types[i])) {
-                jm_create_gc_root_slot(mt, arg_ops[i].u.reg);
-            }
-        }
-    } else {
-        mt->side_no_gc_call_count++;
-    }
-    jm_sync_emitter_from_compat(mt);
-    em_call_void_with_args(&mt->em, fn_name, nargs, arg_types, arg_ops, true);
-    if (mt->side_root_write_back) {
-        jm_note_gc_call_site(mt,
-            DLIST_TAIL(MIR_insn_t, mt->current_func->insns),
-            metadata.gc_effect);
-    }
-    jm_sync_compat_from_emitter(mt);
-}
-
-MIR_reg_t jm_call_0(JsMirTranspiler* mt, const char* fn_name, MIR_type_t ret_type) {
-    return jm_call_with_args(mt, fn_name, ret_type, 0, NULL, NULL);
-}
-
-MIR_reg_t jm_call_1(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1) {
-    MIR_type_t types[1] = {a1t};
-    MIR_op_t ops[1] = {a1};
-    return jm_call_with_args(mt, fn_name, ret_type, 1, types, ops);
-}
-
-MIR_reg_t jm_call_2(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2) {
-    MIR_type_t types[2] = {a1t, a2t};
-    MIR_op_t ops[2] = {a1, a2};
-    return jm_call_with_args(mt, fn_name, ret_type, 2, types, ops);
-}
-
-MIR_reg_t jm_call_3(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3) {
-    MIR_type_t types[3] = {a1t, a2t, a3t};
-    MIR_op_t ops[3] = {a1, a2, a3};
-    return jm_call_with_args(mt, fn_name, ret_type, 3, types, ops);
-}
-
-MIR_reg_t jm_call_4(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
-    MIR_type_t a4t, MIR_op_t a4) {
-    MIR_type_t types[4] = {a1t, a2t, a3t, a4t};
-    MIR_op_t ops[4] = {a1, a2, a3, a4};
-    return jm_call_with_args(mt, fn_name, ret_type, 4, types, ops);
-}
-
-MIR_reg_t jm_call_5(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
-    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5) {
-    MIR_type_t types[5] = {a1t, a2t, a3t, a4t, a5t};
-    MIR_op_t ops[5] = {a1, a2, a3, a4, a5};
-    return jm_call_with_args(mt, fn_name, ret_type, 5, types, ops);
-}
-
-// v20: 6-argument call helper (used for Date setter dispatch with up to 4 args + obj + method_id)
-MIR_reg_t jm_call_6(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
-    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
-    MIR_type_t a6t, MIR_op_t a6) {
-    MIR_type_t types[6] = {a1t, a2t, a3t, a4t, a5t, a6t};
-    MIR_op_t ops[6] = {a1, a2, a3, a4, a5, a6};
-    return jm_call_with_args(mt, fn_name, ret_type, 6, types, ops);
-}
-
-void jm_call_void_0(JsMirTranspiler* mt, const char* fn_name) {
-    jm_call_void_with_args(mt, fn_name, 0, NULL, NULL);
-}
-
-void jm_call_void_1(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1) {
-    MIR_type_t types[1] = {a1t};
-    MIR_op_t ops[1] = {a1};
-    jm_call_void_with_args(mt, fn_name, 1, types, ops);
-}
-
-void jm_call_void_2(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2) {
-    MIR_type_t types[2] = {a1t, a2t};
-    MIR_op_t ops[2] = {a1, a2};
-    jm_call_void_with_args(mt, fn_name, 2, types, ops);
-}
-
-void jm_call_void_3(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
-    MIR_type_t a3t, MIR_op_t a3) {
-    MIR_type_t types[3] = {a1t, a2t, a3t};
-    MIR_op_t ops[3] = {a1, a2, a3};
-    jm_call_void_with_args(mt, fn_name, 3, types, ops);
-}
-
-void jm_call_void_4(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
-    MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4) {
-    MIR_type_t types[4] = {a1t, a2t, a3t, a4t};
-    MIR_op_t ops[4] = {a1, a2, a3, a4};
-    jm_call_void_with_args(mt, fn_name, 4, types, ops);
-}
-
-void jm_call_void_5(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
-    MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4,
-    MIR_type_t a5t, MIR_op_t a5) {
-    MIR_type_t types[5] = {a1t, a2t, a3t, a4t, a5t};
-    MIR_op_t ops[5] = {a1, a2, a3, a4, a5};
-    jm_call_void_with_args(mt, fn_name, 5, types, ops);
 }
 
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt) {
@@ -836,7 +573,7 @@ MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item) {
 // Unbox Item → native double; inline the raw-bit arm for self-tagged floats.
 MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
     // Safety: if item is already a native double, return it directly
-    MIR_type_t rt = MIR_reg_type(mt->ctx, item, mt->current_func);
+    MIR_type_t rt = MIR_reg_type(mt->ctx, item, mt->em.func);
     if (rt == MIR_T_D) return item;
     if (rt == MIR_T_F) {
         MIR_reg_t d = jm_new_reg(mt, "f2d_ub", MIR_T_D);
@@ -888,7 +625,7 @@ MIR_reg_t jm_emit_double_to_int(JsMirTranspiler* mt, MIR_reg_t d_reg) {
 
 // Ensure a register is native int64_t, converting from boxed if needed
 MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
-    MIR_type_t rt = MIR_reg_type(mt->ctx, reg, mt->current_func);
+    MIR_type_t rt = MIR_reg_type(mt->ctx, reg, mt->em.func);
     if (rt == MIR_T_I64 && src_type == LMD_TYPE_INT) return reg;
     if (rt == MIR_T_D) return jm_emit_double_to_int(mt, reg);
     if (rt == MIR_T_F) {
@@ -911,7 +648,7 @@ MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_ty
 
 // Ensure a register is native double, converting from int or boxed if needed
 MIR_reg_t jm_ensure_native_float(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
-    MIR_type_t rt = MIR_reg_type(mt->ctx, reg, mt->current_func);
+    MIR_type_t rt = MIR_reg_type(mt->ctx, reg, mt->em.func);
     if (rt == MIR_T_D) return reg;
     if (rt == MIR_T_F) {
         MIR_reg_t d = jm_new_reg(mt, "f2d_f", MIR_T_D);
@@ -933,7 +670,8 @@ MIR_reg_t jm_ensure_native_float(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_
 }
 
 // Box a native value into an Item based on its type
-MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_id) {
+static MIR_reg_t jm_box_native_impl(JsMirTranspiler* mt, MIR_reg_t reg,
+        TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_INT:   return jm_box_int_reg(mt, reg);
     case LMD_TYPE_FLOAT: {
@@ -953,10 +691,44 @@ MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_id) {
     }
 }
 
+MirValue jm_convert_rep(void* owner, MirValue value,
+        ValueRep required) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)owner;
+    MIR_reg_t reg = 0;
+    if (required == VALUE_REP_ITEM) {
+        reg = jm_box_native_impl(mt, value.reg, value.semantic_type);
+    } else if (value.rep == VALUE_REP_ITEM) {
+        reg = required == VALUE_REP_F64
+            ? jm_emit_unbox_float(mt, value.reg)
+            : jm_emit_unbox_int(mt, value.reg);
+    }
+    if (!reg) return value;
+    MIR_type_t mir_type = required == VALUE_REP_F64 ? MIR_T_D : MIR_T_I64;
+    MirValue converted = em_value(reg, mir_type, value.semantic_type,
+        required, required == VALUE_REP_ITEM ? JIT_VALUE_BOXED_ITEM
+            : JIT_VALUE_NON_GC_SCALAR);
+    converted.scalar_home_id = em_scalar_home_for_reg(&mt->em, reg);
+    converted.scalar_provenance = converted.scalar_home_id
+        ? SCALAR_PROVENANCE_ACTIVATION_HOME : SCALAR_PROVENANCE_NONE;
+    return converted;
+}
+
+MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg,
+        TypeId type_id) {
+    ValueRep actual = type_id == LMD_TYPE_FLOAT ? VALUE_REP_F64
+        : type_id == LMD_TYPE_INT || type_id == LMD_TYPE_BOOL
+            ? VALUE_REP_I64 : VALUE_REP_ITEM;
+    MIR_type_t mir_type = actual == VALUE_REP_F64 ? MIR_T_D : MIR_T_I64;
+    MirValue value = em_value(reg, mir_type, type_id, actual,
+        actual == VALUE_REP_ITEM ? JIT_VALUE_BOXED_ITEM
+            : JIT_VALUE_NON_GC_SCALAR);
+    return em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg;
+}
+
 // Safety net: ensure a register holds a boxed Item (I64).
 // If it's a native double/float, box it; otherwise return as-is.
 MIR_reg_t jm_ensure_boxed(JsMirTranspiler* mt, MIR_reg_t reg) {
-    MIR_type_t rtype = MIR_reg_type(mt->ctx, reg, mt->current_func);
+    MIR_type_t rtype = MIR_reg_type(mt->ctx, reg, mt->em.func);
     if (rtype == MIR_T_D) return jm_box_float(mt, reg);
     if (rtype == MIR_T_F) {
         MIR_reg_t d = jm_new_reg(mt, "f2d_box", MIR_T_D);
@@ -1513,7 +1285,7 @@ MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr)
             MIR_new_int_op(mt->ctx, 1)));
         return result;
     }
-    if (expr_type == LMD_TYPE_FLOAT && MIR_reg_type(mt->ctx, val, mt->current_func) == MIR_T_D) {
+    if (expr_type == LMD_TYPE_FLOAT && MIR_reg_type(mt->ctx, val, mt->em.func) == MIR_T_D) {
         MIR_reg_t nonzero = jm_new_reg(mt, "dtruth_nz", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DNE,
             MIR_new_reg_op(mt->ctx, nonzero),

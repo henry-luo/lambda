@@ -117,6 +117,30 @@ bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata) {
     const JitImport* found = (const JitImport*)hashmap_get(func_map, &key);
     if (!found) return false;
     *metadata = found->metadata;
+    if (metadata->ret_class == JIT_VALUE_UNKNOWN) {
+        for (int i = 0; i < sys_func_def_count; i++) {
+            const SysFuncInfo* info = &sys_func_defs[i];
+            if (!info->c_func_name || strcmp(info->c_func_name, name) != 0) {
+                continue;
+            }
+            switch (info->c_ret_type) {
+            case C_RET_ITEM:
+            case C_RET_RETITEM:
+                metadata->ret_class = JIT_VALUE_BOXED_ITEM;
+                break;
+            case C_RET_STRING:
+            case C_RET_SYMBOL:
+            case C_RET_TYPE_PTR:
+            case C_RET_CONTAINER:
+                metadata->ret_class = JIT_VALUE_RAW_GC_POINTER;
+                break;
+            default:
+                metadata->ret_class = JIT_VALUE_NON_GC_SCALAR;
+                break;
+            }
+            break;
+        }
+    }
     return true;
 }
 

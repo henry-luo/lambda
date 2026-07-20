@@ -573,6 +573,78 @@ static MIR_reg_t jm_transpile_default_param_value(JsMirTranspiler* mt, JsFunctio
     return jm_transpile_box_item(mt, expr);
 }
 
+static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
+        JsFuncCollected* fc, int param_count, bool has_captures) {
+    int total_params = param_count + (has_captures ? 1 : 0);
+    MIR_var_t* params = total_params > 0
+        ? LAMBDA_ALLOCA(total_params, MIR_var_t) : NULL;
+    char** names = total_params > 0
+        ? LAMBDA_ALLOCA(total_params, char*) : NULL;
+    int pi = 0;
+    if (has_captures) {
+        names[pi] = LAMBDA_ALLOCA(128, char);
+        snprintf(names[pi], 128, "%s", "_js.env");
+        params[pi] = {MIR_T_I64, names[pi], 0};
+        pi++;
+    }
+    JsAstNode* param = fc->node->params;
+    for (int i = 0; i < param_count; i++) {
+        names[pi] = LAMBDA_ALLOCA(128, char);
+        jm_get_param_name(param, i, names[pi], 128);
+        params[pi] = {MIR_T_I64, names[pi], 0};
+        param = param ? param->next : NULL;
+        pi++;
+    }
+    int env_offset = has_captures ? 1 : 0;
+    for (int i = env_offset; i < total_params; i++) {
+        for (int j = i + 1; j < total_params; j++) {
+            if (strcmp(names[i], names[j]) != 0) continue;
+            char* renamed = LAMBDA_ALLOCA(128, char);
+            snprintf(renamed, 128, "%s__dup%d", names[i], i);
+            names[i] = renamed;
+            params[i].name = renamed;
+            break;
+        }
+    }
+    MIR_type_t return_type = MIR_T_I64;
+    MIR_item_t wrapper_item = MIR_new_func_arr(mt->ctx, fc->name, 1,
+        &return_type, total_params, params);
+    MIR_func_t wrapper_func = MIR_get_item_func(mt->ctx, wrapper_item);
+    fc->func_item = wrapper_item;
+    jm_register_local_func(mt, fc->name, wrapper_item);
+    mt->em.func_item = wrapper_item;
+    mt->em.func = wrapper_func;
+    jm_begin_function_frame(mt, return_type, true, MIR_SCALAR_RETURN_NONE, 0);
+    mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
+
+    MIR_reg_t* args = total_params > 0
+        ? LAMBDA_ALLOCA(total_params, MIR_reg_t) : NULL;
+    for (int i = 0; i < total_params; i++) {
+        args[i] = MIR_reg(mt->ctx, names[i], wrapper_func);
+    }
+    MIR_reg_t result = jm_call_direct_boxed(mt, fc, total_params, args);
+    // Public wrappers persist activation-backed results; exceptional nulls
+    // retain the active exception and bypass ordinary ownership conversion.
+    MIR_reg_t persistent = jm_new_reg(mt, "public_result", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, persistent), MIR_new_reg_op(mt->ctx, result)));
+    MIR_reg_t exception_pending = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+    MIR_label_t persistent_ready = jm_new_label(mt);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, persistent_ready),
+        MIR_new_reg_op(mt->ctx, exception_pending)));
+    MIR_reg_t heap_result = jm_call_1(mt, "lambda_item_heap_rehome", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, persistent));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, persistent),
+        MIR_new_reg_op(mt->ctx, heap_result)));
+    jm_emit_label(mt, persistent_ready);
+    jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+        MIR_new_reg_op(mt->ctx, persistent)));
+    jm_finish_function_frame(mt, fc->name);
+    MIR_finish_func(mt->ctx);
+}
+
 void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     int param_count = jm_count_params(fn);
@@ -627,8 +699,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         jm_register_local_func(mt, native_name, native_item);
 
         // Save transpiler state
-        MIR_item_t saved_item = mt->current_func_item;
-        MIR_func_t saved_func = mt->current_func;
+        MIR_item_t saved_item = mt->em.func_item;
+        MIR_func_t saved_func = mt->em.func;
         int saved_scope_depth = mt->scope_depth;
         int saved_loop_depth = mt->loop_depth;
         bool saved_in_native = mt->in_native_func;
@@ -648,8 +720,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             fc->is_strict = true;
         }
 
-        mt->current_func_item = native_item;
-        mt->current_func = native_func;
+        mt->em.func_item = native_item;
+        mt->em.func = native_func;
         mt->loop_depth = 0;
         mt->for_of_depth = 0;
         mt->pending_label_name = NULL;
@@ -665,6 +737,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         jm_begin_function_frame(mt, native_ret_type, false,
             MIR_SCALAR_RETURN_NONE, 0);
+        mt->em.frame.plan.entry_kind = FN_ENTRY_NATIVE_BODY;
+        mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
         jm_push_scope(mt);
 
         // Register parameters with their inferred native types
@@ -900,8 +974,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_finish_func(mt->ctx);
 
         // Restore state
-        mt->current_func_item = saved_item;
-        mt->current_func = saved_func;
+        mt->em.func_item = saved_item;
+        mt->em.func = saved_func;
         mt->scope_depth = saved_scope_depth;
         mt->loop_depth = saved_loop_depth;
         mt->in_native_func = saved_in_native;
@@ -991,7 +1065,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // Create state machine function: gen_sm_<name>(Item* env, Item input, int64_t state) -> Item
         char sm_name[160];
-        snprintf(sm_name, sizeof(sm_name), "gen_sm_%s_%d", fc->name, mt->label_counter++);
+        snprintf(sm_name, sizeof(sm_name), "gen_sm_%s_%d", fc->name, mt->em.label_counter++);
 
         MIR_var_t sm_params[3] = {
             {MIR_T_I64, "gen_env", 0},   // Item* env (passed as i64)
@@ -1004,8 +1078,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         jm_register_local_func(mt, sm_name, gen_sm_func_item);
 
         // Save transpiler state
-        MIR_item_t saved_item_sm = mt->current_func_item;
-        MIR_func_t saved_func_sm = mt->current_func;
+        MIR_item_t saved_item_sm = mt->em.func_item;
+        MIR_func_t saved_func_sm = mt->em.func;
         int saved_scope_depth_sm = mt->scope_depth;
         int saved_loop_depth_sm = mt->loop_depth;
         bool saved_in_native_sm = mt->in_native_func;
@@ -1023,8 +1097,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             fc->is_strict = true;
         }
 
-        mt->current_func_item = gen_sm_func_item;
-        mt->current_func = sm_func;
+        mt->em.func_item = gen_sm_func_item;
+        mt->em.func = sm_func;
         mt->loop_depth = 0;
         mt->for_of_depth = 0;
         mt->pending_label_name = NULL;
@@ -1054,6 +1128,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         jm_begin_function_frame(mt, sm_ret, true,
             MIR_SCALAR_RETURN_DYNAMIC, 0);
+        mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
         jm_push_scope(mt);
         mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -1564,8 +1639,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_finish_func(mt->ctx);
 
         // Restore transpiler state
-        mt->current_func_item = saved_item_sm;
-        mt->current_func = saved_func_sm;
+        mt->em.func_item = saved_item_sm;
+        mt->em.func = saved_func_sm;
         mt->scope_depth = saved_scope_depth_sm;
         mt->loop_depth = saved_loop_depth_sm;
         mt->in_native_func = saved_in_native_sm;
@@ -1621,7 +1696,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
             // Create state machine function: async_sm_<name>(Item* env, Item input, int64_t state) -> Item
             char sm_name[160];
-            snprintf(sm_name, sizeof(sm_name), "async_sm_%s_%d", fc->name, mt->label_counter++);
+            snprintf(sm_name, sizeof(sm_name), "async_sm_%s_%d", fc->name, mt->em.label_counter++);
 
             MIR_var_t sm_params[3] = {
                 {MIR_T_I64, "gen_env", 0},
@@ -1634,8 +1709,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_register_local_func(mt, sm_name, gen_sm_func_item);
 
             // Save transpiler state
-            MIR_item_t saved_item_sm = mt->current_func_item;
-            MIR_func_t saved_func_sm = mt->current_func;
+            MIR_item_t saved_item_sm = mt->em.func_item;
+            MIR_func_t saved_func_sm = mt->em.func;
             int saved_scope_depth_sm = mt->scope_depth;
             int saved_loop_depth_sm = mt->loop_depth;
             bool saved_in_native_sm = mt->in_native_func;
@@ -1653,8 +1728,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 fc->is_strict = true;
             }
 
-            mt->current_func_item = gen_sm_func_item;
-            mt->current_func = sm_func;
+            mt->em.func_item = gen_sm_func_item;
+            mt->em.func = sm_func;
             mt->loop_depth = 0;
             mt->for_of_depth = 0;
             mt->pending_label_name = NULL;
@@ -1683,6 +1758,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
             jm_begin_function_frame(mt, sm_ret, true,
                 MIR_SCALAR_RETURN_DYNAMIC, 0);
+            mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
             jm_push_scope(mt);
 
             mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
@@ -2104,8 +2180,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MIR_finish_func(mt->ctx);
 
             // Restore transpiler state
-            mt->current_func_item = saved_item_sm;
-            mt->current_func = saved_func_sm;
+            mt->em.func_item = saved_item_sm;
+            mt->em.func = saved_func_sm;
             mt->scope_depth = saved_scope_depth_sm;
             mt->loop_depth = saved_loop_depth_sm;
             mt->in_native_func = saved_in_native_sm;
@@ -2127,7 +2203,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
 
     // --- Generate boxed version (original or wrapper) ---
-    int total_params = param_count + (has_captures ? 1 : 0);
+    bool body_needs_scalar_home = em_scalar_return_mode_for_type(
+        fc->return_type) != MIR_SCALAR_RETURN_NONE;
+    int total_params = param_count + (has_captures ? 1 : 0) +
+        (body_needs_scalar_home ? 1 : 0);
     MIR_var_t* params = LAMBDA_ALLOCA(total_params, MIR_var_t);
     char** param_names_arr = LAMBDA_ALLOCA(total_params, char*);
     const char* closure_env_param_name = "_js.env";
@@ -2146,6 +2225,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         jm_get_param_name(param_node, i, param_names_arr[pi], 128);
         params[pi] = {MIR_T_I64, param_names_arr[pi], 0};
         param_node = param_node ? param_node->next : NULL;
+        pi++;
+    }
+    if (body_needs_scalar_home) {
+        param_names_arr[pi] = LAMBDA_ALLOCA(128, char);
+        snprintf(param_names_arr[pi], 128, "%s", "_js.scalar_home");
+        params[pi] = {MIR_T_P, param_names_arr[pi], 0};
         pi++;
     }
 
@@ -2168,14 +2253,15 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
 
     MIR_type_t ret_type = MIR_T_I64;
-    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, fc->name, 1, &ret_type, total_params, params);
+    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, fc->body_name, 1,
+        &ret_type, total_params, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
-
-    jm_register_local_func(mt, fc->name, func_item);
+    fc->body_func_item = func_item;
+    jm_register_local_func(mt, fc->body_name, func_item);
 
     // Save transpiler state
-    MIR_item_t saved_item = mt->current_func_item;
-    MIR_func_t saved_func = mt->current_func;
+    MIR_item_t saved_item = mt->em.func_item;
+    MIR_func_t saved_func = mt->em.func;
     int saved_scope_depth = mt->scope_depth;
     int saved_loop_depth = mt->loop_depth;
     bool saved_in_native = mt->in_native_func;
@@ -2213,8 +2299,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         fc->is_strict = true;
     }
 
-    mt->current_func_item = func_item;
-    mt->current_func = func;
+    mt->em.func_item = func_item;
+    mt->em.func = func;
     mt->loop_depth = 0;
     mt->for_of_depth = 0;
     mt->pending_label_name = NULL;
@@ -2226,6 +2312,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     jm_begin_function_frame(mt, ret_type, true,
         em_scalar_return_mode_for_type(fc->return_type), 0);
+    mt->em.frame.plan.entry_kind = FN_ENTRY_BOXED_BODY;
+    mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
+    if (body_needs_scalar_home) {
+        mt->em.frame.incoming_scalar_home = MIR_reg(mt->ctx,
+            "_js.scalar_home", func);
+        mt->em.frame.plan.accepts_caller_scalar_home = true;
+        mt->em.frame.plan.scalar_home_lane_mask = 1u;
+    }
     if (has_captures) {
         MIR_reg_t closure_env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);
         jm_create_gc_root_slot(mt, closure_env_reg);
@@ -2276,25 +2370,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // If we have a native version, the boxed version becomes a thin wrapper:
     // unbox params → call native → box result
     if (generate_native) {
-        // Build native call: result = native_func(unboxed_p1, unboxed_p2, ...)
-        char proto_name[160];
-        snprintf(proto_name, sizeof(proto_name), "%s_n_wp%d", fc->name, mt->label_counter++);
-
-        MIR_var_t* np_args = LAMBDA_ALLOCA(param_count, MIR_var_t);
-        for (int i = 0; i < param_count; i++) {
-            MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-            np_args[i] = {mtype, "a", 0};
-        }
-        MIR_type_t native_ret_type = (fc->return_type == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-        MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, &native_ret_type, param_count, np_args);
-
-        int nops = 3 + param_count;
-        MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
-        int oi = 0;
-        ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
-        ops[oi++] = MIR_new_ref_op(mt->ctx, fc->native_func_item);
-        MIR_reg_t native_result = jm_new_reg(mt, "nret", native_ret_type);
-        ops[oi++] = MIR_new_reg_op(mt->ctx, native_result);
+        MIR_reg_t* native_args = LAMBDA_ALLOCA(param_count, MIR_reg_t);
 
         // Unbox each parameter (with default-param handling for native wrapper)
         param_node = fn->params;
@@ -2321,20 +2397,19 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
 
             if (fc->param_types[i] == LMD_TYPE_FLOAT) {
-                MIR_reg_t unboxed = jm_emit_unbox_float(mt, preg);
-                ops[oi++] = MIR_new_reg_op(mt->ctx, unboxed);
+                native_args[i] = jm_emit_unbox_float(mt, preg);
             } else {
                 // Use it2i (runtime type-checking unbox) instead of jm_emit_unbox_int
                 // because callers may pass FLOAT Items for INT-typed params (e.g. 36e5).
                 // it2i handles INT, INT64, FLOAT → int64_t conversion correctly.
-                MIR_reg_t unboxed = jm_call_1(mt, JS_PROFILED_IT2I_NAME, MIR_T_I64,
+                native_args[i] = jm_call_1(mt, JS_PROFILED_IT2I_NAME, MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, preg));
-                ops[oi++] = MIR_new_reg_op(mt->ctx, unboxed);
             }
             param_node = param_node ? param_node->next : NULL;
         }
 
-        jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+        MIR_reg_t native_result = jm_call_direct_native(mt, fc,
+            param_count, native_args);
 
         // Box the result and return
         MIR_reg_t boxed_result = jm_box_native(mt, native_result, fc->return_type);
@@ -3697,10 +3772,11 @@ finish_boxed:
     jm_pop_scope(mt);
     jm_finish_function_frame(mt, fc->name);
     MIR_finish_func(mt->ctx);
+    jm_emit_public_function_wrapper(mt, fc, param_count, has_captures);
 
     // Restore state
-    mt->current_func_item = saved_item;
-    mt->current_func = saved_func;
+    mt->em.func_item = saved_item;
+    mt->em.func = saved_func;
     mt->scope_depth = saved_scope_depth;
     mt->loop_depth = saved_loop_depth;
     mt->in_native_func = saved_in_native;

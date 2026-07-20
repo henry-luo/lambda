@@ -5892,10 +5892,65 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
+        FnAnalysis* analysis = &fc->analysis;
+        analysis->variant_count = 0;
+        FnVariantAnalysis* public_entry =
+            &analysis->variants[analysis->variant_count++];
+        memset(public_entry, 0, sizeof(*public_entry));
+        public_entry->entry = {FN_ENTRY_PUBLIC_WRAPPER, false,
+            fc->has_direct_eval, fc->uses_arguments, true};
+        public_entry->effects = {true, true, true, false,
+            fc->node->is_async || fc->node->is_generator, true};
+        public_entry->result.normal = {fc->return_type, VALUE_REP_ITEM,
+            SCALAR_RETURN_NONE, false};
+        public_entry->param_count = fc->param_count;
+
+        FnVariantAnalysis* body =
+            &analysis->variants[analysis->variant_count++];
+        memset(body, 0, sizeof(*body));
+        body->entry = {FN_ENTRY_BOXED_BODY, true, fc->has_direct_eval,
+            fc->uses_arguments, false};
+        body->effects = public_entry->effects;
+        ScalarReturnClass scalar_class =
+            em_scalar_return_class_for_type(fc->return_type);
+        body->result.normal = {fc->return_type, VALUE_REP_ITEM,
+            scalar_class, scalar_class != SCALAR_RETURN_NONE};
+        body->result.scalar_home_lane_mask =
+            scalar_class != SCALAR_RETURN_NONE ? FN_RETURN_HOME_NORMAL : 0;
+        body->param_count = fc->param_count;
+
+        if (fc->has_native_version) {
+            FnVariantAnalysis* native =
+                &analysis->variants[analysis->variant_count++];
+            memset(native, 0, sizeof(*native));
+            native->entry = {FN_ENTRY_NATIVE_BODY, true, false, false, false};
+            native->effects = body->effects;
+            native->result.normal = {fc->return_type,
+                fc->return_type == LMD_TYPE_FLOAT
+                    ? VALUE_REP_F64 : VALUE_REP_I64,
+                SCALAR_RETURN_NONE, false};
+            native->param_count = fc->param_count;
+        }
+        if ((fc->node->is_async || fc->node->is_generator) &&
+                analysis->variant_count < 4) {
+            FnVariantAnalysis* resume =
+                &analysis->variants[analysis->variant_count++];
+            memset(resume, 0, sizeof(*resume));
+            resume->entry = {FN_ENTRY_RESUME, false, false, false, true};
+            resume->effects = public_entry->effects;
+            resume->result.normal = {LMD_TYPE_ANY, VALUE_REP_ITEM,
+                SCALAR_RETURN_NONE, false};
+        }
+        snprintf(fc->body_name, sizeof(fc->body_name), "%s_body", fc->name);
         if (!fc->func_item) {
             MIR_item_t fwd = MIR_new_forward(mt->ctx, fc->name);
             fc->func_item = fwd;
             jm_register_local_func(mt, fc->name, fwd);
+        }
+        if (!fc->body_func_item) {
+            MIR_item_t body_fwd = MIR_new_forward(mt->ctx, fc->body_name);
+            fc->body_func_item = body_fwd;
+            jm_register_local_func(mt, fc->body_name, body_fwd);
         }
         // P1: Also pre-declare native function version so call sites emitted before
         // a function is defined can use fc->native_func_item.  The actual native
@@ -5919,8 +5974,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     MIR_type_t main_ret = MIR_T_I64;
     MIR_item_t main_item = MIR_new_func_arr(mt->ctx, "js_main", 1, &main_ret, 1, main_vars);
     MIR_func_t main_func = MIR_get_item_func(mt->ctx, main_item);
-    mt->current_func_item = main_item;
-    mt->current_func = main_func;
+    mt->em.func_item = main_item;
+    mt->em.func = main_func;
     mt->current_func_index = -1;
     mt->current_fc = NULL;
     mt->current_class = NULL;

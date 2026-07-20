@@ -318,7 +318,7 @@ void jm_make_fn_name(char* buf, int bufsize, JsFunctionNode* fn, JsMirTranspiler
         strbuf_append_str_n(sb, fn->name->chars, fn->name->len);
     } else {
         strbuf_append_str(sb, "anon");
-        strbuf_append_int(sb, mt->label_counter++);
+        strbuf_append_int(sb, mt->em.label_counter++);
     }
     strbuf_append_char(sb, '_');
     strbuf_append_int(sb, ts_node_start_byte(fn->node));

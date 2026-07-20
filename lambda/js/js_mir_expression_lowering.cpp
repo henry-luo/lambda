@@ -1344,7 +1344,6 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)inner_class_binding->inner_module_var_index));
     }
     if (var) {
-        jm_note_gc_var_use(mt, var, vname);
         MIR_reg_t live_cell_reg = 0;
         // Js57 P3 (Track B2): live binding for self-imported default — re-fetch
         // `namespace.default` from the module registry each time the local
@@ -8529,40 +8528,24 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     if (jm_should_inline(p7_fc)) {
                         return jm_transpile_inline_native(mt, (JsCallNode*)call, p7_fc);
                     }
-                    // emit native direct call (same pattern as identifier native call)
-                    char p7_name[160];
-                    snprintf(p7_name, sizeof(p7_name), "%s_n_p7%d", p7_fc->name, mt->label_counter++);
-                    MIR_var_t* p7_pargs = LAMBDA_ALLOCA(p7_fc->param_count, MIR_var_t);
-                    for (int i = 0; i < p7_fc->param_count; i++) {
-                        MIR_type_t mtype = (p7_fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-                        p7_pargs[i] = {mtype, "a", 0};
-                    }
-                    MIR_type_t p7_ret = (p7_fc->return_type == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-                    MIR_item_t p7_proto = MIR_new_proto_arr(mt->ctx, p7_name, 1, &p7_ret, p7_fc->param_count, p7_pargs);
-                    int p7_nops = 3 + p7_fc->param_count;
-                    MIR_op_t* p7_ops = LAMBDA_ALLOCA(p7_nops, MIR_op_t);
-                    int p7_oi = 0;
-                    p7_ops[p7_oi++] = MIR_new_ref_op(mt->ctx, p7_proto);
-                    p7_ops[p7_oi++] = MIR_new_ref_op(mt->ctx, p7_fc->native_func_item);
-                    MIR_reg_t p7_result = jm_new_reg(mt, "p7call", p7_ret);
-                    p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, p7_result);
+                    MIR_reg_t* p7_args = LAMBDA_ALLOCA(
+                        p7_fc->param_count, MIR_reg_t);
                     JsAstNode* p7_arg = ((JsCallNode*)call)->arguments;
                     for (int i = 0; i < p7_fc->param_count; i++) {
                         if (p7_arg) {
-                            MIR_reg_t val = jm_transpile_as_native(mt, p7_arg,
+                            p7_args[i] = jm_transpile_as_native(mt, p7_arg,
                                 jm_get_effective_type(mt, p7_arg), p7_fc->param_types[i]);
-                            p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, val);
                             p7_arg = p7_arg->next;
                         } else {
-                            MIR_reg_t zero = jm_new_reg(mt, "p7z", MIR_T_I64);
+                            p7_args[i] = jm_new_reg(mt, "p7z", MIR_T_I64);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, zero), MIR_new_int_op(mt->ctx, 0)));
-                            p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, zero);
+                                MIR_new_reg_op(mt->ctx, p7_args[i]),
+                                MIR_new_int_op(mt->ctx, 0)));
                         }
                     }
                     jm_transpile_discard_call_args(mt, p7_arg);
-                    jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, p7_nops, p7_ops));
-                    return p7_result; // returns native value
+                    return jm_call_direct_native(mt, p7_fc,
+                        p7_fc->param_count, p7_args);
                 }
             }
 
@@ -8863,33 +8846,12 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         jm_call_void_1(mt, "js_set_direct_new_target",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, p3_undef));
 
-                        // Build proto + call ops
-                        char p3_pname[160];
-                        snprintf(p3_pname, sizeof(p3_pname), "%s_p3_%d", p3_method->fc->name, mt->label_counter++);
-                        MIR_var_t* p3_pargs = LAMBDA_ALLOCA(p3_param_count, MIR_var_t);
-                        for (int i = 0; i < p3_param_count; i++) {
-                            p3_pargs[i] = {MIR_T_I64, "a", 0};
-                        }
-                        MIR_type_t p3_ret[1] = {MIR_T_I64};
-                        MIR_item_t p3_proto = MIR_new_proto_arr(mt->ctx, p3_pname, 1, p3_ret, p3_param_count, p3_pargs);
-
-                        int p3_nops = 3 + p3_param_count;
-                        MIR_op_t* p3_ops = LAMBDA_ALLOCA(p3_nops, MIR_op_t);
-                        int p3_oi = 0;
-                        p3_ops[p3_oi++] = MIR_new_ref_op(mt->ctx, p3_proto);
-                        p3_ops[p3_oi++] = MIR_new_ref_op(mt->ctx, p3_method->fc->func_item);
-                        MIR_reg_t p3_result = jm_new_reg(mt, "p3call", MIR_T_I64);
-                        p3_ops[p3_oi++] = MIR_new_reg_op(mt->ctx, p3_result);
-
-                        // Use pre-transpiled argument registers
-                        for (int i = 0; i < p3_param_count; i++) {
-                            p3_ops[p3_oi++] = MIR_new_reg_op(mt->ctx, p3_arg_regs[i]);
-                        }
-
                         // save with-scope depth before direct call
                         MIR_reg_t p3_saved_wd = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
 
-                        jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, p3_nops, p3_ops));
+                        MIR_reg_t p3_result = jm_call_direct_boxed(mt,
+                            p3_method->fc, p3_param_count, p3_arg_regs,
+                            mt->discarded_expression == (JsAstNode*)call);
 
                         // restore with-scope depth after direct call
                         jm_call_void_1(mt, "js_with_restore_depth",
@@ -9803,7 +9765,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                 } else {
                                     snprintf(pname, sizeof(pname), "_js_p%d", i);
                                 }
-                                MIR_reg_t preg = MIR_reg(mt->ctx, pname, mt->current_func);
+                                MIR_reg_t preg = MIR_reg(mt->ctx, pname, mt->em.func);
                                 MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
                                 MIR_insn_code_t mov = (mtype == MIR_T_D) ? MIR_DMOV : MIR_MOV;
                                 jm_emit(mt, MIR_new_insn(mt->ctx, mov,
@@ -9840,44 +9802,28 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             return jm_transpile_inline_native(mt, call, fc);
                         }
 
-                        // Native direct call
-                        char p_name[160];
-                        snprintf(p_name, sizeof(p_name), "%s_n_cp%d", fc->name, mt->label_counter++);
-                        MIR_var_t* p_args = LAMBDA_ALLOCA(fc->param_count, MIR_var_t);
-                        for (int i = 0; i < fc->param_count; i++) {
-                            MIR_type_t mtype = (fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-                            p_args[i] = {mtype, "a", 0};
-                        }
-                        MIR_type_t native_ret = (fc->return_type == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
-                        MIR_item_t proto = MIR_new_proto_arr(mt->ctx, p_name, 1, &native_ret,
-                            fc->param_count, p_args);
-
-                        int nops = 3 + fc->param_count;
-                        MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
-                        int oi = 0;
-                        ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
-                        ops[oi++] = MIR_new_ref_op(mt->ctx, fc->native_func_item);
-                        MIR_reg_t result = jm_new_reg(mt, "ncall", native_ret);
-                        ops[oi++] = MIR_new_reg_op(mt->ctx, result);
+                        MIR_reg_t* native_args = LAMBDA_ALLOCA(
+                            fc->param_count, MIR_reg_t);
 
                         JsAstNode* arg = call->arguments;
                         for (int i = 0; i < fc->param_count; i++) {
                             if (arg) {
-                                MIR_reg_t val = jm_transpile_as_native(mt, arg,
+                                native_args[i] = jm_transpile_as_native(mt, arg,
                                     jm_get_effective_type(mt, arg), fc->param_types[i]);
-                                ops[oi++] = MIR_new_reg_op(mt->ctx, val);
                                 arg = arg->next;
                             } else {
-                                MIR_reg_t undef = jm_new_reg(mt, "nz", MIR_T_I64);
+                                native_args[i] = jm_new_reg(mt, "nz", MIR_T_I64);
                                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                    MIR_new_reg_op(mt->ctx, undef), MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
-                                ops[oi++] = MIR_new_reg_op(mt->ctx, undef);
+                                    MIR_new_reg_op(mt->ctx, native_args[i]),
+                                    MIR_new_int_op(mt->ctx,
+                                        (int64_t)ITEM_JS_UNDEFINED)));
                                 }
                             }
                             jm_transpile_discard_call_args(mt, arg);
 
                             bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-                            jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                            MIR_reg_t result = jm_call_direct_native(mt, fc,
+                                fc->param_count, native_args);
                             jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
                             return result; // returns NATIVE value
                         }
@@ -9908,36 +9854,20 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t prev_this = jm_call_0(mt, "js_get_lexical_this_binding", MIR_T_I64);
                 MIR_reg_t prev_nt_dc = jm_call_0(mt, "js_get_new_target", MIR_T_I64);
 
-                // Build proto for this call site
-                char p_name[160];
-                snprintf(p_name, sizeof(p_name), "%s_cp%d", fc->name, mt->label_counter++);
-                MIR_var_t* p_args = LAMBDA_ALLOCA(param_count, MIR_var_t);
-                for (int i = 0; i < param_count; i++) {
-                    p_args[i] = {MIR_T_I64, "a", 0};
-                }
-                MIR_type_t res_types[1] = {MIR_T_I64};
-                MIR_item_t proto = MIR_new_proto_arr(mt->ctx, p_name, 1, res_types, param_count, p_args);
-
-                // Build call operands: proto, func_ref, result, args...
-                int nops = 3 + param_count;
-                MIR_op_t* ops = LAMBDA_ALLOCA(nops, MIR_op_t);
-                int oi = 0;
-                ops[oi++] = MIR_new_ref_op(mt->ctx, proto);
-                ops[oi++] = MIR_new_ref_op(mt->ctx, fc->func_item);
-                MIR_reg_t result = jm_new_reg(mt, "dcall", MIR_T_I64);
-                ops[oi++] = MIR_new_reg_op(mt->ctx, result);
+                MIR_reg_t* direct_args = param_count > 0
+                    ? LAMBDA_ALLOCA(param_count, MIR_reg_t) : NULL;
 
                 JsAstNode* arg = call->arguments;
                 for (int i = 0; i < param_count; i++) {
                     if (arg) {
                         MIR_reg_t val = jm_transpile_box_item(mt, arg);
-                        ops[oi++] = MIR_new_reg_op(mt->ctx, val);
+                        direct_args[i] = val;
                         arg = arg->next;
                     } else {
                         MIR_reg_t undef_val = jm_new_reg(mt, "ua", MIR_T_I64);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                             MIR_new_reg_op(mt->ctx, undef_val), MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
-                        ops[oi++] = MIR_new_reg_op(mt->ctx, undef_val);
+                        direct_args[i] = undef_val;
                         }
                     }
                     jm_transpile_discard_call_args(mt, arg);
@@ -9961,7 +9891,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t saved_wd = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
 
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-                jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                MIR_reg_t result = jm_call_direct_boxed(mt, fc,
+                    param_count, direct_args,
+                    mt->discarded_expression == (JsAstNode*)call);
                 jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
 
                 // restore with-scope depth after direct call
@@ -11789,8 +11721,8 @@ static void jm_free_branch_state(JsMirBranchState* state);
 
 static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     memset(state, 0, sizeof(*state));
-    state->current_func_item = mt->current_func_item;
-    state->current_func = mt->current_func;
+    state->current_func_item = mt->em.func_item;
+    state->current_func = mt->em.func;
     state->current_fc = mt->current_fc;
     state->current_class = mt->current_class;
     state->current_func_index = mt->current_func_index;
@@ -11850,8 +11782,8 @@ static void jm_free_branch_state(JsMirBranchState* state) {
 static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     if (!state) return;
 
-    mt->current_func_item = state->current_func_item;
-    mt->current_func = state->current_func;
+    mt->em.func_item = state->current_func_item;
+    mt->em.func = state->current_func;
     mt->current_fc = state->current_fc;
     mt->current_class = state->current_class;
     mt->current_func_index = state->current_func_index;

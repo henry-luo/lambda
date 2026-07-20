@@ -745,14 +745,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     }
     jm_track_active_js_transpile(NULL, mt, NULL);
 
-    // Tune6 §3.3: enable per-opcode emission histogram for this transpile.
-    static int js_opcode_hist_cached = -1;
-    if (js_opcode_hist_cached < 0) {
-        const char* e = getenv("JS_MIR_OPCODE_HIST");
-        js_opcode_hist_cached = (e && e[0] && strcmp(e, "0") != 0) ? 1 : 0;
-    }
-    if (js_opcode_hist_cached) { jm_opcode_hist_set_enabled(1); jm_opcode_hist_reset(); }
-
     // Preamble mode setup
     mt->preamble_mode = g_jm_preamble_mode;
     if (g_jm_preamble_in) {
@@ -849,11 +841,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         }
     }
     js_mir_volume_counters_set((long)mt->func_count, (long)total_insns);
-    if (js_opcode_hist_cached) {
-        jm_opcode_hist_dump(ctx, filename ? filename : "<string>");
-        jm_opcode_hist_set_enabled(0);
-    }
-
     // Tune6 (see vibe/jube/Transpile_Js_Tune6_AST.md §0.2a–§0.2d): the dominant JS
     // startup cost is eager per-function MIR_gen during MIR_link. For large modules
     // opt=0 JIT ≈ opt=2 JIT (link is codegen-emit-bound, not optimizer-bound), so

@@ -812,6 +812,45 @@ extern "C" double lambda_mir_bits_double(uint64_t bits) {
     return dval;
 }
 
+extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
+    AutoAssertNoGC no_gc((Context*)context);
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64:
+        if (item.is_inline_int64()) return item;
+        break;
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64:
+        if ((item.item & ITEM_DBL_MASK) || item.item == ITEM_FLOAT_P0 ||
+                item.item == ITEM_FLOAT_N0) return item;
+        break;
+    case LMD_TYPE_DTIME:
+        break;
+    default:
+        return item;
+    }
+    // Copy before watermark restore to prevent unbounded frame donation.
+    if (!home) {
+        // A missing ABI home would return a dead activation pointer.
+        abort();
+    }
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT64:
+        *(int64_t*)home = item.get_int64();
+        return {.item = l2it((int64_t*)home)};
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: {
+        double value = item.get_double();
+        memcpy(home, &value, sizeof(value));
+        return lambda_float_ptr_to_item((double*)home);
+    }
+    case LMD_TYPE_DTIME:
+        *(DateTime*)home = item.get_datetime();
+        return {.item = k2it((DateTime*)home)};
+    default:
+        return item;
+    }
+}
+
 extern "C" Item lambda_item_heap_rehome(Item item) {
     switch (get_type_id(item)) {
     case LMD_TYPE_INT64: {

@@ -179,7 +179,7 @@ bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
 MIR_reg_t jm_native_return_reg(JsMirTranspiler* mt, MIR_reg_t value) {
     if (!mt || !mt->in_native_func || !mt->current_fc) return value;
     if (mt->current_fc->return_type != LMD_TYPE_FLOAT) return value;
-    MIR_type_t value_type = MIR_reg_type(mt->ctx, value, mt->current_func);
+    MIR_type_t value_type = MIR_reg_type(mt->ctx, value, mt->em.func);
     if (value_type == MIR_T_D) return value;
     // Delayed completions use boxed I64 slots, so native float returns must unbox here.
     return jm_emit_unbox_float(mt, value);

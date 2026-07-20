@@ -1,4 +1,5 @@
 fn wide() i64 => 9223372036854775807i64
+fn tiny() float => 5e-324
 
 fn make_reader(value) {
     fn read() => value
@@ -21,7 +22,15 @@ pn delayed_wide() {
 }
 
 pn main() {
+    var loop_i = 0
+    var latest = 0i64
+    while (loop_i < 1000) {
+        latest = wide()
+        wide()
+        loop_i = loop_i + 1
+    }
     let reader = make_reader(9223372036854775806i64)
+    let indirect = wide
     let joined = [wide()] ++ [reader()]
     let mapped = {value: wide()}
     let success^success_err = maybe_wide(true)
@@ -37,4 +46,5 @@ pn main() {
         scalar_map[9223372036854775807i64],
         scalar_map[t'2026-07-15T12:34:56Z']
     ])
+    print([latest, indirect(), tiny(), -tiny(), type(wide())])
 }

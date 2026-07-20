@@ -4297,7 +4297,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         {
             JsVarScopeEntry entry;
             memset(&entry, 0, sizeof(entry));
-            snprintf(entry.name, sizeof(entry.name), "_foriter_%d", mt->label_counter);
+            snprintf(entry.name, sizeof(entry.name), "_foriter_%d", mt->em.label_counter);
             entry.var.reg = iterator;
             entry.var.from_env = true;
             entry.var.env_slot = iter_slot;
@@ -4308,7 +4308,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         {
             JsVarScopeEntry entry;
             memset(&entry, 0, sizeof(entry));
-            snprintf(entry.name, sizeof(entry.name), "_forlv_%d", mt->label_counter);
+            snprintf(entry.name, sizeof(entry.name), "_forlv_%d", mt->em.label_counter);
             entry.var.reg = loop_var;
             entry.var.from_env = true;
             entry.var.env_slot = lv_slot;
@@ -4316,7 +4316,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             entry.var.typed_array_type = -1;
             jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
         }
-        mt->label_counter++;
+        mt->em.label_counter++;
     }
 
     MIR_label_t l_test = jm_new_label(mt);
@@ -4356,7 +4356,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             {
                 JsVarScopeEntry entry;
                 memset(&entry, 0, sizeof(entry));
-                snprintf(entry.name, sizeof(entry.name), "_forit_ret_%d", mt->label_counter);
+                snprintf(entry.name, sizeof(entry.name), "_forit_ret_%d", mt->em.label_counter);
                 entry.var.reg = forit_return_val;
                 entry.var.from_env = true;
                 entry.var.env_slot = ret_slot;
@@ -4367,7 +4367,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
             {
                 JsVarScopeEntry entry;
                 memset(&entry, 0, sizeof(entry));
-                snprintf(entry.name, sizeof(entry.name), "_forit_hret_%d", mt->label_counter);
+                snprintf(entry.name, sizeof(entry.name), "_forit_hret_%d", mt->em.label_counter);
                 entry.var.reg = forit_has_return;
                 entry.var.from_env = true;
                 entry.var.env_slot = hret_slot;
@@ -4375,7 +4375,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
                 entry.var.typed_array_type = -1;
                 jm_install_fresh_var_entry(mt, mt->scope_depth, &entry);
             }
-            mt->label_counter++;
+            mt->em.label_counter++;
         }
         JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
         tc->catch_label = l_iter_exc;
@@ -5683,7 +5683,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
     case JS_AST_NODE_EXPRESSION_STATEMENT: {
         JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
         if (es->expression) {
+            JsAstNode* saved_discarded = mt->discarded_expression;
+            if (!mt->eval_completion_reg) mt->discarded_expression = es->expression;
             MIR_reg_t val = jm_transpile_box_item(mt, es->expression);
+            mt->discarded_expression = saved_discarded;
             if (!mt->eval_completion_reg && es->expression->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
                 jm_call_void_1(mt, "js_discard_value",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));

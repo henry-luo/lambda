@@ -39,8 +39,12 @@ SKIP_SOURCE_PARTS = {
 # or generated code.  Adding an entry is a security-relevant review action.
 VERIFIED_EXTERNAL_LEAVES = {
     "abort",
+    "d2it",
     "fmod",
     "isnan",
+    "k2it",
+    "l2it",
+    "lambda_float_ptr_to_item",
     "log_debug",
     "memcpy",
     "memset",
@@ -60,12 +64,14 @@ VERIFIED_READER_METHODS = {
     "get_decimal",
     "get_int56",
     "get_int64",
+    "get_datetime",
     "get_num_sized_as_double",
     "get_num_sized_as_int64",
     "get_num_type",
     "get_safe_binary",
     "get_safe_string",
     "get_uint64",
+    "is_inline_int64",
     "type_id",
 }
 

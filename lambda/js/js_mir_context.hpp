@@ -42,19 +42,8 @@
 
 struct JsClassEntry;  // forward declaration for JsMirVarEntry.class_entry
 
-struct JsMirRootBinding {
-    MIR_reg_t reg;
-    int slot;
-    int home_id;
-};
-
-typedef MirRootCandidate JsMirGcCandidate;
-typedef MirGcCallSite JsMirGcCallSite;
-
-struct JsMirEnvBinding {
-    MIR_reg_t source_reg;
-    MIR_reg_t reg;
-};
+typedef MirRootBinding JsMirRootBinding;
+typedef MirEnvBinding JsMirEnvBinding;
 // ============================================================================
 
 // Module-scope constants: variables, functions, classes declared at top level.
@@ -151,7 +140,9 @@ struct JsLoopLabels {
 struct JsFuncCollected {
     JsFunctionNode* node;
     char name[128];
-    MIR_item_t func_item;   // set after creation (boxed version)
+    char body_name[144];
+    MIR_item_t func_item;        // public checked wrapper
+    MIR_item_t body_func_item;   // internal boxed implementation body
     // Capture info
     FnCapture* captures;          // dynamically allocated capture array
     int captures_capacity;        // allocated size
@@ -318,15 +309,7 @@ struct JsMirTranspiler {
 
     MIR_context_t ctx;
     MIR_module_t module;
-    MIR_item_t current_func_item;
-    MIR_func_t current_func;
-
-    // Shared emit substrate. The legacy JS fields remain as compatibility
-    // mirrors while Phase 0 moves call sites onto MirEmitter one helper at a time.
     MirEmitter em;
-
-    // Import cache: name -> JsMirImportEntry
-    struct hashmap* import_cache;
 
     // Local function items: name -> MIR_item_t
     struct hashmap* local_funcs;
@@ -350,9 +333,6 @@ struct JsMirTranspiler {
     const char* pending_label_name;
     int pending_label_len;
 
-    int reg_counter;
-    int label_counter;
-
     // Collected functions (pre-pass)
     JsAstNode* root_node;
     JsFuncCollected func_entries[JS_MIR_MAX_COLLECTED_FUNCTIONS];
@@ -374,6 +354,7 @@ struct JsMirTranspiler {
     // Phase 4: Native function generation state
     bool in_native_func;            // currently transpiling native version?
     JsFuncCollected* current_fc;    // current function being transpiled
+    JsAstNode* discarded_expression; // outer expression whose value is unobserved
 
     // TCO state
     JsFuncCollected* tco_func;      // function being TCO'd (NULL if not active)
@@ -468,46 +449,6 @@ struct JsMirTranspiler {
     int with_depth;                           // nesting depth of 'with' statements (for break/continue/return cleanup)
     bool destructure_assignment_mode;         // true for assignment-pattern destructuring targets
 
-    // JS side-stack frame state. Return instructions are funneled through one
-    // epilogue so every normal, exceptional, and suspension exit restores the
-    // precise-root watermark.
-    bool side_frame_active;
-    bool side_frame_item_return;
-    MirScalarReturnMode side_frame_scalar_return_mode;
-    MIR_type_t side_frame_return_type;
-    MIR_reg_t side_frame_runtime;
-    MIR_reg_t side_root_frame_base;
-    MIR_reg_t side_number_frame_base;
-    MIR_label_t side_root_anchor;
-    MIR_label_t side_frame_return_label;
-    MIR_reg_t side_frame_return_reg;
-    int side_root_next;
-    JsMirRootBinding* side_root_bindings;
-    int side_root_binding_count;
-    int side_root_binding_capacity;
-    int* side_root_binding_by_reg;
-    int side_root_binding_by_reg_capacity;
-    int* side_root_binding_by_home;
-    int side_root_binding_by_home_capacity;
-    int side_root_store_count;
-    int side_may_gc_call_count;
-    int side_no_gc_call_count;
-    bool side_root_write_back;
-    JsMirGcCandidate* side_gc_candidates;
-    int side_gc_candidate_count;
-    int side_gc_candidate_capacity;
-    int* side_gc_candidate_by_reg;
-    int side_gc_candidate_by_reg_capacity;
-    JsMirGcCallSite* side_gc_call_sites;
-    int side_gc_call_site_count;
-    int side_gc_call_site_capacity;
-    MIR_insn_t* side_root_backedge_reloads;
-    int side_root_backedge_reload_count;
-    int side_root_backedge_reload_capacity;
-    JsMirEnvBinding* side_env_bindings;
-    int side_env_binding_count;
-    int side_env_binding_capacity;
-
     // Js57 Track A: synthetic module-level scope env. Captures of top-level closures
     // (parent_index == -1) that reference block-lets at module scope land here. The
     // env is allocated at js_main entry and shared across all top-level child closures
@@ -524,33 +465,11 @@ static inline void** jm_alloc_shape_cache_slot(JsMirTranspiler* mt) {
     return (void**)pool_calloc(mt->tp->ast_pool, sizeof(void*));
 }
 
-static inline void jm_sync_emitter_from_compat(JsMirTranspiler* mt) {
-    mt->em.ctx = mt->ctx;
-    mt->em.func_item = mt->current_func_item;
-    mt->em.func = mt->current_func;
-    mt->em.reg_counter = mt->reg_counter;
-    mt->em.label_counter = mt->label_counter;
-    mt->em.import_cache = mt->import_cache;
-}
-
-static inline void jm_sync_compat_from_emitter(JsMirTranspiler* mt) {
-    mt->current_func_item = mt->em.func_item;
-    mt->current_func = mt->em.func;
-    mt->reg_counter = mt->em.reg_counter;
-    mt->label_counter = mt->em.label_counter;
-    mt->import_cache = mt->em.import_cache;
-}
-
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
     if (!mt) return;
-    em_gc_analysis_dispose(&mt->em);
     if (mt->em.import_cache) {
         hashmap_free(mt->em.import_cache);
         mt->em.import_cache = NULL;
-        mt->import_cache = NULL;
-    } else if (mt->import_cache) {
-        hashmap_free(mt->import_cache);
-        mt->import_cache = NULL;
     }
     if (mt->local_funcs) {
         hashmap_free(mt->local_funcs);
@@ -583,32 +502,32 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         mem_free(mt->module_fc.captures);
         mt->module_fc.captures = NULL;
     }
-    if (mt->side_root_bindings) {
-        mem_free(mt->side_root_bindings);
-        mt->side_root_bindings = NULL;
+    if (mt->em.frame.root_bindings) {
+        mem_free(mt->em.frame.root_bindings);
+        mt->em.frame.root_bindings = NULL;
     }
-    if (mt->side_root_binding_by_reg) {
-        mem_free(mt->side_root_binding_by_reg);
-        mt->side_root_binding_by_reg = NULL;
+    if (mt->em.frame.root_binding_by_reg) {
+        mem_free(mt->em.frame.root_binding_by_reg);
+        mt->em.frame.root_binding_by_reg = NULL;
     }
-    if (mt->side_root_binding_by_home) {
-        mem_free(mt->side_root_binding_by_home);
-        mt->side_root_binding_by_home = NULL;
+    if (mt->em.frame.root_binding_by_home) {
+        mem_free(mt->em.frame.root_binding_by_home);
+        mt->em.frame.root_binding_by_home = NULL;
     }
-    if (mt->side_gc_candidates) {
-        mem_free(mt->side_gc_candidates);
-        mt->side_gc_candidates = NULL;
+    if (mt->em.frame.gc_candidates) {
+        mem_free(mt->em.frame.gc_candidates);
+        mt->em.frame.gc_candidates = NULL;
     }
-    if (mt->side_gc_candidate_by_reg) {
-        mem_free(mt->side_gc_candidate_by_reg);
-        mt->side_gc_candidate_by_reg = NULL;
+    if (mt->em.frame.gc_candidate_by_reg) {
+        mem_free(mt->em.frame.gc_candidate_by_reg);
+        mt->em.frame.gc_candidate_by_reg = NULL;
     }
-    if (mt->side_gc_call_sites) {
-        mem_free(mt->side_gc_call_sites);
-        mt->side_gc_call_sites = NULL;
+    if (mt->em.frame.gc_call_sites) {
+        mem_free(mt->em.frame.gc_call_sites);
+        mt->em.frame.gc_call_sites = NULL;
     }
-    if (mt->side_env_bindings) {
-        mem_free(mt->side_env_bindings);
-        mt->side_env_bindings = NULL;
+    if (mt->em.frame.env_bindings) {
+        mem_free(mt->em.frame.env_bindings);
+        mt->em.frame.env_bindings = NULL;
     }
 }

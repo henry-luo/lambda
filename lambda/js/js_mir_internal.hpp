@@ -130,10 +130,6 @@ void jm_destroy_mir_transpiler(JsMirTranspiler* mt);
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
 void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn);
-// Tune6 §3.3: per-opcode emission histogram (env JS_MIR_OPCODE_HIST)
-void jm_opcode_hist_set_enabled(int enabled);
-void jm_opcode_hist_reset(void);
-void jm_opcode_hist_dump(MIR_context_t ctx, const char* label);
 void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label);
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     bool item_return, MirScalarReturnMode scalar_return_mode,
@@ -141,9 +137,6 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
 void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name);
 int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value);
 void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var);
-void jm_write_through_root_live_scope_vars(JsMirTranspiler* mt);
-void jm_note_gc_var_use(JsMirTranspiler* mt, JsMirVarEntry* var,
-    const char* name);
 void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg);
 void jm_emit_loop_backedge_frame_reload(JsMirTranspiler* mt);
 JsMirReference jm_emit_reference(JsMirTranspiler* mt, JsAstNode* node);
@@ -187,8 +180,6 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                        MIR_type_t mir_type = MIR_T_I64, TypeId type_id = LMD_TYPE_ANY);
 JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
     JsVarScopeEntry* entry);
-void jm_note_gc_call_site(JsMirTranspiler* mt, MIR_insn_t insn,
-                          JitGcEffect effect);
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 uint64_t jm_name_hash(const void* item, uint64_t seed0, uint64_t seed1);
 int jm_name_cmp(const void* a, const void* b, void* udata);
@@ -220,43 +211,24 @@ JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
 JsMirImportEntry* jm_ensure_import_ii_i(JsMirTranspiler* mt, const char* name);
 JsMirImportEntry* jm_ensure_import_i_i(JsMirTranspiler* mt, const char* name);
 JsMirImportEntry* jm_ensure_import_v_i(JsMirTranspiler* mt, const char* name);
-MIR_reg_t jm_call_0(JsMirTranspiler* mt, const char* fn_name, MIR_type_t ret_type);
-MIR_reg_t jm_call_1(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1);
-MIR_reg_t jm_call_2(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2);
-MIR_reg_t jm_call_3(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3);
-MIR_reg_t jm_call_4(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
-    MIR_type_t a4t, MIR_op_t a4);
-MIR_reg_t jm_call_5(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
-    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5);
-MIR_reg_t jm_call_6(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
-    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
-    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
-    MIR_type_t a6t, MIR_op_t a6);
-void jm_call_void_0(JsMirTranspiler* mt, const char* fn_name);
-void jm_call_void_1(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1);
-void jm_call_void_2(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2);
-void jm_call_void_3(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
-    MIR_type_t a3t, MIR_op_t a3);
-void jm_call_void_4(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
-    MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4);
-void jm_call_void_5(JsMirTranspiler* mt, const char* fn_name,
-    MIR_type_t a1t, MIR_op_t a1, MIR_type_t a2t, MIR_op_t a2,
-    MIR_type_t a3t, MIR_op_t a3, MIR_type_t a4t, MIR_op_t a4,
-    MIR_type_t a5t, MIR_op_t a5);
+#define jm_call_0(mt, fn, ret) em_call_0(&(mt)->em, fn, ret, true)
+#define jm_call_1(mt, fn, ret, ...) em_call_1(&(mt)->em, fn, ret, __VA_ARGS__, true)
+#define jm_call_2(mt, fn, ret, ...) em_call_2(&(mt)->em, fn, ret, __VA_ARGS__, true)
+#define jm_call_3(mt, fn, ret, ...) em_call_3(&(mt)->em, fn, ret, __VA_ARGS__, true)
+#define jm_call_4(mt, fn, ret, ...) em_call_4(&(mt)->em, fn, ret, __VA_ARGS__, true)
+#define jm_call_5(mt, fn, ret, ...) em_call_5(&(mt)->em, fn, ret, __VA_ARGS__, true)
+#define jm_call_6(mt, fn, ret, ...) em_call_6(&(mt)->em, fn, ret, __VA_ARGS__, true)
+MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
+        int arg_count, MIR_reg_t* arg_regs, bool discard_result = false);
+MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
+        int arg_count, MIR_reg_t* arg_regs);
+MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
+#define jm_call_void_0(mt, fn) em_call_void_0(&(mt)->em, fn, true)
+#define jm_call_void_1(mt, fn, ...) em_call_void_1(&(mt)->em, fn, __VA_ARGS__, true)
+#define jm_call_void_2(mt, fn, ...) em_call_void_2(&(mt)->em, fn, __VA_ARGS__, true)
+#define jm_call_void_3(mt, fn, ...) em_call_void_3(&(mt)->em, fn, __VA_ARGS__, true)
+#define jm_call_void_4(mt, fn, ...) em_call_void_4(&(mt)->em, fn, __VA_ARGS__, true)
+#define jm_call_void_5(mt, fn, ...) em_call_void_5(&(mt)->em, fn, __VA_ARGS__, true)
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_item_error(JsMirTranspiler* mt);

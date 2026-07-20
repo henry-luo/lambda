@@ -1,19 +1,19 @@
 # Common function, representation, MIR, and frame API
 
-**Status:** proposal
+**Status:** implemented and verified (2026-07-20)
 
 **Scope:** MIR-direct compilation for Lambda and LambdaJS
 
-**Revision reviewed:** `79c4070826cccf433cfd48c4b8320a61ce762318`
+**Baseline revision:** `09dfbcc9551817278ef6a290c321fb22a740abac`
 
 **Out of scope:** C2MIR, native helper `RootFrame` APIs, and changes to the GC algorithm
 
 Related design records are `Lambda_Design_Stack_Rooting.md`,
 `Lambda_Design_Unified_AST.md`, `Lambda_Stack_MIR.md`, and
 `Lambda_Stack_JS_MIR.md`. `Lambda_Type_Double_Boxing.md` is normative for the
-float `Item` discriminator and packed-zero encoding used by this proposal.
+float `Item` discriminator and packed-zero encoding used by this design.
 
-This document proposes the common compiler API that should sit between the
+This document specifies the common compiler API that sits between the
 unified AST and MIR-direct code generation. The API has four cooperating parts:
 
 1. common function analysis;
@@ -28,19 +28,72 @@ Correctness remains mandatory, but the common layer must express correctness in
 a way that permits zero-root numeric functions, native scalar lanes, direct
 internal calls, and late elimination of unused frame machinery.
 
-The proposal completes an architectural direction that is only partly realized
-today. `MirEmitter`, semantic root candidates, the shared root finalizer, and
-scalar-return rehoming are already common. Function analysis, frame ownership,
-call-site bookkeeping, prologue/epilogue emission, and representation choices
-are still split between Lambda and LambdaJS.
+The implementation now completes this architectural direction. `MirEmitter`
+owns the one physical generated-frame state, call bookkeeping and frame
+finalization are shared, and immutable per-variant analysis drives generated
+call ABI and scalar-home decisions for both Lambda and LambdaJS.
 
-**New scalar-return decision:** the current callee-frame donation is replaced by
-a **caller-donated canonical scalar return home**. The caller reserves a fixed,
-liveness-colored number slot and passes its address to any generated callee
-whose boxed result may contain a pointer-backed scalar. The callee copies the
-one-word payload into that home, restores its complete number extent, retags the
-returned `Item`, and returns normally. Repeated calls therefore reuse caller
-homes instead of retaining one new donated slot per call.
+**Scalar-storage and return decision:** legacy callee-frame donation is
+replaced by **activation-owned canonical scalar homes**. Any boxed `Item` that
+may contain an activation-temporary `INT64`, out-of-band `FLOAT`, or `DTIME`
+payload receives a liveness-colored fixed home, regardless of whether it came
+from a generated call, runtime import, representation conversion, control-flow
+join, or Lambda error lane. A generated callee returns such a value through a
+**caller-donated canonical scalar return home**: it copies the one-word payload
+into the supplied home, restores its complete number extent, retags the
+returned `Item`, and returns normally. Repeated production therefore reuses
+homes by peak simultaneous liveness instead of retaining one slot per dynamic
+call or conversion.
+
+The hidden return-home ABI exists only between generated implementation bodies.
+Public and runtime-indirect entries keep their existing public value ABI and
+enter through checked wrappers. This separation is established before the
+hidden argument is enabled.
+
+### Implementation result
+
+Phases 0 through 6 are complete. The implementation provides:
+
+- C-compatible value/ABI/effect contracts and immutable function variants;
+- one normalized import/direct-call path and one conservative raw-call funnel;
+- one `MirEmitter` physical-frame owner, prologue, finalizer, verifier, root
+  coloring path, and scalar-home coloring/fixup path for both languages;
+- checked public wrappers separated from bound generated bodies, with the
+  hidden caller-home operand confined to internal direct calls;
+- normal/error lane adoption, discard scratch, tail-home validation, wrapper
+  heap rehoming, and full callee watermark restoration;
+- conservative metadata and representation fallback where an edge is not yet
+  profitable to specialize, without a second frame or call implementation.
+
+The legacy callee-frame donation path, per-language physical frame mirrors,
+write-through/eager differential mode, per-opcode GC event telemetry, stale GC
+analysis structures, and obsolete direct-call compatibility helpers have been
+deleted.
+
+Final release-generated frame profile:
+
+| Representative implementation frame | Baseline locals | Final locals | Baseline MIR instructions | Final MIR instructions | Change |
+|---|---:|---:|---:|---:|---:|
+| Lambda `_frame_review_0` | 47 | 43 | 101 | 78 | -22.8% |
+| LambdaJS `_js_frameReview_149_body` | 53 | 50 | 136 | 112 | -17.6% |
+
+The new LambdaJS public wrapper is intentionally separate and contains 18
+locals and 40 MIR instructions; it is not charged to the implementation-body
+comparison. The raw `lambda/`, `lib/`, and `test/` source scope is 7 lines
+smaller than the baseline (246,362 to 246,355 lines). Including the updated GC
+audit tool, the complete source/test/tool change is still one line smaller.
+
+Final verification:
+
+| Gate | Result |
+|---|---|
+| `make build-test` | passed |
+| `make test-lambda-baseline` | 3,487/3,487 passed |
+| `make test262-baseline` | 40,261/40,261 passed; 0 unstable, 0 failed, 0 regressions |
+| `make test-gc-rooting` | JS JIT, randomized forced-GC, JS MIR interpreter, and Lambda MIR Direct passed; metadata/root audits clean |
+| release million-iteration probes | Lambda wide returns, Lambda local boxing, and LambdaJS wide returns remained bounded and correct |
+| final `make release` | passed after profiling instrumentation was removed |
+| legacy-symbol and `git diff --check` audits | clean |
 
 ## 1. Executive decision
 
@@ -69,7 +122,8 @@ The ownership rules are:
 
 - `FnAnalysis` describes semantic facts about a source function.
 - `FnVariantAnalysis` describes one callable implementation of that function,
-  such as a generic boxed entry or a native direct body.
+  such as a public wrapper, internal boxed body, native direct body, or resume
+  entry.
 - representation-demand analysis decides which value representation is needed
   at each producer, binding, edge, call boundary, and return boundary.
 - common call metadata describes the ABI value classes and observable effects
@@ -100,8 +154,12 @@ The API should:
 - support checked external entries and proven-bound internal entries;
 - eliminate root-frame machinery when a function has no rootable live value;
 - retain scalar returns across number-stack restoration without forced boxing;
-- bound scalar-return storage by peak simultaneously live values rather than
-  dynamic call count;
+- bound activation scalar storage by peak simultaneously live values rather
+  than dynamic call or conversion count;
+- preserve public and runtime-indirect function ABIs while allowing an internal
+  generated ABI to carry hidden frame arguments;
+- preserve tail-call optimization by forwarding the original caller-owned
+  return home on a true tail edge;
 - produce diagnostics and MIR-count statistics from the common layer;
 - allow Lambda and LambdaJS to migrate independently behind compatibility
   adapters.
@@ -116,6 +174,8 @@ This proposal does not:
 - replace native C/C++ exact handle scopes;
 - change persistent or async ownership rules;
 - change non-local-unwind restoration at runtime entry boundaries;
+- introduce a new cross-function tail-call optimization; the API only defines
+  ownership when an existing or future lowering emits a physical tail edge;
 - redesign the GC allocator or collector;
 - change C2MIR. C2MIR remains a compatibility path and is left as-is.
 
@@ -124,7 +184,7 @@ This proposal does not:
 | Area | Shared today | Still duplicated or incomplete |
 |---|---|---|
 | Function analysis | unified AST has `AstFuncNode::analysis`; `FnAnalysis` carries captures, parameter evidence, and async facts | entry variants, call effects, return representation, binding storage, and per-value representation demand are not common analysis products |
-| Representation | shared scalar-return modes and semantic GC value classes exist | most representation decisions are made while lowering; eager boxing and language-specific holder/version locals remain possible; current callee donation can retain one slot per newly returned wide scalar call |
+| Representation | shared scalar-return modes and semantic GC value classes exist | most representation decisions are made while lowering; eager boxing and language-specific holder/version locals remain possible; current callee donation can retain one slot per newly returned wide scalar call, while repeated cold local boxing can also grow the temporary number extent |
 | MIR emitter | MIR construction, import caching, semantic root events, common root finalization, and scalar-return rehoming are shared | Lambda and JS own separate frame arrays, frame enter/exit logic, epilogue state, and call wrappers |
 | Metadata | `JitImportMetadata` records GC effect, re-entry effect, return class, and packed argument classes | exception effect and ABI representation are implicit; direct generated calls and runtime imports do not yet use one normalized call descriptor |
 | Rooting | common finalizer can assign slots and insert writes from semantic events | both transpilers collect and feed those events through their own mutable frame implementations |
@@ -144,7 +204,7 @@ The design deliberately separates facts that are often conflated:
 | actual representation and consumer demands | representation-demand analysis | no |
 | helper ABI and effects | common metadata registry | no |
 | MIR register, label, root home, liveness, inserted write | `MirEmitter` | yes |
-| scalar return-home candidate, liveness, and colored number slot | representation analysis / `MirEmitter` | analysis facts no; physical slot yes |
+| activation scalar-home candidate, liveness, and colored number slot | representation analysis / `MirEmitter` | analysis facts no; physical slot yes |
 | catch target, finally completion, generator state | language lowering | yes |
 
 Two boundaries are especially important:
@@ -168,14 +228,15 @@ implementation; the ownership boundary should not.
 
 ```c
 typedef enum FnEntryKind {
-    FN_ENTRY_GENERIC,
-    FN_ENTRY_DIRECT_BODY,
+    FN_ENTRY_PUBLIC_WRAPPER,
+    FN_ENTRY_BOXED_BODY,
+    FN_ENTRY_NATIVE_BODY,
     FN_ENTRY_RESUME
 } FnEntryKind;
 
 typedef enum FnErrorLane {
     FN_ERROR_LANE_NONE,
-    FN_ERROR_LANE_VALUE_ERROR
+    FN_ERROR_LANE_CONTEXT_ITEM
 } FnErrorLane;
 
 typedef enum ScalarReturnClass {
@@ -189,7 +250,8 @@ typedef enum ScalarReturnClass {
 typedef struct FnEffectSummary {
     bool may_gc;
     bool may_reenter;
-    bool may_raise;
+    bool may_set_exception;
+    bool may_return_error;
     bool may_suspend;
     bool has_unknown_call;
 } FnEffectSummary;
@@ -202,12 +264,23 @@ typedef struct FnEntryAnalysis {
     bool is_external_entry;
 } FnEntryAnalysis;
 
-typedef struct FnReturnAnalysis {
+typedef struct FnReturnLaneAnalysis {
     TypeId semantic_type;
     ValueRep abi_rep;
     ScalarReturnClass scalar_class;
-    bool needs_caller_scalar_home;
+    bool may_need_caller_scalar_home;
+} FnReturnLaneAnalysis;
+
+enum {
+    FN_RETURN_HOME_NORMAL = 1u << 0,
+    FN_RETURN_HOME_ERROR = 1u << 1,
+};
+
+typedef struct FnReturnAnalysis {
+    FnReturnLaneAnalysis normal;
+    FnReturnLaneAnalysis error;
     FnErrorLane error_lane;
+    uint8_t scalar_home_lane_mask;
 } FnReturnAnalysis;
 
 typedef struct FnVariantAnalysis {
@@ -226,12 +299,15 @@ typedef struct FnVariantAnalysis {
 The existing capture, parameter-evidence, and async fields remain valid inputs.
 They should be folded into, rather than copied beside, the expanded model.
 
-`needs_caller_scalar_home` is true only for a boxed ABI that may return an
-out-of-line `INT64`, out-of-band `FLOAT`, or `DTIME` payload. Native scalar
-returns and proven-safe `Item` returns do not carry the hidden home parameter.
-`UINT64` is intentionally absent: its current representation is heap-backed,
-not number-stack-backed, and moving it would require a separate representation
-and GC contract change.
+`scalar_home_lane_mask` is the union of all mutually exclusive return lanes that
+may carry an out-of-line `INT64`, out-of-band `FLOAT`, or `DTIME` payload. One
+hidden home is sufficient for the current normal/error contract because only
+one lane is live on an exit. A function with a native normal return can still
+need the hidden home when its Lambda error lane is a boxed `Item`. Native scalar
+returns with no boxed error lane and proven-safe `Item` returns do not carry the
+hidden parameter. `UINT64` is intentionally absent: its current representation
+is heap-backed, not number-stack-backed, and moving it would require a separate
+representation and GC contract change.
 
 ### 5.2 Required analysis sequence
 
@@ -240,30 +316,62 @@ The common driver should run these stages in order:
 1. binding and capture discovery;
 2. language-profile semantic facts, such as dynamic-scope or arguments-object
    requirements;
-3. type and parameter-evidence fixed point;
-4. call-graph and effect propagation;
-5. representation-demand analysis;
-6. entry, return, and physical frame-plan derivation.
+3. initial type and parameter evidence;
+4. conservative call-graph and callable-variant discovery;
+5. a joint strongly-connected-component fixed point over parameter and return
+   types, representation demand, callable-variant selection, and effects;
+6. entry, return, and physical frame-plan derivation from the converged result.
 
-Recursive strongly connected components need a fixed point for parameter,
-return, and effect summaries. Unknown, indirect, or cross-module calls remain
-conservative until metadata proves otherwise.
+Effects have two layers. Semantic/profile effects describe source operations
+independent of physical representation. Lowering effects add calls introduced
+by boxing, coercion, heap rehoming, wrappers, and other selected ABI mechanics.
+Only the converged union may be published as `FnVariantAnalysis::effects` or
+used to classify a generated direct call. Unknown, indirect, or cross-module
+calls remain conservative until metadata proves otherwise. This prevents a
+native-looking caller from treating a callee as `NO_GC` before representation
+lowering has introduced an allocating conversion.
+
+The correctness fixed point is monotone: summaries may only widen toward boxed
+representation, unknown class/effect, persistent ownership, or `MAY_GC` until
+they stabilize. Profitability choices run after correctness convergence and may
+decline a specialization, but may not make a summary less conservative and
+restart an oscillating specialize/de-specialize cycle.
 
 ### 5.3 Function variants
 
 At minimum, analysis must distinguish:
 
-- a generic externally callable entry using the public value ABI;
+- a public checked wrapper using the existing externally callable value ABI;
+- an internal boxed body using `Item` source arguments plus any hidden generated
+  frame arguments, including the scalar return home;
 - a native direct body used only by verified generated callers;
 - a resume entry when a language profile lowers suspension to a state machine.
 
-The generic wrapper and direct body may share the source analysis but have
-different ABI and frame plans. For example, a generic JavaScript entry may
-accept and return `Item`, while a direct body accepts and returns `F64`.
+The wrapper and implementation bodies share source analysis but have different
+ABI, reachability, effects, and frame plans. For example, a JavaScript
+`JsFunction::func_ptr` points to the public wrapper and remains callable through
+the existing `Item(Item...)` runtime dispatcher. The wrapper allocates a local
+return home when necessary, calls the internal boxed body, heap-rehomes any
+value that escapes the wrapper activation, and only then restores its frame.
+Generated direct calls may target the boxed or native body and may use the
+hidden generated ABI.
 
-A bound direct body may skip binding `Context` again. It may not skip
-per-activation root or number-stack reservation. Only callers proved to have a
-valid bound context may reference that entry.
+Return-home demand is variant-specific. An internal body publishes the lane
+mask described above; after adopting and heap-rehoming, its public wrapper
+publishes a zero mask and no scalar-home operand because every outward `Item`
+is inline or heap-owned.
+
+A cross-module edge may target an internal body only when the producing module
+publishes the exact immutable call contract and the consumer verifies it.
+Otherwise it targets the public wrapper. Resume/scheduler entries similarly use
+checked public/persistent ownership unless a synchronous generated edge proves
+the internal resume contract; suspension never carries an activation home.
+
+`FnEntryKind` describes ABI/reachability; `MirEntryMode` from section 8.3
+describes context-binding proof. They are orthogonal. A bound implementation
+body may skip binding `Context` again, but it may not skip per-activation root
+or number-stack reservation. Only callers proved to have a valid bound context
+may reference that entry. Public wrappers are always checked entries.
 
 ### 5.4 Language-profile contribution
 
@@ -335,6 +443,11 @@ typedef struct FnBindingAnalysis {
 
 `demand_mask` represents the accepted representations of consumers. It is not
 a root-liveness mask. Root homes and liveness belong only to MIR lowering.
+The representation plan also contains definition and edge identities for
+binding versions and control-flow joins; an `AstNode*` lookup is a convenience
+index, not the identity of every dynamic definition. This is required for
+assignments, loop-carried values, and joins whose incoming values have distinct
+scalar-home provenance.
 
 ### 6.2 Demand sources
 
@@ -345,7 +458,7 @@ Demand is seeded from:
 - runtime call metadata for each parameter and return;
 - container, environment, module, and global stores;
 - capture and escape boundaries;
-- generic and direct call ABIs;
+- public-wrapper, internal-boxed, and native-direct call ABIs;
 - return boundaries;
 - `eval`, `with`, reflection, or other dynamic access reported by a profile.
 
@@ -360,7 +473,7 @@ The default decisions are:
 - keep a binding native when all meaningful consumers accept the same native
   representation;
 - use `Item` when a binding must live in a scope environment, module slot,
-  persistent container, dynamic-eval-visible location, or generic ABI;
+  persistent container, dynamic-eval-visible location, or public value ABI;
 - for mixed native and boxed consumers, retain the native canonical value and
   box at boxed consumers when lifetime and reuse make that cheaper;
 - choose a boxed canonical value only when boxed consumers, escape, or lifetime
@@ -394,17 +507,19 @@ ValueRep fn_consumer_rep(const FnVariantAnalysis* fn, AstNode* consumer, int ope
 bool fn_edge_needs_rep_conversion(const FnVariantAnalysis* fn, AstNode* from, AstNode* to);
 ```
 
-### 6.5 Scalar return-home demand and coloring
+### 6.5 Activation scalar-home demand and coloring
 
-Representation analysis also determines whether a boxed call result may contain
-a pointer-backed number-stack scalar. It records a logical home requirement,
-not a physical slot number. MIR lowering later computes exact lifetimes and
-colors non-overlapping values onto the same physical home.
+Representation analysis determines whether any boxed value may contain an
+activation-owned number-stack scalar. This applies to generated-call results,
+runtime-import results, exact representation conversions, control-flow joins,
+and normal or error return lanes. It records a logical home requirement, not a
+physical slot number. MIR lowering later computes exact lifetimes and colors
+non-overlapping values onto the same physical home.
 
 ```c
 typedef enum ScalarHomeDemand {
     SCALAR_HOME_NONE,
-    SCALAR_HOME_BOXED_RETURN
+    SCALAR_HOME_ACTIVATION_ITEM
 } ScalarHomeDemand;
 
 /* added to FnValueAnalysis from §6.1 */
@@ -424,6 +539,17 @@ b = g()          home 1, because a remains live
 consume(a, b)
 ```
 
+Liveness is computed on the finalized MIR control-flow graph, including loop
+backedges, exceptional/profile exits, and edge adoptions. Lexical AST order or a
+linear event sequence is insufficient for coloring.
+
+The home decision follows payload provenance rather than the source operation.
+An inline scalar or heap-owned scalar needs no activation home. A dynamic
+`Item` with unknown scalar provenance is classified once and adopted into its
+assigned home before any temporary watermark is restored. `em_require_rep()`
+must create and record this logical home when lowering introduces a conversion
+that did not exist as an AST producer.
+
 At an escape boundary, the value leaves activation storage:
 
 - environment, module, persistent container, or async/generator state: copy to
@@ -432,6 +558,16 @@ At an escape boundary, the value leaves activation storage:
   return home;
 - discarded value: no persistent home is required;
 - native direct return: no boxed home is required.
+
+When every lane that may carry a pointer-backed scalar is semantically
+discarded, a generated call uses one shared fixed discard scratch home owned by
+the caller activation. The home need not participate in ordinary value liveness
+because no returned `Item` is observed, but it remains non-null so the callee
+never constructs a dangling return value. If, for example, the normal value is
+discarded but a Lambda scalar error lane remains observable, the call uses a
+colored home with the error value's real lifetime instead. The scratch slot is
+reserved only in functions that contain a fully discarded scalar call and is
+never shared with a live value home.
 
 This is the number-stack analogue of root-slot coloring, but the two classes
 must remain distinct. Scalar homes contain raw one-word numeric payloads and
@@ -470,6 +606,32 @@ typedef struct JitAbiValue {
     JitValueClass value_class;
 } JitAbiValue;
 
+typedef enum JitArgEffect {
+    JIT_ARG_BORROWED = 0,
+    JIT_ARG_MAY_CAPTURE = 1u << 0,
+    JIT_ARG_MAY_WRITE_THROUGH = 1u << 1,
+    JIT_ARG_PERSISTENT_STORE = 1u << 2,
+    JIT_ARG_EFFECT_UNKNOWN = 1u << 3
+} JitArgEffect;
+
+typedef struct JitAbiArg {
+    JitAbiValue value;
+    uint16_t effects;
+} JitAbiArg;
+
+typedef enum JitReturnTransport {
+    JIT_RETURN_NONE,
+    JIT_RETURN_MIR_RESULT,
+    JIT_RETURN_CONTEXT_ERROR
+} JitReturnTransport;
+
+typedef struct JitReturnLane {
+    JitAbiValue value;
+    JitReturnTransport transport;
+    ScalarReturnClass scalar_class;
+    bool may_use_scalar_return_home;
+} JitReturnLane;
+
 typedef struct JitCallEffects {
     JitGcEffect gc;
     JitReentryEffect reentry;
@@ -479,26 +641,57 @@ typedef struct JitCallEffects {
 
 typedef struct JitCallMetadata {
     JitCallEffects effects;
-    JitAbiValue result;
-    const JitAbiValue* args;
-    uint16_t arg_count;
-    ScalarReturnClass scalar_return_class;
-    bool has_scalar_return_home;
+    JitReturnLane normal_result;
+    JitReturnLane error_result;
+    const JitAbiArg* abi_args;
+    uint16_t abi_arg_count;
+    uint16_t source_arg_count;
+    int16_t scalar_return_home_arg_index;
+    uint8_t scalar_home_lane_mask;
     uint32_t flags;
 } JitCallMetadata;
 ```
 
+`JIT_EXCEPTION_CLEARS` means guaranteed clear on return and cannot also set an
+exception. A helper that conditionally clears, conditionally sets, or has mixed
+paths is classified `MAY_SET`; this may lose an optimization but cannot suppress
+a required poll. Generated normal control flow does not invoke ordinary helpers
+while an unhandled exception is active.
+
 The public implementation may retain packed argument classes and an inline fast
 path for the current small-call limit. The normalized descriptor must not bake
 that limit into generated-function metadata: direct source functions can have
-more parameters, so the descriptor uses a pointer and count. The form above is
-the interface consumed by analysis and `MirEmitter`.
+more parameters, so the descriptor uses a pointer and count. `abi_args` lists
+every physical MIR call operand, including environment, receiver, variadic,
+resume-state, and scalar-home operands; `source_arg_count` retains the
+language-visible arity. The form above is the interface consumed by analysis
+and `MirEmitter`.
 
-`has_scalar_return_home` describes a hidden generated-call ABI argument. It is
-not counted among source-language parameters. Static/runtime imports that do
-not implement this generated ABI keep it false; their returned `Item` must be
-adopted by the common call emitter or an appropriate wrapper before it can
-cross a generated frame boundary.
+`normal_result` and `error_result` describe distinct, mutually exclusive
+language-visible lanes. JavaScript exception state remains an effect, not a
+second return lane. The current Lambda error lane uses
+`JIT_RETURN_CONTEXT_ERROR`; a native normal result therefore still carries an
+explicit boxed error contract. `scalar_home_lane_mask` is the union of lanes
+that may use the one shared home. The context-error protocol writes zero on a
+normal exit and the boxed error Item on an error exit; the caller reads and
+tests it immediately after the call before emitting any operation that could
+overwrite the shared lane.
+
+`scalar_return_home_arg_index` identifies the hidden generated-call ABI operand
+and is `-1` when absent. It is not counted among source-language parameters and
+is never present on a public wrapper ABI. The canonical generated-body order is
+existing hidden environment/receiver operands, source operands, existing
+variadic or resume-state operands, then the scalar home as the final operand.
+Static/runtime imports that do not implement this generated ABI keep the index
+at `-1`; any returned `Item` with unknown scalar provenance must be adopted by
+the common call emitter before a temporary watermark is restored or the value
+crosses a generated frame boundary.
+
+Argument effects are part of representation correctness, not only
+optimization. `JIT_ARG_BORROWED` proves that a native or activation-owned value
+does not escape the call. Persistent capture/store requires heap ownership at
+that boundary. Unknown arguments conservatively combine capture, write-through,
+and persistent-store behavior until audited.
 
 ### 7.2 Metadata sources
 
@@ -515,9 +708,14 @@ Indirect and unresolved calls default to:
 - may re-enter generated/runtime code;
 - may set the active language's exception/error state;
 - may allocate activation-temporary number payloads;
-- unknown semantic argument and return classes.
+- the public boxed value ABI when the call is dynamically callable;
+- unknown semantic argument and return classes;
+- unknown argument effects, including possible persistent capture.
 
-This fail-closed default is intentional. Optimization requires positive proof.
+The machine ABI itself may never be guessed: an unresolved call without a known
+public signature is a compile-time error or must use a profile-provided runtime
+dispatcher. This fail-closed default is intentional. Optimization requires
+positive proof.
 
 ### 7.3 Metadata invariants
 
@@ -529,13 +727,22 @@ This fail-closed default is intentional. Optimization requires positive proof.
 - declared ABI representation must match the emitted MIR call signature.
 - a boxed `Item`, raw GC pointer, and raw non-GC pointer are never interchangeable
   merely because all use a machine word.
+- argument capture/write effects must be conservative before representation
+  demand chooses activation or persistent ownership.
 - exception effect does not imply GC effect, and GC effect does not imply
   exception effect.
 - an import classified `JIT_NUMBER_STACK_MAY_ALLOCATE` produces only
   activation-temporary number payloads; any value it stores persistently must
   already be heap-rehomed.
+- an import may expose an activation-owned scalar only through a declared return
+  lane. An `Item` written through an argument must be heap-owned before the
+  import returns unless a future metadata extension declares that out-result
+  and gives the emitter an adoption point.
 - the common emitter records effects; language lowering decides how an error or
   exception is observed and routed.
+- a `CONTEXT_ERROR` item that may carry an activation scalar is adopted into
+  the caller home before the callee restores its number extent or publishes the
+  context lane.
 
 The build should report unknown or conservative imports, ranked by emitted call
 count. This makes metadata audit an evidence-driven optimization process.
@@ -627,6 +834,14 @@ Language lowering should exchange semantic MIR values instead of naked
 registers wherever a value can survive, cross a call, or change representation.
 
 ```c
+typedef enum ScalarPayloadProvenance {
+    SCALAR_PROVENANCE_NONE,
+    SCALAR_PROVENANCE_INLINE,
+    SCALAR_PROVENANCE_HEAP,
+    SCALAR_PROVENANCE_ACTIVATION_HOME,
+    SCALAR_PROVENANCE_UNKNOWN
+} ScalarPayloadProvenance;
+
 typedef struct MirValue {
     MIR_reg_t reg;
     MIR_type_t mir_type;
@@ -635,6 +850,7 @@ typedef struct MirValue {
     JitValueClass value_class;
     int gc_home_id;
     int scalar_home_id;
+    ScalarPayloadProvenance scalar_provenance;
 } MirValue;
 ```
 
@@ -643,6 +859,12 @@ typedef struct MirValue {
 namespaces and slot arrays are separate. A home ID is lowering state, not
 function-analysis state. Short local arithmetic helpers may still accept naked
 MIR registers when their representation is unambiguous.
+
+Copies retain scalar provenance and home identity. A control-flow join either
+uses one logical home for every incoming edge or inserts an exact edge adoption;
+it never silently merges Items that point into different temporary extents.
+An unknown/dynamic value is classified and adopted at the first boundary that
+requires a stable activation home.
 
 ### 8.3 Immutable function plan
 
@@ -654,12 +876,19 @@ typedef enum MirEntryMode {
     MIR_ENTRY_BOUND_INTERNAL
 } MirEntryMode;
 
-typedef struct MirReturnPlan {
+typedef struct MirReturnLanePlan {
     MIR_type_t mir_type;
     ValueRep rep;
     ScalarReturnClass scalar_class;
-    bool accepts_caller_scalar_home;
+    bool may_use_caller_scalar_home;
+} MirReturnLanePlan;
+
+typedef struct MirReturnPlan {
+    MirReturnLanePlan normal;
+    MirReturnLanePlan error;
     FnErrorLane error_lane;
+    uint8_t scalar_home_lane_mask;
+    bool accepts_caller_scalar_home;
 } MirReturnPlan;
 
 typedef struct MirFunctionPlan {
@@ -678,6 +907,10 @@ The plan contains policy results, not mutable counters or MIR objects.
 lowering. Colored scalar-home count is finalized from MIR liveness and inserted
 into the prologue later, like root-slot count.
 
+Entry kind is carried beside this plan from `FnVariantAnalysis`. A public
+wrapper is always `MIR_ENTRY_CHECKED` and never accepts a caller home. Internal
+boxed/native bodies may be checked or bound according to call-edge proof.
+
 ### 8.4 Mutable frame state
 
 `MirEmitter` owns a `MirFrameState` for the current function. It replaces the
@@ -689,6 +922,7 @@ separate Lambda and JS `side_frame_*` state and owns:
 - root candidates and stable homes;
 - scalar-home candidates, lifetimes, coloring, and the incoming caller-home
   parameter;
+- scalar-home address fixups and the optional discard scratch home;
 - definition, use, and temporary-lifetime events;
 - call sites and safepoints;
 - environment write-back actions;
@@ -709,13 +943,28 @@ MirValue em_define_binding(MirEmitter* em, int gc_home_id, MirValue value);
 void em_note_use(MirEmitter* em, MirValue value);
 void em_note_temp_end(MirEmitter* em, MirValue value);
 
+typedef enum MirFrameRefKind {
+    MIR_FRAME_REF_NONE,
+    MIR_FRAME_REF_LOCAL_SCALAR_HOME,
+    MIR_FRAME_REF_DISCARD_SCRATCH,
+    MIR_FRAME_REF_INCOMING_CALLER_HOME
+} MirFrameRefKind;
+
+typedef struct MirFrameRef {
+    MirFrameRefKind kind;
+    int logical_home_id;
+} MirFrameRef;
+
 int em_scalar_home_new(MirEmitter* em);
 void em_note_scalar_home_use(MirEmitter* em, int scalar_home_id);
+MirFrameRef em_scalar_home_ref(MirEmitter* em, int scalar_home_id);
 
 MirValue em_require_rep(MirEmitter* em, MirValue value, ValueRep required);
 
 typedef struct MirCallOptions {
-    int scalar_return_home_id;
+    MirFrameRef scalar_return_home;
+    uint8_t observed_return_lane_mask;
+    bool is_tail_call;
 } MirCallOptions;
 
 MirCallResult em_call_import(
@@ -734,8 +983,29 @@ The exact signatures can use existing project containers and result structs.
 The important rule is that language code cannot emit a call that bypasses the
 metadata lookup and frame event recording.
 
-`MirCallOptions::scalar_return_home_id` identifies a home in the caller's
-activation. A direct generated call passes its address through the hidden ABI.
+`MirCallOptions::scalar_return_home` is an opaque reference to a home in the
+caller's activation, not an early physical slot number. A direct generated call
+passes its finalized address through the hidden ABI. If
+`observed_return_lane_mask` has no intersection with the callee's scalar lane
+mask, the emitter uses its shared discard scratch reference. A true tail call
+forwards the current function's incoming caller-home reference; it must not pass
+a home from the activation that the tail edge is about to remove.
+
+For an observed scalar lane, lowering supplies a local logical home or, on a
+proven tail edge, the incoming home. When every scalar lane is discarded, the
+observed mask selects the discard scratch and the explicit reference must be
+`NONE`. Other combinations are verifier errors.
+
+During ordinary lowering, `em_scalar_home_ref()` creates an address-producing
+MIR instruction with a placeholder displacement and records a
+`MirScalarHomeFixup`. `em_function_finish()` colors logical homes, patches every
+recorded displacement, inserts the final fixed-prefix reservation, and verifies
+that no unpatched scalar reference remains. MIR operands are mutable before
+module finalization in the current backend; if that changes, the equivalent
+implementation is a late-inserted address definition consumed by the already
+emitted call. Assigning one physical slot per logical ID is not an acceptable
+fallback because it violates the liveness-bounded contract.
+
 A static/runtime import keeps its declared ABI; when its result may be a
 pointer-backed scalar, the emitter adopts the returned payload into that same
 home immediately after the call. For an import classified
@@ -743,15 +1013,21 @@ home immediately after the call. For an import classified
 watermark, adopts the result, and restores that watermark. Internal helper
 temporaries therefore cannot accumulate across loop iterations.
 
-`em_call_import()` performs the common mechanical work:
+`em_call_import()` and `em_call_direct()` perform the same common mechanical
+work after resolving their metadata source:
 
 1. validate actual ABI representations against metadata;
-2. record argument uses and temporary lifetime boundaries;
-3. record the call as a safepoint when it may GC;
-4. emit the call;
-5. adopt a possible pointer-backed scalar result into the selected caller home;
-6. record the semantic return value and its definition;
-7. return effect information to language lowering.
+2. enforce argument ownership, including heap-rehoming activation scalar Items
+   that may be captured or persistently stored;
+3. record arguments as live through the call and end only the temporaries whose
+   metadata permits it;
+4. record the call as a safepoint when it may GC;
+5. emit the call;
+6. read the normal and error transports before either can be overwritten;
+7. adopt a possible pointer-backed scalar from the active result lane into the
+   selected caller home;
+8. record the semantic return value and its definition;
+9. return effect and lane information to language lowering.
 
 It does **not** emit a JavaScript exception poll or Lambda error propagation.
 The relevant profile consumes the returned exception/error effect and emits its
@@ -771,19 +1047,33 @@ The canonical lowering sequence is:
 5. Profile-specific cleanup that may call or allocate is emitted.
 6. Environment values that outlive the frame are rehomed or ownership is
    transferred.
-7. A pointer-backed scalar return is copied into the caller-provided canonical
-   home and retagged when the return plan requires it.
+7. A pointer-backed scalar from the active normal or error return lane is copied
+   into the caller-provided canonical home and retagged when the return plan
+   requires it. A context error lane is published only after adoption.
 8. The complete callee number-stack watermark is restored; no callee slot is
    retained by the return.
 9. The root-stack watermark is restored.
 10. The common return is emitted.
 11. `em_function_finish()` computes GC-root and scalar-home liveness, colors
     their separate slot spaces, inserts only required safepoint-current root
-    writes, and materializes or removes the checked prologue.
+    writes, and materializes or removes the common checked/bound frame
+    prologue.
 
 All cleanup that can allocate must happen before root restoration. No language
 epilogue may append a `MAY_GC` call after `em_function_finish()` begins final
 teardown.
+
+Tail-call lowering is part of this lifecycle. A tail edge may forward the
+incoming caller home only when its result lanes and error propagation exactly
+match the current function's outward contract. Self-tail recursion lowered as
+a loop keeps the current activation and defers writing the incoming home until
+the final exit. A physical cross-function tail edge must first perform all
+profile cleanup, heap-rehome or reject every argument that points into the
+outgoing activation, and restore that activation's root and number watermarks;
+only then may it jump while forwarding the original incoming home. Reusing the
+outgoing fixed prefix for a callee while arguments still point into it is
+forbidden. A call that converts, catches, wraps, or otherwise observes a result
+is not a physical tail edge and uses an ordinary local home.
 
 ### 8.7 Caller-donated canonical scalar return homes
 
@@ -799,7 +1089,7 @@ The common API therefore uses caller-donated canonical homes:
 ```text
 caller number frame
 
-[scalar home 0][scalar home 1][other fixed homes] | temporary extent
+[colored scalar homes][discard scratch][ABI/error scratch] | temporary extent
        ^
        +-- hidden scalar_return_home argument to callee
 
@@ -807,8 +1097,9 @@ callee number frame begins above the caller's complete fixed-home area
 ```
 
 The caller selects a liveness-colored home for a potentially pointer-backed
-boxed result and passes its address as a hidden ABI argument. The callee uses
-the following return protocol:
+boxed result and passes its address as a hidden ABI argument. Normal and Lambda
+error lanes are mutually exclusive and may share it. The callee uses the
+following return protocol for whichever lane is active:
 
 ```text
 if returned Item has a pointer-backed number payload:
@@ -836,7 +1127,9 @@ The scalar representation set is deliberately narrow:
 
 `UINT64` remains heap-backed under the current value model and is not a scalar
 home representation. Adding it requires a separate value-representation and GC
-decision, not merely another return classifier case.
+decision, not merely another return classifier case. The same scalar homes are
+also used by local conversions and imported results; "return home" names the
+generated-call ABI role, not the only source of an activation scalar.
 
 #### Float discriminator contract
 
@@ -862,16 +1155,24 @@ not reproduce the current multi-test classifier in every function epilogue.
 #### ABI and lifetime rules
 
 - Native direct scalar returns do not use a scalar home.
-- A proven-safe `Item` return does not use a scalar home.
-- A boxed entry that may return a pointer-backed scalar accepts the hidden home
-  argument, including conservative generic/indirect entries.
+- A native direct scalar return with a boxed Lambda error lane may still need a
+  home for that error lane.
+- A proven-safe `Item` return contract does not use a scalar home.
+- An internal boxed body that may return a pointer-backed scalar on either lane
+  accepts the hidden home argument.
+- Public wrappers and runtime-indirect function pointers retain the public ABI;
+  they reserve a local home, call the internal body, and heap-rehome escaping
+  results before restoring their activation.
 - The hidden home is an ABI `POINTER` with
   `JIT_VALUE_RAW_NON_GC_POINTER`; it is never published as an `Item` or GC root.
 - A runtime import that may allocate number payloads is bracketed by a caller
   watermark; its result is adopted before that watermark is restored.
-- Generic external wrappers reserve/adopt a home before entering the generated
-  ABI and heap-rehome a result that escapes the entry activation.
-- A discarded result needs no long-lived home.
+- A call whose scalar-capable lanes are all discarded uses the caller's shared
+  fixed discard scratch home. An observable error lane receives a normal
+  liveness home even when the normal result is discarded.
+- A physical tail call forwards the current function's incoming caller home;
+  it never returns through a home owned by the removed activation, and none of
+  its arguments may retain that activation's homes after teardown.
 - Environment/container writes heap-rehome the payload at the ownership
   boundary.
 - Async/generator suspension never preserves a pointer to an activation home;
@@ -879,10 +1180,14 @@ not reproduce the current multi-test classifier in every function epilogue.
 - Recursion and re-entry are safe because each caller activation owns a distinct
   fixed-home area.
 
-The verifier asserts that a required home is non-null, aligned, belongs to the
-caller activation, and lies below the callee number-frame base. It also asserts
-that a boxed pointer-backed scalar cannot leave an entry whose ABI omitted the
-home.
+The runtime verifier can assert that a required home is non-null, aligned, lies
+inside the bound number-stack reservation, and is below the callee number-frame
+base. Those checks cannot prove immediate-caller ownership from the pointer
+alone. The generated-module verifier supplies that proof statically: every
+ordinary direct edge must pass a finalized fixed home from its current
+activation, every tail edge must forward the incoming home, and every public
+edge must target a checked wrapper. It also rejects a boxed pointer-backed
+scalar leaving an implementation body whose ABI omitted the home.
 
 ### 8.8 Late root and frame materialization
 
@@ -900,10 +1205,14 @@ This is the performance-critical interpretation of safepoint-current canonical
 slots. It forbids both missing publication and always-current publication.
 
 Scalar-home finalization runs beside, not inside, GC-root finalization. It
-colors all overlapping scalar lifetimes, adds fixed error/ABI scratch slots,
-and reserves the resulting number-frame prefix once per activation. It does
-not use collecting safepoints because raw scalar payloads are outside the GC
-domain.
+colors all overlapping scalar lifetimes, patches logical-home references, adds
+the optional discard scratch plus fixed error/ABI scratch slots, and reserves
+the resulting number-frame prefix once per activation. The prefix layout is
+`colored homes`, `discard scratch`, then `ABI/error scratch`; temporary
+allocation begins above the complete prefix. It does not use collecting
+safepoints because raw scalar payloads are outside the GC domain.
+Its CFG construction and reachability rules should reuse the existing common
+root-finalizer utilities rather than introduce a second control-flow parser.
 
 ### 8.9 Checked and bound entries
 
@@ -921,13 +1230,19 @@ The module verifier should reject:
 - exporting a bound-only body;
 - storing its address in an indirect-call slot;
 - calling it from a mismatched context;
-- a generic wrapper that omits the checked entry.
+- a public wrapper that omits the checked entry;
+- storing an internal boxed/native body in a public runtime function pointer;
+- a caller-home fixup that does not resolve inside the caller's fixed prefix;
+- a non-tail edge that forwards an ancestor's incoming home, or a tail edge that
+  passes a home owned by the activation it removes.
 
 ### 8.10 Overflow and failure behavior
 
 Frame-capacity failure must be fail-closed. The plan supplies the correct
-language-visible failure lane or sentinel. The generated function cannot
-continue normal execution with an unreserved root or number frame.
+language-visible failure lane or sentinel. If producing that failure requires a
+boxed error Item, it follows the same error-lane home contract. The generated
+function cannot continue normal execution with an unreserved root or number
+frame.
 
 The overflow path is uncommon and may be cold, but it remains part of the
 common physical frame API. Language profiles decide how its failure is surfaced.
@@ -939,12 +1254,12 @@ common physical frame API. Language profiles decide how its failure is surfaced.
 For a function equivalent to `return a + b` where analysis proves both
 parameters and the return are `F64`:
 
-- the direct-body variant uses `F64` parameters and return;
+- the native-body variant uses `F64` parameters and return;
 - representation demand keeps the addition and result native;
 - no value has a GC value class;
 - no call is a GC safepoint;
 - finalization assigns zero root slots and removes the root frame;
-- a generic wrapper boxes only if a generic caller needs `Item`.
+- a public wrapper boxes only when its public caller needs `Item`.
 
 The common API must make this the natural result, not a special-case peephole.
 
@@ -993,6 +1308,37 @@ If each result is appended to a persistent container instead, the values are
 genuinely live and are heap-rehomed at the container boundary. That growth is
 semantic ownership, not leaked activation storage.
 
+### 9.5 Local wide-scalar conversion
+
+For a loop that converts a native wide `I64` or out-of-band `F64` to `Item`,
+`em_require_rep()` assigns a logical activation home to the converted value.
+The cold boxing helper may allocate temporary payload storage, but the emitter
+adopts the payload into that home and restores the helper watermark. Repeated
+assignment reuses the colored home once the preceding definition is dead, so
+local conversion has the same `O(peak live scalar values)` bound as call
+results.
+
+### 9.6 Lambda normal/error return lanes
+
+For a function with a native success result and a boxed `T^E` error lane,
+analysis describes both lanes. If `E` can be a pointer-backed scalar, the
+internal body accepts one hidden home even though the normal result is native.
+On failure it adopts the error into that home before restoring the number frame
+and publishing `Context::mir_return_lane`. The public wrapper reads that lane
+immediately, heap-rehomes the error, republishes the heap-owned Item, and only
+then ends its own activation; an intervening call may not overwrite the lane.
+
+### 9.7 Public, discarded, and tail calls
+
+- a JavaScript function object points to its public checked wrapper, never the
+  hidden-argument body;
+- a call with no observable scalar-capable lane uses the caller's one discard
+  scratch home, while an observable Lambda error receives a colored home;
+- an ordinary direct call uses a colored home in the current activation;
+- a physical tail call forwards the incoming caller home;
+- self-tail recursion lowered to a loop writes the incoming home only on final
+  exit.
+
 ## 10. Required invariants
 
 The implementation should assert these invariants in debug builds:
@@ -1004,7 +1350,8 @@ The implementation should assert these invariants in debug builds:
 3. **Semantic rooting:** rootability follows `JitValueClass`, never pointer-sized
    MIR type alone.
 4. **Conservative unknowns:** unresolved calls and unknown value classes remain
-   safe until audited.
+   safe until audited; unknown argument effects imply possible persistent
+   capture.
 5. **One call path:** every generated call is emitted through the common
    metadata-aware API.
 6. **One frame owner:** language transpilers do not maintain parallel root
@@ -1017,23 +1364,40 @@ The implementation should assert these invariants in debug builds:
    restored.
 10. **Bound-entry proof:** bound-only entries cannot be reached through public or
     unverified call edges.
-11. **Zero-root elision:** a function with no rootable live-at-safepoint value
+11. **Public ABI isolation:** public and runtime-indirect function pointers name
+    checked wrappers, never hidden-argument implementation bodies.
+12. **Zero-root elision:** a function with no rootable live-at-safepoint value
     emits no root-stack reservation.
-12. **Profile boundary:** JavaScript completion and Lambda error semantics are
+13. **Profile boundary:** JavaScript completion and Lambda error semantics are
     not inferred by the physical frame API.
-13. **Caller-owned scalar home:** a boxed pointer-backed scalar is copied into
-    the caller-provided home before the callee number watermark is restored.
-14. **Complete callee restore:** returning a scalar never leaves
+14. **Complete lane contract:** normal and error transports are both described;
+    their union determines whether the hidden caller home is required.
+15. **Caller-owned scalar home:** a boxed pointer-backed scalar from the active
+    normal or error lane is copied into the caller-provided home before the
+    callee number watermark is restored.
+16. **Complete callee restore:** returning a scalar never leaves
     `side_number_top` inside the callee extent.
-15. **Liveness-bounded homes:** physical scalar-home count is determined by
+17. **All-producer coverage:** calls, imports, conversions, joins, and error
+    lanes use the same activation-home rules.
+18. **Liveness-bounded homes:** physical scalar-home count is determined by
     peak simultaneous liveness, and a home is not reused while its prior value
     remains live.
-16. **No scalar/root alias:** scalar homes contain raw numeric payloads and are
+19. **Finalized references:** every logical scalar-home reference is patched to
+    the final fixed prefix before module finalization; no early physical slot
+    assumption survives.
+20. **Discard scratch isolation:** the shared discard home is non-null, never
+    aliases a live value home, and is used only when every scalar-capable return
+    lane is unobserved.
+21. **Tail-home forwarding:** a physical tail edge forwards the incoming caller
+    home, restores the outgoing frame, and passes no argument that still points
+    into that frame; an ordinary edge uses a home owned by its current
+    activation.
+22. **No scalar/root alias:** scalar homes contain raw numeric payloads and are
     never registered or scanned as GC root slots.
-17. **Float representation authority:** float return classification uses the
+23. **Float representation authority:** float return classification uses the
     canonical single discriminator defined by `Lambda_Type_Double_Boxing.md`;
     epilogues do not duplicate packed-zero tests.
-18. **No activation escape:** persistent, container, environment, async, and
+24. **No activation escape:** persistent, container, environment, async, and
     generator ownership never retains an activation scalar-home pointer.
 
 Non-local unwind remains protected by runtime-entry watermark snapshots and
@@ -1061,10 +1425,15 @@ the physical split.
 
 ## 12. Migration plan
 
+**Completion:** all phases below are implemented. The staged wording is
+retained as the migration record and dependency order.
+
 ### Phase 0: freeze contracts and add diagnostics
 
-- define `ValueRep`, normalized call metadata, and invariants;
+- define `ValueRep`, dual-lane normalized call metadata, per-argument ownership
+  effects, entry kinds, and invariants;
 - report call counts by GC/re-entry/exception classification;
+- report unknown argument effects and unresolved public signatures;
 - report per-function MIR, local, root-slot, root-store, scalar-home,
   temporary-number-slot, and safepoint counts;
 - preserve current emitted behavior.
@@ -1074,6 +1443,10 @@ the physical split.
 - make both transpilers resolve all imports through one metadata path;
 - move use, temporary, result, and safepoint recording into
   `em_call_import()`/`em_call_direct()`;
+- model normal/error transports without changing the emitted ABI;
+- preserve existing ownership-boundary rehomes and diagnose where the new
+  metadata would require an additional one; activation of those new rehomes
+  waits for Phase 5 representation lowering;
 - retain language-specific exception/error checks;
 - validate ABI representation at every emitted call.
 
@@ -1082,8 +1455,10 @@ This phase removes duplicated bookkeeping without changing representation.
 ### Phase 2: common function and representation analysis in shadow mode
 
 - expand `FnAnalysis` and add `FnVariantAnalysis`;
-- compute representation demand without initially changing emitted MIR;
-- compute scalar return-home demand and value lifetimes in shadow mode;
+- run the joint type/representation/variant/effect fixed point without initially
+  changing emitted MIR;
+- compute activation scalar-home demand for calls, imports, conversions, joins,
+  and error lanes in shadow mode;
 - compare proposed representations with actual lowering choices;
 - log mismatches and unknown/conservative reasons.
 
@@ -1093,7 +1468,8 @@ GC behavior even when source results remain identical.
 ### Phase 3: move frame state into `MirEmitter`
 
 - introduce `MirFunctionPlan` and the canonical lifecycle;
-- move scalar-home candidates and coloring into the common frame owner;
+- move scalar-home candidates, coloring, discard scratch, and symbolic-address
+  fixups into the common frame owner without enabling the hidden ABI;
 - adapt the current JS frame begin/finish path to the common owner while keeping
   JS completion routing outside it;
 - migrate Lambda onto the same lifecycle, including its error lane;
@@ -1103,27 +1479,49 @@ GC behavior even when source results remain identical.
 Compatibility wrappers may remain briefly, but they must forward to the single
 common state rather than mirror it.
 
-### Phase 4: enable representation-demand lowering
+### Phase 4: establish public-wrapper and implementation-body variants
+
+- emit public checked wrappers for every externally or runtime-indirectly
+  reachable function while preserving the current public ABI;
+- point JavaScript function objects and other public function pointers only at
+  those wrappers;
+- emit a distinct internal boxed body and represent any already-generated
+  native body as a separate internal variant without changing current
+  selection; boxed scalar returns still use legacy donation in this phase;
+- teach the module verifier to enforce entry reachability and checked/bound
+  context rules;
+- verify indirect calls, closures, methods, cross-module calls, constructors,
+  and resume entries before changing the internal ABI.
+
+This phase creates the ABI boundary needed by caller homes. The hidden argument
+must not be added while a runtime-indirect pointer can still target the body.
+
+### Phase 5: enable representation-demand lowering and caller homes
 
 - introduce `MirValue` at binding, call, and return boundaries;
 - replace eager boxing with `em_require_rep()` at actual demand points;
-- enable native direct-body variants and exact scalar return modes;
-- add the hidden caller-home ABI only to boxed variants that may return a
-  pointer-backed scalar;
+- let the common representation analysis select native-body variants and exact
+  scalar return modes;
+- add the hidden caller-home ABI only to internal variants whose normal/error
+  lane union may return a pointer-backed scalar;
 - replace callee-frame slot retention with copy-to-caller-home followed by full
   callee number-watermark restoration;
+- adopt local conversions and imported results into colored homes before
+  restoring temporary watermarks;
+- implement discard scratch and tail-home forwarding;
+- update public wrappers in the same change to reserve/adopt a local home and
+  heap-rehome normal or error Items that escape their activation;
 - make float adoption consume the canonical single discriminator from
   `Lambda_Type_Double_Boxing.md`;
 - remove holder/version locals made obsolete by canonical representation;
 - measure MIR count and runtime after each class of conversion changes.
 
-### Phase 5: checked-wrapper/direct-body split and cleanup
+### Phase 6: cleanup and final enforcement
 
-- emit generic checked wrappers only where externally reachable;
-- make wrappers reserve/adopt scalar homes and heap-rehome values that escape
-  their entry activation;
 - use bound direct bodies on verified internal edges;
 - enforce reachability in the module verifier;
+- reject every unresolved scalar-home fixup and every metadata entry that
+  claims a non-conservative argument effect without audit evidence;
 - remove legacy per-language frame helpers and stale metadata tables;
 - update the stack MIR and rooting design documents to the final API names.
 
@@ -1143,8 +1541,16 @@ Every migration phase should pass:
 - forced collection at each audited `MAY_GC` boundary;
 - non-local-unwind watermark restoration tests;
 - million-iteration wide-scalar return loops proving constant number-stack use;
+- million-iteration local wide-scalar boxing loops proving the same bound;
 - simultaneous-live scalar return tests proving home coloring does not
   overwrite an older value;
+- native-success/boxed-error `T^E` tests for both normal and error exits;
+- public and indirect wrapper tests proving the hidden ABI is never exposed;
+- discarded-result loops proving one scratch slot is reused;
+- self-tail-recursive tests preserving the current loop transform, plus
+  incoming-home forwarding tests whenever a physical cross-function tail edge
+  is enabled;
+- captured-argument tests proving persistent stores heap-rehome scalar payloads;
 - inline, packed-zero, and out-of-band float return tests pinned to
   `Lambda_Type_Double_Boxing.md`'s canonical encodings;
 - release-build performance measurements. Debug builds must not be used for
@@ -1155,15 +1561,19 @@ The common API is complete only when:
 - Lambda and JS no longer own separate generated root-frame state;
 - call metadata and safepoint recording have one implementation;
 - generated frame prologue/epilogue mechanics have one implementation;
+- public wrappers and internal bodies have verifier-enforced distinct ABIs;
 - common representation demand prevents avoidable boxing and holder locals;
 - zero-root functions emit no root-frame operations;
-- repeated scalar-return calls reuse caller homes and leave no callee number
-  extent retained after return;
+- repeated calls and local conversions reuse caller/activation homes and leave
+  no temporary or callee number extent retained after the boundary;
 - scalar-home count matches peak live scalar demand rather than dynamic call
   count;
-- MIR and local counts are equal to or lower than the pre-migration equivalent
-  for representative numeric, dynamic, exception-heavy, closure, async, and
-  container workloads;
+- normal and error return lanes both satisfy the scalar ownership contract;
+- discarded and physical tail calls satisfy their scratch/forwarding contracts;
+- implementation-body MIR and local counts are equal to or lower than the
+  pre-migration equivalent for representative numeric, dynamic,
+  exception-heavy, closure, async, and container workloads; public-wrapper
+  counts and aggregate code size are reported separately;
 - release `test262` wall time improves without weakening precise-GC checks.
 
 ## 14. Final design boundary
@@ -1181,3 +1591,29 @@ The common API should answer four questions and only those four:
 Language profiles answer what operations mean. `MirEmitter` answers how proven
 values, calls, roots, and returns occupy a generated frame. Keeping that line
 sharp is what allows the implementation to be both shared and fast.
+
+## 15. Post-implementation optimization choices
+
+There is no open correctness or required implementation issue. The following
+optional refinements retain conservative production fallbacks and can be
+measured independently:
+
+1. **Profitability thresholds:** the correctness fixed point determines legal
+   representations; release measurements still need to choose when a native
+   variant or cached conversion is worth its code size.
+2. **Cross-module metadata format:** a compact serialized or linker-visible
+   form may be added for verified internal cross-module calls. Until then those
+   edges use public wrappers.
+3. **Scalar-reference fixup mechanism:** the current MIR permits displacement
+   patching before finalization; a late address-definition scheme remains an
+   equivalent fallback if backend APIs change.
+4. **Registry audit coverage:** unaudited imports and argument effects stay
+   conservative and safe, but their call-count diagnostics will determine the
+   order in which metadata is refined.
+5. **Physical file split and container packing:** the responsibilities in
+   section 11 are fixed, while exact filenames, inline capacities, and project
+   container layouts may follow measured build and hot-path costs.
+
+None of these optional refinements permits exposing an internal ABI, omitting
+an error lane, retaining activation storage across an ownership boundary, or
+weakening the rooting invariants.
