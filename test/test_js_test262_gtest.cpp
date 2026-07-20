@@ -1269,6 +1269,7 @@ struct BatchResult {
     long execute_us;
     long cleanup_us;
     long phase_total_us;
+    long cpu_us;
 };
 
 static const size_t T262_DEFAULT_BATCH_CHUNK_SIZE = 100;
@@ -2544,14 +2545,14 @@ static int run_t262_sub_batch(
                     long elapsed_us = 0;
                     size_t rss_before = 0, rss_after = 0;
                     long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
-                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0;
-                    sscanf(buf + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld",
+                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0, cpu_us = 0;
+                    sscanf(buf + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld",
                            &status, &elapsed_us, &rss_before, &rss_after,
                            &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
-                           &link_us, &execute_us, &cleanup_us, &phase_total_us);
+                           &link_us, &execute_us, &cleanup_us, &phase_total_us, &cpu_us);
                     results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
                                                parse_us, ast_us, early_us, imports_us, mir_us,
-                                               link_us, execute_us, cleanup_us, phase_total_us};
+                                               link_us, execute_us, cleanup_us, phase_total_us, cpu_us};
                     in_script = false;
                 } else if (strncmp(buf + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buf + 1, "BATCH_DIAG ", 11) == 0) {
@@ -2678,14 +2679,14 @@ static int run_t262_sub_batch(
                     long elapsed_us = 0;
                     size_t rss_before = 0, rss_after = 0;
                     long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
-                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0;
-                    sscanf(buffer + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld",
+                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0, cpu_us = 0;
+                    sscanf(buffer + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld",
                            &status, &elapsed_us, &rss_before, &rss_after,
                            &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
-                           &link_us, &execute_us, &cleanup_us, &phase_total_us);
+                           &link_us, &execute_us, &cleanup_us, &phase_total_us, &cpu_us);
                     results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
                                                parse_us, ast_us, early_us, imports_us, mir_us,
-                                               link_us, execute_us, cleanup_us, phase_total_us};
+                                               link_us, execute_us, cleanup_us, phase_total_us, cpu_us};
                     in_script = false;
                 } else if (strncmp(buffer + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buffer + 1, "BATCH_DIAG ", 11) == 0) {
@@ -3628,9 +3629,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 if (written.count(kv.first)) continue;
                 if (g_slow_tests.count(kv.first)) continue;
                 long threshold_us = slow_threshold_for_test(kv.first);
-                if (kv.second.elapsed_us >= threshold_us) {
+                long execution_us = kv.second.cpu_us > 0 ? kv.second.cpu_us : kv.second.elapsed_us;
+                if (execution_us >= threshold_us) {
                     char tag[32];
-                    snprintf(tag, sizeof(tag), "SLOW_%ld", kv.second.elapsed_us / 1000);
+                    snprintf(tag, sizeof(tag), "SLOW_%ld", execution_us / 1000);
                     if (write_partial_once(tag, kv.first, prepared_path_for(kv.first)))
                         slow_count++;
                 }
@@ -3839,11 +3841,13 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             } else if (clean_set.count(name) && !g_slow_tests.count(name)) {
                 auto br_it = batch_results.find(name);
                 long threshold_us = slow_threshold_for_test(name);
-                if (br_it != batch_results.end() && br_it->second.elapsed_us >= threshold_us) {
+                long execution_us = br_it != batch_results.end() && br_it->second.cpu_us > 0
+                    ? br_it->second.cpu_us : br_it->second.elapsed_us;
+                if (br_it != batch_results.end() && execution_us >= threshold_us) {
                     // Test passed in batch but exceeded its slow threshold.
                     // Slow tests are not "fully passing" for baseline purposes:
                     // they go to t262_partial.txt and are excluded from baseline updates.
-                    long elapsed_ms = br_it->second.elapsed_us / 1000;
+                    long elapsed_ms = execution_us / 1000;
                     long threshold_ms = threshold_us / 1000;
                     result = {T262_PARTIAL_PASS,
                               "non-fully-passing: slow batch runtime " +

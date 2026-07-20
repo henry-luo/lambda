@@ -12,6 +12,60 @@
 > `vibe/Lambda_Desing_Native_Module.md`, and
 > `doc/Lambda_Jube_Runtime.md`
 
+## Implementation progress snapshot — 2026-07-21
+
+This is an implementation checkpoint, not a completion claim. The runnable
+product path is now a unified host plus an external Python module:
+
+- `lambda.exe` discovers and loads `modules/lang-python/lang-python.dylib`;
+  there is no separately compiled `lambda-jube.exe` runtime. The compatibility
+  name is only a launcher/symlink to the same host artifact.
+- Python's runtime imports, neutral data operations, opaque roots, guest
+  activation/recovery, module-graph operations, and MIR lifecycle are
+  negotiated Jube services. Python no longer imports the retired raw host
+  lifecycle, root-frame, `_lambda_rt`, function-construction, forward-declare,
+  or register-name lookup symbols.
+- The standard and full-Jube packages contain bit-identical hosts. The latest
+  `make verify-jube-package` run reported SHA-256
+  `b55452fc076f94fafe6460fb1997137a4e16c5f9a26810f79057f7d0564b731e`
+  for both `release-standard/lambda` and `release-jube/lambda` and completed
+  the standard-absent/full-Python smoke checks.
+- Current focused evidence is green: the 42-test Python suite, closure and
+  generator forced-GC gates, and
+  `utils/check_hosted_python_architecture.py --require-module-binary`. The
+  rebuilt `make test-jube-module-integrity` tamper gate also completed
+  successfully.
+  The shared-compiler regression gates also passed: `make test-lambda-baseline`
+  reported 3,495/3,495 passed, and `make test262-baseline` reported
+  40,261/40,261 fully passed with 0 failed and retry time `0.0s`.
+- The only JavaScript runtime-source change in this migration worktree is the
+  file-URL async-XHR ordering bug fix. It is covered by the above Test262 and
+  Lambda baseline evidence; no JS design or global execution-path change is
+  part of Python hosting.
+
+### Still outstanding before closure
+
+1. **Finish H7C as one cohesive opaque compiler-builder service.** Python
+   lowering still includes the shared MIR emitter and constructs raw MIR
+   instructions/operands. The completed lifecycle and selected-constructor
+   services are interim extraction steps, not the final boundary. The host
+   must own opaque compiler/module/function/block/value/import handles and
+   frame/root/scalar-home finalization while Python retains only semantic
+   lowering choices.
+2. **Complete the H7A/H7B header-boundary reduction.** Python still includes
+   internal AST/transpiler/MIR/data-layout headers. Replace those dependencies
+   with reviewed public Jube source, AST/profile, analysis, and compiler
+   projections; do not expose C++ record layouts as an ABI shortcut.
+3. **Close the remaining negative and parity coverage.** Add stale/wrong-owner
+   handle, use-after-finalize, invalid construction order, repeated-session,
+   static/dynamic parity, loader failure/rollback, and module-retention tests.
+4. **Complete release acceptance.** Add supported-platform Windows loader
+   validation, sanitizer/stress evidence, and release-performance measurements.
+5. **Close H10 documentation and audit work.** Reduce the permanent internal
+   header allowlist, update the user/runtime/build/package documentation and
+   ADR status, archive the final matrix, and review every shared/JS diff
+   against the no-Lambda/JS-hot-path-impact rule.
+
 ## 1. Purpose
 
 This plan migrates Python from a language compiled directly into the
@@ -566,6 +620,50 @@ the underlying Lambda Item, container, allocation, and GC mechanics.
   - allocation and rooting;
   - native-resource wrappers;
   - error/status transport.
+
+  Initial implementation note: `JubeHostDataAPI` now carries only opaque
+  active-session name construction, map writes, float construction, and JSON
+  formatting.  Python no longer dereferences the activation `Input` or its
+  pool/name-pool; the host validates the token against the active guest on the
+  calling thread.  The remaining Item/container operations are intentionally
+  not represented as ad-hoc aliases and remain H5 work.
+
+  **Implementation update (2026-07-20, h7e2).** `JubeHostRootAPI` is a
+  separately versioned hosted-language tail with opaque, stack-resident root
+  frames.  It reuses Lambda's exact side-root reservation and teardown rather
+  than introducing a parallel collector or allocation path.  Python's MIR
+  import lowering and native runtime helpers (closures, calls, generators,
+  iterators, class map writes, and list materialization) now use it; the
+  dynamic module no longer imports `lambda_root_frame_*` or exposes the host
+  frame layout.  The architecture verifier rejects both source-level legacy
+  frames and those retired binary imports.  This table is not consulted by
+  Lambda or JavaScript execution, so their generated and hot paths are
+  unchanged.
+
+  **Implementation update (2026-07-20, h7e3).** The neutral data table now
+  owns traced closure-environment allocation, bounded reads/writes, and
+  Python's persistent argument-stack write barrier.  The host preserves the
+  existing allocation type, bounds checks, and GC barriers; Python preserves
+  all closure and call semantics.  This removes direct Python dependencies on
+  the active context, GC header inspection, `heap_calloc_closure_env`, and
+  `owned_item_slot_*`.  The table is negotiated by size and the exact host
+  build ID was advanced; source and dynamic-import checks reject those retired
+  internal dependencies.  Neither Lambda nor JavaScript invokes this module
+  service on its execution paths.
+
+  **Implementation update (2026-07-20, h7e4).** Persistent Python TLS roots
+  and exception/coroutine value rehoming now use session-validated Jube root
+  and data services. This keeps heap selection, root registration, and
+  number-stack relocation in the host while leaving Lambda and JavaScript
+  execution paths unchanged.
+
+  **Implementation update (2026-07-21, h7e5).** Python now requests map and
+  callable allocation through a size-gated neutral data-service tail. The host
+  retains the existing Lambda object layout, allocation class, GC ownership,
+  and callable arity invariant, while Python receives only the resulting
+  `Item`. This removes Python's remaining direct `heap_calloc*` use for these
+  language values. The service is unused by Lambda and JavaScript paths, so it
+  introduces no global runtime performance impact.
 - [ ] **H5.2** Document for every operation:
   - borrowed versus owned values;
   - required root lifetime;
@@ -652,6 +750,14 @@ this checkpoint does not claim the final opaque builder service is complete.
 Normal import lowering roots its transient namespace through the existing
 Jube GC root-frame service; it no longer reads the active context directly.
 
+Nested Python JIT frames obtain the active runtime through the reviewed
+`JubeGuestExecutionAPI` frame-runtime-slot service. It supplies an opaque
+activation-bound address during compilation so the existing shared frame
+emitter retains its proven load-before-prologue ordering without importing the
+`_lambda_rt` storage symbol. The address cannot be obtained outside the active
+guest execution, is never named by Python, and changes no Lambda or JavaScript
+generated path; the module-boundary check rejects the retired storage symbol.
+
 Python-owned runtime helper descriptors now register through the generic,
 capability-negotiated `JubeRuntimeCatalogAPI`. The host validates names and
 collisions, applies the existing conservative `JitImportMetadata` defaults,
@@ -679,6 +785,13 @@ language dispatcher destroys all non-retained wrappers, including error paths;
 the JavaScript fallback unwraps the token only inside the host. Consequently
 Python import lowering has no `Runtime`, `EvalContext`, `Input`, recovery, or
 raw module-registry setup path.
+
+Nested import destruction now invokes that same finish path rather than a
+separate partial cleanup, so the active Jube execution cannot outlive its
+wrapper. Python also scopes its opaque data-session token across nested import
+activation and restores the caller token without resetting its argument or
+exception state. The package corpus and AddressSanitizer now exercise this
+invariant; this was a lifecycle bug fix, not a Lambda/JS runtime redesign.
 
 The exact hosted-compiler build ID was advanced with this additive service
 shape, so stale dynamic modules fail deterministic compatibility negotiation
@@ -778,6 +891,11 @@ remaining H7A/H7D work is to move Python's compiler-owned source allocations,
 diagnostics, and activation internals off direct host headers; this checkpoint
 does not claim that the final compiler boundary is complete.
 
+The Python front-end header no longer includes the monolithic
+`transpiler.hpp`; it receives existing AST/name primitives through its specific
+AST dependency. The architecture check guards that ratchet while the remaining
+runtime and MIR implementation includes are extracted in separate review units.
+
 - [ ] Expose source creation, canonical path, source slices, line/column maps,
   name interning, scoped compilation allocation, and diagnostic emission.
 - [ ] Keep Tree-sitter Python and Python parse policy in the module.
@@ -823,9 +941,56 @@ same guest-execution lifecycle table, so the module no longer imports
 not change a Lambda/JS runtime path. Python's stack-overflow call also now
 uses the existing shared emitter import cache rather than manufacturing a
 separate MIR prototype in each lowering path. The remaining direct MIR-builder
-symbols and raw runtime-context import are deliberately left for the cohesive
-opaque builder extraction rather than papered over with an ABI-unsafe call
-shim.
+symbols are deliberately left for the cohesive opaque builder extraction rather
+than papered over with an ABI-unsafe wrapper.
+
+**Implementation update (2026-07-20, h7e1).** Nested Python frames no longer
+import `_lambda_rt`. The host supplies an activation-scoped opaque frame-runtime
+slot through the size-gated guest-execution service, retaining the existing
+load-before-prologue ordering required by shared root and scalar-home emission.
+The module boundary verifier rejects the retired symbol, and Python closure,
+generator, package, and forced-GC tests cover the service. The same pass fixed
+a pre-existing Python TCO lowering defect: both overflow paths now use one
+pointer-typed MIR prototype for `lambda_stack_overflow_error` rather than
+creating duplicate same-name prototypes.
+
+**Implementation update (2026-07-21, h7e6).** Boxed-`Item` function creation
+now crosses a size-gated guest-execution service. The host constructs the MIR
+signature and owns the returned function/item handles; Python receives them
+only for the lifetime of the active MIR context. Python no longer calls or
+imports `MIR_new_func_arr`, and the architecture verifier rejects its
+reintroduction. This is a compiler-only service and does not change Lambda or
+JavaScript emission or execution paths.
+
+**Implementation update (2026-07-21, h7e7).** Forward function declarations
+now use the same tail-appended, size-gated host compiler surface. This keeps
+direct-call targets host-owned and removes Python's `MIR_new_forward` import.
+The ABI tail ordering is explicitly protected so older negotiated execution
+service offsets remain unchanged. The operation is compiler-only and has no
+Lambda or JavaScript hot-path effect.
+
+**Implementation update (2026-07-21, h7e8).** Python direct-call prototypes
+now use a host-owned boxed-`Item` signature service. The host builds temporary
+MIR parameter descriptors and returns a context-bound opaque prototype; Python
+direct-call lowering no longer calls `MIR_new_proto_arr`. The shared emitter
+still owns runtime-import prototypes until its cohesive opaque-builder
+extraction. This tail-appended compiler service is
+outside Lambda and JavaScript execution paths.
+
+**Implementation update (2026-07-21, h7e9).** Named register resolution now
+uses the tail-appended compiler service. The MIR function register table stays
+host-private and Python receives only the numeric register identity needed for
+lowering. The architecture verifier rejects direct `MIR_reg` use in Python;
+this compile-time lookup does not affect Lambda or JavaScript hot paths.
+
+**Implementation update (2026-07-21, h7e10).** Hosted lowering now records
+the opaque identities of bound parameter registers in the shared compiler
+state. Root liveness uses that explicit entry-state record, so the Python
+module no longer imports MIR's private register-name lookup at all. Legacy
+Lambda and JavaScript lowering retain their existing lookup path; the added
+state is compiler-local and is never read on their execution paths. The
+dynamic-module architecture gate rejects `_MIR_reg`, while Python golden and
+forced-GC closure/generator tests protect the parameter-root invariant.
 
 - [ ] Expose opaque MIR builder/module/function/block/value/import handles.
 - [ ] Wrap the existing `MirEmitter` operations needed by Python: function
