@@ -13140,6 +13140,17 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         return result;
     }
 
+    struct JsArrayDispatchModeGuard {
+        bool saved;
+        JsArrayDispatchModeGuard() : saved(js_dispatch_as_array_method) {
+            // The mode describes only the currently executing shared builtin.
+            // User callbacks are fresh JS executions and must not inherit an
+            // outer Array.prototype call's species semantics.
+            js_dispatch_as_array_method = false;
+        }
+        ~JsArrayDispatchModeGuard() { js_dispatch_as_array_method = saved; }
+    } array_dispatch_mode_guard;
+
     // v11: handle bound functions — use bound this and prepend bound args
     if (fn->bound_args || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) {
         // ES spec: when called via 'new', bound_this is ignored — use the new object (this_val)

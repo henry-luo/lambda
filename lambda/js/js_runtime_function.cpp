@@ -416,6 +416,27 @@ extern "C" void js_mark_strict_func(Item fn_item) {
     fn->flags |= JS_FUNC_FLAG_STRICT;
 }
 
+extern "C" void js_finalize_function(Item fn_item, Item name_item,
+        Item source_item, int formal_length, int init_flags) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    // Lowering already canonicalizes private display names. Direct field setup
+    // keeps this pre-publication transaction allocation-free and non-reentrant.
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (get_type_id(name_item) == LMD_TYPE_STRING) fn->name = it2s(name_item);
+    if (get_type_id(source_item) == LMD_TYPE_STRING) fn->source_text = it2s(source_item);
+    if (formal_length >= 0) fn->formal_length = (int16_t)formal_length;
+    if (init_flags & JS_FUNC_INIT_GENERATOR) fn->flags |= JS_FUNC_FLAG_GENERATOR;
+    if (init_flags & JS_FUNC_INIT_ASYNC_GENERATOR) {
+        fn->flags |= JS_FUNC_FLAG_GENERATOR | JS_FUNC_FLAG_ASYNC_GEN;
+    }
+    if (init_flags & JS_FUNC_INIT_ASYNC) fn->flags |= JS_FUNC_FLAG_ASYNC;
+    if (init_flags & JS_FUNC_INIT_ARROW) fn->flags |= JS_FUNC_FLAG_ARROW;
+    if (init_flags & JS_FUNC_INIT_STRICT) fn->flags |= JS_FUNC_FLAG_STRICT;
+    if (js_private_field_initializing || js_eval_initializer_context) {
+        fn->eval_initializer_context = true;
+    }
+}
+
 extern "C" void js_set_class_name(Item cls_item, Item name_item);
 static Item js_private_display_name_item(Item name_item);
 

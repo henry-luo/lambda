@@ -5892,6 +5892,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
+        fc->boxed_return_scalar_class = jm_infer_boxed_return_scalar_class(fc);
         FnAnalysis* analysis = &fc->analysis;
         analysis->variant_count = 0;
         FnVariantAnalysis* public_entry =
@@ -5903,7 +5904,18 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             fc->node->is_async || fc->node->is_generator, true};
         public_entry->result.normal = {fc->return_type, VALUE_REP_ITEM,
             SCALAR_RETURN_NONE, false};
-        public_entry->param_count = fc->param_count;
+        int env_param_count = fc->capture_count > 0 ? 1 : 0;
+        int physical_param_count = fc->param_count + env_param_count;
+        public_entry->param_count = physical_param_count;
+        if (fc->param_count <= 16 && physical_param_count <= 17) {
+            public_entry->params = fc->public_param_analysis;
+            for (int p = 0; p < physical_param_count; p++) {
+                bool env = env_param_count && p == 0;
+                public_entry->params[p] = {env ? LMD_TYPE_ANY :
+                    fc->param_types[p - env_param_count],
+                    env ? VALUE_REP_RAW_GC_POINTER : VALUE_REP_ITEM, 0};
+            }
+        }
 
         FnVariantAnalysis* body =
             &analysis->variants[analysis->variant_count++];
@@ -5911,13 +5923,21 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         body->entry = {FN_ENTRY_BOXED_BODY, true, fc->has_direct_eval,
             fc->uses_arguments, false};
         body->effects = public_entry->effects;
-        ScalarReturnClass scalar_class =
-            em_scalar_return_class_for_type(fc->return_type);
+        ScalarReturnClass scalar_class = fc->boxed_return_scalar_class;
         body->result.normal = {fc->return_type, VALUE_REP_ITEM,
             scalar_class, scalar_class != SCALAR_RETURN_NONE};
         body->result.scalar_home_lane_mask =
             scalar_class != SCALAR_RETURN_NONE ? FN_RETURN_HOME_NORMAL : 0;
-        body->param_count = fc->param_count;
+        body->param_count = physical_param_count;
+        if (fc->param_count <= 16 && physical_param_count <= 17) {
+            body->params = fc->body_param_analysis;
+            for (int p = 0; p < physical_param_count; p++) {
+                bool env = env_param_count && p == 0;
+                body->params[p] = {env ? LMD_TYPE_ANY :
+                    fc->param_types[p - env_param_count],
+                    env ? VALUE_REP_RAW_GC_POINTER : VALUE_REP_ITEM, 0};
+            }
+        }
 
         if (fc->has_native_version) {
             FnVariantAnalysis* native =
@@ -5930,6 +5950,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     ? VALUE_REP_F64 : VALUE_REP_I64,
                 SCALAR_RETURN_NONE, false};
             native->param_count = fc->param_count;
+            if (fc->param_count <= 16) {
+                native->params = fc->native_param_analysis;
+                for (int p = 0; p < fc->param_count; p++) {
+                    ValueRep rep = fc->param_types[p] == LMD_TYPE_FLOAT
+                        ? VALUE_REP_F64 : VALUE_REP_I64;
+                    native->params[p] = {fc->param_types[p], rep, 0};
+                }
+            }
         }
         if ((fc->node->is_async || fc->node->is_generator) &&
                 analysis->variant_count < 4) {
@@ -6345,26 +6373,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     MIR_reg_t fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc));
-                    jm_emit_set_function_name(mt, fn_item, fn->name->chars, fc->formal_length);
-                    jm_emit_set_function_source(mt, fn_item, fn);
-                    // v20: Mark generator functions
-                    if (fn->is_generator) {
-                        if (fn->is_async) {
-                            jm_call_void_1(mt, "js_mark_async_generator_func",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                        } else {
-                            jm_call_void_1(mt, "js_mark_generator_func",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                        }
-                    } else if (fn->is_async) {
-                        jm_call_void_1(mt, "js_mark_async_func",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                    }
-                    // v30: Mark strict mode functions
-                    if (fc->is_strict) {
-                        jm_call_void_1(mt, "js_mark_strict_func",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                    }
+                    // Keep hoisted declarations on the same atomic metadata path as
+                    // closures so no partially initialized function can escape.
+                    jm_emit_finalize_function(mt, fn_item, fc, fn);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));
@@ -6654,9 +6665,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
-                    jm_emit_set_function_name(mt, fn_item, fn->name->chars,
-                        fc->formal_length);
-                    jm_emit_set_function_source(mt, fn_item, fn);
+                    // Capturing declarations need the same metadata invariants as
+                    // ordinary function expressions before their binding is visible.
+                    jm_emit_finalize_function(mt, fn_item, fc, fn);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));

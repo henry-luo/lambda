@@ -30,6 +30,9 @@ extern "C" const TSLanguage* tree_sitter_typescript(void);
 extern "C" const TSLanguage* tree_sitter_javascript(void);
 extern "C" void ensure_jit_imports_initialized(void);
 
+bool jm_float_const_is_inline(double value);
+MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
+
 extern JsModuleConstEntry* g_eval_preamble_entries;
 extern int g_eval_preamble_entry_count;
 extern int g_eval_preamble_var_count;
@@ -166,6 +169,7 @@ void jm_emit_try_state_reset(JsMirTranspiler* mt);
 void jm_emit_async_resume_refresh(JsMirTranspiler* mt);
 JsTryContext* jm_find_completion_context(JsMirTranspiler* mt, JsMirCompletionKind kind);
 void jm_emit_pending_exception_check(JsMirTranspiler* mt, JsMirCompletionKind kind);
+void jm_optimize_exception_polls(JsMirTranspiler* mt);
 bool jm_emit_delayed_return_completion(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirCompletionKind kind);
 void jm_emit_throw_completion(JsMirTranspiler* mt, MIR_reg_t value);
@@ -236,6 +240,7 @@ MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value);
 void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, MIR_reg_t val_reg);
 MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val);
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
+MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value);
 MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg);
 NamePool* jm_compiled_name_pool(JsMirTranspiler* mt);
 MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len);
@@ -350,6 +355,9 @@ bool jm_add_chain_has_string(JsAstNode* expr);
 void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
                                        TypeId* collected, int* count, int max_count);
 void jm_infer_return_type(JsFuncCollected* fc);
+ScalarReturnClass jm_infer_boxed_return_scalar_class(JsFuncCollected* fc);
+void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
+    JsFuncCollected* fc, JsFunctionNode* fn_node);
 bool jm_expression_has_float_hint(JsAstNode* node);
 bool jm_prescan_is_float_array(struct hashmap* float_arrays, const char* name);
 bool jm_prescan_has_float_array_access(JsAstNode* node, struct hashmap* float_arrays);
