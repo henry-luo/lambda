@@ -323,7 +323,7 @@ extern "C" void js_set_formal_length(Item fn_item, int length) {
 // allocation live; the GC header supplies the exact slot count to the tracer.
 extern "C" Item* js_alloc_env(int count) {
     if (count <= 0) return NULL;
-    return (Item*)heap_calloc_js_env((size_t)count * sizeof(Item));
+    return (Item*)heap_calloc_closure_env((size_t)count * sizeof(Item));
 }
 
 static bool js_env_slot_is_side_number(Item item) {

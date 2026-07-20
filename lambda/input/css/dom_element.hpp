@@ -761,6 +761,14 @@ struct DomElement : DomNode {
 
 };
 
+// Live selectedness belongs to the DOM node, not to a particular scripting
+// guest.  Rendering and every guest must observe the same native state.
+inline bool dom_option_is_selected(DomElement* option) {
+    if (!option) return false;
+    if (option->has_option_selectedness()) return option->option_selectedness();
+    return option->has_attribute("selected");
+}
+
 // ============================================================================
 // DomElement ↔ Element conversion (Phase 1: Unified DOM Tree)
 // ============================================================================

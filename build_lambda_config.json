@@ -287,6 +287,43 @@
     ],
     "targets": [
         {
+            "name": "lang-python",
+            "description": "External hosted Python Jube language module",
+            "lang": "c++17",
+            "link": "dynamic",
+            "target_dir": "modules/lang-python",
+            "target_name": "lang-python",
+            "target_prefix": "",
+            "pic": true,
+            "single_project": true,
+            "defines": [
+                "LAMBDA_PYTHON_DYNAMIC_MODULE"
+            ],
+            "include": "lambda/tree-sitter-python/bindings/c",
+            "source_files": [
+                "lambda/py/build_py_ast.cpp",
+                "lambda/py/py_async.cpp",
+                "lambda/py/py_bigint.cpp",
+                "lambda/py/py_builtins.cpp",
+                "lambda/py/py_class.cpp",
+                "lambda/py/py_print.cpp",
+                "lambda/py/py_runtime.cpp",
+                "lambda/py/py_scope.cpp",
+                "lambda/py/py_stdlib.cpp",
+                "lambda/py/python_jube_module.cpp",
+                "lambda/py/python_runtime_imports.cpp",
+                "lambda/py/transpile_py_mir.cpp",
+                "lambda/tree-sitter-python/src/parser.c",
+                "lambda/tree-sitter-python/src/scanner.c"
+            ],
+            "link_options_macos": [
+                "-Wl,-undefined,dynamic_lookup"
+            ],
+            "link_options_linux": [
+                "-Wl,--allow-shlib-undefined"
+            ]
+        },
+        {
             "name": "lambda-process",
             "description": "Shared direct process launcher and its base runtime support",
             "lang": "c17",
@@ -647,92 +684,6 @@
             ],
             "linker_flags": [],
             "build_dir": "build_cli",
-            "debug": false
-        },
-        "jube": {
-            "description": "Polyglot runtime: Lambda + JS/TS + Python + Bash + Ruby + Radiant",
-            "output": "lambda-jube.exe",
-            "source_dirs": [
-                "lib",
-                "lib/gc",
-                "lib/font",
-                "lib/font/woff2",
-                "lambda",
-                "lambda/jube",
-                "lambda/input",
-                "lambda/input/css",
-                "lambda/input/html5",
-                "lambda/input/markup",
-                "lambda/input/markup/block",
-                "lambda/input/markup/inline",
-                "lambda/input/markup/format",
-                "lambda/format",
-                "lambda/validator",
-                "lambda/js",
-                "lambda/module/radiant",
-                "lambda/module/hostobj_demo",
-                "lambda/py",
-                "lambda/bash",
-                "lambda/ts",
-                "lambda/rb",
-                "lambda/network",
-                "lambda/npm",
-                "radiant"
-            ],
-            "includes": [
-                ".",
-                "include",
-                "build_temp/re2-noabsl",
-                "lambda/tree-sitter/lib/include",
-                "lambda/tree-sitter-lambda/bindings/c",
-                "lambda/tree-sitter-typescript/bindings/c",
-                "lambda/tree-sitter-javascript/bindings/c",
-                "lambda/tree-sitter-python/bindings/c",
-                "lambda/tree-sitter-ruby/bindings/c",
-                "lambda/tree-sitter-bash/bindings/c",
-                "mac-deps/rpmalloc-install/include",
-                "lib/font/woff2/include",
-                "mac-deps/thorvg/src/bindings/capi"
-            ],
-            "additional_libraries": [
-                {
-                    "name": "tree-sitter-python",
-                    "version": "0.25.0",
-                    "include": "lambda/tree-sitter-python/bindings/c",
-                    "lib": "lambda/tree-sitter-python/libtree-sitter-python.a",
-                    "link": "static"
-                },
-                {
-                    "name": "tree-sitter-ruby",
-                    "version": "0.23.1",
-                    "include": "lambda/tree-sitter-ruby/bindings/c",
-                    "lib": "lambda/tree-sitter-ruby/libtree-sitter-ruby.a",
-                    "link": "static"
-                },
-                {
-                    "name": "tree-sitter-bash",
-                    "version": "0.25.1",
-                    "include": "lambda/tree-sitter-bash/bindings/c",
-                    "lib": "lambda/tree-sitter-bash/libtree-sitter-bash.a",
-                    "link": "static"
-                }
-            ],
-            "defines": [
-                "LAMBDA_JUBE",
-                "LAMBDA_PYTHON",
-                "LAMBDA_BASH",
-                "LAMBDA_RUBY"
-            ],
-            "build_dir": "build_jube",
-            "exclude_source_files": [
-                "lambda/transpile.cpp",
-                "lambda/transpile-call.cpp",
-                "radiant/rdt_vector_cg.mm",
-                "lambda/format/format_latex_html_v2.cpp",
-                "lambda/input/input-adoc.cpp",
-                "lib/font/font_config.c",
-                "lambda/http_module.cpp"
-            ],
             "debug": false
         },
         "windows": {
@@ -4405,7 +4356,7 @@
                             "gtest"
                         ],
                         "requires_lambda_exe": true,
-                        "requires_jube_exe": true,
+                        "requires_lang_python": true,
                         "icon": "🐍"
                     },
                     {

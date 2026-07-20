@@ -215,9 +215,3 @@ void jm_cleanup_deferred_mir();
 // Compile a JS file as a module and return the namespace object.
 // Used for cross-language imports (Lambda → JS).
 Item load_js_module(Runtime* runtime, const char* js_path);
-
-#ifdef LAMBDA_PYTHON
-// Compile a Python file as a module and return the namespace object.
-// Used for cross-language imports (Lambda/JS/Python → Python).
-Item load_py_module(Runtime* runtime, const char* py_path);
-#endif

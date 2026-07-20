@@ -7,6 +7,8 @@
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "jube/jube_interface.h"
+#include "jube/jube_language.h"
+#include "jube/jube_registry.h"
 #include "../lib/strbuf.h"  // For string buffer
 #include "../lib/str.h"     // For str_to_int64_default, str_to_double_default
 #include "../lib/arena.h"   // For arena allocator
@@ -52,9 +54,6 @@
 #include "js/js_dom.h"               // JS DOM document/session bridge
 #include "js/js_transpiler.hpp"      // JsPreambleState for js-test-batch
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
-#ifdef LAMBDA_PYTHON
-#include "py/py_transpiler.hpp"      // Python transpiler
-#endif
 #ifdef LAMBDA_BASH
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
 #include "bash/bash_runtime.h"       // bash_exit_code()
@@ -75,6 +74,21 @@ static bool js_test262_global_flag_is_true(const char* name) {
     Item key = (Item){.item = s2it(heap_create_name(name))};
     Item value = js_get_global_property(key);
     return value.item == (ITEM_TRUE);
+}
+
+static void lambda_cli_jube_write(void* user, const char* bytes, size_t length) {
+    FILE* stream = (FILE*)user;
+    if (!stream || !bytes || length == 0) return;
+    fwrite(bytes, 1, length, stream);
+}
+
+static bool lambda_cli_has_core_source_extension(const char* path) {
+    if (!path) return false;
+    const char* extension = strrchr(path, '.');
+    if (!extension) return false;
+    return strcmp(extension, ".ls") == 0 || strcmp(extension, ".js") == 0 ||
+        strcmp(extension, ".mjs") == 0 || strcmp(extension, ".cjs") == 0 ||
+        strcmp(extension, ".ts") == 0 || strcmp(extension, ".tsx") == 0;
 }
 
 static const int JS_DOCUMENT_VIEWPORT_WIDTH = 800;
@@ -1816,6 +1830,7 @@ int main(int argc, char *argv[]) {
 
     // Initialize lambda home path (reads LAMBDA_HOME env var if set)
     lambda_home_init();
+    jube_set_host_executable_path(argc > 0 ? argv[0] : NULL);
 
     // Strip --no-log before reading log.conf. Batch workers share the working
     // directory, so even briefly opening configured outputs races on log.txt.
@@ -2573,73 +2588,96 @@ int main(int argc, char *argv[]) {
         return lambda_main_finish(final_js_exit_code);
     }
 
-#ifdef LAMBDA_PYTHON
-    // Handle Python command
-    log_debug("Checking for py command");
-    if (argc >= 2 && strcmp(argv[1], "py") == 0) {
-        log_debug("Entering Python command handler");
-
-        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
-            printf("Lambda Python Transpiler v1.0\n\n");
-            printf("Usage: %s py [file.py]\n", argv[0]);
-            printf("\nDescription:\n");
-            printf("  The 'py' command runs the Python transpiler.\n");
-            printf("  If a file is provided, it transpiles and executes the Python code.\n");
-            printf("\nOptions:\n");
-            printf("  -h, --help    Show this help message\n");
-            printf("\nExamples:\n");
-            printf("  %s py script.py    # Transpile and run script.py\n", argv[0]);
-            return lambda_main_finish(0);
-        }
-
-        Runtime runtime;
-        runtime_init(&runtime);
-        lambda_stack_init();
-
-        if (argc >= 3) {
-            const char* py_file = argv[2];
-            char* py_source = read_text_file(py_file);
-            if (!py_source) {
-                printf("Error: Could not read file '%s'\n", py_file);
-                runtime_cleanup(&runtime);
+    // Hosted-language aliases are module declarations, not command branches
+    // in the host. The lookup happens once at CLI dispatch and never enters
+    // Lambda or JavaScript evaluation/JIT paths.
+    if (argc >= 2) {
+        // `run --lang` is the command-form spelling of the same generic
+        // language dispatch. Keep this before Lambda's `run` handler so a
+        // hosted language never needs a special command branch in the host.
+        if (argc >= 3 && strcmp(argv[1], "run") == 0 &&
+            strcmp(argv[2], "--lang") == 0) {
+            if (argc < 5) {
+                fprintf(stderr, "Usage: %s run --lang <language> <source> [args...]\n", argv[0]);
                 return lambda_main_finish(1);
             }
-
-            Item result = transpile_py_to_mir(&runtime, py_source, py_file);
-            if (result.item == ITEM_ERROR) {
-                // Conservative-only guest admission failures must be visible to
-                // automation; printing an ItemError with exit zero hides them.
-                mem_free(py_source);
-                runtime_cleanup(&runtime);
+#ifdef LAMBDA_JUBE
+            jube_register_builtin_modules();
+#endif
+            const JubeLanguageDef* run_language = jube_find_language(argv[3]);
+            bool run_discovery_attempted = false;
+            if (!run_language) {
+                run_discovery_attempted = jube_discover_hosted_language(argv[3]);
+                if (run_discovery_attempted) run_language = jube_find_language(argv[3]);
+            }
+            if (run_language) {
+                JubeLanguageRunRequest request = {
+                    JUBE_LANGUAGE_RUN_REQUEST_V1_SIZE,
+                    argv[4],
+                    argc > 5 ? argc - 5 : 0,
+                    argc > 5 ? (const char* const*)&argv[5] : NULL,
+                    false,
+                    stdout,
+                    lambda_cli_jube_write,
+                    lambda_cli_jube_write,
+                };
+                int rc = jube_run_language(run_language->name, &request);
+                return lambda_main_finish(rc == 0 ? 0 : 1);
+            }
+            if (run_discovery_attempted) {
+                fprintf(stderr, "Hosted language module for '%s' is unavailable or incompatible.\n",
+                        argv[3]); // PRINTF_OK: user-facing missing-module diagnostic.
                 return lambda_main_finish(1);
             }
-
-            // only print non-null results (Python scripts use print() for output)
-            if (result.item != ITEM_NULL && result.item != 0) {
-                TypeId result_type = get_type_id(result);
-                if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
-                    || result_type == LMD_TYPE_ELEMENT) {
-                    Pool* fmt_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "main.fmt");
-                    String* json = format_json(fmt_pool, result);
-                    if (json) {
-                        printf("%.*s\n", json->len, json->chars);
-                    }
-                    mem_pool_destroy(fmt_pool);
-                } else {
-                    StrBuf *output = strbuf_new_cap(256);
-                    print_root_item(output, result);
-                    printf("%s\n", output->str);
-                    strbuf_free(output);
-                }
-            }
-
-            mem_free(py_source);
+            fprintf(stderr, "Unknown hosted language '%s'.\n", argv[3]);
+            return lambda_main_finish(1);
         }
-
-        runtime_cleanup(&runtime);
-        return lambda_main_finish(0);
+#ifdef LAMBDA_JUBE
+        jube_register_builtin_modules();
+#endif
+        const JubeLanguageDef* language = jube_find_language(argv[1]);
+        bool language_from_extension = false;
+        if (!language) {
+            language = jube_find_language_for_path(argv[1]);
+            language_from_extension = language != NULL;
+        }
+        bool hosted_discovery_attempted = false;
+        if (!language && !lambda_cli_has_core_source_extension(argv[1])) {
+            hosted_discovery_attempted = jube_discover_hosted_language(argv[1]);
+        }
+        if (!language && hosted_discovery_attempted) {
+            language = jube_find_language(argv[1]);
+            if (!language) {
+                language = jube_find_language_for_path(argv[1]);
+                language_from_extension = language != NULL;
+            }
+        }
+        if (language) {
+            int language_arg_index = language_from_extension ? 1 : 2;
+            bool show_help = argc > language_arg_index &&
+                !language_from_extension &&
+                (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0);
+            JubeLanguageRunRequest request = {
+                JUBE_LANGUAGE_RUN_REQUEST_V1_SIZE,
+                show_help ? NULL : (language_from_extension ? argv[1] :
+                    (argc < 3 ? NULL : argv[2])),
+                language_from_extension ? argc - 2 : (argc > 3 ? argc - 3 : 0),
+                language_from_extension ? (argc > 2 ? (const char* const*)&argv[2] : NULL) :
+                    (argc > 3 ? (const char* const*)&argv[3] : NULL),
+                show_help,
+                stdout,
+                lambda_cli_jube_write,
+                lambda_cli_jube_write,
+            };
+            int rc = jube_run_language(language->name, &request);
+            return lambda_main_finish(rc == 0 ? 0 : 1);
+        }
+        if (hosted_discovery_attempted) {
+            fprintf(stderr, "Hosted language module for '%s' is unavailable or incompatible.\n",
+                    argv[1]); // PRINTF_OK: user-facing missing-module diagnostic.
+            return lambda_main_finish(1);
+        }
     }
-#endif // LAMBDA_PYTHON
 
 #ifdef LAMBDA_RUBY
     // Handle Ruby command

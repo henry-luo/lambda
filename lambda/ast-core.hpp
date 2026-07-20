@@ -806,29 +806,12 @@ inline LangProfile js_profile = {
     lang_profile_noop_hook,
 };
 
-#ifdef LAMBDA_PYTHON
-inline LangProfile py_profile = {
-    "python",
-    lang_profile_noop_hook,
-    lang_profile_noop_hook,
-    lang_profile_noop_hook,
-};
-#endif
-
 static inline LangProfile* lang_profile_for_name(const char* name) {
     if (!name) return &lambda_profile;
     if ((name[0] == 'j' || name[0] == 'J') && (name[1] == 's' || name[1] == 'S') && name[2] == '\0') {
         return &js_profile;
     }
-#ifdef LAMBDA_PYTHON
-    if ((name[0] == 'p' || name[0] == 'P') &&
-            (name[1] == 'y' || name[1] == 'Y') &&
-            (name[2] == 't' || name[2] == 'T') &&
-            (name[3] == 'h' || name[3] == 'H') &&
-            (name[4] == 'o' || name[4] == 'O') &&
-            (name[5] == 'n' || name[5] == 'N') && name[6] == '\0') {
-        return &py_profile;
-    }
-#endif
+    // Hosted languages carry their semantic hooks inside their module; the
+    // shared profile table must not grow a dormant branch per guest language.
     return &lambda_profile;
 }

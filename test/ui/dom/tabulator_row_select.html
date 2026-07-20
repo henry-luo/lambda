@@ -1,0 +1,11 @@
+<!doctype html><html><head><style>
+#table { width: 420px; height: 180px; }
+/* The fixture omits vendor CSS; keep the body below the header so native
+   coordinate hit-testing reaches the selected data row. */
+.tabulator-tableholder { margin-top: 40px; }
+</style></head><body>
+<div id="table"></div><output id="selected">none</output>
+<script src="../../js/tabulator.min.js"></script><script>
+const table = new Tabulator('#table', { height: 180, rowHeight: 30, selectableRows: 1, data: [{ id: 1, name: 'alpha' }, { id: 2, name: 'beta' }], columns: [{ title: 'Name', field: 'name' }] });
+table.on('rowClick', function (event, row) { document.getElementById('selected').textContent = row.getData().name; });
+</script></body></html>

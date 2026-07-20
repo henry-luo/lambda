@@ -1911,16 +1911,6 @@ static PyPatternNode* alloc_pattern_node(PyTranspiler* tp, PyPatternKind kind, T
 // Forward declaration
 static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node);
 
-// Return the concrete type inside a case_pattern wrapper.
-// If node is already a concrete type, returns node unchanged.
-static TSNode py_case_pattern_unwrap(TSNode node) {
-    if (!ts_node_is_null(node) && strcmp(ts_node_type(node), "case_pattern") == 0) {
-        if (ts_node_named_child_count(node) > 0)
-            return ts_node_named_child(node, 0);
-    }
-    return node;
-}
-
 // Check if a case_pattern node contains a keyword_pattern (for class pattern keyword args)
 static bool py_case_pattern_is_keyword(TSNode case_pat_node) {
     if (ts_node_named_child_count(case_pat_node) == 0) return false;

@@ -41,6 +41,16 @@ static void gc_destroy_external_payload(void* obj, uint16_t type_tag) {
         if (binary->storage) binary_release_storage(binary);
         return;
     }
+    if (type_tag == LMD_TYPE_ARRAY) {
+        Array* array = (Array*)obj;
+        // Array item buffers live outside the GC zones, so sweep must release
+        // them before their dead owners can accumulate across a hot runtime.
+        if (array->items && js_array_runtime_items_release(array->items)) {
+            array->items = NULL;
+            array->capacity = 0;
+        }
+        return;
+    }
     if (type_tag == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* array = (ArrayNum*)obj;
         if (!(array->is_view && array->extra)) return;
@@ -596,10 +606,10 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
-extern "C" void* heap_calloc_js_env(size_t size) {
+extern "C" void* heap_calloc_closure_env(size_t size) {
     if (!context || !context->heap || !context->heap->gc || size == 0) return NULL;
     if (size > SIZE_MAX / 2) return NULL;
-    // JS env slots own a parallel scalar tail so captured wide numbers never
+    // Closure slots own a parallel scalar tail so captured wide numbers never
     // retain pointers into a completed invocation's number frame.
     return gc_heap_calloc(context->heap->gc, size * 2, GC_TYPE_JS_ENV);
 }

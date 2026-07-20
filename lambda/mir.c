@@ -20,6 +20,7 @@
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
 
+
 // POC: MIR interpreter mode (skip JIT compilation, use MIR interpreter instead)
 // Set via JS_MIR_INTERP=1 environment variable
 int g_mir_interp_mode = 0;
@@ -67,7 +68,8 @@ static void init_func_map(void) {
     }
 #endif
 
-    // Count total entries: sys_func_defs (with func_ptr) + jit_runtime_imports
+    // Count core entries. Hosted descriptors are registered after this map is
+    // initialized and stay valid because trusted modules are process-lifetime.
     size_t total = 0;
     for (int i = 0; i < sys_func_def_count; i++) {
         if (sys_func_defs[i].func_ptr) total++;
@@ -95,8 +97,68 @@ static void init_func_map(void) {
     for (int i = 0; i < jit_runtime_import_count; i++) {
         hashmap_set(func_map, &jit_runtime_imports[i]);
     }
-
     log_info("func_map initialized: %zu runtime functions", total);
+}
+
+static bool jit_import_metadata_equal(const JitImportMetadata* left,
+                                      const JitImportMetadata* right) {
+    return left->gc_effect == right->gc_effect &&
+        left->reentry_effect == right->reentry_effect &&
+        left->ret_class == right->ret_class &&
+        left->arg_classes == right->arg_classes &&
+        left->flags == right->flags &&
+        left->exception_effect == right->exception_effect &&
+        left->arg_effects == right->arg_effects;
+}
+
+bool jit_register_module_imports(const JitImport* imports, int import_count,
+                                 const char* owner_name) {
+    if (!imports || import_count <= 0) return import_count == 0;
+    // Hosted import registration happens at module activation, before Python
+    // compilation. Initializing here makes core-name collisions fail before a
+    // descriptor is published instead of changing an already-linked call.
+    init_func_map();
+
+    for (int i = 0; i < import_count; i++) {
+        const JitImport* incoming = &imports[i];
+        if (!incoming->name || !incoming->func) {
+            log_error("JIT_CATALOG: module '%s' has an invalid import descriptor",
+                      owner_name ? owner_name : "(unknown)");
+            return false;
+        }
+        JitImport key = {.name = incoming->name, .func = NULL};
+        const JitImport* present = (const JitImport*)hashmap_get(func_map, &key);
+        if (present) {
+            if (present->func == incoming->func &&
+                jit_import_metadata_equal(&present->metadata, &incoming->metadata)) {
+                continue;
+            }
+            log_error("JIT_CATALOG: module '%s' import '%s' conflicts with an existing target",
+                      owner_name ? owner_name : "(unknown)", incoming->name);
+            return false;
+        }
+        for (int j = 0; j < i; j++) {
+            if (strcmp(imports[j].name, incoming->name) != 0) continue;
+            if (imports[j].func == incoming->func &&
+                jit_import_metadata_equal(&imports[j].metadata, &incoming->metadata)) {
+                log_error("JIT_CATALOG: module '%s' repeats import '%s'",
+                          owner_name ? owner_name : "(unknown)", incoming->name);
+            } else {
+                log_error("JIT_CATALOG: module '%s' has conflicting duplicate import '%s'",
+                          owner_name ? owner_name : "(unknown)", incoming->name);
+            }
+            return false;
+        }
+    }
+
+    for (int i = 0; i < import_count; i++) {
+        JitImport key = {.name = imports[i].name, .func = NULL};
+        if (hashmap_get(func_map, &key)) continue;
+        // Modules cannot unload, so the descriptor table is a stable resolver
+        // target and no copied catalog or runtime indirection is necessary.
+        hashmap_set(func_map, &imports[i]);
+    }
+    return true;
 }
 
 // Dynamic import table for cross-module function/variable resolution (O(1) hashmap)

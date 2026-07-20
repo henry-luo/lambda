@@ -1,0 +1,10 @@
+{
+  "name": "Tabulator row click selects a row and exposes its data",
+  "html": "test/ui/dom/tabulator_row_select.html",
+  "events": [
+    {"type": "wait", "ms": 50},
+    {"type": "click", "target": {"selector": ".tabulator-row .tabulator-cell[tabulator-field=\"name\"]"}},
+    {"type": "assert_text", "target": {"selector": "#selected"}, "equals": "alpha"},
+    {"type": "assert_class", "target": {"selector": ".tabulator-row"}, "class": "tabulator-selected"}
+  ]
+}

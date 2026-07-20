@@ -197,6 +197,12 @@ extern const int jit_runtime_import_count;
 bool jit_import_get_metadata(const char* name, JitImportMetadata* metadata);
 bool jit_import_validate_no_gc_allowlist(void);
 
+// Registers module-owned JIT helper descriptors before compilation. The MIR
+// resolver copies descriptors into its cached import map, so generated calls
+// retain direct targets and never perform a per-call module lookup.
+bool jit_register_module_imports(const JitImport* imports, int import_count,
+                                 const char* owner_name);
+
 #ifdef __cplusplus
 }
 #endif

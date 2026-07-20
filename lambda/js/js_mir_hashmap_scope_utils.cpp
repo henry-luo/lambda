@@ -2,6 +2,11 @@
 #include "js_exec_profile.h"
 #include <limits.h>
 
+static bool jm_lookup_import_metadata(const char* name,
+        JitImportMetadata* metadata) {
+    return jit_import_get_metadata(name, metadata);
+}
+
 // ============================================================================
 // Hashmap helpers
 // ============================================================================
@@ -71,6 +76,7 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->em.call_owner = mt;
     mt->em.root_call_value = js_call_root_value;
     mt->em.convert_rep = jm_convert_rep;
+    mt->em.lookup_import_metadata = jm_lookup_import_metadata;
     mt->is_module = is_module;
     mt->filename = filename;
     mt->em.import_cache = em_import_cache_new(import_capacity);

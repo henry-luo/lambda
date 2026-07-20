@@ -591,6 +591,10 @@ class PremakeGenerator:
         # Use -flto=thin (ThinLTO) on macOS/Clang and Linux/Clang, -flto on Linux/GCC
         linux_uses_clang = self.use_linux_config and base_compiler == 'clang'
         lto_flag = '"-flto=thin"' if (self.use_macos_config or linux_uses_clang) else '"-flto"'
+        has_hosted_language_module = any(
+            target.get('link') == 'dynamic' and target.get('name', '').startswith('lang-')
+            for target in self.config.get('targets', [])
+        )
 
         def add_release_link_options():
             # Platform-specific linker flags for dead code stripping
@@ -600,6 +604,10 @@ class PremakeGenerator:
                     '        linkoptions {',
                     '            "-flto=thin",',
                     '            "-Wl,-dead_strip",',
+                    '            -- Hosted Jube modules resolve approved host services at load time.',
+                    '            -- Keep executable definitions in the dynamic symbol table; this',
+                    '            -- changes link visibility only, never an evaluator/JIT hot path.',
+                    '            "-Wl,-export_dynamic",',
                     '            "-Wl,-x",  -- Strip local symbols',
                     '        }',
                 ])
@@ -650,6 +658,10 @@ class PremakeGenerator:
                     '        }',
                 ])
 
+        release_visibility_options = [] if has_hosted_language_module else [
+            '            "-fvisibility=hidden",',
+            '            "-fvisibility-inlines-hidden",',
+        ]
         self.premake_content.extend([
             '    filter "configurations:release"',
             '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE" }',
@@ -661,8 +673,7 @@ class PremakeGenerator:
             f'            {lto_flag},',
             '            "-ffunction-sections",',
             '            "-fdata-sections",',
-            '            "-fvisibility=hidden",',
-            '            "-fvisibility-inlines-hidden",',
+        ] + release_visibility_options + [
             '            -- -march=native: a build-from-source binary targets the local CPU, so the',
             '            -- numeric kernels auto-vectorize to the widest available ISA (AVX2/AVX-512/',
             '            -- NEON). Drop to a baseline -march if ever shipping prebuilt binaries.',
@@ -684,8 +695,7 @@ class PremakeGenerator:
             f'            {lto_flag},',
             '            "-ffunction-sections",',
             '            "-fdata-sections",',
-            '            "-fvisibility=hidden",',
-            '            "-fvisibility-inlines-hidden",',
+        ] + release_visibility_options + [
             '            "-march=native",',
             '        }',
         ])
@@ -899,7 +909,7 @@ class PremakeGenerator:
 
         # If we have both C and C++ files, create a single C++ project that includes all files
         # No need for separate -c project since C++ project already includes C files for proper linking
-        if c_files and cpp_files:
+        if c_files and cpp_files and not lib.get('single_project', False):
             # Create C++ project - include ALL C files for proper linking
             all_files = cpp_files + c_files
             self._create_language_project(lib, all_files, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
@@ -950,10 +960,18 @@ class PremakeGenerator:
             f'project "{project_name}"',
             f'    kind "{kind}"',
             f'    language "{final_language}"',
-            '    targetdir "build/lib"',
+            f'    targetdir "{lib.get("target_dir", "build/lib")}"',
             '    objdir "build/obj/%{prj.name}"',
             '    ',
         ])
+
+        target_name = lib.get('target_name')
+        if target_name:
+            self.premake_content.append(f'    targetname "{target_name}"')
+        if 'target_prefix' in lib:
+            self.premake_content.append(f'    targetprefix "{lib["target_prefix"]}"')
+        if target_name or 'target_prefix' in lib:
+            self.premake_content.append('    ')
 
         # Add source files
         if source_files:
@@ -1273,6 +1291,22 @@ class PremakeGenerator:
                     '    }',
                     '    '
                 ])
+
+        # A hosted native module intentionally resolves its host services when
+        # the trusted host loads it. Platform linkers use different spellings
+        # for that normal shared-module contract.
+        link_options = lib.get('link_options', [])
+        platform_key = 'link_options_windows' if self.use_windows_config else \
+            ('link_options_macos' if self.use_macos_config else 'link_options_linux')
+        link_options = link_options + lib.get(platform_key, [])
+        if link_options:
+            self.premake_content.append('    linkoptions {')
+            for option in link_options:
+                self.premake_content.append(f'        "{option}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
 
         # Add platform-specific defines
         platform_defines = []

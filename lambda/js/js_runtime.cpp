@@ -178,42 +178,47 @@ extern "C" int64_t js_profiled_it2i(Item item) {
 }
 #endif
 
-static ArrayList* g_js_array_runtime_item_buffers = NULL;
-static ArrayList* g_js_array_runtime_item_owners = NULL;
+typedef struct JsArrayRuntimeItemsEntry {
+    Item* items;
+    Array* owner;
+} JsArrayRuntimeItemsEntry;
 
-static void js_array_runtime_items_free_lists_if_empty(void) {
-    if (g_js_array_runtime_item_buffers && g_js_array_runtime_item_buffers->length == 0) {
-        arraylist_free(g_js_array_runtime_item_buffers);
-        g_js_array_runtime_item_buffers = NULL;
-        if (g_js_array_runtime_item_owners) {
-            arraylist_free(g_js_array_runtime_item_owners);
-            g_js_array_runtime_item_owners = NULL;
-        }
+// Hot-reload batches retain live arrays between tests; pointer lookup must stay
+// constant-time so later array allocations do not rescan every retained buffer.
+static HashMap* g_js_array_runtime_items = NULL;
+
+static uint64_t js_array_runtime_items_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const JsArrayRuntimeItemsEntry* entry = (const JsArrayRuntimeItemsEntry*)item;
+    return hashmap_sip(&entry->items, sizeof(entry->items), seed0, seed1);
+}
+
+static int js_array_runtime_items_compare(const void* left, const void* right, void* udata) {
+    (void)udata;
+    const JsArrayRuntimeItemsEntry* a = (const JsArrayRuntimeItemsEntry*)left;
+    const JsArrayRuntimeItemsEntry* b = (const JsArrayRuntimeItemsEntry*)right;
+    uintptr_t a_key = (uintptr_t)a->items;
+    uintptr_t b_key = (uintptr_t)b->items;
+    return (a_key > b_key) - (a_key < b_key);
+}
+
+static void js_array_runtime_items_free_map_if_empty(void) {
+    if (g_js_array_runtime_items && hashmap_count(g_js_array_runtime_items) == 0) {
+        hashmap_free(g_js_array_runtime_items);
+        g_js_array_runtime_items = NULL;
     }
 }
 
 static bool js_array_runtime_items_forget(Item* items, Array** owner_out) {
     if (owner_out) *owner_out = NULL;
-    if (!g_js_array_runtime_item_buffers || !items) return false;
-    for (int i = 0; i < g_js_array_runtime_item_buffers->length; i++) {
-        if (g_js_array_runtime_item_buffers->data[i] == items) {
-            if (owner_out && g_js_array_runtime_item_owners &&
-                    i < g_js_array_runtime_item_owners->length) {
-                *owner_out = (Array*)g_js_array_runtime_item_owners->data[i];
-            }
-            int last = g_js_array_runtime_item_buffers->length - 1;
-            g_js_array_runtime_item_buffers->data[i] =
-                g_js_array_runtime_item_buffers->data[last];
-            g_js_array_runtime_item_buffers->length--;
-            if (g_js_array_runtime_item_owners && i < g_js_array_runtime_item_owners->length) {
-                g_js_array_runtime_item_owners->data[i] = g_js_array_runtime_item_owners->data[last];
-                g_js_array_runtime_item_owners->length--;
-            }
-            js_array_runtime_items_free_lists_if_empty();
-            return true;
-        }
-    }
-    return false;
+    if (!g_js_array_runtime_items || !items) return false;
+    JsArrayRuntimeItemsEntry probe = {items, NULL};
+    const JsArrayRuntimeItemsEntry* found =
+        (const JsArrayRuntimeItemsEntry*)hashmap_get(g_js_array_runtime_items, &probe);
+    if (!found) return false;
+    if (owner_out) *owner_out = found->owner;
+    hashmap_delete(g_js_array_runtime_items, &probe);
+    js_array_runtime_items_free_map_if_empty();
+    return true;
 }
 
 static void js_array_runtime_items_neuter_owner(Array* owner, Item* items) {
@@ -225,30 +230,16 @@ static void js_array_runtime_items_neuter_owner(Array* owner, Item* items) {
 
 static void js_array_runtime_items_register(Array* owner, Item* items) {
     if (!items) return;
-    if (!g_js_array_runtime_item_buffers) {
-        g_js_array_runtime_item_buffers = arraylist_new(32);
-        g_js_array_runtime_item_owners = arraylist_new(32);
-        if (!g_js_array_runtime_item_buffers || !g_js_array_runtime_item_owners) {
-            if (g_js_array_runtime_item_buffers) arraylist_free(g_js_array_runtime_item_buffers);
-            if (g_js_array_runtime_item_owners) arraylist_free(g_js_array_runtime_item_owners);
-            g_js_array_runtime_item_buffers = NULL;
-            g_js_array_runtime_item_owners = NULL;
-            return;
-        }
+    if (!g_js_array_runtime_items) {
+        g_js_array_runtime_items = hashmap_new(sizeof(JsArrayRuntimeItemsEntry), 32, 0, 0,
+            js_array_runtime_items_hash, js_array_runtime_items_compare, NULL, NULL);
+        if (!g_js_array_runtime_items) return;
     }
-    for (int i = 0; i < g_js_array_runtime_item_buffers->length; i++) {
-        if (g_js_array_runtime_item_buffers->data[i] == items) {
-            if (g_js_array_runtime_item_owners && i < g_js_array_runtime_item_owners->length) {
-                g_js_array_runtime_item_owners->data[i] = owner;
-            }
-            return;
-        }
-    }
-    if (!arraylist_append(g_js_array_runtime_item_buffers, items)) return;
-    if (!arraylist_append(g_js_array_runtime_item_owners, owner)) {
-        g_js_array_runtime_item_buffers->length--;
-        js_array_runtime_items_free_lists_if_empty();
-    }
+    JsArrayRuntimeItemsEntry entry = {items, owner};
+    const JsArrayRuntimeItemsEntry* found =
+        (const JsArrayRuntimeItemsEntry*)hashmap_get(g_js_array_runtime_items, &entry);
+    if (found) hashmap_delete(g_js_array_runtime_items, &entry);
+    hashmap_set(g_js_array_runtime_items, &entry);
 }
 
 extern "C" bool js_array_runtime_items_release(Item* items) {
@@ -260,22 +251,16 @@ extern "C" bool js_array_runtime_items_release(Item* items) {
 }
 
 extern "C" void js_array_runtime_items_cleanup_all(void) {
-    if (!g_js_array_runtime_item_buffers) return;
-    for (int i = 0; i < g_js_array_runtime_item_buffers->length; i++) {
-        Item* items = (Item*)g_js_array_runtime_item_buffers->data[i];
-        Array* owner = (g_js_array_runtime_item_owners && i < g_js_array_runtime_item_owners->length)
-            ? (Array*)g_js_array_runtime_item_owners->data[i] : NULL;
-        js_array_runtime_items_neuter_owner(owner, items);
-        if (items) {
-            mem_free(items);
-        }
+    if (!g_js_array_runtime_items) return;
+    size_t iter = 0;
+    void* raw = NULL;
+    while (hashmap_iter(g_js_array_runtime_items, &iter, &raw)) {
+        JsArrayRuntimeItemsEntry* entry = (JsArrayRuntimeItemsEntry*)raw;
+        js_array_runtime_items_neuter_owner(entry->owner, entry->items);
+        if (entry->items) mem_free(entry->items);
     }
-    arraylist_free(g_js_array_runtime_item_buffers);
-    g_js_array_runtime_item_buffers = NULL;
-    if (g_js_array_runtime_item_owners) {
-        arraylist_free(g_js_array_runtime_item_owners);
-        g_js_array_runtime_item_owners = NULL;
-    }
+    hashmap_free(g_js_array_runtime_items);
+    g_js_array_runtime_items = NULL;
 }
 
 static void js_array_install_runtime_items(Array* arr, Item* items, int64_t capacity) {
@@ -310,6 +295,12 @@ static int64_t js_array_dense_required(const Array* arr) {
 
 static void js_array_store_owned(Array* arr, int64_t index, Item value) {
     if (!arr || index < 0) return;
+    if (arr->items && arr->extra == 0 && index < js_array_dense_capacity(arr)) {
+        // Only arrays without a scalar tail can bypass the required scan: wide
+        // scalar writes consume capacity from that tail and must retain it.
+        array_set(arr, index, value);
+        return;
+    }
     int64_t dense_required = js_array_dense_required(arr);
     if (dense_required < index + 1) dense_required = index + 1;
     while (!arr->items || dense_required + arr->extra + 2 > arr->capacity) {
@@ -12615,6 +12606,14 @@ static void js_super_this_binding_push(Item initial_this) {
     js_super_this_bound_depth++;
 }
 
+static Item js_throw_super_called_twice(void) {
+    // keep the interned view within the literal; an oversized manual length reads past it during hashing.
+    Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once",
+                                                    sizeof("Super constructor may only be called once") - 1))};
+    js_throw_reference_error(msg);
+    return make_js_undefined();
+}
+
 static Item js_super_this_binding_finish(Item result) {
     if (js_super_this_bound_depth <= 0) return result;
     int idx = js_super_this_bound_depth - 1;
@@ -12630,7 +12629,9 @@ static Item js_super_this_binding_finish(Item result) {
         return js_throw_type_error("Derived constructors may only return object or undefined");
     }
     if (!initialized) {
-        Item msg = (Item){.item = s2it(heap_create_name("Must call super constructor before accessing 'this'", 51))};
+        // keep the interned view within the literal; an oversized manual length reads past it during hashing.
+        Item msg = (Item){.item = s2it(heap_create_name("Must call super constructor before accessing 'this'",
+                                                        sizeof("Must call super constructor before accessing 'this'") - 1))};
         js_throw_reference_error(msg);
         return make_js_undefined();
     }
@@ -12641,16 +12642,12 @@ extern "C" Item js_super_bind_this(Item this_val, Item construct_result) {
     if (js_check_exception()) return make_js_undefined();
     Item bound_this = js_is_object_constructor_result(construct_result) ? construct_result : this_val;
     if (js_super_this_bound_depth <= 0) {
-        Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
-        js_throw_reference_error(msg);
-        return make_js_undefined();
+        return js_throw_super_called_twice();
     }
     if (js_super_this_bound_depth > 0) {
         int idx = js_super_this_bound_depth - 1;
         if (js_super_this_bound_stack[idx]) {
-            Item msg = (Item){.item = s2it(heap_create_name("Super constructor may only be called once", 43))};
-            js_throw_reference_error(msg);
-            return make_js_undefined();
+            return js_throw_super_called_twice();
         }
         if (!js_is_object_constructor_result(bound_this) &&
             (bound_this.item == 0 || bound_this.item == ITEM_JS_UNDEFINED || bound_this.item == ITEM_NULL) &&

@@ -390,6 +390,9 @@ struct MirEmitter {
     void (*root_call_value)(void* owner, MIR_reg_t reg);
     void (*after_call_result)(void* owner, MIR_reg_t reg, MIR_type_t type);
     MirValue (*convert_rep)(void* owner, MirValue value, ValueRep required);
+    // Hosted compilers provide their build-coupled catalog lookup. Core
+    // transpilers leave this NULL and retain the existing registry path.
+    bool (*lookup_import_metadata)(const char* name, JitImportMetadata* metadata);
     ArrayList* const_list;        // per-module constant pool, owned by Script/Transpiler
     MIR_reg_t consts_reg;         // register holding const_list->data for current function
     MIR_item_t consts_bss;        // per-module BSS slot holding const_list->data
@@ -902,8 +905,12 @@ static inline MirImportEntry* em_ensure_import(MirEmitter* em,
     snprintf(new_entry.name, sizeof(new_entry.name), "%s", key.name);
     new_entry.entry.proto = proto;
     new_entry.entry.import = imp;
-    // Unknown imports retain conservative MAY_GC/unknown-value defaults.
-    jit_import_get_metadata(name, &new_entry.entry.audit);
+    // Unknown imports retain conservative MAY_GC/unknown-value defaults. Each
+    // compiler supplies its own catalog adapter; this shared header must not
+    // bind the private core resolver into a hosted module binary.
+    if (em && em->lookup_import_metadata) {
+        em->lookup_import_metadata(name, &new_entry.entry.audit);
+    }
     em_normalize_import_call(&new_entry.entry, ret_type, nargs, args, nres);
     hashmap_set(em->import_cache, &new_entry);
 

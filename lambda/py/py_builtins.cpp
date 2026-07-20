@@ -1177,8 +1177,7 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
                     }
 
                     // check for 0-padding
-                    bool zero_pad = false;
-                    if (*sp == '0') { zero_pad = true; sp++; if (!align) { fill = '0'; align = '>'; } }
+                    if (*sp == '0') { sp++; if (!align) { fill = '0'; align = '>'; } }
 
                     // width
                     while (*sp >= '0' && *sp <= '9') { width = width * 10 + (*sp - '0'); sp++; }

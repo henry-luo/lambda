@@ -10,9 +10,8 @@
 #include "py_async.h"
 #include "py_stdlib.h"
 #include "../lambda-data.hpp"
-#include "../lambda-stack.h"
 #include "../mir_emitter_shared.hpp"
-#include "../module_registry.h"
+#include "../jube/jube_language.h"
 #include "../../lib/log.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/strbuf.h"
@@ -32,28 +31,8 @@
 #endif
 #include <sys/stat.h>
 
-// External reference to Lambda runtime context
-extern "C" Context* _lambda_rt;
-extern "C" {
-    void* import_resolver(const char* name);
-}
-
-extern __thread EvalContext* context;
 extern void* heap_alloc(int size, TypeId type_id);
-extern void heap_init();
 extern "C" void py_reset_module_vars();
-
-// Forward declarations for cross-language module interop
-extern "C" Item js_property_get(Item object, Item key);
-extern "C" int js_function_get_arity(Item fn_item);
-extern "C" Item js_new_object();
-extern "C" Item js_new_function(void* func_ptr, int param_count);
-extern "C" Item js_property_set(Item object, Item key, Item value);
-extern "C" Item js_object_keys(Item object);
-extern "C" Item js_array_get_int(Item array, int64_t index);
-extern "C" int64_t js_array_length(Item array);
-extern "C" char* read_text_file(const char* filename);
-extern "C" void js_runtime_set_input(void* input);
 
 // ============================================================================
 // Constants
@@ -62,7 +41,6 @@ static const uint64_t PY_ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;
 static const uint64_t PY_ITEM_TRUE_VAL  = ((uint64_t)LMD_TYPE_BOOL << 56) | 1;
 static const uint64_t PY_ITEM_FALSE_VAL = ((uint64_t)LMD_TYPE_BOOL << 56) | 0;
 static const uint64_t PY_ITEM_INT_TAG   = (uint64_t)LMD_TYPE_INT << 56;
-static const uint64_t PY_STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
 static const uint64_t PY_MASK56         = 0x00FFFFFFFFFFFFFFULL;
 
 // These fixed compiler tables describe generated MIR state.  Each limit is
@@ -79,6 +57,167 @@ static const int PM_MAX_MIR_PARAMS = 16;
 // directory of the entry-point script, used for absolute import resolution
 // in sub-modules (prevents path doubling for package-internal imports)
 static char py_entry_script_dir[512] = "";
+static const JubeModuleGraphAPI* py_hosted_module_graph_api = NULL;
+static const JubeSourceAPI* py_hosted_source_api = NULL;
+static const JubeGuestExecutionAPI* py_hosted_execution_api = NULL;
+static const JubeHostGcAPI* py_hosted_gc_api = NULL;
+static const JubeRuntimeCatalogAPI* py_hosted_runtime_catalog_api = NULL;
+
+void py_set_hosted_module_graph_api(const JubeModuleGraphAPI* module_graph) {
+    py_hosted_module_graph_api = module_graph;
+}
+
+void py_set_hosted_source_api(const JubeSourceAPI* source_api) {
+    py_hosted_source_api = source_api;
+}
+
+void py_set_hosted_execution_api(const JubeGuestExecutionAPI* execution_api) {
+    py_hosted_execution_api = execution_api;
+}
+
+void py_set_hosted_gc_api(const JubeHostGcAPI* gc_api) {
+    py_hosted_gc_api = gc_api;
+}
+
+void py_set_hosted_runtime_catalog_api(const JubeRuntimeCatalogAPI* runtime_catalog) {
+    py_hosted_runtime_catalog_api = runtime_catalog;
+}
+
+static bool pm_lookup_hosted_import_metadata(const char* name,
+        JitImportMetadata* out_metadata) {
+    if (!name || !out_metadata || !py_hosted_runtime_catalog_api ||
+        !py_hosted_runtime_catalog_api->lookup_import_metadata) return false;
+    JubeRuntimeImportMetadata hosted = {};
+    if (py_hosted_runtime_catalog_api->lookup_import_metadata(name, &hosted) != 0) {
+        return false;
+    }
+    out_metadata->gc_effect = (JitGcEffect)hosted.gc_effect;
+    out_metadata->reentry_effect = (JitReentryEffect)hosted.reentry_effect;
+    out_metadata->ret_class = (JitValueClass)hosted.result_class;
+    out_metadata->arg_classes = hosted.argument_classes;
+    out_metadata->flags = hosted.flags;
+    out_metadata->exception_effect = (JitExceptionEffect)hosted.exception_effect;
+    out_metadata->arg_effects = hosted.argument_effects;
+    return true;
+}
+
+// Import lowering can allocate while it traverses a Python namespace. The
+// Jube root-frame service keeps that namespace live without exposing the
+// active host context to normal Python compilation.
+class PmHostedItemRoot {
+    LambdaRootFrame frame_;
+    const JubeHostGcAPI* gc_;
+    uint64_t* slot_;
+    Item fallback_;
+
+public:
+    PmHostedItemRoot(Item value) : frame_{}, gc_(py_hosted_gc_api), slot_(NULL), fallback_(value) {
+        if (!gc_ || !gc_->root_frame_begin || !gc_->root_frame_take_slot ||
+            !gc_->root_frame_end || !gc_->root_frame_begin(&frame_, 1)) {
+            gc_ = NULL;
+            return;
+        }
+        slot_ = gc_->root_frame_take_slot(&frame_);
+        if (slot_) *slot_ = value.item;
+    }
+
+    ~PmHostedItemRoot() {
+        if (gc_) gc_->root_frame_end(&frame_);
+    }
+
+    Item get(void) const {
+        return slot_ ? (Item){.item = *slot_} : fallback_;
+    }
+};
+
+static bool pm_link_hosted_module(void* host_execution, MIR_context_t mir_context) {
+    return py_hosted_execution_api &&
+        py_hosted_execution_api->api_version == JUBE_HOST_SERVICE_API_VERSION &&
+        py_hosted_execution_api->struct_size >= JUBE_GUEST_EXECUTION_API_V1_SIZE &&
+        py_hosted_execution_api->execution_link_module &&
+        py_hosted_execution_api->execution_link_module(host_execution, mir_context) == 0;
+}
+
+static MIR_context_t pm_create_hosted_mir_context(void) {
+    if (!py_hosted_execution_api || !py_hosted_execution_api->mir_context_create) return NULL;
+    return (MIR_context_t)py_hosted_execution_api->mir_context_create(2);
+}
+
+static void pm_destroy_hosted_mir_context(MIR_context_t mir_context) {
+    if (!mir_context || !py_hosted_execution_api || !py_hosted_execution_api->mir_context_destroy) return;
+    py_hosted_execution_api->mir_context_destroy(mir_context);
+}
+
+static MIR_module_t pm_create_hosted_mir_module(MIR_context_t mir_context, const char* module_name) {
+    if (!mir_context || !py_hosted_execution_api || !py_hosted_execution_api->mir_module_create) return NULL;
+    return (MIR_module_t)py_hosted_execution_api->mir_module_create(mir_context, module_name);
+}
+
+static bool pm_finalize_and_load_hosted_mir_module(MIR_context_t mir_context, MIR_module_t mir_module) {
+    return mir_context && mir_module && py_hosted_execution_api &&
+        py_hosted_execution_api->mir_module_finalize_and_load &&
+        py_hosted_execution_api->mir_module_finalize_and_load(mir_context, mir_module) == 0;
+}
+
+static void* pm_find_hosted_mir_function(MIR_context_t mir_context, const char* function_name) {
+    if (!mir_context || !function_name || !py_hosted_execution_api ||
+        !py_hosted_execution_api->mir_function_lookup) return NULL;
+    return py_hosted_execution_api->mir_function_lookup(mir_context, function_name);
+}
+
+static void pm_finish_hosted_mir_function(MIR_context_t mir_context) {
+    if (!mir_context || !py_hosted_execution_api ||
+        !py_hosted_execution_api->mir_function_finish) return;
+    py_hosted_execution_api->mir_function_finish(mir_context);
+}
+
+static bool pm_activate_hosted_guest_execution(void* host_execution, void** out_input) {
+    return py_hosted_execution_api && py_hosted_execution_api->execution_activate &&
+        py_hosted_execution_api->execution_activate(host_execution, out_input) == 0;
+}
+
+static bool pm_activate_hosted_import_execution(void* host_execution, void** out_input,
+                                                bool* out_retained_until_heap_cleanup) {
+    return py_hosted_execution_api && py_hosted_execution_api->execution_activate_import &&
+        py_hosted_execution_api->execution_activate_import(host_execution, out_input,
+            out_retained_until_heap_cleanup) == 0;
+}
+
+static bool pm_run_hosted_guest_main(void* host_execution, void* entry_function,
+                                     Item* out_result) {
+    return py_hosted_execution_api && py_hosted_execution_api->execution_run_main &&
+        py_hosted_execution_api->execution_run_main(host_execution, entry_function, out_result) == 0;
+}
+
+static void pm_finish_hosted_guest_execution(void* host_execution) {
+    if (!py_hosted_execution_api || !py_hosted_execution_api->execution_finish_guest) return;
+    py_hosted_execution_api->execution_finish_guest(host_execution);
+}
+
+static Item pm_loading_module_namespace(void* host_execution, const char* source_path) {
+    Item namespace_obj = ItemNull;
+    if (!py_hosted_module_graph_api ||
+        py_hosted_module_graph_api->api_version != JUBE_HOST_SERVICE_API_VERSION ||
+        py_hosted_module_graph_api->struct_size < JUBE_MODULE_GRAPH_API_V1_SIZE ||
+        !py_hosted_module_graph_api->loading_namespace ||
+        py_hosted_module_graph_api->loading_namespace(host_execution, source_path, &namespace_obj) != 1) {
+        return ItemNull;
+    }
+    return namespace_obj;
+}
+
+static Item pm_load_lambda_module(void* host_execution, const char* source_path) {
+    Item namespace_obj = ItemNull;
+    if (!py_hosted_module_graph_api ||
+        py_hosted_module_graph_api->api_version != JUBE_HOST_SERVICE_API_VERSION ||
+        py_hosted_module_graph_api->struct_size < JUBE_MODULE_GRAPH_API_V1_SIZE ||
+        !py_hosted_module_graph_api->load_lambda_module ||
+        py_hosted_module_graph_api->load_lambda_module(host_execution, source_path, NULL,
+                                                        &namespace_obj) != 0) {
+        return ItemNull;
+    }
+    return namespace_obj;
+}
 
 // ============================================================================
 // Transpiler structs
@@ -150,8 +289,6 @@ struct PyMirTranspiler {
 
     MirEmitter em;
     MIR_module_t module;
-    MIR_item_t side_stack_overflow_proto;
-    MIR_item_t side_stack_overflow_import;
     // Local function items
     struct hashmap* local_funcs;
 
@@ -194,8 +331,9 @@ struct PyMirTranspiler {
     // Source filename for relative import resolution
     const char* filename;
 
-    // Runtime pointer for cross-language module loading
-    Runtime* runtime;
+    // Opaque host execution token for cross-language module loading. The
+    // lowering layer never needs the Runtime record itself.
+    void* host_execution;
 
     // ---- TCO (Tail Call Optimization) state ----
     PyFuncCollected* tco_func;      // current function being TCO'd (NULL if not TCO)
@@ -255,6 +393,10 @@ HASHMAP_DEFINE_STRKEY(py_local_func, struct PyLocalFuncEntry, name)
 
 static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr);
 static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt);
+static MIR_reg_t pm_call_0(PyMirTranspiler* mt, const char* fn_name,
+                           MIR_type_t ret_type);
+static void pm_call_void_1(PyMirTranspiler* mt, const char* fn_name,
+    MIR_type_t a1t, MIR_op_t a1);
 
 // ============================================================================
 // Basic MIR helpers
@@ -310,22 +452,10 @@ static MIR_reg_t pm_load_side_stack_runtime(PyMirTranspiler* mt) {
 
 static void pm_emit_side_stack_overflow(PyMirTranspiler* mt) {
     if (!mt) return;
-    if (!mt->side_stack_overflow_proto) {
-        MIR_var_t arg = {MIR_T_P, "py_side_stack_reason", 0};
-        // MIR items are module-global: share this proto across every Python
-        // frame instead of redeclaring it while each frame is finalized.
-        mt->side_stack_overflow_proto = MIR_new_proto_arr(mt->em.ctx,
-            "py_side_stack_overflow_p", 0, NULL, 1, &arg);
-        mt->side_stack_overflow_import = MIR_new_import(mt->em.ctx,
-            "lambda_stack_overflow_error");
-    }
-    MIR_op_t ops[3] = {
-        MIR_new_ref_op(mt->em.ctx, mt->side_stack_overflow_proto),
-        MIR_new_ref_op(mt->em.ctx, mt->side_stack_overflow_import),
-        MIR_new_int_op(mt->em.ctx, (int64_t)(uintptr_t)"py-side-stack")
-    };
-    MIR_insn_t call = MIR_new_insn_arr(mt->em.ctx, MIR_CALL, 3, ops);
-    pm_emit_raw(mt, call);
+    // The shared import cache owns the module-global prototype; hand-written
+    // prototypes here would redeclare the same ABI contract per Python frame.
+    pm_call_void_1(mt, "lambda_stack_overflow_error", MIR_T_P,
+        MIR_new_int_op(mt->em.ctx, (int64_t)(uintptr_t)"py-side-stack"));
 }
 
 static void pm_root_call_value(void* owner, MIR_reg_t reg) {
@@ -597,16 +727,6 @@ static PyMirVarEntry* pm_find_var(PyMirTranspiler* mt, const char* name) {
     return NULL;
 }
 
-// Find a var only in the current scope
-static PyMirVarEntry* pm_find_var_current(PyMirTranspiler* mt, const char* name) {
-    PyVarScopeEntry key;
-    memset(&key, 0, sizeof(key));
-    snprintf(key.name, sizeof(key.name), "%s", name);
-    if (!mt->var_scopes[mt->scope_depth]) return NULL;
-    PyVarScopeEntry* found = (PyVarScopeEntry*)hashmap_get(mt->var_scopes[mt->scope_depth], &key);
-    return found ? &found->var : NULL;
-}
-
 // ============================================================================
 // Boxing helpers
 // ============================================================================
@@ -628,22 +748,6 @@ static MIR_reg_t pm_box_int_const(PyMirTranspiler* mt, int64_t value) {
 
 static MIR_reg_t pm_box_float(PyMirTranspiler* mt, MIR_reg_t d_reg) {
     return pm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->em.ctx, d_reg));
-}
-
-static MIR_reg_t pm_box_string(PyMirTranspiler* mt, MIR_reg_t ptr_reg) {
-    MIR_reg_t result = pm_new_reg(mt, "boxs", MIR_T_I64);
-    MIR_label_t l_nn = pm_new_label(mt);
-    MIR_label_t l_end = pm_new_label(mt);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_BT, MIR_new_label_op(mt->em.ctx, l_nn),
-        MIR_new_reg_op(mt->em.ctx, ptr_reg)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL)));
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_JMP, MIR_new_label_op(mt->em.ctx, l_end)));
-    pm_emit_label(mt, l_nn);
-    pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_OR, MIR_new_reg_op(mt->em.ctx, result),
-        MIR_new_int_op(mt->em.ctx, (int64_t)PY_STR_TAG), MIR_new_reg_op(mt->em.ctx, ptr_reg)));
-    pm_emit_label(mt, l_end);
-    return result;
 }
 
 static MIR_reg_t pm_box_string_literal(PyMirTranspiler* mt, const char* str, int len) {
@@ -956,6 +1060,10 @@ static MIR_reg_t pm_transpile_literal(PyMirTranspiler* mt, PyLiteralNode* lit) {
     case PY_LITERAL_BOOLEAN:
         return pm_emit_bool(mt, lit->value.boolean_value);
     case PY_LITERAL_NONE:
+        return pm_emit_null(mt);
+    case AST_LITERAL_NUMBER:
+    case AST_LITERAL_UNDEFINED:
+        // shared AST values are never valid Python literal payloads; do not reinterpret them.
         return pm_emit_null(mt);
     }
     return pm_emit_null(mt);
@@ -4228,12 +4336,6 @@ static bool pm_file_exists(const char* path) {
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 }
 
-// Check if a directory exists
-static bool pm_dir_exists(const char* path) {
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
-}
-
 // Count leading dots in a module name for relative imports
 static int pm_count_leading_dots(const char* name, int len) {
     int count = 0;
@@ -4244,7 +4346,7 @@ static int pm_count_leading_dots(const char* name, int len) {
 // Try loading a module from a base path (without extension).
 // Tries: base_path.py, base_path/__init__.py, base_path.js, base_path.ls
 // Returns the loaded namespace Item or ItemNull.
-static Item pm_try_load_module(Runtime* runtime, const char* base_path) {
+static Item pm_try_load_module(void* host_execution, const char* base_path) {
     StrBuf* try_buf = strbuf_new();
     Item ns = ItemNull;
 
@@ -4252,15 +4354,16 @@ static Item pm_try_load_module(Runtime* runtime, const char* base_path) {
     strbuf_append_format(try_buf, "%s.py", base_path);
     if (pm_file_exists(try_buf->str)) {
         // check circular import
-        if (module_is_loading(try_buf->str)) {
-            ModuleDescriptor* desc = module_get(try_buf->str);
-            if (desc) {
-                log_info("py-pkg: circular import detected for '%s', returning partial namespace", try_buf->str);
-                strbuf_free(try_buf);
-                return desc->namespace_obj;
-            }
+        Item loading_namespace = pm_loading_module_namespace(host_execution, try_buf->str);
+        if (loading_namespace.item != ItemNull.item) {
+            log_info("py-pkg: circular import detected for '%s', returning partial namespace", try_buf->str);
+            strbuf_free(try_buf);
+            return loading_namespace;
         }
-        ns = load_py_module(runtime, try_buf->str);
+        // Python lowering selects a hosted source by path; the language
+        // registry owns descriptor dispatch instead of embedding a Python
+        // loader call in every import lowering site.
+        jube_load_hosted_module(host_execution, try_buf->str, NULL, &ns);
         if (ns.item != ItemNull.item) {
             strbuf_free(try_buf);
             return ns;
@@ -4271,27 +4374,25 @@ static Item pm_try_load_module(Runtime* runtime, const char* base_path) {
     strbuf_reset(try_buf);
     strbuf_append_format(try_buf, "%s/__init__.py", base_path);
     if (pm_file_exists(try_buf->str)) {
-        if (module_is_loading(try_buf->str)) {
-            ModuleDescriptor* desc = module_get(try_buf->str);
-            if (desc) {
-                log_info("py-pkg: circular import detected for '%s', returning partial namespace", try_buf->str);
-                strbuf_free(try_buf);
-                return desc->namespace_obj;
-            }
+        Item loading_namespace = pm_loading_module_namespace(host_execution, try_buf->str);
+        if (loading_namespace.item != ItemNull.item) {
+            log_info("py-pkg: circular import detected for '%s', returning partial namespace", try_buf->str);
+            strbuf_free(try_buf);
+            return loading_namespace;
         }
-        ns = load_py_module(runtime, try_buf->str);
+        jube_load_hosted_module(host_execution, try_buf->str, NULL, &ns);
         if (ns.item != ItemNull.item) {
             strbuf_free(try_buf);
             return ns;
         }
     }
 
-    // try base_path.js
+    // Cross-language loading is routed through the hosted-language bridge so
+    // Python never reaches into the JavaScript module loader directly.
     strbuf_reset(try_buf);
     strbuf_append_format(try_buf, "%s.js", base_path);
     if (pm_file_exists(try_buf->str)) {
-        ns = load_js_module(runtime, try_buf->str);
-        if (ns.item != ItemNull.item) {
+        if (jube_load_language_module(host_execution, try_buf->str, NULL, &ns)) {
             strbuf_free(try_buf);
             return ns;
         }
@@ -4301,13 +4402,10 @@ static Item pm_try_load_module(Runtime* runtime, const char* base_path) {
     strbuf_reset(try_buf);
     strbuf_append_format(try_buf, "%s.ls", base_path);
     if (pm_file_exists(try_buf->str)) {
-        Script* script = load_script(runtime, try_buf->str, NULL, true);
-        if (script && script->ast_root) {
-            ns = module_build_lambda_namespace(script);
-            if (ns.item != ItemNull.item) {
-                strbuf_free(try_buf);
-                return ns;
-            }
+        ns = pm_load_lambda_module(host_execution, try_buf->str);
+        if (ns.item != ItemNull.item) {
+            strbuf_free(try_buf);
+            return ns;
         }
     }
 
@@ -4319,7 +4417,7 @@ static Item pm_try_load_module(Runtime* runtime, const char* base_path) {
 // Handles built-in modules, single-file imports, package imports (pkg/__init__.py),
 // dotted imports (pkg.submod), relative imports (from .x, from ..x), and circular imports.
 static Item pm_resolve_py_import(const char* mod_name, int mod_len,
-                                  const char* script_filename, Runtime* runtime) {
+                                  const char* script_filename, void* host_execution) {
     // check built-in modules first
     PyBuiltinModuleInitFn builtin_init = py_stdlib_find_builtin(mod_name, mod_len);
     if (builtin_init) {
@@ -4392,13 +4490,13 @@ static Item pm_resolve_py_import(const char* mod_name, int mod_len,
                             strbuf_append_char(comp_path, '/');
                             strbuf_append_format(comp_path, "%.*s", comp_len, rel_name + comp_start);
 
-                            Item sub_ns = pm_try_load_module(runtime, comp_path->str);
+                            Item sub_ns = pm_try_load_module(host_execution, comp_path->str);
                             if (sub_ns.item == ItemNull.item) break;
 
                             if (parent_ns.item != ItemNull.item) {
                                 // attach submodule as attribute of parent package
                                 Item key = {.item = s2it(heap_create_name(rel_name + comp_start, comp_len))};
-                                js_property_set(parent_ns, key, sub_ns);
+                                py_dict_set(parent_ns, key, sub_ns);
                             }
                             parent_ns = sub_ns;
                             ns = sub_ns;
@@ -4410,7 +4508,7 @@ static Item pm_resolve_py_import(const char* mod_name, int mod_len,
             }
         } else {
             // simple (non-dotted) name
-            ns = pm_try_load_module(runtime, base_path->str);
+            ns = pm_try_load_module(host_execution, base_path->str);
         }
     } else if (dot_count > 0) {
         // bare relative import: "from . import x" — module_name is just dots
@@ -4418,11 +4516,9 @@ static Item pm_resolve_py_import(const char* mod_name, int mod_len,
         StrBuf* init_path = strbuf_new();
         strbuf_append_format(init_path, "%s/__init__.py", resolve_dir->str);
         if (pm_file_exists(init_path->str)) {
-            if (module_is_loading(init_path->str)) {
-                ModuleDescriptor* desc = module_get(init_path->str);
-                if (desc) ns = desc->namespace_obj;
-            } else {
-                ns = load_py_module(runtime, init_path->str);
+            ns = pm_loading_module_namespace(host_execution, init_path->str);
+            if (ns.item == ItemNull.item) {
+                jube_load_hosted_module(host_execution, init_path->str, NULL, &ns);
             }
         }
         strbuf_free(init_path);
@@ -4438,7 +4534,7 @@ static Item pm_resolve_py_import(const char* mod_name, int mod_len,
                 strbuf_append_char(entry_path, rel_name[i] == '.' ? '/' : rel_name[i]);
             }
         }
-        ns = pm_try_load_module(runtime, entry_path->str);
+        ns = pm_try_load_module(host_execution, entry_path->str);
         strbuf_free(entry_path);
     }
 
@@ -5032,7 +5128,7 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             if (dot) local_len = (int)(dot - mod_name);
         }
 
-        Item ns = pm_resolve_py_import(mod_name, mod_len, mt->filename, mt->runtime);
+        Item ns = pm_resolve_py_import(mod_name, mod_len, mt->filename, mt->host_execution);
 
         if (ns.item == ItemNull.item) {
             log_error("py-mir: import '%.*s': module not found", mod_len, mod_name);
@@ -5047,7 +5143,8 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             const char* dot = (const char*)memchr(mod_name, '.', mod_len);
             if (dot) {
                 int first_len = (int)(dot - mod_name);
-                Item first_ns = pm_resolve_py_import(mod_name, first_len, mt->filename, mt->runtime);
+                Item first_ns = pm_resolve_py_import(mod_name, first_len, mt->filename,
+                                                      mt->host_execution);
                 if (first_ns.item != ItemNull.item) ns = first_ns;
             }
         }
@@ -5201,7 +5298,7 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         const char* mod_name = imp->module_name->chars;
         int mod_len = (int)imp->module_name->len;
 
-        Item ns = pm_resolve_py_import(mod_name, mod_len, mt->filename, mt->runtime);
+        Item ns = pm_resolve_py_import(mod_name, mod_len, mt->filename, mt->host_execution);
 
         if (ns.item == ItemNull.item) {
             log_error("py-mir: failed to load module '%.*s'", mod_len, mod_name);
@@ -5209,8 +5306,7 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         }
         // Import lowering allocates names and package paths while reading this
         // heap namespace; keep it exact-rooted across those compiler-side calls.
-        RootFrame import_roots((Context*)context, 1);
-        Rooted<Item> rooted_ns(import_roots, ns);
+        PmHostedItemRoot rooted_ns(ns);
 
         // handle wildcard import: from module import *
         if (imp->names) {
@@ -5218,10 +5314,10 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             if (first->module_name && first->module_name->len == 1 &&
                 first->module_name->chars[0] == '*') {
                 ns = rooted_ns.get();
-                Item keys_arr = js_object_keys(ns);
-                int64_t key_count = js_array_length(keys_arr);
+                Item keys_arr = py_dict_keys(ns);
+                int64_t key_count = py_list_length(keys_arr);
                 for (int64_t ki = 0; ki < key_count; ki++) {
-                    Item key_item = js_array_get_int(keys_arr, ki);
+                    Item key_item = py_list_get(keys_arr, (Item){.item = i2it(ki)});
                     Item value = py_dict_get(ns, key_item);
                     if (value.item == ItemNull.item) continue;
                     if (get_type_id(key_item) != LMD_TYPE_STRING) continue;
@@ -5329,19 +5425,18 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                     ns = rooted_ns.get();
                     Item key = {.item = s2it(heap_create_name(sym_name, sym_len))};
                     ns = rooted_ns.get();
-                    // Built-in Python module namespaces are Python maps.  Using
-                    // JS property lookup enters the DOM bridge before js_input
-                    // exists, so import bindings must use the Python map API.
+                    // Python module namespaces are Python maps. Keeping lookup
+                    // in the Python map API prevents imports from depending on
+                    // JS runtime activation or JavaScript missing-key rules.
                     Item value = py_dict_get(ns, key);
 
                     // if not found in namespace and we have a package dir,
                     // try loading as a submodule (from . import submod)
-                    // js_property_get returns UNDEFINED (not ItemNull) for missing keys
                     bool not_in_ns = (value.item == ItemNull.item || get_type_id(value) == LMD_TYPE_UNDEFINED);
                     if (not_in_ns && pkg_dir) {
                         StrBuf* submod_path = strbuf_new();
                         strbuf_append_format(submod_path, "%s/%.*s", pkg_dir->str, sym_len, sym_name);
-                        value = pm_try_load_module(mt->runtime, submod_path->str);
+                        value = pm_try_load_module(mt->host_execution, submod_path->str);
                         if (value.item != ItemNull.item) {
                             // also add to parent namespace for future lookups
                             py_dict_set(ns, key, value);
@@ -5490,6 +5585,8 @@ static int pm_count_yield_points_r(PyAstNode* node) {
         break;
     case PY_AST_NODE_EXPRESSION_STATEMENT:
         n += pm_count_yield_points_r(((PyExpressionStatementNode*)node)->expression);
+        break;
+    default:
         break;
     }
     return n;
@@ -6837,7 +6934,7 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, si_reg)));
 
     pm_finish_function_frame(mt, resume_name);
-    MIR_finish_func(mt->em.ctx);
+    pm_finish_hosted_mir_function(mt->em.ctx);
     pm_pop_scope(mt);
 
     // restore transpiler state (but keep gen_local_names for wrapper compilation)
@@ -6884,7 +6981,7 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, gen_obj)));
     pm_finish_function_frame(mt, fn_name);
-    MIR_finish_func(mt->em.ctx);
+    pm_finish_hosted_mir_function(mt->em.ctx);
 
     // restore remaining parent state
     mt->em.func_item = old_func_item;
@@ -6986,7 +7083,7 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
     pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1, MIR_new_reg_op(mt->em.ctx, body_val)));
 
     pm_finish_function_frame(mt, lc->name);
-    MIR_finish_func(mt->em.ctx);
+    pm_finish_hosted_mir_function(mt->em.ctx);
 
     pm_pop_scope(mt);
     mt->em.func_item = old_func_item;
@@ -7258,7 +7355,7 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         MIR_new_int_op(mt->em.ctx, (int64_t)PY_ITEM_NULL_VAL)));
 
     pm_finish_function_frame(mt, fn_name);
-    MIR_finish_func(mt->em.ctx);
+    pm_finish_hosted_mir_function(mt->em.ctx);
 
     // restore TCO state
     mt->tco_func = saved_tco_func;
@@ -7472,7 +7569,7 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
         MIR_new_reg_op(mt->em.ctx, last_result)));
 
     pm_finish_function_frame(mt, "py_main");
-    MIR_finish_func(mt->em.ctx);
+    pm_finish_hosted_mir_function(mt->em.ctx);
     pm_pop_scope(mt);
     mt->in_main = false;
 }
@@ -7483,39 +7580,13 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
 
 typedef Item (*PmMainFunc)(Context*);
 
-static Item pm_run_main_with_recovery(PmMainFunc py_main, Context* runtime) {
-    if (!py_main || !runtime) return ItemError;
-    LambdaRecoveryCheckpoint recovery_checkpoint =
-        lambda_recovery_checkpoint_capture(runtime);
-#if defined(__APPLE__) || defined(__linux__)
-    if (sigsetjmp(_lambda_recovery_point, 1)) {
-#elif defined(_WIN32)
-    if (setjmp(_lambda_recovery_point)) {
-#else
-    if (0) {
-#endif
-        _lambda_recovery_armed = 0;
-        _lambda_stack_overflow_flag = false;
-        // The checkpoint owns the side-stack restoration after a signal jump;
-        // returning from the JIT directly would leave this Python entry dirty.
-        lambda_recovery_checkpoint_restore(&recovery_checkpoint);
-        lambda_stack_overflow_error("py-main");
-        return ItemError;
-    }
-    _lambda_recovery_armed = 1;
-    Item result = py_main(runtime);
-    _lambda_recovery_armed = 0;
-    lambda_recovery_checkpoint_disarm(&recovery_checkpoint);
-    return result;
-}
-
-Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* filename) {
+Item transpile_py_to_mir(void* host_execution, const char* py_source, const char* filename) {
     log_debug("py-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
     // Python MIR functions publish canonical frame roots, so forcing the old
     // compatibility tier here would hide precise-rooting regressions.
 
     // create Python transpiler (parsing + AST building)
-    PyTranspiler* tp = py_transpiler_create(runtime);
+    PyTranspiler* tp = py_transpiler_create(host_execution);
     if (!tp) {
         log_error("py-mir: failed to create transpiler");
         return (Item){.item = ITEM_ERROR};
@@ -7538,35 +7609,22 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
         return (Item){.item = ITEM_ERROR};
     }
 
-    // set up evaluation context
-    EvalContext py_context;
-    memset(&py_context, 0, sizeof(EvalContext));
-    EvalContext* old_context = context;
-    bool reusing_context = false;
-
-    if (old_context && old_context->heap) {
-        context = old_context;
-        reusing_context = true;
-    } else {
-        context = &py_context;
-        heap_init();
-        context->pool = context->heap->pool;
-        context->name_pool = name_pool_create(context->pool, nullptr);
-        context->type_list = arraylist_new(64);
+    // The host owns TLS activation, heap/input creation, and recovery state.
+    // Python receives the input only as an opaque adapter token.
+    void* runtime_input = NULL;
+    if (!pm_activate_hosted_guest_execution(host_execution, &runtime_input)) {
+        log_error("py-mir: host could not activate Python execution");
+        py_transpiler_destroy(tp);
+        return (Item){.item = ITEM_ERROR};
     }
-
-    _lambda_rt = (Context*)context;
-
-    // create Input context for Python runtime
-    Input* input = Input::create(context->pool);
-    py_runtime_set_input(input);
+    py_runtime_set_input(runtime_input);
 
     // init MIR context
-    MIR_context_t ctx = jit_init(2);
+    MIR_context_t ctx = pm_create_hosted_mir_context();
     if (!ctx) {
         log_error("py-mir: MIR context init failed");
         py_transpiler_destroy(tp);
-        mir_guest_finish_context(runtime, old_context, reusing_context);
+        pm_finish_hosted_guest_execution(host_execution);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -7574,9 +7632,9 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     PyMirTranspiler* mt = (PyMirTranspiler*)mem_alloc(sizeof(PyMirTranspiler), MEM_CAT_PY_RUNTIME);
     if (!mt) {
         log_error("py-mir: failed to allocate PyMirTranspiler");
-        MIR_finish(ctx);
+        pm_destroy_hosted_mir_context(ctx);
         py_transpiler_destroy(tp);
-        mir_guest_finish_context(runtime, old_context, reusing_context);
+        pm_finish_hosted_guest_execution(host_execution);
         return (Item){.item = ITEM_ERROR};
     }
     memset(mt, 0, sizeof(PyMirTranspiler));
@@ -7587,8 +7645,9 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     mt->em.before_may_gc_call = pm_before_may_gc_call;
     mt->em.root_call_value = pm_root_call_value;
     mt->em.after_call_result = pm_after_call_result;
+    mt->em.lookup_import_metadata = pm_lookup_hosted_import_metadata;
     mt->filename = filename;
-    mt->runtime = runtime;
+    mt->host_execution = host_execution;
 
     // store entry-point script directory for sub-module import resolution
     if (filename) {
@@ -7612,7 +7671,20 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     mt->current_func_index = -1;
 
     // create module
-    mt->module = MIR_new_module(ctx, "py_script");
+    mt->module = pm_create_hosted_mir_module(ctx, "py_script");
+    if (!mt->module) {
+        log_error("py-mir: host could not create Python MIR module");
+        hashmap_free(mt->em.import_cache);
+        hashmap_free(mt->local_funcs);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        mem_free(mt);
+        pm_destroy_hosted_mir_context(ctx);
+        py_transpiler_destroy(tp);
+        pm_finish_hosted_guest_execution(host_execution);
+        return (Item){.item = ITEM_ERROR};
+    }
 
     // Keep shared-emitter telemetry scoped to this lowering activation.
     PyMirTranspiler* saved_telemetry_owner = py_mir_telemetry_owner;
@@ -7627,17 +7699,27 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
         mem_free(mt);
-        MIR_finish(ctx);
+        pm_destroy_hosted_mir_context(ctx);
         py_transpiler_destroy(tp);
-        mir_guest_finish_context(runtime, old_context, reusing_context);
+        pm_finish_hosted_guest_execution(host_execution);
         return (Item){.item = ITEM_ERROR};
     }
 
-    // finalize module
-    MIR_finish_module(mt->em.ctx);
-
-    // load module for linking
-    MIR_load_module(mt->em.ctx, mt->module);
+    // Finalization stays host-owned so guest code cannot depend on the MIR
+    // module lifecycle implementation or its load ordering.
+    if (!pm_finalize_and_load_hosted_mir_module(mt->em.ctx, mt->module)) {
+        log_error("py-mir: host could not finalize Python MIR module");
+        hashmap_free(mt->em.import_cache);
+        hashmap_free(mt->local_funcs);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        mem_free(mt);
+        pm_destroy_hosted_mir_context(ctx);
+        py_transpiler_destroy(tp);
+        pm_finish_hosted_guest_execution(host_execution);
+        return (Item){.item = ITEM_ERROR};
+    }
 
 #ifndef NDEBUG
     // dump MIR for debugging
@@ -7649,10 +7731,15 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
 #endif
 
     // link and generate
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    if (!pm_link_hosted_module(host_execution, ctx)) {
+        log_error("py-mir: host could not link Python MIR module");
+        pm_destroy_hosted_mir_context(ctx);
+        py_transpiler_destroy(tp);
+        return (Item){.item = ITEM_ERROR};
+    }
 
     // find py_main
-    PmMainFunc py_main = (PmMainFunc)find_func(ctx, "py_main");
+    PmMainFunc py_main = (PmMainFunc)pm_find_hosted_mir_function(ctx, "py_main");
 
     if (!py_main) {
         log_error("py-mir: failed to find py_main");
@@ -7662,16 +7749,19 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
             if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
         mem_free(mt);
-        MIR_finish(ctx);
+        pm_destroy_hosted_mir_context(ctx);
         py_transpiler_destroy(tp);
-        mir_guest_finish_context(runtime, old_context, reusing_context);
+        pm_finish_hosted_guest_execution(host_execution);
         return (Item){.item = ITEM_ERROR};
     }
 
     // execute
     log_notice("py-mir: executing JIT compiled Python code");
     py_reset_module_vars();
-    Item result = pm_run_main_with_recovery(py_main, (Context*)context);
+    Item result = ItemError;
+    if (!pm_run_hosted_guest_main(host_execution, (void*)py_main, &result)) {
+        log_error("py-mir: host execution failed for py_main");
+    }
 
     // cleanup
     hashmap_free(mt->em.import_cache);
@@ -7681,10 +7771,10 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     }
     mem_free(mt);
 
-    MIR_finish(ctx);
+    pm_destroy_hosted_mir_context(ctx);
     py_transpiler_destroy(tp);
 
-    mir_guest_finish_context(runtime, old_context, reusing_context);
+    pm_finish_hosted_guest_execution(host_execution);
 
     return result;
 }
@@ -7696,76 +7786,145 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
 #define PM_MAX_MODULE_CONTEXTS 64
 static MIR_context_t pm_module_mir_contexts[PM_MAX_MODULE_CONTEXTS];
 static int pm_module_mir_context_count = 0;
+static void* pm_module_owned_execution = NULL;
 
 static void pm_defer_mir_cleanup(MIR_context_t ctx) {
     if (pm_module_mir_context_count < PM_MAX_MODULE_CONTEXTS) {
         pm_module_mir_contexts[pm_module_mir_context_count++] = ctx;
     } else {
         log_error("py-mir: exceeded max deferred MIR contexts (%d)", PM_MAX_MODULE_CONTEXTS);
-        MIR_finish(ctx);
+        pm_destroy_hosted_mir_context(ctx);
     }
+}
+
+void py_module_heap_cleanup(void* host_heap) {
+    (void)host_heap;
+    // Imported Python code keeps its MIR contexts alive for exported function
+    // pointers. Release them at the host heap boundary before either heap can
+    // disappear; leaving them process-global leaked every cross-language run.
+    for (int i = 0; i < pm_module_mir_context_count; i++) {
+        pm_destroy_hosted_mir_context(pm_module_mir_contexts[i]);
+        pm_module_mir_contexts[i] = NULL;
+    }
+    pm_module_mir_context_count = 0;
+
+    if (pm_module_owned_execution && py_hosted_execution_api &&
+        py_hosted_execution_api->execution_destroy) {
+        // The host retained this standalone import activation so its TLS and
+        // heap ownership are restored at the runtime's single cleanup point.
+        py_hosted_execution_api->execution_destroy(pm_module_owned_execution);
+    }
+    pm_module_owned_execution = NULL;
+    py_runtime_set_input(NULL);
 }
 
 // ============================================================================
 // Load Python module for cross-language import
 // ============================================================================
 
-Item load_py_module(Runtime* runtime, const char* py_path) {
+static Item pm_module_namespace_create(void) {
+    return py_dict_new();
+}
+
+static Item pm_module_namespace_get(Item namespace_obj, const char* name) {
+    Item key = {.item = s2it(heap_create_name(name))};
+    return py_dict_get(namespace_obj, key);
+}
+
+static int pm_module_namespace_function_arity(Item function_obj) {
+    if (get_type_id(function_obj) != LMD_TYPE_FUNC || !function_obj.function) return 0;
+    return function_obj.function->arity;
+}
+
+static void* pm_module_namespace_function_ptr(Item function_obj) {
+    if (get_type_id(function_obj) != LMD_TYPE_FUNC || !function_obj.function) return NULL;
+    return (void*)function_obj.function->ptr;
+}
+
+static const JubeModuleNamespaceOps pm_module_namespace_ops = {
+    pm_module_namespace_create,
+    pm_module_namespace_get,
+    pm_module_namespace_function_arity,
+    pm_module_namespace_function_ptr,
+};
+
+static void pm_module_source_release(JubeHostedSource* source) {
+    if (!source || !py_hosted_source_api || !py_hosted_source_api->source_release) return;
+    py_hosted_source_api->source_release(source);
+}
+
+static void pm_module_lowering_cleanup(PyMirTranspiler* mt, MIR_context_t mir_context,
+                                       PyTranspiler* transpiler, JubeHostedSource* source,
+                                       bool defer_mir_context) {
+    if (mt) {
+        hashmap_free(mt->em.import_cache);
+        hashmap_free(mt->local_funcs);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        mem_free(mt);
+    }
+    if (mir_context) {
+        if (defer_mir_context) pm_defer_mir_cleanup(mir_context);
+        else pm_destroy_hosted_mir_context(mir_context);
+    }
+    py_transpiler_destroy(transpiler);
+    pm_module_source_release(source);
+}
+
+Item load_py_module(void* host_execution, const char* py_path) {
+    // The language registry provides a short-lived opaque import execution;
+    // Python never unwraps its Runtime or active-context ownership.
     log_info("py-mir: loading Python module '%s' for cross-language import", py_path);
 
     // check if already loaded in module registry
-    ModuleDescriptor* cached = module_get(py_path);
-    if (cached && cached->initialized) {
+    Item cached_namespace = ItemNull;
+    int cached_state = py_hosted_module_graph_api &&
+        py_hosted_module_graph_api->module_state
+        ? py_hosted_module_graph_api->module_state(host_execution, py_path, &cached_namespace) : -1;
+    if (cached_state == 2) {
         log_debug("py-mir: module '%s' already loaded, returning cached namespace", py_path);
-        return cached->namespace_obj;
+        return cached_namespace;
     }
     // check for circular import (module is currently being loaded)
-    if (cached && cached->loading) {
+    if (cached_state == 1) {
         log_info("py-mir: circular import detected for '%s', returning partial namespace", py_path);
-        return cached->namespace_obj;
+        return cached_namespace;
     }
 
-    char* source = read_text_file(py_path);
-    if (!source) {
+    JubeHostedSource source_record = {JUBE_HOSTED_SOURCE_V1_SIZE};
+    if (!py_hosted_source_api ||
+        py_hosted_source_api->api_version != JUBE_HOST_SERVICE_API_VERSION ||
+        py_hosted_source_api->struct_size < JUBE_SOURCE_API_V1_SIZE ||
+        !py_hosted_source_api->source_read || !py_hosted_source_api->source_release ||
+        py_hosted_source_api->source_read(py_path, &source_record) != 0) {
         log_debug("py-mir: cannot read Python file '%s'", py_path);
         return ItemNull;
     }
+    const char* source = source_record.bytes;
 
-    // ensure a heap context exists for module loading
-    if (!context || !context->heap) {
-        EvalContext* temp_ctx = (EvalContext*)mem_calloc(1, sizeof(EvalContext), MEM_CAT_PY_RUNTIME);
-        temp_ctx->pool = mem_pool_create(NULL, MEM_ROLE_RUNTIME_HEAP, "py.runtime");
-        temp_ctx->result = ItemNull;
-        context = temp_ctx;
-        heap_init();
-        context->pool = context->heap->pool;
-        context->name_pool = name_pool_create(context->pool, nullptr);
-        context->type_list = arraylist_new(64);
-        _lambda_rt = (Context*)context;
-
-        Input* py_input = Input::create(context->pool);
-        py_runtime_set_input(py_input);
-        log_debug("py-mir: created persistent heap for cross-language module loading");
+    void* import_input = NULL;
+    bool retain_import_execution = false;
+    if (!pm_activate_hosted_import_execution(host_execution, &import_input,
+                                             &retain_import_execution)) {
+        log_error("py-mir: host could not activate imported Python module '%s'", py_path);
+        pm_module_source_release(&source_record);
+        return ItemNull;
     }
-
-    // ensure JS runtime Input is initialized (needed for js_property_set / map_put)
-    {
-        Input* js_inp = Input::create(context->pool);
-        js_runtime_set_input(js_inp);
-    }
+    py_runtime_set_input(import_input);
 
     // create Python transpiler (parsing + AST building)
-    PyTranspiler* tp = py_transpiler_create(runtime);
+    PyTranspiler* tp = py_transpiler_create(host_execution);
     if (!tp) {
         log_error("py-mir: module: failed to create transpiler for '%s'", py_path);
-        mem_free(source); // source from read_text_file (lib)
+        pm_module_source_release(&source_record);
         return ItemNull;
     }
 
     if (!py_transpiler_parse(tp, source, strlen(source))) {
         log_error("py-mir: module: parse failed for '%s'", py_path);
         py_transpiler_destroy(tp);
-        mem_free(source); // source from read_text_file (lib)
+        pm_module_source_release(&source_record);
         return ItemNull;
     }
 
@@ -7774,24 +7933,24 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     if (!ast) {
         log_error("py-mir: module: AST build failed for '%s'", py_path);
         py_transpiler_destroy(tp);
-        mem_free(source); // source from read_text_file (lib)
+        pm_module_source_release(&source_record);
         return ItemNull;
     }
 
-    MIR_context_t ctx = jit_init(2);
+    MIR_context_t ctx = pm_create_hosted_mir_context();
     if (!ctx) {
         log_error("py-mir: module: MIR context init failed for '%s'", py_path);
         py_transpiler_destroy(tp);
-        mem_free(source); // source from read_text_file (lib)
+        pm_module_source_release(&source_record);
         return ItemNull;
     }
 
     PyMirTranspiler* mt = (PyMirTranspiler*)mem_alloc(sizeof(PyMirTranspiler), MEM_CAT_PY_RUNTIME);
     if (!mt) {
         log_error("py-mir: module: failed to allocate transpiler for '%s'", py_path);
-        MIR_finish(ctx);
+        pm_destroy_hosted_mir_context(ctx);
         py_transpiler_destroy(tp);
-        mem_free(source); // source from read_text_file (lib)
+        pm_module_source_release(&source_record);
         return ItemNull;
     }
     memset(mt, 0, sizeof(PyMirTranspiler));
@@ -7802,15 +7961,21 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     mt->em.before_may_gc_call = pm_before_may_gc_call;
     mt->em.root_call_value = pm_root_call_value;
     mt->em.after_call_result = pm_after_call_result;
+    mt->em.lookup_import_metadata = pm_lookup_hosted_import_metadata;
     mt->filename = py_path;
-    mt->runtime = runtime;
+    mt->host_execution = host_execution;
     mt->em.import_cache = em_import_cache_new(64);
     mt->local_funcs  = py_local_func_new(32);
     mt->var_scopes[0] = em_var_scope_new(16);
     mt->scope_depth = 0;
     mt->current_func_index = -1;
 
-    mt->module = MIR_new_module(ctx, "py_module");
+    mt->module = pm_create_hosted_mir_module(ctx, "py_module");
+    if (!mt->module) {
+        log_error("py-mir: module: host could not create MIR module for '%s'", py_path);
+        pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
+        return ItemNull;
+    }
 
     // transpile AST to MIR (compiles all functions + py_main)
     PyMirTranspiler* saved_telemetry_owner = py_mir_telemetry_owner;
@@ -7818,22 +7983,40 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     pm_transpile_ast(mt, ast);
     py_mir_telemetry_owner = saved_telemetry_owner;
 
-    MIR_finish_module(mt->em.ctx);
-    MIR_load_module(mt->em.ctx, mt->module);
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    if (!pm_finalize_and_load_hosted_mir_module(mt->em.ctx, mt->module)) {
+        log_error("py-mir: module: host could not finalize '%s'", py_path);
+        pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
+        return ItemNull;
+    }
+    if (!pm_link_hosted_module(host_execution, ctx)) {
+        log_error("py-mir: module: host could not link Python MIR module '%s'", py_path);
+        pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
+        return ItemNull;
+    }
 
     // mark module as loading before execution (circular import detection)
-    ModuleDescriptor* loading_desc = module_register_loading(py_path, "python");
+    if (!py_hosted_module_graph_api || !py_hosted_module_graph_api->module_begin_loading ||
+        py_hosted_module_graph_api->module_begin_loading(host_execution, py_path, "python",
+                                                         &pm_module_namespace_ops) != 0) {
+        log_error("py-mir: module graph could not mark '%s' as loading", py_path);
+        pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
+        return ItemNull;
+    }
 
     // execute py_main to run module-level code (assignments, etc.)
-    PmMainFunc py_main = (PmMainFunc)find_func(ctx, "py_main");
+    PmMainFunc py_main = (PmMainFunc)pm_find_hosted_mir_function(ctx, "py_main");
     if (py_main) {
         py_reset_module_vars();
-        pm_run_main_with_recovery(py_main, (Context*)context);
+        Item ignored_result = ItemError;
+        if (!pm_run_hosted_guest_main(host_execution, (void*)py_main, &ignored_result)) {
+            log_error("py-mir: host execution failed for imported module '%s'", py_path);
+            pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
+            return ItemNull;
+        }
     }
 
     // build namespace from top-level compiled functions
-    Item ns = js_new_object();
+    Item ns = py_dict_new();
     for (int i = 0; i < mt->func_count; i++) {
         PyFuncCollected* fc = &mt->func_entries[i];
         if (fc->parent_index != -1) continue;  // skip nested functions
@@ -7841,15 +8024,14 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         // get the JIT-compiled function pointer by name
         char mir_name[140];
         snprintf(mir_name, sizeof(mir_name), "_%s", fc->name);
-        void* func_ptr = find_func(ctx, mir_name);
+        void* func_ptr = pm_find_hosted_mir_function(ctx, mir_name);
 
         if (func_ptr) {
-            // Use to_fn_n to create a Lambda Function* (compatible with py_call_function).
-            // js_new_function creates a JsFunction with a different struct layout,
-            // which causes py_call_function to read garbage fn->ptr and crash.
+            // Use to_fn_n to create a Lambda Function* compatible with Python
+            // calling convention; a JavaScript function has a different layout.
             Item val = {.function = to_fn_n((fn_ptr)func_ptr, fc->param_count)};
             Item key = {.item = s2it(heap_create_name(fc->name))};
-            js_property_set(ns, key, val);
+            py_dict_set(ns, key, val);
             log_debug("py-mir: module export fn '%s' arity=%d", fc->name, fc->param_count);
         }
     }
@@ -7866,27 +8048,34 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         const char* export_name = (strncmp(var_name, "_py_", 4) == 0) ? var_name + 4 : var_name;
         Item key = {.item = s2it(heap_create_name(export_name))};
         // functions exported above take priority over module vars
-        Item existing = js_property_get(ns, key);
+        Item existing = py_dict_get(ns, key);
         bool not_found = (existing.item == ItemNull.item || get_type_id(existing) == LMD_TYPE_UNDEFINED);
         if (not_found) {
-            js_property_set(ns, key, value);
+            py_dict_set(ns, key, value);
             log_debug("py-mir: module export var '%s' type=%d", export_name, (int)get_type_id(value));
         }
     }
 
-    // register in unified module registry
-    module_register(py_path, "python", ns, ctx);
+    // Publish through the host-owned graph so Python retains only its export
+    // membrane and never accesses registry records or their state layout.
+    if (!py_hosted_module_graph_api || !py_hosted_module_graph_api->module_publish ||
+        py_hosted_module_graph_api->module_publish(host_execution, py_path, "python", ns, ctx,
+                                                   &pm_module_namespace_ops) != 0) {
+        log_error("py-mir: module graph could not publish '%s'", py_path);
+        pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
+        return ItemNull;
+    }
 
     // cleanup transpiler state but DEFER MIR context cleanup
-    hashmap_free(mt->em.import_cache);
-    hashmap_free(mt->local_funcs);
-    for (int i = 0; i <= mt->scope_depth; i++) {
-        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+    pm_module_lowering_cleanup(mt, ctx, tp, &source_record, true);
+
+    if (retain_import_execution) {
+        if (pm_module_owned_execution) {
+            log_error("py-mir: multiple standalone Python import activations are unsupported");
+            return ItemNull;
+        }
+        pm_module_owned_execution = host_execution;
     }
-    mem_free(mt);
-    pm_defer_mir_cleanup(ctx);
-    py_transpiler_destroy(tp);
-    mem_free(source); // source from read_text_file (lib)
 
     log_info("py-mir: module '%s' loaded successfully", py_path);
     return ns;

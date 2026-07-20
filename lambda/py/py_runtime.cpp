@@ -577,11 +577,10 @@ static Item py_string_format_percent(Item left, Item right) {
         }
 
         // parse optional flags: -, +, 0, space
-        bool flag_minus = false, flag_zero = false, flag_plus = false;
+        bool flag_minus = false, flag_zero = false;
         while (p < end && (*p == '-' || *p == '+' || *p == '0' || *p == ' ')) {
             if (*p == '-') flag_minus = true;
             else if (*p == '0') flag_zero = true;
-            else if (*p == '+') flag_plus = true;
             p++;
         }
 
@@ -1161,8 +1160,6 @@ extern "C" Item py_new_object(void) {
     return (Item){.map = m};
 }
 
-extern "C" Item js_property_get(Item object, Item key);
-
 extern "C" Item py_getattr(Item object, Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return ItemNull;
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
@@ -1171,10 +1168,10 @@ extern "C" Item py_getattr(Item object, Item name) {
     if (!key) return ItemNull;
     Map* m = it2map(object);
     if (!m) return ItemNull;
-    // JS-backed HashMap object: type is NULL or EmptyMap (from js_new_object())
-    // These use map_put/js_property_get for storage, not the shape-based _map_get
+    // Python dictionaries are shape-backed Maps. Routing empty maps through
+    // JS property lookup made Python imports depend on JS runtime activation.
     if (!m->type || m->type == &EmptyMap) {
-        return js_property_get(object, name);
+        return ItemNull;
     }
 
     // 1. super proxy: delegate to the *next* class in the MRO
@@ -1430,6 +1427,22 @@ extern "C" Item py_dict_get(Item dict, Item key) {
 
 extern "C" Item py_dict_set(Item dict, Item key, Item value) {
     return py_setattr(dict, key, value);
+}
+
+extern "C" Item py_dict_keys(Item dict) {
+    Item keys = py_list_new(0);
+    if (get_type_id(dict) != LMD_TYPE_MAP) return keys;
+    Map* map = it2map(dict);
+    if (!map || !map->type || !map->data) return keys;
+
+    TypeMap* type = (TypeMap*)map->type;
+    FOR_EACH_MAP_FIELD(type, field) {
+        if (!field->name || !field->name->str) continue;
+        Item key = {.item = s2it(heap_strcpy((char*)field->name->str,
+                                               (int64_t)field->name->length))};
+        py_list_append(keys, key);
+    }
+    return keys;
 }
 
 extern "C" Item py_tuple_new(int length) {
@@ -2031,7 +2044,7 @@ extern "C" Item py_new_closure_with_env(void* func_ptr, int param_count,
 
 extern "C" uint64_t* py_alloc_env(int size) {
     if (!py_input || size <= 0) return NULL;
-    return (uint64_t*)heap_calloc_js_env((size_t)size * sizeof(Item));
+    return (uint64_t*)heap_calloc_closure_env((size_t)size * sizeof(Item));
 }
 
 static int py_env_item_count(uint64_t* env) {

@@ -53,10 +53,14 @@ native contract, its implementation status, and the current scope boundary.
    dirty, invalidate resolved styles as appropriate, and publish DOM mutation
    records. A later layout/render pass consumes those dirty flags.
 4. **Event ownership.** Native input enters Radiant once, then the JS bridge
-   builds a DOM event path and performs capture, target, and bubble dispatch.
+   captures one DOM event path and performs capture, target, and bubble
+   dispatch over it. `composedPath()` copies that captured path; it never
+   reconstructs ancestry after listener-side DOM mutation.
 5. **Lifetime.** DOM wrappers, listeners, selection/range objects, CSSOM
    objects, and observer records are non-owning views. Their C+ storage belongs
-   to the document/runtime pools and is cleared with the document.
+   to the document/runtime pools and is cleared with the document. Expando
+   values live in the wrapper's traced backing store; connected native nodes
+   add only an attachment-scoped GC root, removed recursively on detach.
 
 ## 3. Existing native DOM surface
 
@@ -67,10 +71,10 @@ native contract, its implementation status, and the current scope boundary.
 | Document, Node, Element, Text, Comment, DocumentFragment | **Full** | `js_dom.cpp`, `radiant/view.hpp` | Native wrappers expose document/tree identity, traversal, creation, and mutation. Namespace-sensitive browser behavior is only partial. |
 | Queries, attributes, classes, data attributes | **Full** | `js_dom.cpp`, `input/css/selector_matcher.hpp` | Queries reuse Radiant's selector matcher; `classList` and `dataset` are native proxies. |
 | HTML mutation and serialization | **Full** | `js_dom.cpp`, Radiant HTML5 fragment parser | `innerHTML` parses into the real DOM; `outerHTML`, `textContent`, CharacterData, clone, and adjacent insertion are bridged. |
-| Events and EventTarget | **Full** | `js_dom_events.cpp`, `radiant/event.cpp` | Capture/target/bubble, listener options, default prevention, native event constructors, and input dispatch are native. |
-| Inline style and computed style | **Full** | `js_dom.cpp`, `js_cssom.cpp` | `style`, `className`, `getComputedStyle`, and CSS selector/cascade reads operate over Radiant styles. Full browser CSSOM is not implied. |
+| Events and EventTarget | **Full** | `js_dom_events.cpp`, `radiant/event.cpp` | Capture/target/bubble, listener options, default prevention, native event constructors, and input dispatch are native. The exact dispatch path is retained for `composedPath()` and cleared after dispatch. |
+| Inline style and computed style | **Full** | `js_dom.cpp`, `js_cssom.cpp`, `dom_element.cpp` | `style`, `className`, `getComputedStyle`, and CSS selector/cascade reads operate over Radiant styles. Recascade reads the live `style` attribute and clears only stylesheet declarations, preserving parsed inline ownership. Full browser CSSOM is not implied. |
 | Style sheets and CSS namespace | **Partial** | `js_cssom.cpp` | The bridge supports the needed live stylesheet/rule/declaration paths and `CSS.supports`/`CSS.escape`; browser CSSOM remains much larger. |
-| Geometry and scrolling | **Full (snapshot contract)** | `js_dom.cpp`, `radiant/layout.cpp` | Metrics and rect APIs are native reads of committed layout. They never force synchronous reflow; same-task popup placement and virtual-range recalculation are deferred to a later layout checkpoint. |
+| Geometry and scrolling | **Partial (non-forcing snapshot contract)** | `js_dom.cpp`, `radiant/layout.cpp` | Metrics and rect APIs are native reads of committed layout. They never force synchronous reflow, which is intentionally non-browser-compatible: same-task popup placement and virtual-range recalculation are deferred to a later layout checkpoint. Browser-compatible freshness is deferred to a future DOM iteration. |
 | Unicode text layout, rendering, and caret navigation | **Partial** | `layout_text.cpp`, `intrinsic_sizing.cpp`, `layout_inline.cpp`, `resolve_htm_style.cpp`, `dom_range.cpp`, `editing_geometry.cpp` | Grapheme/emoji-aware advance handling, RTL inline placement, CSS `direction`/`unicode-bidi`, `dir=auto`, and native grapheme/bidi-aware caret and selection navigation are in scope. Complete browser nested-host and IME parity is not. |
 | Forms, focus, and common HTML controls | **Full** | `js_dom.cpp`, `radiant/text_control.cpp`, `form_control.*` | Values, checked/selected state, validation, selection, focus/blur/click, submit/reset, and common text/select/checkbox/radio/range controls are native. |
 | Fancy form controls | **KIV / Deferred** | existing value-state support under `js_dom.cpp` and `form_control.*` | Native picker chrome and complete specialized behavior for date/time/month/week/color/file controls are not scheduled; see §3.7. |
@@ -132,12 +136,18 @@ style. Supported geometry reads include `offset*`, `client*`, `scroll*`,
 `offsetParent`, `getBoundingClientRect()`, and `getClientRects()`; element and
 window scroll helpers are also bridged.
 
-`js_dom_ensure_layout_for_geometry()` is the common geometry read barrier in
+`js_dom_has_committed_geometry_snapshot()` is the common geometry read barrier in
 `js_dom.cpp`. It is deliberately **non-forcing**: a metric returns the last
 committed layout snapshot and leaves a dirty document for the normal frame/
 layout phase. The `offset*`, `client*`, `scroll*` extent, `offsetParent`, rect,
 and point-hit-test paths use this same rule; the no-`UiContext` compatibility
 host may retain its documented synthetic estimate (§5.2).
+
+This differs from browsers, which may synchronously update style and layout
+before returning a layout-dependent getter after a DOM/style write. Radiant
+therefore does not guarantee browser-style same-task geometry freshness in
+DOM3. The compatibility gap remains **Partial** and must be resolved in a
+future DOM iteration with an explicit freshness and reflow policy.
 
 ### 3.5 Editing, range, and forms
 
@@ -268,10 +278,11 @@ LambdaJS module compiler.
 
 ### 5.2 Non-forcing layout measurements
 
-**Status:** supported snapshot contract.
+**Status:** implemented snapshot contract; browser compatibility partial.
 
 Radiant deliberately does not let a CSSOM View read re-enter layout from a JS
-callback. `js_dom_ensure_layout_for_geometry()` is a uniform, side-effect-free
+callback. `js_dom_has_committed_geometry_snapshot()` is a uniform,
+side-effect-free
 barrier that exposes the latest committed tree. A style/tree mutation is
 observed by measurement after the normal frame/layout commit, not synchronously
 from the property getter.
@@ -300,6 +311,12 @@ create a popup or virtualized rows and immediately measure that brand-new DOM
 must schedule their placement/range work for a later frame; DOM3 guarantees
 their DOM/event lifecycle and initial committed layout, not browser-style
 same-task reflow.
+
+This is explicitly non-browser-compatible. Browsers normally return fresh
+same-task geometry by forcing style/layout when necessary. A future DOM
+iteration must decide and implement the supported synchronous freshness
+boundary, its re-entrancy guards, and its layout-thrashing/performance budget;
+until then this feature remains **Partial** rather than Full.
 
 **Acceptance tests**
 

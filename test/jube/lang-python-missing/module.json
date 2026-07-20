@@ -1,0 +1,14 @@
+{
+  "name": "lang-python",
+  "version": "0.1.0",
+  "base_abi_version": 2,
+  "hosted_api_version": 1,
+  "host_build_id": "lambda-hosted-lang-20260720-h7d3",
+  "language": "python",
+  "aliases": ["py"],
+  "extensions": [".py"],
+  "library_macos": "lang-python-missing.dylib",
+  "library_linux": "lang-python-missing.so",
+  "library_windows": "lang-python-missing.dll",
+  "entry_symbol": "jube_module"
+}

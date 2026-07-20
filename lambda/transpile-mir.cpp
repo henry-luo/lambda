@@ -1076,6 +1076,11 @@ static MirImportEntry* ensure_import(MirTranspiler* mt, const char* name,
     return em_ensure_import(&mt->em, name, ret_type, nargs, args, nres, false);
 }
 
+static bool lambda_lookup_import_metadata(const char* name,
+        JitImportMetadata* metadata) {
+    return jit_import_get_metadata(name, metadata);
+}
+
 // ============================================================================
 // Variadic call helpers for map_fill, elmt_fill, list_fill
 // ============================================================================
@@ -14106,6 +14111,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.em.root_call_value = lambda_call_root_value;
     mt.em.after_call_result = lambda_after_call_result;
     mt.em.convert_rep = lambda_convert_rep;
+    mt.em.lookup_import_metadata = lambda_lookup_import_metadata;
     mt.script = script;
     mt.source = source;
     mt.is_main = true;
@@ -14464,8 +14470,6 @@ static void register_cross_lang_pub_fns(AstImportNode* imp) {
         log_error("mir: cross-lang module '%s' not found in registry", imp->script->reference);
         return;
     }
-    Item ns = desc->namespace_obj;
-
     log_debug("mir: registering cross-lang pub symbols from '%.*s' (index=%d)",
         (int)imp->module.length, imp->module.str, imp->script->index);
 
@@ -14475,14 +14479,13 @@ static void register_cross_lang_pub_fns(AstImportNode* imp) {
             AstFuncNode* fn_node = (AstFuncNode*)child;
             TypeFunc* fn_type = (TypeFunc*)fn_node->type;
             if (fn_type && fn_type->is_public) {
-                // Look up the function in the JS namespace
+                // The language-specific namespace membrane owns export lookup.
                 char name_buf[256];
                 snprintf(name_buf, sizeof(name_buf), "%.*s",
                     (int)fn_node->name->len, fn_node->name->chars);
-                Item key = {.item = s2it(heap_create_name(name_buf, strlen(name_buf)))};
-                Item fn_item = js_property_get(ns, key);
+                Item fn_item = module_namespace_get(desc, name_buf);
                 if (get_type_id(fn_item) == LMD_TYPE_FUNC) {
-                    void* fn_ptr = js_function_get_ptr(fn_item);
+                    void* fn_ptr = module_namespace_function_ptr(desc, fn_item);
                     if (fn_ptr) {
                         // Register with module-prefixed name (e.g., "m2._add_1000000")
                         StrBuf* reg_name = strbuf_new_cap(64);

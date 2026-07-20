@@ -971,11 +971,14 @@ Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
 
 // Memory allocation for closure environments
 typedef struct Context Context;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 void* heap_calloc(size_t size, TypeId type_id);
-void* heap_calloc_js_env(size_t size);
+// Closure environments use scalar side storage so captured wide numbers remain
+// valid after their creating invocation's number frame is reclaimed.
+void* heap_calloc_closure_env(size_t size);
 void* heap_calloc_class(size_t size, TypeId type_id, int cls);  // allocate with pre-computed size class
 void* heap_data_calloc(size_t size);  // allocate GC-managed data buffer (for map/object data)
 uint64_t* heap_gc_root_slot_new(uint64_t value);

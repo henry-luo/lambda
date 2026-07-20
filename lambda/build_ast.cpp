@@ -4,6 +4,7 @@
 #include "lambda-error.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
+#include "jube/jube_language.h"
 #include "jube/jube_registry.h"
 #endif
 #include "../lib/hashmap.h"
@@ -9326,6 +9327,36 @@ static bool record_existing_lambda_import_failure(Transpiler* tp, TSNode import_
         (int)ast_node->module.length, ast_node->module.str, resolved_path);
     return true;
 }
+
+static bool load_hosted_module_import(Transpiler* tp, AstImportNode* ast_node,
+                                      StrBuf* resolved_path) {
+    if (!tp || !ast_node || !resolved_path || resolved_path->length < 3) return false;
+    size_t base_length = resolved_path->length - 3; // remove the failed ".ls"
+    resolved_path->length = base_length;
+    resolved_path->str[base_length] = '\0';
+
+    int extension_count = jube_hosted_extension_count();
+    for (int i = 0; i < extension_count; i++) {
+        const char* extension = jube_hosted_extension_at(i);
+        if (!extension || !*extension) continue;
+        strbuf_append_char(resolved_path, '.');
+        strbuf_append_str(resolved_path, extension[0] == '.' ? extension + 1 : extension);
+
+        Item hosted_ns = ItemNull;
+        if (jube_load_hosted_module(tp->runtime, resolved_path->str,
+                                    tp->reference, &hosted_ns)) {
+            ast_node->script = (Script*)create_module_import_script(
+                resolved_path->str, hosted_ns, tp->runtime);
+            ast_node->is_cross_lang = true;
+            return ast_node->script != NULL;
+        }
+        resolved_path->length = base_length;
+        resolved_path->str[base_length] = '\0';
+    }
+
+    strbuf_append_str(resolved_path, ".ls");
+    return false;
+}
 #endif
 
 AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
@@ -9456,31 +9487,15 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                 buf->str[buf->length - 1] = 's';
                 Item ns = load_js_module(tp->runtime, buf->str);
                 if (ns.item != ItemNull.item) {
-                    ast_node->script = (Script*)create_js_import_script(
+                    ast_node->script = (Script*)create_module_import_script(
                         buf->str, ns, tp->runtime);
                     ast_node->is_cross_lang = true;
                     if (ast_node->script) {
                         declare_module_import(tp, ast_node);
                     }
+                } else if (load_hosted_module_import(tp, ast_node, buf)) {
+                    declare_module_import(tp, ast_node);
                 } else {
-#ifdef LAMBDA_PYTHON
-                    // .js failed — try .py fallback for cross-language import
-                    buf->str[buf->length - 2] = 'p';
-                    buf->str[buf->length - 1] = 'y';
-                    Item py_ns = load_py_module(tp->runtime, buf->str);
-                    if (py_ns.item != ItemNull.item) {
-                        ast_node->script = (Script*)create_js_import_script(
-                            buf->str, py_ns, tp->runtime);
-                        ast_node->is_cross_lang = true;
-                        if (ast_node->script) {
-                            declare_module_import(tp, ast_node);
-                        }
-                    } else {
-#endif
-                    // restore .ls extension for error message
-                    buf->str[buf->length - 2] = 'l';
-                    buf->str[buf->length - 1] = 's';
-                #endif
                     log_error("Error: failed to load module '%.*s' (resolved: %s, from: %s)",
                         (int)ast_node->module.length, ast_node->module.str, buf->str,
                         tp->reference ? tp->reference : "<unknown>");
@@ -9488,11 +9503,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                         "  Resolved path: %s\n  Importing script: %s\n",
                         (int)ast_node->module.length, ast_node->module.str, buf->str,
                         tp->reference ? tp->reference : "<unknown>");
-                #ifndef SIMPLE_SCHEMA_PARSER
-#ifdef LAMBDA_PYTHON
                     }
-#endif
-                }
                 }
                 #endif
             }
@@ -9555,41 +9566,21 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                 buf->str[buf->length - 1] = 's';
                 Item ns = load_js_module(tp->runtime, buf->str);
                 if (ns.item != ItemNull.item) {
-                    ast_node->script = (Script*)create_js_import_script(
+                    ast_node->script = (Script*)create_module_import_script(
                         buf->str, ns, tp->runtime);
                     ast_node->is_cross_lang = true;
                     if (ast_node->script) {
                         declare_module_import(tp, ast_node);
                     }
+                } else if (load_hosted_module_import(tp, ast_node, buf)) {
+                    declare_module_import(tp, ast_node);
                 } else {
-#ifdef LAMBDA_PYTHON
-                    // .js failed — try .py fallback for cross-language import
-                    buf->str[buf->length - 2] = 'p';
-                    buf->str[buf->length - 1] = 'y';
-                    Item py_ns = load_py_module(tp->runtime, buf->str);
-                    if (py_ns.item != ItemNull.item) {
-                        ast_node->script = (Script*)create_js_import_script(
-                            buf->str, py_ns, tp->runtime);
-                        ast_node->is_cross_lang = true;
-                        if (ast_node->script) {
-                            declare_module_import(tp, ast_node);
-                        }
-                    } else {
-#endif
-                    // restore .ls extension for error message
-                    buf->str[buf->length - 2] = 'l';
-                    buf->str[buf->length - 1] = 's';
-                #endif
                     log_error("Error: failed to load module '%.*s' (resolved: %s)",
                         (int)ast_node->module.length, ast_node->module.str, buf->str);
                     fprintf(stderr, "Error: Failed to import module '%.*s'\n" // PRINTF_OK: user-facing CLI import error.
                         "  Resolved path: %s\n",
                         (int)ast_node->module.length, ast_node->module.str, buf->str);
-                #ifndef SIMPLE_SCHEMA_PARSER
-#ifdef LAMBDA_PYTHON
                     }
-#endif
-                }
                 }
                 #endif
             }

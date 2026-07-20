@@ -14,8 +14,8 @@ UiContext ui_context{};
 extern "C" bool js_dom_option_is_selected(void* dom_elem) {
     DomElement* option = (DomElement*)dom_elem;
     if (!option) return false;
-    // This standalone target omits LambdaJS and therefore has no expando map;
-    // preserve the DOM-owned selectedness and markup-default behavior instead.
+    // This standalone target omits LambdaJS and its expando map, so use the
+    // native mirror to preserve DOM-owned selectedness without an EvalContext.
     if (option->has_option_selectedness()) return option->option_selectedness();
     return option->has_attribute("selected");
 }

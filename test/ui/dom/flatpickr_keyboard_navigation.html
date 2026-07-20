@@ -1,0 +1,5 @@
+<!doctype html><html><head><style>
+#date { display: block; width: 180px; height: 28px; }.flatpickr-calendar { display: none; width: 308px; padding: 8px; }.flatpickr-calendar.open { display: block; }.flatpickr-months, .flatpickr-weekdays, .dayContainer { display: flex; flex-wrap: wrap; width: 308px; }.flatpickr-month, .flatpickr-weekdaycontainer { width: 308px; }.flatpickr-day, .flatpickr-weekday { display: block; box-sizing: border-box; width: 44px; height: 30px; }
+</style></head><body>
+<input id="date" type="text"><output id="trace"></output><script src="../../js/flatpickr.min.js"></script><script>window.picker = flatpickr(document.getElementById('date'), { dateFormat: 'Y-m-d', defaultDate: '2024-03-14', disableMobile: true, closeOnSelect: false, onOpen: function () { picker.selectedDateElem.focus(); }, onKeyDown: function (_, __, ___, event) { document.getElementById('trace').textContent = event.key + ':' + event.keyCode + ':' + event.defaultPrevented + ':' + picker.isOpen + ':' + event.target.className; } });</script>
+</body></html>
