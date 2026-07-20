@@ -71,7 +71,6 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 struct CssEngine;
 void apply_stylesheet_to_dom_tree_fast(DomElement* root, struct CssStylesheet* stylesheet,
                                         struct SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
-void apply_inline_styles_to_tree(DomElement* root, Element* html_root, Pool* pool, int depth = 0);
 void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, Pool* pool,
                                      struct CssStylesheet*** stylesheets, int* count, int depth = 0);
 struct SelectorMatcher* selector_matcher_create(Pool* pool);
@@ -4296,9 +4295,6 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
         }
     }
 
-    if (!root->is_synthetic()) {
-        apply_inline_styles_to_tree(root, dom_element_to_element(root), pool);
-    }
     if (epoch_scope) style_epoch_cascade_end(doc);
 }
 
@@ -4599,8 +4595,6 @@ static void post_html_handler_rebuild(EventContext* evcon,
         }
     }
 
-    // Re-apply inline style="" attributes
-    apply_inline_styles_to_tree(doc->root, doc->html_root, pool);
     if (epoch_scope) style_epoch_cascade_end(doc);
 
     auto t1 = high_resolution_clock::now();
@@ -5387,16 +5381,15 @@ bool radiant_editing_animation_tick(UiContext* uicon, double timestamp) {
 // ============================================================================
 
 /**
- * Recursively clear specified_style and styles_resolved flag on every element
- * in the subtree rooted at `node`. Used before re-cascading the document so
- * that declarations from previously matching pseudo-class rules (e.g. :hover)
- * are removed when those rules no longer match.
+ * Recursively clear stylesheet declarations and styles_resolved on every
+ * element in the subtree. Live inline declarations remain attached while
+ * previously matching selector declarations (e.g. :hover) are removed.
  */
 static void clear_cascaded_styles_recursive(DomNode* node) {
     if (!node) return;
     if (node->is_element()) {
         DomElement* e = lam::dom_require_element(node);
-        dom_element_clear(e);
+        dom_element_clear_cascaded_styles(e);
         // Pseudo declarations share the base cascade epoch; otherwise a :hover
         // recascade reads declarations that no longer match.
         dom_element_clear_pseudo_styles(e);
@@ -5503,7 +5496,6 @@ static void recascade_document_for_pseudo_state(DomDocument* doc, DocState* stat
                                                   matcher, pool, css_engine);
             }
         }
-        apply_inline_styles_to_tree(doc->root, doc->html_root, pool);
         if (epoch_scope) style_epoch_cascade_end(doc);
     }
 }

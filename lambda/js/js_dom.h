@@ -55,6 +55,9 @@ bool js_dom_force_layout_for_geometry(void* dom_doc);
 /** Advance the active document's CSS animation scheduler by one headless frame. */
 bool js_dom_tick_headless_animation_frame(void);
 
+/** Commit pending DOM mutations at a one-shot headless rendering checkpoint. */
+bool js_dom_commit_headless_layout_checkpoint(void);
+
 // Lazy DomElement* with tag "#document" used so JS Range/Selection APIs can
 // accept `document` (or a foreign-doc wrapper) as a node container.
 void* js_dom_get_or_create_doc_node(void* dom_doc);
@@ -96,6 +99,12 @@ void* js_dom_unwrap_element(Item item);
  * This is distinct from the immutable selected content attribute.
  */
 bool js_dom_option_is_selected(void* dom_elem);
+
+/**
+ * Create a selector matcher configured for a DOM document's live UI state.
+ * The opaque return value is a SelectorMatcher* for Radiant's native bridge.
+ */
+void* js_dom_create_selector_matcher_bridge(void* dom_doc);
 
 /** Return the identity-preserving Document proxy that owns a DOM node. */
 Item js_dom_owner_document_for_node(void* node);

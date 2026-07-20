@@ -4593,7 +4593,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             bool has_display_box = true;
             for (View* current = elem; current; current = current->parent) {
                 DomElement* current_elem = current->as_element();
-                if (current_elem && current_elem->display.outer == CSS_VALUE_NONE) {
+                // display:none nodes are skipped before layout stores a view
+                // display value, so consult the cascaded declaration instead
+                // of the stale default carried by the retained DOM node.
+                if (current_elem &&
+                    resolve_display_value(current_elem).outer == CSS_VALUE_NONE) {
                     has_display_box = false;
                     break;
                 }

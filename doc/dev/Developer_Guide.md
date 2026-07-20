@@ -307,7 +307,7 @@ grammar.js  ──→  tree-sitter generate  ──→  parser.c + grammar.json 
                                 build_ast.cpp  (matches CST nodes → typed AST)
                                                   │
                                                   ▼
-                          transpile.cpp / transpile-mir.cpp  (code generation)
+                              transpile-mir.cpp  (code generation)
 ```
 
 The Makefile tracks this entire chain automatically. When `grammar.js` changes, `make` triggers `tree-sitter generate` → `update_ts_enum.sh` → recompile dependent sources.
@@ -339,7 +339,7 @@ The Makefile tracks this entire chain automatically. When `grammar.js` changes, 
        break;
    ```
 
-4. **Update transpiler(s)** — add code generation in `lambda/transpile.cpp` (C path) and/or `lambda/transpile-mir.cpp` (direct MIR path) for the new AST node.
+4. **Update the transpiler** — add MIR generation in `lambda/transpile-mir.cpp` for the new AST node. `lambda/transpile.cpp` is archived C2MIR source and is not an implementation target.
 
 5. **Build and test**:
    ```bash
@@ -385,11 +385,9 @@ These follow the same `grammar.js` → `parser.c` pattern and are built as stati
 
 Lambda uses [MIR](https://github.com/vnmakarov/mir) (Medium Internal Representation) by Vladimir Makarov for JIT compilation, achieving near-native performance.
 
-### Two JIT Paths
+### Supported JIT Path and Archived Backend
 
-Lambda provides two compilation paths from AST to machine code:
-
-#### Path 1: C2MIR (AST → C source → MIR → machine code)
+#### Archived: C2MIR (AST → C source → MIR → machine code)
 
 ```
 Lambda AST  ──→  transpile.cpp  ──→  C source code string
@@ -400,11 +398,12 @@ Lambda AST  ──→  transpile.cpp  ──→  C source code string
                                    C2MIR compiler  ──→  MIR IR  ──→  machine code
 ```
 
-- `lambda/transpile.cpp` generates C source code from the Lambda AST.
+- `lambda/transpile.cpp` contains the retired C source generator. It and
+  `transpile-call.cpp` are excluded from core and Jube builds.
 - `lambda/mir.c` feeds this C source into the C2MIR compiler character-by-character via `getc_func()`.
 - The C2MIR frontend parses the C code into MIR IR, which is then compiled to native machine code.
 
-#### Path 2: Direct MIR (AST → MIR IR → machine code)
+#### Supported: Direct MIR (AST → MIR IR → machine code)
 
 ```
 Lambda AST  ──→  transpile-mir.cpp  ──→  MIR instructions (MIR_MOV, MIR_ADD, MIR_CALL, ...)
@@ -416,15 +415,16 @@ Lambda AST  ──→  transpile-mir.cpp  ──→  MIR instructions (MIR_MOV, 
 - `lambda/transpile-mir.cpp` emits MIR IR instructions directly via the MIR C API.
 - No intermediate C code is involved — instructions like `MIR_MOV`, `MIR_ADD`, `MIR_CALL` are built directly.
 
-Both paths share the same set of runtime functions registered in `mir.c`.
+Legacy C2MIR source shares runtime declarations with MIR Direct, but it is not
+part of the supported build or test matrix.
 
 ### Key Files
 
 | File | Role |
 |------|------|
-| `lambda/transpile.cpp` | Generates C source from Lambda AST (C2MIR path) |
+| `lambda/transpile.cpp` | Archived C2MIR source generator (not built) |
 | `lambda/transpile-mir.cpp` | Emits MIR IR directly from Lambda AST (direct path) |
-| `lambda/mir.c` | C bridge: runtime function registry + C2MIR feeder |
+| `lambda/mir.c` | MIR context, runtime import registry, linking, and code generation |
 | `lambda/lambda.h` | C API header — function signatures callable from JIT code |
 | `include/mir.h` | MIR library API (upstream, v0.2) |
 | `build_temp/mir/` | MIR library source (built into `libmir.a`) |
@@ -448,7 +448,7 @@ When adding new runtime functions:
    ```c
    {"my_new_func", (void*)my_new_func},
    ```
-4. **Call** from transpiled code — either emit a C function call in `transpile.cpp`, or emit a `MIR_CALL` instruction in `transpile-mir.cpp`.
+4. **Call** from transpiled code — emit a `MIR_CALL` instruction in `transpile-mir.cpp`.
 
 ### MIR Transpiler Architecture (`transpile-mir.cpp`)
 
@@ -484,7 +484,7 @@ make test-mir                    # Run MIR JIT test suite
 ### Debugging JIT Code
 
 1. Check `./log.txt` for execution trace — JIT operations are logged.
-2. The generated C source (C2MIR path) is written to `temp/_transpiled_*.c` files for inspection.
+2. Inspect `temp/mir_dump.txt` for the generated MIR in a debug build.
 3. Use `lldb` for native debugging:
    ```bash
    lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- script.ls

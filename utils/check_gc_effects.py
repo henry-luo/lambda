@@ -49,9 +49,12 @@ VERIFIED_EXTERNAL_LEAVES = {
     "memcpy",
     "memset",
     "mpd_free",
+    "mpd_isinteger",
     "mpd_iszero",
+    "mpd_qget_ssize",
     "mpd_to_sci",
     "strtod",
+    "u2it",
 }
 
 # Inline Item/representation readers are methods rather than free functions,
@@ -65,6 +68,7 @@ VERIFIED_READER_METHODS = {
     "get_int56",
     "get_int64",
     "get_datetime",
+    "get_datetime_ptr",
     "get_num_sized_as_double",
     "get_num_sized_as_int64",
     "get_num_type",

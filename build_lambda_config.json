@@ -719,13 +719,14 @@
             ],
             "defines": [
                 "LAMBDA_JUBE",
-                "LAMBDA_C2MIR",
                 "LAMBDA_PYTHON",
                 "LAMBDA_BASH",
                 "LAMBDA_RUBY"
             ],
             "build_dir": "build_jube",
             "exclude_source_files": [
+                "lambda/transpile.cpp",
+                "lambda/transpile-call.cpp",
                 "radiant/rdt_vector_cg.mm",
                 "lambda/format/format_latex_html_v2.cpp",
                 "lambda/input/input-adoc.cpp",
@@ -4459,19 +4460,6 @@
                         "requires_lambda_exe": true,
                         "requires_jube_exe": true,
                         "icon": "🐚"
-                    },
-                    {
-                        "source": "test/test_c2mir_gtest.cpp",
-                        "name": "C2MIR JIT Execution Tests",
-                        "dependencies": [],
-                        "binary": "test_c2mir_gtest.exe",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "requires_lambda_exe": true,
-                        "requires_jube_exe": true,
-                        "icon": "⚡"
                     },
                     {
                         "source": "test/test_js_test262_gtest.cpp",

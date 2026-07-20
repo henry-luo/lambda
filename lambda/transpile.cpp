@@ -29,6 +29,7 @@ void transpile_box_capture(Transpiler* tp, FnCapture* cap, bool from_outer_env);
 void transpile_query_expr(Transpiler* tp, AstQueryNode *query_node);
 void infer_proc_param_types_from_callsites(Transpiler* tp, AstScript* script);
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_global);
+bool c2mir_sys_call_returns_boxed_item(AstCallNode* call);
 
 static bool expr_produces_native_ptr(AstNode* expr);
 static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* field);
@@ -75,7 +76,7 @@ static const TypeBoxInfo type_box_table[] = {
     {LMD_TYPE_INT64,      "int64_t",   "it2l",     "box_int64_value",  "const_l2it",  "0"},
     {LMD_TYPE_UINT64,     "uint64_t",  "it2u",     "box_uint64_value", NULL,          "0"},
     {LMD_TYPE_FLOAT,      "double",    "it2d",     "push_d",  "const_d2it",  "0.0"},
-    {LMD_TYPE_DTIME,      "DateTime",  "it2k",     "push_k",  "const_k2it",  "{0}"},
+    {LMD_TYPE_DTIME,      "DateTime*", "it2k",     "k2it",    "const_k2it",  "NULL"},
     {LMD_TYPE_DECIMAL,    "Decimal*",  "it2c",     "c2it",    "const_c2it",  "NULL"},
     // string-like types
     {LMD_TYPE_STRING,     "String*",   "it2s",     "s2it",    "const_s2it",  "NULL"},
@@ -808,12 +809,12 @@ static bool is_idiv_expr(AstNode* node) {
     if (node->node_type != AST_NODE_BINARY) return false;
     AstBinaryNode* bin = (AstBinaryNode*)node;
     if (bin->op != OPERATOR_IDIV) return false;
-    // When both operands are INT/INT64, transpiler uses fn_idiv_i which returns
+    // When both operands are semantic INT, transpiler uses fn_idiv_i which returns
     // native int64_t — no need for it2i unboxing. Only return true when the
     // boxed fn_idiv() path is used (returns Item).
     TypeId lt = bin->left->type ? bin->left->type->type_id : LMD_TYPE_ANY;
     TypeId rt = bin->right->type ? bin->right->type->type_id : LMD_TYPE_ANY;
-    bool both_int = is_integer_type_id(lt) && is_integer_type_id(rt);
+    bool both_int = lt == LMD_TYPE_INT && rt == LMD_TYPE_INT;
     return !both_int;  // true only when boxed fn_idiv() is used
 }
 
@@ -829,39 +830,28 @@ static bool binary_already_returns_item(AstNode* node) {
     AstBinaryNode* bin_node = (AstBinaryNode*)node;
     TypeId lt = bin_node->left->type ? bin_node->left->type->type_id : LMD_TYPE_ANY;
     TypeId rt = bin_node->right->type ? bin_node->right->type->type_id : LMD_TYPE_ANY;
-    bool both_numeric = is_native_numeric_type_id(lt) &&
-                         is_native_numeric_type_id(rt);
+    bool both_int = lt == LMD_TYPE_INT && rt == LMD_TYPE_INT;
+    bool both_float = lt == LMD_TYPE_FLOAT && rt == LMD_TYPE_FLOAT;
+    bool int_float = (lt == LMD_TYPE_INT && rt == LMD_TYPE_FLOAT) ||
+                     (lt == LMD_TYPE_FLOAT && rt == LMD_TYPE_INT);
 
     switch (bin_node->op) {
     case OPERATOR_IDIV: {
-        // Native fn_idiv_i for INT/INT64 operands returns int64_t (needs boxing)
+        // Native fn_idiv_i for semantic int operands returns int64_t (needs boxing)
         // Boxed fn_idiv for other types returns Item (no boxing needed)
-        bool both_int = is_integer_type_id(lt) && is_integer_type_id(rt);
         return !both_int;
     }
     case OPERATOR_MOD:
-        // Native fn_mod_i (int) or fmod (float) for numeric operands returns native type
-        // Boxed fn_mod for non-numeric returns Item
-        return !both_numeric;
+        return !both_int;
     case OPERATOR_POW:
-        // Numeric → push_d(fn_pow_u(...)) returns double* which needs boxing
-        // Non-numeric → fn_pow returns Item
-        return !both_numeric;
+        return !(both_int || both_float || int_float);
     case OPERATOR_DIV:
-        // Numeric → native ((double)left/(double)right) returns double, needs boxing
-        // Non-numeric → fn_div returns Item
-        return !both_numeric;
+        return !(both_int || both_float || int_float);
     case OPERATOR_ADD:
     case OPERATOR_SUB:
     case OPERATOR_MUL: {
-        // Same numeric type → native C op → returns raw value
-        if (lt == rt && (is_native_numeric_type_id(lt))) {
-            return false;
-        }
-        // Both in numeric range → native C op
-        if (both_numeric) return false;
-        // Otherwise, fn_add/fn_sub/fn_mul are used → returns Item
-        return true;
+        // compact int arithmetic is boxed because overflow may become float.
+        return !(both_float || int_float);
     }
     default:
         return false;
@@ -892,6 +882,15 @@ static bool direct_call_returns_item(AstNode* node) {
     // body uses Item-level operations → returns Item effectively
     if (fn_node->param && !has_typed_params(fn_node)) return true;
     return false;
+}
+
+static bool specialized_sys_call_returns_item(AstNode* node) {
+    if (node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (primary->expr) node = primary->expr;
+    }
+    return node->node_type == AST_NODE_CALL_EXPR &&
+        c2mir_sys_call_returns_boxed_item((AstCallNode*)node);
 }
 
 // Table-driven scalar boxing: handles BOOL, INT, INT64, FLOAT, DTIME, DECIMAL,
@@ -939,7 +938,8 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
 
     // fn_call* dispatch always returns Item — skip boxing to avoid double-boxing
     // Also skip for binary exprs and direct calls that already return Item
-    if (is_dynamic_fn_call(item) || binary_already_returns_item(item) || direct_call_returns_item(item)) {
+    if (is_dynamic_fn_call(item) || binary_already_returns_item(item) ||
+            direct_call_returns_item(item) || specialized_sys_call_returns_item(item)) {
         transpile_expr(tp, item);
         return;
     }
@@ -1072,6 +1072,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             // It's stored as Item type, so just emit the expression directly
             transpile_expr(tp, item);
         }
+        break;
+    case LMD_TYPE_NUM_SIZED:
+        // Compact sized values are already self-describing Items.
+        transpile_expr(tp, item);
         break;
     case LMD_TYPE_BOOL:  case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_UINT64:
     case LMD_TYPE_FLOAT:  case LMD_TYPE_DTIME:  case LMD_TYPE_DECIMAL:
@@ -1429,8 +1433,9 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 strbuf_append_char(tp->code_buf, ')');
             }
             else if (pri_node->type->type_id == LMD_TYPE_DTIME) {
-                // Datetime literals materialize as GC objects at runtime.
-                strbuf_append_str(tp->code_buf, "push_k(const_k(");
+                // Datetime locals retain the GC-owned object pointer; copying
+                // the old one-word payload would make its layout part of C2MIR ABI.
+                strbuf_append_str(tp->code_buf, "it2k(const_k2it(");
                 TypeDateTime *dt_type = (TypeDateTime*)pri_node->type;
                 strbuf_append_int(tp->code_buf, dt_type->const_index);
                 strbuf_append_str(tp->code_buf, "))");
@@ -1440,8 +1445,22 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 strbuf_append_str(tp->code_buf, "LL");  // Lambda INT is 56-bit; ensure C2MIR uses long long
             }
             else if (pri_node->type->type_id == LMD_TYPE_INT64) {
-                write_node_source(tp, pri_node->node);
-                strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
+                TypeConst* int64_type = (TypeConst*)pri_node->type;
+                strbuf_append_str(tp->code_buf, "(*(int64_t*)_const_pool[");
+                strbuf_append_int(tp->code_buf, int64_type->const_index);
+                strbuf_append_str(tp->code_buf, "])");
+            }
+            else if (pri_node->type->type_id == LMD_TYPE_UINT64) {
+                TypeConst* uint64_type = (TypeConst*)pri_node->type;
+                strbuf_append_str(tp->code_buf, "(*(uint64_t*)_const_pool[");
+                strbuf_append_int(tp->code_buf, uint64_type->const_index);
+                strbuf_append_str(tp->code_buf, "])");
+            }
+            else if (pri_node->type->type_id == LMD_TYPE_NUM_SIZED) {
+                TypeNumSized* sized_type = (TypeNumSized*)pri_node->type;
+                strbuf_append_format(tp->code_buf,
+                    "((Item)NUM_SIZED_PACK(%u,%u))",
+                    (unsigned)sized_type->num_type, (unsigned)sized_type->raw_bits);
             }
             else if (pri_node->type->type_id == LMD_TYPE_FLOAT) {
                 TypeFloat *f_type = (TypeFloat*)pri_node->type;
@@ -1585,8 +1604,11 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         }
     }
     else if (bi_node->op == OPERATOR_POW) {
-        // Use unboxed pow when both operands are numeric
-        if (is_numeric_type(left_type) && is_numeric_type(right_type)) {
+        // Full-width integers enter the exact integer/decimal domain; only
+        // compact int/float operands may use the native double helper.
+        bool native_domain = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
+            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
+        if (native_domain) {
             strbuf_append_str(tp->code_buf, "push_d(fn_pow_u((double)(");
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, "),(double)(");
@@ -1602,19 +1624,10 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         }
     }
     else if (bi_node->op == OPERATOR_ADD) {
-        if (left_type == right_type) {
-            if (is_native_numeric_type_id(left_type)) {
-                strbuf_append_str(tp->code_buf, "(");
-                transpile_expr(tp, bi_node->left);
-                strbuf_append_char(tp->code_buf, '+');
-                transpile_expr(tp, bi_node->right);
-                strbuf_append_char(tp->code_buf, ')');
-                return;
-            }
-            // else let fn_add() handle it
-        }
-        else if (is_native_numeric_type_id(left_type) &&
-            is_native_numeric_type_id(right_type)) {
+        bool native_float = (left_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_FLOAT) &&
+            (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
+            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
+        if (native_float) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, '+');
@@ -1630,8 +1643,10 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_SUB) {
-        if (is_native_numeric_type_id(left_type) &&
-            is_native_numeric_type_id(right_type)) {
+        bool native_float = (left_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_FLOAT) &&
+            (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
+            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
+        if (native_float) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, '-');
@@ -1647,8 +1662,10 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_MUL) {
-        if (is_native_numeric_type_id(left_type) &&
-            is_native_numeric_type_id(right_type)) {
+        bool native_float = (left_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_FLOAT) &&
+            (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
+            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
+        if (native_float) {
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, '*');
@@ -1665,8 +1682,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_MOD) {
         // Native fast path for typed integer mod (fn_mod_i handles div-by-zero)
-        if (is_integer_type_id(left_type) &&
-            is_integer_type_id(right_type)) {
+        if (left_type == LMD_TYPE_INT && right_type == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "fn_mod_i((int64_t)(");
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, "),(int64_t)(");
@@ -1674,17 +1690,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             strbuf_append_str(tp->code_buf, "))");
             return;
         }
-        // Native fast path for typed float mod
-        if (is_native_numeric_type_id(left_type) &&
-            is_native_numeric_type_id(right_type)) {
-            strbuf_append_str(tp->code_buf, "fmod((double)(");
-            transpile_expr(tp, bi_node->left);
-            strbuf_append_str(tp->code_buf, "),(double)(");
-            transpile_expr(tp, bi_node->right);
-            strbuf_append_str(tp->code_buf, "))");
-            return;
-        }
-        // Fallback: boxed fn_mod() for unknown types
+        // Float modulo and all non-int domains are classified by the runtime.
         strbuf_append_str(tp->code_buf, "fn_mod(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -1692,8 +1698,9 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_DIV) {
-        if (is_native_numeric_type_id(left_type) &&
-            is_native_numeric_type_id(right_type)) {
+        bool native_domain = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
+            (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
+        if (native_domain) {
             strbuf_append_str(tp->code_buf, "((double)(");
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, ")/(double)(");
@@ -1710,8 +1717,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_IDIV) {
         // Native fast path for typed integer division (fn_idiv_i handles div-by-zero)
-        if (is_integer_type_id(left_type) &&
-            is_integer_type_id(right_type)) {
+        if (left_type == LMD_TYPE_INT && right_type == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "fn_idiv_i((int64_t)(");
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, "),(int64_t)(");
@@ -7077,7 +7083,7 @@ void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node) {
         case LMD_TYPE_SYMBOL:
             box_prefix = "ri_ok(y2it("; box_suffix = "))"; break;
         case LMD_TYPE_DTIME:
-            box_prefix = "ri_ok(push_k("; box_suffix = "))"; break;
+            box_prefix = "ri_ok(k2it("; box_suffix = "))"; break;
         case LMD_TYPE_DECIMAL:
             box_prefix = "ri_ok(c2it("; box_suffix = "))"; break;
         default:
@@ -7118,6 +7124,7 @@ void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node) {
             case LMD_TYPE_BOOL:   unbox_fn = "it2b("; break;
             case LMD_TYPE_STRING: unbox_fn = "it2s("; break;
             case LMD_TYPE_BINARY: unbox_fn = "it2x("; break;
+            case LMD_TYPE_DTIME:  unbox_fn = "it2k("; break;
             default: {
                 // container/pointer types: use safe type-checking unbox helpers
                 const char* container_fn = get_container_unbox_fn(param_type->type_id);
@@ -7202,7 +7209,7 @@ void transpile_box_capture(Transpiler* tp, FnCapture* cap, bool from_outer_env) 
         strbuf_append_str(tp->code_buf, "c2it(_");
         break;
     case LMD_TYPE_DTIME:
-        strbuf_append_str(tp->code_buf, "push_k(_");
+        strbuf_append_str(tp->code_buf, "k2it(_");
         break;
     default:
         // for container types (List*, Map*, etc.) and Item, cast to Item
@@ -8030,10 +8037,12 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
 // output — the OS catches stack overflow at the hardware/MMU level with zero overhead.
 
 void transpile_ast_root(Transpiler* tp, AstScript *script) {
-    // Define C2MIR runtime marker and declare memcpy before embedding lambda.h
-    // C2MIR doesn't support __builtin_memcpy, so we use memcpy with explicit declaration
+    // C2MIR doesn't support __builtin_memcpy, so declare its runtime import with
+    // a concrete 64-bit size parameter before lambda.h defines size_t.  Referring
+    // to size_t here made the parser fail before it reached lambda.h's typedef.
     strbuf_append_str(tp->code_buf, "#define LAMBDA_C2MIR_RUNTIME 1\n"
-                                     "extern void *memcpy(void *dest, const void *src, size_t n);\n");
+                                     "extern void *memcpy(void *dest, const void *src, unsigned long long n);\n"
+                                     "#define __builtin_memcpy memcpy\n");
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // Phase 2: No stack check code emitted — signal handler handles overflow
     // all (nested) function definitions need to be hoisted to global level

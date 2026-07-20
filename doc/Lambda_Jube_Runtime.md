@@ -5,15 +5,13 @@ Lambda ships as two build configurations from a single codebase:
 | Binary | Description |
 |--------|-------------|
 | `lambda.exe` | **Core** — Lambda + JavaScript/TypeScript + Radiant (HTML/CSS/SVG layout) |
-| `lambda-jube.exe` | **Polyglot** — everything in core, plus Python, Bash, Ruby, and the legacy C2MIR transpiler |
+| `lambda-jube.exe` | **Polyglot** — everything in core, plus Python, Bash, and Ruby |
 
 ## Why Two Builds?
 
 Lambda's core value is functional scripting, document processing, and the Radiant layout engine. JavaScript and TypeScript are tightly coupled to Radiant (DOM, CSSOM, event loop) and ship with core.
 
 Python, Bash, and Ruby are independent language runtimes that don't interact with Radiant. Bundling them into every build adds ~40 source files, 3 tree-sitter parsers, and several megabytes to the binary. Splitting them out keeps the core build focused and fast.
-
-The legacy C2MIR transpiler (Lambda AST → C code → c2mir → MIR → native) is similarly isolated to Jube, since the primary MIR Direct path (`transpile-mir.cpp`) is faster and doesn't require the C intermediate step.
 
 ## Why "Jube"?
 
@@ -48,7 +46,6 @@ Everything in core, plus:
 - Python runtime (`lambda/py/` — 17 files)
 - Bash runtime (`lambda/bash/` — 8 files)
 - Ruby runtime (`lambda/rb/` — 10 files)
-- Legacy C2MIR transpiler (`transpile.cpp`, `transpile-call.cpp`)
 - Serve backends for Python and Bash (`backend_python.cpp`, `flask_compat.*`, `asgi_bridge.*`)
 - Tree-sitter parsers: python, ruby, bash
 
@@ -61,8 +58,7 @@ The split is implemented with compile-time feature flags:
 | `LAMBDA_PYTHON` | Jube only | Python runtime, imports, CLI handler |
 | `LAMBDA_BASH` | Jube only | Bash runtime, imports, CLI handler |
 | `LAMBDA_RUBY` | Jube only | Ruby runtime, imports, CLI handler |
-| `LAMBDA_C2MIR` | Jube only | Legacy C2MIR transpiler, `--c2mir` CLI flag |
-| `LAMBDA_JUBE` | Jube only | Master flag (implies all above) |
+| `LAMBDA_JUBE` | Jube only | Polyglot runtime integration |
 
 The flags follow a consistent pattern across the codebase:
 
@@ -83,13 +79,10 @@ The flags follow a consistent pattern across the codebase:
 ```
 
 Files guarded:
-- `lambda/main.cpp` — includes, CLI command handlers, `--c2mir` flag, REPL C2MIR branch
-- `lambda/main-repl.cpp` — C2MIR references in help text
+- `lambda/main.cpp` — language includes and CLI command handlers
 - `lambda/sys_func_registry.c` — language-specific function registrations
 - `lambda/build_ast.cpp` — `load_py_module` and parser references
 - `lambda/transpiler.hpp` — `jit_compile_to_mir()` and `load_py_module` declarations
-- `lambda/runner.cpp` — C2MIR transpile branch, `print_ts_root()` debug call
-- `lambda/mir.c` — `c2mir.h` include, `c2mir_init/finish`, `jit_compile_to_mir()`
 - `lambda/module_registry.cpp` — cross-language import helpers
 - `lambda/serve/language_backend.cpp` — conditional backend registration
 
@@ -104,7 +97,8 @@ Both builds are defined in a single `build_lambda_config.json`. The Jube variant
         "jube": {
             "output": "lambda-jube.exe",
             "source_dirs": ["lambda/py", "lambda/bash", "lambda/rb"],
-            "defines": ["LAMBDA_JUBE", "LAMBDA_C2MIR", "LAMBDA_PYTHON", "LAMBDA_BASH", "LAMBDA_RUBY"],
+            "defines": ["LAMBDA_JUBE", "LAMBDA_PYTHON", "LAMBDA_BASH", "LAMBDA_RUBY"],
+            "exclude_source_files": ["lambda/transpile.cpp", "lambda/transpile-call.cpp"],
             "additional_libraries": [
                 {"name": "tree-sitter-python", "lib": "lambda/tree-sitter-python/libtree-sitter-python.a"},
                 {"name": "tree-sitter-ruby",   "lib": "lambda/tree-sitter-ruby/libtree-sitter-ruby.a"},
@@ -115,7 +109,7 @@ Both builds are defined in a single `build_lambda_config.json`. The Jube variant
 }
 ```
 
-The top-level config excludes `lambda/py`, `lambda/bash`, `lambda/rb` from `source_dirs` and does not define any language flags. The core build also excludes `transpile.cpp` and `transpile-call.cpp` (the C2MIR path), using `transpile_shared.cpp` to provide the shared utility functions needed by `transpile-mir.cpp`.
+The top-level config excludes `lambda/py`, `lambda/bash`, `lambda/rb` from `source_dirs` and does not define any language flags. Both builds exclude the retired `transpile.cpp` and `transpile-call.cpp` C2MIR backend, using `transpile_shared.cpp` for utilities shared with MIR Direct.
 
 ---
 
@@ -138,7 +132,7 @@ make test-radiant-baseline  # Radiant baseline only (must pass 100%)
 make build-jube             # Debug build → lambda-jube.exe
 make release-jube           # Release build → release/lambda-jube.exe
 make build-jube-test        # Build jube + test executables
-make test-jube              # Run jube-specific tests (Python, Bash, Ruby, C2MIR)
+make test-jube              # Run jube-specific tests (Python, Bash, Ruby)
 make test-all               # Run ALL test suites (core + jube)
 ```
 
@@ -157,14 +151,11 @@ Jube `lambda-jube.exe` adds:
 lambda-jube py script.py      # Run Python script
 lambda-jube bash script.sh    # Run Bash script
 lambda-jube rb script.rb      # Run Ruby script
-lambda-jube --c2mir script.ls # Run with legacy C2MIR JIT
 ```
 
 ---
 
-## JIT Compilation: MIR Direct vs. C2MIR
-
-Lambda has two JIT compilation paths:
+## JIT Compilation
 
 ### MIR Direct (core — default)
 
@@ -174,18 +165,17 @@ Lambda AST → transpile-mir.cpp → MIR API calls → MIR optimize → native c
 
 The primary JIT path. Translates Lambda AST directly into MIR intermediate representation via API calls. Faster compilation, no intermediate files, no C parsing overhead. Available in both `lambda.exe` and `lambda-jube.exe`.
 
-### C2MIR (jube only — legacy)
+### Retired C2MIR source
 
 ```
 Lambda AST → transpile.cpp → C source code → c2mir_compile() → MIR → native code
 ```
 
-The original JIT path. Transpiles Lambda AST to C code, then compiles the C code through MIR's C-to-MIR compiler. Produces a readable C intermediate (useful for debugging), but has higher compilation overhead. Available only in `lambda-jube.exe` via the `--c2mir` flag.
-
-The C2MIR path is retained in Jube for:
-- Debugging and diagnostics (the generated C code is human-readable)
-- Regression testing against the MIR Direct path
-- `--transpile-dir` / `--transpile-only` flags for inspecting generated C output
+This was the original JIT path. Its source remains in the repository as legacy
+reference code, but it is excluded from core and Jube build configurations and
+from the generated test projects. `--c2mir` is therefore not an available
+backend in supported binaries; numeric and runtime changes are gated on MIR
+Direct only.
 
 ---
 
@@ -200,8 +190,8 @@ The C2MIR path is retained in Jube for:
 
 ## Platform Matrix
 
-| Platform | Lambda | JS/TS | Radiant | Python | Bash | Ruby | C2MIR |
-|----------|:------:|:-----:|:-------:|:------:|:----:|:----:|:-----:|
-| `default` (lambda.exe) | ✅ | ✅ | ✅ | — | — | — | — |
-| `jube` (lambda-jube.exe) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cli` | ✅ | ✅ | — | — | — | — | — |
+| Platform | Lambda | JS/TS | Radiant | Python | Bash | Ruby |
+|----------|:------:|:-----:|:-------:|:------:|:----:|:----:|
+| `default` (lambda.exe) | ✅ | ✅ | ✅ | — | — | — |
+| `jube` (lambda-jube.exe) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cli` | ✅ | ✅ | — | — | — | — |

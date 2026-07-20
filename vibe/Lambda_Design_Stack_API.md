@@ -193,7 +193,8 @@ This proposal does not:
   ownership when an existing or future lowering emits a physical tail edge;
 - redesign the GC allocator or collector; Phase 7 may change which scalar
   payloads use it, but not how it operates;
-- change C2MIR. C2MIR remains a compatibility path and is left as-is.
+- change the archived C2MIR source. C2MIR is excluded from supported build and
+  test configurations; its source is left as historical reference only.
 
 ## 3. Current implementation and the missing boundary
 
@@ -1610,9 +1611,9 @@ must not be added while a runtime-indirect pointer can still target the body.
 - deleted the transitional representation paths after old and new
   encodings cannot be mixed inside one runtime.
 
-Phase 7 changed the shared runtime `Item` representation. C2MIR does not gain
-the hidden caller-home ABI; it remains a compatibility path against the new
-runtime producers and decoders.
+Phase 7 changed the shared runtime `Item` representation. The archived C2MIR
+source does not gain the hidden caller-home ABI and is not a build, test, or
+compatibility target.
 
 ## 13. Verification and acceptance gates
 
@@ -1711,6 +1712,13 @@ sharp is what allows the implementation to be both shared and fast.
 for persistent slots without a natural owner. The general direction is that `DOUBLE`,
 `INT64`, and `UINT64` ultimately have no standalone heap representation and are
 not GC-rootable value classes; that final step is deferred.
+
+The 2026-07-20 number-model follow-up is also implemented. It leaves this
+physical ownership matrix intact while removing magnitude-directed arithmetic
+promotion: compact sized integers enter `int`, and every `INT64`/`UINT64`
+enters `integer` when an operation leaves the sized domain. Exact semantic
+conversion to a GC-owned `integer`/`decimal` is a result-domain change, not a
+heap representation for the original full-width sized value.
 
 Before Phase 7, small `INT64` values could be inline, wide `INT64` and `DTIME`
 could use the number stack, and `UINT64` was heap-backed. Phase 7 replaced that

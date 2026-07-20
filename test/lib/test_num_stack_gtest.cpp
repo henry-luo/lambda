@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 #include <cstring>
+#include "../../lambda/lambda-number.hpp"
 
 extern "C" {
 #include "../../lib/num_stack.h"
-#include "../../lib/datetime.h"
 #include "../../lib/log.h"
 }
 
@@ -57,21 +57,6 @@ TEST_F(NumStackTest, PushDoubleValues) {
     EXPECT_NE(val2, nullptr) << "second push double should return valid pointer";
     EXPECT_DOUBLE_EQ(*val2, -2.71828) << "second pushed double value should be correct";
     EXPECT_EQ(num_stack_length(stack), 2UL) << "stack length should be 2";
-}
-
-TEST_F(NumStackTest, PushDateTimeValues) {
-    // Test pushing DateTime values
-    DateTime dt = {0};
-    dt.year_month = 2025 * 16 + 8; // Year 2025, Month 8
-    dt.day = 15;
-    dt.hour = 10;
-    dt.minute = 30;
-    
-    DateTime* val = num_stack_push_datetime(stack, dt);
-    EXPECT_NE(val, nullptr) << "push datetime should return valid pointer";
-    EXPECT_EQ(val->day, 15UL) << "pushed datetime day should be correct";
-    EXPECT_EQ(val->hour, 10UL) << "pushed datetime hour should be correct";
-    EXPECT_EQ(num_stack_length(stack), 1UL) << "stack length should be 1";
 }
 
 TEST_F(NumStackTest, PeekOperations) {
@@ -278,6 +263,163 @@ TEST_F(NumStackTest, ResetToIndexEdgeCases) {
     num_stack_reset_to_index(stack, 0);
     EXPECT_EQ(num_stack_length(stack), 0UL) << "reset to 0 should clear stack";
     EXPECT_TRUE(num_stack_is_empty(stack)) << "stack should be empty after reset to 0";
+}
+
+TEST(LambdaNumericClassifier, SizedLaneAndSemanticDomainAnchors) {
+    LambdaNumericDecision decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_ADD, LAMBDA_NUM_I8, LAMBDA_NUM_U8);
+    ASSERT_TRUE(decision.valid);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_I16);
+    EXPECT_EQ(decision.overflow, LAMBDA_NUM_OVERFLOW_SIZED_WRAP);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_ADD, LAMBDA_NUM_I32, LAMBDA_NUM_U32);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_I64);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_ADD, LAMBDA_NUM_I64, LAMBDA_NUM_U64);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_U64);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_ADD, LAMBDA_NUM_U8, LAMBDA_NUM_INT);
+    EXPECT_EQ(decision.left_domain, LAMBDA_NUM_INT);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_INT);
+    EXPECT_EQ(decision.overflow, LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_ADD, LAMBDA_NUM_U64, LAMBDA_NUM_INT);
+    EXPECT_EQ(decision.left_domain, LAMBDA_NUM_INTEGER);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_INTEGER);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_ADD, LAMBDA_NUM_I64, LAMBDA_NUM_FLOAT);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_DECIMAL);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_SHIFT, LAMBDA_NUM_U8, LAMBDA_NUM_INT);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_U8);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_SHIFT, LAMBDA_NUM_U64, LAMBDA_NUM_INT);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_U64);
+}
+
+TEST(LambdaNumericClassifier, DivisionIsSelectedFromCompleteDomains) {
+    LambdaNumericDecision decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_TRUE_DIV, LAMBDA_NUM_I8, LAMBDA_NUM_U8);
+    ASSERT_TRUE(decision.valid);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_FLOAT);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_TRUE_DIV, LAMBDA_NUM_I64, LAMBDA_NUM_U64);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_DECIMAL);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_TRUE_DIV, LAMBDA_NUM_INT, LAMBDA_NUM_INT);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_FLOAT);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_TRUE_DIV, LAMBDA_NUM_INTEGER, LAMBDA_NUM_INTEGER);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_DECIMAL);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_IDIV, LAMBDA_NUM_INTEGER, LAMBDA_NUM_INT);
+    EXPECT_EQ(decision.result, LAMBDA_NUM_INTEGER);
+
+    decision = lambda_numeric_classify(
+        LAMBDA_NUM_OP_IDIV, LAMBDA_NUM_FLOAT, LAMBDA_NUM_INT);
+    EXPECT_FALSE(decision.valid);
+}
+
+TEST(LambdaNumericClassifier, ArithmeticFamiliesCoverEveryPairSymmetrically) {
+    const LambdaNumericKind kinds[] = {
+        LAMBDA_NUM_INT, LAMBDA_NUM_INTEGER, LAMBDA_NUM_FLOAT, LAMBDA_NUM_DECIMAL,
+        LAMBDA_NUM_I8, LAMBDA_NUM_I16, LAMBDA_NUM_I32, LAMBDA_NUM_I64,
+        LAMBDA_NUM_U8, LAMBDA_NUM_U16, LAMBDA_NUM_U32, LAMBDA_NUM_U64,
+        LAMBDA_NUM_F16, LAMBDA_NUM_F32,
+    };
+    const LambdaNumericOpFamily families[] = {
+        LAMBDA_NUM_OP_ADD, LAMBDA_NUM_OP_SUB, LAMBDA_NUM_OP_MUL,
+        LAMBDA_NUM_OP_TRUE_DIV, LAMBDA_NUM_OP_IDIV, LAMBDA_NUM_OP_MOD,
+        LAMBDA_NUM_OP_BITWISE,
+    };
+    for (size_t op_index = 0; op_index < sizeof(families) / sizeof(families[0]); op_index++) {
+        for (size_t left = 0; left < sizeof(kinds) / sizeof(kinds[0]); left++) {
+            for (size_t right = 0; right < sizeof(kinds) / sizeof(kinds[0]); right++) {
+                LambdaNumericDecision forward = lambda_numeric_classify(
+                    families[op_index], kinds[left], kinds[right]);
+                LambdaNumericDecision reverse = lambda_numeric_classify(
+                    families[op_index], kinds[right], kinds[left]);
+                EXPECT_EQ(forward.valid, reverse.valid);
+                EXPECT_EQ(forward.result, reverse.result);
+                EXPECT_EQ(forward.overflow, reverse.overflow);
+                EXPECT_EQ(forward.left_domain, reverse.right_domain);
+                EXPECT_EQ(forward.right_domain, reverse.left_domain);
+            }
+        }
+    }
+}
+
+TEST(LambdaNumericClassifier, EverySizedIntegerPairHasTheSpecifiedLane) {
+    const LambdaNumericKind sized[] = {
+        LAMBDA_NUM_I8, LAMBDA_NUM_I16, LAMBDA_NUM_I32, LAMBDA_NUM_I64,
+        LAMBDA_NUM_U8, LAMBDA_NUM_U16, LAMBDA_NUM_U32, LAMBDA_NUM_U64,
+    };
+    const LambdaNumericKind expected[8][8] = {
+        {LAMBDA_NUM_I8,  LAMBDA_NUM_I16, LAMBDA_NUM_I32, LAMBDA_NUM_I64, LAMBDA_NUM_I16, LAMBDA_NUM_I32, LAMBDA_NUM_I64, LAMBDA_NUM_U64},
+        {LAMBDA_NUM_I16, LAMBDA_NUM_I16, LAMBDA_NUM_I32, LAMBDA_NUM_I64, LAMBDA_NUM_I16, LAMBDA_NUM_I32, LAMBDA_NUM_I64, LAMBDA_NUM_U64},
+        {LAMBDA_NUM_I32, LAMBDA_NUM_I32, LAMBDA_NUM_I32, LAMBDA_NUM_I64, LAMBDA_NUM_I32, LAMBDA_NUM_I32, LAMBDA_NUM_I64, LAMBDA_NUM_U64},
+        {LAMBDA_NUM_I64, LAMBDA_NUM_I64, LAMBDA_NUM_I64, LAMBDA_NUM_I64, LAMBDA_NUM_I64, LAMBDA_NUM_I64, LAMBDA_NUM_I64, LAMBDA_NUM_U64},
+        {LAMBDA_NUM_I16, LAMBDA_NUM_I16, LAMBDA_NUM_I32, LAMBDA_NUM_I64, LAMBDA_NUM_U8,  LAMBDA_NUM_U16, LAMBDA_NUM_U32, LAMBDA_NUM_U64},
+        {LAMBDA_NUM_I32, LAMBDA_NUM_I32, LAMBDA_NUM_I32, LAMBDA_NUM_I64, LAMBDA_NUM_U16, LAMBDA_NUM_U16, LAMBDA_NUM_U32, LAMBDA_NUM_U64},
+        {LAMBDA_NUM_I64, LAMBDA_NUM_I64, LAMBDA_NUM_I64, LAMBDA_NUM_I64, LAMBDA_NUM_U32, LAMBDA_NUM_U32, LAMBDA_NUM_U32, LAMBDA_NUM_U64},
+        {LAMBDA_NUM_U64, LAMBDA_NUM_U64, LAMBDA_NUM_U64, LAMBDA_NUM_U64, LAMBDA_NUM_U64, LAMBDA_NUM_U64, LAMBDA_NUM_U64, LAMBDA_NUM_U64},
+    };
+    const LambdaNumericOpFamily integral_families[] = {
+        LAMBDA_NUM_OP_ADD, LAMBDA_NUM_OP_SUB, LAMBDA_NUM_OP_MUL,
+        LAMBDA_NUM_OP_IDIV, LAMBDA_NUM_OP_MOD, LAMBDA_NUM_OP_BITWISE,
+    };
+    for (size_t family = 0; family < sizeof(integral_families) / sizeof(integral_families[0]); family++) {
+        for (size_t left = 0; left < 8; left++) {
+            for (size_t right = 0; right < 8; right++) {
+                LambdaNumericDecision decision = lambda_numeric_classify(
+                    integral_families[family], sized[left], sized[right]);
+                ASSERT_TRUE(decision.valid);
+                EXPECT_EQ(decision.result, expected[left][right]);
+                EXPECT_EQ(decision.overflow, LAMBDA_NUM_OVERFLOW_SIZED_WRAP);
+            }
+        }
+    }
+    for (size_t left = 0; left < 8; left++) {
+        for (size_t right = 0; right < 8; right++) {
+            LambdaNumericDecision shift = lambda_numeric_classify(
+                LAMBDA_NUM_OP_SHIFT, sized[left], sized[right]);
+            ASSERT_TRUE(shift.valid);
+            EXPECT_EQ(shift.result, sized[left]);
+
+            LambdaNumericDecision division = lambda_numeric_classify(
+                LAMBDA_NUM_OP_TRUE_DIV, sized[left], sized[right]);
+            ASSERT_TRUE(division.valid);
+            bool has_full_lane = left == 3 || left == 7 || right == 3 || right == 7;
+            EXPECT_EQ(division.result,
+                has_full_lane ? LAMBDA_NUM_DECIMAL : LAMBDA_NUM_FLOAT);
+        }
+    }
+}
+
+TEST(LambdaNumericClassifier, ExactEmbeddingLatticeRejectsLossyWidening) {
+    EXPECT_TRUE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_I8, LAMBDA_NUM_F16));
+    EXPECT_TRUE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_U8, LAMBDA_NUM_F16));
+    EXPECT_FALSE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_I16, LAMBDA_NUM_F16));
+    EXPECT_TRUE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_I16, LAMBDA_NUM_F32));
+    EXPECT_TRUE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_U16, LAMBDA_NUM_F32));
+    EXPECT_FALSE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_I32, LAMBDA_NUM_F32));
+    EXPECT_TRUE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_I32, LAMBDA_NUM_FLOAT));
+    EXPECT_TRUE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_U32, LAMBDA_NUM_FLOAT));
+    EXPECT_FALSE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_I64, LAMBDA_NUM_FLOAT));
+    EXPECT_FALSE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_U64, LAMBDA_NUM_FLOAT));
+    EXPECT_TRUE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_I64, LAMBDA_NUM_INTEGER));
+    EXPECT_TRUE(lambda_numeric_kind_exactly_embeds(LAMBDA_NUM_U64, LAMBDA_NUM_INTEGER));
 }
 
 // Missing test 5: Null pointer handling

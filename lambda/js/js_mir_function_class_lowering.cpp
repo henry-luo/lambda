@@ -858,6 +858,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 jm_function_clear_shadowed_capture_binding(hvar);
                             }
                             hvar->from_hoist = true;
+                            // A child closure may need to distinguish this var
+                            // from a nested same-named lexical binding.
+                            hvar->binding_start = e->binding_start;
+                            hvar->binding_end = e->binding_end;
                         }
                     }
                 }
@@ -2268,6 +2272,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     MIR_item_t saved_item = mt->em.func_item;
     MIR_func_t saved_func = mt->em.func;
     int saved_scope_depth = mt->scope_depth;
+    int saved_var_hoist_depth = mt->var_hoist_depth;
     int saved_loop_depth = mt->loop_depth;
     bool saved_in_native = mt->in_native_func;
     bool saved_in_main = mt->in_main;
@@ -2283,6 +2288,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->current_func_index = (int)(fc - mt->func_entries);
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
+    // A function's implicit bindings, including `arguments`, must not inherit
+    // an enclosing var-hoist target left by nested statement lowering.
+    mt->var_hoist_depth = -1;
     mt->eval_completion_reg = 0;  // disable completion tracking in function bodies
     mt->eval_local_frame_reg = 0;
     mt->last_closure_has_env = false;  // clear stale closure env from previous function
@@ -3221,6 +3229,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                                 jm_function_clear_shadowed_capture_binding(hvar);
                             }
                             hvar->from_hoist = true;
+                            // A child closure may need to distinguish this var
+                            // from a nested same-named lexical binding.
+                            hvar->binding_start = e->binding_start;
+                            hvar->binding_end = e->binding_end;
                         }
                     }
                 }
@@ -3786,6 +3798,7 @@ finish_boxed:
     mt->em.func_item = saved_item;
     mt->em.func = saved_func;
     mt->scope_depth = saved_scope_depth;
+    mt->var_hoist_depth = saved_var_hoist_depth;
     mt->loop_depth = saved_loop_depth;
     mt->in_native_func = saved_in_native;
     mt->in_main = saved_in_main;

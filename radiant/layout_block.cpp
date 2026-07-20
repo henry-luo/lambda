@@ -1145,8 +1145,9 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
             }
         }
 
-        // Copy pseudo-element styles to the pseudo element itself
-        pseudo_elem->specified_style = pseudo_styles;
+        // The originating element retains the pseudo declaration tree across
+        // generated-box rebuilds; the box only borrows it for style resolution.
+        dom_element_borrow_specified_style(pseudo_elem, pseudo_styles);
     }
 
     bool has_counter_content = false;
@@ -1546,7 +1547,8 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     }
 
     // Assign the first-letter styles for CSS resolution
-    fl_elem->specified_style = elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER);
+    dom_element_borrow_specified_style(
+        fl_elem, elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER));
 
     // Create text content for the first-letter pseudo-element
     char* fl_text = (char*)pool_calloc(pool, boundary + 1);
@@ -3691,18 +3693,6 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
  * Insert pseudo-element into DOM tree at appropriate position
  * ::before is inserted as first child, ::after as last child
  */
-static bool dom_subtree_contains_node(DomNode* root, DomNode* target) {
-    if (!root || !target) return false;
-    if (root == target) return true;
-    if (!root->is_element()) return false;
-
-    DomElement* element = lam::dom_require_element(root);
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (dom_subtree_contains_node(child, target)) return true;
-    }
-    return false;
-}
-
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
     if (!parent || !pseudo) return;
 
@@ -3801,7 +3791,9 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
               is_before ? "::before" : "::after");
 
     // Copy pseudo-element-specific styles (::before or ::after styles)
-    pseudo_elem->specified_style = is_before ? parent_elem->pseudo_style(PSEUDO_STYLE_BEFORE) : parent_elem->pseudo_style(PSEUDO_STYLE_AFTER);
+    dom_element_borrow_specified_style(
+        pseudo_elem, is_before ? parent_elem->pseudo_style(PSEUDO_STYLE_BEFORE)
+                               : parent_elem->pseudo_style(PSEUDO_STYLE_AFTER));
 
     // Handle different content types
     switch (content_type) {

@@ -668,6 +668,7 @@ enum MapKind {
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
 #define CONTAINER_FLAG_JS_PROPS (1u << 6)
+#define CONTAINER_FLAG_CTOR_RESERVED (1u << 7)
 
 static inline bool map_kind_is_array_props(uint8_t map_kind) {
     return map_kind == MAP_KIND_ARRAY_PROPS || map_kind == MAP_KIND_ARRAY_SPARSE;
@@ -1630,6 +1631,7 @@ extern "C" {
     double it2d(Item item);
     bool it2b(Item item);
     int64_t it2i(Item item);
+    DateTime* it2k(Item item);
     String* it2s(Item item);
     Binary* it2x(Item item);
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
@@ -1649,6 +1651,7 @@ extern "C" {
 
     // generic field access function
     Item fn_index(Item item, Item index);
+    int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
     // length function
     int64_t fn_len(Item item);

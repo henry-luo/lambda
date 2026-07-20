@@ -26,7 +26,7 @@ struct Function {
 ```
 
 **Key Observations**:
-1. Functions are JIT-compiled to native C functions via MIR
+1. Functions are JIT-compiled to native functions through MIR Direct
 2. `to_fn()` creates a `Function*` wrapper around a raw function pointer
 3. Anonymous functions (`fn_expr`) use `to_fn(_f{offset})` pattern
 4. Named functions are called directly by their transpiled name (e.g., `_square123`)
@@ -54,7 +54,11 @@ typedef struct TypeFunc : Type {
 } TypeFunc;
 ```
 
-### Current Transpilation (`transpile.cpp`)
+### Historical C2MIR illustration (`transpile.cpp`)
+
+The snippets below describe the archived C-text backend used when this proposal
+was written. The live implementation is `transpile-mir.cpp`; C2MIR is excluded
+from supported builds and tests.
 
 **Named Function Call** (direct invocation):
 ```c
@@ -750,11 +754,13 @@ fn make_adder(n: int) {
 
 ### 7.1 Current MIR Integration
 
-Lambda functions are transpiled to C code, then compiled via C2MIR JIT:
-1. `transpile.cpp` generates C code string
-2. `mir.c` compiles C → MIR
-3. MIR generates native code
-4. Function pointers are registered in `func_list[]`
+Lambda functions are lowered directly from the typed AST to MIR:
+1. `transpile-mir.cpp` emits MIR modules and callable variants
+2. MIR generates native code
+3. Function pointers are registered in `func_list[]`
+
+The former C-text/C2MIR backend is archived source and excluded from supported
+builds and tests.
 
 ### 7.2 Closure Handling in MIR
 
@@ -786,7 +792,8 @@ Lambda functions are transpiled to C code, then compiled via C2MIR JIT:
 | `lambda-data.hpp` | `ClosureEnv`, `MutableSlot` types |
 | `ast.hpp` | Capture fields in `AstFuncNode` |
 | `build_ast.cpp` | Capture analysis pass |
-| `transpile.cpp` | Closure transpilation, `fn_call()` usage |
+| `transpile-mir.cpp` | Live closure lowering and `fn_call()` usage |
+| `transpile.cpp` | Archived C2MIR reference only |
 | `lambda-eval.cpp` | `fn_call()` implementation |
 | `mir.c` | Register new runtime functions |
 | `lambda-mem.cpp` | Closure memory management |
@@ -812,6 +819,7 @@ Lambda functions are transpiled to C code, then compiled via C2MIR JIT:
 
 - [Lambda_Function_Param.md](Lambda_Function_Param.md) - Current function parameter handling
 - [Lambda_Proc.md](Lambda_Procedural.md) - Procedural function support
-- `lambda/transpile.cpp` - Current transpilation logic
+- `lambda/transpile-mir.cpp` - Current transpilation logic
+- `lambda/transpile.cpp` - Archived C2MIR source
 - `lambda/mir.c` - MIR JIT integration
 - `lambda/lambda-eval.cpp` - Runtime function implementations

@@ -656,6 +656,9 @@ extern Type TYPE_FLOAT;
 extern Type TYPE_FLOAT64;
 extern Type TYPE_DECIMAL;
 extern Type TYPE_INTEGER;
+// Runtime integer values use the decimal carrier but retain a distinct Type*
+// so static promotion cannot erase integer into ordinary decimal.
+extern Type TYPE_INTEGER_VALUE;
 extern Type TYPE_NUMBER;
 extern Type TYPE_STRING;
 extern Type TYPE_BINARY;

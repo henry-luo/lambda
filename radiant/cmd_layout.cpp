@@ -441,8 +441,9 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool) {
     if (!dom_elem || !html_elem || !pool) return;
 
-    // Extract 'style' attribute from html_elem
-    const char* style_text = extract_element_attribute(html_elem, "style", nullptr);
+    // CSSOM updates the live DomElement attribute; reading the parse-time
+    // Element snapshot here discarded script-created inline styles at recascade.
+    const char* style_text = dom_elem->get_attribute("style");
 
     if (style_text && strlen(style_text) > 0) {
         log_debug("[CSS] Applying inline style to <%s>: %s",
@@ -2622,21 +2623,9 @@ static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
     if (!node) return;
     if (node->is_element()) {
         DomElement* elem = lam::dom_require_element(node);
-        bool changed = false;
-        if (elem->specified_style && style_epoch_ensure_owned(elem) &&
-            style_tree_remove_non_inline_declarations(elem->specified_style)) {
-            changed = true;
-        }
-        if (dom_element_clear_pseudo_styles(elem)) {
-            // Keep pseudo declarations in the same cascade epoch as element styles.
-            changed = true;
-        }
-        if (changed) {
-            // Load-time scripts now run after an initial cascade; the recascade
-            // must drop old selector matches without erasing JS inline styles.
-            elem->style_version++;
-            elem->set_needs_style_recompute(true);
-        }
+        dom_element_clear_cascaded_styles(elem);
+        // Keep pseudo declarations in the same cascade epoch as element styles.
+        dom_element_clear_pseudo_styles(elem);
         elem->set_styles_resolved(false);
 
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {

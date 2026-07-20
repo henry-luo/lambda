@@ -1,5 +1,6 @@
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
+#include "lambda-number-types.hpp"
 #include "lambda-error.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
@@ -16,7 +17,6 @@
 #include "../lib/recursion_guard.hpp"
 #include <errno.h>
 #include <stdlib.h>
-#include <algorithm>  // for std::max
 
 // Caps build_expr recursion so a pathologically nested source reports an error
 // instead of overflowing the stack (and tripping the SIGSEGV recovery). Well above
@@ -518,6 +518,13 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
 
     TypeId arg_tid = arg_elem->type_id;
     if (arg_tid == LMD_TYPE_ANY || arg_tid == LMD_TYPE_TYPE) return true;
+    LambdaNumericKind expected_numeric = lambda_numeric_kind_from_type(expected_elem);
+    if (lambda_numeric_is_sized(expected_numeric)) {
+        // A sized array annotation is an explicit destination conversion boundary,
+        // just like an annotated scalar slot; its store performs the lane conversion.
+        return lambda_numeric_kind_from_type(arg_elem) != LAMBDA_NUM_INVALID ||
+               arg_tid == LMD_TYPE_BOOL;
+    }
     switch (expected_elem->type_id) {
     case LMD_TYPE_INT:
         return is_integer_type_id(arg_tid) ||
@@ -530,6 +537,27 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
     default:
         return false;
     }
+}
+
+static bool ast_is_numeric_literal_syntax(AstNode* node) {
+    while (node && node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* primary = (AstPrimaryNode*)node;
+        if (!primary->expr) {
+            return node->type && node->type->is_literal &&
+                lambda_numeric_kind_from_type(node->type) != LAMBDA_NUM_INVALID;
+        }
+        // Identifier types can carry constant/literal metadata from their binding,
+        // but the source expression itself is not a literal-zero diagnostic site.
+        if (primary->expr->node_type == AST_NODE_IDENT) return false;
+        node = primary->expr;
+    }
+    if (node && node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op == OPERATOR_NEG || unary->op == OPERATOR_POS) {
+            return ast_is_numeric_literal_syntax(unary->operand);
+        }
+    }
+    return false;
 }
 
 static bool typed_array_annotation_compatible(Type* arg_type, Type* param_type) {
@@ -623,6 +651,7 @@ static bool typed_array_literal_elements_compatible(AstNode* node, Type* expecte
 static bool is_global_simple_type(const Type* type) {
     return type == &TYPE_NULL || type == &TYPE_BOOL || type == &TYPE_INT ||
            type == &TYPE_INT64 || type == &TYPE_FLOAT || type == &TYPE_DECIMAL ||
+           type == &TYPE_INTEGER_VALUE ||
            type == &TYPE_NUMBER || type == &TYPE_STRING || type == &TYPE_SYMBOL ||
            type == &TYPE_DTIME || type == &TYPE_DATE || type == &TYPE_TIME ||
            type == &TYPE_BINARY || type == &TYPE_RANGE || type == &TYPE_ARRAY ||
@@ -645,15 +674,15 @@ static inline bool is_static_spread_scalar_type_id(TypeId type_id) {
            is_text_type_id(type_id);
 }
 
-static inline bool is_assignment_numeric_type_id(TypeId type_id) {
-    return is_integer_type_id(type_id) ||
-           type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_DECIMAL;
-}
-
 static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* param_full_type) {
     if (!arg_type || !param_type) return true;  // unknown types are compatible
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
     if (arg_type->type_id == LMD_TYPE_ANY) return true;  // any arg can pass to typed param (runtime check)
+    LambdaNumericKind arg_numeric = lambda_numeric_kind_from_type(arg_type);
+    LambdaNumericKind param_numeric = lambda_numeric_kind_from_type(param_type);
+    if (arg_numeric != LAMBDA_NUM_INVALID && param_numeric != LAMBDA_NUM_INVALID) {
+        return lambda_numeric_kind_exactly_embeds(arg_numeric, param_numeric);
+    }
     if (arg_type->type_id == param_type->type_id) return true;
 
     // handle union types (e.g., T | error from T^ syntax)
@@ -682,46 +711,10 @@ static bool types_compatible_with_full(Type* arg_type, Type* param_type, Type* p
         }
     }
 
-    // Numeric coercion: int → int64, int → float, int64 → float
-    if (param_type->type_id == LMD_TYPE_FLOAT) {
-        if (is_integer_type_id(arg_type->type_id) ||
-            arg_type->type_id == LMD_TYPE_FLOAT64 ||
-            arg_type->type_id == LMD_TYPE_NUM_SIZED ||
-            arg_type->type_id == LMD_TYPE_UINT64) return true;
-    }
-    if (param_type->type_id == LMD_TYPE_FLOAT64) {
-        if (is_integer_type_id(arg_type->type_id) ||
-            is_float_type_id(arg_type->type_id) ||
-            arg_type->type_id == LMD_TYPE_NUM_SIZED ||
-            arg_type->type_id == LMD_TYPE_UINT64) return true;
-    }
-    if (param_type->type_id == LMD_TYPE_INT64) {
-        if (arg_type->type_id == LMD_TYPE_INT ||
-            arg_type->type_id == LMD_TYPE_NUM_SIZED ||
-            arg_type->type_id == LMD_TYPE_UINT64) return true;
-    }
     if (param_type == &TYPE_NUMBER) {
         // `number` is an abstract type keyword; no runtime TypeId carries it.
         if (IS_NUMERIC_ID(arg_type->type_id)) return true;
     }
-    if (param_type == &TYPE_INTEGER) {
-        if (is_integer_type_id(arg_type->type_id) ||
-            arg_type->type_id == LMD_TYPE_UINT64 ||
-            arg_type->type_id == LMD_TYPE_NUM_SIZED) return true;
-    }
-    // Sized numeric coercion: NUM_SIZED and UINT64 are compatible with each other
-    // and with standard numeric types for parameter passing
-    if (param_type->type_id == LMD_TYPE_NUM_SIZED || param_type->type_id == LMD_TYPE_UINT64) {
-        if (is_native_numeric_type_id(arg_type->type_id) ||
-            arg_type->type_id == LMD_TYPE_NUM_SIZED ||
-            arg_type->type_id == LMD_TYPE_UINT64) return true;
-    }
-    // Standard int/int64 accept NUM_SIZED/UINT64 args
-    if (param_type->type_id == LMD_TYPE_INT) {
-        if (arg_type->type_id == LMD_TYPE_NUM_SIZED ||
-            arg_type->type_id == LMD_TYPE_UINT64) return true;
-    }
-
     return false;
 }
 
@@ -807,6 +800,31 @@ static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
     }
 }
 
+static bool ast_static_numeric_literal_is_zero(Transpiler* tp, AstNode* node) {
+    if (!ast_is_numeric_literal_syntax(node)) return false;
+    while (node && node->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (node && node->node_type == AST_NODE_UNARY) {
+        node = ((AstUnaryNode*)node)->operand;
+    }
+    Item item;
+    if (!ast_static_literal_item(tp, node, &item)) return false;
+    switch (get_type_id(item)) {
+    case LMD_TYPE_INT: return item.get_int56() == 0;
+    case LMD_TYPE_INT64: return item.get_int64() == 0;
+    case LMD_TYPE_UINT64: return item.get_uint64() == 0;
+    case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64: return item.get_double() == 0.0;
+    case LMD_TYPE_NUM_SIZED:
+        return item.get_num_type() == NUM_FLOAT16 || item.get_num_type() == NUM_FLOAT32 ?
+            item.get_num_sized_as_double() == 0.0 :
+            item.get_num_sized_as_int64() == 0;
+    case LMD_TYPE_DECIMAL: return decimal_item_is_zero(item);
+    default: return false;
+    }
+}
+
 static Type* ast_called_type_target(AstNode* function) {
     while (function && function->node_type == AST_NODE_PRIMARY) {
         AstPrimaryNode* primary = (AstPrimaryNode*)function;
@@ -872,69 +890,6 @@ bool types_compatible(Type* arg_type, Type* param_type) {
     return types_compatible_with_full(arg_type, param_type, NULL);
 }
 
-static bool type_sized_integer_info(Type* type, bool* is_unsigned, int* bits) {
-    if (!type) return false;
-    if (type->type_id == LMD_TYPE_UINT64) {
-        *is_unsigned = true;
-        *bits = 64;
-        return true;
-    }
-    if (type->type_id != LMD_TYPE_NUM_SIZED) return false;
-    switch (type_num_sized_kind(type)) {
-    case NUM_INT8:   *is_unsigned = false; *bits = 8;  return true;
-    case NUM_INT16:  *is_unsigned = false; *bits = 16; return true;
-    case NUM_INT32:  *is_unsigned = false; *bits = 32; return true;
-    case NUM_UINT8:  *is_unsigned = true;  *bits = 8;  return true;
-    case NUM_UINT16: *is_unsigned = true;  *bits = 16; return true;
-    case NUM_UINT32: *is_unsigned = true;  *bits = 32; return true;
-    default: return false;
-    }
-}
-
-static Type* sized_integer_type_for(bool is_unsigned, int bits) {
-    if (is_unsigned) {
-        if (bits <= 8) return &TYPE_U8;
-        if (bits <= 16) return &TYPE_U16;
-        if (bits <= 32) return &TYPE_U32;
-        return &TYPE_UINT64;
-    }
-    if (bits <= 8) return &TYPE_I8;
-    if (bits <= 16) return &TYPE_I16;
-    if (bits <= 32) return &TYPE_I32;
-    return &TYPE_INT64;
-}
-
-static int next_signed_width_for_unsigned_type(int unsigned_bits) {
-    if (unsigned_bits < 8) return 8;
-    if (unsigned_bits < 16) return 16;
-    if (unsigned_bits < 32) return 32;
-    return 64;
-}
-
-static Type* promote_sized_integer_types(Type* left, Type* right) {
-    bool left_unsigned = false, right_unsigned = false;
-    int left_bits = 0, right_bits = 0;
-    bool left_sized = type_sized_integer_info(left, &left_unsigned, &left_bits);
-    bool right_sized = type_sized_integer_info(right, &right_unsigned, &right_bits);
-    if (!left_sized && !right_sized) return NULL;
-    if (left_sized && !right_sized) return sized_integer_type_for(left_unsigned, left_bits);
-    if (!left_sized && right_sized) return sized_integer_type_for(right_unsigned, right_bits);
-
-    if (left_unsigned == right_unsigned) {
-        return sized_integer_type_for(left_unsigned, left_bits > right_bits ? left_bits : right_bits);
-    }
-
-    int signed_bits = left_unsigned ? right_bits : left_bits;
-    int unsigned_bits = left_unsigned ? left_bits : right_bits;
-    if (signed_bits > unsigned_bits) return sized_integer_type_for(false, signed_bits);
-    if (unsigned_bits < 64) {
-        int bits = next_signed_width_for_unsigned_type(unsigned_bits);
-        if (bits < signed_bits) bits = signed_bits;
-        return sized_integer_type_for(false, bits);
-    }
-    return &TYPE_UINT64;
-}
-
 static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* second_arg) {
     Type* left = first_arg ? first_arg->type : NULL;
     Type* right = second_arg ? second_arg->type : NULL;
@@ -942,31 +897,34 @@ static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* se
     case SYSFUNC_BAND:
     case SYSFUNC_BOR:
     case SYSFUNC_BXOR: {
-        Type* promoted = promote_sized_integer_types(left, right);
-        return promoted ? promoted : NULL;
+        LambdaNumericDecision decision = lambda_numeric_classify(
+            LAMBDA_NUM_OP_BITWISE, lambda_numeric_kind_from_type(left),
+            lambda_numeric_kind_from_type(right));
+        return decision.valid ? lambda_numeric_type_from_kind(decision.result) : NULL;
     }
     case SYSFUNC_BNOT: {
-        bool is_unsigned = false;
-        int bits = 0;
-        return type_sized_integer_info(left, &is_unsigned, &bits) ?
-            sized_integer_type_for(is_unsigned, bits) : NULL;
+        LambdaNumericKind kind = lambda_numeric_kind_from_type(left);
+        if (lambda_numeric_is_sized_integer(kind)) return left;
+        if (kind == LAMBDA_NUM_INT || kind == LAMBDA_NUM_INTEGER) {
+            return lambda_numeric_type_from_kind(kind);
+        }
+        return NULL;
     }
     case SYSFUNC_SHL:
     case SYSFUNC_SHR: {
-        bool is_unsigned = false;
-        int bits = 0;
-        return type_sized_integer_info(left, &is_unsigned, &bits) ?
-            sized_integer_type_for(is_unsigned, bits) : NULL;
+        LambdaNumericDecision decision = lambda_numeric_classify(
+            LAMBDA_NUM_OP_SHIFT, lambda_numeric_kind_from_type(left),
+            lambda_numeric_kind_from_type(right));
+        return decision.valid ? lambda_numeric_type_from_kind(decision.result) : NULL;
     }
     case SYSFUNC_USHR: {
-        bool is_unsigned = false;
-        int bits = 0;
-        if (type_sized_integer_info(left, &is_unsigned, &bits)) {
-            return sized_integer_type_for(true, bits);
+        LambdaNumericKind kind = lambda_numeric_kind_from_type(left);
+        if (lambda_numeric_is_sized_integer(kind)) {
+            return lambda_numeric_type_from_kind(lambda_numeric_sized_kind(
+                1, lambda_numeric_sized_bits(kind)));
         }
-        if (left && left->type_id == LMD_TYPE_INT64) return &TYPE_UINT64;
         // Lambda's unsized int follows the documented ToUint32 lane.
-        return left && left->type_id == LMD_TYPE_INT ? &TYPE_U32 : NULL;
+        return kind == LAMBDA_NUM_INT ? &TYPE_U32 : NULL;
     }
     default:
         return NULL;
@@ -4110,6 +4068,15 @@ static bool known_magnitude_comparable(TypeId left_type, TypeId right_type) {
     return false;
 }
 
+static bool known_numeric_array_type(Type* type) {
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_ARRAY_NUM) return true;
+    if (type->type_id != LMD_TYPE_ARRAY) return false;
+    TypeArray* array_type = (TypeArray*)type;
+    return array_type->nested &&
+        lambda_numeric_kind_from_type(array_type->nested) != LAMBDA_NUM_INVALID;
+}
+
 static void normalize_is_array_type_rhs(Transpiler* tp, AstBinaryNode* ast_node) {
     if (!ast_node || ast_node->op != OPERATOR_IS || !ast_node->right) return;
     AstNode* rhs = ast_node->right;
@@ -4404,6 +4371,16 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         return (AstNode*)ast_node;
     }
 
+    if ((ast_node->op == OPERATOR_IDIV || ast_node->op == OPERATOR_MOD) &&
+        ast_static_numeric_literal_is_zero(tp, ast_node->right)) {
+        // A literal integral zero is knowable before lowering; rejecting it
+        // here keeps static diagnostics aligned with the runtime error contract.
+        record_semantic_error(tp, right_node, ERR_INVALID_OPERATION,
+            "integral division or remainder by literal zero");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
     TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
     log_debug("left type: %d, right type: %d", left_type, right_type);
     if (is_relational_op(ast_node->op) && !known_magnitude_comparable(left_type, right_type)) {
@@ -4413,48 +4390,51 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         return (AstNode*)ast_node;
     }
     TypeId type_id;
-    if (ast_node->op == OPERATOR_DIV) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
-            // If either operand is decimal, result is decimal
-            // if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
-            //     type_id = LMD_TYPE_DECIMAL;
-            // } else {
-            type_id = LMD_TYPE_FLOAT;  // division and power produce float results for non-decimals
-            // }
-        }
-        else {
-            type_id = LMD_TYPE_ANY;
-        }
+    Type* complete_numeric_type = NULL;
+    bool arithmetic_op = ast_node->op == OPERATOR_ADD || ast_node->op == OPERATOR_SUB ||
+        ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_DIV ||
+        ast_node->op == OPERATOR_IDIV || ast_node->op == OPERATOR_MOD;
+    bool left_numeric_array = known_numeric_array_type(ast_node->left->type);
+    bool right_numeric_array = known_numeric_array_type(ast_node->right->type);
+    bool left_numeric_scalar = lambda_numeric_kind_from_type(ast_node->left->type) != LAMBDA_NUM_INVALID;
+    bool right_numeric_scalar = lambda_numeric_kind_from_type(ast_node->right->type) != LAMBDA_NUM_INVALID;
+    if (arithmetic_op &&
+        ((left_numeric_array && (right_numeric_array || right_numeric_scalar)) ||
+         (right_numeric_array && left_numeric_scalar))) {
+        // Numeric vector operations finalize to ArrayNum. Describing their
+        // result as the source TypeArray made C2MIR call array_get on an
+        // ArrayNum pointer after a vector expression.
+        type_id = LMD_TYPE_ARRAY_NUM;
     }
-    else if (ast_node->op == OPERATOR_ADD) {
-        if (left_type == right_type && left_type == LMD_TYPE_ARRAY) {
-            type_id = left_type;
-        }
-        else if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
-            // If either operand is decimal, result is decimal
-            // if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
-            //     type_id = LMD_TYPE_DECIMAL;
-            // } else {
-            type_id = std::max(left_type, right_type);
-            // }
-        }
-        else {
-            type_id = LMD_TYPE_ANY;
-        }
+    else if (arithmetic_op && ast_node->op == OPERATOR_ADD &&
+        left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY) {
+        type_id = LMD_TYPE_ARRAY;
     }
-    else if (ast_node->op == OPERATOR_SUB || ast_node->op == OPERATOR_MUL) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
-            // If either operand is decimal, result is decimal
-            // if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
-            //     type_id = LMD_TYPE_DECIMAL;
-            // } else {
-            type_id = std::max(left_type, right_type);
-            //}
-        }
-        else {
+    else if (arithmetic_op) {
+        LambdaNumericOpFamily family = ast_node->op == OPERATOR_ADD ? LAMBDA_NUM_OP_ADD :
+            ast_node->op == OPERATOR_SUB ? LAMBDA_NUM_OP_SUB :
+            ast_node->op == OPERATOR_MUL ? LAMBDA_NUM_OP_MUL :
+            ast_node->op == OPERATOR_DIV ? LAMBDA_NUM_OP_TRUE_DIV :
+            ast_node->op == OPERATOR_IDIV ? LAMBDA_NUM_OP_IDIV : LAMBDA_NUM_OP_MOD;
+        LambdaNumericDecision decision = lambda_numeric_classify(family,
+            lambda_numeric_kind_from_type(ast_node->left->type),
+            lambda_numeric_kind_from_type(ast_node->right->type));
+        if (decision.valid) {
+            complete_numeric_type = lambda_numeric_type_from_kind(decision.result);
+            type_id = complete_numeric_type->type_id;
+        } else {
+            LambdaNumericKind left_kind = lambda_numeric_kind_from_type(ast_node->left->type);
+            LambdaNumericKind right_kind = lambda_numeric_kind_from_type(ast_node->right->type);
+            if (left_kind != LAMBDA_NUM_INVALID && right_kind != LAMBDA_NUM_INVALID) {
+                // A fully known scalar pair that has no numeric-domain rule is
+                // an invalid program, not a request for dynamic dispatch.
+                record_semantic_error(tp, bi_node, ERR_INVALID_OPERATION,
+                    "operator '%.*s' is not defined for %s and %s",
+                    (int)op.length, op.str,
+                    get_type_name(left_type), get_type_name(right_type));
+                ast_node->type = &TYPE_ERROR;
+                return (AstNode*)ast_node;
+            }
             type_id = LMD_TYPE_ANY;
         }
     }
@@ -4487,24 +4467,6 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         // equality is total: incompatible concrete families compile and evaluate
         // to false/true instead of becoming a static type error.
     }
-    else if (ast_node->op == OPERATOR_IDIV) {
-        if (IS_NUMERIC_ID(left_type) && IS_NUMERIC_ID(right_type)) {
-            type_id = LMD_TYPE_INT;  // Integer division always produces int result
-        }
-        else {
-            type_id = LMD_TYPE_ANY;
-        }
-    }
-    else if (ast_node->op == OPERATOR_MOD) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
-            // Modulo preserves type: int%int=int, float%any=float
-            type_id = std::max(left_type, right_type);
-        }
-        else {
-            type_id = LMD_TYPE_ANY;
-        }
-    }
     else if (ast_node->op == OPERATOR_TO) {
         type_id = LMD_TYPE_RANGE;
     }
@@ -4528,7 +4490,11 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else {  // OPERATOR_JOIN, etc.
         type_id = LMD_TYPE_ANY;
     }
-    if (type_id >= LMD_TYPE_CONTAINER) {
+    if (complete_numeric_type) {
+        ast_node->type = complete_numeric_type;
+    } else if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+    } else if (type_id >= LMD_TYPE_CONTAINER) {
         // reuse existing type from the branch that determined the type_id
         // to preserve full struct layout (TypeMap, TypeArray, etc.)
         Type* reuse_type = (type_id == right_type && ast_node->right->type) ?
@@ -4717,20 +4683,19 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     TypeId then_type_id = ast_node->then->type->type_id;
     TypeId else_type_id = ast_node->otherwise ? ast_node->otherwise->type->type_id : LMD_TYPE_NULL;
 
-    // Check if branches have incompatible types that require coercion to ANY
-    bool need_any_type = false;
-    if (then_type_id != else_type_id) {
-        need_any_type = true;
-    }
-
-    if (need_any_type) {
+    Type* else_type = ast_node->otherwise ? ast_node->otherwise->type : NULL;
+    LambdaNumericDecision numeric_join = lambda_numeric_classify(LAMBDA_NUM_OP_ADD,
+        lambda_numeric_kind_from_type(ast_node->then->type),
+        lambda_numeric_kind_from_type(else_type));
+    if (numeric_join.valid) {
+        ast_node->type = lambda_numeric_type_from_kind(numeric_join.result);
+    } else if (then_type_id != else_type_id) {
         ast_node->type = &TYPE_ANY;
     } else if (then_type_id >= LMD_TYPE_CONTAINER) {
         // reuse branch type to preserve full struct (TypeMap, TypeArray, etc.)
         ast_node->type = ast_node->then->type;
     } else {
-        TypeId type_id = std::max(then_type_id, else_type_id);
-        ast_node->type = alloc_type(tp->pool, type_id, sizeof(Type));
+        ast_node->type = ast_node->then->type;
     }
     log_debug("end build if expr");
     return (AstNode*)ast_node;
@@ -5076,7 +5041,8 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definit
                                 TypeId expected_tid = expected_elem->type_id;
                                 TypeId actual_tid = arr_type->nested->type_id;
                                 if (expected_tid != actual_tid &&
-                                    !types_compatible(arr_type->nested, expected_elem)) {
+                                    !types_compatible(arr_type->nested, expected_elem) &&
+                                    !typed_array_element_compatible(arr_type->nested, expected_elem)) {
                                     int line = ts_node_start_point(asn_node).row + 1;
                                     record_type_error(tp, line,
                                         "array element type mismatch: expected %s, but got %s",
@@ -7918,15 +7884,16 @@ AstNode* build_assign_stam(Transpiler* tp, TSNode assign_node) {
             if (var_tid != val_tid) {
                 if (entry->has_type_annotation) {
                     // type-annotated var: assignment must follow declared type
-                    // allow ANY/NULL values (will use runtime cast)
-                    // allow numeric coercions: int <-> int64 <-> float (bidirectional)
+                    // allow ANY/NULL values (will use runtime cast). A sized
+                    // destination is also an explicit conversion boundary and
+                    // retains the documented Go-style truncation/wrap behavior;
+                    // ordinary parameter passing still requires exact embedding.
                     bool compatible = (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL);
                     if (!compatible) compatible = types_compatible(ast_node->value->type, entry->node->type);
-                    // also allow numeric narrowing (e.g., float -> int) for var assignment
-                    if (!compatible) {
-                        bool var_numeric = is_assignment_numeric_type_id(var_tid);
-                        bool val_numeric = is_assignment_numeric_type_id(val_tid);
-                        compatible = var_numeric && val_numeric;
+                    if (!compatible &&
+                            (var_tid == LMD_TYPE_NUM_SIZED || var_tid == LMD_TYPE_UINT64) &&
+                            lambda_numeric_kind_from_type(ast_node->value->type) != LAMBDA_NUM_INVALID) {
+                        compatible = true;
                     }
                     if (!compatible) {
                         int line = ts_node_start_point(assign_node).row + 1;

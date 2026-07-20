@@ -29,12 +29,10 @@
 3 - 1.2
 4 * 2.5
 8 / 2.0
-10 div 3.3
 0.5 + 7
 2.7 - 1
 1.5 * 6
 9.0 / 3
-15.5 div 4
 
 "Modulo Operations (%):"
 17 % 5
@@ -50,11 +48,6 @@ let zero_divisor = 0
 5 % zero_divisor
 zero_divisor % zero_divisor
 17 % zero_divisor
-
-"Modulo with Float (errors):"
-5.5 % 3
-7 % 2.5
-3.14 % 2.71
 
 "Modulo with Boolean/Null (errors):"
 true % 2

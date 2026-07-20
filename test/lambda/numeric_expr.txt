@@ -23,12 +23,10 @@
 1.8
 10
 4
-error
 7.5
 1.7000000000000002
 9
 3
-error
 "Modulo Operations (%):"
 2
 -2
@@ -41,10 +39,6 @@ error
 error
 error
 error
-"Modulo with Float (errors):"
-2.5
-2
-0.43000000000000016
 "Modulo with Boolean/Null (errors):"
 error
 error

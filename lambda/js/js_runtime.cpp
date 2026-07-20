@@ -2833,6 +2833,10 @@ extern "C" Item js_new_object_with_shape(const char** prop_names, const int* pro
     m->data = pool_calloc(js_input->pool, data_cap);
     m->data_cap = data_cap;
     m->type = tm;
+    // Reserved shape entries accelerate constructor writes but are not JS own
+    // properties until their assignment executes.
+    uint16_t reserved = count >= 16 ? UINT16_MAX : (uint16_t)((1u << count) - 1u);
+    map_ctor_set_reserved_mask(m, reserved);
 
     return (Item){.map = m};
 }
@@ -2910,6 +2914,7 @@ static Item js_constructor_apply_prototype(Item obj, Item callee) {
 // A5: Create pre-shaped object and set __proto__ from constructor's prototype
 extern "C" Item js_constructor_create_object_shaped(Item callee,
     const char** prop_names, const int* prop_lens, int count) {
+    int ctor_prop_count = count;
     bool has_proto_marker = false;
     bool has_proto = false;
     for (int i = 0; i < count; i++) {
@@ -2947,6 +2952,11 @@ extern "C" Item js_constructor_create_object_shaped(Item callee,
         count = use_count;
     }
     Item obj = js_new_object_with_shape(use_names, use_lens, count);
+    if (get_type_id(obj) == LMD_TYPE_MAP) {
+        uint16_t reserved = ctor_prop_count >= 16 ? UINT16_MAX :
+            (uint16_t)((1u << ctor_prop_count) - 1u);
+        map_ctor_set_reserved_mask(obj.map, reserved);
+    }
     return js_constructor_apply_prototype(obj, callee);
 }
 
@@ -3015,6 +3025,11 @@ extern "C" Item js_constructor_create_object_shaped_cached(Item callee,
         TypeMap* cached = (TypeMap*)*shape_cache;
         if (typemap_ptr_is_plausible(cached) && cached->is_shared_constructor_shape) {
             Item obj = js_new_object_with_typemap(cached);
+            if (get_type_id(obj) == LMD_TYPE_MAP) {
+                uint16_t reserved = count >= 16 ? UINT16_MAX :
+                    (uint16_t)((1u << count) - 1u);
+                map_ctor_set_reserved_mask(obj.map, reserved);
+            }
             return js_constructor_apply_prototype(obj, callee);
         }
     }
@@ -3070,6 +3085,14 @@ extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
     if (!tm || !tm->shape) return ItemNull;
     // P1: O(1) array lookup when slot_entries is populated
     if (tm->slot_entries && slot < tm->slot_count) {
+        ShapeEntry* entry = tm->slot_entries[slot];
+        if (map_ctor_offset_is_reserved(m, entry->byte_offset)) {
+            // Reserved slots participate in layout only; reads before the
+            // constructor assignment must continue through the prototype.
+            Item key = (Item){.item = s2it(heap_create_name(
+                entry->name->str, (int)entry->name->length))};
+            return js_property_get(object, key);
+        }
         if (js_runtime_trace_enabled()) {
             static int _gs_trace = 0;
             ShapeEntry* e = tm->slot_entries[slot];
@@ -3089,6 +3112,11 @@ extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
     ShapeEntry* entry = tm->shape;
     for (int i = 0; i < (int)slot && entry; i++) entry = entry->next;
     if (!entry) return ItemNull;
+    if (map_ctor_offset_is_reserved(m, entry->byte_offset)) {
+        Item key = (Item){.item = s2it(heap_create_name(
+            entry->name->str, (int)entry->name->length))};
+        return js_property_get(object, key);
+    }
     return _map_read_field(entry, m->data);
 }
 
@@ -3111,6 +3139,7 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
     entry = js_detach_shared_ctor_shape_for_slot(object, (int)slot, entry->byte_offset,
         entry, value_type);
     if (!entry) return;
+    map_ctor_initialize_offset(m, entry->byte_offset);
     m = (Map*)object.map;
     void* field_ptr = (char*)m->data + entry->byte_offset;
     field_type = entry->type->type_id;
@@ -3200,6 +3229,7 @@ extern "C" int64_t js_shape_slot_guard(Item object, const char* name,
             !entry->name->str) {
         return 0;
     }
+    if (map_ctor_offset_is_reserved(m, entry->byte_offset)) return 0;
     if (jspd_is_accessor(entry) || jspd_is_deleted(entry)) return 0;
     if (entry->name->length != (size_t)name_len) return 0;
     if (entry->name->str == name) return 1;
@@ -3252,6 +3282,7 @@ extern "C" void js_set_slot_f(Item object, int64_t byte_offset, double value) {
     ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
     entry = js_detach_shared_ctor_shape_for_slot(object, slot, byte_offset, entry,
         LMD_TYPE_FLOAT);
+    map_ctor_initialize_offset(m, entry->byte_offset);
     m = (Map*)object.map;
     *(double*)((char*)m->data + byte_offset) = value;
     // Update ShapeEntry type to FLOAT if currently NULL (first write).
@@ -3278,6 +3309,7 @@ extern "C" void js_set_slot_i(Item object, int64_t byte_offset, int64_t value) {
     ShapeEntry* entry = js_shape_entry_for_slot_offset(tm, slot, byte_offset);
     entry = js_detach_shared_ctor_shape_for_slot(object, slot, byte_offset, entry,
         LMD_TYPE_INT);
+    map_ctor_initialize_offset(m, entry->byte_offset);
     m = (Map*)object.map;
     *(int64_t*)((char*)m->data + byte_offset) = value;
     // Update ShapeEntry type to INT if currently NULL (first write).
@@ -3325,6 +3357,10 @@ Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found) 
     // when the table is unpopulated or saturated.
     ShapeEntry* entry = typemap_hash_lookup(map_type, key_str, key_len);
     if (entry) {
+        if (map_ctor_offset_is_reserved(m, entry->byte_offset)) {
+            if (out_found) *out_found = false;
+            return ItemNull;
+        }
         if (out_found) *out_found = true;
         return _map_read_field(entry, m->data);
     }
@@ -6332,7 +6368,8 @@ static Item js_property_set_map(Item object, Item key, Item value) {
                 bool own_has = false;
                 {
                     ShapeEntry* _se_own = js_find_shape_entry(object, str_key->chars, (int)str_key->len);
-                    own_has = (_se_own != NULL);
+                    own_has = js_ordinary_has_own(object, str_key->chars,
+                                                  (int)str_key->len);
                     if (own_has && str_key->len == 9 &&
                         strncmp(str_key->chars, "__proto__", 9) == 0 &&
                         !jspd_is_accessor(_se_own)) {
@@ -7299,6 +7336,10 @@ static inline bool js_load_ic_try_hit_entry(Map* m, JsLoadICEntry* cached,
     if (m->type != cached->shape) return false;
     if (!js_load_ic_offset_ok(m, cached->byte_offset)) return false;
     ShapeEntry* entry = (ShapeEntry*)cached->entry;
+    // A shared constructor shape can name storage that is still absent on this
+    // instance; an IC hit must not turn the zero-filled reservation into data.
+    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
+            map_ctor_offset_is_reserved(m, entry->byte_offset)) return false;
     if (out_value) *out_value = _map_read_field(entry, m->data);
     return true;
 }
@@ -7340,6 +7381,13 @@ static bool js_load_ic_build_entry(Item object, const char* name, int name_len,
     }
     if (!js_load_ic_offset_ok(m, entry->byte_offset)) {
         if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_OFFSET;
+        return false;
+    }
+    // Reserved constructor slots are layout metadata, not own properties, so
+    // cache only the initialized state that ordinary lookup can observe.
+    if (receiver_kind == JS_NAMED_IC_RECEIVER_MAP &&
+            map_ctor_offset_is_reserved(m, entry->byte_offset)) {
+        if (out_reason) *out_reason = JS_LOAD_IC_SITE_MISS_NOT_FOUND;
         return false;
     }
 

@@ -3,7 +3,7 @@
 - **Status:** IMPLEMENTED for scalar storage and `ushr`; retained as a
   historical completion record. Item 1's value-based mixed-`u64` policy was
   implemented at the time but is now superseded by the type-directed number
-  model. Its replacement is planned in `vibe/Lambda_Impl_Numbers.md`.
+  model. Its replacement is implemented in `vibe/Lambda_Impl_Numbers.md`.
 - **Date:** 2026-07-16; revised 2026-07-20 for implementation of the
   scalar-storage realignment
 - **Primary design:** `vibe/Lambda_Design_Stack_API.md` Phase 7 and §15.
@@ -142,9 +142,9 @@ representation analysis and MIR lowering, not language-specific copies:
 - add `UINT64` to number-frame adoption/rebasing. Keep the existing `DTIME`
   path working until its atomic P0.4 cutover, then remove it rather than
   leaving a mixed representation;
-- do not add the hidden caller-home ABI to C2MIR. Update its shared runtime
-  producers/decoders and require compatibility tests against the new Item
-  representation.
+- do not add the hidden caller-home ABI to C2MIR. The backend is now excluded
+  from supported builds and tests; its archived source is not a compatibility
+  target.
 
 **P0.3 — Complete destination-owned integer storage — DONE.** Add `UINT64` beside
 `INT64`/`DOUBLE` in array/list scalar tails, owned Item slots, typed map/object

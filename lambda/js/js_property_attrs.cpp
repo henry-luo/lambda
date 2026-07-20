@@ -672,9 +672,14 @@ extern "C" JsAccessorPair* js_find_accessor_pair_inheritable(Item obj,
     int depth = 0;
     while (depth < 16) {
         ShapeEntry* se = js_find_shape_entry(cur, name, name_len);
+        Map* m = se ? js_obj_underlying_map(cur) : NULL;
+        if (se && m && map_ctor_offset_is_reserved(m, se->byte_offset)) {
+            // Preallocated constructor storage is absent until initialized, so
+            // it cannot terminate OrdinarySet before an inherited setter.
+            se = NULL;
+        }
         if (se) {
             if (jspd_is_accessor(se)) {
-                Map* m = js_obj_underlying_map(cur);
                 if (m) {
                     bool found = false;
                     Item slot_val = js_map_get_fast_ext(m, name, name_len, &found);

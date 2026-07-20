@@ -294,6 +294,7 @@ static bool jm_should_gc_root_var(MIR_type_t mir_type, TypeId type_id) {
     if (mir_type == MIR_T_UNDEF) return true;
     switch (type_id) {
     case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_DTIME:
     case LMD_TYPE_SYMBOL:
     case LMD_TYPE_STRING:
     case LMD_TYPE_BINARY:

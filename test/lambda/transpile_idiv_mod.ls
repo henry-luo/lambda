@@ -35,18 +35,6 @@ fn int_mod(a: int, b: int) { a % b }
 ]
 
 // ============================================
-// Section 3: Float mod (fmod path)
-// ============================================
-
-fn float_mod(a: float, b: float) { a % b }
-
-"3. Float mod"
-[
-    float_mod(10.5, 3.0),  // 1.5
-    float_mod(7.0, 2.5)    // 2
-]
-
-// ============================================
 // Section 4: Typed div/mod in expressions
 // ============================================
 

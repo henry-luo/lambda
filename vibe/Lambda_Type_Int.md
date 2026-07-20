@@ -63,7 +63,10 @@ This document proposes changing the underlying representation of `LMD_TYPE_INT` 
 1. **Greatly expanded range**: ±36 quadrillion vs ±2 billion
 2. **Consistent error handling**: Use `ITEM_ERROR` for division-by-zero, matching other Item error conventions
 3. **True integer semantics**: Exact arithmetic for `+`, `-`, `*`, `%` operations
-4. **Graceful division**: `/` promotes to double before dividing, returning float result
+4. **Plain-int true division**: `int / int` promotes to double before dividing,
+   returning float. This is not a universal `/` rule: `integer / integer` and
+   full-width sized-integer true division return decimal under the v2 number
+   model.
 
 ---
 

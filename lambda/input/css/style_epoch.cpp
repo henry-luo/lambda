@@ -239,7 +239,8 @@ static void style_builder_add(StyleEpochManager* manager,
         manager->doc->document_pool, sizeof(StyleRecipeBuilder));
     if (!builder) return;
     builder->element = element;
-    builder->eligible = element->css_variables == nullptr &&
+    builder->eligible = !element->specified_style_borrowed() &&
+        element->css_variables == nullptr &&
         (element->specified_style_shared() ||
          style_tree_is_empty(element->specified_style));
     if (element->specified_style_shared() && element->specified_style) {
@@ -508,6 +509,15 @@ void style_epoch_unbind_element(DomElement* element) {
 
 bool style_epoch_ensure_owned(DomElement* element) {
     if (!element || !element->doc) return false;
+    if (element->specified_style_borrowed()) {
+        // CSS writes to generated boxes must not mutate their source element's
+        // pseudo tree; detach through a deep copy before entering the cascade.
+        StyleTree* clone = style_tree_clone_owned(
+            element->specified_style, element->doc->document_pool);
+        if (!clone) return false;
+        element->specified_style = clone;
+        element->mark_specified_style_owned();
+    }
     StyleEpochManager* manager = style_manager(element->doc);
     if (manager && manager->collecting) {
         StyleRecipeBuilder* builder = style_builder_find(manager, element);
@@ -538,6 +548,9 @@ static void style_epoch_bind(StyleEpochManager* manager,
         element->specified_style == entry->tree) return;
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
+    } else if (element->specified_style_borrowed()) {
+        element->specified_style = nullptr;
+        element->mark_specified_style_owned();
     } else if (element->specified_style) {
         style_tree_destroy_owned(element->specified_style);
         element->specified_style = nullptr;

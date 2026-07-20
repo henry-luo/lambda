@@ -122,7 +122,9 @@ void write_type(StrBuf* code_buf, Type *type) {
         strbuf_append_str(code_buf, "uint64_t");
         break;
     case LMD_TYPE_DTIME:
-        strbuf_append_str(code_buf, "DateTime");
+        // Datetime is always GC-owned; C2MIR locals carry the object pointer,
+        // never a copied payload whose lifetime would be disconnected from GC.
+        strbuf_append_str(code_buf, "DateTime*");
         break;
     case LMD_TYPE_DECIMAL:
         strbuf_append_str(code_buf, "Decimal*");
@@ -156,6 +158,9 @@ void write_type(StrBuf* code_buf, Type *type) {
         }
         break;
     }
+    case LMD_TYPE_ARRAY_NUM:
+        strbuf_append_str(code_buf, "ArrayNum*");
+        break;
     case LMD_TYPE_MAP:
         strbuf_append_str(code_buf, "Map*");
         break;

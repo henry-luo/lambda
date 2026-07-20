@@ -35,6 +35,18 @@ extern "C" __attribute__((weak)) void svg_unregister_image_resolvers_for_tree(El
     (void)root;
 }
 
+bool dom_subtree_contains_node(DomNode* root, DomNode* target) {
+    if (!root || !target) return false;
+    if (root == target) return true;
+    if (!root->is_element()) return false;
+
+    DomElement* element = root->as_element();
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (dom_subtree_contains_node(child, target)) return true;
+    }
+    return false;
+}
+
 // Runtime-cleanup hook: the full runtime layer (lambda/runner.cpp's
 // runtime_init) installs this so the input/css layer doesn't hard-depend on
 // runner.cpp's runtime_cleanup. NULL in input-only unit-test builds — safe
@@ -355,6 +367,9 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
         element->tag_name = nullptr;
         if (element->specified_style_shared()) {
             style_epoch_unbind_element(element);
+        } else if (element->specified_style_borrowed()) {
+            element->specified_style = nullptr;
+            element->mark_specified_style_owned();
         } else if (element->specified_style) {
             style_tree_destroy_owned(element->specified_style);
             element->specified_style = nullptr;
@@ -474,6 +489,11 @@ void dom_element_clear(DomElement* element) {
         style_epoch_unbind_element(element);
         element->specified_style = style_tree_create(element->doc->document_pool);
         element->mark_specified_style_owned();
+    } else if (element->specified_style_borrowed()) {
+        // A generated pseudo box may discard its view of the source tree, but
+        // it must never clear declarations owned by the originating element.
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
     } else if (element->specified_style) {
         // Recascade runs inside the document pool's active lifetime; returning
         // its live style allocations here corrupts subsequent CSS allocations.
@@ -490,6 +510,56 @@ void dom_element_clear(DomElement* element) {
     // The pool will handle cleanup
 }
 
+void dom_element_clear_cascaded_styles(DomElement* element) {
+    if (!element) return;
+
+    bool changed = false;
+    if (element->specified_style_shared()) {
+        // Canonical trees never contain inline declarations, so detaching is
+        // sufficient and avoids materializing declarations that are discarded.
+        style_epoch_unbind_element(element);
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
+        changed = true;
+    } else if (element->specified_style_borrowed()) {
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
+        changed = true;
+    } else if (element->specified_style) {
+        if (style_tree_has_inline_declarations(element->specified_style)) {
+            // Inline declarations are live DOM state. Reparse-on-recascade both
+            // lost CSSOM writes and grew the document pool on every hover event.
+            changed = style_tree_remove_non_inline_declarations(
+                element->specified_style);
+        } else if (!style_tree_is_empty(element->specified_style)) {
+            style_tree_clear(element->specified_style);
+            changed = true;
+        }
+    } else {
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
+    }
+    if (changed) {
+        element->style_version++;
+        element->set_needs_style_recompute(true);
+    }
+}
+
+void dom_element_borrow_specified_style(DomElement* element, StyleTree* style) {
+    if (!element) return;
+    if (element->specified_style_shared()) {
+        style_epoch_unbind_element(element);
+    } else if (!element->specified_style_borrowed() && element->specified_style &&
+               element->specified_style != style) {
+        style_tree_destroy_owned(element->specified_style);
+    }
+    // Generated pseudo elements are views over their source declarations; the
+    // source element remains the sole owner across view retirement and rebuild.
+    element->specified_style = style;
+    if (style) element->mark_specified_style_borrowed();
+    else element->mark_specified_style_owned();
+}
+
 void dom_element_destroy(DomElement* element) {
     if (!element) {
         return;
@@ -497,6 +567,9 @@ void dom_element_destroy(DomElement* element) {
 
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
+    } else if (element->specified_style_borrowed()) {
+        element->specified_style = nullptr;
+        element->mark_specified_style_owned();
     } else if (element->specified_style) {
         style_tree_destroy_owned(element->specified_style);
         element->specified_style = nullptr;
@@ -524,6 +597,9 @@ void dom_element_release_retired_storage(DomElement* element) {
     }
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
+    } else if (element->specified_style_borrowed()) {
+        element->specified_style = nullptr;
+        element->mark_specified_style_owned();
     } else if (element->specified_style) {
         style_tree_destroy_owned(element->specified_style);
         element->specified_style = nullptr;
@@ -2549,6 +2625,13 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
             new_dt->set_symbol(text_node->is_symbol());
             new_dt->rect = text_node->rect;
             new_dt->font = text_node->font;
+            new_dt->view_type = text_node->view_type;
+            // Replacing the fat String transfers the retained layout handles to
+            // its embedded DomText; leaving them on the retired node double-recycled
+            // the TextRect chain at the next asynchronous layout checkpoint.
+            text_node->rect = nullptr;
+            text_node->font = nullptr;
+            text_node->view_type = RDT_VIEW_NONE;
             new_dt->parent = parent;
             new_dt->prev_sibling = saved_prev;
             new_dt->next_sibling = saved_next;
