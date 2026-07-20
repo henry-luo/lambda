@@ -8,14 +8,18 @@
 #include "py_class.h"
 #include "py_bigint.h"
 #include "../lambda-data.hpp"
+#include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/gc/gc_heap.h"
 #include <cstring>
 #include <cmath>
 #include "../../lib/mem.h"
 #include <cstdio>
+
+extern __thread EvalContext* context;
 
 // Global Input context for Python runtime (for map_put, pool allocations)
 Input* py_input = NULL;
@@ -29,18 +33,23 @@ extern Item _map_get(TypeMap* map_type, void* map_data, const char* key, bool* i
 
 extern TypeMap EmptyMap;
 
-// Exception handling state
-static bool py_exception_pending = false;
-static Item py_exception_value = {0};
+// Guest execution state belongs to the active host thread.  A Python exception
+// or module binding must not leak into another concurrently driven guest run.
+static thread_local bool py_exception_pending = false;
+static thread_local Item py_exception_value = {0};
 
 // Module variable table
 #define PY_MODULE_VAR_MAX 1024
-static Item py_module_vars[PY_MODULE_VAR_MAX];
-static int py_module_var_count = 0;
+static thread_local Item py_module_vars[PY_MODULE_VAR_MAX];
+static thread_local int py_module_var_count = 0;
+
+#define PY_ARGS_STACK_CAP 4096
+static thread_local Item py_args_stack[PY_ARGS_STACK_CAP * 2];
+static thread_local int py_args_stack_top = 0;
 
 // Stop iteration sentinel
-static Item py_stop_iteration_sentinel = {0};
-static bool py_stop_iteration_initialized = false;
+static thread_local Item py_stop_iteration_sentinel = {0};
+static thread_local bool py_stop_iteration_initialized = false;
 
 // ============================================================================
 // Runtime initialization
@@ -49,14 +58,47 @@ static bool py_stop_iteration_initialized = false;
 extern "C" void py_runtime_set_input(void* input) {
     py_input = (Input*)input;
     py_init_builtin_classes();
-    // register static Item variables as GC roots (BSS memory invisible to stack scanning)
-    static bool statics_rooted = false;
-    if (!statics_rooted) {
-        heap_register_gc_root(&py_exception_value.item);
-        heap_register_gc_root(&py_stop_iteration_sentinel.item);
-        heap_register_gc_root_range((uint64_t*)py_module_vars, PY_MODULE_VAR_MAX);
-        statics_rooted = true;
+    // TLS addresses differ per guest thread; register this thread's persistent
+    // slots with the active heap each time its Python runtime is entered.
+    heap_register_gc_root(&py_exception_value.item);
+    heap_register_gc_root(&py_stop_iteration_sentinel.item);
+    heap_register_gc_root_range((uint64_t*)py_module_vars, PY_MODULE_VAR_MAX);
+    heap_register_gc_root_range((uint64_t*)py_args_stack, PY_ARGS_STACK_CAP);
+    // Recovery can bypass a lexical py_args_restore.  Clear both the Item and
+    // scalar-tail halves so an abandoned call frame cannot retain old values.
+    memset(py_args_stack, 0, sizeof(py_args_stack));
+    py_args_stack_top = 0;
+}
+
+extern "C" int64_t py_args_save(void) {
+    return py_args_stack_top;
+}
+
+extern "C" Item* py_args_push(int count) {
+    if (count < 0 || count > PY_ARGS_STACK_CAP - py_args_stack_top) {
+        // A scoped caller frame must not silently overwrite live nested args.
+        log_error("py-args: capacity exceeded count=%d top=%d", count, py_args_stack_top);
+        return NULL;
     }
+    Item* args = py_args_stack + py_args_stack_top;
+    py_args_stack_top += count;
+    return args;
+}
+
+extern "C" void py_args_store(Item* args, int index, Item value) {
+    if (!args || index < 0) return;
+    int base = (int)(args - py_args_stack);
+    if (base < 0 || base >= py_args_stack_top || index >= py_args_stack_top - base) return;
+    owned_item_slot_store(py_args_stack, PY_ARGS_STACK_CAP, base + index, value);
+}
+
+extern "C" void py_args_restore(int64_t mark) {
+    if (mark < 0 || mark > py_args_stack_top) return;
+    for (int i = (int)mark; i < py_args_stack_top; i++) {
+        py_args_stack[i] = ItemNull;
+        py_args_stack[PY_ARGS_STACK_CAP + i] = ItemNull;
+    }
+    py_args_stack_top = (int)mark;
 }
 
 // ============================================================================
@@ -103,14 +145,10 @@ extern "C" Item py_to_float(Item value) {
     case LMD_TYPE_NULL:
         return (Item){.item = i2it(0)};
     case LMD_TYPE_BOOL: {
-        double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *ptr = it2b(value) ? 1.0 : 0.0;
-        return lambda_float_ptr_to_item(ptr);
+        return push_d(it2b(value) ? 1.0 : 0.0);
     }
     case LMD_TYPE_INT: {
-        double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *ptr = (double)it2i(value);
-        return lambda_float_ptr_to_item(ptr);
+        return push_d((double)it2i(value));
     }
     case LMD_TYPE_FLOAT:
         return value;
@@ -120,9 +158,7 @@ extern "C" Item py_to_float(Item value) {
         char* endptr;
         double d = strtod(str->chars, &endptr);
         if (endptr == str->chars) return (Item){.item = i2it(0)};
-        double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *ptr = d;
-        return lambda_float_ptr_to_item(ptr);
+        return push_d(d);
     }
     default:
         return (Item){.item = i2it(0)};
@@ -302,9 +338,7 @@ static Item py_make_number(double d) {
     if (isfinite(d) && d == (double)(int64_t)d && d >= INT56_MIN && d <= INT56_MAX) {
         return (Item){.item = i2it((int64_t)d)};
     }
-    double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *ptr = d;
-    return lambda_float_ptr_to_item(ptr);
+    return push_d(d);
 }
 
 double py_get_number(Item value) {
@@ -465,13 +499,10 @@ extern "C" Item py_divide(Item left, Item right) {
     double r = py_get_number(right);
     if (r == 0.0) {
         log_error("py: ZeroDivisionError: division by zero");
-        py_exception_pending = true;
-        py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
+        py_raise((Item){.item = s2it(heap_create_name("ZeroDivisionError"))});
         return ItemNull;
     }
-    double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *ptr = l / r;
-    return lambda_float_ptr_to_item(ptr);
+    return push_d(l / r);
 }
 
 extern "C" Item py_floor_divide(Item left, Item right) {
@@ -489,8 +520,7 @@ extern "C" Item py_floor_divide(Item left, Item right) {
         int64_t a = it2i(left), b = it2i(right);
         if (b == 0) {
             log_error("py: ZeroDivisionError: integer floor division by zero");
-            py_exception_pending = true;
-            py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
+            py_raise((Item){.item = s2it(heap_create_name("ZeroDivisionError"))});
             return ItemNull;
         }
         // Python floor division rounds toward negative infinity
@@ -503,8 +533,7 @@ extern "C" Item py_floor_divide(Item left, Item right) {
     double r = py_get_number(right);
     if (r == 0.0) {
         log_error("py: ZeroDivisionError: float floor division by zero");
-        py_exception_pending = true;
-        py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
+        py_raise((Item){.item = s2it(heap_create_name("ZeroDivisionError"))});
         return ItemNull;
     }
     return py_make_number(floor(l / r));
@@ -698,8 +727,7 @@ extern "C" Item py_modulo(Item left, Item right) {
     double r = py_get_number(right);
     if (r == 0.0) {
         log_error("py: ZeroDivisionError: float modulo by zero");
-        py_exception_pending = true;
-        py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
+        py_raise((Item){.item = s2it(heap_create_name("ZeroDivisionError"))});
         return ItemNull;
     }
     return py_make_number(fmod(l, r) + (fmod(l, r) != 0 && ((l < 0) != (r < 0)) ? r : 0));
@@ -713,9 +741,7 @@ extern "C" Item py_power(Item left, Item right) {
         int64_t base = it2i(left), exp = it2i(right);
         if (exp < 0) {
             // negative exponent → float
-            double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *ptr = pow((double)base, (double)exp);
-            return lambda_float_ptr_to_item(ptr);
+            return push_d(pow((double)base, (double)exp));
         }
         if (exp == 0) return (Item){.item = i2it(1)};
         if (base == 0) return (Item){.item = i2it(0)};
@@ -1886,6 +1912,9 @@ extern "C" Item py_get_iterator(Item iterable) {
 }
 
 extern "C" Item py_iterator_next(Item iterator) {
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> rooted_iterator(roots, iterator);
+    iterator = rooted_iterator.get();
     // generator objects: call resume function
     if (get_type_id(iterator) == LMD_TYPE_FUNC) {
         Function* fn = iterator.function;
@@ -1955,30 +1984,83 @@ extern "C" Item py_range_new(Item start, Item stop, Item step) {
 // Function/closure
 // ============================================================================
 
-extern "C" Item py_new_function(void* func_ptr, int param_count) {
-    // allocate a Function-like object
-    if (!py_input) return ItemNull;
-    Function* fn = (Function*)pool_calloc(py_input->pool, sizeof(Function));
+static Function* py_alloc_function(void* func_ptr, int param_count) {
+    if (!py_input) return NULL;
+    Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
+    if (!fn) return NULL;
     fn->type_id = LMD_TYPE_FUNC;
     fn->ptr = (fn_ptr)func_ptr;
-    fn->arity = param_count;
+    fn->arity = (uint8_t)param_count;
+    return fn;
+}
+
+extern "C" Item py_new_function(void* func_ptr, int param_count) {
+    Function* fn = py_alloc_function(func_ptr, param_count);
+    if (!fn) return ItemNull;
     return (Item){.function = fn};
 }
 
-extern "C" Item py_new_closure(void* func_ptr, int param_count, uint64_t* env, int env_size) {
-    if (!py_input) return ItemNull;
-    Function* fn = (Function*)pool_calloc(py_input->pool, sizeof(Function));
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->ptr = (fn_ptr)func_ptr;
-    fn->arity = param_count;
+extern "C" Item py_new_closure(void* func_ptr, int param_count, int env_size) {
+    if (env_size <= 0 || env_size > 255) return ItemNull;
+    Function* fn = py_alloc_function(func_ptr, param_count);
+    if (!fn) return ItemNull;
+
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> rooted_fn(roots, (Item){.function = fn});
+    uint64_t* env = py_alloc_env(env_size);
+    if (!env) return ItemNull;
+    fn = rooted_fn.get().function;
+    // The Function is rooted while allocating its GC environment; otherwise a
+    // collection in the environment allocator can lose the only owner.
     fn->closure_env = env;
-    fn->closure_field_count = env_size;
+    fn->closure_field_count = (uint8_t)env_size;
+    return rooted_fn.get();
+}
+
+extern "C" Item py_new_closure_with_env(void* func_ptr, int param_count,
+        uint64_t* env, int env_size) {
+    if (!env || env_size <= 0 || env_size > 255) return ItemNull;
+    Function* fn = py_alloc_function(func_ptr, param_count);
+    if (!fn) return ItemNull;
+    // The caller's existing closure owns this shared environment before this
+    // allocation, so attaching it needs no second allocation window.
+    fn->closure_env = env;
+    fn->closure_field_count = (uint8_t)env_size;
     return (Item){.function = fn};
 }
 
 extern "C" uint64_t* py_alloc_env(int size) {
-    if (!py_input) return NULL;
-    return (uint64_t*)pool_calloc(py_input->pool, size * sizeof(uint64_t));
+    if (!py_input || size <= 0) return NULL;
+    return (uint64_t*)heap_calloc_js_env((size_t)size * sizeof(Item));
+}
+
+static int py_env_item_count(uint64_t* env) {
+    if (!env || !context || !context->heap || !context->heap->gc ||
+            !gc_is_managed(context->heap->gc, env)) return 0;
+    gc_header_t* header = gc_get_header(env);
+    if (!header || header->type_tag != GC_TYPE_JS_ENV) return 0;
+    return (int)(header->alloc_size / (2 * sizeof(Item)));
+}
+
+extern "C" int64_t py_closure_get_env(Item closure) {
+    if (get_type_id(closure) != LMD_TYPE_FUNC || !closure.function) return 0;
+    return (int64_t)(uintptr_t)closure.function->closure_env;
+}
+
+extern "C" void py_env_store(uint64_t* env, int slot, Item value) {
+    int count = py_env_item_count(env);
+    if (count > 0) {
+        owned_item_slot_store((Item*)env, count, slot, value);
+        return;
+    }
+    if (env && slot >= 0) env[slot] = value.item;
+}
+
+extern "C" Item py_env_load(uint64_t* env, int slot) {
+    int count = py_env_item_count(env);
+    if (count > 0) return owned_item_slot_read((Item*)env, count, slot, false);
+    if (!env || slot < 0) return ItemNull;
+    return (Item){.item = env[slot]};
 }
 
 // set FN_FLAG_HAS_KWARGS on a function item (called at definition site for **kwargs functions)
@@ -2008,15 +2090,43 @@ extern "C" Item py_dict_merge(Item dst, Item src) {
     return dst;
 }
 
+static bool py_can_prepend_call_arg(const char* call_kind, int arg_count) {
+    if (arg_count >= 16) {
+        // Native dispatch has a fixed ABI; never discard trailing Python args.
+        log_error("py-call: %s exceeds 16-argument dispatch limit", call_kind);
+        return false;
+    }
+    return true;
+}
+
 // call a function that may accept **kwargs: if FN_FLAG_HAS_KWARGS, append kwargs_map as last arg
 extern "C" Item py_call_function_kw(Item func, Item* args, int arg_count, Item kwargs_map) {
+    if (arg_count < 0 || arg_count > 16) {
+        log_error("py-call: keyword call argument count %d exceeds native dispatch limit", arg_count);
+        return ItemNull;
+    }
+    RootFrame roots((Context*)context, 18);
+    Rooted<Item> rooted_func(roots, func);
+    uint64_t fallback_args[16] = {};
+    uint64_t* rooted_args = roots.take_slot();
+    for (int i = 1; i < 16; i++) roots.take_slot();
+    for (int i = 0; i < 16; i++) {
+        uint64_t value = (i < arg_count && args) ? args[i].item : ItemNull.item;
+        if (rooted_args) rooted_args[i] = value;
+        else fallback_args[i] = value;
+    }
+    Rooted<Item> rooted_kwargs(roots, kwargs_map);
+    func = rooted_func.get();
+    args = (Item*)(rooted_args ? rooted_args : fallback_args);
+    kwargs_map = rooted_kwargs.get();
     // bound method: prepend __self__ to args
     if (py_is_bound_method(func)) {
         Item fn_item = py_map_get_cstr(func, "__func__");
         Item self    = py_map_get_cstr(func, "__self__");
+        if (!py_can_prepend_call_arg("bound keyword method", arg_count)) return ItemNull;
         Item new_args[17];
         new_args[0] = self;
-        int na = arg_count > 16 ? 16 : arg_count;
+        int na = arg_count;
         for (int i = 0; i < na; i++) new_args[i + 1] = args ? args[i] : ItemNull;
         return py_call_function_kw(fn_item, new_args, na + 1, kwargs_map);
     }
@@ -2039,6 +2149,10 @@ extern "C" Item py_call_function_kw(Item func, Item* args, int arg_count, Item k
     }
 
     int arity = fn->arity;
+    if (arity > 6) {
+        log_error("py-call: keyword function arity %d exceeds native dispatch limit", arity);
+        return ItemNull;
+    }
     bool is_closure = (fn->closure_field_count > 0 && fn->closure_env != NULL);
 
     // typedefs: regular params + kwargs map as last param (non-closure)
@@ -2092,14 +2206,30 @@ extern "C" Item py_call_function_kw(Item func, Item* args, int arg_count, Item k
 }
 
 extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
+    if (arg_count < 0 || arg_count > 16) {
+        log_error("py-call: argument count %d exceeds native dispatch limit", arg_count);
+        return ItemNull;
+    }
+    RootFrame roots((Context*)context, 17);
+    Rooted<Item> rooted_func(roots, func);
+    uint64_t fallback_args[16] = {};
+    uint64_t* rooted_args = roots.take_slot();
+    for (int i = 1; i < 16; i++) roots.take_slot();
+    for (int i = 0; i < 16; i++) {
+        uint64_t value = (i < arg_count && args) ? args[i].item : ItemNull.item;
+        if (rooted_args) rooted_args[i] = value;
+        else fallback_args[i] = value;
+    }
+    func = rooted_func.get();
+    args = (Item*)(rooted_args ? rooted_args : fallback_args);
     // bound method: prepend __self__ to args
     if (py_is_bound_method(func)) {
         Item fn_item = py_map_get_cstr(func, "__func__");
         Item self    = py_map_get_cstr(func, "__self__");
-        // build new args array with self prepended (max 16+1=17)
+        if (!py_can_prepend_call_arg("bound method", arg_count)) return ItemNull;
         Item new_args[17];
         new_args[0] = self;
-        int na = arg_count > 16 ? 16 : arg_count;
+        int na = arg_count;
         for (int i = 0; i < na; i++) new_args[i + 1] = args ? args[i] : ItemNull;
         return py_call_function(fn_item, new_args, na + 1);
     }
@@ -2111,9 +2241,10 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
         Item own_new = py_map_get_cstr(func, "__new__");
         if (get_type_id(own_new) != LMD_TYPE_NULL) {
             // custom __new__: call __new__(cls, *args) — cls is first arg
+            if (!py_can_prepend_call_arg("__new__", arg_count)) return ItemNull;
             Item new_args[17];
             new_args[0] = func;
-            int na = arg_count > 16 ? 16 : arg_count;
+            int na = arg_count;
             for (int i = 0; i < na; i++) new_args[i + 1] = args ? args[i] : ItemNull;
             return py_call_function(own_new, new_args, na + 1);
         }
@@ -2123,9 +2254,10 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
         Item init_fn = py_mro_lookup(func,
             (Item){.item = s2it(heap_create_name("__init__"))});
         if (get_type_id(init_fn) != LMD_TYPE_NULL) {
+            if (!py_can_prepend_call_arg("__init__", arg_count)) return ItemNull;
             Item init_args[17];
             init_args[0] = inst;
-            int na = arg_count > 16 ? 16 : arg_count;
+            int na = arg_count;
             for (int i = 0; i < na; i++) init_args[i + 1] = args ? args[i] : ItemNull;
             py_call_function(init_fn, init_args, na + 1);
         }
@@ -2141,6 +2273,10 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
     if (!fn || !fn->ptr) return ItemNull;
 
     int arity = fn->arity;
+    if (arity > 6) {
+        log_error("py-call: function arity %d exceeds native dispatch limit", arity);
+        return ItemNull;
+    }
     bool is_closure = (fn->closure_field_count > 0 && fn->closure_env != NULL);
 
     // for closures, env is a hidden first argument — MIR function has arity+1 params
@@ -2200,7 +2336,9 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
 
 extern "C" void py_raise(Item exception) {
     py_exception_pending = true;
-    py_exception_value = exception;
+    // The exception slot outlives the raising MIR frame, so relocate scalar
+    // payloads before its number-stack extent is restored.
+    py_exception_value = lambda_item_heap_rehome(exception);
 }
 
 extern "C" Item py_check_exception(void) {
@@ -2280,6 +2418,10 @@ extern "C" void py_set_module_var(int index, Item value) {
         if (index >= py_module_var_count) {
             py_module_var_count = index + 1;
         }
+    } else {
+        // ignoring an out-of-range export makes later imports observe a different module.
+        log_error("py-runtime-cap: module variable index %d exceeds limit %d",
+            index, PY_MODULE_VAR_MAX);
     }
 }
 
@@ -2287,6 +2429,8 @@ extern "C" Item py_get_module_var(int index) {
     if (index >= 0 && index < PY_MODULE_VAR_MAX) {
         return py_module_vars[index];
     }
+    log_error("py-runtime-cap: module variable index %d exceeds limit %d",
+        index, PY_MODULE_VAR_MAX);
     return ItemNull;
 }
 
@@ -2324,16 +2468,20 @@ extern "C" bool py_is_stop_iteration(Item value) {
 //               slots 1..N = local variables (params first).
 extern "C" Item py_gen_create(void* resume_fn_ptr, int frame_size) {
     if (!py_input || frame_size <= 0 || frame_size > 256) return ItemNull;
-    Function* fn = (Function*)pool_calloc(py_input->pool, sizeof(Function));
-    fn->type_id = LMD_TYPE_FUNC;
+    Function* fn = py_alloc_function(resume_fn_ptr, 0);
+    if (!fn) return ItemNull;
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> rooted_fn(roots, (Item){.function = fn});
+    uint64_t* frame = py_alloc_env(frame_size);
+    if (!frame) return ItemNull;
+    fn = rooted_fn.get().function;
     fn->flags = FN_FLAG_IS_GENERATOR;
-    fn->arity = 0;
-    fn->ptr = (fn_ptr)resume_fn_ptr;
-    uint64_t* frame = (uint64_t*)pool_calloc(py_input->pool, frame_size * sizeof(uint64_t));
     fn->closure_env = frame;
-    fn->closure_field_count = (uint8_t)(frame_size < 255 ? frame_size : 255);
+    // Generator slot zero is a raw resume state, so the traced env owns the
+    // frame while the legacy Item-field count deliberately remains zero.
+    fn->closure_field_count = 0;
     // frame[0] = 0: fresh (not started)
-    return (Item){.function = fn};
+    return rooted_fn.get();
 }
 
 // Return the frame array pointer of a generator as an i64 (for MIR store ops).
@@ -2347,6 +2495,9 @@ extern "C" int64_t py_gen_get_frame_c(Item gen) {
 // Advance a generator by sending ItemNull (used by next()).
 // Also callable from py_iterator_next above.
 extern "C" Item py_gen_next(Item gen) {
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> rooted_gen(roots, gen);
+    gen = rooted_gen.get();
     if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
     Function* fn = gen.function;
     if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
@@ -2360,6 +2511,10 @@ extern "C" Item py_gen_next(Item gen) {
 
 // Send a value into a generator (used by gen.send(val)).
 extern "C" Item py_gen_send(Item gen, Item value) {
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_gen(roots, gen);
+    Rooted<Item> rooted_value(roots, value);
+    gen = rooted_gen.get();
     if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
     Function* fn = gen.function;
     if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
@@ -2367,7 +2522,7 @@ extern "C" Item py_gen_send(Item gen, Item value) {
     if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
     typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
     resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
-    uint64_t result = resume(frame, value.item);
+    uint64_t result = resume(frame, rooted_value.get().item);
     return (Item){.item = result};
 }
 

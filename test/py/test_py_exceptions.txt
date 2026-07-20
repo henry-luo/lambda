@@ -1,0 +1,7 @@
+caught raised error
+42
+finally ran
+100
+caught custom
+inner caught
+outer ok

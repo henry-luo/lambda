@@ -45,17 +45,14 @@ extern "C" bool py_is_coroutine(Item x) {
 // Coroutine return-value side channel (safe in single-threaded mode)
 // =========================================================================
 
-static Item g_coro_return_value = {.item = ITEM_NULL};
+// Coroutine completion may outlive the resume frame and is isolated per host thread.
+static thread_local Item g_coro_return_value = {.item = ITEM_NULL};
 
 extern "C" Item py_coro_set_return(Item value) {
-    // register as GC root on first use (static variable invisible to stack scanning)
-    static bool root_registered = false;
-    if (!root_registered) {
-        heap_register_gc_root(&g_coro_return_value.item);
-        root_registered = true;
-    }
-    g_coro_return_value = value;
-    return value;
+    // A TLS completion slot has a distinct address on each host thread.
+    heap_register_gc_root(&g_coro_return_value.item);
+    g_coro_return_value = lambda_item_heap_rehome(value);
+    return g_coro_return_value;
 }
 
 extern "C" Item py_coro_get_return(void) {

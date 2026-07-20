@@ -1,6 +1,11 @@
 # LambdaPy Runtime — Design Document
 
-> ⚠️ **STALE (2026-07-16).** This document describes the runtime's early (~7.8K LOC / 9-file) state; the code is now ~18.6K LOC across 17 files, with closures, classes (`py_class.cpp`), generators/coroutines/asyncio (`py_async.cpp`), BigInt (`py_bigint.cpp`), and a stdlib layer (`py_stdlib.cpp`) implemented. Its memory-management claims predate the stack-frame architecture — there is no GC nursery anymore; floats are inline doubles via the shared `push_d`. Verified current state + alignment design: `vibe/Lambda_Design_Stack_Frame_Python.md`; the full rewrite of this document is owned by `vibe/Lambda_Impl_Stack_Frame_Py.md` stage P4b. Point fixes below correct only the flat-wrong claims.
+> **Updated 2026-07-20.** LambdaPy uses the shared MIR frame/rooting API,
+> recovery checkpoints, traced closure and generator environments, scalar-home
+> return adoption, and a checked thread-local argument stack. Its builder emits
+> the shared `AstNode` base and shared kinds for structurally identical syntax;
+> Python-only forms occupy the 2000+ extension range. This document describes
+> that architecture rather than the retired compatibility-tier implementation.
 
 ## Overview
 
@@ -26,7 +31,7 @@ Python Source (.py)
 Tree-sitter Parser     (tree-sitter-python grammar)
     │
     ▼
-Python AST Builder     (build_py_ast.cpp → typed PyAstNode tree)
+Python AST Builder     (build_py_ast.cpp → shared AstNode tree + Py extensions)
     │
     ▼
 MIR Transpiler         (transpile_py_mir.cpp → MIR IR instructions)
@@ -94,6 +99,22 @@ argv[1] == "py"
                                       ← return Item result
 ```
 
+### 1.4 Frame, recovery, and ownership invariants
+
+Every Python-generated function, lambda, generator wrapper, and `py_main`
+creates a `MirEmitter` frame with saved side-root and side-number watermarks.
+`pm_emit` funnels returns through one epilogue, records conservative Item roots
+around collecting calls, finalizes scalar homes, and restores each watermark.
+An Item that could point into the current number stack is adopted by a caller
+home or re-homed before a public return restores that stack.
+
+`transpile_py_to_mir()` runs `py_main` inside a `LambdaRecoveryCheckpoint`.
+The checkpoint restores runtime stack state after non-local recovery. Closure
+and generator state lives in a traced environment owned through
+`Function::closure_env`; functions are rooted while those environments are
+allocated. Exceptions, coroutine returns, module variables, and argument-stack
+state are thread-local roots registered by `py_runtime_set_input()`.
+
 ---
 
 ## 2. Python Data Types ↔ Lambda Runtime Types
@@ -112,7 +133,7 @@ All Python values are represented as Lambda `Item` (64-bit tagged value). There 
 | `list` | `LMD_TYPE_ARRAY` | Lambda `Array` (dynamic `Item*` buffer) | GC heap allocated |
 | `tuple` | `LMD_TYPE_ARRAY` | Lambda `Array` (immutable semantics) | GC heap allocated |
 | `dict` | `LMD_TYPE_MAP` | Lambda `Map` with `ShapeEntry` field chain | GC heap allocated |
-| `function` | `LMD_TYPE_FUNC` | Pool-allocated `Function` struct | Pool allocated |
+| `function` | `LMD_TYPE_FUNC` | `Function` with traced closure environment | GC-owned environment |
 
 ### 2.2 Tagged Pointer Constants
 
@@ -151,41 +172,18 @@ LambdaPy reuses Lambda's existing subsystems rather than reimplementing them:
 
 ### 3.1 Transpiler Architecture (`transpile_py_mir.cpp`)
 
-The Python transpiler emits MIR IR directly (no intermediate C code), following the same approach as the JS transpiler. The core struct is `PyMirTranspiler`:
+The Python transpiler emits MIR directly and embeds the shared `MirEmitter`.
+`VarEntry`/`em_var_scope_*` provide lowering-time variable tables, while the
+builder records lexical binding in shared `NameScope` objects and attaches
+`FnAnalysis` plus `PyFnExt` to functions and lambdas. Python-specific function
+facts (star arguments, kwargs, methods, async and generator flags) remain in
+`PyFnExt`; generic capture facts use `FnCapture`.
 
-```c
-struct PyMirTranspiler {
-    MIR_context_t ctx;              // MIR JIT context
-    MIR_module_t module;            // current MIR module
-    MIR_item_t current_func_item;   // MIR function item being emitted
-    MIR_func_t current_func;        // MIR function being emitted
-    PyTranspiler* tp;               // Python parser/AST context
-
-    struct hashmap* import_cache;   // runtime function import deduplication
-    struct hashmap* local_funcs;    // user-defined functions
-
-    struct hashmap* var_scopes[64]; // variable scope stack
-    int scope_depth;
-
-    PyLoopLabels loop_stack[32];    // break/continue label stack
-    int loop_depth;
-
-    int reg_counter;                // MIR register counter
-    int label_counter;              // MIR label counter
-
-    PyFuncCollected func_entries[128]; // collected function definitions
-    int func_count;
-
-    struct hashmap* module_consts;  // module-level constants (reserved)
-    int module_var_count;
-    bool in_main;
-
-    // Closure support
-    MIR_reg_t scope_env_reg;
-    int scope_env_slot_count;
-    int current_func_index;
-};
-```
+Every generated entry, ordinary function, lambda, generator wrapper, and
+generator resume function has a single `MirEmitter` epilogue. The epilogue
+publishes exact roots around collecting helpers, restores side-stack
+watermarks, adopts scalar returns, and re-homes public Item returns before the
+activation number stack is restored.
 
 ### 3.2 Multi-Phase Compilation
 
@@ -238,15 +236,29 @@ MIR:     pyf_add: func i64, i64:_py_a, i64:_py_b
 - Each parameter gets a unique MIR register name (`_py_<paramname>`) — MIR requires unique names
 - Parameters are registered in the function's scope via `pm_set_var()`
 - A trailing `RET PY_ITEM_NULL_VAL` is emitted after the body to ensure Python's implicit `return None`
+
+### 3.5 Current lowering substrate
+
+`PyMirTranspiler` embeds `MirEmitter` and uses its import-signature, call-root,
+frame, scalar-home, and metadata APIs. Python calls pass complete signatures and
+install pre-GC, result, and telemetry callbacks. Python remains Item-based
+during this transition, so it does not yet use representation conversion.
+
+Python call arguments use a checked thread-local `py_args_*` stack. The MIR
+lowerer saves, reserves, stores, and restores that stack around dynamic calls;
+there are no Python `MIR_ALLOCA` argument buffers. Compiler tables have checked
+limits: exceeding a scope, loop, function, lambda, handler, module-variable,
+generator-local, yield-point, or direct-parameter limit produces `ItemError`
+instead of silently omitting part of a program.
 - Functions are collected in a pre-pass (Phase 1) so they can be called before their definition appears textually
 
-### 3.5 Builtin Call Optimization
+### 3.6 Builtin Call Optimization
 
 When the transpiler encounters a call to a known builtin, it emits a direct runtime call instead of going through the generic `py_call_function` dispatch:
 
 | Builtin | Runtime Function | Notes |
 |---------|-----------------|-------|
-| `print(...)` | `py_print(args[], argc)` | Stack-allocated arg array |
+| `print(...)` | `py_print(args[], argc)` | Checked `py_args` stack scope |
 | `len(x)` | `py_builtin_len(x)` | Direct call |
 | `type(x)` | `py_builtin_type(x)` | Returns `<class 'int'>` etc. |
 | `isinstance(x, t)` | `py_builtin_isinstance(x, t)` | Type check |
@@ -276,9 +288,11 @@ When the transpiler encounters a call to a known builtin, it emits a direct runt
 | `set(x)` | `py_builtin_set(x)` | Set constructor |
 | `tuple(x)` | `py_builtin_tuple(x)` | Tuple constructor |
 
-Unrecognized function calls go through the generic path: evaluate the callable, collect arguments into a stack array, and call `py_call_function(func, args[], argc)`.
+Unrecognized function calls go through the generic path: evaluate the callable,
+collect arguments in a checked `py_args` scope, and call
+`py_call_function(func, args[], argc)`.
 
-### 3.6 Method Call Dispatch
+### 3.7 Method Call Dispatch
 
 Method calls (`obj.method(args)`) use a three-tier dispatch strategy with early exit:
 
@@ -300,15 +314,17 @@ pm_transpile_call() → if call.function is ATTRIBUTE:
 
 Each dispatcher checks the object's `TypeId` and matches the method name against its known methods. The dispatchers return `None` to signal "not my type," allowing the next dispatcher to try.
 
-### 3.7 Scope & Variable Management
+### 3.8 Scope & Variable Management
 
-Variables are managed through a stack of hashmap-based scopes:
+The builder binds Python names in shared `NameScope` objects. Module, function,
+class, and comprehension scopes have explicit kinds; lookup crosses enclosing
+functions, skips class scope below a function boundary, and isolates
+comprehension targets. `global` and `nonlocal` are stored on shared `NameEntry`
+flags, so subsequent writes use the correct module or enclosing-function home.
 
-- **Module scope** (depth 0) — Top-level variables
-- **Function scope** — Created on function entry, destroyed on exit
-- **Block scope** — Created for compound statements (if/while/for blocks)
-
-**Variable lookup** walks the scope chain from innermost to outermost (`pm_find_var`), implementing Python's LEGB (Local → Enclosing → Global → Built-in) resolution order.
+The lowering-time register mapping is separate from lexical binding and uses
+the shared `VarEntry` scope helpers. Its lookup follows the builder's LEGB
+decision rather than creating Python block scopes.
 
 **Variable assignment** creates a new MIR register in the current scope if the variable doesn't exist yet:
 
@@ -323,7 +339,7 @@ PyMirVarEntry* var = pm_find_var(mt, "_py_x");
 // use var->reg
 ```
 
-### 3.8 Control Flow
+### 3.9 Control Flow
 
 **If/elif/else:**
 ```
@@ -374,7 +390,7 @@ while cond:                 L_loop:
 
 **Break/continue** emit `JMP` to the nearest loop's `break_label` or `continue_label` from the loop stack.
 
-### 3.9 Chained Comparisons
+### 3.10 Chained Comparisons
 
 Python's chained comparisons (`a < b < c`) compile to short-circuit evaluation:
 
@@ -397,7 +413,7 @@ MIR:     left = emit(a)
          L_end:
 ```
 
-### 3.10 Boolean Short-Circuit
+### 3.11 Boolean Short-Circuit
 
 `and`/`or` operators implement Python's value-returning semantics:
 
@@ -417,13 +433,13 @@ MIR (and):
          L_end:
 ```
 
-### 3.11 Exception Handling
+### 3.12 Exception Handling
 
-Exceptions use global thread state (same pattern as LambdaJS):
+Exceptions use thread-local state, rooted for the active heap:
 
 ```c
-static bool py_exception_pending;
-static Item py_exception_value;
+static thread_local bool py_exception_pending;
+static thread_local Item py_exception_value;
 
 // Factory for typed exceptions:
 Item py_new_exception(Item type_name, Item message);
@@ -546,13 +562,13 @@ Follows Python's truthiness rules:
 
 ### 5.1 AST Node Types (`py_ast.hpp`)
 
-60 node types organized by category (+ `NULL` sentinel and `NODE_COUNT`):
-
-**Program:** `MODULE`
-
-**Statements (26):** `EXPRESSION_STATEMENT`, `ASSIGNMENT`, `AUGMENTED_ASSIGNMENT`, `RETURN`, `IF`, `ELIF`, `ELSE`, `WHILE`, `FOR`, `BREAK`, `CONTINUE`, `PASS`, `FUNCTION_DEF`, `CLASS_DEF`, `IMPORT`, `IMPORT_FROM`, `GLOBAL`, `NONLOCAL`, `DEL`, `ASSERT`, `RAISE`, `TRY`, `EXCEPT`, `FINALLY`, `WITH`, `BLOCK`
-
-**Expressions (32):** `IDENTIFIER`, `LITERAL`, `FSTRING`, `BINARY_OP`, `UNARY_OP`, `NOT`, `BOOLEAN_OP`, `COMPARE`, `CALL`, `ATTRIBUTE`, `SUBSCRIPT`, `SLICE`, `STARRED`, `LIST`, `TUPLE`, `DICT`, `SET`, `LIST_COMPREHENSION`, `DICT_COMPREHENSION`, `SET_COMPREHENSION`, `GENERATOR_EXPRESSION`, `CONDITIONAL_EXPR`, `LAMBDA`, `KEYWORD_ARGUMENT`, `PARAMETER`, `DEFAULT_PARAMETER`, `TYPED_PARAMETER`, `DICT_SPLAT_PARAMETER`, `LIST_SPLAT_PARAMETER`, `TUPLE_UNPACK`, `PAIR`, `DECORATOR`
+`PyAstNode` is an alias of the shared `AstNode`, and `PyAstNodeType` aliases
+the common kind space. Modules, blocks, identifiers, literals, binary/unary
+expressions, calls, members, indexes, collections, assignment, control flow,
+functions, classes, imports, match, yield, and await use core kinds. Python
+forms whose shared representation is intentionally incomplete—such as
+f-strings, chained comparisons, slices, comprehensions, scope declarations,
+patterns, and `with`—use the Python extension range beginning at 2000.
 
 ### 5.2 Operator Enum (42 operators + sentinel)
 
@@ -566,16 +582,14 @@ Follows Python's truthiness rules:
 ### 5.3 Key AST Structures
 
 ```c
-PyCompareNode {                  // Chained: a < b < c
-    PyAstNode base;
+struct PyCompareNode : PyAstNode { // Chained: a < b < c
     PyAstNode* left;             // first operand
     PyOperator* ops;             // dynamic array of comparison operators
     PyAstNode** comparators;     // dynamic array of comparison operands
     int op_count;
 }
 
-PyFunctionDefNode {
-    PyAstNode base;
+struct PyFunctionDefNode : PyAstNode {
     String* name;
     PyAstNode* params;           // linked list of PyParamNode
     PyAstNode* body;             // function body (block)
@@ -583,8 +597,7 @@ PyFunctionDefNode {
     PyAstNode* return_annotation;
 }
 
-PyIfNode {
-    PyAstNode base;
+struct PyIfNode : PyAstNode {
     PyAstNode* test;
     PyAstNode* body;
     PyAstNode* elif_clauses;     // linked list of elif nodes
@@ -599,7 +612,9 @@ Converts Tree-sitter Python CST nodes to typed Lambda AST nodes. Key design poin
 - **Pool-allocated:** All AST nodes are allocated from `tp->ast_pool` — single bulk free on cleanup
 - **Linked lists:** Children (params, arguments, statements) are linked via `node->next`
 - **String interning:** Identifier names and string literals go through `pool_strcpy()` / `heap_create_name()`
-- **Scope registration:** `build_py_assignment()` calls `py_scope_define()` for the target variable
+- **Scope registration:** assignment and `for` targets bind through the shared
+  `NameScope`; global/nonlocal declarations are consumed into `NameEntry`
+  flags
 - **Escape sequences:** `py_decode_escape()` handles `\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0`, `\a`, `\b`, `\f`, `\v`
 - **Assignment ambiguity:** Tree-sitter Python may produce `assignment` nodes either inside or outside `expression_statement`; both paths are handled
 
@@ -609,25 +624,8 @@ Converts Tree-sitter Python CST nodes to typed Lambda AST nodes. Key design poin
 
 ### 6.1 LEGB Scoping (`py_scope.cpp`, `py_transpiler.hpp`)
 
-Python's LEGB (Local → Enclosing → Global → Built-in) scope resolution:
-
-```c
-typedef enum {
-    PY_SCOPE_MODULE,         // global scope
-    PY_SCOPE_FUNCTION,       // local function scope
-    PY_SCOPE_CLASS,          // class body
-    PY_SCOPE_COMPREHENSION   // comprehension scope
-} PyScopeType;
-
-typedef enum {
-    PY_VAR_LOCAL,     // assigned in current scope
-    PY_VAR_GLOBAL,    // global declaration → module_scope
-    PY_VAR_NONLOCAL,  // nonlocal declaration → nearest enclosing function
-    PY_VAR_FREE,      // captured from enclosing scope
-    PY_VAR_CELL,      // local, captured by inner function
-    PY_VAR_MODULE     // module-level variable
-} PyVarKind;
-```
+Python's LEGB (Local → Enclosing → Global → Built-in) resolution uses shared
+`NameScope` and `NameEntry` rather than a parallel `PyScope` type.
 
 - `global x` → defines `x` directly in the module scope
 - `nonlocal x` → walks to the nearest enclosing function scope
@@ -640,7 +638,7 @@ At the MIR level, variables map to named registers within each function:
 
 - Variable naming convention: `_py_<python_name>` (e.g., `_py_x`, `_py_total`)
 - Function parameters use the same convention: `_py_a`, `_py_b`
-- Scope is managed via a stack of hashmaps (`var_scopes[0..scope_depth]`)
+- Scope is managed via shared `em_var_scope_*` helpers
 - Variable lookup walks from `scope_depth` down to 0
 
 ---
@@ -649,17 +647,19 @@ At the MIR level, variables map to named registers within each function:
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `transpile_py_mir.cpp` | ~2,500 | Core MIR transpiler: AST → MIR IR, function compilation, builtin dispatch |
-| `build_py_ast.cpp` | ~2,050 | AST builder: Tree-sitter Python CST → typed PyAstNode tree |
+| `transpile_py_mir.cpp` | ~7,900 | MIR lowering, shared frame composition, function compilation, builtin dispatch |
+| `build_py_ast.cpp` | ~2,500 | AST builder: Tree-sitter Python CST → common AST plus Python extensions |
 | `py_builtins.cpp` | ~1,150 | Built-in functions (29), method dispatchers (string/list/dict) |
 | `py_runtime.cpp` | ~1,090 | Runtime library: operators, type coercion, collections, exceptions |
-| `py_ast.hpp` | ~475 | AST node types: 60 node types, 42 operators, 41 struct definitions |
+| `py_ast.hpp` | ~500 | Python aliases/extensions over shared AST nodes and operators |
 | `py_print.cpp` | ~175 | Debug AST printer |
-| `py_scope.cpp` | ~150 | Scope management: LEGB resolution, symbol tables |
+| `py_scope.cpp` | ~300 | Python binding policy over shared `NameScope` |
 | `py_runtime.h` | ~120 | Runtime C API: 73 function declarations callable from JIT code |
 | `py_transpiler.hpp` | ~70 | Transpiler context struct, scope types, lifecycle functions |
 
-**Total:** ~7,780 LOC across 9 source files *(stale — now ~18.6K across 17 files; `py_class.cpp`, `py_async.cpp`, `py_bigint.cpp`, `py_builtins.cpp` grown, `py_stdlib.cpp` added; see header note)*.
+**Total:** approximately 18.6K LOC across the Python runtime, builder, and
+lowerer. The runtime library remains Python-owned; only the AST, binding, and
+MIR substrate are shared.
 
 ---
 
@@ -669,18 +669,18 @@ At the MIR level, variables map to named registers within each function:
 |--------|---------------|-------------------|
 | Source grammar | Tree-sitter JavaScript | Tree-sitter Python |
 | Entry function | `js_main()` | `py_main()` |
-| User function prefix | inline naming | `pyf_<name>` prefix |
+| User function prefix | inline naming | `_name` / nested-name MIR symbols |
 | Variables | `var`/`let`/`const` with hoisting | Assignment-based, LEGB scoping |
 | Scoping | Function-scoped `var`, block-scoped `let`/`const` | LEGB: Local → Enclosing → Global → Built-in |
 | Closures | Shared scope env (mutable reference semantics) | Implemented — `py_alloc_env` slot arrays (see `vibe/Lambda_Design_Stack_Frame_Python.md` §1.4) |
-| Type inference | Evidence-based (arithmetic patterns → int/float) | None (all values boxed) |
-| Native fast path | Dual compilation for typed functions | None (all operators are runtime calls) |
+| Type inference | Evidence-based (arithmetic patterns → int/float) | Runtime type hints preserve Python semantics; proven int/float expressions use native fast paths |
+| Native fast path | Dual compilation for typed functions | Inline integer and float arithmetic/comparison paths with runtime promotion fallback |
 | Division | JS `/` (float) | `//` floor division, `/` true division |
 | Comparisons | Binary only | Chained: `a < b < c` |
 | Boolean ops | Truthy/falsy | Value-returning: `a or b` returns `a` if truthy |
 | Exception model | `try`/`catch`/`finally` | `try`/`except`/`finally` with `raise` |
 | DOM integration | Full DOM bridge via Radiant | None |
 | Method dispatch | Prototype chain | Three-tier: string → list → dict |
-| Module vars | `js_module_vars[256]` indexed array | Scope-based (all variables in scope hashmap) |
+| Module vars | `js_module_vars[256]` indexed array | Rooted thread-local module table with shared lowering scopes |
 | Class system | Prototype-based with constructor shape pre-alloc | Implemented — `py_class.cpp` |
 | LOC | ~22K | ~18.6K |

@@ -1953,12 +1953,16 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         // Skip the '#' prefix
         if (source.length > 1 && source.str[0] == '#') {
             String* decoded = js_decode_identifier_name(tp, source.str + 1, (int)(source.length - 1));
-            char buf[256];
-            int len = snprintf(buf, sizeof(buf), "__private_%.*s",
-                decoded ? (int)decoded->len : 0,
-                decoded ? decoded->chars : "");
+            size_t decoded_len = decoded ? decoded->len : 0;
+            size_t private_len = (sizeof("__private_") - 1) + decoded_len;
+            char* private_name = (char*)pool_alloc(tp->ast_pool, private_len + 1);
+            // private identifiers may contain generated Unicode names larger than
+            // the old fixed buffer; preserve the full decoded spelling before interning.
+            memcpy(private_name, "__private_", sizeof("__private_") - 1);
+            if (decoded_len) memcpy(private_name + sizeof("__private_") - 1, decoded->chars, decoded_len);
+            private_name[private_len] = '\0';
             JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
-            identifier->name = name_pool_create_len(tp->name_pool, buf, len);
+            identifier->name = name_pool_create_len(tp->name_pool, private_name, private_len);
             identifier->entry = NULL;
             identifier->type = &TYPE_ANY;
             return (JsAstNode*)identifier;

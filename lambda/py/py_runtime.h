@@ -105,6 +105,10 @@ Item py_builtin_open(Item path, Item mode);
 // Variadic args support
 // ========================================================================
 Item py_build_list_from_args(Item* args, int64_t count);
+int64_t py_args_save(void);
+Item* py_args_push(int count);
+void py_args_store(Item* args, int index, Item value);
+void py_args_restore(int64_t mark);
 
 // ========================================================================
 // Iterator protocol
@@ -117,8 +121,12 @@ Item py_range_new(Item start, Item stop, Item step);
 // Function/closure
 // ========================================================================
 Item py_new_function(void* func_ptr, int param_count);
-Item py_new_closure(void* func_ptr, int param_count, uint64_t* env, int env_size);
+Item py_new_closure(void* func_ptr, int param_count, int env_size);
+Item py_new_closure_with_env(void* func_ptr, int param_count, uint64_t* env, int env_size);
 uint64_t* py_alloc_env(int size);
+int64_t py_closure_get_env(Item closure);
+void py_env_store(uint64_t* env, int slot, Item value);
+Item py_env_load(uint64_t* env, int slot);
 Item py_set_kwargs_flag(Item fn_item);
 Item py_dict_merge(Item dst, Item src);
 Item py_call_function(Item func, Item* args, int arg_count);

@@ -228,17 +228,17 @@ void print_py_ast_node(PyAstNode* node, int depth) {
             printf("\n");
             indent(depth + 1);
             printf("target:\n");
-            print_py_ast_node(assign->targets, depth + 2);
+            print_py_ast_node(assign->left, depth + 2);
             indent(depth + 1);
             printf("value:\n");
-            print_py_ast_node(assign->value, depth + 2);
+            print_py_ast_node(assign->right, depth + 2);
             break;
         }
         case PY_AST_NODE_AUGMENTED_ASSIGNMENT: {
             PyAugAssignmentNode* aug = (PyAugAssignmentNode*)node;
             printf(" %s\n", py_op_name(aug->op));
-            print_py_ast_node(aug->target, depth + 1);
-            print_py_ast_node(aug->value, depth + 1);
+            print_py_ast_node(aug->left, depth + 1);
+            print_py_ast_node(aug->right, depth + 1);
             break;
         }
         case PY_AST_NODE_IF:
@@ -281,10 +281,10 @@ void print_py_ast_node(PyAstNode* node, int depth) {
             printf("\n");
             indent(depth + 1);
             printf("target:\n");
-            print_py_ast_node(f->target, depth + 2);
+            print_py_ast_node(f->left, depth + 2);
             indent(depth + 1);
             printf("iter:\n");
-            print_py_ast_node(f->iter, depth + 2);
+            print_py_ast_node(f->right, depth + 2);
             indent(depth + 1);
             printf("body:\n");
             print_py_ast_node(f->body, depth + 2);

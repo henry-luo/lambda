@@ -14,6 +14,7 @@
 #include "py_class.h"
 #include "py_runtime.h"
 #include "../lambda-data.hpp"
+#include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
@@ -21,6 +22,7 @@
 #include "../../lib/mem.h"
 
 extern Input* py_input;
+extern __thread EvalContext* context;
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern Item _map_get(TypeMap* map_type, void* map_data, const char* key, bool* is_found);
 extern TypeMap EmptyMap;
@@ -57,12 +59,17 @@ extern "C" Item py_map_get_cstr(Item obj, const char* key) {
 
 // Write a field by C string key. Returns value.
 extern "C" Item py_map_set_cstr(Item obj, const char* key, Item value) {
-    if (get_type_id(obj) != LMD_TYPE_MAP) return value;
-    Map* m = it2map(obj);
-    if (!m || !py_input) return value;
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_obj(roots, obj);
+    Rooted<Item> rooted_value(roots, value);
+    if (get_type_id(rooted_obj.get()) != LMD_TYPE_MAP) return rooted_value.get();
+    Map* m = it2map(rooted_obj.get());
+    if (!m || !py_input) return rooted_value.get();
     String* k = (String*)heap_create_name(key);
-    map_put(m, k, value, py_input);
-    return value;
+    // map_put can grow the shape/data storage after name interning; both
+    // receiver and value must survive that collection boundary exactly.
+    map_put(m, k, rooted_value.get(), py_input);
+    return rooted_value.get();
 }
 
 // Returns true if a Map has a field set to a truthy bool value.

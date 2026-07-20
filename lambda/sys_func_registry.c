@@ -2262,6 +2262,7 @@ JitImport jit_runtime_imports[] = {
     {"py_lshift", FPTR(py_lshift)},
     {"py_rshift", FPTR(py_rshift)},
     // bigint
+    {"py_bigint_from_int64", FPTR(py_bigint_from_int64)},
     {"py_bigint_from_cstr", FPTR(py_bigint_from_cstr)},
     // comparison
     {"py_eq", FPTR(py_eq)},
@@ -2317,6 +2318,10 @@ JitImport jit_runtime_imports[] = {
     {"py_builtin_open", FPTR(py_builtin_open)},
     // variadic args
     {"py_build_list_from_args", FPTR(py_build_list_from_args)},
+    {"py_args_save", FPTR(py_args_save)},
+    {"py_args_push", FPTR(py_args_push)},
+    {"py_args_store", FPTR(py_args_store)},
+    {"py_args_restore", FPTR(py_args_restore)},
     // iterator
     {"py_get_iterator", FPTR(py_get_iterator)},
     {"py_iterator_next", FPTR(py_iterator_next)},
@@ -2324,7 +2329,11 @@ JitImport jit_runtime_imports[] = {
     // function/closure
     {"py_new_function", FPTR(py_new_function)},
     {"py_new_closure", FPTR(py_new_closure)},
+    {"py_new_closure_with_env", FPTR(py_new_closure_with_env)},
     {"py_alloc_env", FPTR(py_alloc_env)},
+    {"py_closure_get_env", FPTR(py_closure_get_env)},
+    {"py_env_store", FPTR(py_env_store)},
+    {"py_env_load", FPTR(py_env_load)},
     {"py_set_kwargs_flag", FPTR(py_set_kwargs_flag)},
     {"py_dict_merge", FPTR(py_dict_merge)},
     {"py_call_function", FPTR(py_call_function)},
