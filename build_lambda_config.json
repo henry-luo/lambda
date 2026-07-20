@@ -559,10 +559,24 @@
                 "fno-omit-frame-pointer",
                 "g3",
                 "gline-tables-only",
-                "O0"
+                "Og"
             ],
             "linker_flags": [],
             "build_dir": "build_debug",
+            "debug": true
+        },
+        "debug_profile": {
+            "output": "lambda-debug-profile.exe",
+            "flags": [
+                "std=c++17",
+                "pedantic",
+                "fdiagnostics-color=auto",
+                "g3",
+                "fno-omit-frame-pointer",
+                "O3"
+            ],
+            "linker_flags": [],
+            "build_dir": "build_debug_profile",
             "debug": true
         },
         "cli": {

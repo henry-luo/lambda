@@ -80,6 +80,12 @@ static bool js_test262_global_flag_is_true(const char* name) {
 static const int JS_DOCUMENT_VIEWPORT_WIDTH = 800;
 static const int JS_DOCUMENT_VIEWPORT_HEIGHT = 600;
 
+// This is placed before the batch helper so it can share the normal CLI
+// document loader without duplicating document construction.
+extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
+    bool track_source_lines, bool execute_scripts);
+
 static char ascii_lower_char(char ch) {
     return (ch >= 'A' && ch <= 'Z') ? (char)(ch + ('a' - 'A')) : ch;
 }
@@ -157,6 +163,65 @@ static void js_document_session_finish(JsDocumentSession* session) {
     session->uicon.document = nullptr;
     ui_context_cleanup(&session->uicon);
     js_document_session_init(session);
+}
+
+struct JsBatchDocument {
+    JsDocumentSession session;
+    DomDocument* document;
+    Pool* pool;
+    Url* url;
+};
+
+static void js_batch_document_init(JsBatchDocument* job) {
+    if (!job) return;
+    memset(job, 0, sizeof(JsBatchDocument));
+    js_document_session_init(&job->session);
+}
+
+static void js_batch_document_finish(Runtime* runtime, JsBatchDocument* job) {
+    if (!job) return;
+    // The batch reset runs before this teardown, so no JS DOM wrapper can keep
+    // a pointer into the document pool after the next job begins.
+    if (job->document) {
+        // Keep the UI context bound while the document releases its view tree,
+        // retained script state, and DOM-owned resource caches.
+        free_document(job->document);
+        job->document = nullptr;
+        job->url = nullptr; // free_document owns document->url
+    }
+    js_document_session_finish(&job->session);
+    if (job->url) url_destroy(job->url);
+    job->url = nullptr;
+    if (job->pool) {
+        pool_destroy(job->pool);
+        job->pool = nullptr;
+    }
+    if (runtime) runtime->dom_doc = nullptr;
+}
+
+static bool js_batch_document_start(Runtime* runtime, JsBatchDocument* job,
+                                    const char* document_path) {
+    if (!runtime || !job || !document_path || !document_path[0]) return false;
+    js_fetch_set_base_path(document_path);
+    Url* cwd = get_current_dir();
+    job->url = parse_url(cwd, document_path);
+    if (cwd) url_destroy(cwd);
+    job->pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "js.batch.document");
+    if (!job->url || !job->pool) {
+        js_batch_document_finish(runtime, job);
+        return false;
+    }
+    // WPT supplies the test script separately; loading it here would execute
+    // inline page scripts a second time before the shared harness is installed.
+    job->document = load_lambda_html_doc(job->url, NULL, JS_DOCUMENT_VIEWPORT_WIDTH,
+                                         JS_DOCUMENT_VIEWPORT_HEIGHT, job->pool,
+                                         nullptr, false, false);
+    if (!job->document || !js_document_session_start(&job->session, job->document)) {
+        js_batch_document_finish(runtime, job);
+        return false;
+    }
+    runtime->dom_doc = (void*)job->document;
+    return true;
 }
 
 #if !defined(_WIN32)
@@ -437,11 +502,6 @@ extern void event_sim_set_replay_assert_state(bool assert_state);
 extern int lambda_repl_init();
 extern void lambda_repl_cleanup();
 void transpile_ast_root(Transpiler* tp, AstScript *script);
-
-// DOM functions from radiant (for JS --document support)
-extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool, const char* html_source,
-    bool track_source_lines, bool execute_scripts);
 
 // MIR JIT optimization level for JS (from transpile_js_mir.cpp)
 extern unsigned int g_js_mir_optimize_level;
@@ -4038,6 +4098,7 @@ int main(int argc, char *argv[]) {
         bool batch_in_test = false; // true between BATCH_START and BATCH_END (for crash recovery)
         char* saved_harness_src = NULL;  // kept for recompilation after crash recovery
         size_t saved_harness_len = 0;
+        char batch_document_path[4096] = {};
 
 #ifndef _WIN32
         // Install signal handlers ONCE for the entire batch loop.
@@ -4078,8 +4139,25 @@ int main(int argc, char *argv[]) {
                     runtime_reset_heap(&runtime);
                     path_reset();
                 }
+                // A document directive belongs only to its next source job;
+                // a manifest boundary must not leak it into the next manifest.
+                batch_document_path[0] = '\0';
                 printf("\x01" "BATCH_MANIFEST_END %s\n", boundary_id);
                 fflush(stdout);
+                continue;
+            }
+
+            // The next source job gets a fresh DOM realm.  Its harness stays
+            // worker-scoped, so WPT does not recompile testharness.js per file.
+            if (strncmp(line, "document:", 9) == 0) {
+                const char* document_path = line + 9;
+                size_t document_len = strlen(document_path);
+                if (document_len == 0 || document_len >= sizeof(batch_document_path)) {
+                    fprintf(stderr, "js-test-batch: invalid document path\n");
+                    batch_document_path[0] = '\0';
+                } else {
+                    memcpy(batch_document_path, document_path, document_len + 1);
+                }
                 continue;
             }
 
@@ -4151,7 +4229,10 @@ int main(int argc, char *argv[]) {
             if (source_prefix) {
                 char* name_start = (char*)source_prefix;
                 char* len_colon = strrchr(name_start, ':');
-                if (!len_colon) continue;
+                if (!len_colon) {
+                    batch_document_path[0] = '\0';
+                    continue;
+                }
                 *len_colon = '\0';
                 script_path = name_start;
                 script_exec_path = script_path;
@@ -4161,9 +4242,15 @@ int main(int argc, char *argv[]) {
                     script_exec_path = path_colon + 1;
                 }
                 size_t source_len = (size_t)atol(len_colon + 1);
-                if (source_len == 0 || source_len > 10 * 1024 * 1024) continue; // sanity check
+                if (source_len == 0 || source_len > 10 * 1024 * 1024) {
+                    batch_document_path[0] = '\0';
+                    continue; // sanity check
+                }
                 js_source = (char*)mem_alloc(source_len + 1, MEM_CAT_SYSTEM);
-                if (!js_source) continue;
+                if (!js_source) {
+                    batch_document_path[0] = '\0';
+                    continue;
+                }
                 size_t total_read = 0;
                 while (total_read < source_len) {
                     size_t n = fread(js_source + total_read, 1, source_len - total_read, stdin);
@@ -4187,12 +4274,17 @@ int main(int argc, char *argv[]) {
             struct timeval tv_start, tv_end;
             gettimeofday(&tv_start, NULL);
             js_mir_reset_last_phase_timing();
+            JsBatchDocument batch_document;
+            js_batch_document_init(&batch_document);
+            bool has_batch_document = false;
+            int result = 0;
 
             if (!inline_source) {
                 if (!file_exists(script_path)) {
                     fprintf(stderr, "Error: Script file '%s' does not exist\n", script_path);
                     printf("\x01" "BATCH_END 1 0\n");
                     fflush(stdout);
+                    batch_document_path[0] = '\0';
                     continue;
                 }
 
@@ -4201,7 +4293,18 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "Error: Could not read file '%s'\n", script_path);
                     printf("\x01" "BATCH_END 1 0\n");
                     fflush(stdout);
+                    batch_document_path[0] = '\0';
                     continue;
+                }
+            }
+
+            if (batch_document_path[0]) {
+                has_batch_document = js_batch_document_start(
+                    &runtime, &batch_document, batch_document_path);
+                if (!has_batch_document) {
+                    fprintf(stderr, "Error: Could not initialize DOM document '%s'\n",
+                            batch_document_path);
+                    result = 1;
                 }
             }
 
@@ -4221,7 +4324,7 @@ int main(int argc, char *argv[]) {
             }
             LambdaRecoveryCheckpoint batch_recovery_checkpoint =
                 lambda_recovery_checkpoint_capture(&batch_context);
-            int result = 0;
+            if (result == 0) {
 #ifndef _WIN32
             // Per-test crash recovery via sigsetjmp.
             // Signal handlers are installed once before the while loop.
@@ -4239,6 +4342,8 @@ int main(int argc, char *argv[]) {
                     printf("\x01" "BATCH_EXIT between_test_crash signal=%d tests=%d\n",
                             crash_sig, batch_test_count);
                     fflush(stdout);
+                    js_batch_reset();
+                    js_batch_document_finish(&runtime, &batch_document);
                     break;
                 }
                 fprintf(stderr, "Crash: script '%s' caught signal %d (recovered)\n", script_path, crash_sig);
@@ -4308,6 +4413,7 @@ int main(int argc, char *argv[]) {
                 result = 1;
             }
 #endif
+            }
             mem_free(js_source);
             fflush(stdout);
 
@@ -4372,6 +4478,8 @@ int main(int argc, char *argv[]) {
                                 batch_crash_count, MAX_CRASH_COUNT,
                                 rss_after / (1024*1024), RSS_LIMIT / (1024*1024), batch_test_count);
                         fflush(stdout);
+                        js_batch_reset();
+                        js_batch_document_finish(&runtime, &batch_document);
                         break;
                     }
                     js_batch_reset();
@@ -4418,6 +4526,8 @@ int main(int argc, char *argv[]) {
                     printf("\x01" "BATCH_EXIT rss_exceeded RSS=%zuMB limit=%zuMB tests=%d\n",
                             rss_after / (1024*1024), RSS_LIMIT / (1024*1024), batch_test_count);
                     fflush(stdout);
+                    js_batch_reset();
+                    js_batch_document_finish(&runtime, &batch_document);
                     break;
                 } else if (rss_after > RSS_RESET_LIMIT ||
                            (rss_after > rss_before && rss_after - rss_before > RSS_GROWTH_RESET_LIMIT)) {
@@ -4466,6 +4576,10 @@ int main(int argc, char *argv[]) {
                 js_batch_reset();
                 runtime_reset_heap(&runtime);
             }
+            if (has_batch_document) {
+                js_batch_document_finish(&runtime, &batch_document);
+            }
+            batch_document_path[0] = '\0';
         }
 
 #ifndef _WIN32
