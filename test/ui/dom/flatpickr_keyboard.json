@@ -1,0 +1,10 @@
+{
+  "name": "flatpickr parses an editable date on Enter",
+  "html": "test/ui/dom/flatpickr_keyboard.html",
+  "events": [
+    {"type": "type", "target": {"selector": "#date"}, "text": "2024-03-15"},
+    {"type": "assert_value", "target": {"selector": "#date"}, "equals": "2024-03-15"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_value", "target": {"selector": "#date"}, "equals": "2024-03-15"}
+  ]
+}

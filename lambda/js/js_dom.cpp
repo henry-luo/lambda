@@ -5444,6 +5444,16 @@ static int64_t js_dom_synthetic_inline_offset_left(DomElement* elem) {
 // Document Method Dispatcher
 // ============================================================================
 
+static Item js_dom_create_document_fragment(DomDocument* doc) {
+    if (!doc || !doc->input) return ItemNull;
+
+    MarkBuilder builder(doc->input);
+    Item frag_item = builder.element("#document-fragment").final();
+    DomElement* fragment = dom_element_create(doc, "#document-fragment",
+                                              frag_item.element);
+    return fragment ? js_dom_wrap_element(fragment) : ItemNull;
+}
+
 extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
     const char* method = fn_to_cstr(method_name);
     if (!method) {
@@ -5743,12 +5753,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 
     // v12b: createDocumentFragment()
     if (strcmp(method, "createDocumentFragment") == 0) {
-        // create a lightweight container element with a special tag
-        MarkBuilder builder(doc->input);
-        Item frag_item = builder.element("#document-fragment").final();
-        Element* frag_elem = frag_item.element;
-        DomElement* dom_frag = dom_element_create(doc, "#document-fragment", frag_elem);
-        return js_dom_wrap_element(dom_frag);
+        return js_dom_create_document_fragment(doc);
     }
 
     // v12b: createComment(data)
@@ -7024,6 +7029,7 @@ static char* _option_text(DomElement* opt) {
 // Default falls back to the `selected` content attribute (defaultSelected).
 static bool _get_selectedness(DomElement* opt) {
     if (!opt) return false;
+    if (opt->has_option_selectedness()) return opt->option_selectedness();
     Item exp = expando_get_map((DomNode*)opt);
     if (exp.item != ITEM_NULL) {
         Item key = (Item){.item = s2it(heap_create_name("__selected"))};
@@ -7031,6 +7037,10 @@ static bool _get_selectedness(DomElement* opt) {
         if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
     }
     return opt->has_attribute("selected");
+}
+
+extern "C" bool js_dom_option_is_selected(void* dom_elem) {
+    return _get_selectedness((DomElement*)dom_elem);
 }
 
 // Returns true if the select's selectedness has been explicitly modified
@@ -7210,6 +7220,9 @@ extern "C" Item js_dom_text_control_set_default_value_bridge(void* dom_elem, Ite
 
 static void _set_selectedness(DomElement* opt, bool v) {
     if (!opt) return;
+    // Layout can rebuild independently of a JS EvalContext, so selectedness
+    // must have a native mirror rather than only living in an expando map.
+    opt->set_option_selectedness(v);
     Item exp = expando_get_or_create_map((DomNode*)opt);
     if (exp.item == ITEM_NULL) return;
     Item key = (Item){.item = s2it(heap_create_name("__selected"))};
@@ -12041,8 +12054,13 @@ extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int ar
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
         if (child_node) {
-            if (child_node->parent) child_node->parent->remove_child(child_node);
+            // ParentNode.append is the path used by DOMParser consumers such
+            // as HTMX; it must adopt foreign nodes before relinking them.
+            if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
+                return (Item){.item = ITEM_JS_UNDEFINED};
+            }
             ((DomNode*)elem)->append_child(child_node);
+            dom_post_insert((DomNode*)elem, child_node);
         } else {
             const char* text = fn_to_cstr(args[i]);
             if (text) {
@@ -12062,8 +12080,11 @@ extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int a
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
         if (child_node) {
-            if (child_node->parent) child_node->parent->remove_child(child_node);
+            if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
+                return (Item){.item = ITEM_JS_UNDEFINED};
+            }
             ((DomNode*)elem)->insert_before(child_node, ref);
+            dom_post_insert((DomNode*)elem, child_node);
             if (elem->tag() == HTM_TAG_SELECT && child_node->is_element() &&
                 child_node->as_element()->tag() == HTM_TAG_OPTION) {
                 DomElement* child_elem = child_node->as_element();
@@ -12431,8 +12452,12 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                 DomNode* frag_child = child_elem->first_child;
                 while (frag_child) {
                     DomNode* next = frag_child->next_sibling;
-                    dom_pre_remove(frag_child);
-                    child_elem->remove_child(frag_child);
+                    // A fragment may contain DOMParser nodes from another
+                    // document; transfer before detaching so its lifecycle
+                    // record never remains owned by the source document.
+                    if (!js_dom_prepare_cross_document_insertion(frag_child, elem)) {
+                        return ItemNull;
+                    }
                     ((DomNode*)elem)->append_child(frag_child);
                     dom_post_insert((DomNode*)elem, frag_child);
                     frag_child = next;
@@ -12441,13 +12466,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                 return args[0];
             }
         }
-        // detach child from current parent if any
-        if (child_node->parent) {
-            DomNode* old_parent = child_node->parent;
-            if (old_parent->is_element()) {
-                dom_pre_remove(child_node);
-                old_parent->remove_child(child_node);
-            }
+        if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
+            return ItemNull;
         }
         // use DomNode::append_child which handles all node types
         ((DomNode*)elem)->append_child(child_node);
@@ -13651,6 +13671,22 @@ static void _install_iface(Item global, const char* name) {
     js_property_set(global, key, ctor);
 }
 
+static Item _document_fragment_ctor(void) {
+    // Both construction paths must create the same detached native node so
+    // fragment insertion retains the move-children invariant.
+    return js_dom_create_document_fragment(_js_current_document);
+}
+
+static void _install_document_fragment_iface(Item global) {
+    Item ctor = js_new_method_function((void*)_document_fragment_ctor, 0);
+    js_set_function_name(ctor, js_string_key("DocumentFragment"));
+    Item proto = js_new_object();
+    _set_iface_to_string_tag(proto, "DocumentFragment");
+    js_property_set(proto, js_string_key("constructor"), ctor);
+    js_property_set(ctor, js_string_key("prototype"), proto);
+    js_property_set(global, js_string_key("DocumentFragment"), ctor);
+}
+
 static Item _iface_proto(Item global, const char* name) {
     Item ctor = js_property_get(global, (Item){.item = s2it(heap_create_name(name))});
     if (get_type_id(ctor) != LMD_TYPE_FUNC) return ItemNull;
@@ -13833,7 +13869,7 @@ extern "C" void js_dom_install_collection_globals(void) {
         _link_iface_proto(global, s_js_dom_html_interfaces[i].constructor_name,
                           "HTMLElement");
     }
-    _install_iface(global, "DocumentFragment");
+    _install_document_fragment_iface(global);
     _link_iface_proto(global, "DocumentFragment", "Node");
     _install_iface(global, "ShadowRoot");
     _link_iface_proto(global, "ShadowRoot", "DocumentFragment");

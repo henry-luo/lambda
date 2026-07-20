@@ -443,6 +443,22 @@ static bool jm_modvar_is_iife_scope_binding(JsModuleConstEntry* mc) {
         (mc->is_iife_var || mc->is_iife_func_decl);
 }
 
+static bool jm_capture_binding_starts_after_function(JsFuncCollected* parent, FnCapture* cap) {
+    if (!parent || !parent->node || !cap || !cap->scope_env_key[0]) return false;
+    const char* at = strchr(cap->scope_env_key, '@');
+    if (!at || !at[1]) return false;
+    uint32_t binding_start = 0;
+    const char* cursor = at + 1;
+    if (*cursor < '0' || *cursor > '9') return false;
+    while (*cursor >= '0' && *cursor <= '9') {
+        binding_start = binding_start * 10u + (uint32_t)(*cursor - '0');
+        cursor++;
+    }
+    // A nested closure can outlive a factory before an outer `var` initializer
+    // runs; only that source order needs a second, immediate-parent cell link.
+    return binding_start >= ts_node_end_byte(parent->node->node);
+}
+
 static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
     const char* name, char* out_key);
 
@@ -5497,11 +5513,39 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // independent cells (e.g. captured --waiting in nested event callbacks).
         (void)has_local;
 
-        // Mixed scope env: add parent env link at the LAST slot (no shifting needed)
+        bool needs_immediate_parent_link = false;
+        if (parent_link_uses_grandparent) {
+            for (int ci = 0; ci < mt->func_count && !needs_immediate_parent_link; ci++) {
+                JsFuncCollected* child = &mt->func_entries[ci];
+                if (child->parent_index != fi) continue;
+                for (int k = 0; k < child->capture_count && !needs_immediate_parent_link; k++) {
+                    for (int pc = 0; pc < parent_fc->capture_count; pc++) {
+                        FnCapture* parent_cap = &parent_fc->captures[pc];
+                        if (strcmp(child->captures[k].name, parent_cap->name) != 0 ||
+                            parent_cap->grandparent_slot >= 0 ||
+                            parent_cap->scope_env_slot < 0) continue;
+                        if (jm_capture_binding_starts_after_function(parent_fc, parent_cap)) {
+                            needs_immediate_parent_link = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Mixed scope env: add parent env link at the LAST slot (no shifting needed).
         parent_fc->has_parent_env_link = true;
         parent_fc->parent_env_link_uses_grandparent = parent_link_uses_grandparent;
+        int immediate_parent_env_link_slot = -1;
+        if (needs_immediate_parent_link) {
+            parent_fc->has_immediate_parent_env_link = true;
+            immediate_parent_env_link_slot = parent_fc->scope_env_count;
+            parent_fc->immediate_parent_env_link_slot = immediate_parent_env_link_slot;
+            snprintf(parent_fc->scope_env_names[parent_fc->scope_env_count], 64,
+                "__immediate_parent_env__");
+            parent_fc->scope_env_count++;
+        }
         int parent_env_link_slot = parent_fc->scope_env_count; // last slot = parent env pointer
-        (void)parent_env_link_slot;
         // scope_env_names was allocated with +2 extra slots for this
         snprintf(parent_fc->scope_env_names[parent_fc->scope_env_count], 64, "__parent_env__");
         parent_fc->scope_env_count++;
@@ -5554,9 +5598,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 // own scope-env layout in mixed callback closures.
                                 child->captures[k].grandparent_slot = parent_fc->captures[pc].scope_env_slot;
                             } else {
-                                child->captures[k].scope_env_slot = -1;
-                                child->captures[k].grandparent_slot = -1;
-                                break;
+                                if (immediate_parent_env_link_slot >= 0) {
+                                    // The default link skips to the grandparent, but this
+                                    // capture is owned by the immediate parent. Preserve
+                                    // its late-initialized cell through the direct link.
+                                    child->captures[k].grandparent_slot =
+                                        parent_fc->captures[pc].scope_env_slot;
+                                    child->captures[k].parent_env_link_slot_override =
+                                        immediate_parent_env_link_slot;
+                                } else {
+                                    child->captures[k].scope_env_slot = -1;
+                                    child->captures[k].grandparent_slot = -1;
+                                    break;
+                                }
                             }
                         } else if (!parent_link_uses_grandparent) {
                             // parent closures that do not use a shared scope env

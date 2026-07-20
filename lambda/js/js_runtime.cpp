@@ -18324,7 +18324,10 @@ static Item js_collection_canonical_key(Item key) {
 static bool js_can_be_held_weakly(Item key) {
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY ||
-        kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT) {
+        kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT ||
+        kt == LMD_TYPE_OBJECT || kt == LMD_TYPE_VMAP) {
+        // DOM host objects are VMAP-backed; WeakMap must accept every
+        // object-valued wrapper rather than rejecting library bookkeeping keys.
         return true;
     }
     if (kt == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {

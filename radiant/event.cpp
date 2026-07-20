@@ -6235,6 +6235,16 @@ static View* mouse_focus_target(View* hit) {
     for (View* view = hit; view; view = view->parent) {
         if (is_view_programmatically_focusable(view)) return view;
     }
+    // Generated widget internals can be hit-tested through a visual child
+    // whose View parent is not its DOM parent; follow the DOM chain so a
+    // tabindex handle still receives the browser's mouse-focus default.
+    for (DomNode* node = hit ? static_cast<DomNode*>(hit) : nullptr;
+         node; node = node->parent) {
+        if (node->is_element() &&
+            is_view_programmatically_focusable(static_cast<View*>(node))) {
+            return static_cast<View*>(node);
+        }
+    }
     return nullptr;
 }
 

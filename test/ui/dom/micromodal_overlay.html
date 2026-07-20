@@ -1,0 +1,6 @@
+<!doctype html><html><head><style>
+.modal { display: none; }.modal.is-open { display: block; position: fixed; left: 20px; top: 40px; width: 260px; height: 150px; background: white; }.overlay { display: block; width: 100%; height: 100%; }
+</style></head><body>
+<button id="trigger" data-micromodal-trigger="modal">open</button><div id="modal" class="modal" aria-hidden="true"><div class="overlay" tabindex="-1" data-micromodal-close><div role="dialog"><button id="inside">inside</button></div></div></div>
+<script src="../../js/micromodal.min.js"></script><script>MicroModal.init({ awaitOpenAnimation: false, awaitCloseAnimation: false });</script>
+</body></html>
