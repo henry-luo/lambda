@@ -1,6 +1,8 @@
 # Common function, representation, MIR, and frame API
 
-**Status:** implemented and verified (2026-07-20)
+**Status:** Phases 0 through 6 implemented and verified (2026-07-20);
+Phase 7 scalar-type realignment proposed, with GC fallback chosen for currently
+ownerless persistent numeric slots
 
 **Scope:** MIR-direct compilation for Lambda and LambdaJS
 
@@ -34,16 +36,21 @@ finalization are shared, and immutable per-variant analysis drives generated
 call ABI and scalar-home decisions for both Lambda and LambdaJS.
 
 **Scalar-storage and return decision:** legacy callee-frame donation is
-replaced by **activation-owned canonical scalar homes**. Any boxed `Item` that
-may contain an activation-temporary `INT64`, out-of-band `FLOAT`, or `DTIME`
-payload receives a liveness-colored fixed home, regardless of whether it came
-from a generated call, runtime import, representation conversion, control-flow
-join, or Lambda error lane. A generated callee returns such a value through a
-**caller-donated canonical scalar return home**: it copies the one-word payload
-into the supplied home, restores its complete number extent, retags the
-returned `Item`, and returns normally. Repeated production therefore reuses
-homes by peak simultaneous liveness instead of retaining one slot per dynamic
-call or conversion.
+replaced by **activation-owned canonical scalar homes**. Phases 0 through 6
+apply this to pointer-backed `INT64`, out-of-band `FLOAT`, and `DTIME`. Phase 7
+realigns the type set: `INT64` and `UINT64` have no inline form and use number
+homes while transient, while `DTIME` becomes always heap-backed. A generated
+callee returns a transient numeric `Item` through a **caller-donated canonical
+scalar return home**: it copies the one-word payload into the supplied home,
+restores its complete number extent, retags the returned `Item`, and returns
+normally. Repeated production therefore reuses homes by peak simultaneous
+liveness instead of retaining one slot per dynamic call or conversion.
+
+The general direction beyond Phase 7 is that `DOUBLE`, `INT64`, and `UINT64`
+have no standalone heap-owned payload representation. Their type tags become a
+strong non-GC invariant: known values of those types require neither GC roots
+nor collector-side object handling. Phase 7's GC scalar cells for ownerless
+persistent boundaries are explicitly transitional.
 
 The hidden return-home ABI exists only between generated implementation bodies.
 Public and runtime-indirect entries keep their existing public value ABI and
@@ -52,7 +59,8 @@ hidden argument is enabled.
 
 ### Implementation result
 
-Phases 0 through 6 are complete. The implementation provides:
+Phases 0 through 6 are complete. Phase 7 is a proposed representation
+realignment and is not yet implemented. The completed implementation provides:
 
 - C-compatible value/ABI/effect contracts and immutable function variants;
 - one normalized import/direct-call path and one conservative raw-call funnel;
@@ -172,11 +180,13 @@ This proposal does not:
   semantics;
 - move JavaScript catch/finally/generator/async routing into `MirEmitter`;
 - replace native C/C++ exact handle scopes;
-- change persistent or async ownership rules;
+- redesign general persistent or async ownership outside the scalar-storage
+  realignment in Phase 7;
 - change non-local-unwind restoration at runtime entry boundaries;
 - introduce a new cross-function tail-call optimization; the API only defines
   ownership when an existing or future lowering emits a physical tail edge;
-- redesign the GC allocator or collector;
+- redesign the GC allocator or collector; Phase 7 may change which scalar
+  payloads use it, but not how it operates;
 - change C2MIR. C2MIR remains a compatibility path and is left as-is.
 
 ## 3. Current implementation and the missing boundary
@@ -242,8 +252,8 @@ typedef enum FnErrorLane {
 typedef enum ScalarReturnClass {
     SCALAR_RETURN_NONE,
     SCALAR_RETURN_I64,
+    SCALAR_RETURN_U64,
     SCALAR_RETURN_F64,
-    SCALAR_RETURN_DTIME,
     SCALAR_RETURN_DYNAMIC
 } ScalarReturnClass;
 
@@ -300,14 +310,15 @@ The existing capture, parameter-evidence, and async fields remain valid inputs.
 They should be folded into, rather than copied beside, the expanded model.
 
 `scalar_home_lane_mask` is the union of all mutually exclusive return lanes that
-may carry an out-of-line `INT64`, out-of-band `FLOAT`, or `DTIME` payload. One
-hidden home is sufficient for the current normal/error contract because only
-one lane is live on an exit. A function with a native normal return can still
-need the hidden home when its Lambda error lane is a boxed `Item`. Native scalar
-returns with no boxed error lane and proven-safe `Item` returns do not carry the
-hidden parameter. `UINT64` is intentionally absent: its current representation
-is heap-backed, not number-stack-backed, and moving it would require a separate
-representation and GC contract change.
+may carry a transient `INT64`, transient `UINT64`, or out-of-band `FLOAT`
+payload. One hidden home is sufficient for the normal/error contract because
+only one lane is live on an exit. A function with a native normal return can
+still need the hidden home when its Lambda error lane is a boxed `Item`. Native
+scalar returns with no boxed error lane and proven-safe `Item` returns do not
+carry the hidden parameter. Phase 7 adds `UINT64` to this set and removes
+`DTIME`; datetime results are already persistent heap Items and require no
+number home. The shipped Phase 0-through-6 enum still has `SCALAR_RETURN_DTIME`
+and lacks `SCALAR_RETURN_U64` until that phase lands.
 
 ### 5.2 Required analysis sequence
 
@@ -553,7 +564,8 @@ that did not exist as an AST producer.
 At an escape boundary, the value leaves activation storage:
 
 - environment, module, persistent container, or async/generator state: copy to
-  the owning heap representation;
+  storage owned by that destination, or use the section 15 fallback when the
+  destination has no declared scalar owner;
 - return to another generated activation: copy to the caller-provided scalar
   return home;
 - discarded value: no persistent home is required;
@@ -689,9 +701,10 @@ crosses a generated frame boundary.
 
 Argument effects are part of representation correctness, not only
 optimization. `JIT_ARG_BORROWED` proves that a native or activation-owned value
-does not escape the call. Persistent capture/store requires heap ownership at
-that boundary. Unknown arguments conservatively combine capture, write-through,
-and persistent-store behavior until audited.
+does not escape the call. Persistent capture/store requires a persistent owner:
+the GC heap in Phases 0 through 6, and destination-owned storage or the selected
+fallback under Phase 7. Unknown arguments conservatively combine capture,
+write-through, and persistent-store behavior until audited.
 
 ### 7.2 Metadata sources
 
@@ -733,11 +746,12 @@ positive proof.
   exception effect.
 - an import classified `JIT_NUMBER_STACK_MAY_ALLOCATE` produces only
   activation-temporary number payloads; any value it stores persistently must
-  already be heap-rehomed.
+  already be copied into declared destination-owned storage or the selected
+  persistent fallback.
 - an import may expose an activation-owned scalar only through a declared return
-  lane. An `Item` written through an argument must be heap-owned before the
-  import returns unless a future metadata extension declares that out-result
-  and gives the emitter an adoption point.
+  lane. An `Item` written through an argument must have persistent ownership
+  before the import returns unless a future metadata extension declares that
+  out-result and gives the emitter an adoption point.
 - the common emitter records effects; language lowering decides how an error or
   exception is observed and routed.
 - a `CONTEXT_ERROR` item that may carry an activation scalar is adopted into
@@ -1024,8 +1038,8 @@ temporaries therefore cannot accumulate across loop iterations.
 work after resolving their metadata source:
 
 1. validate actual ABI representations against metadata;
-2. enforce argument ownership, including heap-rehoming activation scalar Items
-   that may be captured or persistently stored;
+2. enforce argument ownership, including persistently rehoming activation
+   scalar Items that may be captured or stored beyond the call;
 3. record arguments as live through the call and end only the temporaries whose
    metadata permits it;
 4. record the call as a safepoint when it may GC;
@@ -1075,9 +1089,10 @@ incoming caller home only when its result lanes and error propagation exactly
 match the current function's outward contract. Self-tail recursion lowered as
 a loop keeps the current activation and defers writing the incoming home until
 the final exit. A physical cross-function tail edge must first perform all
-profile cleanup, heap-rehome or reject every argument that points into the
-outgoing activation, and restore that activation's root and number watermarks;
-only then may it jump while forwarding the original incoming home. Reusing the
+profile cleanup, persistently rehome or reject every argument that points into
+the outgoing activation, and restore that activation's root and number
+watermarks; only then may it jump while forwarding the original incoming home.
+Reusing the
 outgoing fixed prefix for a callee while arguments still point into it is
 forbidden. A call that converts, catches, wraps, or otherwise observes a result
 is not a physical tail edge and uses an ordinary local home.
@@ -1124,19 +1139,26 @@ heap representation. No source-address range comparison is required. Repeated
 loop calls overwrite the same colored home once the preceding value is dead;
 space is bounded by peak simultaneously live scalar values.
 
-The scalar representation set is deliberately narrow:
+The Phase 7 scalar representation set is deliberately narrow:
 
-- non-inline `INT64`;
+- `INT64`, with no inline encoding;
+- `UINT64`, with no inline encoding;
 - out-of-band `FLOAT` (the tiny/subnormal boxed residue);
-- `DTIME`;
 - a dynamic `Item` only when runtime classification selects one of those
   representations.
 
-`UINT64` remains heap-backed under the current value model and is not a scalar
-home representation. Adding it requires a separate value-representation and GC
-decision, not merely another return classifier case. The same scalar homes are
-also used by local conversions and imported results; "return home" names the
+`DTIME` is deliberately absent. Phase 7 makes every datetime payload a GC-heap
+object, even while local, because datetime is rare, heap ownership removes its
+activation-lifetime machinery, and an object representation may grow beyond
+one word without changing the generated-call ABI. The same scalar homes are
+used by local conversions and imported results; "return home" names the
 generated-call ABI role, not the only source of an activation scalar.
+
+This is a representation and ownership change, not merely a return-classifier
+edit. The Phase 0-through-6 implementation still permits compact inline
+`INT64`, keeps `UINT64` heap-backed, and places `DTIME` on the number stack.
+Phase 7 must change all producers, consumers, storage boundaries, runtime
+classifiers, and tests together.
 
 #### Float discriminator contract
 
@@ -1168,8 +1190,9 @@ not reproduce the current multi-test classifier in every function epilogue.
 - An internal boxed body that may return a pointer-backed scalar on either lane
   accepts the hidden home argument.
 - Public wrappers and runtime-indirect function pointers retain the public ABI;
-  they reserve a local home, call the internal body, and heap-rehome escaping
-  results before restoring their activation.
+  in Phases 0 through 6 they reserve a local home, call the internal body, and
+  heap-rehome escaping results before restoring their activation. Phase 7 uses
+  the persistent policy selected in section 15 for Item-only outward results.
 - The hidden home is an ABI `POINTER` with
   `JIT_VALUE_RAW_NON_GC_POINTER`; it is never published as an `Item` or GC root.
 - A runtime import that may allocate number payloads is bracketed by a caller
@@ -1180,10 +1203,13 @@ not reproduce the current multi-test classifier in every function epilogue.
 - A physical tail call forwards the current function's incoming caller home;
   it never returns through a home owned by the removed activation, and none of
   its arguments may retain that activation's homes after teardown.
-- Environment/container writes heap-rehome the payload at the ownership
-  boundary.
+- Environment/container writes copy numeric payloads into destination-owned
+  scalar storage at the ownership boundary when that destination has a natural
+  owner.
 - Async/generator suspension never preserves a pointer to an activation home;
-  suspended state uses persistent heap ownership.
+  suspended state uses storage owned by the persistent state object. The
+  fallback for a persistent destination without such storage is the explicit
+  open decision in Phase 7.
 - Recursion and re-entry are safe because each caller activation owns a distinct
   fixed-home area.
 
@@ -1312,18 +1338,21 @@ the next iteration overwrites the same word. Number-stack use is therefore
 `O(peak live scalar values)`, not `O(call count)`.
 
 If each result is appended to a persistent container instead, the values are
-genuinely live and are heap-rehomed at the container boundary. That growth is
-semantic ownership, not leaked activation storage.
+genuinely live and are copied into storage owned by that container. That growth
+is semantic ownership, not leaked activation storage. The shipped
+Phase 0-through-6 fallback may heap-rehome some such values; Phase 7 requires
+owner-backed storage where the destination has a natural owner.
 
 ### 9.5 Local wide-scalar conversion
 
-For a loop that converts a native wide `I64` or out-of-band `F64` to `Item`,
+For a loop that converts a native `I64`, `U64`, or out-of-band `F64` to `Item`,
 `em_require_rep()` assigns a logical activation home to the converted value.
 The cold boxing helper may allocate temporary payload storage, but the emitter
 adopts the payload into that home and restores the helper watermark. Repeated
 assignment reuses the colored home once the preceding definition is dead, so
 local conversion has the same `O(peak live scalar values)` bound as call
-results.
+results. Phase 7 applies this to small and wide `I64`/`U64` alike because neither
+integer type retains an inline `Item` representation.
 
 ### 9.6 Lambda normal/error return lanes
 
@@ -1334,6 +1363,9 @@ On failure it adopts the error into that home before restoring the number frame
 and publishing `Context::mir_return_lane`. The public wrapper reads that lane
 immediately, heap-rehomes the error, republishes the heap-owned Item, and only
 then ends its own activation; an intervening call may not overwrite the lane.
+That sentence records the shipped Phase 0-through-6 behavior; Phase 7 replaces
+the final heap rehome only if the public boundary gains another explicit
+persistent-owner contract.
 
 ### 9.7 Public, discarded, and tail calls
 
@@ -1406,6 +1438,16 @@ The implementation should assert these invariants in debug builds:
     epilogues do not duplicate packed-zero tests.
 24. **No activation escape:** persistent, container, environment, async, and
     generator ownership never retains an activation scalar-home pointer.
+25. **Uniform 64-bit integer boxing:** after Phase 7, neither `INT64` nor
+    `UINT64` has an inline `Item` encoding; transient boxed values use number
+    homes regardless of magnitude.
+26. **Datetime heap ownership:** after Phase 7, every `DTIME` payload is
+    GC-heap-owned and no datetime `Item` points into a number frame, caller
+    home, container scalar tail, or async scalar sidecar.
+27. **Persistent-owner boundary:** an `INT64`/`UINT64` value crossing an
+    activation boundary is copied into storage owned by the destination. A
+    boundary with no declared owner must use a GC scalar cell under Phase 7; it
+    may never retain the activation pointer.
 
 Non-local unwind remains protected by runtime-entry watermark snapshots and
 restoration. Native C/C++ helpers continue to use exact native handles. Values
@@ -1432,8 +1474,9 @@ the physical split.
 
 ## 12. Migration plan
 
-**Completion:** all phases below are implemented. The staged wording is
-retained as the migration record and dependency order.
+**Completion:** Phases 0 through 6 are implemented. Phase 7 is proposed and
+remains open. The staged wording is retained as the migration record and
+dependency order.
 
 ### Phase 0: freeze contracts and add diagnostics
 
@@ -1532,7 +1575,41 @@ must not be added while a runtime-indirect pointer can still target the body.
 - remove legacy per-language frame helpers and stale metadata tables;
 - update the stack MIR and rooting design documents to the final API names.
 
-C2MIR is not changed in any phase.
+### Phase 7: realign `INT64`, `UINT64`, and `DTIME` storage
+
+- remove the compact inline `INT64` encoding and its producer, decoder,
+  discriminator, GC-filter, and container special cases;
+- make transient `INT64` and `UINT64` producers use the same one-word number
+  homes regardless of value magnitude;
+- add `UINT64` to exact and dynamic scalar-home classification, imported-result
+  adoption, generated return lanes, caller-home transfer, discard scratch, and
+  heap/persistent rehoming;
+- remove `DTIME` from number-stack allocation, scalar-home classification,
+  caller-home transfer, owned scalar tails, and number-frame rebasing;
+- make every datetime constructor and producer return a GC-heap-owned datetime
+  object, including runtime materialization of datetime literals/constants,
+  retaining the same semantic `DTIME` Item tag while allowing the heap object
+  layout to grow beyond 64 bits later;
+- make arrays, maps/objects, closure environments, module/global bindings,
+  async/generator frames, and task/promise state own their persistent
+  `INT64`/`UINT64` payloads instead of retaining activation pointers;
+- audit every Item-only public return, opaque retaining call, singleton runtime
+  slot, external embedding boundary, and cross-thread handoff using the
+  scenario list in section 15;
+- use an immutable GC scalar cell for every persistent `DOUBLE`/`INT64`/`UINT64`
+  slot that has no natural owner; retain the audit counts so this interim
+  fallback can be revisited;
+- record the general no-heap direction for `DOUBLE`/`INT64`/`UINT64`: no
+  standalone heap payload, no GC-root classification, and no collector object
+  cases after the transitional persistent fallback is removed. This is a
+  deferred goal, not part of Phase 7 acceptance;
+- delete the transitional representation paths only after old and new
+  encodings cannot be mixed inside one runtime.
+
+Phase 7 changes the shared runtime `Item` representation, so C2MIR does not gain
+the hidden caller-home ABI but must pass compatibility tests against the new
+runtime producers and decoders. Phases 0 through 6 otherwise leave C2MIR
+unchanged.
 
 ## 13. Verification and acceptance gates
 
@@ -1557,9 +1634,19 @@ Every migration phase should pass:
 - self-tail-recursive tests preserving the current loop transform, plus
   incoming-home forwarding tests whenever a physical cross-function tail edge
   is enabled;
-- captured-argument tests proving persistent stores heap-rehome scalar payloads;
+- captured-argument tests proving persistent stores copy scalar payloads into
+  destination-owned storage or the selected fail-closed fallback;
 - inline, packed-zero, and out-of-band float return tests pinned to
   `Lambda_Type_Double_Boxing.md`'s canonical encodings;
+- Phase 7 representation tests proving small, zero, boundary, and full-width
+  `INT64`/`UINT64` values are never emitted in an inline Item form;
+- Phase 7 repeated local, imported-result, normal/error-return, discarded, and
+  tail-call tests for both signed and unsigned 64-bit values;
+- Phase 7 container, closure, module/global, async/generator, task/promise,
+  exception-slot, public-return, embedding, and cross-thread lifetime tests;
+- Phase 7 datetime tests proving every payload is GC-managed, survives all
+  publication boundaries, never points into the number stack, and is accessed
+  through an object layout that is not assumed to be one word;
 - release-build performance measurements. Debug builds must not be used for
   performance conclusions.
 
@@ -1599,11 +1686,226 @@ Language profiles answer what operations mean. `MirEmitter` answers how proven
 values, calls, roots, and returns occupy a generated frame. Keeping that line
 sharp is what allows the implementation to be both shared and fast.
 
-## 15. Post-implementation optimization choices
+## 15. Numeric scalar representation realignment
 
-There is no open correctness or required implementation issue. The following
-optional refinements retain conservative production fallbacks and can be
-measured independently:
+**Status:** proposed Phase 7; GC scalar-cell fallback selected for persistent
+slots without a natural owner. The general direction is that `DOUBLE`,
+`INT64`, and `UINT64` ultimately have no standalone heap representation and are
+not GC-rootable value classes; that final step is deferred.
+
+The Phase 0-through-6 implementation grew from different historical storage
+rules: small `INT64` values may be inline, wide `INT64` and `DTIME` may use the
+number stack, and `UINT64` is heap-backed. Phase 7 replaces that split with a
+type-consistent ownership model. Integer magnitude no longer selects a boxed
+representation, signed and unsigned 64-bit integers use the same lifetime
+mechanics, and datetime leaves the numeric stack entirely.
+
+### 15.1 Target storage matrix
+
+| Situation | `INT64` | `UINT64` | `DTIME` |
+|---|---|---|---|
+| Small/local value | no inline form; number home when transient, or retain an already-persistent representation | no inline form; number home when transient, or retain an already-persistent representation | GC heap |
+| Wide transient value | number home | number home | GC heap |
+| Generated-function return | caller-donated number home | caller-donated number home | ordinary heap-owned `Item`; no caller home |
+| Array/environment storage | destination-owned scalar storage | destination-owned scalar storage | GC pointer stored in the destination |
+| Persistent slot without natural owner | GC heap for Phase 7; future non-GC ownership deferred | GC heap for Phase 7; future non-GC ownership deferred | GC heap |
+
+Out-of-band `DOUBLE` already follows the number-home and caller-home protocol.
+For persistent slots without a natural owner it uses the same interim GC scalar
+cell as `INT64`/`UINT64`; removing that last numeric heap case is part of the
+deferred goal in section 15.6.
+
+"No inline form" is normative. Zero, one, values inside the float64 safe-integer
+band, and full-width values follow the same `INT64`/`UINT64` ownership rules.
+This removes value-dependent representation branches and prevents a small value
+from silently bypassing the same return, storage, and lifetime protocol used by
+a large value.
+
+This does not remove the separate inline encodings for `LMD_TYPE_INT`, compact
+`LMD_TYPE_NUM_SIZED` values, or self-tagged floats. The realignment is specific
+to the full-width `LMD_TYPE_INT64` and `LMD_TYPE_UINT64` types.
+
+A number home is one raw 64-bit payload word. It is not a GC root. Signedness is
+semantic metadata carried by the `Item` tag and analysis; it does not require a
+different physical home. A transient value that is already backed by verified
+persistent storage may remain there, but a transient producer must not allocate
+on the GC heap merely because the integer is small or unsigned.
+
+### 15.2 Datetime policy
+
+Every `DTIME` payload is GC-heap-owned. Datetime is expected to be rare enough
+that eliminating its number-stack classifier, caller-home lane, environment
+sidecar cases, and relocation logic is more valuable than avoiding its
+allocation. Generated functions return the already-persistent datetime Item
+through their ordinary value ABI.
+
+The heap object, not the tagged `Item`, defines datetime's payload layout.
+Consumers must use datetime accessors rather than assuming that the object is
+exactly one 64-bit word. This permits future timezone, calendar, precision, or
+other representation data to expand the object without adding a wider number
+home or changing the caller-home ABI.
+
+### 15.3 What counts as destination-owned scalar storage
+
+A destination is a natural owner when its lifetime already defines how long the
+stored value remains valid and its layout can reserve one unscanned payload word
+per stored integer. Examples include:
+
+- array/list scalar tails and typed-array element buffers;
+- typed map/object fields and sidecars for dynamically typed fields;
+- closure environments and `with`/dynamic-scope environments;
+- module and global binding tables;
+- async/generator frames and resumable spill records;
+- task, promise, message, callback, and event records;
+- exception/completion records that are modeled as owned runtime objects.
+
+The owner stores the `Item` tag/pointer in its scanned value region and the raw
+integer payload in an unscanned region, or stores type and raw payload directly
+in a typed field. Moving or resizing the owner must rebase any interior pointer.
+Reading a value out of movable owner storage copies it into the current
+activation home unless the owner is proven stable for the complete borrow.
+
+Destination ownership is different from GC ownership. The containing object
+may itself be GC-managed, but the individual integer need not be a separate GC
+allocation.
+
+### 15.4 Persistent slots without a natural owner
+
+The phrase means that the current boundary transports or retains only a bare
+`Item` and provides neither a caller-donated home nor a storage object whose
+lifetime and payload capacity are part of the contract. The live audit must
+cover at least these scenarios:
+
+| Scenario | Why no natural owner exists today | Possible explicit contract |
+|---|---|---|
+| Public or runtime-indirect function return | the public ABI returns one `Item`; the callee cannot know how long an arbitrary caller retains it | heap fallback, caller-supplied persistent result home, or an owned return handle |
+| External embedding/plugin API | foreign code may copy and retain an `Item` after the Lambda entry returns | documented borrow-only API, explicit retain/copy handle, or heap fallback |
+| Opaque or unaudited native callee that may retain an argument | the generated caller cannot see the callee's destination or lifetime | require retaining-call metadata and an owner/copy callback, otherwise heap fallback or reject the call |
+| Singleton runtime/TLS slot | slots such as the current JS exception value hold one `Item` but no companion payload word | add an owned scalar sidecar/record, or use heap fallback |
+| Cross-thread handoff without a message owner | a raw `Item` may outlive both the sending activation and its context | require an owned message/transfer object, or use a process-safe heap/handle |
+| Legacy callback, queue, cache, or registry storing bare Items | the structure has storage for the tag/pointer but no scalar payload or rebase contract | extend the entry layout with owned payload storage, or use heap fallback |
+
+Several of these are "no owner in the current layout," not intrinsically
+ownerless. Internal runtime slots, queues, tasks, and exception state should
+normally be converted to explicit owner records. Public and foreign Item-only
+ABIs are the strongest cases for retaining a universal fallback because their
+consumer lifetime is not visible to the producer.
+
+`Context::mir_return_lane` is not automatically persistent storage. If the
+generated/public wrapper consumes it before restoring the producing activation,
+it is a transport lane and can use the same caller-home protocol. If a runtime
+path permits the lane to survive that restoration, it must instead acquire an
+explicit owner or use the selected persistent fallback.
+
+### 15.5 Interim GC fallback decision
+
+GC allocation is not required by out-of-band `DOUBLE`, `INT64`, or `UINT64`
+semantics. Their payloads contain no outgoing GC references. What is required
+is a stable address whose lifetime is at least as long as every retained `Item`
+that points to it.
+
+Within the runtime, separate per-numeric-scalar GC allocations can be eliminated
+if every persistent destination supplies owner-backed payload storage. GC heap
+is therefore not required for arrays, environments, modules, async state,
+tasks, promises, messages, or exceptions once those owners are complete and
+audited.
+
+With the current one-word public and foreign `Item` ABI, however, some fallback
+is still required unless that ABI is strengthened. Phase 7 therefore uses an
+immutable GC scalar cell for every persistent `DOUBLE`, `INT64`, or `UINT64`
+value whose destination has no natural owner. This is the fail-closed rule for
+public returns, foreign retention, unaudited retaining calls, singleton slots,
+and ownerless cross-thread handoff.
+
+This is an interim lifetime decision, not a claim that numeric payloads belong
+in the GC domain. It lets Phase 7 realign local, return, and destination-owned
+storage without simultaneously changing every public or foreign lifetime ABI.
+The audit inventory remains required so the fallback cost and remaining edges
+are known rather than hidden behind one generic rehome helper.
+
+The future alternatives remain:
+
+1. **Caller-supplied persistent home:** extend the public/embedding ABI with a
+   result or retained-argument home whose lifetime is guaranteed by the caller.
+2. **Owned non-GC scalar handle/cell:** return an explicitly retained object or
+   handle with a release/ownership contract rather than a borrowable bare
+   `Item`.
+3. **Reject persistent retention:** keep an Item-only API borrow-scoped and
+   require callers that retain a value to copy it through an ownership API.
+
+The preferred direction remains destination-owned storage for all auditable
+internal paths, with the GC scalar-cell fallback confined to public, foreign,
+or genuinely opaque retention edges. The fallback cannot be removed merely by
+assuming callers consume values immediately; every such edge needs a
+mechanically checkable lifetime contract.
+
+The decision gate is an inventory with counts for each remaining heap rehome:
+public return, retained argument, singleton slot, embedding boundary, and
+cross-thread transfer. A future phase may remove the numeric GC fallback only if
+that inventory reaches zero or every remaining edge is changed to an explicit
+home/handle/borrow contract. Until then the GC heap remains the required
+fail-closed behavior.
+
+### 15.6 Deferred direction: non-heap, non-GC numeric scalar classes
+
+The long-term goal is that `DOUBLE`, `INT64`, and `UINT64` payloads never require
+a standalone heap allocation, whether GC-managed or otherwise.
+Inline/self-tagged doubles remain inline; transient out-of-band doubles and
+64-bit integers use activation/caller homes; destination-owned values use owner
+sidecars or typed fields; and the remaining public/foreign cases gain an
+explicit non-heap lifetime contract. `DTIME` is not part of this goal and
+remains intentionally GC-heap-owned.
+
+"Non-heap scalar" does not prohibit a raw numeric payload from being embedded
+inside a heap-managed array, environment, task, or other destination owner. The
+owner may be a GC object; the numeric payload is not a separate heap object, and
+the numeric `Item` is never the edge that keeps the owner alive. Reading such a
+payload out of its owner produces an activation/caller-home representation.
+
+The final GC invariant is:
+
+- `DOUBLE`, `INT64`, and `UINT64` tags never encode a GC-managed address;
+- a statically known value of any of those types never receives a GC root home;
+- dynamic `Item` marking rejects those runtime tags before pointer recovery;
+- the collector has no scalar-object trace/sweep case for those types;
+- numeric boxing, return transfer, and persistent copying introduce no GC
+  allocation effect;
+- only the containing destination owner, when it is a GC object, participates
+  in rooting and tracing.
+
+This removes three value classes from both generated GC-root analysis and the
+collector's managed-object domain. Dynamic `ANY` values can still require a GC
+root because they may contain strings, containers, functions, errors,
+datetimes, or other GC-owned values; at runtime an actual numeric tag is simply
+ignored by the marker.
+
+A donated-slot-derived protocol is retained as one option. The terminology is
+important: the retired protocol described in section 8.7 is **callee-frame
+donation**, which retained callee slots and could grow by call count. The active
+generated return protocol is **caller-donated canonical homes**, which is
+bounded by simultaneous liveness. A future persistent protocol could extend
+caller-provided homes beyond generated activations or transfer ownership of a
+donated non-GC cell, but it must not simply restore the retired callee-frame
+retention behavior.
+
+Any future donated persistent home must provide:
+
+- an explicit owner and lifetime that survives the producing activation;
+- deterministic release, reuse, or transfer instead of watermark pinning;
+- space bounded by genuinely live persistent values, not calls made;
+- a public/embedding ABI that distinguishes borrowed from retained results;
+- safe context and cross-thread transfer rules;
+- no scanning of raw numeric payload words as GC roots.
+
+The exact protocol is deliberately deferred. Phase 7 should preserve enough
+diagnostics to identify the remaining GC scalar-cell sites and revisit them
+without reopening transient scalar-home correctness.
+
+## 16. Post-implementation optimization choices
+
+Apart from the proposed Phase 7 realignment, there is no open correctness issue
+in the Phase 0-through-6 implementation. The following optional refinements
+retain conservative production fallbacks and can be measured independently:
 
 1. **Profitability thresholds:** the correctness fixed point determines legal
    representations; release measurements still need to choose when a native

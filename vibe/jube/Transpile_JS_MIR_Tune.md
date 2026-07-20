@@ -1,6 +1,6 @@
 # LambdaJS-specific MIR tuning plan
 
-**Status:** implementation complete; final verification in progress
+**Status:** COMPLETE
 
 **Revision date:** 2026-07-20
 
@@ -558,6 +558,51 @@ Use `make release`. Measure separately:
 
 Debug MIR is structural evidence only. Runtime conclusions require release
 measurements.
+
+### 13.4 Final acceptance results (2026-07-20)
+
+All correctness gates were run against the final implementation:
+
+| Gate | Final result |
+|---|---|
+| Release build | `make release` passed |
+| Test build | `make build-test` passed |
+| LambdaJS GTest | 385 / 385 passed |
+| GC rooting | all precise, forced-GC, interpreter and MIR-Direct modes passed; 29 `NO_GC` imports and 12,145 migrated native functions audited with no hazards |
+| Test262 baseline | 40,261 / 40,261 fully supported tests passed; 0 failures, 0 retry-only results, 2,628 expected skips; 298.3 s wall time |
+| Node baseline | 3,528 / 3,528 executed tests passed; 0 failures, timeouts, crashes or regressions; 713.3 s wall time |
+
+The Node gate was repeated in full after an isolated detached-child process
+race in the first run. Ten independent focused reruns and the complete second
+run passed, so no exception was added to the baseline.
+
+Release runtime remained flat on the fixed microbenchmark set:
+
+| Workload | Baseline median | Final median | Change |
+|---|---:|---:|---:|
+| Sieve | 51.254 ms | 50.574 ms | -1.3% |
+| DeltaBlue | 751.200 ms | 761.835 ms | +1.4% |
+| Richards | 1,183.904 ms | 1,199.068 ms | +1.3% |
+| NQueens | 16.842 ms | 16.749 ms | -0.6% |
+
+Release compile/JIT medians for large modules were:
+
+| Module | Baseline median | Final median | Change |
+|---|---:|---:|---:|
+| Lodash | 1,900.063 ms | 1,991.779 ms | +4.8% |
+| jQuery | 398.003 ms | 477.872 ms | +20.1% |
+
+The exception fixed point is limited to poll-bearing functions and preindexes
+call sites, poll-result uses and compact CFG edges. This removed the earlier
+multi-fold analysis regression; the remaining jQuery increase is 79.9 ms and
+is the measured cost of the JS exception dataflow. The release executable grew
+from 17,726,440 to 17,842,312 bytes (+0.65%).
+
+The structural target is met for LambdaJS: total MIR instructions fell 29.1%,
+and average MIR instructions per generated frame fell from 86.9 to 61.6. The
+common Stack API frame metrics also improved, as recorded in section 2.2.
+
+**Open issues:** none.
 
 ## 14. Correctness constraints
 

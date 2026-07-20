@@ -1724,6 +1724,15 @@ JitImport jit_runtime_imports[] = {
     {"js_eq_raw", FPTR(js_eq_raw)},
     {"js_loose_eq_raw", FPTR(js_loose_eq_raw)},
     {"js_new_object", FPTR(js_new_object)},
+    {"js_new_object_with_shape", FPTR(js_new_object_with_shape),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      0, JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(2, JIT_ARG_BORROWED)}},
     {"js_property_get", FPTR(js_property_get)},
     {"js_arguments_mapped_get", FPTR(js_arguments_mapped_get)},
     {"js_arguments_mapped_param_writeback", FPTR(js_arguments_mapped_param_writeback)},
@@ -1841,7 +1850,15 @@ JitImport jit_runtime_imports[] = {
     {"js_constructor_create_object_shaped_cached", FPTR(js_constructor_create_object_shaped_cached)},
     {"js_set_internal_class_name", FPTR(js_set_internal_class_name)},
     {"js_get_shaped_slot", FPTR(js_get_shaped_slot)},
-    {"js_set_shaped_slot", FPTR(js_set_shaped_slot)},
+    {"js_set_shaped_slot", FPTR(js_set_shaped_slot),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
+      0, JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(2, JIT_ARG_PERSISTENT_STORE)}},
     {"js_set_shaped_slot_guarded", FPTR(js_set_shaped_slot_guarded)},
     {"js_shape_slot_guard", FPTR(js_shape_slot_guard)},
     {"js_get_slot_f", FPTR(js_get_slot_f)},
@@ -1856,10 +1873,23 @@ JitImport jit_runtime_imports[] = {
     {"js_get_this", FPTR(js_get_this)},
     {"js_get_lexical_this_binding", FPTR(js_get_lexical_this_binding)},
     {"js_resolve_lexical_this", FPTR(js_resolve_lexical_this)},
-    {"js_set_this", FPTR(js_set_this)},
-    {"js_get_new_target", FPTR(js_get_new_target)},
+    {"js_set_this", FPTR(js_set_this),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_PERSISTENT_STORE)}},
+    {"js_get_new_target", FPTR(js_get_new_target),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES, 0}},
     {"js_set_new_target", FPTR(js_set_new_target)},
-    {"js_set_direct_new_target", FPTR(js_set_direct_new_target)},
+    {"js_set_direct_new_target", FPTR(js_set_direct_new_target),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_PERSISTENT_STORE)}},
     {"js_set_pending_call_source", FPTR(js_set_pending_call_source)},
     {"js_super_bind_this", FPTR(js_super_bind_this)},
     {"js_get_super_this_value", FPTR(js_get_super_this_value)},
@@ -1950,7 +1980,27 @@ JitImport jit_runtime_imports[] = {
     {"js_check_class_static_field_key", FPTR(js_check_class_static_field_key)},
     {"js_mark_non_configurable", FPTR(js_mark_non_configurable)},
     {"js_to_property_key", FPTR(js_to_property_key)},
-    {"js_set_function_source", FPTR(js_set_function_source)},
+    {"js_set_function_source", FPTR(js_set_function_source),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_MAY_WRITE_THROUGH) |
+      JIT_ARG_EFFECT(1, JIT_ARG_PERSISTENT_STORE)}},
+    {"js_finalize_function", FPTR(js_finalize_function),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(4, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_MAY_WRITE_THROUGH) |
+      JIT_ARG_EFFECT(1, JIT_ARG_PERSISTENT_STORE) |
+      JIT_ARG_EFFECT(2, JIT_ARG_PERSISTENT_STORE) |
+      JIT_ARG_EFFECT(3, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(4, JIT_ARG_BORROWED)}},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_async_generator_func", FPTR(js_mark_async_generator_func)},
     {"js_mark_async_func", FPTR(js_mark_async_func)},
@@ -1958,7 +2008,12 @@ JitImport jit_runtime_imports[] = {
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
     {"js_mark_method_func", FPTR(js_mark_method_func)},
     {"js_set_method_home_from_target", FPTR(js_set_method_home_from_target)},
-    {"js_mark_strict_func", FPTR(js_mark_strict_func)},
+    {"js_mark_strict_func", FPTR(js_mark_strict_func),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_MAY_WRITE_THROUGH)}},
     {"js_mark_derived_constructor_func", FPTR(js_mark_derived_constructor_func)},
     {"js_set_formal_length", FPTR(js_set_formal_length)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
@@ -2042,8 +2097,20 @@ JitImport jit_runtime_imports[] = {
     {"js_dataview_method", FPTR(js_dataview_method)},
     // SharedArrayBuffer
     {"js_sharedarraybuffer_construct_with_options", FPTR(js_sharedarraybuffer_construct_with_options)},
-    {"js_set_module_var", FPTR(js_set_module_var)},
-    {"js_get_module_var", FPTR(js_get_module_var)},
+    {"js_set_module_var", FPTR(js_set_module_var),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_PERSISTENT_STORE)}},
+    {"js_get_module_var", FPTR(js_get_module_var),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED)}},
     {"js_register_global_var_module_binding", FPTR(js_register_global_var_module_binding)},
     {"js_init_module_vars_undefined_bulk", FPTR(js_init_module_vars_undefined_bulk)},
     // v12: Language features
@@ -2066,8 +2133,15 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_builtin_fn", FPTR(js_get_global_builtin_fn)},
     {"js_with_push", FPTR(js_with_push)},
     {"js_with_pop", FPTR(js_with_pop)},
-    {"js_with_save_depth", FPTR(js_with_save_depth)},
-    {"js_with_restore_depth", FPTR(js_with_restore_depth)},
+    {"js_with_save_depth", FPTR(js_with_save_depth),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, 0,
+      JIT_IMPORT_NUMBER_STACK_PRESERVES, JIT_EXCEPTION_PRESERVES, 0}},
+    {"js_with_restore_depth", FPTR(js_with_restore_depth),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED)}},
     {"js_get_with_binding_or_fallback", FPTR(js_get_with_binding_or_fallback)},
     {"js_get_last_with_binding_base_or_undefined", FPTR(js_get_last_with_binding_base_or_undefined)},
     {"js_probe_with_binding", FPTR(js_probe_with_binding)},
@@ -3095,7 +3169,11 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_item_adopt_scalar_home",
         "item_type_id", "it2l", "it2d", "it2i", "it2b", "it2s", "it2x",
         "js_is_truthy", "js_is_nullish", "js_args_save", "js_args_restore",
-        "js_check_exception",
+        "js_check_exception", "js_set_this", "js_get_new_target",
+        "js_set_direct_new_target", "js_set_function_source",
+        "js_mark_strict_func", "js_finalize_function", "js_set_module_var",
+        "js_get_module_var",
+        "js_with_save_depth", "js_with_restore_depth",
     };
     const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));
     int no_gc_count = 0;

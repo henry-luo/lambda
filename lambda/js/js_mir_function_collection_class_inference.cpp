@@ -2622,6 +2622,101 @@ void jm_infer_return_type(JsFuncCollected* fc) {
         fc->return_type == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
 }
 
+// Return expressions whose values always fit directly in Item bits or are
+// managed objects never borrow a number-stack cell from the activation.
+static bool jm_return_expr_needs_scalar_home(JsAstNode* expr) {
+    if (!expr) return false;
+    switch (expr->node_type) {
+    case JS_AST_NODE_LITERAL: {
+        JsLiteralNode* lit = (JsLiteralNode*)expr;
+        if (lit->literal_type != JS_LITERAL_NUMBER || lit->is_bigint) return false;
+        return !jm_float_const_is_inline(lit->value.number_value);
+    }
+    case JS_AST_NODE_ARRAY_EXPRESSION:
+    case JS_AST_NODE_OBJECT_EXPRESSION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+    case JS_AST_NODE_CLASS_EXPRESSION:
+    case JS_AST_NODE_NEW_EXPRESSION:
+        return false;
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)expr;
+        return jm_return_expr_needs_scalar_home(cond->consequent) ||
+            jm_return_expr_needs_scalar_home(cond->alternate);
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* seq = (JsSequenceNode*)expr;
+        JsAstNode* last = seq->expressions;
+        if (!last) return false;
+        while (last->next) last = last->next;
+        return jm_return_expr_needs_scalar_home(last);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* unary = (JsUnaryNode*)expr;
+        return unary->op != JS_OP_NOT && unary->op != JS_OP_TYPEOF &&
+            unary->op != JS_OP_VOID;
+    }
+    default:
+        return true;
+    }
+}
+
+static bool jm_return_walk_needs_scalar_home(JsAstNode* node) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case JS_AST_NODE_RETURN_STATEMENT:
+        return jm_return_expr_needs_scalar_home(((JsReturnNode*)node)->argument);
+    case JS_AST_NODE_BLOCK_STATEMENT:
+        for (JsAstNode* stmt = ((JsBlockNode*)node)->statements; stmt;
+                stmt = stmt->next) {
+            if (jm_return_walk_needs_scalar_home(stmt)) return true;
+        }
+        return false;
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* branch = (JsIfNode*)node;
+        return jm_return_walk_needs_scalar_home(branch->consequent) ||
+            jm_return_walk_needs_scalar_home(branch->alternate);
+    }
+    case JS_AST_NODE_WHILE_STATEMENT:
+        return jm_return_walk_needs_scalar_home(((JsWhileNode*)node)->body);
+    case JS_AST_NODE_FOR_STATEMENT:
+        return jm_return_walk_needs_scalar_home(((JsForNode*)node)->body);
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* attempt = (JsTryNode*)node;
+        return jm_return_walk_needs_scalar_home(attempt->block) ||
+            jm_return_walk_needs_scalar_home(attempt->handler) ||
+            jm_return_walk_needs_scalar_home(attempt->finalizer);
+    }
+    case JS_AST_NODE_CATCH_CLAUSE:
+        return jm_return_walk_needs_scalar_home(((JsCatchNode*)node)->body);
+    case JS_AST_NODE_SWITCH_STATEMENT:
+        for (JsAstNode* item = ((JsSwitchNode*)node)->cases; item;
+                item = item->next) {
+            if (jm_return_walk_needs_scalar_home(item)) return true;
+        }
+        return false;
+    case JS_AST_NODE_SWITCH_CASE:
+        for (JsAstNode* stmt = ((JsSwitchCaseNode*)node)->consequent; stmt;
+                stmt = stmt->next) {
+            if (jm_return_walk_needs_scalar_home(stmt)) return true;
+        }
+        return false;
+    default:
+        // Nested function bodies are intentionally not traversed.
+        return false;
+    }
+}
+
+ScalarReturnClass jm_infer_boxed_return_scalar_class(JsFuncCollected* fc) {
+    if (!fc || !fc->node) return SCALAR_RETURN_DYNAMIC;
+    JsAstNode* body = fc->node->body;
+    bool needs_home = body && body->node_type == JS_AST_NODE_BLOCK_STATEMENT
+        ? jm_return_walk_needs_scalar_home(body)
+        : jm_return_expr_needs_scalar_home(body);
+    if (!needs_home) return SCALAR_RETURN_NONE;
+    return em_scalar_return_class_for_type(fc->return_type);
+}
+
 // ============================================================================
 // P9: Variable type widening pre-scan
 // ============================================================================
@@ -2953,12 +3048,22 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
     }
 
     // Args live on the transient call-argument stack (js_args_push), which is
-    // registered with the GC once and popped after the call returns (the
-    // save/restore is emitted at the call-expression chokepoint in
-    // jm_transpile_box_item). This avoids the per-call permanent GC root range
+    // registered with the GC once and popped after the call returns. The
+    // enclosing call/new scope emits its mark lazily at the first push, so
+    // direct and zero-argument calls carry no argument-stack protocol. This
+    // avoids the per-call permanent GC root range
     // that made js_alloc_env-based calls O(n^2) in call-heavy loops. We use a
     // runtime stack (not MIR_ALLOCA) to avoid the MIR inlining ALLOCA bug on
     // ARM64 where top-alloca consolidation assigns wrong offsets.
+    if (!mt->arg_stack_scope) {
+        // Every transient buffer must be bounded by its owning call/new
+        // expression; an unscoped push would leak stack roots across calls.
+        log_error("js-mir arg-stack invariant: push without call/new scope");
+        abort();
+    }
+    if (!mt->arg_stack_scope->mark) {
+        mt->arg_stack_scope->mark = jm_call_0(mt, "js_args_save", MIR_T_I64);
+    }
     MIR_reg_t args_ptr = jm_call_1(mt, "js_args_push", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
 

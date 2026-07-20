@@ -346,6 +346,11 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
         bool item_return, MirScalarReturnMode scalar_return_mode,
         MIR_reg_t runtime_reg) {
     if (!mt) return;
+    // Poll dedup is local to one MIR function; retaining another function's
+    // tail pointer would suppress a required first exception observation.
+    mt->last_exception_poll_branch = NULL;
+    mt->last_exception_poll_target = 0;
+    mt->arg_stack_scope = NULL;
     em_frame_dispose(&mt->em);
     mt->em.frame.return_type = return_type;
     mt->em.frame.item_return = item_return;
@@ -438,6 +443,7 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
     }
     jm_emit_raw(mt, MIR_new_ret_insn(mt->ctx, 1,
         MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg)));
+    jm_optimize_exception_polls(mt);
     jm_finalize_write_back_roots(mt);
     em_finalize_scalar_homes(&mt->em);
     // Scratch coloring fixes the physical frame size only after the complete
