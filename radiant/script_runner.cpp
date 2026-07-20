@@ -70,7 +70,7 @@ static struct sigaction js_exec_old_segv, js_exec_old_bus;
 static volatile sig_atomic_t js_exec_timed_out = 0;
 
 // Per-document script timeout: covers parse/transpile plus execution.
-static struct sigaction js_exec_old_alrm;
+static struct sigaction js_exec_old_prof;
 #define JS_EXEC_TIMEOUT_BASE_SECONDS 5
 #define JS_EXEC_TIMEOUT_MAX_SECONDS 120
 #define JS_EXEC_TIMEOUT_ENV_MAX_SECONDS 600
@@ -84,7 +84,7 @@ static void js_exec_timeout_handler(int sig) {
         js_exec_guarded = 0;
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
-        sigaction(SIGALRM, &js_exec_old_alrm, NULL);
+        sigaction(SIGPROF, &js_exec_old_prof, NULL);
         siglongjmp(js_exec_jmpbuf, 2);
     }
 }
@@ -132,6 +132,25 @@ static int js_exec_timeout_seconds(size_t source_len) {
     }
     if (seconds > JS_EXEC_TIMEOUT_MAX_SECONDS) seconds = JS_EXEC_TIMEOUT_MAX_SECONDS;
     return seconds;
+}
+
+static void js_exec_watchdog_arm(int timeout_seconds) {
+    struct sigaction timeout_action;
+    memset(&timeout_action, 0, sizeof(timeout_action));
+    timeout_action.sa_handler = js_exec_timeout_handler;
+    sigaction(SIGPROF, &timeout_action, &js_exec_old_prof);
+
+    struct itimerval timer;
+    memset(&timer, 0, sizeof(timer));
+    timer.it_value.tv_sec = timeout_seconds;
+    setitimer(ITIMER_PROF, &timer, NULL);
+}
+
+static void js_exec_watchdog_disarm(void) {
+    struct itimerval timer;
+    memset(&timer, 0, sizeof(timer));
+    setitimer(ITIMER_PROF, &timer, NULL);
+    sigaction(SIGPROF, &js_exec_old_prof, NULL);
 }
 #endif  // !_WIN32
 
@@ -2217,7 +2236,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 
     // execute document scripts via JIT transpiler
     // Install crash guard around JIT execution (catches SIGSEGV/SIGBUS in compiled code)
-    // and per-script timeout via SIGALRM
+    // and per-script CPU-time watchdog
 #ifndef _WIN32
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -2226,11 +2245,6 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     sigaction(SIGSEGV, &sa, &js_exec_old_segv);
     sigaction(SIGBUS, &sa, &js_exec_old_bus);
 
-    // install SIGALRM-based timeout
-    struct sigaction alrm_sa;
-    memset(&alrm_sa, 0, sizeof(alrm_sa));
-    alrm_sa.sa_handler = js_exec_timeout_handler;
-    sigaction(SIGALRM, &alrm_sa, &js_exec_old_alrm);
     js_exec_timed_out = 0;
     js_exec_guarded = 1;
     int timeout_seconds = js_exec_timeout_seconds(watchdog_source_len);
@@ -2238,7 +2252,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_info("script_runner_timeout: source %zu bytes gets %ds watchdog",
                  watchdog_source_len, timeout_seconds);
     }
-    alarm(timeout_seconds);
+    // Parse/transpile/JIT are synchronous CPU work. A wall-clock alarm made
+    // valid parallel fixtures time out while descheduled under CPU contention.
+    js_exec_watchdog_arm(timeout_seconds);
 #endif
 
     Item result = ItemNull;
@@ -2263,10 +2279,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         log_mem_stage("js: after transpile/exec");
 #ifndef _WIN32
         js_exec_guarded = 0;
-        alarm(0);  // cancel pending alarm
+        js_exec_watchdog_disarm();
         sigaction(SIGSEGV, &js_exec_old_segv, NULL);
         sigaction(SIGBUS, &js_exec_old_bus, NULL);
-        sigaction(SIGALRM, &js_exec_old_alrm, NULL);
 	    } else if (jmp_val == 2) {
 	        log_error("execute_document_scripts: JS execution timed out after %ds", timeout_seconds);
 	        result = ItemError;
@@ -2274,10 +2289,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 	        // siglongjmp skips the normal guarded-execution epilogue; restore
 	        // handlers here so teardown does not run under the JS crash guard.
 	        js_exec_guarded = 0;
-	        alarm(0);
+	        js_exec_watchdog_disarm();
 	        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
 	        sigaction(SIGBUS, &js_exec_old_bus, NULL);
-	        sigaction(SIGALRM, &js_exec_old_alrm, NULL);
 		        // siglongjmp skips MIR/transpiler destructors; clean the active stack
 		        // before releasing the wrapper so large code pages are not orphaned.
 		        jm_cleanup_active_mir();
@@ -2298,10 +2312,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
 	        // siglongjmp skips the normal guarded-execution epilogue; restore
 	        // handlers here so teardown does not run under the JS crash guard.
 	        js_exec_guarded = 0;
-	        alarm(0);
+	        js_exec_watchdog_disarm();
 	        sigaction(SIGSEGV, &js_exec_old_segv, NULL);
 	        sigaction(SIGBUS, &js_exec_old_bus, NULL);
-	        sigaction(SIGALRM, &js_exec_old_alrm, NULL);
 		        // the native signal may have interrupted MIR/JIT state in-place;
 		        // abandon active MIR contexts instead of finalizing corrupted lists.
 		        jm_abandon_active_mir_after_signal();

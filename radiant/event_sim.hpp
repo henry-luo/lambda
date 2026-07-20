@@ -384,6 +384,7 @@ struct EventSimContext {
     int viewport_width;          // 0 = use default (1200)
     int viewport_height;         // 0 = use default (800)
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
+    double current_time;         // deterministic host clock in seconds
     // Assertion retries must yield to the host loop so queued JS and layout work
     // can make the condition true instead of sleeping inside event_sim_update().
     bool assertion_retry_pending;
@@ -442,7 +443,6 @@ bool event_sim_update(EventSimContext* ctx, void* uicon, GLFWwindow* window, dou
 // attempt, while waking early when an actual timer or task becomes ready.
 bool event_sim_assertion_retry_pending(EventSimContext* ctx);
 int event_sim_assertion_retry_wait_ms(EventSimContext* ctx);
-void event_sim_wake_assertion_retry(EventSimContext* ctx);
 
 // Get simulation results summary
 void event_sim_print_results(EventSimContext* ctx);

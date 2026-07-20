@@ -1479,9 +1479,12 @@ static __thread double js_performance_origin_monotonic_ms = 0.0;
 static __thread double js_performance_origin_epoch_ms = 0.0;
 static __thread bool js_performance_frame_clock_active = false;
 static __thread double js_performance_frame_clock_ms = 0.0;
+static __thread bool js_performance_virtual_clock_enabled = false;
+static __thread double js_performance_virtual_clock_ms = 0.0;
 
 extern "C" double js_performance_monotonic_now_ms(void) {
     if (js_performance_frame_clock_active) return js_performance_frame_clock_ms;
+    if (js_performance_virtual_clock_enabled) return js_performance_virtual_clock_ms;
 #ifdef __APPLE__
     static mach_timebase_info_data_t timebase = {0, 0};
     if (timebase.denom == 0) {
@@ -1495,6 +1498,13 @@ extern "C" double js_performance_monotonic_now_ms(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
 #endif
+}
+
+extern "C" void js_performance_virtual_clock_set(bool enabled, double monotonic_ms) {
+    // Headless timers, rAF timestamps, performance.now(), and Date.now() must
+    // observe one clock or animation libraries make wall-clock-dependent progress.
+    js_performance_virtual_clock_enabled = enabled;
+    js_performance_virtual_clock_ms = monotonic_ms >= 0.0 ? monotonic_ms : 0.0;
 }
 
 extern "C" void js_performance_frame_clock_begin(double monotonic_ms) {
@@ -1893,12 +1903,14 @@ static void js_date_format_iso_year(char* buf, size_t size, int year) {
 
 extern "C" Item js_date_now(void) {
     double ms;
-    if (js_performance_frame_clock_active) {
+    if (js_performance_frame_clock_active || js_performance_virtual_clock_enabled) {
         // Date.now() must advance with the same synthetic frame clock as rAF;
         // animation tickers commonly use epoch time instead of performance.now().
         js_performance_ensure_origin();
+        double monotonic_ms = js_performance_frame_clock_active
+            ? js_performance_frame_clock_ms : js_performance_virtual_clock_ms;
         ms = js_performance_origin_epoch_ms +
-            (js_performance_frame_clock_ms - js_performance_origin_monotonic_ms);
+            (monotonic_ms - js_performance_origin_monotonic_ms);
     } else {
         struct timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);

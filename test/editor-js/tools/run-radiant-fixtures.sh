@@ -19,7 +19,7 @@ for j in "$DIR"/*.json; do
   : > log.txt 2>/dev/null || true
   # Each fixture names its own page in the JSON "html" field.
   page=$(grep -o '"html"[^,]*' "$j" | head -1 | sed 's/.*: *"//;s/"//')
-  out=$(timeout 90 "$EXE" view "$page" --event-file "$j" --headless 2>&1)
+  out=$(timeout 90 "$EXE" view "$page" --event-file "$j" --headless --no-log 2>&1)
   line=$(printf '%s\n' "$out" | grep -iE "Assertions:" | tail -1)
   crash=$(printf '%s\n' "$out" | grep -ic "AddressSanitizer")
   name=$(basename "$j")

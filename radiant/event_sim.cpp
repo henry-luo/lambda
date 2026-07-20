@@ -16,6 +16,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/arena.h"
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
@@ -28,37 +29,25 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#undef ERROR
-#endif
-
-// Portable monotonic time (works without GLFW initialization)
 static double get_monotonic_time() {
-#if defined(__APPLE__)
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-#elif defined(_WIN32)
-    // Windows: use QueryPerformanceCounter
-    static LARGE_INTEGER freq = {0};
-    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
-    LARGE_INTEGER counter;
-    QueryPerformanceCounter(&counter);
-    return (double)counter.QuadPart / (double)freq.QuadPart;
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-#endif
+    // Simulated input timestamps must share the virtual headless clock with JS
+    // timers and rAF; wall time made otherwise identical fixtures nondeterministic.
+    return js_performance_monotonic_now_ms() / 1000.0;
 }
 
-static void sim_input_turn_yield() {
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = 16 * 1000 * 1000L;
-    nanosleep(&ts, NULL);
+static int g_pending_input_turns = 0;
+
+static void sim_input_turn_mark_pending() {
+    // Each native primitive used to spend one 16ms wall-clock slice. Preserve
+    // that elapsed-time budget, but defer callbacks until the browser task edge.
+    if (g_pending_input_turns < 256) g_pending_input_turns++;
+}
+
+static void sim_input_turn_drain(UiContext* uicon) {
+    if (g_pending_input_turns <= 0) return;
+    int turns = g_pending_input_turns;
+    g_pending_input_turns = 0;
+    radiant_advance_js_event_loop(uicon, (1000.0 / 60.0) * turns, turns);
 }
 
 // Forward declarations for callbacks (defined in window.cpp)
@@ -107,6 +96,7 @@ void event_sim_set_replay_assert_state(bool assert_state) {
 }
 
 static EventSimContext* event_sim_create_context() {
+    g_pending_input_turns = 0;
     EventSimContext* ctx = (EventSimContext*)mem_calloc(1, sizeof(EventSimContext), MEM_CAT_LAYOUT);
     if (!ctx) return NULL;
     ctx->event_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "event_sim.events");
@@ -2923,7 +2913,7 @@ static void sim_mouse_move(UiContext* uicon, int x, int y) {
     event.mouse_position.x = x;
     event.mouse_position.y = y;
     handle_event(uicon, uicon->document, &event);
-    sim_input_turn_yield();
+    sim_input_turn_mark_pending();
 }
 
 // Simulate a mouse button event
@@ -2941,7 +2931,7 @@ static void sim_mouse_button(UiContext* uicon, int x, int y, int button, int mod
     event.mouse_button.clicks = 1;
     event.mouse_button.mods = mods;
     handle_event(uicon, uicon->document, &event);
-    sim_input_turn_yield();
+    sim_input_turn_mark_pending();
 }
 
 // Simulate a key event
@@ -2953,7 +2943,7 @@ static void sim_key(UiContext* uicon, int key, int mods, bool is_down) {
     event.key.scancode = 0;
     event.key.mods = mods;
     handle_event(uicon, uicon->document, &event);
-    sim_input_turn_yield();
+    sim_input_turn_mark_pending();
 }
 
 // Simulate a scroll event
@@ -2975,7 +2965,7 @@ static void sim_text_input(UiContext* uicon, uint32_t codepoint) {
     event.text_input.timestamp = get_monotonic_time();
     event.text_input.codepoint = codepoint;
     handle_event(uicon, uicon->document, &event);
-    sim_input_turn_yield();
+    sim_input_turn_mark_pending();
 }
 
 static void sim_replay_input(UiContext* uicon, SimEvent* ev) {
@@ -3626,10 +3616,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         case SIM_EVENT_WAIT:
             log_info("event_sim: wait %d ms", ev->wait_ms);
             if (ev->wait_ms > 0) {
-                struct timespec ts;
-                ts.tv_sec = ev->wait_ms / 1000;
-                ts.tv_nsec = (ev->wait_ms % 1000) * 1000000L;
-                nanosleep(&ts, NULL);
+                // Fixture waits advance browser-observable time without making
+                // the test duration depend on the host scheduler.
+                radiant_advance_js_event_loop(uicon, (double)ev->wait_ms, 0);
             }
             break;
 
@@ -3670,7 +3659,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 // Browser drag libraries schedule hit-testing intervals during
                 // the gesture; pumping only after mouseup makes every move look
                 // like one indivisible host task and prevents reordering.
-                radiant_pump_js_event_loop(uicon, -1);
+                sim_input_turn_drain(uicon);
             }
             sim_mouse_button(uicon, drag_to_x, drag_to_y, ev->button, ev->mods, false);
             break;
@@ -3700,7 +3689,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     int x = drag_x + (drag_to_x - drag_x) * step / steps;
                     int y = drag_y + (drag_to_y - drag_y) * step / steps;
                     sim_mouse_move(uicon, x, y);
-                    radiant_pump_js_event_loop(uicon, -1);
+                    sim_input_turn_drain(uicon);
                 }
                 sim_mouse_button(uicon, drag_to_x, drag_to_y,
                                  ev->button, ev->mods, false);
@@ -5557,14 +5546,22 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             float ms = (float)ev->wait_ms;  // advance_time stores ms in wait_ms
-            int steps = ev->advance_steps > 0 ? ev->advance_steps : (int)(ms / 16.0f);
+            int steps = ev->advance_steps > 0 ? ev->advance_steps : ev->wait_ms / 16;
             if (steps < 1) steps = 1;
             float step_ms = ms / (float)steps;
-            double base_time = sched->current_time;
+            bool virtual_clock = js_event_loop_virtual_clock_enabled();
+            double base_time = virtual_clock
+                ? js_event_loop_virtual_clock_now_ms() / 1000.0
+                : sched->current_time;
             log_info("event_sim: advance_time %.1fms in %d steps (%.2fms each)", ms, steps, step_ms);
+            if (virtual_clock) {
+                radiant_advance_js_event_loop(uicon, (double)ms, steps);
+            }
             for (int i = 1; i <= steps; i++) {
                 double now = base_time + (step_ms * i) / 1000.0;
-                animation_scheduler_tick(sched, now, &state->dirty_tracker);
+                if (!virtual_clock) {
+                    animation_scheduler_tick(sched, now, &state->dirty_tracker);
+                }
                 radiant_editing_animation_tick(uicon, now);
             }
             // Re-render after advancing animation
@@ -5751,6 +5748,9 @@ static bool process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiC
     // Non-assertion events execute directly
     if (!sim_event_is_assertion(ev->type)) {
         process_sim_event(ctx, ev, uicon, window);
+        // A JSON event is one browser task. Timers and animation callbacks run
+        // only after all of its native input primitives have been dispatched.
+        sim_input_turn_drain(uicon);
         return true;
     }
 
@@ -5762,7 +5762,7 @@ static bool process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiC
     }
 
     int interval = ev->assert_interval > 0 ? ev->assert_interval : 100;
-    double now = get_monotonic_time();
+    double now = ctx->current_time;
     if (ctx->assertion_retry_pending && now < ctx->assertion_retry_time) {
         return false;
     }
@@ -5774,7 +5774,7 @@ static bool process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiC
     }
 
     process_sim_event(ctx, ev, uicon, window);
-    now = get_monotonic_time();
+    now = ctx->current_time;
 
     // Passed if pass_count increased without fail_count increasing.
     if (ctx->pass_count > ctx->assertion_saved_pass_count &&
@@ -5802,14 +5802,10 @@ bool event_sim_assertion_retry_pending(EventSimContext* ctx) {
 
 int event_sim_assertion_retry_wait_ms(EventSimContext* ctx) {
     if (!ctx || !ctx->assertion_retry_pending) return 0;
-    double remaining_ms = (ctx->assertion_retry_time - get_monotonic_time()) * 1000.0;
+    double remaining_ms = (ctx->assertion_retry_time - ctx->current_time) * 1000.0;
     if (remaining_ms <= 0.0) return 0;
-    int wait_ms = (int)remaining_ms; // INT_CAST_OK: bounded retry delay in milliseconds.
+    int wait_ms = (int)(remaining_ms + 0.999); // INT_CAST_OK: bounded retry delay in milliseconds.
     return wait_ms > 0 ? wait_ms : 1;
-}
-
-void event_sim_wake_assertion_retry(EventSimContext* ctx) {
-    if (ctx && ctx->assertion_retry_pending) ctx->assertion_retry_time = 0.0;
 }
 
 static void replay_emit_mismatch(EventSimContext* ctx, UiContext* uicon,
@@ -5906,6 +5902,7 @@ static void replay_check_final_state(EventSimContext* ctx, UiContext* uicon) {
 bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window, double current_time) {
     UiContext* uicon = (UiContext*)uicon_ptr;
     if (!ctx || !ctx->is_running) return false;
+    ctx->current_time = current_time;
     if (ctx->current_index >= ctx->events->length) {
         ctx->is_running = false;
         return false;

@@ -421,6 +421,7 @@ Item js_performance_now(void);
 double js_performance_now_ms(void);
 double js_performance_monotonic_now_ms(void);
 double js_performance_monotonic_to_relative(double monotonic_ms);
+void js_performance_virtual_clock_set(bool enabled, double monotonic_ms);
 void js_performance_frame_clock_begin(double monotonic_ms);
 void js_performance_frame_clock_end(void);
 double js_performance_time_origin_ms(void);
