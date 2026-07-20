@@ -8,6 +8,7 @@ before counting. Multi-line log calls are consumed as a unit.
 
 Usage:
     ./utils/loc_report.py                # full report
+    ./utils/loc_report.py lambda/py lib  # count only the given sub-dirs (repo-relative)
     ./utils/loc_report.py --raw          # also show raw physical line counts
     ./utils/loc_report.py --json         # machine-readable output
     ./utils/loc_report.py --unclassified # list files that fell into "other"
@@ -260,16 +261,37 @@ def main():
     ap.add_argument('--json', action='store_true', help='emit JSON')
     ap.add_argument('--unclassified', action='store_true',
                     help='list files that landed in an "other" bucket')
+    ap.add_argument('paths', nargs='*', metavar='DIR',
+                    help='restrict counting to these repo-relative sub-dirs '
+                         '(e.g. lambda/py lib); default: whole repo')
     args = ap.parse_args()
+
+    # normalize sub-dir filters to clean repo-relative prefixes
+    prefixes = [os.path.normpath(p).lstrip('./') for p in args.paths]
+    for p in prefixes:
+        if not os.path.isdir(os.path.join(REPO_ROOT, p)):
+            ap.error(f'not a directory in repo: {p}')
+
+    def selected(rel):
+        if not prefixes:
+            return True
+        return any(rel == p or rel.startswith(p + '/') for p in prefixes)
 
     # tree: top -> module -> submodule -> [files, eff, raw]
     tree = OrderedDict()
     others = []
 
     for rel in walk_sources(REPO_ROOT):
+        if not selected(rel):
+            continue
         hit = classify(rel)
         if hit is None:
-            continue
+            if not prefixes:
+                continue
+            # explicitly requested dir outside the module taxonomy (e.g. test/):
+            # bucket by its top-level dir so the count is still reported
+            top = rel.split('/', 1)[0]
+            hit = (top, 'other', 'other')
         top, module, sub = hit
         eff, raw = count_effective_lines(os.path.join(REPO_ROOT, rel))
         bucket = tree.setdefault(top, OrderedDict()).setdefault(module, OrderedDict())

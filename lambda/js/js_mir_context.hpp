@@ -165,6 +165,7 @@ struct JsFuncCollected {
     // Phase 4: Type inference results
     TypeId param_types[16];         // inferred parameter types
     TypeId return_type;             // inferred return type
+    ScalarReturnClass boxed_return_scalar_class; // caller-home need for boxed body
     int param_count;                // cached param count
     int formal_length;              // ES spec .length: params before first default/rest (-1 = same as param_count)
     MIR_item_t native_func_item;    // native version (NULL if not generated)
@@ -184,6 +185,9 @@ struct JsFuncCollected {
     bool is_reassigned;              // function name is an assignment target somewhere in the module
     bool is_strict;                  // v30: true if function is strict mode (own directive, inherits, or class method)
     bool has_direct_eval;            // true if own function body contains syntactic eval(...)
+    bool observes_this;              // own body or lexical arrows read this
+    bool observes_new_target;        // own body or lexical arrows read new.target
+    bool uses_with;                  // own body contains a with statement
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
@@ -199,6 +203,10 @@ struct JsFuncCollected {
     int ctor_super_name_len;
     bool func_ctor_shape_composed;
     bool func_ctor_shape_compose_failed;
+    // Immutable physical-operand facts consumed by the common direct-call API.
+    FnParamAnalysis public_param_analysis[17];
+    FnParamAnalysis body_param_analysis[17];
+    FnParamAnalysis native_param_analysis[16];
 };
 
 // Free dynamically allocated scope_env_names for all func_entries
@@ -302,6 +310,13 @@ struct JsTryContext {
     JsAstNode* finally_body;     // v18: AST of finally block for inlining before break/continue
     MIR_reg_t saved_exc_flag_reg; // generator finally: pending-exception flag saved before finalizer
     MIR_reg_t saved_exc_val_reg;  // generator finally: pending-exception value saved before finalizer
+};
+
+// A call/new expression owns one transient argument-stack extent. The mark is
+// emitted lazily only if a lowering path actually pushes an argument buffer.
+struct JsMirArgStackScope {
+    JsMirArgStackScope* parent;
+    MIR_reg_t mark;
 };
 
 struct JsMirTranspiler {
@@ -427,6 +442,10 @@ struct JsMirTranspiler {
     // Exception propagation: label to jump to when an exception is detected outside a try block.
     // Lazily created when first needed within a function body. Jumps to this label → return null.
     MIR_label_t func_except_label;   // 0 if not yet created for current function
+    MIR_insn_t last_exception_poll_branch; // last emitted poll branch, for adjacent-poll dedup
+    MIR_label_t last_exception_poll_target;
+
+    JsMirArgStackScope* arg_stack_scope; // active call/new argument extent, if any
 
     // v20: arguments aliasing state
     MIR_reg_t arguments_reg;         // register holding 'arguments' object (0 if not active)

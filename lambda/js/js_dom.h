@@ -91,6 +91,12 @@ Item js_dom_wrap_element(void* dom_elem);
  */
 void* js_dom_unwrap_element(Item item);
 
+/**
+ * Return an <option>'s live selectedness, including IDL writes to .selected.
+ * This is distinct from the immutable selected content attribute.
+ */
+bool js_dom_option_is_selected(void* dom_elem);
+
 /** Return the identity-preserving Document proxy that owns a DOM node. */
 Item js_dom_owner_document_for_node(void* node);
 

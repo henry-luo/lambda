@@ -443,6 +443,22 @@ static bool jm_modvar_is_iife_scope_binding(JsModuleConstEntry* mc) {
         (mc->is_iife_var || mc->is_iife_func_decl);
 }
 
+static bool jm_capture_binding_starts_after_function(JsFuncCollected* parent, FnCapture* cap) {
+    if (!parent || !parent->node || !cap || !cap->scope_env_key[0]) return false;
+    const char* at = strchr(cap->scope_env_key, '@');
+    if (!at || !at[1]) return false;
+    uint32_t binding_start = 0;
+    const char* cursor = at + 1;
+    if (*cursor < '0' || *cursor > '9') return false;
+    while (*cursor >= '0' && *cursor <= '9') {
+        binding_start = binding_start * 10u + (uint32_t)(*cursor - '0');
+        cursor++;
+    }
+    // A nested closure can outlive a factory before an outer `var` initializer
+    // runs; only that source order needs a second, immediate-parent cell link.
+    return binding_start >= ts_node_end_byte(parent->node->node);
+}
+
 static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
     const char* name, char* out_key);
 
@@ -5497,11 +5513,39 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // independent cells (e.g. captured --waiting in nested event callbacks).
         (void)has_local;
 
-        // Mixed scope env: add parent env link at the LAST slot (no shifting needed)
+        bool needs_immediate_parent_link = false;
+        if (parent_link_uses_grandparent) {
+            for (int ci = 0; ci < mt->func_count && !needs_immediate_parent_link; ci++) {
+                JsFuncCollected* child = &mt->func_entries[ci];
+                if (child->parent_index != fi) continue;
+                for (int k = 0; k < child->capture_count && !needs_immediate_parent_link; k++) {
+                    for (int pc = 0; pc < parent_fc->capture_count; pc++) {
+                        FnCapture* parent_cap = &parent_fc->captures[pc];
+                        if (strcmp(child->captures[k].name, parent_cap->name) != 0 ||
+                            parent_cap->grandparent_slot >= 0 ||
+                            parent_cap->scope_env_slot < 0) continue;
+                        if (jm_capture_binding_starts_after_function(parent_fc, parent_cap)) {
+                            needs_immediate_parent_link = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Mixed scope env: add parent env link at the LAST slot (no shifting needed).
         parent_fc->has_parent_env_link = true;
         parent_fc->parent_env_link_uses_grandparent = parent_link_uses_grandparent;
+        int immediate_parent_env_link_slot = -1;
+        if (needs_immediate_parent_link) {
+            parent_fc->has_immediate_parent_env_link = true;
+            immediate_parent_env_link_slot = parent_fc->scope_env_count;
+            parent_fc->immediate_parent_env_link_slot = immediate_parent_env_link_slot;
+            snprintf(parent_fc->scope_env_names[parent_fc->scope_env_count], 64,
+                "__immediate_parent_env__");
+            parent_fc->scope_env_count++;
+        }
         int parent_env_link_slot = parent_fc->scope_env_count; // last slot = parent env pointer
-        (void)parent_env_link_slot;
         // scope_env_names was allocated with +2 extra slots for this
         snprintf(parent_fc->scope_env_names[parent_fc->scope_env_count], 64, "__parent_env__");
         parent_fc->scope_env_count++;
@@ -5554,9 +5598,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 // own scope-env layout in mixed callback closures.
                                 child->captures[k].grandparent_slot = parent_fc->captures[pc].scope_env_slot;
                             } else {
-                                child->captures[k].scope_env_slot = -1;
-                                child->captures[k].grandparent_slot = -1;
-                                break;
+                                if (immediate_parent_env_link_slot >= 0) {
+                                    // The default link skips to the grandparent, but this
+                                    // capture is owned by the immediate parent. Preserve
+                                    // its late-initialized cell through the direct link.
+                                    child->captures[k].grandparent_slot =
+                                        parent_fc->captures[pc].scope_env_slot;
+                                    child->captures[k].parent_env_link_slot_override =
+                                        immediate_parent_env_link_slot;
+                                } else {
+                                    child->captures[k].scope_env_slot = -1;
+                                    child->captures[k].grandparent_slot = -1;
+                                    break;
+                                }
                             }
                         } else if (!parent_link_uses_grandparent) {
                             // parent closures that do not use a shared scope env
@@ -5892,6 +5946,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
+        fc->boxed_return_scalar_class = jm_infer_boxed_return_scalar_class(fc);
         FnAnalysis* analysis = &fc->analysis;
         analysis->variant_count = 0;
         FnVariantAnalysis* public_entry =
@@ -5903,7 +5958,18 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             fc->node->is_async || fc->node->is_generator, true};
         public_entry->result.normal = {fc->return_type, VALUE_REP_ITEM,
             SCALAR_RETURN_NONE, false};
-        public_entry->param_count = fc->param_count;
+        int env_param_count = fc->capture_count > 0 ? 1 : 0;
+        int physical_param_count = fc->param_count + env_param_count;
+        public_entry->param_count = physical_param_count;
+        if (fc->param_count <= 16 && physical_param_count <= 17) {
+            public_entry->params = fc->public_param_analysis;
+            for (int p = 0; p < physical_param_count; p++) {
+                bool env = env_param_count && p == 0;
+                public_entry->params[p] = {env ? LMD_TYPE_ANY :
+                    fc->param_types[p - env_param_count],
+                    env ? VALUE_REP_RAW_GC_POINTER : VALUE_REP_ITEM, 0};
+            }
+        }
 
         FnVariantAnalysis* body =
             &analysis->variants[analysis->variant_count++];
@@ -5911,13 +5977,21 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         body->entry = {FN_ENTRY_BOXED_BODY, true, fc->has_direct_eval,
             fc->uses_arguments, false};
         body->effects = public_entry->effects;
-        ScalarReturnClass scalar_class =
-            em_scalar_return_class_for_type(fc->return_type);
+        ScalarReturnClass scalar_class = fc->boxed_return_scalar_class;
         body->result.normal = {fc->return_type, VALUE_REP_ITEM,
             scalar_class, scalar_class != SCALAR_RETURN_NONE};
         body->result.scalar_home_lane_mask =
             scalar_class != SCALAR_RETURN_NONE ? FN_RETURN_HOME_NORMAL : 0;
-        body->param_count = fc->param_count;
+        body->param_count = physical_param_count;
+        if (fc->param_count <= 16 && physical_param_count <= 17) {
+            body->params = fc->body_param_analysis;
+            for (int p = 0; p < physical_param_count; p++) {
+                bool env = env_param_count && p == 0;
+                body->params[p] = {env ? LMD_TYPE_ANY :
+                    fc->param_types[p - env_param_count],
+                    env ? VALUE_REP_RAW_GC_POINTER : VALUE_REP_ITEM, 0};
+            }
+        }
 
         if (fc->has_native_version) {
             FnVariantAnalysis* native =
@@ -5930,6 +6004,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     ? VALUE_REP_F64 : VALUE_REP_I64,
                 SCALAR_RETURN_NONE, false};
             native->param_count = fc->param_count;
+            if (fc->param_count <= 16) {
+                native->params = fc->native_param_analysis;
+                for (int p = 0; p < fc->param_count; p++) {
+                    ValueRep rep = fc->param_types[p] == LMD_TYPE_FLOAT
+                        ? VALUE_REP_F64 : VALUE_REP_I64;
+                    native->params[p] = {fc->param_types[p], rep, 0};
+                }
+            }
         }
         if ((fc->node->is_async || fc->node->is_generator) &&
                 analysis->variant_count < 4) {
@@ -6345,26 +6427,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     MIR_reg_t fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc));
-                    jm_emit_set_function_name(mt, fn_item, fn->name->chars, fc->formal_length);
-                    jm_emit_set_function_source(mt, fn_item, fn);
-                    // v20: Mark generator functions
-                    if (fn->is_generator) {
-                        if (fn->is_async) {
-                            jm_call_void_1(mt, "js_mark_async_generator_func",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                        } else {
-                            jm_call_void_1(mt, "js_mark_generator_func",
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                        }
-                    } else if (fn->is_async) {
-                        jm_call_void_1(mt, "js_mark_async_func",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                    }
-                    // v30: Mark strict mode functions
-                    if (fc->is_strict) {
-                        jm_call_void_1(mt, "js_mark_strict_func",
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
-                    }
+                    // Keep hoisted declarations on the same atomic metadata path as
+                    // closures so no partially initialized function can escape.
+                    jm_emit_finalize_function(mt, fn_item, fc, fn);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));
@@ -6654,9 +6719,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, fc->capture_count));
-                    jm_emit_set_function_name(mt, fn_item, fn->name->chars,
-                        fc->formal_length);
-                    jm_emit_set_function_source(mt, fn_item, fn);
+                    // Capturing declarations need the same metadata invariants as
+                    // ordinary function expressions before their binding is visible.
+                    jm_emit_finalize_function(mt, fn_item, fc, fn);
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));

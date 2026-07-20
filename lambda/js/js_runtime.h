@@ -236,6 +236,15 @@ void js_args_stack_reset(void);
 void js_args_stack_cleanup(void);
 void js_set_function_name(Item fn_item, Item name_item);
 void js_set_function_source(Item fn_item, Item source_item);
+enum {
+    JS_FUNC_INIT_GENERATOR = 1u << 0,
+    JS_FUNC_INIT_ASYNC_GENERATOR = 1u << 1,
+    JS_FUNC_INIT_ASYNC = 1u << 2,
+    JS_FUNC_INIT_ARROW = 1u << 3,
+    JS_FUNC_INIT_STRICT = 1u << 4,
+};
+void js_finalize_function(Item fn_item, Item name_item, Item source_item,
+                          int formal_length, int init_flags);
 void js_set_function_ctor_shape_metadata(Item fn_item, const char** prop_names,
                                          const int* prop_lens, int count);
 void js_mark_generator_func(Item fn_item);

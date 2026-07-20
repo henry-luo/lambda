@@ -355,6 +355,11 @@ enum DomElementFlag : uint32_t {
     ELMT_FLAG_INLINE_PROP_SHARED = 1u << 17,
     // Reserved for R6: shared specified styles are owned by a StyleEpoch pool.
     ELMT_FLAG_SPECIFIED_STYLE_SHARED = 1u << 18,
+    // Option selectedness is live IDL state. Keep it on the native node so a
+    // DOM reconciliation/layout pass can observe script writes without a JS
+    // execution context or an expando-map lookup.
+    ELMT_FLAG_OPTION_SELECTEDNESS_SET = 1u << 19,
+    ELMT_FLAG_OPTION_SELECTEDNESS_VALUE = 1u << 20,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
@@ -559,6 +564,12 @@ struct DomElement : DomNode {
     void set_has_pending_element_scroll_x(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_X, value); }
     bool has_pending_element_scroll_y() const { return flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y); }
     void set_has_pending_element_scroll_y(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y, value); }
+    bool has_option_selectedness() const { return flag(ELMT_FLAG_OPTION_SELECTEDNESS_SET); }
+    bool option_selectedness() const { return flag(ELMT_FLAG_OPTION_SELECTEDNESS_VALUE); }
+    void set_option_selectedness(bool value) {
+        set_flag(ELMT_FLAG_OPTION_SELECTEDNESS_SET, true);
+        set_flag(ELMT_FLAG_OPTION_SELECTEDNESS_VALUE, value);
+    }
     bool has_inline_fragment_union() const { return has_fragment_union(FRAGMENT_UNION_INLINE); }
     void set_has_inline_fragment_union(bool value) { set_has_fragment_union(FRAGMENT_UNION_INLINE, value); }
     bool has_ancestor_fragment_union() const { return has_fragment_union(FRAGMENT_UNION_ANCESTOR); }

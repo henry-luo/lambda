@@ -133,7 +133,7 @@ static inline void em_normalize_import_call(MirImportEntry* entry,
     entry->call.abi_args = entry->abi_args;
     entry->call.effects.gc = entry->audit.gc_effect;
     entry->call.effects.reentry = entry->audit.reentry_effect;
-    entry->call.effects.exception = JIT_EXCEPTION_MAY_SET;
+    entry->call.effects.exception = entry->audit.exception_effect;
     entry->call.effects.number_stack =
         entry->audit.flags & JIT_IMPORT_NUMBER_STACK_PRESERVES
         ? JIT_NUMBER_STACK_PRESERVES : JIT_NUMBER_STACK_MAY_ALLOCATE;
@@ -159,9 +159,11 @@ static inline void em_normalize_import_call(MirImportEntry* entry,
         entry->abi_args[i].value.abi_rep = em_abi_rep(
             args[i].type, arg_class, true);
         entry->abi_args[i].value.value_class = arg_class;
-        entry->abi_args[i].effects =
-            entry->audit.flags & JIT_IMPORT_ARGS_BORROWED_AUDITED
-            ? JIT_ARG_BORROWED : JIT_ARG_EFFECT_UNKNOWN;
+        JitArgEffect arg_effect = jit_import_arg_effect(&entry->audit, i);
+        entry->abi_args[i].effects = arg_effect != JIT_ARG_EFFECT_UNKNOWN
+            ? arg_effect
+            : entry->audit.flags & JIT_IMPORT_ARGS_BORROWED_AUDITED
+                ? JIT_ARG_BORROWED : JIT_ARG_EFFECT_UNKNOWN;
     }
 }
 
@@ -209,6 +211,8 @@ struct MirRootCandidate {
 struct MirGcCallSite {
     MIR_insn_t insn;
     JitGcEffect effect;
+    JitExceptionEffect exception_effect;
+    bool is_exception_poll;
 };
 
 struct MirRootWriteBackResult {
@@ -498,7 +502,8 @@ static inline bool em_root_candidate_info(const MirRootCandidate* candidates,
 
 static inline bool em_root_note_call_site(MirGcCallSite** call_sites,
         int* call_site_count, int* call_site_capacity, MIR_insn_t insn,
-        JitGcEffect effect) {
+        JitGcEffect effect, JitExceptionEffect exception_effect,
+        bool is_exception_poll) {
     if (!call_sites || !call_site_count || !call_site_capacity || !insn) {
         return false;
     }
@@ -514,6 +519,8 @@ static inline bool em_root_note_call_site(MirGcCallSite** call_sites,
     MirGcCallSite* site = &(*call_sites)[(*call_site_count)++];
     site->insn = insn;
     site->effect = effect;
+    site->exception_effect = exception_effect;
+    site->is_exception_poll = is_exception_poll;
     return true;
 }
 
@@ -2519,7 +2526,9 @@ static inline void em_after_resolved_call(MirEmitter* em,
     if (!em || !metadata || !call) return;
     if (!em_root_note_call_site(
             &em->frame.gc_call_sites, &em->frame.gc_call_site_count,
-            &em->frame.gc_call_site_capacity, call, metadata->effects.gc)) {
+            &em->frame.gc_call_site_capacity, call, metadata->effects.gc,
+            metadata->effects.exception,
+            call_name && strcmp(call_name, "js_check_exception") == 0)) {
         log_error("mir-call: unable to record call site for %s", call_name);
         abort();
     }
@@ -2597,7 +2606,8 @@ static inline void em_emit_unknown_call(MirEmitter* em, MIR_insn_t insn) {
     mir_append_emit_insn(em->ctx, em->func_item, insn);
     if (!em_root_note_call_site(
             &em->frame.gc_call_sites, &em->frame.gc_call_site_count,
-            &em->frame.gc_call_site_capacity, insn, JIT_EFFECT_MAY_GC)) {
+            &em->frame.gc_call_site_capacity, insn, JIT_EFFECT_MAY_GC,
+            JIT_EXCEPTION_MAY_SET, false)) {
         log_error("mir-call: unable to record unresolved call site");
         abort();
     }

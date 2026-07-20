@@ -536,20 +536,10 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
     dirty = dirty || element->doc->js.mutation_count > 0;
     if (!dirty) return true;
 
-    static thread_local bool computed_flush_active = false;
-    // A computed-style flush cannot recursively enter layout; doing so would
-    // expose partially regenerated tier-2 groups as authoritative style.
-    assert(!computed_flush_active);
-    if (computed_flush_active) return false;
-    computed_flush_active = true;
-    bool result = js_dom_force_layout_for_geometry(element->doc);
-    computed_flush_active = false;
-    if (result) return true;
-    // The loader cascades before executing load-time scripts, while no UiContext
-    // exists yet to commit layout. Clean resolved groups remain authoritative;
-    // mutations and unresolved styles must still fail rather than return stale data.
-    return element->styles_resolved() && !element->needs_style_recompute() &&
-        element->doc->js.mutation_count == 0;
+    // DOM3 geometry is a committed-layout snapshot. A computed-style read may
+    // serialize its current declaration, but it must not turn a style mutation
+    // into a synchronous layout pass merely to refresh a used value.
+    return false;
 }
 
 bool css_prop_serialize_computed(DomElement* element, CssPropertyId id,

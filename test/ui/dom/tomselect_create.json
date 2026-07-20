@@ -1,0 +1,9 @@
+{
+  "name": "Tom Select creates and selects a typed option",
+  "html": "test/ui/dom/tomselect_create.html",
+  "events": [
+    {"type": "type", "target": {"selector": ".ts-control input"}, "text": "Radiant"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_value", "target": {"selector": "#select"}, "equals": "Radiant"}
+  ]
+}

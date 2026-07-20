@@ -140,12 +140,19 @@ typedef struct JitCallMetadata {
 #define JIT_ARG_CLASS(index, value_class) \
     ((uint32_t)(value_class) << ((index) * JIT_ARG_CLASS_BITS))
 
+#define JIT_ARG_EFFECT_BITS 4
+// Zero stays the conservative default for legacy rows; stored effects are +1.
+#define JIT_ARG_EFFECT(index, effect) \
+    ((uint32_t)((effect) + 1u) << ((index) * JIT_ARG_EFFECT_BITS))
+
 typedef struct JitImportMetadata {
     JitGcEffect gc_effect;
     JitReentryEffect reentry_effect;
     JitValueClass ret_class;
     uint32_t arg_classes;
     uint32_t flags;
+    JitExceptionEffect exception_effect;
+    uint32_t arg_effects;
 } JitImportMetadata;
 
 enum {
@@ -161,6 +168,14 @@ static inline JitValueClass jit_import_arg_class(
     if (!metadata || index < 0 || index >= 8) return JIT_VALUE_UNKNOWN;
     return (JitValueClass)((metadata->arg_classes >>
         (index * JIT_ARG_CLASS_BITS)) & 7u);
+}
+
+static inline JitArgEffect jit_import_arg_effect(
+        const JitImportMetadata* metadata, int index) {
+    if (!metadata || index < 0 || index >= 8) return JIT_ARG_EFFECT_UNKNOWN;
+    uint32_t encoded = (metadata->arg_effects >>
+        (index * JIT_ARG_EFFECT_BITS)) & 15u;
+    return encoded ? (JitArgEffect)(encoded - 1u) : JIT_ARG_EFFECT_UNKNOWN;
 }
 
 // JIT import entry: maps name to function pointer and is the single source of

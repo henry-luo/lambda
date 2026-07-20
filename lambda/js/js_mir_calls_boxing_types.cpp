@@ -243,6 +243,34 @@ MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg) {
     return result;
 }
 
+bool jm_float_const_is_inline(double value) {
+    uint64_t bits;
+    __builtin_memcpy(&bits, &value, sizeof(bits));
+    return value == 0.0 || (bits & ITEM_DBL_MASK) != 0;
+}
+
+MIR_reg_t jm_box_float_const(JsMirTranspiler* mt, double value) {
+    uint64_t bits;
+    __builtin_memcpy(&bits, &value, sizeof(bits));
+    uint64_t item = 0;
+    if (value == 0.0) {
+        item = ITEM_FLOAT_P0 | (bits >> 63);
+    } else if (bits & ITEM_DBL_MASK) {
+        item = bits;
+    } else {
+        // Out-of-band IEEE patterns require a managed numeric cell; retain the
+        // dynamic boxing path only for constants that cannot live in Item bits.
+        MIR_reg_t d = jm_new_reg(mt, "dbl", MIR_T_D);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, d), MIR_new_double_op(mt->ctx, value)));
+        return jm_box_float(mt, d);
+    }
+    MIR_reg_t result = jm_new_reg(mt, "boxfc", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, (int64_t)item)));
+    return result;
+}
+
 // Box string via s2it tagging: result = ptr ? (STR_TAG | ptr) : ITEM_NULL
 MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg) {
     MIR_reg_t result = jm_new_reg(mt, "boxs", MIR_T_I64);
@@ -343,24 +371,29 @@ static const char* jm_private_display_suffix_from_name(const char* name) {
     return suffix;
 }
 
+static const char* jm_function_display_name(const char* name, char* buffer,
+        size_t buffer_size) {
+    if (!name || !name[0]) return NULL;
+    const char* display_name = name;
+    if (strncmp(name, "__private_", 10) == 0) {
+        snprintf(buffer, buffer_size, "#%s", jm_private_display_suffix_from_name(name));
+        display_name = buffer;
+    } else if (strncmp(name, "get __private_", 14) == 0) {
+        snprintf(buffer, buffer_size, "get #%s", jm_private_display_suffix_from_name(name));
+        display_name = buffer;
+    } else if (strncmp(name, "set __private_", 14) == 0) {
+        snprintf(buffer, buffer_size, "set #%s", jm_private_display_suffix_from_name(name));
+        display_name = buffer;
+    }
+    return display_name;
+}
+
 // Helper: emit js_set_function_name call if name is non-empty, and formal_length if needed
 void jm_emit_set_function_name(JsMirTranspiler* mt, MIR_reg_t fn_reg, const char* name, int formal_length ) {
     if (name && name[0]) {
         char priv_buf[256];
-        const char* display_name = name;
-        if (strncmp(name, "__private_", 10) == 0) {
-            int len = snprintf(priv_buf, sizeof(priv_buf), "#%s", jm_private_display_suffix_from_name(name));
-            display_name = priv_buf;
-            (void)len;
-        } else if (strncmp(name, "get __private_", 14) == 0) {
-            int len = snprintf(priv_buf, sizeof(priv_buf), "get #%s", jm_private_display_suffix_from_name(name));
-            display_name = priv_buf;
-            (void)len;
-        } else if (strncmp(name, "set __private_", 14) == 0) {
-            int len = snprintf(priv_buf, sizeof(priv_buf), "set #%s", jm_private_display_suffix_from_name(name));
-            display_name = priv_buf;
-            (void)len;
-        }
+        const char* display_name = jm_function_display_name(name, priv_buf,
+            sizeof(priv_buf));
         MIR_reg_t name_reg = jm_box_string_literal(mt, display_name, strlen(display_name));
         jm_call_void_2(mt, "js_set_function_name",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
@@ -408,22 +441,19 @@ static void jm_emit_ctor_shape_metadata(JsMirTranspiler* mt, MIR_reg_t destinati
         MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
 }
 
-// Helper: emit js_set_function_source call to store original source text for toString
-void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node) {
-    if (!fn_node) return;
-    JsFuncCollected* fc = jm_find_collected_func(mt, fn_node);
-    jm_emit_ctor_shape_metadata(mt, fn_reg, fc,
-        "js_set_function_ctor_shape_metadata");
-    if (!mt->tp || !mt->tp->source) return;
+static bool jm_function_source_span(JsMirTranspiler* mt,
+        JsFunctionNode* fn_node, const char** text_out, uint32_t* len_out) {
+    if (!mt || !fn_node || !text_out || !len_out || !mt->tp ||
+            !mt->tp->source) return false;
     TSNode node = fn_node->node;
-    if (ts_node_is_null(node)) return;
+    if (ts_node_is_null(node)) return false;
     uint32_t start = ts_node_start_byte(node);
     uint32_t end = ts_node_end_byte(node);
-    if (end <= start || end > mt->tp->source_length) return;
+    if (end <= start || end > mt->tp->source_length) return false;
     const char* text = mt->tp->source + start;
     uint32_t len = end - start;
     // Cap source text to avoid overly large string literals in MIR
-    if (len > 65536) return;
+    if (len > 65536) return false;
     // Skip leading whitespace and comments, then strip "static" keyword if present.
     // Class static methods span from (optional comment + "static" keyword) through body.
     // We want source text to start at "get"/"set"/function-keyword, not "static".
@@ -483,10 +513,59 @@ void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFuncti
     if (len > 0 && fn_node->body && fn_node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
         while (len > 1 && text[len - 1] != '}') len--;
     }
+    *text_out = text;
+    *len_out = len;
+    return true;
+}
+
+// Helper: emit js_set_function_source call to store original source text for toString
+void jm_emit_set_function_source(JsMirTranspiler* mt, MIR_reg_t fn_reg, JsFunctionNode* fn_node) {
+    if (!fn_node) return;
+    JsFuncCollected* fc = jm_find_collected_func(mt, fn_node);
+    jm_emit_ctor_shape_metadata(mt, fn_reg, fc,
+        "js_set_function_ctor_shape_metadata");
+    const char* text = NULL;
+    uint32_t len = 0;
+    if (!jm_function_source_span(mt, fn_node, &text, &len)) return;
     MIR_reg_t src_reg = jm_box_string_literal(mt, text, len);
     jm_call_void_2(mt, "js_set_function_source",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, src_reg));
+}
+
+void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
+        JsFuncCollected* fc, JsFunctionNode* fn_node) {
+    if (!mt || !fn_reg || !fc || !fn_node) return;
+    jm_emit_ctor_shape_metadata(mt, fn_reg, fc,
+        "js_set_function_ctor_shape_metadata");
+    char display_buffer[256];
+    const char* source_name = fn_node->name ? fn_node->name->chars : NULL;
+    const char* display_name = jm_function_display_name(source_name,
+        display_buffer, sizeof(display_buffer));
+    MIR_reg_t name = display_name
+        ? jm_box_string_literal(mt, display_name, (int)strlen(display_name))
+        : jm_emit_undefined(mt);
+    const char* source_text = NULL;
+    uint32_t source_len = 0;
+    MIR_reg_t source = jm_function_source_span(mt, fn_node, &source_text,
+        &source_len) ? jm_box_string_literal(mt, source_text, (int)source_len)
+        : jm_emit_undefined(mt);
+    int flags = 0;
+    if (fn_node->is_generator && fn_node->is_async) {
+        flags |= JS_FUNC_INIT_ASYNC_GENERATOR;
+    } else if (fn_node->is_generator) {
+        flags |= JS_FUNC_INIT_GENERATOR;
+    } else if (fn_node->is_async) {
+        flags |= JS_FUNC_INIT_ASYNC;
+    }
+    if (fn_node->is_arrow) flags |= JS_FUNC_INIT_ARROW;
+    if (fc->is_strict) flags |= JS_FUNC_INIT_STRICT;
+    jm_call_void_5(mt, "js_finalize_function",
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, name),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, source),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, fc->formal_length),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, flags));
 }
 
 // Helper: emit js_property_set(cls_obj, "__source_text__", source) so that

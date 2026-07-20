@@ -12,10 +12,13 @@
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/file.h"
+#include "../lib/gc/gc_heap.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "../lib/arena.h"
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/transpiler.hpp"
+#include "../lambda/js/js_dom.h"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/mark_reader.hpp"
@@ -69,11 +72,46 @@ extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
 
 // Stage 4C: seed the next window.prompt() answer (headless has no dialog UI).
 extern "C" void js_window_dialog_push_response(const char* value);
+extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus);
+extern __thread EvalContext* context;
+extern __thread Context* input_context;
+extern "C" Context* _lambda_rt;
 
 // Forward declaration for parse_json
 void parse_json(Input* input, const char* json_string);
 
 static bool g_replay_assert_state = false;
+
+static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
+    if (!doc || !target || !doc->js.runtime_heap || !doc->js.runtime_name_pool) {
+        return false;
+    }
+
+    Heap* heap = (Heap*)doc->js.runtime_heap;
+    EvalContext focus_ctx = {};
+    focus_ctx.heap = heap;
+    focus_ctx.name_pool = (NamePool*)doc->js.runtime_name_pool;
+    focus_ctx.pool = doc->js.runtime_pool ? (Pool*)doc->js.runtime_pool : heap->pool;
+    ArrayList* type_list = arraylist_new(16);
+    if (!type_list) return false;
+    focus_ctx.type_list = type_list;
+
+    EvalContext* saved_ctx = context;
+    Context* saved_input_ctx = input_context;
+    Context* saved_lambda_rt = _lambda_rt;
+    void* saved_doc = js_dom_get_document();
+    context = &focus_ctx;
+    input_context = nullptr;
+    _lambda_rt = (Context*)&focus_ctx;
+    js_dom_set_document(doc);
+    js_dom_focus_method_bridge(target, true);
+    js_dom_restore_active_document(saved_doc);
+    context = saved_ctx;
+    input_context = saved_input_ctx;
+    _lambda_rt = saved_lambda_rt;
+    arraylist_free(type_list);
+    return true;
+}
 
 static bool sim_event_is_assertion(SimEventType type) {
     // Clipboard assertion predates the contiguous assertion enum block; keep it
@@ -509,17 +547,10 @@ static void get_element_center_abs(View* view, float* cx, float* cy) {
 // Get element absolute bounding rect (x, y, width, height)
 static void get_element_rect_abs(View* view, float* out_x, float* out_y, float* out_w, float* out_h) {
     if (!view) { *out_x = 0; *out_y = 0; *out_w = 0; *out_h = 0; return; }
-    float abs_x = 0, abs_y = 0;
-    View* current = view;
-    while (current) {
-        abs_x += current->x;
-        abs_y += current->y;
-        current = static_cast<View*>(current->parent);
-    }
-    *out_x = abs_x;
-    *out_y = abs_y;
-    *out_w = view->width;
-    *out_h = view->height;
+    // Position assertions describe painted geometry. The old parent-chain sum
+    // discarded CSS transforms, so a Popper translate was laid out correctly
+    // but the simulator still reported its pre-transform box.
+    view_get_visual_bounds(view, out_x, out_y, out_w, out_h);
 }
 
 // Serialize a Color to "rgb(R, G, B)" or "rgba(R, G, B, A)" string
@@ -4034,11 +4065,20 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_FOCUS: {
+            View* target = resolve_target_element(ev, uicon->document);
             int x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
+            // Focus fixtures historically model pointer focus. Preserve that
+            // default so native form controls run their normal mouse path;
+            // only widgets that cancel mousedown need programmatic fallback.
             log_info("event_sim: focus via click at (%d, %d)", x, y);
             sim_mouse_button(uicon, x, y, 0, 0, true);
             sim_mouse_button(uicon, x, y, 0, 0, false);
+            if (target && target->is_element() &&
+                (!uicon->document->state || focus_get(uicon->document->state) != target) &&
+                sim_focus_element_with_js_runtime(uicon->document, target)) {
+                sim_input_turn_mark_pending();
+            }
             break;
         }
 

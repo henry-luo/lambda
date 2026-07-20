@@ -4,7 +4,10 @@
   coercion boundaries, bitwise model, and full-unsigned `u64` landed
   2026-06-30; callable conversions (`i32(...)`, `u8(...)`, …) landed later and
   are verified working 2026-07-16. §5 (runtime representation of `int64` /
-  `uint64`) added 2026-07-16. Open items in §7.
+  `uint64`) added 2026-07-16. Open items in §7 — item 1 **decided 2026-07-20
+  (D1-B, §1 decision 8), implementation pending**
+  (`vibe/Lambda_Impl_Sized_Int.md`). §5.3 heap backing **reaffirmed
+  2026-07-20** post-Stack-API.
 - **Scope:** Lambda scalar sized integer annotations, literals, and builtins
   (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), plus the runtime
   representation of the `int` / `int64` / `uint64` scalar family.
@@ -56,7 +59,16 @@ Decisions:
 7. **Plain `int` interop:** untyped `int` operands keep legacy behavior among
    themselves; when one operand is compact and the other is a plain `int`,
    the plain value converts into the compact result width (bitwise builtins;
-   see §7 for the unresolved `u64`-above-`INT64_MAX` arithmetic case).
+   ordinary arithmetic with `u64` is decision 8).
+8. **`u64` in ordinary (untyped-mixed) arithmetic is value-preserving**
+   (D1-B, decided 2026-07-20; **implementation pending** —
+   `vibe/Lambda_Impl_Sized_Int.md`). `u64 ≤ INT64_MAX` folds to `int64`
+   exactly; above that it promotes to **decimal** (the unlimited
+   BigInt-family rank) — consistent with rank promotion
+   `int → int64 → decimal` and with the comparison paths, which already
+   uphold `u64` value semantics. Consequence: untyped arithmetic exits the
+   fixed-width domain — `18446744073709551615u64 * 1` yields a decimal, not
+   a `u64`; mixed float follows the ladder's decimal/float rule.
 
 Why not the alternatives:
 
@@ -259,6 +271,27 @@ unjustified here: the population is cold and small, so an inline band would
 add a classifier branch for essentially zero saved allocations — the same
 reasoning that keeps decimal single-form.
 
+**Heap backing reaffirmed 2026-07-20, post-Stack-API.** The paragraphs above
+cited the donation-era return lane; that machinery is gone
+(`Lambda_Design_Stack_API.md` — caller-donated canonical scalar homes), and
+the new uniform copy-to-home protocol tolerates any payload provenance, so
+moving `u64` to the number side stack is now mechanically *possible*. It
+stays rejected. Heap backing is what keeps `UINT64` out of every
+frame-lifetime mechanism — the scalar-home lane set, wrapper heap-rehoming,
+import adoption, watermark brackets, GC-audit metadata, and C2MIR handling —
+and keeps the hot generic-return classifier narrow (non-inline `INT64`,
+out-of-band `FLOAT`, `DTIME`); the Stack API excludes `UINT64` from scalar
+homes explicitly, on exactly these grounds. The escaping population stays
+cold: mixed arithmetic exits the u64 domain (§1 decision 8), and JS never
+carries u64 (BigInt ⇔ decimal). Note payload provenance is already mixed —
+constant `u64` literals point into AST `TypeUint64` nodes
+(`transpile-mir.cpp`), not the heap. If wide-u64 loops (PRNG/hash ports)
+ever matter, the lever is representation-demand *native* u64 inside
+generated bodies — boxing only at escape, per the Stack API's own
+philosophy — with container storage under the OI-9 shaped-slots design
+("all scalar kinds"); number-stack boxing per operation is the wrong tool
+either way.
+
 ### 5.4 Cross-rank egress
 
 Per number model v2: LambdaJS never sees these representations from pure JS
@@ -281,14 +314,20 @@ boundary, `int64` egresses to JS as BigInt, type-directed, always.
 
 ## 7. Open items
 
-1. **`u64` above `INT64_MAX` in ordinary (untyped-mixed) arithmetic.**
-   Same-width `u64` ops are correct, but `normalize_sized()` folds `UINT64`
-   into the ordinary ladders by signed reinterpretation
-   (`push_l((int64_t)get_uint64())`). Verified 2026-07-16:
-   `18446744073709551615u64 * 1` → `-1`; `… + 0.5` → `-0.5`. Needs a
-   decision: reject, promote to decimal, or document as reinterpretation.
-   (Bitwise mixing is unaffected — plain operands convert into the compact
-   width.)
+1. **`u64` above `INT64_MAX` in ordinary (untyped-mixed) arithmetic** —
+   **DECIDED 2026-07-20 (D1-B, §1 decision 8): value-preserving promotion;
+   implementation pending** (`vibe/Lambda_Impl_Sized_Int.md`). Same-width
+   `u64` ops are correct, but `normalize_sized()` folds `UINT64` into the
+   ordinary ladders by signed reinterpretation
+   (`push_l((int64_t)get_uint64())`). Verified 2026-07-16, re-verified
+   2026-07-20: `18446744073709551615u64 * 1` → `-1`; `… + 0.5` → `-0.5`.
+   **Worse (found 2026-07-20): `u64` exactly `INT64_MAX` segfaults in any
+   untyped-mixed arithmetic** — `push_l(INT64_MAX)` returns `ItemError`
+   (`INT64_ERROR == INT64_MAX` sentinel, `lambda/lambda.h`) and
+   `normalize_sized()` doesn't check, so the ladder consumes a poisoned
+   operand. The fix folds via `box_int64_value` (full-domain) below the
+   boundary and promotes to decimal above. (Bitwise mixing is unaffected —
+   plain operands convert into the compact width.)
 2. **JS-style `>>>` / `ushr` spelling.** Not implemented; the core behavior
    exists as `shr` on unsigned-typed operands. Optional convenience alias —
    add only if JS-porting demand materializes.

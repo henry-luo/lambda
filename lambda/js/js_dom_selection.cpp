@@ -1540,6 +1540,12 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
             f->tc_sc_next_pending = nullptr;
             f->tc_sc_pending = 0;
         }
+        // The text-control selection writer can be nested inside the native
+        // anchor/focus transition. Dispatch at this checkpoint so `onselect`
+        // reads one committed selection rather than re-entering that writer.
+        Item select_ev = js_create_event("select", /*bubbles=*/true,
+                                         /*cancelable=*/false);
+        js_dom_dispatch_event(js_dom_wrap_element(head), select_ev);
         // Per HTML, selectionchange on text controls fires on the element
         // AND is observable at document. Spec says bubbles=false but two
         // separate dispatches; we use bubbles=true to deliver both with a
@@ -1592,17 +1598,6 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     state->tc_selectionchange_drain_scheduled = true;
     Item cb = js_new_function((void*)_tc_selectionchange_drain, 0);
     js_setTimeout(cb, (Item){.item = i2it(0)});
-    js_doc_runtime_exit(&scope);
-}
-
-extern "C" void js_dom_dispatch_textcontrol_select(DomElement* elem) {
-    if (!elem) return;
-    if (!js_input || !js_input->pool) return;
-    DomDocument* doc = elem->doc ? elem->doc : (DomDocument*)js_dom_get_document();
-    JsDocRuntimeScope scope;
-    if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
-    Item ev = js_create_event("select", /*bubbles=*/true, /*cancelable=*/false);
-    js_dom_dispatch_event(js_dom_wrap_element(elem), ev);
     js_doc_runtime_exit(&scope);
 }
 

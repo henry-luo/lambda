@@ -13140,6 +13140,17 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         return result;
     }
 
+    struct JsArrayDispatchModeGuard {
+        bool saved;
+        JsArrayDispatchModeGuard() : saved(js_dispatch_as_array_method) {
+            // The mode describes only the currently executing shared builtin.
+            // User callbacks are fresh JS executions and must not inherit an
+            // outer Array.prototype call's species semantics.
+            js_dispatch_as_array_method = false;
+        }
+        ~JsArrayDispatchModeGuard() { js_dispatch_as_array_method = saved; }
+    } array_dispatch_mode_guard;
+
     // v11: handle bound functions — use bound this and prepend bound args
     if (fn->bound_args || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) {
         // ES spec: when called via 'new', bound_this is ignored — use the new object (this_val)
@@ -18313,7 +18324,10 @@ static Item js_collection_canonical_key(Item key) {
 static bool js_can_be_held_weakly(Item key) {
     TypeId kt = get_type_id(key);
     if (kt == LMD_TYPE_MAP || kt == LMD_TYPE_ARRAY ||
-        kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT) {
+        kt == LMD_TYPE_FUNC || kt == LMD_TYPE_ELEMENT ||
+        kt == LMD_TYPE_OBJECT || kt == LMD_TYPE_VMAP) {
+        // DOM host objects are VMAP-backed; WeakMap must accept every
+        // object-valued wrapper rather than rejecting library bookkeeping keys.
         return true;
     }
     if (kt == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {

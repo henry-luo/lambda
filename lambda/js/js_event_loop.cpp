@@ -804,7 +804,10 @@ static Item make_timer_object(int64_t id, JsClass cls) {
     js_property_set(obj, (Item){.item = s2it(heap_create_name("refresh", 7))}, refresh_fn);
 
     // Symbol.toPrimitive → stored as __sym_2 internally
-    Item toPrim_fn = js_new_function((void*)js_timeout_toPrimitive, 0);
+    // @@toPrimitive receives the coercion hint. Declaring that ABI argument
+    // prevents the generic call trampoline from invoking this one-argument C
+    // function as P0 while it recovers the Timeout receiver from `this`.
+    Item toPrim_fn = js_new_function((void*)js_timeout_toPrimitive, 1);
     js_property_set(obj, (Item){.item = s2it(heap_create_name("__sym_2", 7))}, toPrim_fn);
 
     // class identity (T5b: typed JsClass byte; legacy `__class_name__`

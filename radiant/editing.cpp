@@ -132,13 +132,6 @@ DomText* editing_rich_find_text_descendant(DomNode* node, bool last) {
     return found;
 }
 
-bool editing_rich_is_composition_intent(const EditingIntent* intent) {
-    return intent &&
-        (intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT ||
-         intent->type == INPUT_INTENT_INSERT_FROM_COMPOSITION ||
-         intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT);
-}
-
 const char* editing_surface_kind_name(EditingSurfaceKind kind) {
     switch (kind) {
         case EDIT_SURFACE_NONE: return "none";

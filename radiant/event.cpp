@@ -35,20 +35,6 @@
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
 extern "C" Context* _lambda_rt;
-extern "C" void* js_dom_rich_history_capture_before(
-    DocState* state,
-    const EditingSurface* surface,
-    const EditingIntent* intent);
-extern "C" void js_dom_rich_history_commit_after(
-    DocState* state,
-    const EditingSurface* surface,
-    const EditingIntent* intent,
-    void* pending,
-    bool mutated);
-extern "C" bool js_dom_rich_history_restore_for_surface(
-    DocState* state,
-    const EditingSurface* surface,
-    InputIntentType input_type);
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind,
                                         void* target, void* parent);
 extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
@@ -2387,9 +2373,9 @@ static bool rich_transaction_default_mutate_unscoped(
         return false;
     }
 
-    // Unprevented beforeinput has a browser-owned default action. Editors that
-    // own their model retain exclusive control by calling preventDefault();
-    // editors such as CodeMirror observe this native contenteditable mutation.
+    // DOM3 retains only narrow plain-text insertion/replacement as a native
+    // contenteditable default; structural, clipboard, history, and IME edits
+    // are delivered to the script-owned editor without a DOM mutation.
     log_debug("rich_transaction_default_mutate: inserted %zu UTF-8 bytes",
               byte_len);
     return true;
@@ -2429,25 +2415,8 @@ static bool dispatch_rich_transaction_defaultable(EventContext* evcon,
     tx.mutation_invalidates_layout = true;
     tx.mutation_invalidates_paint = true;
 
-    void* history_pending =
-        js_dom_rich_history_capture_before(state, &surface, intent);
     bool mutated = false;
-    bool ok = editing_run_transaction(evcon, &tx, nullptr, &mutated, nullptr);
-    js_dom_rich_history_commit_after(state, &surface, intent,
-                                     history_pending, ok && mutated);
-    return ok;
-}
-
-static bool rich_history_transaction_mutate(EventContext* evcon,
-                                            DocState* state,
-                                            const EditingSurface* surface,
-                                            const EditingIntent* intent,
-                                            void* user) {
-    (void)evcon;
-    (void)intent;
-    InputIntentType input_type =
-        user ? *(InputIntentType*)user : INPUT_INTENT_NONE;
-    return js_dom_rich_history_restore_for_surface(state, surface, input_type);
+    return editing_run_transaction(evcon, &tx, nullptr, &mutated, nullptr);
 }
 
 static bool dispatch_rich_selection_snapshot(EventContext* evcon,
@@ -3312,43 +3281,6 @@ static bool dispatch_editing_history_for_controller(EventContext* evcon,
         return dispatch_form_history(evcon, elem, state, target, input_type);
     }
 
-    if (editing_surface_is_rich(surface)) {
-        InputIntent intent;
-        intent.type = input_type;
-        intent.data = "";
-        View* target = static_cast<View*>(surface->owner);
-        DocState* state = event_context_target_state(evcon);
-        EditingSurface live_surface;
-        if (!editing_surface_from_target(target, &live_surface) ||
-            !editing_surface_is_rich(&live_surface)) {
-            return false;
-        }
-
-        EditingDispatchHooks hooks = dispatch_editing_hooks();
-
-        EditingTransaction tx;
-        memset(&tx, 0, sizeof(tx));
-        tx.surface = &live_surface;
-        tx.intent = &intent;
-        tx.hooks = &hooks;
-        tx.mutate = rich_history_transaction_mutate;
-        tx.mutate_user = &input_type;
-        tx.operation = "history";
-        tx.dispatch_input_without_mutation = false;
-        tx.mutation_invalidates_layout = true;
-        tx.mutation_invalidates_paint = true;
-
-        bool mutated = false;
-        bool handled = editing_run_transaction(evcon, &tx, nullptr, &mutated,
-                                               nullptr);
-        event_log_editing_history(state, surface, &intent,
-                                  input_type == INPUT_INTENT_HISTORY_UNDO
-                                      ? "undo"
-                                      : "redo",
-                                  0, 0, mutated);
-        return handled;
-    }
-
     return false;
 }
 
@@ -3510,8 +3442,7 @@ static bool editing_text_drag_dispatch_delete(EventContext* evcon,
     InputIntent intent;
     intent.type = INPUT_INTENT_DELETE_BY_DRAG;
     intent.data = "";
-    return dispatch_rich_transaction_defaultable(evcon, range_view, &intent,
-        range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
+    return dispatch_rich_consumer_transaction(evcon, range_view, &intent);
 }
 
 static bool editing_text_drag_dispatch_insert(EventContext* evcon,
@@ -3546,26 +3477,7 @@ static bool editing_text_drag_dispatch_insert(EventContext* evcon,
     intent.data = text;
     intent.html_data = html_payload && html_payload[0] ? html_payload : nullptr;
     intent.data_mime = intent.html_data ? "text/html" : "text/plain";
-    return dispatch_rich_transaction_defaultable(evcon, range_view, &intent,
-        range_view, (int)start); // INT_CAST_OK: StateStore caret API uses int offsets.
-}
-
-static bool rich_drop_fallback_from_boundary(const DomBoundary* boundary,
-                                             View** out_view,
-                                             int* out_offset) {
-    if (out_view) *out_view = nullptr;
-    if (out_offset) *out_offset = 0;
-    if (!boundary || !boundary->node) return false;
-
-    if (out_view) *out_view = static_cast<View*>(boundary->node);
-    if (!out_offset) return true;
-    if (boundary->node->is_text()) {
-        DomText* text = lam::dom_require_text(boundary->node);
-        *out_offset = (int)dom_text_utf16_to_utf8(text, boundary->offset); // INT_CAST_OK: StateStore caret API uses int offsets.
-    } else {
-        *out_offset = (int)boundary->offset; // INT_CAST_OK: StateStore caret API uses int offsets.
-    }
-    return true;
+    return dispatch_rich_consumer_transaction(evcon, range_view, &intent);
 }
 
 static bool dispatch_rich_drop_transaction_at_range(EventContext* evcon,
@@ -3596,11 +3508,7 @@ static bool dispatch_rich_drop_transaction_at_range(EventContext* evcon,
     dispatch_rich_selection_snapshot(evcon, state, target, "dropTarget",
                                      &intent);
 
-    View* fallback_view = nullptr;
-    int fallback_offset = 0;
-    rich_drop_fallback_from_boundary(end, &fallback_view, &fallback_offset);
-    return dispatch_rich_transaction_defaultable(evcon, target, &intent,
-        fallback_view, fallback_offset);
+    return dispatch_rich_consumer_transaction(evcon, target, &intent);
 }
 
 extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
@@ -4006,12 +3914,9 @@ static bool dispatch_editing_composition_for_controller(EventContext* evcon,
         intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT;
     editing_interaction_set_composing(state, surface, composing);
     bool handled = false;
-    if (editing_rich_is_composition_intent(intent)) {
-        handled = dispatch_rich_transaction_defaultable(evcon, target, intent,
-            target, 0);
-    } else {
-        handled = dispatch_rich_consumer_transaction(evcon, target, intent);
-    }
+    // Complex rich-host IME reconciliation is outside DOM3. Keep the event
+    // stream observable, but leave mutation to the editor model.
+    handled = dispatch_rich_consumer_transaction(evcon, target, intent);
     if (handled) {
         evcon->need_repaint = true;
     }
@@ -6329,6 +6234,16 @@ bool is_view_programmatically_focusable(View* view) {
 static View* mouse_focus_target(View* hit) {
     for (View* view = hit; view; view = view->parent) {
         if (is_view_programmatically_focusable(view)) return view;
+    }
+    // Generated widget internals can be hit-tested through a visual child
+    // whose View parent is not its DOM parent; follow the DOM chain so a
+    // tabindex handle still receives the browser's mouse-focus default.
+    for (DomNode* node = hit ? static_cast<DomNode*>(hit) : nullptr;
+         node; node = node->parent) {
+        if (node->is_element() &&
+            is_view_programmatically_focusable(static_cast<View*>(node))) {
+            return static_cast<View*>(node);
+        }
     }
     return nullptr;
 }
@@ -8805,16 +8720,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
         int keydown_caret_offset = 0;
         bool had_keydown_caret = caret_get_offset(state, &keydown_caret_offset);
-        int rich_keydown_caret_offset = keydown_caret_offset;
-        View* debug_keydown_caret_view = nullptr;
-        int debug_keydown_caret_offset = 0;
-        if (caret_get_debug_snapshot(state, &debug_keydown_caret_view,
-                                     &debug_keydown_caret_offset, nullptr,
-                                     nullptr, nullptr, nullptr, nullptr, nullptr) &&
-            debug_keydown_caret_view &&
-            rich_editable_from_target(debug_keydown_caret_view)) {
-            rich_keydown_caret_offset = debug_keydown_caret_offset;
-        }
 
         // Rich-text editing path (Phase R4): translate platform key events
         // into browser-like beforeinput intents for data-editable/contenteditable
@@ -8836,39 +8741,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
                 bool handled = false;
-                if (intent.type == INPUT_INTENT_HISTORY_UNDO ||
-                    intent.type == INPUT_INTENT_HISTORY_REDO) {
-                    EditingSurface surface;
-                    if (editing_surface_from_target(intent_target, &surface) &&
-                        editing_surface_is_rich(&surface)) {
-                        EditingControllerHooks controller_hooks =
-                            editing_controller_hooks();
-                        handled = intent.type == INPUT_INTENT_HISTORY_UNDO
-                            ? editing_undo(&evcon, &surface, &controller_hooks)
-                            : editing_redo(&evcon, &surface, &controller_hooks);
-                    }
-                } else {
-                    bool defaultable =
-                        intent.type == INPUT_INTENT_INSERT_FROM_PASTE ||
-                        intent.type == INPUT_INTENT_INSERT_PARAGRAPH ||
-                        intent.type == INPUT_INTENT_INSERT_LINE_BREAK ||
-                        intent.type == INPUT_INTENT_DELETE_BY_CUT ||
-                        intent.type == INPUT_INTENT_DELETE_CONTENT_BACKWARD ||
-                        intent.type == INPUT_INTENT_DELETE_CONTENT_FORWARD ||
-                        intent.type == INPUT_INTENT_DELETE_WORD_BACKWARD ||
-                        intent.type == INPUT_INTENT_DELETE_WORD_FORWARD ||
-                        intent.type == INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD ||
-                        intent.type == INPUT_INTENT_DELETE_SOFT_LINE_FORWARD ||
-                        intent.type == INPUT_INTENT_DELETE_HARD_LINE_BACKWARD ||
-                        intent.type == INPUT_INTENT_DELETE_HARD_LINE_FORWARD;
-                    if (defaultable && dispatch_rich_transaction_defaultable(
-                            &evcon, intent_target, &intent, intent_target,
-                            rich_keydown_caret_offset)) {
-                        handled = true;
-                    } else {
-                        handled = dispatch_rich_consumer_transaction(&evcon, intent_target, &intent);
-                    }
-                }
+                handled = dispatch_rich_consumer_transaction(
+                    &evcon, intent_target, &intent);
                 if (handled) {
                     evcon.need_repaint = true;
                     break;
@@ -8897,21 +8771,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 "keydown", key_event->key, key_event->mods, false);
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
-        }
-
-        // copy has no beforeinput intent, so rich surfaces need their default
-        // clipboard action here after keydown handlers had a chance to cancel.
-        if (!evcon.default_prevented &&
-            (key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER)) &&
-            key_event->key == RDT_KEY_C) {
-            EditingSurface rich_copy_surface;
-            View* rich_copy_target =
-                rich_keyboard_target_from_selection(state, intent_target,
-                                                    &rich_copy_surface);
-            if (rich_copy_target) {
-                copy_current_selection_to_clipboard(state, "rich copy");
-                break;
-            }
         }
 
         // Handle arrow keys and caret adjustment for text input form controls

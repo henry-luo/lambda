@@ -1,4 +1,5 @@
 #include "event.hpp"
+#include "../lambda/js/js_dom.h"
 #include "state_store_internal.hpp"
 #include "view.hpp"
 #include "../lib/log.h"
@@ -3212,7 +3213,9 @@ static int form_default_selected_index_from_tree(View* view) {
     int selected_index = -1;
     for (DomElement* option = dom_select_next_option(element, nullptr); option;
          option = dom_select_next_option(element, option)) {
-        if (option->has_attribute("selected") && selected_index < 0) {
+        // A reconstructed form view must read the option's live selectedness
+        // so dynamic option.selected writes do not revert to the markup default.
+        if (js_dom_option_is_selected((void*)option) && selected_index < 0) {
             selected_index = option_count;
         }
         option_count++;

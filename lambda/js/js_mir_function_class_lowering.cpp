@@ -1130,10 +1130,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MIR_SCALAR_RETURN_DYNAMIC, 0);
         mt->em.frame.plan.entry_kind = FN_ENTRY_RESUME;
         jm_push_scope(mt);
-        mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
-            MIR_new_int_op(mt->ctx, 0)));
+        if (fc->has_direct_eval) {
+            // Only direct eval can publish caller-local bindings; ordinary
+            // resumable bodies must not pay for a dormant eval frame.
+            mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
+                MIR_new_int_op(mt->ctx, 0)));
+        }
 
         // Get parameters from function signature
         mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
@@ -2203,8 +2207,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
 
     // --- Generate boxed version (original or wrapper) ---
-    bool body_needs_scalar_home = em_scalar_return_mode_for_type(
-        fc->return_type) != MIR_SCALAR_RETURN_NONE;
+    MirScalarReturnMode body_scalar_mode = em_scalar_return_mode_for_class(
+        fc->boxed_return_scalar_class);
+    bool body_needs_scalar_home = body_scalar_mode != MIR_SCALAR_RETURN_NONE;
     int total_params = param_count + (has_captures ? 1 : 0) +
         (body_needs_scalar_home ? 1 : 0);
     MIR_var_t* params = LAMBDA_ALLOCA(total_params, MIR_var_t);
@@ -2310,8 +2315,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->current_fc = fc;
     mt->func_except_label = 0;  // reset for this function
 
-    jm_begin_function_frame(mt, ret_type, true,
-        em_scalar_return_mode_for_type(fc->return_type), 0);
+    jm_begin_function_frame(mt, ret_type, true, body_scalar_mode, 0);
     mt->em.frame.plan.entry_kind = FN_ENTRY_BOXED_BODY;
     mt->em.frame.plan.entry_mode = MIR_ENTRY_BOUND_INTERNAL;
     if (body_needs_scalar_home) {
@@ -2326,10 +2330,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         jm_register_owned_env(mt, closure_env_reg);
     }
     jm_push_scope(mt);
-    mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
-        MIR_new_int_op(mt->ctx, 0)));
+    if (fc->has_direct_eval) {
+        // The eval-local protocol is semantic state, not generic frame state;
+        // omit it when collection proves the function has no direct eval.
+        mt->eval_local_frame_reg = jm_new_reg(mt, "eval_local_frame", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mt->eval_local_frame_reg),
+            MIR_new_int_op(mt->ctx, 0)));
+    }
 
     {
         struct hashmap* dstr_param_names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,

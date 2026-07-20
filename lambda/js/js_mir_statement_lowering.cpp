@@ -867,7 +867,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_INT);
                         jm_scope_env_mark_and_writeback_binding(mt, vname, d->id, reg, LMD_TYPE_INT);
                         jm_write_last_closure_capture_if_matching(mt, vname, reg, LMD_TYPE_INT);
-                        if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
+                        if ((var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) &&
+                            mt->is_eval_direct) {
+                            // Only direct-eval scripts export top-level lexical
+                            // bindings; boxing here otherwise creates a dead Item.
                             MIR_reg_t boxed_reg = jm_box_int_reg(mt, reg);
                             jm_declare_evalscript_global_lexical_if_needed(mt, var, id, boxed_reg);
                         }
@@ -895,7 +898,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         jm_write_env_backing_if_needed(mt, jm_find_var(mt, vname), reg, LMD_TYPE_FLOAT);
                         jm_scope_env_mark_and_writeback_binding(mt, vname, d->id, reg, LMD_TYPE_FLOAT);
                         jm_write_last_closure_capture_if_matching(mt, vname, reg, LMD_TYPE_FLOAT);
-                        if (var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) {
+                        if ((var->kind == JS_VAR_LET || var->kind == JS_VAR_CONST) &&
+                            mt->is_eval_direct) {
+                            // Preserve native doubles unless direct eval needs
+                            // an observable boxed global lexical binding.
                             MIR_reg_t boxed_reg = jm_box_float(mt, reg);
                             jm_declare_evalscript_global_lexical_if_needed(mt, var, id, boxed_reg);
                         }
@@ -4776,7 +4782,6 @@ static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,
     }
 
     MIR_reg_t saved_with_depth = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
-    MIR_reg_t saved_args_mark = jm_call_0(mt, "js_args_save", MIR_T_I64);
 
     jm_transpile_statement_list_with_using(mt, tail);
 
@@ -4791,8 +4796,6 @@ static void jm_transpile_using_tail(JsMirTranspiler* mt, JsAstNode* tail,
     jm_emit_label(mt, finally_label);
     jm_call_void_1(mt, "js_with_restore_depth", MIR_T_I64,
         MIR_new_reg_op(mt->ctx, saved_with_depth));
-    jm_call_void_1(mt, "js_args_restore", MIR_T_I64,
-        MIR_new_reg_op(mt->ctx, saved_args_mark));
 
     MIR_reg_t saved_exc_flag = jm_call_0(mt, "js_check_exception", MIR_T_I64);
     MIR_reg_t saved_exc_val = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
@@ -5751,16 +5754,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             saved_with_depth_spill = jm_gen_spill_save(mt, saved_with_depth);
         }
 
-        // Save the transient call-argument stack mark. An exception thrown while
-        // evaluating a call's arguments unwinds past that call's restore, leaving
-        // its half-built arg frame on the stack; resetting to this mark on the
-        // catch/finally path reclaims it (otherwise the stack grows per throw).
-        MIR_reg_t saved_args_mark = jm_call_0(mt, "js_args_save", MIR_T_I64);
-        int saved_args_mark_spill = -1;
-        if (mt->in_generator) {
-            saved_args_mark_spill = jm_gen_spill_save(mt, saved_args_mark);
-        }
-
         // === Try body ===
         if (try_node->block && try_node->block->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             jm_push_scope(mt);
@@ -5804,13 +5797,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             }
             jm_call_void_1(mt, "js_with_restore_depth", MIR_T_I64,
                 MIR_new_reg_op(mt->ctx, saved_with_depth));
-
-            // Reclaim any arg frames leaked by a throw during argument evaluation
-            if (saved_args_mark_spill >= 0) {
-                jm_gen_spill_load(mt, saved_args_mark, saved_args_mark_spill);
-            }
-            jm_call_void_1(mt, "js_args_restore", MIR_T_I64,
-                MIR_new_reg_op(mt->ctx, saved_args_mark));
 
             JsCatchNode* catch_node = (JsCatchNode*)try_node->handler;
 
@@ -5948,13 +5934,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             }
             jm_call_void_1(mt, "js_with_restore_depth", MIR_T_I64,
                 MIR_new_reg_op(mt->ctx, saved_with_depth));
-
-            // Reclaim any arg frames leaked by a throw during argument evaluation
-            if (saved_args_mark_spill >= 0) {
-                jm_gen_spill_load(mt, saved_args_mark, saved_args_mark_spill);
-            }
-            jm_call_void_1(mt, "js_args_restore", MIR_T_I64,
-                MIR_new_reg_op(mt->ctx, saved_args_mark));
 
             // In generators, push a minimal try context so that yield inside
             // the finally body can re-initialize has_return_reg/return_val_reg
