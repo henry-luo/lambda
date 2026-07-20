@@ -3693,18 +3693,6 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
  * Insert pseudo-element into DOM tree at appropriate position
  * ::before is inserted as first child, ::after as last child
  */
-static bool dom_subtree_contains_node(DomNode* root, DomNode* target) {
-    if (!root || !target) return false;
-    if (root == target) return true;
-    if (!root->is_element()) return false;
-
-    DomElement* element = lam::dom_require_element(root);
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (dom_subtree_contains_node(child, target)) return true;
-    }
-    return false;
-}
-
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
     if (!parent || !pseudo) return;
 

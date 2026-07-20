@@ -1,9 +1,9 @@
 function
 function
 object function
+after:0
+XHR_PAGE_DONE
 200
 OK
 true
 4
-after:200
-XHR_PAGE_DONE

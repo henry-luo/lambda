@@ -491,6 +491,25 @@ static void reset_layout_cache(DomElement* elem, ViewTree* tree) {
     radiant::layout_cache_init(elem->layout_cache, tree ? tree->layout_generation : 0);
 }
 
+static bool view_element_uses_marker_prop(DomElement* elem) {
+    return elem && elem->tag_name && strcmp(elem->tag_name, "::marker") == 0;
+}
+
+static void reset_block_or_marker_prop(DomElement* elem, ViewTree*) {
+    if (!elem || !elem->blk) return;
+    if (view_element_uses_marker_prop(elem)) {
+        // ::marker stores MarkerProp in the shared blk slot; treating it as the
+        // larger BlockProp overwrites adjacent view-pool allocations.
+        return;
+    }
+    memcpy(elem->blk, &BLOCK_PROP_DEFAULT, sizeof(BlockProp));
+}
+
+static void reset_pseudo_content_prop(DomElement*, ViewTree*) {
+    // Generated pseudo nodes remain linked in the retained DOM tree, so their
+    // structural owner and generation flags must survive the matching reset.
+}
+
 static void free_inline_prop(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->in_line) return;
     if (!elem->inline_prop_shared()) {
@@ -524,7 +543,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "font",            release_element_font_prop, free_element_font_payload, view_prop_get_font,            view_prop_clear_font,            nullptr,         nullptr,       &FONT_PROP_DEFAULT,          sizeof(FontProp),          nullptr },
     { "inline",          nullptr,                   nullptr,                   view_prop_get_in_line,         view_prop_clear_inline,          nullptr,         free_inline_prop, nullptr,                    sizeof(InlineProp),        reset_inline_prop },
     { "boundary",        nullptr,                   free_boundary_payload,     view_prop_get_bound,           view_prop_clear_bound,           nullptr,         nullptr,       &BOUNDARY_PROP_DEFAULT,      sizeof(BoundaryProp),      nullptr },
-    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr,       &BLOCK_PROP_DEFAULT,         sizeof(BlockProp),         nullptr },
+    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr,       nullptr,                      sizeof(BlockProp),         reset_block_or_marker_prop },
     { "scroll",          nullptr,                   free_scroll_payload,       view_prop_get_scroller,        view_prop_clear_scroller,        nullptr,         nullptr,       &SCROLL_PROP_DEFAULT,        sizeof(ScrollProp),        nullptr },
     { "embed",           release_embed_prop_entry,  free_embed_payload,        view_prop_get_embed,           view_prop_clear_embed,           nullptr,         nullptr,       &EMBED_PROP_DEFAULT,         sizeof(EmbedProp),         nullptr },
     { "position",        nullptr,                   nullptr,                   view_prop_get_position,        view_prop_clear_position,        nullptr,         nullptr,       &POSITION_PROP_DEFAULT,      sizeof(PositionProp),      nullptr },
@@ -534,7 +553,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "multicol",        nullptr,                   nullptr,                   view_prop_get_multicol,        view_prop_clear_multicol,        nullptr,         nullptr,       &MULTICOL_PROP_DEFAULT,      sizeof(MultiColumnProp),   nullptr },
     { "form",            release_form_prop,         nullptr,                   nullptr,                       nullptr,                       nullptr,         nullptr,       nullptr,                      0,                         nullptr },
     { "item",            nullptr,                   nullptr,                   nullptr,                       nullptr,                       clear_item_prop, free_item_prop, nullptr,                   0,                         free_item_prop },
-    { "pseudo",          release_pseudo_content_prop_entry, free_pseudo_payload, view_prop_get_pseudo,        view_prop_clear_pseudo,          nullptr,         nullptr,       &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), nullptr },
+    { "pseudo",          release_pseudo_content_prop_entry, free_pseudo_payload, view_prop_get_pseudo,        view_prop_clear_pseudo,          nullptr,         nullptr,       &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
     { "vector-path",     nullptr,                   free_vector_path_payload,  view_prop_get_vpath,           view_prop_clear_vpath,           nullptr,         nullptr,       &VECTOR_PATH_PROP_DEFAULT,   sizeof(VectorPathProp),    nullptr },
     { "layout-cache",    nullptr,                   nullptr,                   view_prop_get_layout_cache,    view_prop_clear_layout_cache,    nullptr,         nullptr,       nullptr,                      sizeof(radiant::LayoutCache), reset_layout_cache },
 };
@@ -550,17 +569,34 @@ static_assert(sizeof(TRANSFORM_PROP_DEFAULT) == sizeof(TransformProp), "transfor
 static_assert(sizeof(FILTER_PROP_DEFAULT) == sizeof(FilterProp), "filter reset metadata drift");
 static_assert(sizeof(MULTICOL_PROP_DEFAULT) == sizeof(MultiColumnProp), "multicol reset metadata drift");
 
+static bool view_teardown_pseudo_is_reachable(DomElement* owner, DomElement* generated) {
+    if (!owner || !generated) return false;
+    for (DomNode* child = owner->first_child; child; child = child->next_sibling) {
+        if (dom_subtree_contains_node(child, static_cast<DomNode*>(generated))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void view_teardown_visit_pseudo(ViewTree* tree,
+                                       DomElement* owner,
                                        PseudoContentProp* pseudo,
                                        int flags) {
     if (!pseudo) return;
 
     // Generated pseudo nodes are not always reachable from first_child. The
-    // unified visitor must see them before the pseudo pointer is cleared, or
-    // their font/form/embed handles survive a retained relayout.
-    view_teardown_visit_node(tree, static_cast<DomNode*>(pseudo->before), flags, false);
-    view_teardown_visit_node(tree, static_cast<DomNode*>(pseudo->after), flags, false);
-    view_teardown_visit_node(tree, static_cast<DomNode*>(pseudo->marker), flags, false);
+    // unified visitor handles only detached ones here; reachable pseudos are
+    // visited by the child walk exactly once.
+    if (!view_teardown_pseudo_is_reachable(owner, pseudo->before)) {
+        view_teardown_visit_node(tree, static_cast<DomNode*>(pseudo->before), flags, false);
+    }
+    if (!view_teardown_pseudo_is_reachable(owner, pseudo->after)) {
+        view_teardown_visit_node(tree, static_cast<DomNode*>(pseudo->after), flags, false);
+    }
+    if (!view_teardown_pseudo_is_reachable(owner, pseudo->marker)) {
+        view_teardown_visit_node(tree, static_cast<DomNode*>(pseudo->marker), flags, false);
+    }
 }
 
 static void view_teardown_apply_table(ViewTree* tree,
@@ -612,7 +648,10 @@ static void view_teardown_apply_table(ViewTree* tree,
 
 static void view_teardown_clear_element_scalars(DomElement* elem) {
     if (!elem) return;
-    elem->view_type = RDT_VIEW_NONE;
+    // Retained ::marker nodes must keep their discriminator because their blk
+    // slot is MarkerProp, and normal inline layout would cast it to BlockProp.
+    elem->view_type = view_element_uses_marker_prop(elem)
+        ? RDT_VIEW_MARKER : RDT_VIEW_NONE;
     elem->content_width = 0.0f;
     elem->content_height = 0.0f;
     elem->set_has_cached_intrinsic_widths(false);
@@ -697,7 +736,7 @@ static void view_teardown_visit_node(ViewTree* tree,
                 child_flags &= ~VIEW_TEARDOWN_RELEASE_EXTERNAL;
             }
 
-            view_teardown_visit_pseudo(tree, pseudo, flags);
+            view_teardown_visit_pseudo(tree, elem, pseudo, flags);
             view_teardown_visit_node(tree, first_child, child_flags, true);
             view_teardown_apply_table(tree, elem, flags);
             if (flags & (VIEW_TEARDOWN_CLEAR_POINTERS | VIEW_TEARDOWN_RESET_IN_PLACE)) {

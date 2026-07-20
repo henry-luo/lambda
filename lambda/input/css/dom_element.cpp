@@ -35,6 +35,18 @@ extern "C" __attribute__((weak)) void svg_unregister_image_resolvers_for_tree(El
     (void)root;
 }
 
+bool dom_subtree_contains_node(DomNode* root, DomNode* target) {
+    if (!root || !target) return false;
+    if (root == target) return true;
+    if (!root->is_element()) return false;
+
+    DomElement* element = root->as_element();
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (dom_subtree_contains_node(child, target)) return true;
+    }
+    return false;
+}
+
 // Runtime-cleanup hook: the full runtime layer (lambda/runner.cpp's
 // runtime_init) installs this so the input/css layer doesn't hard-depend on
 // runner.cpp's runtime_cleanup. NULL in input-only unit-test builds — safe
@@ -2613,6 +2625,13 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
             new_dt->set_symbol(text_node->is_symbol());
             new_dt->rect = text_node->rect;
             new_dt->font = text_node->font;
+            new_dt->view_type = text_node->view_type;
+            // Replacing the fat String transfers the retained layout handles to
+            // its embedded DomText; leaving them on the retired node double-recycled
+            // the TextRect chain at the next asynchronous layout checkpoint.
+            text_node->rect = nullptr;
+            text_node->font = nullptr;
+            text_node->view_type = RDT_VIEW_NONE;
             new_dt->parent = parent;
             new_dt->prev_sibling = saved_prev;
             new_dt->next_sibling = saved_next;

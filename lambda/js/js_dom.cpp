@@ -447,6 +447,21 @@ extern "C" bool js_dom_tick_headless_animation_frame(void) {
     return animation_scheduler_tick(scheduler, now, &state->dirty_tracker);
 }
 
+extern "C" bool js_dom_commit_headless_layout_checkpoint(void) {
+    UiContext* uicon = _js_current_ui_context;
+    DomDocument* doc = uicon && uicon->document
+        ? uicon->document : _js_current_document;
+    if (!uicon || !uicon->headless || js_dom_is_host_driven_loop() ||
+        !doc || !doc->view_tree || !doc->view_tree->root ||
+        doc->js.mutation_count == 0) {
+        return false;
+    }
+    // A one-shot DOM session has no native render loop, so task boundaries must
+    // commit pending mutations; geometry getters remain snapshots and never reflow.
+    radiant_reconcile_js_dom_mutations(uicon, doc);
+    return true;
+}
+
 // ----------------------------------------------------------------------------
 // Phase 3: live-range mutation envelopes — thin wrappers that bail when no
 // per-document DocState (and thus no live ranges) is attached. All DOM

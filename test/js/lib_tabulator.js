@@ -28,5 +28,6 @@ table.on('tableBuilt', function () {
   var firstName = document.querySelector(
     '.tabulator-row .tabulator-cell[tabulator-field="name"]'
   );
+  // Tabulator retains one viewport of buffered rows above the visible window.
   console.log('tabulator:scroll:' + holder.scrollTop + ':' + firstName.textContent);
 });

@@ -55,6 +55,9 @@ bool js_dom_force_layout_for_geometry(void* dom_doc);
 /** Advance the active document's CSS animation scheduler by one headless frame. */
 bool js_dom_tick_headless_animation_frame(void);
 
+/** Commit pending DOM mutations at a one-shot headless rendering checkpoint. */
+bool js_dom_commit_headless_layout_checkpoint(void);
+
 // Lazy DomElement* with tag "#document" used so JS Range/Selection APIs can
 // accept `document` (or a foreign-doc wrapper) as a node container.
 void* js_dom_get_or_create_doc_node(void* dom_doc);

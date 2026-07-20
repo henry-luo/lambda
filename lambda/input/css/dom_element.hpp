@@ -1031,6 +1031,9 @@ bool dom_element_remove_property(DomElement* element, CssPropertyId property_id)
  */
 bool dom_element_clear_pseudo_styles(DomElement* element);
 
+/** Return whether target is root or one of root's DOM descendants. */
+bool dom_subtree_contains_node(DomNode* root, DomNode* target);
+
 // ============================================================================
 // Utility Functions
 // ============================================================================

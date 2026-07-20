@@ -275,6 +275,22 @@ extern "C" int js_animation_frame_has_pending(void) {
     return raf_count > 0 ? 1 : 0;
 }
 
+static void js_event_loop_render_checkpoint(void) {
+    if (!js_dom_get_ui_context() || js_dom_is_host_driven_loop()) {
+        js_microtask_flush();
+        return;
+    }
+
+    // One-shot DOM tasks need a rendering opportunity before dependent library
+    // continuations inspect geometry. Repeat because observer microtasks can mutate DOM.
+    for (int turn = 0; turn < 8; turn++) {
+        bool committed = js_dom_commit_headless_layout_checkpoint();
+        bool had_microtasks = js_microtask_pending_count() > 0;
+        if (had_microtasks) js_microtask_flush();
+        if (!committed && !had_microtasks) break;
+    }
+}
+
 extern "C" int js_animation_frame_flush(double timestamp_ms) {
     int pending = raf_count;
     int called = 0;
@@ -298,7 +314,7 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
         }
     }
     js_performance_frame_clock_end();
-    js_microtask_flush();
+    js_event_loop_render_checkpoint();
     return called;
 }
 
@@ -641,7 +657,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
         timer_mark_object_destroyed(th);
         timer_close_handle(th);
     }
-    js_microtask_flush();
+    js_event_loop_render_checkpoint();
 }
 static double item_to_ms(Item delay) {
     if (get_type_id(delay) == LMD_TYPE_FLOAT) {
@@ -2070,8 +2086,9 @@ extern "C" bool js_event_loop_pump_wait(int max_wait_ms) {
 }
 
 extern "C" int js_event_loop_drain(void) {
-    // flush any synchronous microtasks first (from Promise resolutions)
-    js_microtask_flush();
+    // Commit script mutations before its first queued task. This is the
+    // one-shot equivalent of the host render opportunity between event tasks.
+    js_event_loop_render_checkpoint();
 
     // Host-driven sessions (Radiant `view`) own the timer/rAF cadence and pump
     // the loop via js_event_loop_pump_nowait() AFTER committing the first layout.
@@ -2095,12 +2112,12 @@ extern "C" int js_event_loop_drain(void) {
     if (auto_close_mode) {
         for (int turn = 0; turn < 4; turn++) {
             int active = uv_run(loop, UV_RUN_NOWAIT);
-            js_microtask_flush();
+            js_event_loop_render_checkpoint();
             if (!active || timer_handle_count == 0) break;
         }
         close_all_timer_handles();
         uv_run(loop, UV_RUN_NOWAIT);
-        js_microtask_flush();
+        js_event_loop_render_checkpoint();
         return 0;
     }
 
@@ -2141,11 +2158,12 @@ extern "C" int js_event_loop_drain(void) {
 
         // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
         result = lambda_uv_run();
+        js_event_loop_render_checkpoint();
 
         int animation_frames = 0;
         while (!watchdog_state.fired && js_dom_tick_headless_animation_frame() &&
                animation_frames < 256) {
-            js_microtask_flush();
+            js_event_loop_render_checkpoint();
             uv_run(loop, UV_RUN_NOWAIT);
             animation_frames++;
         }
