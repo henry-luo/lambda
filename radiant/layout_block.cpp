@@ -1145,8 +1145,9 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
             }
         }
 
-        // Copy pseudo-element styles to the pseudo element itself
-        pseudo_elem->specified_style = pseudo_styles;
+        // The originating element retains the pseudo declaration tree across
+        // generated-box rebuilds; the box only borrows it for style resolution.
+        dom_element_borrow_specified_style(pseudo_elem, pseudo_styles);
     }
 
     bool has_counter_content = false;
@@ -1546,7 +1547,8 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     }
 
     // Assign the first-letter styles for CSS resolution
-    fl_elem->specified_style = elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER);
+    dom_element_borrow_specified_style(
+        fl_elem, elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER));
 
     // Create text content for the first-letter pseudo-element
     char* fl_text = (char*)pool_calloc(pool, boundary + 1);
@@ -3801,7 +3803,9 @@ void generate_pseudo_element_content(LayoutContext* lycon, ViewBlock* block, boo
               is_before ? "::before" : "::after");
 
     // Copy pseudo-element-specific styles (::before or ::after styles)
-    pseudo_elem->specified_style = is_before ? parent_elem->pseudo_style(PSEUDO_STYLE_BEFORE) : parent_elem->pseudo_style(PSEUDO_STYLE_AFTER);
+    dom_element_borrow_specified_style(
+        pseudo_elem, is_before ? parent_elem->pseudo_style(PSEUDO_STYLE_BEFORE)
+                               : parent_elem->pseudo_style(PSEUDO_STYLE_AFTER));
 
     // Handle different content types
     switch (content_type) {

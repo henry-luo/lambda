@@ -1,0 +1,15 @@
+bound-prototype:true
+bound-before-own:false
+bound-types:function:function
+bound-before-proto:true
+bound-after-own:true
+bound-call:true
+class-before-own:false
+class-before-proto:true
+class-after-own:true
+class-call:true
+large-bound:large
+setter-own:false
+setter-seen:7
+keys-before:
+keys-after:first

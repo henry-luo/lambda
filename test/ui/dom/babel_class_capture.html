@@ -1,0 +1,10 @@
+<!doctype html><html><body><button id="go">go</button><output id="result"></output><script>
+(function () {
+  var Modal = function () {
+    function Constructor() { var c = true; this.modal = document.getElementById('go'); this.run = this.run.bind(this); }
+    Constructor.prototype.run = function (event) { var same = c(event.target, this.modal); document.getElementById('result').textContent = same ? 'same' : 'different'; };
+    return Constructor;
+  }(), c = function (left, right) { return left === right; };
+  var modal = new Modal(); document.getElementById('go').addEventListener('click', modal.run);
+}());
+</script></body></html>

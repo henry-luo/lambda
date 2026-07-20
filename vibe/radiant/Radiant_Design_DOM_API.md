@@ -53,10 +53,14 @@ native contract, its implementation status, and the current scope boundary.
    dirty, invalidate resolved styles as appropriate, and publish DOM mutation
    records. A later layout/render pass consumes those dirty flags.
 4. **Event ownership.** Native input enters Radiant once, then the JS bridge
-   builds a DOM event path and performs capture, target, and bubble dispatch.
+   captures one DOM event path and performs capture, target, and bubble
+   dispatch over it. `composedPath()` copies that captured path; it never
+   reconstructs ancestry after listener-side DOM mutation.
 5. **Lifetime.** DOM wrappers, listeners, selection/range objects, CSSOM
    objects, and observer records are non-owning views. Their C+ storage belongs
-   to the document/runtime pools and is cleared with the document.
+   to the document/runtime pools and is cleared with the document. Expando
+   values live in the wrapper's traced backing store; connected native nodes
+   add only an attachment-scoped GC root, removed recursively on detach.
 
 ## 3. Existing native DOM surface
 
@@ -67,8 +71,8 @@ native contract, its implementation status, and the current scope boundary.
 | Document, Node, Element, Text, Comment, DocumentFragment | **Full** | `js_dom.cpp`, `radiant/view.hpp` | Native wrappers expose document/tree identity, traversal, creation, and mutation. Namespace-sensitive browser behavior is only partial. |
 | Queries, attributes, classes, data attributes | **Full** | `js_dom.cpp`, `input/css/selector_matcher.hpp` | Queries reuse Radiant's selector matcher; `classList` and `dataset` are native proxies. |
 | HTML mutation and serialization | **Full** | `js_dom.cpp`, Radiant HTML5 fragment parser | `innerHTML` parses into the real DOM; `outerHTML`, `textContent`, CharacterData, clone, and adjacent insertion are bridged. |
-| Events and EventTarget | **Full** | `js_dom_events.cpp`, `radiant/event.cpp` | Capture/target/bubble, listener options, default prevention, native event constructors, and input dispatch are native. |
-| Inline style and computed style | **Full** | `js_dom.cpp`, `js_cssom.cpp` | `style`, `className`, `getComputedStyle`, and CSS selector/cascade reads operate over Radiant styles. Full browser CSSOM is not implied. |
+| Events and EventTarget | **Full** | `js_dom_events.cpp`, `radiant/event.cpp` | Capture/target/bubble, listener options, default prevention, native event constructors, and input dispatch are native. The exact dispatch path is retained for `composedPath()` and cleared after dispatch. |
+| Inline style and computed style | **Full** | `js_dom.cpp`, `js_cssom.cpp`, `dom_element.cpp` | `style`, `className`, `getComputedStyle`, and CSS selector/cascade reads operate over Radiant styles. Recascade reads the live `style` attribute and clears only stylesheet declarations, preserving parsed inline ownership. Full browser CSSOM is not implied. |
 | Style sheets and CSS namespace | **Partial** | `js_cssom.cpp` | The bridge supports the needed live stylesheet/rule/declaration paths and `CSS.supports`/`CSS.escape`; browser CSSOM remains much larger. |
 | Geometry and scrolling | **Full (snapshot contract)** | `js_dom.cpp`, `radiant/layout.cpp` | Metrics and rect APIs are native reads of committed layout. They never force synchronous reflow; same-task popup placement and virtual-range recalculation are deferred to a later layout checkpoint. |
 | Unicode text layout, rendering, and caret navigation | **Partial** | `layout_text.cpp`, `intrinsic_sizing.cpp`, `layout_inline.cpp`, `resolve_htm_style.cpp`, `dom_range.cpp`, `editing_geometry.cpp` | Grapheme/emoji-aware advance handling, RTL inline placement, CSS `direction`/`unicode-bidi`, `dir=auto`, and native grapheme/bidi-aware caret and selection navigation are in scope. Complete browser nested-host and IME parity is not. |

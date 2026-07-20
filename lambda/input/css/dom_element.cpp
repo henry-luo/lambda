@@ -355,6 +355,9 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
         element->tag_name = nullptr;
         if (element->specified_style_shared()) {
             style_epoch_unbind_element(element);
+        } else if (element->specified_style_borrowed()) {
+            element->specified_style = nullptr;
+            element->mark_specified_style_owned();
         } else if (element->specified_style) {
             style_tree_destroy_owned(element->specified_style);
             element->specified_style = nullptr;
@@ -474,6 +477,11 @@ void dom_element_clear(DomElement* element) {
         style_epoch_unbind_element(element);
         element->specified_style = style_tree_create(element->doc->document_pool);
         element->mark_specified_style_owned();
+    } else if (element->specified_style_borrowed()) {
+        // A generated pseudo box may discard its view of the source tree, but
+        // it must never clear declarations owned by the originating element.
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
     } else if (element->specified_style) {
         // Recascade runs inside the document pool's active lifetime; returning
         // its live style allocations here corrupts subsequent CSS allocations.
@@ -490,6 +498,56 @@ void dom_element_clear(DomElement* element) {
     // The pool will handle cleanup
 }
 
+void dom_element_clear_cascaded_styles(DomElement* element) {
+    if (!element) return;
+
+    bool changed = false;
+    if (element->specified_style_shared()) {
+        // Canonical trees never contain inline declarations, so detaching is
+        // sufficient and avoids materializing declarations that are discarded.
+        style_epoch_unbind_element(element);
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
+        changed = true;
+    } else if (element->specified_style_borrowed()) {
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
+        changed = true;
+    } else if (element->specified_style) {
+        if (style_tree_has_inline_declarations(element->specified_style)) {
+            // Inline declarations are live DOM state. Reparse-on-recascade both
+            // lost CSSOM writes and grew the document pool on every hover event.
+            changed = style_tree_remove_non_inline_declarations(
+                element->specified_style);
+        } else if (!style_tree_is_empty(element->specified_style)) {
+            style_tree_clear(element->specified_style);
+            changed = true;
+        }
+    } else {
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
+    }
+    if (changed) {
+        element->style_version++;
+        element->set_needs_style_recompute(true);
+    }
+}
+
+void dom_element_borrow_specified_style(DomElement* element, StyleTree* style) {
+    if (!element) return;
+    if (element->specified_style_shared()) {
+        style_epoch_unbind_element(element);
+    } else if (!element->specified_style_borrowed() && element->specified_style &&
+               element->specified_style != style) {
+        style_tree_destroy_owned(element->specified_style);
+    }
+    // Generated pseudo elements are views over their source declarations; the
+    // source element remains the sole owner across view retirement and rebuild.
+    element->specified_style = style;
+    if (style) element->mark_specified_style_borrowed();
+    else element->mark_specified_style_owned();
+}
+
 void dom_element_destroy(DomElement* element) {
     if (!element) {
         return;
@@ -497,6 +555,9 @@ void dom_element_destroy(DomElement* element) {
 
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
+    } else if (element->specified_style_borrowed()) {
+        element->specified_style = nullptr;
+        element->mark_specified_style_owned();
     } else if (element->specified_style) {
         style_tree_destroy_owned(element->specified_style);
         element->specified_style = nullptr;
@@ -524,6 +585,9 @@ void dom_element_release_retired_storage(DomElement* element) {
     }
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
+    } else if (element->specified_style_borrowed()) {
+        element->specified_style = nullptr;
+        element->mark_specified_style_owned();
     } else if (element->specified_style) {
         style_tree_destroy_owned(element->specified_style);
         element->specified_style = nullptr;

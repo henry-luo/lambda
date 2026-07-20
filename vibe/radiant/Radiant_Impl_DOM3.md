@@ -1,6 +1,7 @@
 # Radiant DOM Implementation Plan 3 — Modern Page Bootstrap
 
-**Status:** implemented; final baseline verification in progress
+**Status:** implemented; four blocking review findings resolved; asynchronous
+DOM-golden follow-up remains
 **Predecessor:** `Radiant_Impl_DOM2.md`
 **Scope contract:** `Radiant_Design_DOM_API.md`
 **Primary outcome:** complete non-forcing geometry reads and asynchronous XHR, then
@@ -423,6 +424,38 @@ Module scripts are enabled by default after graph and scheduling validation:
 5. Remove temporary diagnostics that are not useful in normal debug builds;
    keep concise, distinct-prefix telemetry at lifecycle boundaries.
 
+### 6.1 Blocking-review resolutions
+
+The final JS/DOM review identified four mechanisms that could not be accepted
+as local compatibility fixes. They are resolved with the following explicit
+contracts:
+
+1. **Event dispatch path ownership.** `composedPath()` returns a fresh array
+   copied from the exact path captured for the current dispatch. It does not
+   reconstruct ancestry after a listener mutates the tree, and the captured
+   path is cleared when dispatch ends.
+2. **Cascade invalidation and inline style ownership.** A recascade reads the
+   live DOM `style` attribute. Clearing stylesheet results preserves the
+   element's parsed inline declarations instead of reparsing every inline
+   attribute in the document. Generated pseudo-elements borrow their parent's
+   pseudo-style tree explicitly; copy-on-write is required before mutation so
+   lifecycle cleanup cannot free the parent's tree.
+3. **Constructor instance shape.** Constructor inference reserves candidate
+   own-property slots as uninitialized per instance. Reads fall through to the
+   prototype and reflection does not expose a slot until the first write. If a
+   constructor assignment would overwrite a prototype method, inference
+   disables constructor pre-shaping for that class rather than emitting a
+   syntax-specific `.bind(this)` exception.
+4. **DOM expando lifetime.** Expando maps live in the owning wrapper's GC-
+   traced backing store. A native attached node receives a temporary GC root
+   only while an ancestry walk proves it is connected to its document root;
+   detach removes that root recursively and reattach restores it. There is no
+   permanent process-global node-to-map retention table.
+
+The event and cascade changes are observable DOM design corrections. The
+constructor shape and expando changes are runtime ownership/model changes.
+None is accepted as a fixture-specific workaround.
+
 ## 4. Implementation log
 
 Populate this section during implementation; do not pre-mark phases complete.
@@ -434,3 +467,4 @@ Populate this section during implementation; do not pre-mark phases complete.
 | 2026-07-20 | 2–3 | Implemented XHR `open(..., true)` as a document-owned queued event-loop task with copied request body, token invalidation, abort, and ready-state event sequencing. | Native async XHR smoke path green. | Streaming/CORS/full response types remain deferred. |
 | 2026-07-20 | 4–5 | Enabled bounded inline and relative external module graphs without the environment gate; added external-import fixture. | Module policy and dependency fixtures green. | Import maps/bare specifiers/CORS parity deferred. |
 | 2026-07-20 | 6 | Updated API scope and compatibility fixtures for DOM3 snapshots and rich-editing non-goals. | `make test-radiant-baseline`: 6,344 passed, 543 baseline-partial, 6 skipped, 0 failed. | — |
+| 2026-07-20 | 6 review | Replaced dynamic event-path reconstruction, whole-document inline-style reparsing, syntax-specific constructor binding, and permanent expando side-table retention with the contracts in §6.1. | DOM UI 49/49; `make test-radiant-baseline`: 6,358 passed, 543 baseline-partial, 6 skipped, 0 failed; Test262: 40,261/40,261, 0 regressions; Radiant no-int-cast lint clean. | The broader `test_js_gtest` run still has six asynchronous layout/event-loop failures: geometry observers, ResizeObserver, transitionend, XHR page ordering, Floating UI, and Tabulator. These are follow-up DOM3 timing work, not regressions in the four review mechanisms. |

@@ -97,6 +97,12 @@ void* js_dom_unwrap_element(Item item);
  */
 bool js_dom_option_is_selected(void* dom_elem);
 
+/**
+ * Create a selector matcher configured for a DOM document's live UI state.
+ * The opaque return value is a SelectorMatcher* for Radiant's native bridge.
+ */
+void* js_dom_create_selector_matcher_bridge(void* dom_doc);
+
 /** Return the identity-preserving Document proxy that owns a DOM node. */
 Item js_dom_owner_document_for_node(void* node);
 

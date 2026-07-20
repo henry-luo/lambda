@@ -666,6 +666,7 @@ enum MapKind {
 
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
 #define CONTAINER_FLAG_JS_PROPS (1u << 6)
+#define CONTAINER_FLAG_CTOR_RESERVED (1u << 7)
 
 static inline bool map_kind_is_array_props(uint8_t map_kind) {
     return map_kind == MAP_KIND_ARRAY_PROPS || map_kind == MAP_KIND_ARRAY_SPARSE;

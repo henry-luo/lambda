@@ -425,17 +425,32 @@ static void jm_count_lexical_binding_name_for_slot(JsAstNode* node, const char* 
     }
 }
 
-static bool jm_parent_has_duplicate_lexical_slot_name(JsFuncCollected* parent, const char* name) {
+static bool jm_parent_declares_function_var(JsFuncCollected* parent, const char* name) {
+    if (!parent || !parent->node || !parent->node->body || !name) return false;
+    struct hashmap* vars = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+        jm_name_hash, jm_name_cmp, NULL, NULL);
+    jm_collect_body_locals(parent->node->body, vars, /*var_only=*/true);
+    JsNameSetEntry lookup;
+    memset(&lookup, 0, sizeof(lookup));
+    snprintf(lookup.name, sizeof(lookup.name), "%s", name);
+    JsNameSetEntry* entry = (JsNameSetEntry*)hashmap_get(vars, &lookup);
+    bool is_var = entry && !entry->from_func_decl;
+    hashmap_free(vars);
+    return is_var;
+}
+
+static bool jm_parent_var_has_lexical_slot_collision(JsFuncCollected* parent, const char* name) {
     if (!parent || !parent->node || !parent->node->body || !name) return false;
     int count = 0;
     for (JsAstNode* param = parent->node->params; param; param = param->next) {
         jm_count_lexical_pattern_name_for_slot(param, name, &count);
     }
     jm_count_lexical_binding_name_for_slot(parent->node->body, name, &count);
-    // A nested lexical may shadow a parameter while a child closure captures
-    // the lexical. Treat both declarations as distinct env cells or callback
-    // writeback overwrites the parameter after the block exits.
-    return count > 1;
+    // Existing lexical/parameter collisions already need keyed slots. A
+    // captured var and any same-named nested lexical require them too;
+    // distinct cells; otherwise the lexical assignment overwrites the value
+    // observed by a callback created after that nested block has exited.
+    return count > 1 || (count > 0 && jm_parent_declares_function_var(parent, name));
 }
 
 static bool jm_modvar_is_iife_scope_binding(JsModuleConstEntry* mc) {
@@ -469,7 +484,7 @@ static const char* jm_capture_scope_env_slot_key(JsFuncCollected* parent, JsFunc
     // Only class methods need a source-keyed forced capture to distinguish an
     // IIFE lexical from its promoted same-named module binding; keying every
     // forced capture disconnects ordinary closures from their parent writes.
-    bool needs_binding_key = jm_parent_has_duplicate_lexical_slot_name(parent, cap->name) ||
+    bool needs_binding_key = jm_parent_var_has_lexical_slot_collision(parent, cap->name) ||
         (cap->force_env_capture && child && child->is_class_method);
     if (needs_binding_key) {
         if (!cap->scope_env_key[0] || strcmp(cap->scope_env_key, cap->name) == 0) {
@@ -994,7 +1009,7 @@ static bool jm_compose_derived_ctor_shape(JsClassEntry* ce, int depth) {
 static void jm_compose_derived_ctor_shapes(JsMirTranspiler* mt) {
     if (!mt) return;
     for (int i = 0; i < mt->class_count; i++) {
-        jm_remove_ctor_props_shadowing_methods(&mt->class_entries[i]);
+        jm_disable_ctor_shape_for_method_overwrite(&mt->class_entries[i]);
     }
     for (int i = 0; i < mt->class_count; i++) {
         JsClassEntry* ce = &mt->class_entries[i];

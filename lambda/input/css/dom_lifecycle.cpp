@@ -36,6 +36,8 @@ typedef struct DomNodeRegistry {
 // DOM-only unit targets do not link the Radiant view teardown implementation.
 __attribute__((weak)) void view_tree_release_retired_subtree(ViewTree*, DomNode*) {}
 __attribute__((weak)) void dom_range_refresh_lifecycle_pins(DomDocument*) {}
+extern "C" __attribute__((weak)) void js_dom_expando_attachment_changed(
+    DomDocument*, DomNode*, bool) {}
 
 static void dom_lifecycle_fail(const char* operation, DomNodeRef ref,
                                DomNodePinReason reason) {
@@ -318,17 +320,24 @@ void dom_node_schedule_detached(DomDocument* doc, DomNode* root) {
         record->state = DOM_NODE_DETACHED_CANDIDATE;
         registry->stats.scheduled_candidates++;
     }
+    // Detached wrapper-owned state must stop being a native-tree GC root;
+    // a live JS wrapper remains the sole owner until possible reattachment.
+    js_dom_expando_attachment_changed(doc, root, false);
 }
 
 void dom_node_cancel_detached(DomDocument* doc, DomNode* root) {
     DomNodeRegistry* registry = dom_registry(doc);
     if (!registry || !root) return;
     DomNodeRecord* record = dom_record_find(registry, root);
+    if (!record || record->id != root->id || record->state == DOM_NODE_RETIRED) return;
     if (record && record->candidate && record->id == root->id) {
         record->candidate = false;
         record->state = DOM_NODE_LIVE;
         registry->stats.cancelled_candidates++;
     }
+    // Reinsertion calls this before linking the parent; the lifecycle decision
+    // itself confirms that the subtree is becoming attached again.
+    js_dom_expando_attachment_changed(doc, root, true);
 }
 
 static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,

@@ -1,0 +1,4 @@
+<!doctype html><html><head><style>button, #panel, output { display: block; margin: 8px; }</style></head><body>
+<main x-data="{ open: false }"><button id="toggle" type="button" x-on:click="open = !open" x-bind:aria-expanded="open">toggle</button><div id="panel" x-show="open">panel</div><output id="state" x-text="open">false</output></main>
+<script src="../../js/alpine.min.js"></script>
+</body></html>

@@ -11,6 +11,15 @@
 TemplateRegistry* g_template_registry = NULL;
 UiContext ui_context{};
 
+extern "C" bool js_dom_option_is_selected(void* dom_elem) {
+    DomElement* option = (DomElement*)dom_elem;
+    if (!option) return false;
+    // The standalone state-store target omits LambdaJS; use the native mirror
+    // that keeps reconstructed form views independent of a JS EvalContext.
+    if (option->has_option_selectedness()) return option->option_selectedness();
+    return option->has_attribute("selected");
+}
+
 void render_map_record_path(Item source_item, const char* template_ref,
                             const int* path_indices, int depth) {
     (void)source_item;

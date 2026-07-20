@@ -1,0 +1,40 @@
+<!doctype html>
+<html><body>
+<div id="original"><button id="target">target</button></div>
+<div id="replacement"></div>
+<output id="status">pending</output>
+<script>
+const target = document.getElementById('target');
+const original = document.getElementById('original');
+const replacement = document.getElementById('replacement');
+const status = document.getElementById('status');
+const event = new Event('radiant-path', { bubbles: true });
+let targetPath = null;
+let originalReached = false;
+let windowPath = null;
+
+target.addEventListener('radiant-path', function (current) {
+  targetPath = current.composedPath();
+  targetPath.push('caller-mutation');
+  replacement.appendChild(target);
+});
+original.addEventListener('radiant-path', function () {
+  originalReached = true;
+});
+window.addEventListener('radiant-path', function (current) {
+  windowPath = current.composedPath();
+});
+
+target.dispatchEvent(event);
+const stable = windowPath[0] === target &&
+  windowPath.indexOf(original) >= 0 &&
+  windowPath.indexOf(replacement) < 0 &&
+  windowPath[windowPath.length - 1] === window;
+status.textContent = [
+  targetPath.length > windowPath.length,
+  originalReached,
+  stable,
+  event.composedPath().length === 0
+].join('|');
+</script>
+</body></html>

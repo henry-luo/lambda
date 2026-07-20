@@ -1,0 +1,9 @@
+{
+  "name": "HTMX debounced input swaps a file response",
+  "html": "test/ui/dom/htmx_keyup_swap.html",
+  "events": [
+    {"type": "type", "target": {"selector": "#query"}, "text": "r"},
+    {"type": "wait", "ms": 140},
+    {"type": "assert_text", "target": {"selector": "#target"}, "equals": "updated from keyup\n"}
+  ]
+}

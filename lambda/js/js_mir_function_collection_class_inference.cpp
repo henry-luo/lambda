@@ -902,7 +902,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 }
             }
 
-            jm_remove_ctor_props_shadowing_methods(ce);
+            jm_disable_ctor_shape_for_method_overwrite(ce);
 
             // When instance fields are present, disable A5/P3/P4 shaped slot optimization.
             // Field inits run before the constructor body via js_property_set, which manages
@@ -1775,38 +1775,25 @@ void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
     }
 }
 
-void jm_remove_ctor_props_shadowing_methods(JsClassEntry* ce) {
+void jm_disable_ctor_shape_for_method_overwrite(JsClassEntry* ce) {
     if (!ce || !ce->constructor || !ce->constructor->fc) return;
     JsFuncCollected* fc = ce->constructor->fc;
-    for (int prop_index = 0; prop_index < fc->ctor_prop_count;) {
-        bool shadows_method = false;
-        for (JsClassEntry* owner = ce; owner && !shadows_method; owner = owner->superclass) {
+    for (int prop_index = 0; prop_index < fc->ctor_prop_count; prop_index++) {
+        for (JsClassEntry* owner = ce; owner; owner = owner->superclass) {
             for (int method_index = 0; method_index < owner->method_count; method_index++) {
                 JsClassMethodEntry* method = &owner->methods[method_index];
                 if (method->is_static || method->computed || !method->name) continue;
-                if ((int)method->name->len == fc->ctor_prop_lens[prop_index] &&
-                    strncmp(method->name->chars, fc->ctor_prop_ptrs[prop_index],
-                        method->name->len) == 0) {
-                    shadows_method = true;
-                    break;
-                }
+                if ((int)method->name->len != fc->ctor_prop_lens[prop_index] ||
+                        memcmp(method->name->chars, fc->ctor_prop_ptrs[prop_index],
+                            method->name->len) != 0) continue;
+                // Shape metadata also drives compile-time class access. A
+                // prototype method that becomes own data changes dispatch
+                // semantics mid-constructor, so the whole optimization must
+                // bail out instead of deleting one field from the metadata.
+                fc->ctor_prop_count = 0;
+                return;
             }
         }
-        if (!shadows_method) {
-            prop_index++;
-            continue;
-        }
-
-        // reserved constructor slots exist before the assignment and would
-        // mask a prototype method that the constructor reads and then binds.
-        for (int move = prop_index + 1; move < fc->ctor_prop_count; move++) {
-            fc->ctor_prop_ptrs[move - 1] = fc->ctor_prop_ptrs[move];
-            fc->ctor_prop_lens[move - 1] = fc->ctor_prop_lens[move];
-            fc->ctor_prop_ta_types[move - 1] = fc->ctor_prop_ta_types[move];
-            fc->ctor_prop_types[move - 1] = fc->ctor_prop_types[move];
-            fc->ctor_prop_param_idx[move - 1] = fc->ctor_prop_param_idx[move];
-        }
-        fc->ctor_prop_count--;
     }
 }
 

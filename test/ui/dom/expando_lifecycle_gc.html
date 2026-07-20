@@ -1,0 +1,34 @@
+<!doctype html>
+<html><body>
+<div id="host"><button id="kept">kept</button><button id="retired">retired</button></div>
+<output id="status">pending</output>
+<script>
+const host = document.getElementById('host');
+let kept = document.getElementById('kept');
+kept.token = 'connected';
+gc();
+const connected = document.getElementById('kept').token === 'connected';
+
+kept.remove();
+kept.token = 'detached';
+gc();
+const detached = kept.token === 'detached';
+host.appendChild(kept);
+kept = null;
+gc();
+const reattached = document.getElementById('kept').token === 'detached';
+
+let retired = document.getElementById('retired');
+retired.token = 'old-address';
+retired.self = retired;
+retired.remove();
+retired = null;
+gc();
+const fresh = document.createElement('button');
+host.appendChild(fresh);
+const noStaleState = typeof fresh.token === 'undefined' && typeof fresh.self === 'undefined';
+
+document.getElementById('status').textContent =
+  [connected, detached, reattached, noStaleState].join('|');
+</script>
+</body></html>

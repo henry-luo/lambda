@@ -6529,6 +6529,11 @@ void fn_map_set(Item map_item, Item key, Item value) {
             entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, entry, value_type);
             if (!entry || !entry->type) return;
+            // A reserved constructor slot becomes observable only at the
+            // source assignment that reaches this storage write.
+            if (map_type_id == LMD_TYPE_MAP) {
+                map_ctor_initialize_offset(map_item.map, entry->byte_offset);
+            }
             field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
 

@@ -1,0 +1,8 @@
+{
+  "name": "Babel class outer helper capture",
+  "html": "test/ui/dom/babel_class_capture.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#go"}},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "same"}
+  ]
+}

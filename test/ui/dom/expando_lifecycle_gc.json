@@ -1,0 +1,8 @@
+{
+  "name": "DOM expandos follow attached and wrapper reachability across GC",
+  "html": "test/ui/dom/expando_lifecycle_gc.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "true|true|true|true"}
+  ]
+}

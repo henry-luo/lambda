@@ -11,6 +11,7 @@
 struct DomDocument;
 
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
+RADIANT_C_API Item radiant_dom_lookup_cached_node(void* dom_elem);
 RADIANT_C_API void* radiant_dom_unwrap_node(Item item);
 RADIANT_C_API bool radiant_dom_is_node(Item item);
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);

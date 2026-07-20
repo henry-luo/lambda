@@ -1,0 +1,13 @@
+{
+  "name": "Alpine x-show and x-bind update after native clicks",
+  "html": "test/ui/dom/alpine_visibility_binding.html",
+  "events": [
+    {"type": "wait", "ms": 30},
+    {"type": "assert_visible", "target": {"selector": "#panel"}, "visible": false},
+    {"type": "click", "target": {"selector": "#toggle"}},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_visible", "target": {"selector": "#panel"}, "visible": true},
+    {"type": "assert_attr", "target": {"selector": "#toggle"}, "attribute": "aria-expanded", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": "#state"}, "equals": "true"}
+  ]
+}

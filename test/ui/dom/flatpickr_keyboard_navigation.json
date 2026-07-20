@@ -1,0 +1,13 @@
+{
+  "name": "flatpickr keyboard navigation advances the selected date",
+  "html": "test/ui/dom/flatpickr_keyboard_navigation.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#date"}},
+    {"type": "assert_focus", "target": {"selector": ".flatpickr-day.selected"}},
+    {"type": "assert_focus", "target": {"selector": ".flatpickr-day.selected"}},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_text", "target": {"selector": "#trace"}, "equals": "ArrowRight:39:true:true:flatpickr-day selected"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_value", "target": {"selector": "#date"}, "equals": "2024-03-15"}
+  ]
+}
