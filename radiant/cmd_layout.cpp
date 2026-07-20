@@ -2627,11 +2627,10 @@ static void clear_load_stylesheet_cascade_recursive(DomNode* node) {
             style_tree_remove_non_inline_declarations(elem->specified_style)) {
             changed = true;
         }
-        if (elem->pseudo_style(PSEUDO_STYLE_BEFORE)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_BEFORE)); changed = true; }
-        if (elem->pseudo_style(PSEUDO_STYLE_AFTER)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_AFTER)); changed = true; }
-        if (elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER)); changed = true; }
-        if (elem->pseudo_style(PSEUDO_STYLE_MARKER)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_MARKER)); changed = true; }
-        if (elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER)) { style_tree_clear(elem->pseudo_style(PSEUDO_STYLE_PLACEHOLDER)); changed = true; }
+        if (dom_element_clear_pseudo_styles(elem)) {
+            // Keep pseudo declarations in the same cascade epoch as element styles.
+            changed = true;
+        }
         if (changed) {
             // Load-time scripts now run after an initial cascade; the recascade
             // must drop old selector matches without erasing JS inline styles.

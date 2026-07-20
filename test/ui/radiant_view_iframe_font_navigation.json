@@ -1,0 +1,11 @@
+{
+  "name": "Radiant view resets glyph cache across iframe navigation",
+  "viewport": { "width": 1200, "height": 720 },
+  "events": [
+    { "type": "click", "target": { "selector": "a[href=\"../lambda/complex_iot_report_html.ls\"]" } },
+    { "type": "click", "target": { "selector": "a[href=\"../input/test.xml\"]" } },
+    { "type": "assert_pixel", "x": 464, "y": 165, "min_r": 220, "min_g": 220, "min_b": 220 },
+    { "type": "switch_frame", "selector": "iframe[name=\"main_frame\"]" },
+    { "type": "assert_text", "target": { "selector": "header title" }, "contains": "Sam's Bookstore", "assert_timeout": 10000 }
+  ]
+}

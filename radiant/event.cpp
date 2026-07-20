@@ -5492,6 +5492,9 @@ static void clear_cascaded_styles_recursive(DomNode* node) {
     if (node->is_element()) {
         DomElement* e = lam::dom_require_element(node);
         dom_element_clear(e);
+        // Pseudo declarations share the base cascade epoch; otherwise a :hover
+        // recascade reads declarations that no longer match.
+        dom_element_clear_pseudo_styles(e);
         e->set_styles_resolved(false);
         for (DomNode* c = e->first_child; c; c = c->next_sibling) {
             clear_cascaded_styles_recursive(c);
@@ -8459,6 +8462,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         int css_vw = (int)block->width;
                         int css_vh = (int)block->height;
                         DomDocument* old_doc = block->embedp()->doc;
+                        if (evcon.ui_context->font_ctx) {
+                            // Glyph-cache keys retain raw document FontHandle addresses; clear
+                            // them before iframe navigation can free and reuse those addresses.
+                            font_context_reset_glyph_caches(evcon.ui_context->font_ctx);
+                        }
                         DomDocument* new_doc = block->embed->doc =
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh,
                                           1.0f);  // Layout uses CSS pixels, pixel_ratio not needed
