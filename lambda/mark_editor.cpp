@@ -349,11 +349,14 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
         break;
+    case LMD_TYPE_UINT64:
+        *(uint64_t*)field_ptr = value.get_uint64();
+        break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
         break;
     case LMD_TYPE_DTIME:
-        *(DateTime*)field_ptr = value.get_datetime();
+        *(DateTime**)field_ptr = value.get_datetime_ptr();
         break;
     case LMD_TYPE_STRING: {
         *(String**)field_ptr = value.get_safe_string();

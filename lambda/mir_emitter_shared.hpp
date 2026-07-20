@@ -227,7 +227,7 @@ enum MirScalarReturnMode {
     MIR_SCALAR_RETURN_NONE,
     MIR_SCALAR_RETURN_FLOAT,
     MIR_SCALAR_RETURN_INT64,
-    MIR_SCALAR_RETURN_DTIME,
+    MIR_SCALAR_RETURN_UINT64,
     MIR_SCALAR_RETURN_DYNAMIC,
 };
 struct MirRootBinding {
@@ -594,8 +594,8 @@ static inline MirScalarReturnMode em_scalar_return_mode_for_type(TypeId type_id)
         return MIR_SCALAR_RETURN_FLOAT;
     case LMD_TYPE_INT64:
         return MIR_SCALAR_RETURN_INT64;
-    case LMD_TYPE_DTIME:
-        return MIR_SCALAR_RETURN_DTIME;
+    case LMD_TYPE_UINT64:
+        return MIR_SCALAR_RETURN_UINT64;
     case LMD_TYPE_ANY:
         return MIR_SCALAR_RETURN_DYNAMIC;
     default:
@@ -607,8 +607,8 @@ static inline MirScalarReturnMode em_scalar_return_mode_for_class(
         ScalarReturnClass scalar_class) {
     switch (scalar_class) {
     case SCALAR_RETURN_I64: return MIR_SCALAR_RETURN_INT64;
+    case SCALAR_RETURN_U64: return MIR_SCALAR_RETURN_UINT64;
     case SCALAR_RETURN_F64: return MIR_SCALAR_RETURN_FLOAT;
-    case SCALAR_RETURN_DTIME: return MIR_SCALAR_RETURN_DTIME;
     case SCALAR_RETURN_DYNAMIC: return MIR_SCALAR_RETURN_DYNAMIC;
     default: return MIR_SCALAR_RETURN_NONE;
     }
@@ -618,8 +618,8 @@ static inline ScalarReturnClass em_scalar_return_class_for_type(
         TypeId type_id) {
     switch (em_scalar_return_mode_for_type(type_id)) {
     case MIR_SCALAR_RETURN_INT64: return SCALAR_RETURN_I64;
+    case MIR_SCALAR_RETURN_UINT64: return SCALAR_RETURN_U64;
     case MIR_SCALAR_RETURN_FLOAT: return SCALAR_RETURN_F64;
-    case MIR_SCALAR_RETURN_DTIME: return SCALAR_RETURN_DTIME;
     case MIR_SCALAR_RETURN_DYNAMIC: return SCALAR_RETURN_DYNAMIC;
     default: return SCALAR_RETURN_NONE;
     }

@@ -327,12 +327,12 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, const char* in
         break;
     }
     case LMD_TYPE_UINT64:
-        strbuf_append_format(strbuf, "%" PRIu64, (uint64_t)titem->long_val);
+        strbuf_append_format(strbuf, "%" PRIu64, titem->uint64_val);
         break;
     case LMD_TYPE_DTIME: {
-        DateTime dt = titem->datetime_val;
+        DateTime* dt = titem->datetime_ptr;
         strbuf_append_str(strbuf, "t'");
-        datetime_format_lambda(strbuf, &dt);
+        if (dt) datetime_format_lambda(strbuf, dt);
         strbuf_append_char(strbuf, '\'');
         break;
     }

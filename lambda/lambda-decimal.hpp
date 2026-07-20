@@ -81,6 +81,9 @@ mpd_t* decimal_parse_unlimited_str(const char* str);
 // Create fixed decimal Item from int64
 Item decimal_from_int64(int64_t val, EvalContext* ctx);
 
+// Create fixed decimal Item from uint64 without signed reinterpretation.
+Item decimal_from_uint64(uint64_t val, EvalContext* ctx);
+
 // Create fixed decimal Item from double
 Item decimal_from_double(double val, EvalContext* ctx);
 
@@ -171,6 +174,9 @@ Item decimal_mul(Item a, Item b, EvalContext* ctx);
 
 // Division: a / b (returns error on division by zero)
 Item decimal_div(Item a, Item b, EvalContext* ctx);
+
+// Integer division: a div b (truncates toward zero, returns error on zero)
+Item decimal_idiv(Item a, Item b, EvalContext* ctx);
 
 // Modulo: a % b
 Item decimal_mod(Item a, Item b, EvalContext* ctx);

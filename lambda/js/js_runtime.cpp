@@ -5833,11 +5833,14 @@ static bool js_array_companion_write_same_size_slot(ShapeEntry* entry, void* dat
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
         break;
+    case LMD_TYPE_UINT64:
+        *(uint64_t*)field_ptr = value.get_uint64();
+        break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
         break;
     case LMD_TYPE_DTIME:
-        *(DateTime*)field_ptr = value.get_datetime();
+        *(DateTime**)field_ptr = value.get_datetime_ptr();
         break;
     case LMD_TYPE_STRING:
         *(String**)field_ptr = value.get_safe_string();
@@ -7536,11 +7539,14 @@ static inline bool js_store_ic_write_same_slot(ShapeEntry* entry, void* data,
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
         return true;
+    case LMD_TYPE_UINT64:
+        *(uint64_t*)field_ptr = value.get_uint64();
+        return true;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
         return true;
     case LMD_TYPE_DTIME:
-        *(DateTime*)field_ptr = value.get_datetime();
+        *(DateTime**)field_ptr = value.get_datetime_ptr();
         return true;
     case LMD_TYPE_STRING:
         *(String**)field_ptr = value.get_safe_string();

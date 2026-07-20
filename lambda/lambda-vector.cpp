@@ -57,7 +57,7 @@ extern __thread EvalContext* context;
 
 // Forward declarations from lambda-eval-num.cpp
 Item push_d(double val);
-Item push_l(int64_t val);
+Item box_int64_value(int64_t val);
 
 //==============================================================================
 // Type Detection Helpers
@@ -1191,7 +1191,7 @@ Item fn_math_prod(Item item) {
             for (int64_t i = 0; i < arr->length; i++) {
                 prod *= arr->items[i];
             }
-            return push_l(prod);
+            return box_int64_value(prod);
         } else if (is_float_elem_type(arr->get_elem_type())) {
             double prod = 1.0;
             for (int64_t i = 0; i < arr->length; i++) {
@@ -1204,7 +1204,7 @@ Item fn_math_prod(Item item) {
             for (int64_t i = 0; i < arr->length; i++) {
                 prod *= (int64_t)array_num_read_double(arr, i);
             }
-            return push_l(prod);
+            return box_int64_value(prod);
         }
     }
     else if (type == LMD_TYPE_ARRAY) {
@@ -1235,7 +1235,7 @@ Item fn_math_prod(Item item) {
         for (int64_t i = r->start; i <= r->end; i++) {
             prod *= i;
         }
-        return push_l(prod);
+        return box_int64_value(prod);
     }
 
     log_error("fn_math_prod: unsupported type %s", get_type_name(type));
@@ -2333,7 +2333,7 @@ Item fn_math_random(Item seed_item) {
     double value = (double)(z >> 11) * 0x1.0p-53;
     List* result = list();
     list_push(result, push_d(value));
-    list_push(result, push_l((int64_t)state));
+    list_push(result, box_int64_value((int64_t)state));
     return { .array = result };
 }
 
@@ -2675,7 +2675,7 @@ Item fn_unique(Item item) {
                     }
                 }
                 if (!found) {
-                    array_push(result, push_l(val));
+                    array_push(result, box_int64_value(val));
                 }
             }
         }
@@ -3137,7 +3137,7 @@ Item fn_shape(Item vec) {
     RootFrame roots((Context*)context, 1);
     Rooted<List*> rooted_result(roots, result);
     for (int i = 0; i < ndim; i++) {
-        Item dim = push_l(dims[i]);
+        Item dim = box_int64_value(dims[i]);
         result = rooted_result.get();
         list_push(result, dim);
     }
@@ -3148,14 +3148,14 @@ Item fn_shape(Item vec) {
 Item fn_ndim(Item vec) {
     GUARD_ERROR1(vec);
     TypeId vt = get_type_id(vec);
-    if (vt != LMD_TYPE_ARRAY_NUM) return push_l(0);
+    if (vt != LMD_TYPE_ARRAY_NUM) return box_int64_value(0);
     ArrayNum* arr = vec.array_num;
-    if (!arr) return push_l(0);
+    if (!arr) return box_int64_value(0);
     if (arr->is_ndim && arr->extra) {
         ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
-        return push_l((int64_t)shape->ndim);
+        return box_int64_value((int64_t)shape->ndim);
     }
-    return push_l(1);
+    return box_int64_value(1);
 }
 
 // ============================================================================
@@ -3185,7 +3185,7 @@ static void arr_num_copy_into(ArrayNum* src, ArrayNum* dst, int64_t dst_base) {
     bool dst_float = !elem_is_int(det);
     for (int64_t i = 0; i < src->length; i++) {
         double v = array_num_read_double(src, off);
-        array_num_set_item(dst, dst_base + i, dst_float ? push_d(v) : push_l((int64_t)v));
+        array_num_set_item(dst, dst_base + i, dst_float ? push_d(v) : box_int64_value((int64_t)v));
         for (int ax = ndim - 1; ax >= 0; ax--) {
             idx[ax]++; off += str[ax];
             if (idx[ax] < shp[ax]) break;
@@ -3337,7 +3337,7 @@ Item fn_matmul(Item a_item, Item b_item) {
         double sum = 0;
         for (int64_t k = 0; k < a_shp[0]; k++)
             sum += array_num_read_double(A, k * a_str[0]) * array_num_read_double(B, k * b_str[0]);
-        return rf ? push_d(sum) : push_l((int64_t)sum);
+        return rf ? push_d(sum) : box_int64_value((int64_t)sum);
     }
     // Every remaining branch allocates its result before reading the operands;
     // exact-root both owners so nursery compaction cannot stale their data pointers.
@@ -3711,7 +3711,7 @@ static Item array_num_reduce_axis(Item arr_item, Item axis_item, int op, const c
     // 1-D input → scalar
     if (ndim == 1) {
         double acc = reduce_lane(arr, 0, axis_str, axis_len, op);
-        return result_float ? push_d(acc) : push_l((int64_t)acc);
+        return result_float ? push_d(acc) : box_int64_value((int64_t)acc);
     }
 
     // build output shape and the non-axis dims/strides (same order)

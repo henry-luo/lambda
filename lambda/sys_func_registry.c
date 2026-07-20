@@ -931,6 +931,9 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_SHR, "shr", 2, &TYPE_INT, false, false, false, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_NATIVE, "fn_shr", FPTR(fn_shr), NULL, NULL, false, 0},
 
+    {SYSFUNC_USHR, "ushr", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_ushr_item", FPTR(fn_ushr_item), NULL, NULL, false, 0},
+
     // ========================================================================
     // VMap functions — handled by special transpiler paths
     // ========================================================================
@@ -1337,13 +1340,13 @@ JitImport jit_runtime_imports[] = {
     {"js_profile_shape_guard_miss_site", FPTR(js_profile_shape_guard_miss_site)},
     {"js_profile_property_set_site", FPTR(js_profile_property_set_site)},
 #endif
-    {"push_l", FPTR(push_l),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"box_int64_value", FPTR(box_int64_value),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-    {"box_int64_value_safe", FPTR(box_int64_value_safe),
+    {"box_int64_result_or_error", FPTR(box_int64_result_or_error),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+    {"box_uint64_value", FPTR(box_uint64_value),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"owned_item_slot_read", FPTR(owned_item_slot_read),
@@ -1353,18 +1356,15 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR)}},
     {"owned_item_slot_store", FPTR(owned_item_slot_store)},
-    {"push_l_safe", FPTR(push_l_safe),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"push_d_safe", FPTR(push_d_safe),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+    // push_k returns a GC-owned DateTime Item, so generic scalar-home adoption
+    // would only add a dead number slot after the DateTime stack cutover.
     {"push_k", FPTR(push_k),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
-    {"push_k_safe", FPTR(push_k_safe),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
     {"push_c", FPTR(push_c)},
     {"item_keys", FPTR(item_keys)},
     {"symbol_key_list_free", FPTR(symbol_key_list_free)},
@@ -1375,6 +1375,10 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"item_at", FPTR(item_at)},
     {"it2l", FPTR(it2l),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"it2u", FPTR(it2u),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
@@ -1443,6 +1447,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_bnot_item", FPTR(fn_bnot_item)},
     {"fn_shl_item", FPTR(fn_shl_item)},
     {"fn_shr_item", FPTR(fn_shr_item)},
+    {"fn_ushr_item", FPTR(fn_ushr_item)},
     {"op_and", FPTR(op_and)},
     {"op_or", FPTR(op_or)},
     {"fn_is", FPTR(fn_is)},
@@ -1716,8 +1721,16 @@ JitImport jit_runtime_imports[] = {
     {"js_bigint_as_int_n", FPTR(js_bigint_as_int_n)},
     {"js_bigint_as_uint_n", FPTR(js_bigint_as_uint_n)},
     {"js_bigint_not_constructor", FPTR(js_bigint_not_constructor)},
-    {"bigint_from_int64", FPTR(bigint_from_int64)},
-    {"bigint_from_string", FPTR(bigint_from_string)},
+    // BigInt constructors return immutable decimal objects on the GC heap;
+    // they are not transient scalar homes and must not reserve one in JS MIR.
+    {"bigint_from_int64", FPTR(bigint_from_int64),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM, 0,
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
+    {"bigint_from_string", FPTR(bigint_from_string),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
     {"js_typeof", FPTR(js_typeof)},
     {"js_typeof_is", FPTR(js_typeof_is)},
     {"js_cmp_raw", FPTR(js_cmp_raw)},
@@ -3167,7 +3180,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "memset", "memcpy", "fmod", "is_truthy",
         "lambda_mir_double_bits", "lambda_mir_bits_double",
         "lambda_item_adopt_scalar_home",
-        "item_type_id", "it2l", "it2d", "it2i", "it2b", "it2s", "it2x",
+        "item_type_id", "it2l", "it2u", "it2d", "it2i", "it2b", "it2s", "it2x",
         "js_is_truthy", "js_is_nullish", "js_args_save", "js_args_restore",
         "js_check_exception", "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",

@@ -105,11 +105,14 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
         break;
+    case LMD_TYPE_UINT64:
+        *(uint64_t*)field_ptr = value.get_uint64();
+        break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
         break;
     case LMD_TYPE_DTIME:
-        *(DateTime*)field_ptr = value.get_datetime();
+        *(DateTime**)field_ptr = value.get_datetime_ptr();
         break;
     case LMD_TYPE_DECIMAL:
         *(Decimal**)field_ptr = value.get_decimal();
@@ -156,10 +159,12 @@ static bool map_store_field_value(void* field_ptr, TypeId type_id, Item value) {
             titem.int_val = item.int_val;  break;
         case LMD_TYPE_INT64:
             titem.long_val = item.get_int64();  break;
+        case LMD_TYPE_UINT64:
+            titem.uint64_val = item.get_uint64();  break;
         case LMD_TYPE_FLOAT:
             titem.double_val = item.get_double();  break;
         case LMD_TYPE_DTIME:
-            titem.datetime_val = item.get_datetime();  break;
+            titem.datetime_ptr = item.get_datetime_ptr();  break;
         case LMD_TYPE_STRING:
             titem.string = item.get_safe_string();
             break;
@@ -609,11 +614,14 @@ static void elmt_store_value(void* field_ptr, TypeId type_id, Item value) {
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
         break;
+    case LMD_TYPE_UINT64:
+        *(uint64_t*)field_ptr = value.get_uint64();
+        break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
         break;
     case LMD_TYPE_DTIME:
-        *(DateTime*)field_ptr = value.get_datetime();
+        *(DateTime**)field_ptr = value.get_datetime_ptr();
         break;
     case LMD_TYPE_DECIMAL:
         *(Decimal**)field_ptr = value.get_decimal();

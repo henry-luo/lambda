@@ -118,7 +118,7 @@ bool has_fixed_shape(TypeMap* map_type) {
 
 bool is_direct_access_type(TypeId type_id) {
     switch (type_id) {
-    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
+    case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_UINT64:
     case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
     case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:

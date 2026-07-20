@@ -74,6 +74,11 @@ typedef struct mpd_context_t mpd_context_t;
 struct LambdaError;  // forward declaration
 struct LambdaScheduler;
 
+// Runtime-facing scalar materializers are needed by native input adapters as
+// well as generated code. Keep DateTime construction here because static input
+// headers intentionally suppress the C2MIR-only lambda.h ABI declarations.
+extern "C" Item push_k(DateTime dtval);
+
 typedef struct EvalContext : Context {
     Heap* heap;
     Pool* ast_pool;
@@ -121,9 +126,9 @@ typedef struct TypedItem {
         bool bool_val;
         int int_val;
         int64_t long_val;
+        uint64_t uint64_val;
         // float float_val;
         double double_val;
-        DateTime datetime_val;
         uint64_t item;
 
         // pointer types
@@ -132,6 +137,9 @@ typedef struct TypedItem {
         String* string;
         Symbol* symbol;
         Binary* binary;
+        // Datetimes are always GC objects.  Keep their pointer in typed
+        // storage so the container tracer can retain the actual allocation.
+        DateTime* datetime_ptr;
 
         // containers
         Container* container;
