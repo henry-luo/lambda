@@ -1,6 +1,35 @@
 #include <gtest/gtest.h>
 
+#include <cstring>
+
 #include "../../lib/font/font_internal.h"
+
+static uint64_t test_loaded_glyph_cache_hash(const void* item,
+                                             uint64_t seed0, uint64_t seed1) {
+    const LoadedGlyphCacheEntry* entry = (const LoadedGlyphCacheEntry*)item;
+    uint64_t data[2];
+    data[0] = (uint64_t)(uintptr_t)entry->caller_handle;
+    data[1] = ((uint64_t)entry->codepoint << 2) |
+              ((uint64_t)(entry->for_rendering ? 1 : 0) << 1) |
+              (uint64_t)(entry->emoji_presentation ? 1 : 0);
+    return hashmap_xxhash3(data, sizeof(data), seed0, seed1);
+}
+
+static int test_loaded_glyph_cache_compare(const void* left, const void* right,
+                                           void* context) {
+    (void)context;
+    const LoadedGlyphCacheEntry* a = (const LoadedGlyphCacheEntry*)left;
+    const LoadedGlyphCacheEntry* b = (const LoadedGlyphCacheEntry*)right;
+    if (a->caller_handle != b->caller_handle) {
+        return a->caller_handle < b->caller_handle ? -1 : 1;
+    }
+    if (a->codepoint != b->codepoint) return a->codepoint < b->codepoint ? -1 : 1;
+    if (a->for_rendering != b->for_rendering) return a->for_rendering ? 1 : -1;
+    if (a->emoji_presentation != b->emoji_presentation) {
+        return a->emoji_presentation ? 1 : -1;
+    }
+    return 0;
+}
 
 TEST(FontContextTest, FamilyListParserPreservesOrderAndQuotedNames) {
     const char* cursor = "  \"Open Sans\", Arial , ' Noto, Serif ', sans-serif";
@@ -62,6 +91,41 @@ TEST(FontContextTest, GlyphArenaLimitResetReclaimsArenaChunks) {
     arena_destroy(glyph_arena);
     arena_destroy(arena);
     pool_destroy(pool);
+}
+
+TEST(FontContextTest, GlyphCacheResetDropsReusedDocumentHandleEntry) {
+    FontContext ctx = {};
+    ctx.glyph_cache_generation = 1;
+    ctx.loaded_glyph_cache = hashmap_new(
+        sizeof(LoadedGlyphCacheEntry), 8, 0, 0,
+        test_loaded_glyph_cache_hash, test_loaded_glyph_cache_compare, NULL, NULL);
+    ASSERT_NE(ctx.loaded_glyph_cache, nullptr);
+
+    FontHandle recycled_document_handle = {};
+    LoadedGlyphCacheEntry cached = {};
+    cached.caller_handle = &recycled_document_handle;
+    cached.codepoint = 'A';
+    cached.for_rendering = true;
+    cached.glyph.advance_x = 37.0f;
+    ASSERT_EQ(hashmap_set(ctx.loaded_glyph_cache, &cached), nullptr);
+
+    LoadedGlyphCacheEntry lookup = {};
+    lookup.caller_handle = &recycled_document_handle;
+    lookup.codepoint = 'A';
+    lookup.for_rendering = true;
+    const LoadedGlyphCacheEntry* stale =
+        (const LoadedGlyphCacheEntry*)hashmap_get(ctx.loaded_glyph_cache, &lookup);
+    ASSERT_NE(stale, nullptr);
+    EXPECT_FLOAT_EQ(stale->glyph.advance_x, 37.0f);
+
+    // Iframe navigation can recycle a freed document handle at this address.
+    font_context_reset_glyph_caches(&ctx);
+
+    EXPECT_EQ(hashmap_count(ctx.loaded_glyph_cache), (size_t)0);
+    EXPECT_EQ(hashmap_get(ctx.loaded_glyph_cache, &lookup), nullptr);
+    EXPECT_EQ(font_context_glyph_cache_generation(&ctx), 2u);
+
+    hashmap_free(ctx.loaded_glyph_cache);
 }
 
 TEST(FontContextTest, LongSessionGlyphArenaUsePlateausAtConfiguredLimit) {

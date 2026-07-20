@@ -472,12 +472,16 @@ void dom_element_clear(DomElement* element) {
 
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
     } else if (element->specified_style) {
-        style_tree_destroy_owned(element->specified_style);
-        element->specified_style = nullptr;
+        // Recascade runs inside the document pool's active lifetime; returning
+        // its live style allocations here corrupts subsequent CSS allocations.
+        style_tree_clear(element->specified_style);
+    } else {
+        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->mark_specified_style_owned();
     }
-    element->specified_style = style_tree_create(element->doc->document_pool);
-    element->mark_specified_style_owned();
     // Reset version tracking
     element->style_version++;
     element->set_needs_style_recompute(true);
@@ -1235,6 +1239,22 @@ bool dom_element_remove_property(DomElement* element, CssPropertyId property_id)
     }
 
     return removed;
+}
+
+bool dom_element_clear_pseudo_styles(DomElement* element) {
+    if (!element || !element->ext) return false;
+
+    bool cleared = false;
+    for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
+        StyleTree* style = element->ext->pseudo_styles[kind];
+        if (style) {
+            // Pseudo rules share the base cascade epoch, so stale :hover
+            // declarations must not survive into the next state.
+            style_tree_clear(style);
+            cleared = true;
+        }
+    }
+    return cleared;
 }
 
 // ============================================================================

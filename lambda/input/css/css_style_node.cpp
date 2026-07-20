@@ -767,10 +767,10 @@ void style_tree_destroy(StyleTree* style_tree) {
 void style_tree_clear(StyleTree* style_tree) {
     if (!style_tree) return;
 
-    // Destroy all nodes
+    // This is a logical cascade reset, not an ownership teardown. Pooled
+    // declarations can still be referenced by a reflowing pseudo view, so
+    // only style_tree_destroy_owned may reclaim their records.
     if (style_tree->tree) {
-        avl_tree_foreach_inorder(style_tree->tree, collect_nodes_callback, NULL);
-
         avl_tree_clear(style_tree->tree);
     }
 

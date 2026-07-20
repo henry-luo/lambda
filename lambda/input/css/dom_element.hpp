@@ -996,6 +996,12 @@ const char* dom_element_get_pseudo_element_content_with_counters(
  */
 bool dom_element_remove_property(DomElement* element, CssPropertyId property_id);
 
+/**
+ * Clear every stylesheet-derived pseudo-element style tree before recascade.
+ * Returns true when at least one pseudo style tree was cleared.
+ */
+bool dom_element_clear_pseudo_styles(DomElement* element);
+
 // ============================================================================
 // Utility Functions
 // ============================================================================

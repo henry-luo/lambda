@@ -1,0 +1,21 @@
+{
+  "name": "Radiant view iframe Lambda report scroll-hover recascade",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "click", "target": { "selector": "a[href=\"../lambda/complex_iot_report_html.ls\"]" } },
+    { "type": "resize", "width": 1280, "height": 720 },
+    { "type": "mouse_move", "x": 400, "y": 300 },
+    { "type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -8 },
+    { "type": "mouse_move", "x": 400, "y": 300 },
+    { "type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -8 },
+    { "type": "mouse_move", "x": 400, "y": 300 },
+    { "type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -8 },
+    { "type": "mouse_move", "x": 400, "y": 300 },
+    { "type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -8 },
+    { "type": "mouse_move", "x": 400, "y": 300 },
+    { "type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -8 },
+    { "type": "mouse_move", "x": 400, "y": 300 },
+    { "type": "switch_frame", "selector": "iframe[name=\"main_frame\"]" },
+    { "type": "assert_text", "target": { "selector": "body" }, "contains": "Smart City", "assert_timeout": 10000 }
+  ]
+}
