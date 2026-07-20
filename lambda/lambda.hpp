@@ -188,15 +188,11 @@ typedef struct Item {
         }
         return *(double*)this->double_ptr;
     }
-    inline bool is_inline_int64() const {
-        return lambda_item_is_inline_int64_bits(this->item);
-    }
     inline int64_t get_int64() const {
-        return is_inline_int64()
-            ? lambda_inline_int64_value(this->item)
-            : *(int64_t*)this->int64_ptr;
+        return *(int64_t*)this->int64_ptr;
     }
     inline uint64_t get_uint64() const { return *(uint64_t*)this->uint64_ptr; }
+    inline DateTime* get_datetime_ptr() const { return (DateTime*)(uintptr_t)this->datetime_ptr; }
     inline DateTime get_datetime() const { return *(DateTime*)this->datetime_ptr; }
     inline Decimal* get_decimal() const { return (Decimal*)this->decimal_ptr; }
     inline String* get_string() const { return (String*)this->string_ptr; }

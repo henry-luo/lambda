@@ -2611,6 +2611,17 @@ void jm_infer_return_type(JsFuncCollected* fc) {
 
 // Return expressions whose values always fit directly in Item bits or are
 // managed objects never borrow a number-stack cell from the activation.
+static bool jm_return_expr_needs_scalar_home(JsAstNode* expr);
+
+static bool jm_const_identifier_has_stable_return_value(JsIdentifierNode* id) {
+    if (!id || !id->entry || !id->entry->is_const || !id->entry->node ||
+            id->entry->node->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) {
+        return false;
+    }
+    JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)id->entry->node;
+    return decl->init && !jm_return_expr_needs_scalar_home(decl->init);
+}
+
 static bool jm_return_expr_needs_scalar_home(JsAstNode* expr) {
     if (!expr) return false;
     switch (expr->node_type) {
@@ -2643,6 +2654,11 @@ static bool jm_return_expr_needs_scalar_home(JsAstNode* expr) {
         return unary->op != JS_OP_NOT && unary->op != JS_OP_TYPEOF &&
             unary->op != JS_OP_VOID;
     }
+    case JS_AST_NODE_IDENTIFIER:
+        // A const initializer cannot be rebound. Reuse the initializer's
+        // proven lifetime so a BigInt/Date/object Item does not get a dead
+        // caller scalar home merely because the return expression is a name.
+        return !jm_const_identifier_has_stable_return_value((JsIdentifierNode*)expr);
     default:
         return true;
     }

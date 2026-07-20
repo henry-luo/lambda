@@ -1,5 +1,12 @@
 # Proposal: Direct Struct Access for Typed Maps and Objects
 
+**Status:** implemented optimization record. Scalar representation details are
+amended to the current `vibe/Lambda_Design_Stack_API.md` Phase 7 contract:
+typed fields own raw `INT64`/`UINT64` payloads, generic owner layouts provide
+numeric sidecars, and `DTIME` fields retain a GC-owned datetime pointer rather
+than embedding the datetime payload. Historical implementation notes below are
+labelled where their old storage assumption matters.
+
 ## Problem Statement
 
 Currently, every map/object field read or write goes through a **runtime linear scan** of the `ShapeEntry` linked list, comparing field names with `strncmp`:
@@ -101,13 +108,15 @@ push_d(((_type_Point*)v->data)->x)  // zero-cost: known offset, known type
 
 | Field Type | Generated Read Expression | Notes |
 |---|---|---|
-| `int` | `i2it(st->field)` | Inline int56 boxing |
-| `int64` | `push_l(st->field)` | GC nursery allocation |
-| `float` | `push_d(st->field)` | GC nursery allocation |
+| `int` | `i2it(st->field)` | Inline safe-integer-band value |
+| `int64` | `box_int64_value(st->field)` | Copy into the current activation number extent; generated returns use caller homes |
+| `uint64` | `box_uint64_value(st->field)` | Same ownership protocol as `int64` |
+| `float` | `push_d(st->field)` | Canonical self-tagging; out-of-band residue uses a number home |
 | `bool` | `b2it(st->field)` | Inline bool boxing |
 | `string` | `s2it(st->field)` | Tag pointer |
 | `symbol` | `y2it(st->field)` | Tag pointer |
 | `decimal` | `c2it(st->field)` | Tag pointer |
+| `datetime` | `k2it(st->field)` | Preserve the GC-owned datetime pointer |
 | container types | `{.container = st->field}` | Direct pointer, no boxing |
 
 Where `st` is `((_type_Point*)map_ptr->data)`.
@@ -542,7 +551,11 @@ Map literals with known shapes now bypass `map_fill()` (which uses va_list + per
 
 3. **Symbol/binary fields stored as null** — Used `it2s()` to unbox symbol/binary Items, but `it2s()` only handles `LMD_TYPE_STRING` and returns nullptr for other types. **Fix**: Changed all pointer-type fields (string, symbol, binary, decimal, containers) to use generic tag-stripping: `(void*)((uint64_t)(item) & 0x00FFFFFFFFFFFFFFULL)`.
 
-4. **DateTime fields stored as pointer instead of value** — Default case stored the tagged pointer as `void*`, but DateTime is a value type (stored as uint64_t in the packed struct, not a pointer). **Fix**: Added dedicated `LMD_TYPE_DTIME` case that dereferences the heap pointer: `*(DateTime*)((uint64_t)(item) & mask)`.
+4. **Historical DateTime value-field fix (superseded by Phase 7)** — This phase
+   changed an Item pointer into an embedded `DateTime` word. The current
+   contract deliberately does the opposite: the packed field stores the
+   GC-owned datetime pointer/Item, and consumers use datetime accessors without
+   assuming a one-word object layout.
 
 5. **`resolve_field_type_id` crash on anonymous maps** — Function blindly cast `Type*` with `type_id == LMD_TYPE_TYPE` to `TypeType*` and accessed `->type`. Anonymous map shape entries store plain `Type` structs (smaller than `TypeType`), causing out-of-bounds memory access. **Fix**: Added `unwrap_type_type` parameter; only unwrap for named types (where shape entries are proper `TypeType` structs).
 

@@ -166,12 +166,12 @@ static Item stabilize_value(HashMapData* hd, Item value) {
         value = {.item = l2it(ival)};
         if (!hd->num_values) hd->num_values = arraylist_new(4);
         arraylist_append(hd->num_values, (void*)ival);
-    } else if (vtype == LMD_TYPE_DTIME) {
-        DateTime* dtval = (DateTime*)mem_alloc(sizeof(DateTime), MEM_CAT_EVAL);
-        *dtval = value.get_datetime();
-        value = {.item = k2it(dtval)};
+    } else if (vtype == LMD_TYPE_UINT64) {
+        uint64_t* uval = (uint64_t*)mem_alloc(sizeof(uint64_t), MEM_CAT_EVAL);
+        *uval = value.get_uint64();
+        value = {.item = u2it(uval)};
         if (!hd->num_values) hd->num_values = arraylist_new(4);
-        arraylist_append(hd->num_values, (void*)dtval);
+        arraylist_append(hd->num_values, (void*)uval);
     }
     return value;
 }

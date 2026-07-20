@@ -1,0 +1,11 @@
+Hello from Python!
+42
+3.14
+30
+42
+Hello, Lambda!
+True
+5
+x is big
+10
+7

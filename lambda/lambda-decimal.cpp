@@ -253,6 +253,15 @@ Item decimal_from_int64(int64_t val, EvalContext* ctx) {
     return decimal_push_result(dec_val, false);  // fixed precision
 }
 
+Item decimal_from_uint64(uint64_t val, EvalContext* ctx) {
+    mpd_context_t* dec_ctx = ctx ? ctx->decimal_ctx : decimal_fixed_context();
+    mpd_t* dec_val = mpd_new(dec_ctx);
+    if (!dec_val) return ItemError;
+
+    mpd_set_u64(dec_val, val, dec_ctx);
+    return decimal_push_result(dec_val, false);  // fixed precision
+}
+
 Item decimal_from_double(double val, EvalContext* ctx) {
     mpd_context_t* dec_ctx = ctx ? ctx->decimal_ctx : decimal_fixed_context();
     mpd_t* dec_val = mpd_new(dec_ctx);
@@ -865,7 +874,15 @@ Item decimal_mul(Item a, Item b, EvalContext* ctx) {
     return decimal_push_result(result, is_unlimited);
 }
 
-Item decimal_div(Item a, Item b, EvalContext* ctx) {
+typedef enum DecimalDivisionOp {
+    DECIMAL_DIVIDE,
+    DECIMAL_INTEGER_DIVIDE,
+    DECIMAL_REMAINDER,
+} DecimalDivisionOp;
+
+static Item decimal_division_apply(Item a, Item b, EvalContext* ctx,
+                                   DecimalDivisionOp op) {
+    (void)ctx;
     bool is_unlimited = should_be_unlimited(a, b);
     mpd_context_t* dec_ctx = get_decimal_context(a, b);
     
@@ -878,7 +895,7 @@ Item decimal_div(Item a, Item b, EvalContext* ctx) {
     if (!a_dec || !b_dec) {
         if (!a_is_dec) cleanup_temp(a_dec, false);
         if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal_div: conversion failed");
+        log_error("decimal division: conversion failed");
         return ItemError;
     }
     
@@ -886,7 +903,7 @@ Item decimal_div(Item a, Item b, EvalContext* ctx) {
     if (mpd_iszero(b_dec)) {
         if (!a_is_dec) cleanup_temp(a_dec, false);
         if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal_div: division by zero");
+        log_error("decimal division: division by zero");
         return ItemError;
     }
     
@@ -897,7 +914,17 @@ Item decimal_div(Item a, Item b, EvalContext* ctx) {
         return ItemError;
     }
     
-    mpd_div(result, a_dec, b_dec, dec_ctx);
+    switch (op) {
+    case DECIMAL_DIVIDE:
+        mpd_div(result, a_dec, b_dec, dec_ctx);
+        break;
+    case DECIMAL_INTEGER_DIVIDE:
+        mpd_divint(result, a_dec, b_dec, dec_ctx);
+        break;
+    case DECIMAL_REMAINDER:
+        mpd_rem(result, a_dec, b_dec, dec_ctx);
+        break;
+    }
     
     if (!a_is_dec) cleanup_temp(a_dec, false);
     if (!b_is_dec) cleanup_temp(b_dec, false);
@@ -908,56 +935,24 @@ Item decimal_div(Item a, Item b, EvalContext* ctx) {
         return ItemError;
     }
     
-    // integer division exits to decimal, even when the quotient happens to be exact.
+    if (op == DECIMAL_REMAINDER && decimal_binary_result_is_bigint(a, b)) {
+        return decimal_push_bigint_result(result);
+    }
+    // Division and integer division exit the fixed-width lane; the quotient
+    // remains decimal even when its digits happen to fit in int64.
     return decimal_push_result(result, is_unlimited);
 }
 
+Item decimal_div(Item a, Item b, EvalContext* ctx) {
+    return decimal_division_apply(a, b, ctx, DECIMAL_DIVIDE);
+}
+
+Item decimal_idiv(Item a, Item b, EvalContext* ctx) {
+    return decimal_division_apply(a, b, ctx, DECIMAL_INTEGER_DIVIDE);
+}
+
 Item decimal_mod(Item a, Item b, EvalContext* ctx) {
-    bool is_unlimited = should_be_unlimited(a, b);
-    mpd_context_t* dec_ctx = get_decimal_context(a, b);
-    
-    bool a_is_dec = decimal_is_any(a);
-    bool b_is_dec = decimal_is_any(b);
-    
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
-    mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, dec_ctx);
-    
-    if (!a_dec || !b_dec) {
-        if (!a_is_dec) cleanup_temp(a_dec, false);
-        if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal_mod: conversion failed");
-        return ItemError;
-    }
-    
-    // Check for division by zero
-    if (mpd_iszero(b_dec)) {
-        if (!a_is_dec) cleanup_temp(a_dec, false);
-        if (!b_is_dec) cleanup_temp(b_dec, false);
-        log_error("decimal_mod: division by zero");
-        return ItemError;
-    }
-    
-    mpd_t* result = mpd_new(dec_ctx);
-    if (!result) {
-        if (!a_is_dec) cleanup_temp(a_dec, false);
-        if (!b_is_dec) cleanup_temp(b_dec, false);
-        return ItemError;
-    }
-    
-    mpd_rem(result, a_dec, b_dec, dec_ctx);
-    
-    if (!a_is_dec) cleanup_temp(a_dec, false);
-    if (!b_is_dec) cleanup_temp(b_dec, false);
-    
-    if (mpd_isnan(result)) {
-        mpd_del(result);
-        log_error("decimal_mod: result is NaN");
-        return ItemError;
-    }
-    
-    // integer remainder is still an integer; division exits to decimal separately.
-    if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
-    return decimal_push_result(result, is_unlimited);
+    return decimal_division_apply(a, b, ctx, DECIMAL_REMAINDER);
 }
 
 Item decimal_pow(Item a, Item b, EvalContext* ctx) {

@@ -241,7 +241,7 @@ static Item parse_datetime(InputContext& ctx, const char **mark) {
 
     DateTime* dt = datetime_parse_lambda(ctx.input()->pool, content_str->chars);
     if (dt) {
-        return {.item = k2it(dt)};
+        return push_k(*dt);
     }
 
     // fallback: return as string if datetime parsing fails

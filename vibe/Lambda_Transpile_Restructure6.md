@@ -1,5 +1,12 @@
 # Experiment Proposal: Direct C Pointer for String, Symbol, Binary
 
+> **Historical experiment.** This document records the rejected
+> `direct-string-pointer` experiment and its then-current value inventory. Its
+> references to inline `INT64`/`DTIME`, boxed common doubles, and numeric heap
+> types are not current design. See `vibe/Lambda_Design_Item_Boxing.md` and
+> `vibe/Lambda_Design_Stack_API.md` Phase 7 for the active representation and
+> lifetime contracts.
+
 **Branch:** `direct-string-pointer`  
 **Baseline:** Round 4 benchmark results (`test/benchmark/Overall_Result4.md`)  
 **Goal:** Determine whether eliminating high-byte type tagging for `String`, `Symbol`, and `Binary` and switching to direct C pointer storage (same as containers) improves runtime performance and/or reduces peak memory.

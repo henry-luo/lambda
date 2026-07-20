@@ -6,14 +6,15 @@ This document provides comprehensive documentation for all built-in system funct
 
 1. [Type Functions](#type-functions)
 2. [Mathematical Functions](#mathematical-functions)
-3. [String Functions](#string-functions)
-4. [Collection Functions](#collection-functions)
-5. [Date/Time Functions](#datetime-functions)
-6. [Variadic Argument Functions](#variadic-argument-functions)
-7. [Input/Output Functions](#inputoutput-functions)
-8. [Concurrency Functions](#concurrency-functions)
-9. [Error Handling](#error-handling)
-10. [Quick Reference Table](#quick-reference-table)
+3. [Bitwise Functions](#bitwise-functions)
+4. [String Functions](#string-functions)
+5. [Collection Functions](#collection-functions)
+6. [Date/Time Functions](#datetime-functions)
+7. [Variadic Argument Functions](#variadic-argument-functions)
+8. [Input/Output Functions](#inputoutput-functions)
+9. [Concurrency Functions](#concurrency-functions)
+10. [Error Handling](#error-handling)
+11. [Quick Reference Table](#quick-reference-table)
 
 ---
 
@@ -247,6 +248,38 @@ let x, seed1 = math.random(42)
 x                                // 0.7415648788 (float in [0.0, 1.0))
 let x2, seed2 = math.random(seed1)
 let dice = floor(x * 6) + 1     // random 1-6
+```
+
+---
+
+## Bitwise Functions
+
+Bitwise functions preserve a sized integer's width. `band`, `bor`, and `bxor`
+use the sized-integer promotion rules; `bnot` and shifts operate in the left
+operand's width.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `band(a, b)` | Bitwise AND | `band(12u8, 10u8)` | `8u8` |
+| `bor(a, b)` | Bitwise OR | `bor(12u8, 3u8)` | `15u8` |
+| `bxor(a, b)` | Bitwise XOR | `bxor(12u8, 10u8)` | `6u8` |
+| `bnot(a)` | Invert within operand width | `bnot(0u8)` | `255u8` |
+| `shl(a, n)` | Left shift and truncate to width | `shl(1i8, 7)` | `-128i8` |
+| `shr(a, n)` | Signed arithmetic or unsigned logical right shift | `shr(-1i32, 1)` | `-1i32` |
+| `ushr(a, n)` | Logical right shift; signed result becomes its unsigned counterpart | `ushr(-1i32, 1)` | `2147483647u32` |
+
+`ushr` is the Lambda builtin equivalent of JavaScript's `>>>`, without adding
+a new grammar token. For signed `i8`/`i16`/`i32`/`i64`, it reinterprets the
+operand bits in the matching unsigned width and returns that unsigned type. It
+leaves unsigned operands unsigned; for a plain `int`, it uses a `u32` result.
+A negative count is an error, and a count at least the operand width returns
+zero.
+
+```lambda
+ushr(-1i8, 1)                    // 127u8
+ushr(-1i64, 1)                   // 9223372036854775807u64
+ushr(8, 1)                       // 4u32
+ushr(18446744073709551615u64, 64) // 0u64
 ```
 
 ---

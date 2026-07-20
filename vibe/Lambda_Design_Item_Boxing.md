@@ -1,11 +1,11 @@
 # Lambda Item Boxing Design
 
 - **Status:** CURRENT DESIGN RECORD
-- **Date:** 2026-07-10
+- **Date:** 2026-07-10; scalar-storage alignment updated 2026-07-20
 - **Scope:** the 64-bit `Item` representation shared by Lambda core, LambdaJS, the Jube frontends, Radiant, the MIR transpilers, and the garbage collector.
 - **Decision:** retain Lambda's hybrid representation: inline tagged values and tagged leaf pointers for scalar types; unmodified native pointers for header-bearing containers.
 - **Convention:** source references name symbols rather than fixed line numbers because line numbers drift.
-- **Related:** `Lambda_Type_Double_Boxing.md` (proposed inline-double extension), `Lambda_Transpile_Restructure6.md` (measured direct-string-pointer experiment), `Lambda_Semantics_Number_Model.md`, `doc/dev/lambda/LR_03_Value_and_Type_Model.md`, and `doc/dev/js/JS_03_Value_Model.md`.
+- **Related:** `Lambda_Design_Stack_API.md` Phase 7 (current scalar ownership), `Lambda_Impl_Double_Boxing (done).md` (completed inline-double work), `Lambda_Transpile_Restructure6.md` (measured direct-string-pointer experiment), `Lambda_Semantics_Number_Model.md`, `doc/dev/lambda/LR_03_Value_and_Type_Model.md`, and `doc/dev/js/JS_03_Value_Model.md`.
 
 ---
 
@@ -17,8 +17,8 @@ There are three principal storage classes:
 
 | Storage class | Representative values | Where the type comes from | Payload access |
 |---|---|---|---|
-| Inline tagged value | null, bool, compact `int`, sized numerics | high byte of the `Item` | directly from Item bits |
-| Tagged leaf pointer | string, symbol, binary, datetime, decimal, int64, current boxed float | high byte of the `Item` | extract the low 56-bit pointer, then dereference |
+| Inline tagged value | null, bool, compact `int`, sized numerics, canonical common doubles | high byte or canonical float bit pattern | directly from Item bits |
+| Tagged scalar/leaf pointer | string, symbol, binary, decimal, GC-owned datetime, number-home `int64`/`uint64`, out-of-band float residue | Item tag plus the scalar's ownership class | extract the payload pointer, then dereference through the canonical accessor |
 | Raw header pointer | array, numeric array, map, object, element, range, path, function, type | first byte of the pointed-to object | the Item word is already the native pointer |
 
 The asymmetry is intentional:
@@ -46,7 +46,7 @@ The Item representation is designed to provide:
 5. a stable ABI across Lambda core, LambdaJS, Radiant, and Jube;
 6. enough semantic type capacity for Lambda's richer value domain;
 7. precise classification for GC tracing and JIT rooting;
-8. a representation that can evolve locally, as with the proposed inline-double extension.
+8. a representation that can evolve locally, as demonstrated by the completed inline-double and Phase 7 scalar-home changes.
 
 ### 1.2 Terminology
 
@@ -161,12 +161,16 @@ Examples:
 +--------------------------+-------------------------------------+
 ```
 
-The constructors `l2it`, `u2it`, `d2it`, `f642it`, `c2it`, `k2it`, `y2it`, `s2it`, `x2it`, and `err2it` encode this family. C++ Item bitfields such as `string_ptr`, `symbol_ptr`, and `datetime_ptr` extract the pointer payload.
+The constructors and canonical boxing helpers for `INT64`, `UINT64`, cold
+`FLOAT`, decimal, datetime, symbol, string, binary, and error values encode this
+family. C++ Item accessors recover the payload according to the value's
+representation and ownership class; callers must not infer GC ownership merely
+from a numeric tag.
 
 Representative types:
 
-- int64 and uint64;
-- current boxed float/f64;
+- number-home or owner-backed int64 and uint64;
+- out-of-band float/f64 residue;
 - decimal and BigInt carrier;
 - datetime;
 - symbol, string, and binary;
@@ -424,7 +428,7 @@ These assumptions are pragmatically valid on Lambda's supported mainstream confi
 |---|---|---|---|
 | Universal word | 64-bit Item | 64-bit value | pointer-sized execution value; commonly 32-bit compressed heap storage |
 | Common integers | compact safe-integer-band `int`; sized numeric immediates | typically int32 immediate | 31/32-bit Smi |
-| Doubles | currently tagged pointer; proposed self-tagging documented separately | inline by construction | HeapNumber at generic boundary; unboxed in optimized paths/typed storage |
+| Doubles | common values self-tag; out-of-band residue uses scalar homes or the ownerless persistent fallback | inline by construction | HeapNumber at generic boundary; unboxed in optimized paths/typed storage |
 | Scalar type test | direct high-byte read | tag/range test in NaN space | low-bit/tag and object-kind machinery |
 | Leaf pointer access | remove high-byte tag | extract/XOR NaN payload tag | remove low tag; decompress after compressed heap load |
 | Container pointer access | native pointer, no untagging | pointer reconstructed from payload | low tag; commonly compressed in heap fields |
@@ -440,7 +444,7 @@ These assumptions are pragmatically valid on Lambda's supported mainstream confi
 - Compact int band aligned with exact binary64 integers, plus inline sized numerics.
 - Native raw-pointer ABI for containers and direct aggregate traversal.
 - Container subtyping through headers, kinds, shapes, and nominal metadata rather than Item-tag proliferation.
-- Local evolution: the double representation can change without rewriting every pointer and integer encoding.
+- Local evolution: the completed double and scalar-home migrations changed numeric storage without rewriting every pointer and integer encoding.
 - One shared representation supports Lambda, LambdaJS, Python/Ruby/Bash frontends, document inputs, validators, and Radiant.
 
 ### 7.2 Lambda disadvantages
@@ -451,7 +455,7 @@ These assumptions are pragmatically valid on Lambda's supported mainstream confi
 - Raw pointer classification depends on supported virtual-address behavior.
 - Eight-byte references sacrifice the memory-density advantage of V8 pointer compression.
 - Direct raw pointers constrain moving-GC and sandboxing options.
-- The current boxed 64-bit scalar design allocates float/int64/datetime payloads; the float part is addressed by the separate double proposal.
+- Ownerless persistent `DOUBLE`/`INT64`/`UINT64` still require an interim GC scalar cell until the public/foreign lifetime ABI supplies an explicit owner; `DTIME` is intentionally GC-owned.
 - Representation-sensitive shortcuts such as raw `_type_id` reads and raw Item equality are sharp edges.
 
 ### 7.3 Assessed structural weaknesses
@@ -460,7 +464,16 @@ The §7.2 list names the costs; four of them deserve deeper treatment because th
 
 **W1 — The invariants were implicit, and the codebase shows the symptoms.** This is the largest weakness, and it is not in the encoding: for most of the design's life, its contract lived in convention rather than in checked code. The accumulated evidence: two JS sentinels squatting in unclaimed tag space, chosen precisely *because* nothing defined what unclaimed tag space means (`JS_DELETED_SENTINEL_VAL`, `JS_ITER_DONE_SENTINEL` — discovered only when the inline-double partition made them collisions); ~24 raw `>> 56` extractions scattered across 11 files; open-coded payload dereferences bypassing the canonical accessors (`Item::get_double`); JIT-emitted raw `MIR_EQ` comparisons on Item words whose semantics silently depend on the representation; and a shipped representation-sensitivity bug in `ArrayNum` equality. None of these indict the hybrid itself — they are the predictable residue of a representation without an enforcement story. The §6 invariants plus the double-boxing Part 7 assertion regime are, in effect, the design belatedly acquiring that story; the guardrail layer (impl plan S0) should be understood as **part of this design**, not as an appendage of the float work.
 
-**W2 — Boxed 64-bit scalars were the under-designed storage class.** The tagged-leaf row of the §0 table works well for strings and symbols but never had a coherent answer for float/int64/datetime: their payloads live in three places with three different lifecycles — a numeric nursery that is *never collected* (`gc_nursery.h`: values persist until `nursery_destroy()`, a monotonic leak in long-running processes), GC-heap leaf objects, and payloads embedded in container buffer extra areas with their own relocation fixups. It took benchmark-defining regressions (nbody-class, >150× vs Node) to force the float fix (`Lambda_Type_Double_Boxing.md`), and int64/datetime still carry the leak. Pointer-distinct equal values from this class are also the root of the recurring raw-equality bug family. The row is being repaired value-by-value; the lifecycle story for the remainder belongs to the nursery redesign.
+**W2 — Boxed 64-bit scalars were the under-designed storage class; Phase 7 now
+gives them explicit lifecycles.** The old tagged-leaf row had float/int64/datetime
+payloads in a never-collected numeric nursery, GC leaf objects, and movable
+container extras. The inline-double work and Stack API Phase 7 retired that
+nursery split: common doubles self-tag; transient `INT64`/`UINT64` and cold
+doubles use activation/caller homes; persistent numeric destinations own their
+payloads; ownerless boundaries use a counted interim GC fallback; and `DTIME`
+is deliberately always GC-owned. The remaining weakness is narrow and visible:
+the ownerless numeric fallback cannot disappear until public and foreign
+Item-only boundaries acquire an explicit lifetime contract.
 
 **W3 — Raw container pointers are a permanent strategic commitment.** Items holding bare addresses means the object heap can never move (or every reference must be precisely updated — in practice: never move), which shaped and constrained the entire GC-evolution space (sticky/pinning designs instead of copying collection), and forecloses V8-style pointer compression — Lambda pays 8-byte references and the cache pressure that follows in pointer-heavy workloads. It also means a garbage word with a zero high byte is a *wild dereference* in `type_id()`, so memory safety leans entirely on canonical construction (§6.3). These trades are defensible for a C-native multi-frontend runtime and this document accepts them deliberately — but they are one-way doors, and should be re-acknowledged whenever GC or sandboxing work is planned.
 
@@ -488,7 +501,7 @@ When adding or changing a value type:
 The next four rules are corrective — each answers one of the §7.3 weaknesses:
 
 7. **Enforcement is part of the design (answers W1).** Every representation invariant in §6 must exist as a compile-time assertion, a debug runtime check, or a lint rule — not as prose alone. New tag constants, sentinels, and packed encodings are illegal until pinned by an assertion; new code reading raw high bytes or raw payloads outside the representation layer must fail `make lint`. The guardrail set in `Lambda_Impl_Double_Boxing (done).md` S0 is the reference implementation of this rule; it stands on its own merits regardless of the float migration's fate.
-8. **A storage class is not designed until its lifecycle is (answers W2).** A representation decision must state where payloads are allocated, how they are reclaimed, and how equality behaves — "tagged pointer to an 8-byte payload" without a reclamation story produced the never-collected numeric nursery. Any new leaf class (and the remaining int64/datetime repair) must specify all three before landing.
+8. **A storage class is not designed until its lifecycle is (answers W2).** A representation decision must state where payloads are allocated, how they are reclaimed, and how equality behaves — "tagged pointer to an 8-byte payload" without a reclamation story produced the never-collected numeric nursery. New leaf classes and future removal of the ownerless numeric GC fallback must specify all three before landing.
 9. **Semantic equality has one entry point (answers W1's sharpest recurrence).** Raw Item bit-comparison is a representation-layer operation (§6.4.4). Runtime and JIT code must obtain value equality through the canonical helpers; every emitted raw-word compare must carry a proof that the operands' types make bit-equality semantic. This bug family has shipped at least three times (ArrayNum `==`, NaN identity, packed −0); the lint rule and the `MIR_EQ` audit are its ratchet.
 10. **The tag budget is governed, not discovered (answers W1/W3 at the boundary).** Legal high-byte space is a finite architectural resource — 64 values once inline doubles land. Claiming a value requires updating the partition assertions and this document in the same change; "it was unused" is how the sentinel collisions happened. Re-acknowledge the W3 one-way doors (non-moving heap, no pointer compression, low-address model) whenever GC, sandboxing, or platform-port work is planned, rather than rediscovering them mid-design.
 

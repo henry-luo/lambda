@@ -21,11 +21,11 @@ LambdaJS does not invent a value representation: every JS value is a Lambda `Ite
 
 Three storage classes exist:
 
-- **Packed scalars** — value lives entirely in the word. `null` (`ITEM_NULL`, `lambda.h:749`), booleans (`ITEM_TRUE`/`ITEM_FALSE`, `:762`), and small integers (`ITEM_INT` + a sign-extended 56-bit payload via `i2it`, `:774`) carry no heap object. `INT56_MAX`/`INT56_MIN` (`:766`) bound the inline-int range; `Item::get_int56()` (`lambda.hpp:240`) sign-extends from bit 55. Sub-word numerics (`i8`..`u32`, `f16`, `f32`) use the `LMD_TYPE_NUM_SIZED` layout — value in `[31:0]`, sub-type in `[55:48]` (`NUM_SIZED_PACK`, `lambda.h:216`).
-- **Tagged-pointer scalars** — high byte is the tag, low 56 bits are a heap pointer: `LMD_TYPE_INT64` (`l2it`), `LMD_TYPE_FLOAT` (`d2it`), `LMD_TYPE_DECIMAL` (`c2it`, also BigInt), `LMD_TYPE_STRING` (`s2it`), `LMD_TYPE_SYMBOL` (`y2it`), `LMD_TYPE_DTIME` (`k2it`) (`lambda.h:780`–`786`). The pointer is recovered by masking off the tag (`0x00FFFFFFFFFFFFFF`).
+- **Packed scalars** — value lives entirely in the word. `null`, booleans, Lambda safe-band integers, compact sized numerics, and most canonical binary64 values carry no heap object. Ordinary JS Number creation uses the float encoding, not Lambda's integer tag.
+- **Tagged-reference scalars** — high byte is the tag and the low 56 bits address a payload. Full-width integers and out-of-band doubles may point to number homes or destination-owned words; decimal/BigInt, strings, symbols, binaries, and datetimes are GC/pool-owned. The numeric tag alone does not prove GC ownership; every datetime is explicitly GC-owned.
 - **Containers** — the word *is* the pointer (no tag byte), so `it2map`/`it2arr`/etc. are bare casts (`lambda.h:848`); the `TypeId` is read from the pointee's first byte. All extend `struct Container` (`lambda.h:525`).
 
-JS arithmetic results funnel through `js_make_number`: an exact integer in int56 range becomes a packed `ITEM_INT`; other doubles use the shared inline-double encoding, with only its tiny/subnormal residue stored in the active number side-stack through `flt2it`. Two extra guards matter for JS — `-0.0` is preserved (never collapsed to int 0), and integers with magnitude `≥ JS_SYMBOL_BASE` avoid the packed-int Symbol range ([§4](#4-symbol-as-property-key-encoding)).
+JS arithmetic results funnel through `js_make_number`, which always calls the shared canonical float encoder. Most doubles self-tag directly; only the out-of-band residue uses the active number stack. `-0.0` remains distinct. No magnitude, integral-value, or Symbol-range test can retype a JS Number as Lambda `int`.
 
 ---
 
@@ -38,8 +38,8 @@ The JS language types are a projection of the Lambda `EnumTypeId` enum (`lambda.
 | `undefined` | `LMD_TYPE_UNDEFINED` | `"undefined"` | `ITEM_JS_UNDEFINED`; distinct from null ([§5](#5-undefinednulltdz--deleted-sentinels)). |
 | `null` | `LMD_TYPE_NULL` | `"object"` | the `typeof null` quirk (`:2086`). |
 | boolean | `LMD_TYPE_BOOL` | `"boolean"` | packed in low byte. |
-| number (int) | `LMD_TYPE_INT` | `"number"` | packed int56 (unless a Symbol — see below). |
-| number (non-int / boxed) | `LMD_TYPE_FLOAT` | `"number"` | heap `double`. |
+| number | `LMD_TYPE_FLOAT` | `"number"` | canonical binary64; most values self-tag, residue uses a number home. |
+| Lambda integer crossing into JS | `LMD_TYPE_INT` | `"number"` | exact because Lambda `int` is restricted to the JS safe-integer band. |
 | number (sized) | `LMD_TYPE_NUM_SIZED` | `"number"` | typed-array element reads. |
 | bigint | `LMD_TYPE_DECIMAL` | `"bigint"` | `Decimal` with `unlimited == DECIMAL_BIGINT` ([§4](#4-symbol-as-property-key-encoding)). |
 | string | `LMD_TYPE_STRING` | `"string"` | heap `String`. |
@@ -47,7 +47,7 @@ The JS language types are a projection of the Lambda `EnumTypeId` enum (`lambda.
 | function | `LMD_TYPE_FUNC` | `"function"` | a `JsFunction` ([§6](#6-memory-model-gc-heap-side-stacks-pool)). |
 | object / array / Proxy / class ctor | `LMD_TYPE_MAP`, `LMD_TYPE_ARRAY`, `LMD_TYPE_ELEMENT` | `"object"`/`"function"` | `js_typeof` returns `"function"` for callable Proxies and class-constructor maps (those carrying `__instance_proto__`), `:2107`. |
 
-A subtlety the table flags twice: a value tagged `LMD_TYPE_INT` is *usually* a JS number, but a sufficiently negative one is a JS Symbol; `js_typeof` calls `js_key_is_symbol` to decide (`:2093`), and `js_make_number` keeps the number domain clear of that range. `LMD_TYPE_NUMBER`, `LMD_TYPE_DTIME`, `LMD_TYPE_BINARY`, `LMD_TYPE_RANGE`, `LMD_TYPE_OBJECT`, `LMD_TYPE_PATH`, etc. exist in the Lambda enum but are not produced by ordinary JS code paths (they fall to the `default: "object"` arm).
+A value tagged `LMD_TYPE_INT` can be a Lambda safe-band integer crossing the membrane or a negative encoded JS Symbol. `js_typeof` calls the Symbol predicate to distinguish them. `js_make_number` does not participate in that ambiguity because it always emits `LMD_TYPE_FLOAT`.
 
 ---
 
@@ -75,7 +75,7 @@ JS needs `undefined` distinct from `null`; Lambda already separates them at the 
 
 JS arrays are the shared Lambda `Array` layout; there is no larger JS-only
 header. Indexed values occupy the low `items[]` slots. Wide scalar payloads
-(out-of-band doubles and polyglot int64/DateTime values) occupy counted slots
+(out-of-band doubles and polyglot int64/uint64 values) occupy counted slots
 growing down from the high end, and their logical Items point back into that
 same buffer.
 
@@ -104,7 +104,7 @@ container.
 LambdaJS allocates from the `EvalContext`'s three regions, all shared with Lambda script.
 
 - **GC heap** (`gc_heap_t`) — a **dual-zone non-moving mark-and-sweep** collector (`lib/gc/gc_heap.c:4`). The *object zone* is a size-class free-list allocator for object structs (`Map`, `List`, `String`, `Decimal`, `JsAccessorPair`, …); the *data zone* is a bump-pointer allocator for variable-size buffers such as `Map.data` (`gc_heap.h:96`). JS objects are created via `heap_calloc` (`lambda-mem.cpp:381`), which zeroes the struct (so a fresh map is `MAP_KIND_PLAIN` and a fresh `ShapeEntry` is a default data property for free) and sets `Container::is_heap` for heap-vs-arena discrimination. The JIT hot path uses `heap_calloc_class` (`:395`) with a pre-computed size class and a bump-pointer fast path. **Non-moving headers** are the load-bearing property: a pointer handed to JIT code, stored in a traced environment, or sitting in the arg stack stays valid across a collection. Object structs never relocate; variable data buffers can move and their owner pointers/interior scalar references are rewritten.
-- **Execution side stacks** — each context reserves stable root and number regions. Generated JS saves both watermarks at function entry. Heap-capable register values are published to the precise root region; wide scalar temporaries use the raw number region. The single epilogue restores both, rebuilding an escaping Item in its caller's extent. The collector scans only `[side_root_base, side_root_top)` and never interprets raw number slots as Items.
+- **Execution side stacks** — each context reserves stable root and number regions. Generated JS saves both watermarks at function entry. Heap-capable register values are published to the precise root region; out-of-band doubles and full-width integer temporaries use the raw number region. The single epilogue copies escaping numerics to caller-donated homes before restoring the complete callee extent. The collector scans only `[side_root_base, side_root_top)` and never interprets raw number slots as Items. Datetime is GC-owned and does not use the number region.
 - **Module-lifetime pool** (`js_input->pool`, a `mempool`) — cache-addressable compiled wrappers returned by the cached `js_new_function` path remain module-lifetime because the function cache embeds them. Uncached method/`with` wrappers, escaping closures, bound functions, and other dynamically created wrappers are ordinary GC objects.
 
 **`JsFunction` and closure-env ownership.** `js_new_closure` and bound-function paths allocate a `JsFunction` through `js_alloc_gc_function_object`. Its layout marker lets the `LMD_TYPE_FUNC` GC trace dispatch distinguish it from a Lambda `Function`. The trace hook follows the raw env object, bound-argument env, captured `with` stack, prototype, properties, name/source metadata, and global. `js_alloc_env` allocates the internal `GC_TYPE_JS_ENV`; its first half is precisely traced Item storage and its second half is one owned raw scalar-tail slot per Item. Thus env reachability follows closure/generator/async ownership and dead closures are collectible—there is no per-env permanent root range. Cached compiled wrappers remain pooled so `func_ptr → JsFunction*` continues to preserve `.prototype` identity. Closure-env *structure* is detailed in [JS_05 — Functions & Closures](JS_05_Functions_Closures.md).
@@ -153,7 +153,7 @@ LambdaJS is an embedding, so much of the runtime is borrowed wholesale:
 
 ## Known Issues & Future Improvements
 
-1. **Symbol/number share `LMD_TYPE_INT`.** A negative int beyond `-JS_SYMBOL_BASE` *is* a Symbol, forcing `js_make_number` to special-case the boundary (`js_runtime_value.cpp:1079`) and every numeric reader to stay clear of the range. A dedicated `LMD_TYPE_SYMBOL`-style packed tag would remove the overlap, at the cost of a new enum slot. (Heap `LMD_TYPE_SYMBOL` exists but is used for Lambda symbols, not JS well-known symbols.)
+1. **Symbol/Lambda-int share `LMD_TYPE_INT`.** A negative int beyond `-JS_SYMBOL_BASE` *is* a Symbol, so consumers of Lambda integer Items crossing into JS must distinguish the range. `js_make_number` no longer needs a special case because JS Numbers always use `LMD_TYPE_FLOAT`. A dedicated packed Symbol tag would remove the remaining overlap, at the cost of a new enum slot.
 2. **No small-BigInt fast path.** Every BigInt — including `0n`/`1n` and loop counters — is a full `mpd_t` heap allocation (`lambda-decimal.cpp:963`,`983`). An inline-int56 representation for small magnitudes (à la V8's SMI-BigInt) would cut allocation pressure in BigInt-heavy code; today the type is always boxed.
 3. **Cached compiled wrappers remain module-lifetime.** The cacheable `js_new_function` path keeps pooled wrappers because the function cache embeds their addresses. Uncached method/`with` wrappers, closures, and bound functions are GC-owned, but repeatedly compiling distinct modules still retains cached wrappers until module teardown.
 4. **Module-var ceiling is a hard 2048.** `JS_MAX_MODULE_VARS` (`js_runtime_state.hpp:21`) is fixed; `js_set_module_var` silently drops out-of-range indices (`cpp:124`). A module with >2048 top-level bindings would lose writes rather than grow.

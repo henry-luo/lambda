@@ -72,7 +72,8 @@ static const TypeBoxInfo type_box_table[] = {
     // scalars: have both box and unbox functions
     {LMD_TYPE_BOOL,       "bool",      "it2b",     "b2it",    NULL,          "0"},
     {LMD_TYPE_INT,        "int64_t",   "it2i",     "i2it",    NULL,          "0"},
-    {LMD_TYPE_INT64,      "int64_t",   "it2l",     "push_l",  "const_l2it",  "0"},
+    {LMD_TYPE_INT64,      "int64_t",   "it2l",     "box_int64_value",  "const_l2it",  "0"},
+    {LMD_TYPE_UINT64,     "uint64_t",  "it2u",     "box_uint64_value", NULL,          "0"},
     {LMD_TYPE_FLOAT,      "double",    "it2d",     "push_d",  "const_d2it",  "0.0"},
     {LMD_TYPE_DTIME,      "DateTime",  "it2k",     "push_k",  "const_k2it",  "{0}"},
     {LMD_TYPE_DECIMAL,    "Decimal*",  "it2c",     "c2it",    "const_c2it",  "NULL"},
@@ -1072,7 +1073,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             transpile_expr(tp, item);
         }
         break;
-    case LMD_TYPE_BOOL:  case LMD_TYPE_INT:  case LMD_TYPE_INT64:
+    case LMD_TYPE_BOOL:  case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_UINT64:
     case LMD_TYPE_FLOAT:  case LMD_TYPE_DTIME:  case LMD_TYPE_DECIMAL:
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
         // Table-driven scalar boxing: handles optional/closure params, captured vars,
@@ -1428,11 +1429,11 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 strbuf_append_char(tp->code_buf, ')');
             }
             else if (pri_node->type->type_id == LMD_TYPE_DTIME) {
-                // loads the const datetime without boxing
-                strbuf_append_str(tp->code_buf, "const_k(");
+                // Datetime literals materialize as GC objects at runtime.
+                strbuf_append_str(tp->code_buf, "push_k(const_k(");
                 TypeDateTime *dt_type = (TypeDateTime*)pri_node->type;
                 strbuf_append_int(tp->code_buf, dt_type->const_index);
-                strbuf_append_char(tp->code_buf, ')');
+                strbuf_append_str(tp->code_buf, "))");
             }
             else if (pri_node->type->type_id == LMD_TYPE_INT) {
                 write_node_source(tp, pri_node->node);
@@ -5493,6 +5494,12 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
                         else { strbuf_append_str(tp->code_buf, "it2l("); transpile_box_item(tp, val_expr); strbuf_append_str(tp->code_buf, ")"); }
                         strbuf_append_str(tp->code_buf, ";");
                         break;
+                    case LMD_TYPE_UINT64:
+                        strbuf_append_format(tp->code_buf, "\n uint64_t _tf%d=", field_idx);
+                        if (native) { transpile_expr(tp, val_expr); }
+                        else { strbuf_append_str(tp->code_buf, "it2u("); transpile_box_item(tp, val_expr); strbuf_append_str(tp->code_buf, ")"); }
+                        strbuf_append_str(tp->code_buf, ";");
+                        break;
                     case LMD_TYPE_FLOAT:
                         strbuf_append_format(tp->code_buf, "\n double _tf%d=", field_idx);
                         if (native) { transpile_expr(tp, val_expr); }
@@ -5500,7 +5507,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
                         strbuf_append_str(tp->code_buf, ";");
                         break;
                     case LMD_TYPE_DTIME:
-                        strbuf_append_format(tp->code_buf, "\n DateTime _tf%d=*(DateTime*)((uint64_t)(", field_idx);
+                        strbuf_append_format(tp->code_buf, "\n DateTime* _tf%d=(DateTime*)((uint64_t)(", field_idx);
                         transpile_box_item(tp, val_expr);
                         strbuf_append_str(tp->code_buf, ")&0x00FFFFFFFFFFFFFFULL);");
                         break;
@@ -5552,13 +5559,17 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
                         strbuf_append_format(tp->code_buf,
                             "\n *(int64_t*)((char*)(m)->data+%lld)=_tf%d;", (long long)off, field_idx);
                         break;
+                    case LMD_TYPE_UINT64:
+                        strbuf_append_format(tp->code_buf,
+                            "\n *(uint64_t*)((char*)(m)->data+%lld)=_tf%d;", (long long)off, field_idx);
+                        break;
                     case LMD_TYPE_FLOAT:
                         strbuf_append_format(tp->code_buf,
                             "\n *(double*)((char*)(m)->data+%lld)=_tf%d;", (long long)off, field_idx);
                         break;
                     case LMD_TYPE_DTIME:
                         strbuf_append_format(tp->code_buf,
-                            "\n *(DateTime*)((char*)(m)->data+%lld)=_tf%d;", (long long)off, field_idx);
+                            "\n *(DateTime**)((char*)(m)->data+%lld)=_tf%d;", (long long)off, field_idx);
                         break;
                     default:
                         // all pointer types (string, symbol, container, etc.)
@@ -6077,8 +6088,9 @@ static void write_c_field_type(StrBuf* buf, TypeId type_id) {
     case LMD_TYPE_BOOL:    strbuf_append_str(buf, "bool");      break;
     case LMD_TYPE_INT:     strbuf_append_str(buf, "int64_t");   break;
     case LMD_TYPE_INT64:   strbuf_append_str(buf, "int64_t");   break;
+    case LMD_TYPE_UINT64:  strbuf_append_str(buf, "uint64_t");  break;
     case LMD_TYPE_FLOAT:   strbuf_append_str(buf, "double");    break;
-    case LMD_TYPE_DTIME:   strbuf_append_str(buf, "DateTime");  break;
+    case LMD_TYPE_DTIME:   strbuf_append_str(buf, "DateTime*"); break;
     case LMD_TYPE_STRING:  strbuf_append_str(buf, "String*");   break;
     case LMD_TYPE_SYMBOL:  strbuf_append_str(buf, "Symbol*");   break;
     case LMD_TYPE_BINARY:  strbuf_append_str(buf, "Binary*");   break;
@@ -6155,13 +6167,18 @@ static void emit_direct_field_read(Transpiler* tp, AstNode* object, ShapeEntry* 
         transpile_expr(tp, object);
         strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
         break;
+    case LMD_TYPE_UINT64:
+        strbuf_append_str(tp->code_buf, "*(uint64_t*)((char*)(");
+        transpile_expr(tp, object);
+        strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
+        break;
     case LMD_TYPE_FLOAT:
         strbuf_append_str(tp->code_buf, "*(double*)((char*)(");
         transpile_expr(tp, object);
         strbuf_append_format(tp->code_buf, ")->data+%lld)", (long long)offset);
         break;
     case LMD_TYPE_DTIME:
-        strbuf_append_str(tp->code_buf, "push_k(*(DateTime*)((char*)(");
+        strbuf_append_str(tp->code_buf, "k2it(*(DateTime**)((char*)(");
         transpile_expr(tp, object);
         strbuf_append_format(tp->code_buf, ")->data+%lld))", (long long)offset);
         break;
@@ -6285,6 +6302,19 @@ static void emit_direct_field_write(Transpiler* tp, AstNode* object,
             transpile_expr(tp, value);
         } else {
             strbuf_append_format(tp->code_buf, ")->data+%lld)=it2l(", (long long)offset);
+            transpile_box_item(tp, value);
+            strbuf_append_str(tp->code_buf, ")");
+        }
+        strbuf_append_str(tp->code_buf, ";");
+        break;
+    case LMD_TYPE_UINT64:
+        strbuf_append_str(tp->code_buf, "\n *(uint64_t*)((char*)(");
+        transpile_expr(tp, object);
+        if (native) {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=", (long long)offset);
+            transpile_expr(tp, value);
+        } else {
+            strbuf_append_format(tp->code_buf, ")->data+%lld)=it2u(", (long long)offset);
             transpile_box_item(tp, value);
             strbuf_append_str(tp->code_buf, ")");
         }
@@ -7031,8 +7061,11 @@ void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node) {
     } else {
         switch (boxed_ret_tid) {
         case LMD_TYPE_INT:
-        case LMD_TYPE_INT64:
             box_prefix = "ri_ok(i2it("; box_suffix = "))"; break;
+        case LMD_TYPE_INT64:
+            box_prefix = "ri_ok(box_int64_value("; box_suffix = "))"; break;
+        case LMD_TYPE_UINT64:
+            box_prefix = "ri_ok(box_uint64_value("; box_suffix = "))"; break;
         case LMD_TYPE_FLOAT:
             box_prefix = "ri_ok(push_d("; box_suffix = "))"; break;
         case LMD_TYPE_BOOL:
@@ -7080,6 +7113,7 @@ void define_func_boxed(Transpiler* tp, AstFuncNode *fn_node) {
             switch (param_type->type_id) {
             case LMD_TYPE_INT:    unbox_fn = "it2i("; break;
             case LMD_TYPE_INT64:  unbox_fn = "it2l("; break;
+            case LMD_TYPE_UINT64: unbox_fn = "it2u("; break;
             case LMD_TYPE_FLOAT:  unbox_fn = "it2d("; break;
             case LMD_TYPE_BOOL:   unbox_fn = "it2b("; break;
             case LMD_TYPE_STRING: unbox_fn = "it2s("; break;
@@ -7144,7 +7178,10 @@ void transpile_box_capture(Transpiler* tp, FnCapture* cap, bool from_outer_env) 
         strbuf_append_str(tp->code_buf, "i2it(_");
         break;
     case LMD_TYPE_INT64:
-        strbuf_append_str(tp->code_buf, "l2it(&_");
+        strbuf_append_str(tp->code_buf, "box_int64_value(_");
+        break;
+    case LMD_TYPE_UINT64:
+        strbuf_append_str(tp->code_buf, "box_uint64_value(_");
         break;
     case LMD_TYPE_FLOAT:
         strbuf_append_str(tp->code_buf, "lambda_float_ptr_to_item(&_");
@@ -7165,7 +7202,7 @@ void transpile_box_capture(Transpiler* tp, FnCapture* cap, bool from_outer_env) 
         strbuf_append_str(tp->code_buf, "c2it(_");
         break;
     case LMD_TYPE_DTIME:
-        strbuf_append_str(tp->code_buf, "k2it(&_");
+        strbuf_append_str(tp->code_buf, "push_k(_");
         break;
     default:
         // for container types (List*, Map*, etc.) and Item, cast to Item

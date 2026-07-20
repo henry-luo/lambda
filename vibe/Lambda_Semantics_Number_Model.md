@@ -1,9 +1,10 @@
 # Lambda Number Model v2
 
-**Status:** adopted design (2026-07-08) — Part 1 is the normative model; Part 2 is an informative snapshot of implementation gaps
+**Status:** adopted design (2026-07-08; revised 2026-07-20) — Part 1 is the normative model; Part 2 is an informative snapshot of implementation gaps
 **Changelog:** v2 born from the JS-interop question "any issue mapping JS number to `TYPE_FLOAT`?"; N1–N9 confirmed 2026-07-08; sized-scalar arithmetic (Go-style) added same day; division rule and literal-typing rule resolved same day; **`is`/`type()` semantics finalized same day after three iterations** (flat → hybrid → final): **uniform exact-embedding subtyping over all scalar numeric types; containers covariant where values copy, invariant at `var`-param borrows** (a brief blanket-invariance detour was reverted to the pre-existing normative ruling, ADR §9.2/C12) — supersedes both the draft lattice paragraph and the interim flat rule (history preserved in §6); doc restructured into spec form same day.
+**2026-07-20 arithmetic decision:** operand promotion is type-directed, never magnitude-directed. Sized-integer × sized-integer arithmetic remains in a Lambda-selected sized lane and then follows Go overflow behavior. A sized integer mixed with a non-sized number first enters its smallest complete non-sized domain (`i8`…`u32 → int`, `i64/u64 → integer`) and then follows the value tower. Flex-`int` result overflow deliberately remains `int → float` for practical performance, accepting correctly rounded precision loss at boundary cases.
 **Normative home:** this doc designs in the area owned by `../doc/Lambda_Formal_Semantics.md` **§4 Numerics** (§4.1 two-tier integers [C3] · §4.3 promotion lattice [C3] · §4.4 decimal tiers [C13] · §4.5 float↔decimal [C8.5a] · §4.7 division) and touches **§5 Equality** [C8], **§6 Ordering** [C11], **§9.2 Covariance** [C12]. Where v2 amends a section, the amendment flows back into the ADR when implemented; until then the ADR governs the language and this doc records the agreed direction.
-**Grounding:** `js_make_number` (`lambda/js/js_runtime_value.cpp:1071`), the compact-int band (`lambda.h:889`, `INT56_MAX` = ±(2⁵³−1), deliberately the JS safe-integer band), the two libmpdec contexts (`lambda-decimal.cpp:21` — `g_fixed_ctx` decimal128 / `g_unlimited_ctx` arbitrary), the sized-scalar carriers (`lambda.h:126` NUM_SIZED, 32-bit payload), the ArrayNum lane enum (`lambda.h:149`), the Go spec (`go.dev/ref/spec#Numeric_types`, `#Integer_overflow`, `#Constants`, `#Conversions`).
+**Grounding:** `js_make_number` (`lambda/js/js_runtime_value.cpp`), the compact-int band (`INT56_MAX` in `lambda/lambda.h` = ±(2⁵³−1), deliberately the JS safe-integer band), the two libmpdec contexts (`g_fixed_ctx` decimal128 / `g_unlimited_ctx` arbitrary in `lambda/lambda-decimal.cpp`), the `NUM_SIZED` carriers and `EnumArrayNumElemType` (`lambda/lambda.h`), the scalar-home contract (`Lambda_Design_Stack_API.md`), and the Go spec (`go.dev/ref/spec#Numeric_types`, `#Integer_overflow`, `#Constants`, `#Conversions`).
 
 ---
 
@@ -14,7 +15,7 @@
 - **P1 — Type-directed FFI, never value-directed.** A Lambda value's foreign type (JS `number` vs `BigInt`, …) is a function of its Lambda *type*, never of its magnitude. (The rejected alternative is the snowflake-ID bug — §6.)
 - **P2 — Tier-hiding.** Hide representation tiers when the external contract is tier-independent (decimal's tiers hide; `integer` stays a distinct type *because its FFI face differs*).
 - **P3 — Two orthogonal axes, each uniform.** `==` is **equality**: value-precise across representations for values (ADR §5.2 Numbers [C8]: `1 == 1.0`, `2.5f32 == 2.5`), exact equality for types. `is` is **subsumption**: `x is T` ⟺ `type(x) ⊑ T`, and with a type on the left, `T1 is T2` ⟺ `T1 ⊑ T2` — where ⊑ is the exact-embedding lattice over scalar numeric types, **covariance over containers where values copy / invariance at `var`-param borrows** (§3.4, per the normative §9.2/C12), and membership for unions. No operator mixes the axes.
-- **P4 — Exact embeddings up the tower; division exits honestly.** `int ⊂ integer ⊂ decimal`; `float ⊂ decimal` (every binary64 has an exact finite decimal expansion); `float ∥ integer`. Division always produces a type that can hold the answer honestly (`integer ÷ integer → decimal`; decimal `÷` rounds by the §2.4 rule) — no silent truncation, no silent wrap in the value domain. *(Extends the ADR's §4.3 promotion lattice [C3] and §4.7 division rules with the `integer` column.)*
+- **P4 — Exact embeddings up the tower; division is domain-selected.** `int ⊂ integer ⊂ decimal`; `float ⊂ decimal` (every binary64 has an exact finite decimal expansion); `float ∥ integer`. Mixed-type promotion never loses information while converting an operand. True `/` then uses the selected arithmetic domain: `int / int → float`, with binary64 rounding where necessary, while `integer / integer → decimal`, with the §2.4 decimal rounding rule. Two explicit arithmetic-domain rules sit beside that exact lattice: sized integer lanes wrap per §3.3, and flex-`int` result overflow enters `float` and may round per §2.1. *(Extends the ADR's §4.3 promotion lattice [C3] and §4.7 division rules with the `integer` column.)*
 
 ## 2. Value types
 
@@ -22,7 +23,19 @@ User-visible numeric value types: **`int` · `integer` · `float` · `decimal`**
 
 ### 2.1 `int`
 
-The everyday integer, per the ADR's **two-tier model** (`Lambda_Formal_Semantics.md` §4.1–4.2 [C3] — compact band + int64 tier, strict literals). The compact band is **±(2⁵³−1) by design — exactly the JS safe-integer band**, which makes `int → number` egress exact always (§5.4). C3 semantics unchanged by v2. (Whether `int64`-tier overflow should someday promote to `integer`, Python-style, is deferred — W5; it would be a C3 amendment.)
+The everyday integer is the ADR's **flex `int`** (`Lambda_Formal_Semantics.md`
+§4.1–4.2 [C3]). Its domain is **±(2⁵³−1) by design — exactly the JS
+safe-integer band**, which makes every `int → float` or JS-`number` conversion
+exact (§5.4). `int64`/`i64` is a distinct sized machine type, not a hidden
+storage tier of `int`.
+
+For `+`, `-`, and `×`, a result inside the compact band remains `int`. A result
+outside the band promotes to `float`, and subsequent arithmetic stays float.
+The conversion into float is exact for each source `int`, but the overflowing
+mathematical result is only correctly rounded to binary64: odd or otherwise
+unrepresentable integers above 2⁵³ can lose precision. Retaining this
+`int → float` overflow rule is a deliberate 2026-07-20 practical/performance
+decision; automatic `int → integer` overflow is not adopted (W5).
 
 ### 2.2 `integer` — arbitrary precision, the BigInt counterpart
 
@@ -35,7 +48,7 @@ The everyday integer, per the ADR's **two-tier model** (`Lambda_Formal_Semantics
 
 - IEEE-754 binary64; **`f64` is a spelling alias for the same type** (§3.2), not a second type.
 - **Considered-and-kept** (the "is float redundant given decimal?" question): (a) the JS bijection requires a native binary64 type — it is the identity mapping in both directions; (b) it is the hardware type — SIMD lanes, ArrayNum, K19 pairwise reductions, Stage-A parallelism, and all of Radiant (layout is float by rule); (c) the world's data is binary64 (JSON-in-practice, Float64Array, Arrow, C ABI). `float` and `decimal` serve disjoint domains: measurements vs exact human quantities.
-- **Specials:** −0, NaN, ±Infinity flow untouched; uniform boxing preserves −0 naturally; NaN payloads pass through unmodified (observable only via typed-array bit views; spec latitude).
+- **Specials:** −0, NaN, ±Infinity flow untouched; the canonical float encoding preserves −0; NaN payloads pass through unmodified (observable only via typed-array bit views; spec latitude).
 
 ### 2.4 `decimal` — one type, invisible tiers, BigDecimal-family arithmetic
 
@@ -59,7 +72,13 @@ The everyday integer, per the ADR's **two-tier model** (`Lambda_Formal_Semantics
 | `float` | | | `float` | `decimal` |
 | `decimal` | | | | `decimal` (§2.4 rules) |
 
-All meets are **exact embeddings** (P4); nothing silently loses precision on the way in — precision decisions happen only at `÷` (the §2.4 rule) and at explicit `quantize`/conversion. *(This table is the v2 extension of the ADR §4.3 mixed-operation promotion lattice [C3]; the `int`/`float` cells defer to it unchanged.)*
+All mixed-type meets are **exact embeddings** (P4); nothing silently loses
+precision while an operand enters the selected common type. The `int`/`int`
+cell retains C3's separate result-overflow rule: crossing the compact band
+selects float arithmetic and can round the result as described in §2.1.
+Decimal division and explicit `quantize`/conversion carry their own documented
+precision decisions. *(This table is the v2 extension of ADR §4.3 [C3]; the
+`int`/`float` cells defer to it unchanged.)*
 
 ### 2.6 `number`
 
@@ -82,13 +101,78 @@ Aliases are **accepted everywhere on input** (annotations, `is` targets, signatu
 Sized scalar arithmetic follows the Go spec — no UB, no overflow panic, no optimizer assumption that overflow cannot happen. *(Kin to the ADR's C3 "exact-until-float, Go-aligned machine tier" doctrine — the same Go alignment, applied to the sized family; division/remainder-by-zero returning `error()` matches ADR §4.7.)*
 
 - **Unsigned:** `+ - * <<` are modulo 2ⁿ: `255u8 + 1u8 → 0u8`; `0u8 - 1u8 → 255u8`.
-- **Signed:** overflow produces the deterministic two's-complement result: `127i8 + 1i8 → -128i8`; `-128i8 / -1i8 → -128i8`.
+- **Signed:** overflow produces the deterministic two's-complement result: `127i8 + 1i8 → -128i8`; `-128i8 div -1i8 → -128i8`.
 - **Division/remainder by zero:** `error()` — never wraps, never panics, never yields a lane value.
 - **Shifts:** negative counts → `error()`; non-negative counts compute mathematically, then truncate to the lane width: `1u8 << 8 → 0u8`.
 - **Constants:** exact constant evaluation does not wrap; a suffixed literal/constant expression must be representable in its declared type — `128i8`, `256u8` are compile-time errors.
 - **Conversions:** constant vs non-constant deliberately split (Go's rule): `u8(-1)` on a constant is a compile-time error; on a non-constant, sign/zero-extend then truncate with no overflow signal (`let x = -1; u8(x) → 255u8`). Float-sized conversions round to the destination IEEE format.
 - **Sized floats:** `f32` follows Go `float32` (working precision allowed; conversion/assignment rounds to binary32); `f16` same principle with binary16 (primarily storage/interop).
-- **Mixing:** same sized type → sized result (Go overflow rule applies). Mixed sized floats where one exactly contains the other → the wider (`f16 + f32 → f32`). Otherwise operands **promote out of the sized lane** into the value tower (`int`/`float`/`integer`/`decimal`) and §2.5 applies. Promotion is by the type lattice, never by inspecting the value — there is no value-dependent promotion to dodge overflow. *Promotion is conversion (it produces a new value of the wider type); it is not `is`-subtyping (§3.4).*
+
+#### 3.3.1 Sized integer × sized integer
+
+Integer operands remain in the sized domain. Go defines arithmetic and
+overflow once a machine lane has been selected; Go itself normally requires an
+explicit conversion between different named integer types, so Lambda supplies
+this mixed-width lane-selection extension:
+
+| Sized integer operands | Lambda result lane |
+|---|---|
+| same type | that type |
+| same signedness, different widths | wider participating width |
+| signed width represents the complete unsigned domain | that signed width |
+| next wider signed width represents both domains | that next signed width |
+| no signed lane represents both, including `i64` with `u64` | wider unsigned lane (`u64` at 64 bits) |
+
+Examples: `i8 + u8 → i16`, `i32 + u32 → i64`, and `i64 + u64 → u64`.
+After selection, the operation—including overflow—uses the chosen fixed width;
+it does not promote to `int`, `integer`, `float`, or `decimal`. This rule covers
+`+`, `-`, `*`, integral `div`/`%`, bitwise operations, and shifts. Constants
+must still fit exactly; runtime results wrap as specified above. `/` is not an
+integer-lane operator in Lambda: it is true division and exits through the
+non-sized mapping in §3.3.2, consistent with ADR §4.7.
+
+#### 3.3.2 Sized integer × non-sized number
+
+A mixed sized/non-sized expression leaves the machine domain before the
+operation. First map the sized integer by its **complete type domain**, never by
+the current value:
+
+| Sized integer source | Non-sized entry type |
+|---|---|
+| `i8/i16/i32/u8/u16/u32` | `int` |
+| `i64/u64` (`int64/uint64`) | `integer` |
+
+Then meet that entry type with the other non-sized operand through §2.5:
+
+| Sized integer | with `int` | with `float` | with `integer` | with `decimal` |
+|---|---|---|---|---|
+| `i8/i16/i32/u8/u16/u32` | `int` | `float` | `integer` | `decimal` |
+| `i64/u64` | `integer` | `decimal` | `integer` | `decimal` |
+
+Consequences:
+
+- `255u8 + 1u8 → 0u8`, but `255u8 + 1 → 256` as `int`;
+- `9223372036854775807i64 + 1 → 9223372036854775808` as `integer`;
+- `18446744073709551615u64 + 1 → 18446744073709551616` as `integer`;
+- `1i64 + 0.5` and `1u64 + 0.5` both produce `decimal`;
+- small and large `u64` values take the same route. There is no
+  `u64 ≤ INT64_MAX → int64` rule.
+
+For `/`, map every sized integer operand through this section even when both
+operands are sized; the selected non-sized domain controls the result:
+`i8 / u8` enters `int / int → float`, while `i64 / u64` enters
+`integer / integer → decimal`. Integral `div` and `%` stay in the selected
+sized lane when both operands are sized, or in the selected `int`/`integer`
+domain after a sized/non-sized mix. A sized integer mixed with `f16`/`f32` is
+category mixing rather than sized-integer arithmetic: map the integer as above,
+map the sized float to `float`, and use §2.5. Mixed sized floats where one
+exactly contains the other retain the wider sized-float lane
+(`f16 + f32 → f32`).
+
+This operational promotion is conversion, not `is`-subtyping (§3.4). Operand
+types alone select the route. Result overflow may still trigger flex-`int`'s
+documented `int → float` behavior after both operands have entered `int`; that
+is an arithmetic result rule, not value-directed operand promotion.
 
 ### 3.4 `is` and `type()`: subsumption by exact embedding; containers invariant
 
@@ -97,7 +181,11 @@ Sized scalar arithmetic follows the Go spec — no UB, no overflow panic, no opt
 > **T1 ⊑ T2 ⟺ every T1 value embeds exactly (value-preserving) into T2's value domain.**
 > `x is T` ⟺ `type(x) ⊑ T` · with a type on the left, **`T1 is T2` ⟺ T1 ⊑ T2** (`int is integer` → true) · aliases resolve first (§3.2) · unions check membership · `type(x) == T` remains the exact check.
 
-The derived lattice over all scalar numeric types — sized and semantic follow the *same* rule:
+The derived lattice over all scalar numeric types — sized and semantic follow
+the *same* subsumption rule. This lattice governs `is`, assignment, and exact
+embedding. It does not replace §3.3.1's explicit machine-lane selection when
+both arithmetic operands are sized; when an expression leaves the sized domain,
+§3.3.2 uses this lattice to select its exact non-sized entry type.
 
 - **Widening within a kind:** `i8 ⊑ i16 ⊑ i32 ⊑ int ⊑ int64 ⊑ integer ⊑ decimal` · `u8 ⊑ u16 ⊑ u32 ⊑ int` and `u32 ⊑ u64 ⊑ integer` · `f16 ⊑ f32 ⊑ float ⊑ decimal` · `int ⊑ float`.
 - **Cross signed/unsigned:** `u8 ⊑ i16`, `u16 ⊑ i32`, `u32 ⊑ int64` — **never the reverse; `i* ⋢ u*`, ever** (negatives). *(user-confirmed)*
@@ -133,7 +221,7 @@ The case table (rows marked ✗ supersede earlier rulings/goldens):
 | `var xs: i8[]` passed to `pn f(var a: int[])` | **compile error** | `var`-borrow invariance (§9.2/C12) |
 | `type(1.0f64)` | `float` | canonical output (§3.2) |
 
-**Tests to pin:** trues — `1u8 is u16`, `42i8 is i16` (golden migration, W1), `2.5f32 is float`, `42i8 is int`, `5 is i64`, `1.0 is decimal`, `int is integer`, `[1i8] is [int]`; falses — `1.0 is f32`, `1i16 is f16`, `5 is u8`, `1i64 is float`, `[1.5] is [i8]`; compile-error negative — `var i8[]` argument to a `var int[]` parameter (`test/lambda/negative/semantic/`).
+**Tests to pin:** trues — `1u8 is u16`, `42i8 is i16` (golden migration, W1), `2.5f32 is float`, `42i8 is int`, `5 is i64`, `1.0 is decimal`, `int is integer`, `[1i8] is [int]`; falses — `1.0 is f32`, `1i16 is f16`, `5 is u8`, `1i64 is float`, `[1.5] is [i8]`; compile-error negative — `var i8[]` argument to a `var int[]` parameter (`test/lambda/negative/semantic/`). Arithmetic pins — same-lane wrap (`255u8 + 1u8 → 0u8`), mixed-sized lane selection (`i8 + u8 → i16`, `i64 + u64 → u64`), sized/non-sized exit (`255u8 + 1 → int`, `i64 + int → integer`, `u64 + int → integer`), magnitude independence at both sides of `INT64_MAX`, symmetric `i64/u64 + float → decimal`, sized `div` remaining in its machine lane, and true division exiting (`i8 / u8 → float`, `i64 / u64 → decimal`).
 
 ### 3.5 Lane tags: one tag per representation
 
@@ -146,8 +234,8 @@ The set of names `type()` can return **is** the set of runtime numeric types —
 
 | Canonical `type()` output | Accepted input aliases | Kind |
 |---|---|---|
-| `int` | — | value type (tiered internally) |
-| `int64` | `i64` | native 64-bit signed (today's tier/type; W5 may revisit) |
+| `int` | — | value type; compact safe-integer band |
+| `int64` | `i64` | native 64-bit signed sized type |
 | `uint64` | `u64` | native 64-bit unsigned (FFI/lane boundary) |
 | `integer` | — | value type, unbounded |
 | `float` | `f64` | value type, binary64 |
@@ -165,7 +253,16 @@ Never returned: `number` (union), `f64`/`i64`/`u64` (aliases), tier names. Array
 
 JS number *is* binary64; the mapping is exact by construction (NaN, ±Infinity, −0 included). **Compact-int packing is removed from `js_make_number`** — with it go the integer fast path, the `-0` special case, and the `JS_SYMBOL_BASE` guard (symbols keep the packed encoding; numbers never use it). The obligation that "every JS-visible surface keys on value, never representation" — the discipline that produced the `v18p` −0 bug and the Stage-4C int-vs-float inference family — is dissolved rather than policed.
 
-**Perf plan, eyes open:** every boxed JS number heap-allocates (Lambda tags pointers; no NaN-boxing). Mitigations: MIR inference keeps hot-path numbers as raw unboxed doubles in registers (and *simplifies* — one JS numeric type to infer); number-dense JS arrays store as float64 typed lanes; nursery bump allocation. **Gate: node-baseline runtime + benchmark suite before/after (W4)** — the regression budget is a conscious decision. Doubles do exact integer arithmetic to 2⁵³, so integer-heavy JS stays correct by construction — the JS spec's own model.
+**Perf plan, eyes open:** JS Number uses Lambda's canonical float encoding.
+Most doubles are self-tagged in the `Item`; out-of-band transient values use an
+activation/caller number home, and retained values normally copy into
+destination-owned scalar storage. Only a bare-Item persistent boundary without
+a natural owner uses the explicit interim GC fallback. MIR inference keeps hot
+numbers as raw doubles in registers, and number-dense JS arrays use float64
+lanes. The resulting allocation/rooting behavior is governed by
+`Lambda_Design_Stack_API.md`, not by a JS-specific heap-boxing rule. Doubles do
+exact integer arithmetic through 2⁵³, so integer-heavy JS follows the JS
+specification's own precision envelope.
 
 ### 5.2 Ingress (JS → Lambda)
 
@@ -207,13 +304,20 @@ An API wanting JS-`number` ergonomics returns `int`; exactness is then guarantee
 - **Overloading `<`/`<=` for subtyping** — rejected: ⊑ is partial, C11's value order (which type values participate in, for `sort`/`order by`) must stay total; one operator cannot carry both. Julia's dedicated `<:` is the precedent for a separate spelling; Lambda's spelling is `is` with a type on the left.
 - **Python-`decimal`-style all-rounded arithmetic** (loses exactness of ±×) and **exact rationals** (Raku/Racket — a different type philosophy where `1/3` is a rational).
 - **JS's BigInt throw-on-mix** — JS throws for lack of an exact meeting type; Lambda's `decimal` is that type (§2.5).
+- **Value-directed `u64` normalization** (`u64 ≤ INT64_MAX → int64`, otherwise
+  decimal) — rejected: two values of one type must not take different promotion
+  paths. `u64` enters `integer` whenever it mixes with a non-sized number
+  (§3.3.2), irrespective of magnitude.
+- **Promoting every mixed pair of sized integers out of the machine domain** —
+  rejected by the 2026-07-20 decision. Lambda selects a sized result lane, then
+  applies Go arithmetic and overflow semantics (§3.3.1).
 - **The `n`/`N` dual suffixes** — precision-context control on literals; moved to operations.
 
 **Precedent index:** Go spec (sized arithmetic, constants, conversions — §3.3's source) · V8's Smi (what §5.1 deliberately walks away from, trading representation cleverness for one clean rule) · C#/SQL name-aliasing (§3.2) · Java BigDecimal vs Python decimal vs rationals (§2.4's family choice) · IEEE 754-2008 / TC39 Decimal + PostgreSQL/SQL Server/Oracle (the division rule's two parents) · Python's unbounded ints (the accepted exact-arithmetic performance trade) · NumPy pairwise summation (the K19 sibling policy for reductions).
 
 ## 7. Cross-references
 
-**`../doc/Lambda_Formal_Semantics.md` — the ADR this doc amends**: §4 Numerics [C3 integers/lattice, C13 decimal tiers, C8.5a float↔decimal, §4.6 float printing, §4.7 division] · §5 Equality [C8] · §6 Ordering [C11] · §9.2 Covariance [C12] — per its own section↔ledger mapping table · `Lambda_Semantics_Formal.md`/`Formal2.md` (the decision records behind those entries; A8 = the variance implementation gap, Part 2 item 11) · `Lambda_Semantics_Features.md` §1.8 **G7** (this is the numeric row of the per-guest projection table; G3 error-mapping is the sibling) · `Lambda_Design_Concurrency.md` K16/§4.6 (the membrane §5 simplifies) · K19 (deterministic reductions; the same order-as-spec philosophy) · K28 (the best-effort banner W2 rides) · `Lambda_Type_Numbers.md` (sized-scalar implementation doc — **must align to §3.4**, see Part 2) · `test/lambda/int53_boundary.ls`, `decimal_tiers.ls`, `sized_numeric_type_annot.ls` (the tests that gain siblings).
+**`../doc/Lambda_Formal_Semantics.md` — the ADR this doc amends**: §4 Numerics [C3 integers/lattice, C13 decimal tiers, C8.5a float↔decimal, §4.6 float printing, §4.7 division] · §5 Equality [C8] · §6 Ordering [C11] · §9.2 Covariance [C12] — per its own section↔ledger mapping table · `Lambda_Semantics_Formal.md`/`Formal2.md` (the decision records behind those entries; A8 = the variance implementation gap, Part 2 item 11) · `Lambda_Semantics_Features.md` §1.8 **G7** (this is the numeric row of the per-guest projection table; G3 error-mapping is the sibling) · `Lambda_Design_Concurrency.md` K16/§4.6 (the membrane §5 simplifies) · K19 (deterministic reductions; the same order-as-spec philosophy) · K28 (the best-effort banner W2 rides) · `Lambda_Type_Numbers.md`, `Lambda_Type_Int.md`, and `Lambda_Type_Int_Sized.md` (implementation-facing numeric records; the latter still requires W10 synchronization) · `test/lambda/int53_boundary.ls`, `decimal_tiers.ls`, `sized_numeric_type_annot.ls` (the tests that gain siblings).
 
 ---
 
@@ -225,7 +329,7 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 
 | # | Item | Status | Violates |
 |---|---|---|---|
-| 1 | `js_make_number` compact-int packing + `-0` special case + `JS_SYMBOL_BASE` guard (`js_runtime_value.cpp:1071`) | **Fixed in current tree:** `js_make_number` always boxes `LMD_TYPE_FLOAT`. | §5.1 |
+| 1 | `js_make_number` compact-int packing + `-0` special case + `JS_SYMBOL_BASE` guard (`js_runtime_value.cpp:1071`) | **Fixed in current tree:** `js_make_number` always emits the canonical `LMD_TYPE_FLOAT` representation. | §5.1 |
 | 2 | Dual double lane tags `ELEM_FLOAT`/`ELEM_FLOAT64`: the dead-but-armed **truncation landmine** in `print.cpp:23` (`read_compact_elem` FLOAT64 → `i2it`), the JS seam (`Float64Array` → `ELEM_FLOAT64` vs inference → `ELEM_FLOAT`), reductions routing FLOAT64 via the generic slow path (`lambda-eval-num.cpp:1385`), `validate_pattern.cpp:111` collapsing both to one leaf | **Fixed:** `ELEM_FLOAT64` is the single canonical double lane at `0x10`; `ELEM_FLOAT` is only a source-compatibility alias, the retired `0xC0` slot has size `0`, JS `Float64Array` and `[float]` inference produce the same lane, and the duplicate slow/dead branches are removed. | §3.5 |
 | 3 | `LIT_TYPE_F64` as a distinct static type object (`build_ast.cpp:3181`) | **Fixed:** `f64` input canonicalizes to `float` literals/type refs; `TYPE_F64`/`LIT_TYPE_F64` now point at `TYPE_FLOAT`. | §3.2 |
 | 4 | Any `type()` path reporting `"f64"` (the superseded draft direction) | **Fixed for new values:** `type(1.0f64)` reports `float`; the legacy scalar `LMD_TYPE_FLOAT64` compatibility tag remains distinct from the ArrayNum lane merge. | §4 |
@@ -236,18 +340,22 @@ Deliberately informal — a snapshot of divergences found while designing v2, ea
 | 9 | `is` test coverage vs the final §3.4 semantics: missing pins (trues: `1u8 is u16`, `2.5f32 is float`, `42i8 is int`, `5 is i64`, `int is integer`; falses: `1.0 is f32`, `1i16 is f16`, `5 is u8`, `[1i8] is [int]`) **and one existing golden to flip** (`42i8 is i16`: false → true, `sized_numeric_type_annot.txt`) | **Fixed:** scalar/type-left pins and array covariance pins are covered in `sized_numeric_semantics`; `sized_numeric_type_annot.txt` golden flipped. | §3.4 |
 | 10 | `Lambda_Type_Numbers.md` documents the superseded lattice `is` semantics | **Fixed:** doc now says `f64` aliases to canonical `float` and `is` uses exact-embedding widening. | §3.4 |
 | 11 | **A8** (`Lambda_Semantics_Formal.md`): `is`-subtyping and assignment-subtyping disagree for arrays (`var ys: any[] = xs` fails at `ensure_typed_array`), and the failure is a **log-only error with silent continuation** — `ys` left invalid, program keeps running | **Fixed:** `is`/validator checks support covariant numeric arrays, including `ArrayNum` and range occurrence checks. Typed-array assignment coercion widens by value: `ArrayNum → any[]` boxes each element, `ArrayNum → int[]/float[]/int64[]` allocates a widened typed copy, and boxed sized-scalar payloads are decoded before widening. MIR failed-coercion sites halt before storing a null typed-array pointer, and the legacy generated-C assignment expression emits the same null guard when that source path is built. The intentional remaining restriction is `var`-parameter invariance, per §3.4/ADR §9.2, not an implementation gap. | §3.4 covariant-assignment + error-enforcement discipline |
+| 12 | Ordinary arithmetic normalizes every compact sized integer to `int64`, keeps `int64 + int` in `int64`, and selects `uint64 → int64/decimal` by comparing the runtime value with `INT64_MAX` (`normalize_sized`, `lambda-eval-num.cpp`) | **Open — W10:** replace the normalization shortcut with the type-directed §3.3.2 entry map. Both small and large `u64` must enter `integer`; compact sized integers must enter `int`; `i64/u64 + float` must enter `decimal`. | §3.3.2, P1 |
+| 13 | The implementation-facing number/type records, historical sized-int plan, Stack API summary, public numeric guide, and LR detailed-design set contained pre-realignment promotion or scalar-storage wording | **Fixed in the 2026-07-20 documentation synchronization.** Historical threshold work remains visible but is explicitly superseded; the new implementation work is centralized in `Lambda_Impl_Numbers.md`. | §3.1, §3.3 |
+| 14 | `doc/Lambda_Formal_Semantics.md` §4.3 said `integer / integer → decimal`, while §4.7 over-generalized `/` as unconditionally float-producing; §4.1 used `/` instead of `div` in the `MinInt / -1` machine-overflow example | **Fixed:** true-division results are domain-selected (`int/int → float`, `integer/integer → decimal`), and the machine-overflow example now uses `MinInt div -1`. | §2.2, §2.5, §3.3.2 |
 
 ## 9. Scheduled work & migrations (W)
 
 - **W1** — Done for literal suffix semantics and affected goldens: integer-valued `n` literals retype to `integer`; decimal goldens shifted under §2.4 exactness; `N`-suffix scripts migrated or now fail at parse time; the `42i8 is i16` golden has flipped under the final §3.4 lattice.
 - **W2** — Done for the v2 BigInt helper/conversion scope: radix string conversion, large string parsing, wide shifts, wide `asIntN`/`asUintN`, Buffer/DataView/BigInt typed-array 64-bit paths, BigInt typed-array `fill()`, fs BigInt positions, BigInt bitwise/shift MIR typing, and huge-exponent sign/identity cases are all implemented and pinned. The remaining caps (`100000` precision digits / shift bits) are explicit implementation guardrails, not host-width narrowing.
 - **W3** — Done for the v2 host-egress scope: lossless raw `int64`/`uint64` egress uses BigInt, while public Node APIs whose contract is JS `number` now construct Numbers explicitly for fs stats/statfs defaults, os memory/cpu counters, fs read/write byte counts, WriteStream `bytesWritten`, and net/http socket counters/high-water marks. `{ bigint: true }` stats/statfs paths remain BigInt. Internal ids/status constants/ports stay safe-band numeric implementation details, and host option readers that consume JS numeric literals now accept integral float-backed Numbers before narrowing to native ports/fds/high-water marks.
-- **W4** — Implemented and accepted by regression gate rather than a separate perf budget document: `js_make_number` now always boxes `LMD_TYPE_FLOAT`; typed lanes remain the mitigation for dense numeric arrays. The current closeout gate is semantic regression safety (`make build`, focused JS/fs/os/BigInt fixtures, and `make test-lambda-baseline`/JS harness checks), with future perf tuning tracked outside this semantics proposal if benchmark deltas become material.
-- **W5** — Deferred design question (not v2): `int64`-tier overflow promoting to `integer` (Python-style full tower). Needs its own C3 amendment; §5.3 egress is unaffected either way.
+- **W4** — Implemented and accepted by regression gate rather than a separate perf budget document: `js_make_number` now always emits canonical `LMD_TYPE_FLOAT`; self-tagging, activation number homes, and typed lanes avoid a mandatory GC allocation per Number. The current closeout gate is semantic regression safety (`make build`, focused JS/fs/os/BigInt fixtures, and `make test-lambda-baseline`/JS harness checks), with future perf tuning tracked outside this semantics proposal if benchmark deltas become material.
+- **W5** — **Decided 2026-07-20:** flex-`int` result overflow continues to promote to float, not `integer`. The conversion of each in-range operand is exact, but the overflowing result is correctly rounded and may lose integer precision above the safe band. This is the accepted practical/performance tradeoff recorded in §2.1; no C3 amendment is planned.
 - **W6** — Done per §5.3: `js_to_number` warns once per native caller when a regular Lambda `decimal` crosses into JS `Number` through the lossy `decimal_to_double` path, while JS BigInt (`DECIMAL_BIGINT`) still throws before any warning. The warning site table is mutex-protected, resets with the JS batch lifecycle, and the LambdaJS audit found no direct decimal-egress bypass outside `js_to_number`.
-- **W7** — Done for current docs: parser literals, AST range checks, MIR/runtime arithmetic, conversions, `is`/`type()`, the number-specific doc, public type/data/cheatsheet/formal docs, the typed-array note, and the core runtime number dev doc now align with §3.3–§3.4 and the BigInt/egress fixes. Older historical proposals may still preserve their original design context; they are not normative.
+- **W7** — Done for the original v2 scope: parser literals, AST range checks, conversions, `is`/`type()`, public docs, and runtime number docs were synchronized with the earlier §3.3–§3.4 and BigInt/egress decisions. The 2026-07-20 arithmetic revision intentionally reopens only the promotion subset tracked by W10.
 - **W8** — Done: the §3.5 ArrayNum lane merge now uses `ELEM_FLOAT64` as the single double tag at `0x10`, keeps `ELEM_FLOAT` only as a compatibility alias, retires the duplicate `0xC0` slot, closes the JS `Float64Array` seam, and removes doubled branches.
-- **W9** — Suffix split migration (A.5): grammar gains `m` (all numeric spellings) and restricts `n` to integer-valued spellings (fractional/negative-exponent `n` → compile error naming `m`); AST literal typing drops the lexical *typing* rule (`n` → `integer`, `m` → `decimal`, unconditionally); fractional-`n` scripts and goldens migrate to `m`; docs (`Lambda_Data.md`, cheatsheet, reference) follow.
+- **W9** — **Done:** the suffix split migration (A.5) added `m` for all decimal spellings, restricted `n` to integer-valued spellings, made the suffix determine the type unconditionally, migrated fractional-`n` scripts/goldens, and synchronized the public docs.
+- **W10** — **Open implementation; documentation synchronized 2026-07-20:** remove all magnitude-directed `u64` promotion; keep sized-integer × sized-integer `+ - * div %`, bitwise operations, and shifts in the Lambda-selected machine lane with Go overflow behavior; map compact sized integers to `int` and `i64/u64` to `integer` before any sized/non-sized operation or true `/`; route 64-bit integer + float through decimal; update evaluator, AST, MIR, and legacy C static/result inference; add magnitude-independence, boundary, overflow, division, and result-type tests. The executable work packages and gates are in `Lambda_Impl_Numbers.md`.
 
 ### 9.1 Verification snapshot (2026-07-10)
 

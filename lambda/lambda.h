@@ -96,7 +96,7 @@ enum EnumTypeId {
     LMD_TYPE_NUM_SIZED,  // inline sized numerics (i8..u32, f16, f32) — packed in Item
     LMD_TYPE_INT,    // int literal, just 32-bit
     LMD_TYPE_INT64,  // int literal, 64-bit
-    LMD_TYPE_UINT64, // unsigned 64-bit integer (heap-allocated pointer)
+    LMD_TYPE_UINT64, // unsigned 64-bit integer (number-home or owned pointer)
     LMD_TYPE_FLOAT,  // float literal, 64-bit
     LMD_TYPE_FLOAT64, // legacy reserved tag; f64 syntax canonicalizes to LMD_TYPE_FLOAT
     LMD_TYPE_DECIMAL,
@@ -288,9 +288,10 @@ static inline int elem_type_is_compact(ArrayNumElemType et) {
 #define u16_to_item(v)  NUM_SIZED_PACK(NUM_UINT16, (uint32_t)(uint16_t)(v))
 #define u32_to_item(v)  NUM_SIZED_PACK(NUM_UINT32, (uint32_t)(v))
 
-// uint64 packing macro (heap-allocated pointer, like int64)
+// uint64 Items point at a raw 64-bit payload owned by a number home or an
+// explicit persistent owner. Transient producers must use box_uint64_value().
 #define u64_to_item(uint64_ptr) \
-    ((uint64_ptr) ? ((((uint64_t)LMD_TYPE_UINT64) << 56) | (uint64_t)(uint64_ptr)) : ITEM_NULL)
+    lambda_uint64_ptr_to_item_bits((const uint64_t*)(uint64_ptr))
 
 // Get human-readable name for a NumSizedType sub-type
 #ifdef __cplusplus
@@ -507,6 +508,7 @@ typedef enum SysFunc {
     SYSFUNC_BNOT,
     SYSFUNC_SHL,
     SYSFUNC_SHR,
+    SYSFUNC_USHR,
     SYSFUNC_TO_PROMISE,       // toPromise(handle) - JS Promise adapter
     // procedural functions
     SYSPROC_NOW,
@@ -867,6 +869,9 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
 Item lambda_item_adopt_scalar_home(Item item, uint64_t* home);
+// Counts actual GC rehomes at ownerless Item boundaries, by wide scalar type.
+// Small inline values and already-GC values do not contribute.
+uint64_t lambda_scalar_heap_rehome_count(TypeId type_id);
 Item lambda_item_heap_rehome(Item item);
 #ifdef __cplusplus
 }
@@ -1031,11 +1036,6 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_JS_ITER_DONE_SENTINEL UINT64_C(0x9F00DEAD00000000)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 #define ITEM_INT64          ((uint64_t)LMD_TYPE_INT64 << 56)
-// Compact INT64 values use bit 55 as an immediate discriminator. Lambda's
-// integer value band ends at bit 52, while ordinary user pointers must keep
-// this payload bit clear under the tagged-pointer ABI.
-#define ITEM_INT64_INLINE_MARK UINT64_C(0x0080000000000000)
-#define ITEM_INT64_INLINE_MASK UINT64_C(0x007FFFFFFFFFFFFF)
 // BigInt reuses LMD_TYPE_DECIMAL; distinguished by Decimal.unlimited == DECIMAL_BIGINT
 #define DECIMAL_BIGINT      2
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
@@ -1160,33 +1160,18 @@ static inline void assert_raw_item_pointer(const void* ptr) {
 #define INT56_MAX  ((int64_t)9007199254740991LL)   // +(2^53 - 1)
 #define INT56_MIN  ((int64_t)-9007199254740991LL)  // -(2^53 - 1)
 
-static inline bool lambda_int64_fits_inline(int64_t value) {
-    return value >= INT56_MIN && value <= INT56_MAX;
-}
-
-static inline bool lambda_item_is_inline_int64_bits(uint64_t item) {
-    return (uint8_t)(item >> 56) == LMD_TYPE_INT64 &&
-           (item & ITEM_INT64_INLINE_MARK) != 0;
-}
-
-static inline uint64_t lambda_inline_int64_to_item_bits(int64_t value) {
-    if (!lambda_int64_fits_inline(value)) return ITEM_ERROR;
-    return ITEM_INT64 | ITEM_INT64_INLINE_MARK |
-           ((uint64_t)value & ITEM_INT64_INLINE_MASK);
-}
-
-static inline int64_t lambda_inline_int64_value(uint64_t item) {
-    // Discard the tag and discriminator, then sign-extend payload bit 54.
-    return (int64_t)(item << 9) >> 9;
-}
-
 static inline uint64_t lambda_int64_ptr_to_item_bits(const int64_t* ptr) {
     if (!ptr) return ITEM_NULL;
     uint64_t payload = (uint64_t)(uintptr_t)ptr;
-    // The discriminator must never alias a tagged pointer. Fail closed if a
-    // future address-space ABI exceeds the payload contract.
-    if (payload & (ITEM_HIGH_BYTE_MASK | ITEM_INT64_INLINE_MARK)) return ITEM_ERROR;
+    if (payload & ITEM_HIGH_BYTE_MASK) return ITEM_ERROR;
     return ITEM_INT64 | payload;
+}
+
+static inline uint64_t lambda_uint64_ptr_to_item_bits(const uint64_t* ptr) {
+    if (!ptr) return ITEM_NULL;
+    uint64_t payload = (uint64_t)(uintptr_t)ptr;
+    if (payload & ITEM_HIGH_BYTE_MASK) return ITEM_ERROR;
+    return ((uint64_t)LMD_TYPE_UINT64 << 56) | payload;
 }
 
 inline uint64_t b2it(uint8_t bool_val) {
@@ -1223,7 +1208,7 @@ static inline Item lambda_float_ptr_to_item(const double* double_ptr) {
 #define y2it(sym_ptr)        ((sym_ptr)? ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr)): ITEM_NULL)
 #define x2it(bin_ptr)        ((bin_ptr)? ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr)): ITEM_NULL)
 #define k2it(dtime_ptr)      ((dtime_ptr)? ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr)): ITEM_NULL)
-#define u2it(uint64_ptr)     ((uint64_ptr)? ((((uint64_t)LMD_TYPE_UINT64)<<56) | (uint64_t)(uint64_ptr)): ITEM_NULL)
+#define u2it(uint64_ptr)     lambda_uint64_ptr_to_item_bits((const uint64_t*)(uint64_ptr))
 
 // Float16/Float32 packing into NUM_SIZED Items
 // float32: store IEEE 754 binary32 bit pattern in low 32 bits
@@ -1615,13 +1600,13 @@ extern "C" {
 
     Item flt2it(double dval);  // canonical double -> Item encoder
     Item push_d(double dval);
-    Item push_l(int64_t lval);
     Item box_int64_value(int64_t lval);
-    Item box_int64_value_safe(int64_t val);
-    Item push_l_safe(int64_t val);  // safe boxing: detects already-boxed INT64 Items
+    // Compatibility boundary for legacy native helpers whose raw int64 result
+    // uses INT64_ERROR as an out-of-band failure signal.
+    Item box_int64_result_or_error(int64_t lval);
+    Item box_uint64_value(uint64_t uval);
     Item push_d_safe(double val);   // safe boxing: detects already-boxed FLOAT Items
     Item push_k(DateTime dtval);
-    Item push_k_safe(DateTime val); // safe boxing: detects already-boxed DTIME Items
     Item push_c(int64_t cval);
 
     // Const pool pointer — modules override this single macro to redirect to module-local consts
@@ -1632,7 +1617,7 @@ extern "C" {
     #define const_c2it(index)    c2it(_const_pool[index])
     #define const_s2it(index)    s2it(_const_pool[index])
     #define const_y2it(index)    y2it(_const_pool[index])
-    #define const_k2it(index)    k2it(_const_pool[index])
+    #define const_k2it(index)    push_k(const_k(index))
     #define const_x2it(index)    x2it(_const_pool[index])
 
     #define const_s(index)      ((String*)_const_pool[index])
@@ -1642,6 +1627,7 @@ extern "C" {
 
     // item unboxing
     int64_t it2l(Item item);
+    uint64_t it2u(Item item);
     double it2d(Item item);
     bool it2b(Item item);
     int64_t it2i(Item item);
@@ -2088,6 +2074,7 @@ extern "C" {
     Item fn_bnot_item(Item a);
     Item fn_shl_item(Item a, Item b);
     Item fn_shr_item(Item a, Item b);
+    Item fn_ushr_item(Item a, Item b);
 
     // compound assignment support (procedural only)
     Item fn_mutable_value(Item value);

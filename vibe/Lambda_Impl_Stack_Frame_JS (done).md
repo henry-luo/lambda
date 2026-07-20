@@ -4,6 +4,10 @@
 **Date:** 2026-07-15
 **Design:** `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20). **Phase 1:** `vibe/Lambda_Impl_Stack_Frame.md` (Lambda MIR-Direct + shared runtime). This plan brings the JS transpiler and JS runtime onto the same architecture.
 
+> **Scalar-storage successor:** `vibe/Lambda_Design_Stack_API.md` Phase 7
+> supersedes this completed plan's pre-Phase-7 `INT64`/`DTIME` inventory.
+> Transient `INT64`/`UINT64` use number homes and `DTIME` is always GC-owned.
+
 ---
 
 ## 0. Completion record (2026-07-15)

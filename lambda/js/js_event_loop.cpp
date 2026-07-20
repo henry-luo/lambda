@@ -772,7 +772,7 @@ extern "C" Item js_timeout_hasRef(Item this_val) {
 
 // Timeout.refresh() — no-op, returns this
 extern "C" Item js_timeout_refresh(Item this_val) {
-    return this_val;
+    return timeout_this_or_arg(this_val);
 }
 
 // Timeout[Symbol.toPrimitive]() — returns the timer id
@@ -793,10 +793,13 @@ static Item make_timer_object(int64_t id, JsClass cls) {
 
     // bind methods
     extern Item js_new_function(void* fn, int nargs);
-    Item ref_fn = js_new_function((void*)js_timeout_ref, 0);
-    Item unref_fn = js_new_function((void*)js_timeout_unref, 0);
-    Item hasRef_fn = js_new_function((void*)js_timeout_hasRef, 0);
-    Item refresh_fn = js_new_function((void*)js_timeout_refresh, 0);
+    // Native timeout methods use one Item ABI argument (the JS argument or
+    // undefined). Declaring zero made the invoke trampoline call a P0 function
+    // even though these handlers read Item this_val, corrupting `@@toPrimitive`.
+    Item ref_fn = js_new_function((void*)js_timeout_ref, 1);
+    Item unref_fn = js_new_function((void*)js_timeout_unref, 1);
+    Item hasRef_fn = js_new_function((void*)js_timeout_hasRef, 1);
+    Item refresh_fn = js_new_function((void*)js_timeout_refresh, 1);
 
     js_property_set(obj, (Item){.item = s2it(heap_create_name("ref", 3))}, ref_fn);
     js_property_set(obj, (Item){.item = s2it(heap_create_name("unref", 5))}, unref_fn);

@@ -1,8 +1,8 @@
 # Common function, representation, MIR, and frame API
 
-**Status:** Phases 0 through 6 implemented and verified (2026-07-20);
-Phase 7 scalar-type realignment proposed, with GC fallback chosen for currently
-ownerless persistent numeric slots
+**Status:** Phases 0 through 7 implemented (2026-07-20). Phase 7 retains an
+explicit, measured GC fallback for ownerless persistent numeric Items; the
+long-term no-standalone-numeric-heap direction remains deferred.
 
 **Scope:** MIR-direct compilation for Lambda and LambdaJS
 
@@ -36,9 +36,8 @@ finalization are shared, and immutable per-variant analysis drives generated
 call ABI and scalar-home decisions for both Lambda and LambdaJS.
 
 **Scalar-storage and return decision:** legacy callee-frame donation is
-replaced by **activation-owned canonical scalar homes**. Phases 0 through 6
-apply this to pointer-backed `INT64`, out-of-band `FLOAT`, and `DTIME`. Phase 7
-realigns the type set: `INT64` and `UINT64` have no inline form and use number
+replaced by **activation-owned canonical scalar homes**. Phase 7 realigns the
+type set: `INT64` and `UINT64` have no inline form and use number
 homes while transient, while `DTIME` becomes always heap-backed. A generated
 callee returns a transient numeric `Item` through a **caller-donated canonical
 scalar return home**: it copies the one-word payload into the supplied home,
@@ -59,8 +58,7 @@ hidden argument is enabled.
 
 ### Implementation result
 
-Phases 0 through 6 are complete. Phase 7 is a proposed representation
-realignment and is not yet implemented. The completed implementation provides:
+Phases 0 through 7 are complete. The completed implementation provides:
 
 - C-compatible value/ABI/effect contracts and immutable function variants;
 - one normalized import/direct-call path and one conservative raw-call funnel;
@@ -70,6 +68,14 @@ realignment and is not yet implemented. The completed implementation provides:
   hidden caller-home operand confined to internal direct calls;
 - normal/error lane adoption, discard scratch, tail-home validation, wrapper
   heap rehoming, and full callee watermark restoration;
+- full-domain `INT64`/`UINT64` transient homes, unsigned caller-home transfer,
+  destination-owned scalar storage, and `ushr` lowering for Lambda and
+  LambdaJS. The high-`u64` corruption repair landed in this implementation
+  round, but its magnitude-based promotion policy was later superseded by the
+  type-directed number model and is tracked in `Lambda_Impl_Numbers.md`;
+- GC-owned datetime objects with no number-home return or relocation lane;
+- a counted `lambda_item_heap_rehome()` fallback only for Item-only numeric
+  persistence without a natural destination owner;
 - conservative metadata and representation fallback where an edge is not yet
   profitable to specialize, without a second frame or call implementation.
 
@@ -96,8 +102,8 @@ Final verification:
 | Gate | Result |
 |---|---|
 | `make build-test` | passed |
-| `make test-lambda-baseline` | 3,487/3,487 passed |
-| `make test262-baseline` | 40,261/40,261 passed; 0 unstable, 0 failed, 0 regressions |
+| `make test-lambda-baseline` | 3,494/3,494 passed (1,389 runtime + 2,105 input baseline) |
+| `make test262-baseline` | 40,261/40,261 fully passed; 0 non-fully-passing, 0 failed, 0 regressions, 0.0s retry time |
 | `make test-gc-rooting` | JS JIT, randomized forced-GC, JS MIR interpreter, and Lambda MIR Direct passed; metadata/root audits clean |
 | release million-iteration probes | Lambda wide returns, Lambda local boxing, and LambdaJS wide returns remained bounded and correct |
 | final `make release` | passed after profiling instrumentation was removed |
@@ -1154,11 +1160,10 @@ one word without changing the generated-call ABI. The same scalar homes are
 used by local conversions and imported results; "return home" names the
 generated-call ABI role, not the only source of an activation scalar.
 
-This is a representation and ownership change, not merely a return-classifier
-edit. The Phase 0-through-6 implementation still permits compact inline
-`INT64`, keeps `UINT64` heap-backed, and places `DTIME` on the number stack.
-Phase 7 must change all producers, consumers, storage boundaries, runtime
-classifiers, and tests together.
+This was a representation and ownership change, not merely a return-classifier
+edit. Phase 7 changed all producers, consumers, storage boundaries, runtime
+classifiers, and tests together: compact inline `INT64`, heap-backed transient
+`UINT64`, and number-stack `DTIME` are removed.
 
 #### Float discriminator contract
 
@@ -1474,9 +1479,8 @@ the physical split.
 
 ## 12. Migration plan
 
-**Completion:** Phases 0 through 6 are implemented. Phase 7 is proposed and
-remains open. The staged wording is retained as the migration record and
-dependency order.
+**Completion:** Phases 0 through 7 are implemented. The staged wording below
+is retained as the migration record and dependency order.
 
 ### Phase 0: freeze contracts and add diagnostics
 
@@ -1575,41 +1579,40 @@ must not be added while a runtime-indirect pointer can still target the body.
 - remove legacy per-language frame helpers and stale metadata tables;
 - update the stack MIR and rooting design documents to the final API names.
 
-### Phase 7: realign `INT64`, `UINT64`, and `DTIME` storage
+### Phase 7: realign `INT64`, `UINT64`, and `DTIME` storage — implemented
 
-- remove the compact inline `INT64` encoding and its producer, decoder,
+- removed the compact inline `INT64` encoding and its producer, decoder,
   discriminator, GC-filter, and container special cases;
-- make transient `INT64` and `UINT64` producers use the same one-word number
+- made transient `INT64` and `UINT64` producers use the same one-word number
   homes regardless of value magnitude;
-- add `UINT64` to exact and dynamic scalar-home classification, imported-result
+- added `UINT64` to exact and dynamic scalar-home classification, imported-result
   adoption, generated return lanes, caller-home transfer, discard scratch, and
   heap/persistent rehoming;
-- remove `DTIME` from number-stack allocation, scalar-home classification,
+- removed `DTIME` from number-stack allocation, scalar-home classification,
   caller-home transfer, owned scalar tails, and number-frame rebasing;
-- make every datetime constructor and producer return a GC-heap-owned datetime
+- made every datetime constructor and producer return a GC-heap-owned datetime
   object, including runtime materialization of datetime literals/constants,
   retaining the same semantic `DTIME` Item tag while allowing the heap object
   layout to grow beyond 64 bits later;
-- make arrays, maps/objects, closure environments, module/global bindings,
+- made arrays, maps/objects, closure environments, module/global bindings,
   async/generator frames, and task/promise state own their persistent
   `INT64`/`UINT64` payloads instead of retaining activation pointers;
-- audit every Item-only public return, opaque retaining call, singleton runtime
+- audited every Item-only public return, opaque retaining call, singleton runtime
   slot, external embedding boundary, and cross-thread handoff using the
   scenario list in section 15;
-- use an immutable GC scalar cell for every persistent `DOUBLE`/`INT64`/`UINT64`
+- used an immutable GC scalar cell for every persistent `DOUBLE`/`INT64`/`UINT64`
   slot that has no natural owner; retain the audit counts so this interim
   fallback can be revisited;
-- record the general no-heap direction for `DOUBLE`/`INT64`/`UINT64`: no
+- recorded the general no-heap direction for `DOUBLE`/`INT64`/`UINT64`: no
   standalone heap payload, no GC-root classification, and no collector object
   cases after the transitional persistent fallback is removed. This is a
   deferred goal, not part of Phase 7 acceptance;
-- delete the transitional representation paths only after old and new
+- deleted the transitional representation paths after old and new
   encodings cannot be mixed inside one runtime.
 
-Phase 7 changes the shared runtime `Item` representation, so C2MIR does not gain
-the hidden caller-home ABI but must pass compatibility tests against the new
-runtime producers and decoders. Phases 0 through 6 otherwise leave C2MIR
-unchanged.
+Phase 7 changed the shared runtime `Item` representation. C2MIR does not gain
+the hidden caller-home ABI; it remains a compatibility path against the new
+runtime producers and decoders.
 
 ## 13. Verification and acceptance gates
 
@@ -1650,6 +1653,22 @@ Every migration phase should pass:
 - release-build performance measurements. Debug builds must not be used for
   performance conclusions.
 
+### Phase 7 execution record (2026-07-20)
+
+The completed scalar realignment passed `make build` and `make build-test`.
+`make test-lambda-baseline` completed with 1,389 runtime tests and 2,105 input
+baseline tests passed, with 0 failed. The captured `make test262-baseline` run
+completed 40,261/40,261 baseline tests fully passed, with 0 non-fully-passing,
+0 failed, 0 regressions, and 0.0 seconds in retry processing.
+
+The debug-MIR control compares the same implementation body immediately before
+and after the relevant Phase 7 lowering cleanup. Lambda
+`_phase7_dtime_return_107` fell from 31 instructions/21 locals to 22
+instructions/15 locals (29.0% fewer instructions). LambdaJS
+`_js_phase7BigIntReturn_146_body` fell from 17 instructions/10 locals to 15
+instructions/9 locals (11.8% fewer instructions). These are body-frame counts,
+so the reduction is not hidden in a public wrapper.
+
 The common API is complete only when:
 
 - Lambda and JS no longer own separate generated root-frame state;
@@ -1688,17 +1707,16 @@ sharp is what allows the implementation to be both shared and fast.
 
 ## 15. Numeric scalar representation realignment
 
-**Status:** proposed Phase 7; GC scalar-cell fallback selected for persistent
-slots without a natural owner. The general direction is that `DOUBLE`,
+**Status:** implemented Phase 7; GC scalar-cell fallback is active and counted
+for persistent slots without a natural owner. The general direction is that `DOUBLE`,
 `INT64`, and `UINT64` ultimately have no standalone heap representation and are
 not GC-rootable value classes; that final step is deferred.
 
-The Phase 0-through-6 implementation grew from different historical storage
-rules: small `INT64` values may be inline, wide `INT64` and `DTIME` may use the
-number stack, and `UINT64` is heap-backed. Phase 7 replaces that split with a
-type-consistent ownership model. Integer magnitude no longer selects a boxed
-representation, signed and unsigned 64-bit integers use the same lifetime
-mechanics, and datetime leaves the numeric stack entirely.
+Before Phase 7, small `INT64` values could be inline, wide `INT64` and `DTIME`
+could use the number stack, and `UINT64` was heap-backed. Phase 7 replaced that
+split with a type-consistent ownership model. Integer magnitude no longer
+selects a boxed representation, signed and unsigned 64-bit integers use the
+same lifetime mechanics, and datetime leaves the numeric stack entirely.
 
 ### 15.1 Target storage matrix
 
@@ -1820,8 +1838,10 @@ and ownerless cross-thread handoff.
 This is an interim lifetime decision, not a claim that numeric payloads belong
 in the GC domain. It lets Phase 7 realign local, return, and destination-owned
 storage without simultaneously changing every public or foreign lifetime ABI.
-The audit inventory remains required so the fallback cost and remaining edges
-are known rather than hidden behind one generic rehome helper.
+`lambda_scalar_heap_rehome_count(INT64/UINT64/FLOAT)` counts actual fallback
+allocations, rather than treating a numeric tag as proof of heap ownership.
+The audit inventory therefore keeps the remaining edge cost visible behind the
+single rehome helper.
 
 The future alternatives remain:
 
@@ -1841,10 +1861,11 @@ mechanically checkable lifetime contract.
 
 The decision gate is an inventory with counts for each remaining heap rehome:
 public return, retained argument, singleton slot, embedding boundary, and
-cross-thread transfer. A future phase may remove the numeric GC fallback only if
-that inventory reaches zero or every remaining edge is changed to an explicit
-home/handle/borrow contract. Until then the GC heap remains the required
-fail-closed behavior.
+cross-thread transfer. The current counter is per numeric type; split
+per-boundary attribution is a future diagnostic refinement. A future phase may
+remove the numeric GC fallback only if that inventory reaches zero or every
+remaining edge is changed to an explicit home/handle/borrow contract. Until
+then the GC heap remains the required fail-closed behavior.
 
 ### 15.6 Deferred direction: non-heap, non-GC numeric scalar classes
 

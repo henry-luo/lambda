@@ -845,11 +845,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         return {.item = x2it(copied)};
     } else if constexpr (Tag == LMD_TYPE_DTIME) {
         DateTime* dt = typed.ptr();
-        // DateTime is uint64_t bitfield, allocate from arena
-        DateTime* dt_ptr = (DateTime*)arena_alloc(arena_, sizeof(DateTime));
-        if (!dt_ptr) return ItemNull;
-        *dt_ptr = *dt;
-        return {.item = k2it(dt_ptr)};
+        return dt ? push_k(*dt) : ItemNull;
     } else if constexpr (Tag == LMD_TYPE_DECIMAL) {
         // Use centralized decimal_deep_copy function
         return decimal_deep_copy(item, arena_, false);

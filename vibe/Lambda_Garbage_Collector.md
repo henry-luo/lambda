@@ -4,6 +4,14 @@ Status: Phases 1–4 Complete (In Progress)
 Date: 2026-02-24
 Last Updated: 2026-02-24
 
+> **Historical migration record.** The `num_stack`, reference-counting, and
+> numeric-lifetime descriptions below are the starting point of the 2026 GC
+> migration, not the current runtime. Current GC behavior is specified by
+> `doc/dev/lambda/LR_08_Memory_and_GC.md`; current scalar ownership is specified
+> by `vibe/Lambda_Design_Stack_API.md` Phase 7. In particular, `DTIME` is always
+> GC-owned, while `DOUBLE`/`INT64`/`UINT64` normally use self-tagged values,
+> number homes, or destination-owned storage rather than the retired nursery.
+
 ---
 
 ## Executive Summary

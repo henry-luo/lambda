@@ -768,11 +768,10 @@ static bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
         *out = lambda_float_ptr_to_item(&t->double_val);
         return true;
     }
-    case LMD_TYPE_DTIME: {
-        TypeDateTime* t = (TypeDateTime*)node->type;
-        out->item = k2it(&t->datetime);
-        return true;
-    }
+    case LMD_TYPE_DTIME:
+        // Static containers cannot own a GC datetime.  Leave this expression
+        // dynamic so its runtime path materializes a traced heap object.
+        return false;
     case LMD_TYPE_DECIMAL: {
         TypeDecimal* t = (TypeDecimal*)node->type;
         out->item = c2it(t->decimal);
@@ -958,6 +957,16 @@ static Type* infer_bitwise_call_type(SysFunc fn, AstNode* first_arg, AstNode* se
         int bits = 0;
         return type_sized_integer_info(left, &is_unsigned, &bits) ?
             sized_integer_type_for(is_unsigned, bits) : NULL;
+    }
+    case SYSFUNC_USHR: {
+        bool is_unsigned = false;
+        int bits = 0;
+        if (type_sized_integer_info(left, &is_unsigned, &bits)) {
+            return sized_integer_type_for(true, bits);
+        }
+        if (left && left->type_id == LMD_TYPE_INT64) return &TYPE_UINT64;
+        // Lambda's unsized int follows the documented ToUint32 lane.
+        return left && left->type_id == LMD_TYPE_INT ? &TYPE_U32 : NULL;
     }
     default:
         return NULL;

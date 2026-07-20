@@ -816,14 +816,12 @@ extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
     AutoAssertNoGC no_gc((Context*)context);
     switch (get_type_id(item)) {
     case LMD_TYPE_INT64:
-        if (item.is_inline_int64()) return item;
+    case LMD_TYPE_UINT64:
         break;
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:
         if ((item.item & ITEM_DBL_MASK) || item.item == ITEM_FLOAT_P0 ||
                 item.item == ITEM_FLOAT_N0) return item;
-        break;
-    case LMD_TYPE_DTIME:
         break;
     default:
         return item;
@@ -837,28 +835,63 @@ extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
     case LMD_TYPE_INT64:
         *(int64_t*)home = item.get_int64();
         return {.item = l2it((int64_t*)home)};
+    case LMD_TYPE_UINT64:
+        *(uint64_t*)home = item.get_uint64();
+        return {.item = u2it((uint64_t*)home)};
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: {
         double value = item.get_double();
         memcpy(home, &value, sizeof(value));
         return lambda_float_ptr_to_item((double*)home);
     }
-    case LMD_TYPE_DTIME:
-        *(DateTime*)home = item.get_datetime();
-        return {.item = k2it((DateTime*)home)};
     default:
         return item;
     }
 }
 
+static volatile uint64_t scalar_heap_rehome_counts[3];
+
+static int scalar_heap_rehome_type_index(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_INT64: return 0;
+    case LMD_TYPE_UINT64: return 1;
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT64: return 2;
+    default: return -1;
+    }
+}
+
+static void scalar_heap_rehome_note(TypeId type_id) {
+    int index = scalar_heap_rehome_type_index(type_id);
+    if (index >= 0) {
+        // This boundary has no destination-owned scalar slot, so the copy is
+        // deliberately observable until that ABI can donate a retired home.
+        __atomic_fetch_add(&scalar_heap_rehome_counts[index], 1,
+            __ATOMIC_RELAXED);
+    }
+}
+
+extern "C" uint64_t lambda_scalar_heap_rehome_count(TypeId type_id) {
+    int index = scalar_heap_rehome_type_index(type_id);
+    return index < 0 ? 0 : __atomic_load_n(&scalar_heap_rehome_counts[index],
+        __ATOMIC_RELAXED);
+}
+
 extern "C" Item lambda_item_heap_rehome(Item item) {
     switch (get_type_id(item)) {
     case LMD_TYPE_INT64: {
-        if (item.is_inline_int64()) return item;
         int64_t* value = (int64_t*)heap_alloc(sizeof(int64_t), LMD_TYPE_INT64);
         if (!value) return ItemError;
         *value = item.get_int64();
+        scalar_heap_rehome_note(LMD_TYPE_INT64);
         return {.item = l2it(value)};
+    }
+    case LMD_TYPE_UINT64: {
+        uint64_t* value = (uint64_t*)heap_alloc(sizeof(uint64_t), LMD_TYPE_UINT64);
+        if (!value) return ItemError;
+        *value = item.get_uint64();
+        scalar_heap_rehome_note(LMD_TYPE_UINT64);
+        return {.item = u2it(value)};
     }
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: {
@@ -867,13 +900,8 @@ extern "C" Item lambda_item_heap_rehome(Item item) {
         double* value = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         if (!value) return ItemError;
         *value = item.get_double();
+        scalar_heap_rehome_note(LMD_TYPE_FLOAT);
         return {.item = d2it(value)};
-    }
-    case LMD_TYPE_DTIME: {
-        DateTime* value = (DateTime*)heap_alloc(sizeof(DateTime), LMD_TYPE_DTIME);
-        if (!value) return ItemError;
-        *value = item.get_datetime();
-        return {.item = k2it(value)};
     }
     default:
         return item;
@@ -881,14 +909,12 @@ extern "C" Item lambda_item_heap_rehome(Item item) {
 }
 
 Item box_int64_value(int64_t lval) {
-    if (lambda_int64_fits_inline(lval)) {
-        return {.item = lambda_inline_int64_to_item_bits(lval)};
-    }
     if (!context || (!context->side_number_top && !lambda_side_stack_bind(context))) {
-        log_error("push_l called with invalid context");
+        log_error("int64 number-home boxing called with invalid context");
         return ItemError;
     }
-    // Only genuinely wide INT64 values need stable backing storage.
+    // INT64 never uses an inline Item so every transient value follows the
+    // same return and ownership protocol regardless of magnitude.
     int64_t *lptr = (int64_t*)lambda_side_number_alloc(context);
     if (!lptr) {
         lambda_stack_overflow_error("number-side-stack");
@@ -898,44 +924,27 @@ Item box_int64_value(int64_t lval) {
     return {.item = l2it(lptr)};
 }
 
-// Legacy result-channel adapter. New code should use box_int64_value so the
-// full int64 domain, including INT64_MAX, remains representable.
-Item push_l(int64_t lval) {
+Item box_uint64_value(uint64_t uval) {
+    if (!context || (!context->side_number_top && !lambda_side_stack_bind(context))) {
+        log_error("uint64 number-home boxing called with invalid context");
+        return ItemError;
+    }
+    // UINT64 shares the one-word scalar-home protocol with INT64; transient
+    // unsigned values must not allocate a standalone GC payload.
+    uint64_t* uptr = lambda_side_number_alloc(context);
+    if (!uptr) {
+        lambda_stack_overflow_error("number-side-stack");
+        return ItemError;
+    }
+    *uptr = uval;
+    return {.item = u2it(uptr)};
+}
+
+// Native helpers that return raw int64_t retain this historical error channel.
+// Ordinary language values must call box_int64_value(), which preserves INT64_MAX.
+Item box_int64_result_or_error(int64_t lval) {
     if (lval == INT64_ERROR) return ItemError;
     return box_int64_value(lval);
-}
-
-Item box_int64_value_safe(int64_t val) {
-    uint8_t tag = (uint64_t)val >> 56;
-    if (tag == LMD_TYPE_INT64) return {.item = (uint64_t)val};
-    if (tag == LMD_TYPE_INT) {
-        Item item = {.item = (uint64_t)val};
-        return box_int64_value(item.get_int56());
-    }
-    return box_int64_value(val);
-}
-
-// Safe version of push_l that detects already-boxed INT64 Items.
-// When the MIR JIT passes a value that's already a boxed INT64 Item
-// (from a runtime function return), this prevents double-boxing.
-// Also handles boxed INT Items by extracting and re-boxing as INT64.
-Item push_l_safe(int64_t val) {
-    uint8_t tag = (uint64_t)val >> 56;
-    if (tag == LMD_TYPE_INT64) {
-        // Already a boxed INT64 Item — return as-is
-        Item result;
-        result.item = (uint64_t)val;
-        return result;
-    }
-    if (tag == LMD_TYPE_INT) {
-        // This is a boxed INT Item — extract the int value and re-box as INT64
-        Item itm;
-        itm.item = (uint64_t)val;
-        int64_t real_val = (int64_t)itm.get_int56();
-        return push_l(real_val);
-    }
-    // Raw int64 value — box normally
-    return push_l(val);
 }
 
 // Safe version of push_d that detects already-boxed FLOAT Items.
@@ -958,42 +967,6 @@ Item push_d_safe(double val) {
     }
     // Raw double value — box normally
     return push_d(val);
-}
-
-Item push_k(DateTime val) {
-    // check for DateTime error sentinel before pushing
-    if (DATETIME_IS_ERROR(val)) {
-        log_debug("push_k: received DateTime error sentinel");
-        return ItemError;
-    }
-    if (!context || (!context->side_number_top && !lambda_side_stack_bind(context))) {
-        log_error("push_k called with invalid context");
-        return ItemError;
-    }
-    DateTime *dtptr = (DateTime*)lambda_side_number_alloc(context);
-    if (!dtptr) {
-        lambda_stack_overflow_error("number-side-stack");
-        return ItemError;
-    }
-    *dtptr = val;
-    return {.item = k2it(dtptr)};
-}
-
-// Safe version of push_k that detects already-boxed DTIME Items.
-// When the MIR JIT passes a value that's already a boxed DTIME Item
-// (from a runtime function return), this prevents double-boxing.
-Item push_k_safe(DateTime val) {
-    uint64_t bits;
-    memcpy(&bits, &val, sizeof(bits));
-    uint8_t tag = bits >> 56;
-
-    if (tag == LMD_TYPE_DTIME) {
-        // Already a boxed DTIME Item — return as-is
-        Item result;
-        result.item = bits;
-        return result;
-    }
-    return push_k(val);
 }
 
 extern "C" void heap_finalize_gc_objects(gc_heap_t *gc) {

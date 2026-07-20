@@ -65,7 +65,7 @@ A run of `lambda script.ls` threads through these stages (full detail in [LR_01]
 ### Part II — Data & types
 
 - **[LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md)** — the tagged `Item`, the `TypeId` storage classes, boxing/unboxing, the `Container` family and map shapes, and the static `Type*` family.
-- **[LR_04 — Numbers, Decimal & DateTime](LR_04_Numbers_Decimal_DateTime.md)** — the `INT`/`INT64`/`FLOAT`/`DECIMAL` numeric tower, overflow handling, libmpdec decimals/BigInt, and packed DateTime.
+- **[LR_04 — Numbers, Decimal & DateTime](LR_04_Numbers_Decimal_DateTime.md)** — the `int`/`integer`/`float`/`decimal` value tower, sized-machine arithmetic, overflow handling, libmpdec decimal/integer carriers, and GC-owned DateTime.
 - **[LR_05 — Strings, Symbols & Vectors](LR_05_Strings_and_Vectors.md)** — UTF-8 strings, utf8proc normalization, and the `ArrayNum` vector machinery (auto-vectorization, broadcasting, mutable views, the image toolkit).
 
 ### Part III — Compilation backend
