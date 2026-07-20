@@ -79,6 +79,11 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     input_context = nullptr;
     _lambda_rt = (Context*)&pump_ctx;
     js_dom_set_document(doc);
+    // A native handler can enqueue a Promise callback after inserting its DOM
+    // (Popper and virtual-list libraries do this). Commit that insertion before
+    // flushing the callback so its geometry reads sample a frame boundary,
+    // rather than forcing layout from the getter itself.
+    radiant_reconcile_js_dom_mutations(uicon, doc);
     js_dom_observers_post_layout();
     bool pumped = true;
     if (action == RADIANT_JS_LOOP_ADVANCE) {

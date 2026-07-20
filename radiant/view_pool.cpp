@@ -1263,6 +1263,28 @@ static void apply_css_transforms_to_bounds(View* view, float* x, float* y, float
     }
 }
 
+void view_get_visual_bounds(View* view, float* out_x, float* out_y,
+                            float* out_width, float* out_height) {
+    if (!view) {
+        if (out_x) *out_x = 0.0f;
+        if (out_y) *out_y = 0.0f;
+        if (out_width) *out_width = 0.0f;
+        if (out_height) *out_height = 0.0f;
+        return;
+    }
+
+    float x = 0.0f;
+    float y = 0.0f;
+    calculate_absolute_position(view, nullptr, &x, &y);
+    float width = view->width;
+    float height = view->height;
+    apply_css_transforms_to_bounds(view, &x, &y, &width, &height);
+    if (out_x) *out_x = x;
+    if (out_y) *out_y = y;
+    if (out_width) *out_width = width;
+    if (out_height) *out_height = height;
+}
+
 void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nullptr,
         bool trailing_comma = false, bool is_root = false) {
     // CSS Display Level 3: display:contents elements don't generate a box

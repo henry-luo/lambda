@@ -1,0 +1,14 @@
+{
+  "name": "DOM3: external module dependency",
+  "html": "test/ui/js_postdom_module_dependency_phase4.html",
+  "description": "Executes a local external module and its relative static dependency in the document realm.",
+  "events": [
+    {"type": "log", "message": "=== js_postdom_module_dependency_phase4 ==="},
+    {
+      "type": "assert_text",
+      "target": {"selector": "#result"},
+      "equals": "external-module",
+      "assert_timeout": 1000
+    }
+  ]
+}

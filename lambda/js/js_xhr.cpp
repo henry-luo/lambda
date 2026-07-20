@@ -8,6 +8,7 @@
  */
 
 #include "js_xhr.h"
+#include "js_event_loop.h"
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -44,7 +45,11 @@ struct XhrState {
     bool    in_use;
     char*   method;         // "GET", "POST", etc.
     char*   url;            // request URL
-    bool    async_flag;     // async (ignored — always sync in Radiant)
+    bool    async_flag;
+    bool    send_pending;
+    bool    async_dispatching;
+    uint32_t request_token;
+    char*   request_body;
     XhrHeader req_headers[MAX_HEADERS];
     int     req_header_count;
     int     ready_state;    // 0=UNSENT, 1=OPENED, 2=HEADERS_RECEIVED, 3=LOADING, 4=DONE
@@ -62,6 +67,28 @@ static XhrState _xhr_pool[MAX_XHR];
 static int _xhr_count = 0;
 static char* _xhr_base_url = nullptr;
 static XhrState* xhr_state_from_this();
+
+static void xhr_clear_response_headers(XhrState* xhr) {
+    if (!xhr) return;
+    for (int i = 0; i < xhr->resp_header_count; i++) {
+        if (xhr->resp_headers && xhr->resp_headers[i]) {
+            mem_free(xhr->resp_headers[i]);
+        }
+    }
+    if (xhr->resp_headers) mem_free(xhr->resp_headers);
+    xhr->resp_headers = nullptr;
+    xhr->resp_header_count = 0;
+}
+
+static void xhr_clear_response(XhrState* xhr) {
+    if (!xhr) return;
+    if (xhr->status_text) mem_free(xhr->status_text);
+    if (xhr->response_text) mem_free(xhr->response_text);
+    xhr->status_text = nullptr;
+    xhr->response_text = nullptr;
+    xhr->response_size = 0;
+    xhr_clear_response_headers(xhr);
+}
 
 // ============================================================================
 // Helpers
@@ -136,20 +163,17 @@ static void xhr_fire_readystatechange(XhrState* xhr) {
 static void xhr_free_state(XhrState* xhr) {
     if (xhr->method) { mem_free(xhr->method); xhr->method = nullptr; }
     if (xhr->url) { mem_free(xhr->url); xhr->url = nullptr; }
-    if (xhr->status_text) { mem_free(xhr->status_text); xhr->status_text = nullptr; }
+    xhr_clear_response(xhr);
     if (xhr->override_mime_type) {
         mem_free(xhr->override_mime_type);
         xhr->override_mime_type = nullptr;
     }
-    if (xhr->response_text) { mem_free(xhr->response_text); xhr->response_text = nullptr; }
+    if (xhr->request_body) { mem_free(xhr->request_body); xhr->request_body = nullptr; }
     for (int i = 0; i < xhr->req_header_count; i++) {
         if (xhr->req_headers[i].name) mem_free(xhr->req_headers[i].name);
         if (xhr->req_headers[i].value) mem_free(xhr->req_headers[i].value);
     }
     xhr->req_header_count = 0;
-    // resp_headers are owned by FetchResponse and freed via free_fetch_response
-    xhr->resp_headers = nullptr;
-    xhr->resp_header_count = 0;
     xhr->in_use = false;
 }
 
@@ -414,8 +438,11 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     // reset any previous request state
     if (xhr->method) mem_free(xhr->method);
     if (xhr->url) mem_free(xhr->url);
-    if (xhr->response_text) { mem_free(xhr->response_text); xhr->response_text = nullptr; }
-    if (xhr->status_text) { mem_free(xhr->status_text); xhr->status_text = nullptr; }
+    xhr_clear_response(xhr);
+    if (xhr->request_body) {
+        mem_free(xhr->request_body);
+        xhr->request_body = nullptr;
+    }
     if (xhr->override_mime_type) {
         mem_free(xhr->override_mime_type);
         xhr->override_mime_type = nullptr;
@@ -428,7 +455,12 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
 
     xhr->method = xhr_mem_strdup(method);
     xhr->url = xhr_resolve_url(url);
-    xhr->async_flag = true; // default true, ignored
+    TypeId async_type = get_type_id(async_arg);
+    xhr->async_flag = async_type == LMD_TYPE_UNDEFINED ||
+        async_type == LMD_TYPE_NULL || it2b(js_to_boolean(async_arg));
+    xhr->send_pending = false;
+    xhr->async_dispatching = false;
+    xhr->request_token++;
     xhr->status = 0;
     xhr->response_size = 0;
 
@@ -476,6 +508,45 @@ extern "C" Item js_xhr_override_mime_type(Item mime_arg) {
     return make_js_undef();
 }
 
+static Item js_xhr_async_send_task(Item id_arg, Item token_arg) {
+    if (get_type_id(id_arg) != LMD_TYPE_INT ||
+        get_type_id(token_arg) != LMD_TYPE_INT) {
+        return make_js_undef();
+    }
+    int id = (int)it2i(id_arg);
+    uint32_t token = (uint32_t)it2i(token_arg);
+    if (id < 0 || id >= _xhr_count) return make_js_undef();
+    XhrState* xhr = &_xhr_pool[id];
+    if (!xhr->in_use || !xhr->send_pending || xhr->request_token != token ||
+        xhr->ready_state != 1) {
+        return make_js_undef();
+    }
+
+    // A queued XMLHttpRequest must not start after open() or abort() replaced
+    // its request state. The monotonic token makes that lifecycle boundary
+    // explicit even when the pool slot is reused by the same JS object.
+    xhr->async_dispatching = true;
+    Item result = js_xhr_send(ItemNull);
+    xhr->async_dispatching = false;
+    return result;
+}
+
+static bool xhr_schedule_async_send(XhrState* xhr) {
+    if (!xhr) return false;
+    int id = (int)(xhr - _xhr_pool);
+    Item args[2] = {
+        (Item){.item = i2it(id)},
+        (Item){.item = i2it((int64_t)xhr->request_token)},
+    };
+    Item task = js_bind_function(
+        js_new_function((void*)js_xhr_async_send_task, 2), xhr->js_object,
+        args, 2);
+    if (get_type_id(task) != LMD_TYPE_FUNC) return false;
+    Item delay = {.item = i2it(0)};
+    Item timer = js_setTimeout(task, delay);
+    return get_type_id(timer) != LMD_TYPE_NULL;
+}
+
 extern "C" Item js_xhr_send(Item body_arg) {
     XhrState* xhr = xhr_state_from_this();
     if (!xhr) return make_js_undef();
@@ -484,6 +555,36 @@ extern "C" Item js_xhr_send(Item body_arg) {
         log_error("xhr: send() called in wrong state (%d)", xhr->ready_state);
         return make_js_undef();
     }
+
+    if (!xhr->async_dispatching) {
+        if (xhr->request_body) {
+            mem_free(xhr->request_body);
+            xhr->request_body = nullptr;
+        }
+        TypeId body_type = get_type_id(body_arg);
+        if (body_type != LMD_TYPE_NULL && body_type != LMD_TYPE_UNDEFINED) {
+            const char* body = fn_to_cstr(body_arg);
+            if (body) xhr->request_body = xhr_mem_strdup(body);
+        }
+        xhr->send_pending = true;
+        xhr->request_token++;
+
+        Item loadstart_cb = xhr_get_prop(xhr->js_object, "onloadstart");
+        if (get_type_id(loadstart_cb) == LMD_TYPE_FUNC) {
+            js_call_function(loadstart_cb, xhr->js_object, nullptr, 0);
+        }
+        if (xhr->ready_state != 1 || !xhr->send_pending) {
+            return make_js_undef();
+        }
+        if (xhr->async_flag) {
+            if (!xhr_schedule_async_send(xhr)) {
+                xhr->send_pending = false;
+                log_error("xhr: unable to schedule asynchronous request");
+            }
+            return make_js_undef();
+        }
+    }
+    xhr->send_pending = false;
 
     // Build FetchConfig
     FetchConfig config = {};
@@ -495,11 +596,7 @@ extern "C" Item js_xhr_send(Item body_arg) {
     config.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:139.0) Gecko/20100101 Firefox/139.0";
 
     // body
-    const char* body_str = nullptr;
-    TypeId body_type = get_type_id(body_arg);
-    if (body_type != LMD_TYPE_NULL && body_type != LMD_TYPE_UNDEFINED) {
-        body_str = fn_to_cstr(body_arg);
-    }
+    const char* body_str = xhr->request_body;
     if (body_str) {
         config.body = body_str;
         config.body_size = strlen(body_str);
@@ -521,12 +618,6 @@ extern "C" Item js_xhr_send(Item body_arg) {
     config.header_count = xhr->req_header_count;
 
     log_debug("xhr: send() %s %s", xhr->method, xhr->url);
-
-    // fire onloadstart
-    Item loadstart_cb = xhr_get_prop(xhr->js_object, "onloadstart");
-    if (get_type_id(loadstart_cb) == LMD_TYPE_FUNC) {
-        js_call_function(loadstart_cb, xhr->js_object, nullptr, 0);
-    }
 
     if (xhr->url && strncmp(xhr->url, "file:", 5) == 0) {
         const char* path = xhr->url + 5;
@@ -610,6 +701,8 @@ extern "C" Item js_xhr_abort(void) {
         return make_js_undef(); // nothing to abort
     }
 
+    xhr->send_pending = false;
+    xhr->request_token++;
     xhr->ready_state = 4;
     xhr->status = 0;
     xhr_set_int(xhr->js_object, "readyState", 4);
@@ -686,13 +779,6 @@ extern "C" Item js_xhr_get_all_response_headers(void) {
 extern "C" void js_xhr_reset(void) {
     for (int i = 0; i < _xhr_count; i++) {
         if (_xhr_pool[i].in_use) {
-            // free copied response headers
-            for (int h = 0; h < _xhr_pool[i].resp_header_count; h++) {
-                if (_xhr_pool[i].resp_headers[h]) mem_free(_xhr_pool[i].resp_headers[h]);
-            }
-            if (_xhr_pool[i].resp_headers) mem_free(_xhr_pool[i].resp_headers);
-            _xhr_pool[i].resp_headers = nullptr;
-            _xhr_pool[i].resp_header_count = 0;
             xhr_free_state(&_xhr_pool[i]);
         }
     }

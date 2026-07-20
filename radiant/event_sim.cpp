@@ -509,17 +509,10 @@ static void get_element_center_abs(View* view, float* cx, float* cy) {
 // Get element absolute bounding rect (x, y, width, height)
 static void get_element_rect_abs(View* view, float* out_x, float* out_y, float* out_w, float* out_h) {
     if (!view) { *out_x = 0; *out_y = 0; *out_w = 0; *out_h = 0; return; }
-    float abs_x = 0, abs_y = 0;
-    View* current = view;
-    while (current) {
-        abs_x += current->x;
-        abs_y += current->y;
-        current = static_cast<View*>(current->parent);
-    }
-    *out_x = abs_x;
-    *out_y = abs_y;
-    *out_w = view->width;
-    *out_h = view->height;
+    // Position assertions describe painted geometry. The old parent-chain sum
+    // discarded CSS transforms, so a Popper translate was laid out correctly
+    // but the simulator still reported its pre-transform box.
+    view_get_visual_bounds(view, out_x, out_y, out_w, out_h);
 }
 
 // Serialize a Color to "rgb(R, G, B)" or "rgba(R, G, B, A)" string

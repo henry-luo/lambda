@@ -135,21 +135,6 @@ static void _select_refresh_cached_selected_options_for_node(DomNode* node);
 static void _select_ask_for_reset(DomElement* sel);
 static bool _get_selectedness(DomElement* opt);
 
-#define JS_DOM_RICH_HISTORY_CAP 64
-#define JS_DOM_RICH_HISTORY_PATH_CAP 32
-
-typedef struct JsDomRichHistoryBoundary {
-    bool valid;
-    uint32_t depth;
-    uint32_t path[JS_DOM_RICH_HISTORY_PATH_CAP];
-    uint32_t offset;
-} JsDomRichHistoryBoundary;
-
-typedef struct JsDomRichHistorySelection {
-    JsDomRichHistoryBoundary anchor;
-    JsDomRichHistoryBoundary focus;
-} JsDomRichHistorySelection;
-
 static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
                                       bool notify_mutation);
 
@@ -167,20 +152,6 @@ static String* js_dom_fragment_text(Item item) {
 static inline bool js_dom_is_internal_attr(const char* name) {
     return name && strncmp(name, "__lambda_", 9) == 0;
 }
-static char* js_dom_rich_history_snapshot(DomElement* owner);
-static bool js_dom_rich_history_capture_selection(
-    DocState* state, DomElement* owner, JsDomRichHistorySelection* out);
-static bool js_dom_rich_history_restore(DocState* state,
-                                        const EditingSurface* surface,
-                                        const EditingIntent* intent);
-static bool js_dom_rich_history_should_record(const EditingIntent* intent);
-static void js_dom_rich_history_record(DomElement* owner,
-                                       const char* before_html,
-                                       const char* after_html,
-                                       const JsDomRichHistorySelection* before_sel,
-                                       const JsDomRichHistorySelection* after_sel);
-static void js_dom_rich_history_reset();
-
 // ============================================================================
 // Unique type markers for DOM-adjacent Maps
 // ============================================================================
@@ -449,61 +420,12 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* targ
                            attribute_name, old_value);
 }
 
-static void js_dom_reset_mutation_records(DomDocument* doc) {
-    dom_js_mutation_records_reset(doc);
-}
-
 static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
-    if (!doc || !_js_current_ui_context) return false;
-    DocState* ds = doc->state ? (DocState*)doc->state : nullptr;
-    if (ds && ds->lifecycle == DOC_LIFECYCLE_COMMITTED &&
-        doc->view_tree && doc->view_tree->root &&
-        doc->js.mutation_count == 0) {
-        return true;
-    }
-
-    // Geometry reads after a mutation must observe same-thread layout. The old
-    // host-loop exception returned stale boxes because its workaround destroyed
-    // the live view pool; incremental layout preserves DOM ownership while
-    // satisfying the synchronous CSSOM View contract.
-    if (!ds) return doc->view_tree && doc->view_tree->root;
-    bool initial_layout = ds->lifecycle != DOC_LIFECYCLE_COMMITTED;
-
-    static __thread bool layout_flush_active = false;
-#ifndef NDEBUG
-    // Release builds erase log_debug arguments, so debug-only telemetry must
-    // not leave a write-only counter that fails the -Werror release build.
-    static __thread uint64_t layout_flush_count = 0;
-#endif
-    if (layout_flush_active) return doc->view_tree && doc->view_tree->root;
-    layout_flush_active = true;
-
-    EvalContext* saved_context = context;
-    Context* saved_input_context = input_context;
-    Context* saved_lambda_rt = _lambda_rt;
-    DomDocument* saved_doc = _js_current_ui_context->document;
-    _js_current_ui_context->document = doc;
-    // A parsed document may already own a provisional view tree while still
-    // lacking its first committed layout; geometry must commit that tree now.
-    layout_html_doc(_js_current_ui_context, doc,
-                    !initial_layout && doc->view_tree != nullptr);
-    _js_current_ui_context->document = saved_doc;
-    // A synchronous geometry query runs inside the caller's JS frame. Preserve
-    // its allocation contexts across layout helpers so subsequent property
-    // keys cannot observe a loader/parser context (or a cleared one).
-    context = saved_context;
-    input_context = saved_input_context;
-    _lambda_rt = saved_lambda_rt;
-    js_dom_reset_mutation_records(doc);
-    doc_state_clear_reflow(ds);
-    reflow_clear(ds);
-#ifndef NDEBUG
-    layout_flush_count++;
-    log_debug("dom-flush: synchronous geometry layout count=%llu",
-        (unsigned long long)layout_flush_count);
-#endif
-    layout_flush_active = false;
-    return doc->view_tree && doc->view_tree->root;
+    // DOM3 geometry is a read-only snapshot of the last committed layout.
+    // Forcing layout from a property getter re-entered the host loop during JS
+    // dispatch and made ordinary measurements a synchronous reflow hazard.
+    // A pending document reflow is consumed by the normal frame/layout phase.
+    return doc && doc->view_tree && doc->view_tree->root;
 }
 
 extern "C" bool js_dom_force_layout_for_geometry(void* dom_doc) {
@@ -1109,7 +1031,6 @@ extern "C" void* js_dom_current_active_text_control(void) {
 extern "C" void js_dom_batch_reset() {
     DocState* state = js_dom_current_state();
     js_dom_selection_reset();
-    js_dom_rich_history_reset();
     reset_live_dom_collections();
     reset_pending_iframe_loads();
     reset_dom_wrapper_cache();
@@ -1131,7 +1052,6 @@ extern "C" void js_dom_batch_reset() {
 }
 
 extern "C" void js_dom_shutdown() {
-    js_dom_rich_history_reset();
     reset_live_dom_collections();
     reset_pending_iframe_loads();
     reset_dom_wrapper_cache();
@@ -5177,6 +5097,16 @@ static float js_dom_inline_css_dimension(DomElement* elem,
     return js_dom_parse_positive_css_dimension(value);
 }
 
+static float js_dom_computed_css_dimension(DomElement* elem, bool width_axis) {
+    if (!elem) return 0.0f;
+    char value[64];
+    CssPropertyId property = width_axis ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
+    if (!css_prop_serialize_computed(elem, property, 0, value, sizeof(value))) {
+        return 0.0f;
+    }
+    return js_dom_parse_positive_css_dimension(value);
+}
+
 static int64_t js_dom_headless_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0;
     float layout_value = width_axis ? elem->width : elem->height;
@@ -5184,6 +5114,9 @@ static int64_t js_dom_headless_dimension(DomElement* elem, bool width_axis) {
 
     float css_value = js_dom_inline_css_dimension(
         elem, width_axis ? "width" : "height");
+    if (css_value <= 0.0f) {
+        css_value = js_dom_computed_css_dimension(elem, width_axis);
+    }
     if (css_value > 0.0f) return (int64_t)(css_value + 0.5f);
 
     StrBuf* text = strbuf_new_cap(32);
@@ -5192,6 +5125,17 @@ static int64_t js_dom_headless_dimension(DomElement* elem, bool width_axis) {
     if (text) strbuf_free(text);
     if (width_axis) return text_len > 0 ? (int64_t)text_len : 1;
     return 1;
+}
+
+static int64_t js_dom_geometry_dimension(DomElement* elem, bool width_axis) {
+    if (!elem) return 0;
+    js_dom_ensure_layout_for_geometry(elem->doc);
+    float layout_value = width_axis ? elem->width : elem->height;
+    if (layout_value > 0.0f) return (int64_t)(layout_value + 0.5f);
+    // Load-time scripts execute before the first host-loop commit. A resolved
+    // CSS length is a declaration lookup, not a reflow, and lets those scripts
+    // initialize against their declared container size without flushing layout.
+    return js_dom_headless_dimension(elem, width_axis);
 }
 
 // ============================================================================
@@ -5292,120 +5236,6 @@ static void collect_inner_html(DomNode* node, StrBuf* sb) {
             strbuf_append_char(sb, '>');
         }
     }
-}
-
-static char* js_dom_rich_history_snapshot(DomElement* owner) {
-    if (!owner) return nullptr;
-    StrBuf* sb = strbuf_new_cap(256);
-    if (!sb) return nullptr;
-    for (DomNode* child = js_dom_first_script_visible_child(owner); child;
-         child = js_dom_next_script_visible_sibling(child)) {
-        collect_inner_html(child, sb);
-    }
-    char* copy = mem_strdup(sb->str ? sb->str : "", MEM_CAT_JS_RUNTIME);
-    strbuf_free(sb);
-    return copy;
-}
-
-static bool js_dom_rich_history_capture_boundary(
-    DomElement* owner, const DomBoundary* boundary,
-    JsDomRichHistoryBoundary* out) {
-    if (out) memset(out, 0, sizeof(*out));
-    if (!owner || !boundary || !boundary->node || !out ||
-        !dom_boundary_is_valid(boundary)) {
-        return false;
-    }
-
-    DomNode* owner_node = (DomNode*)owner;
-    if (!js_dom_node_contains(owner_node, boundary->node)) return false;
-
-    uint32_t reverse_path[JS_DOM_RICH_HISTORY_PATH_CAP];
-    uint32_t depth = 0;
-    for (DomNode* cur = boundary->node; cur && cur != owner_node;
-         cur = cur->parent) {
-        if (depth == JS_DOM_RICH_HISTORY_PATH_CAP) return false;
-        uint32_t index = dom_node_child_index(cur);
-        if (index == UINT32_MAX) return false;
-        reverse_path[depth++] = index;
-    }
-
-    for (uint32_t i = 0; i < depth; i++) {
-        out->path[i] = reverse_path[depth - 1 - i];
-    }
-    out->depth = depth;
-    out->offset = boundary->offset;
-    out->valid = true;
-    return true;
-}
-
-static bool js_dom_rich_history_capture_selection(
-    DocState* state, DomElement* owner, JsDomRichHistorySelection* out) {
-    if (out) memset(out, 0, sizeof(*out));
-    if (!state || !owner || !out || !state->dom_selection ||
-        state->dom_selection->range_count == 0) {
-        return false;
-    }
-
-    DomBoundary anchor = dom_selection_anchor_boundary(state->dom_selection);
-    DomBoundary focus = dom_selection_focus_boundary(state->dom_selection);
-    bool anchor_ok = js_dom_rich_history_capture_boundary(
-        owner, &anchor, &out->anchor);
-    bool focus_ok = js_dom_rich_history_capture_boundary(
-        owner, &focus, &out->focus);
-    return anchor_ok && focus_ok;
-}
-
-static DomNode* js_dom_rich_history_child_at(DomElement* elem,
-                                             uint32_t index) {
-    if (!elem) return nullptr;
-    uint32_t i = 0;
-    for (DomNode* child = elem->first_child; child;
-         child = child->next_sibling, i++) {
-        if (i == index) return child;
-    }
-    return nullptr;
-}
-
-static bool js_dom_rich_history_resolve_boundary(
-    DomElement* owner, const JsDomRichHistoryBoundary* snapshot,
-    DomBoundary* out) {
-    if (!owner || !snapshot || !snapshot->valid || !out) return false;
-
-    DomNode* node = (DomNode*)owner;
-    for (uint32_t i = 0; i < snapshot->depth; i++) {
-        if (!node || !node->is_element()) return false;
-        node = js_dom_rich_history_child_at(node->as_element(),
-                                            snapshot->path[i]);
-    }
-    if (!node) return false;
-
-    uint32_t limit = dom_node_boundary_length(node);
-    out->node = node;
-    out->offset = snapshot->offset <= limit ? snapshot->offset : limit;
-    return true;
-}
-
-static bool js_dom_rich_history_restore_selection(
-    DocState* state, DomElement* owner,
-    const JsDomRichHistorySelection* snapshot) {
-    if (!state || !owner || !snapshot) return false;
-
-    DomBoundary anchor;
-    DomBoundary focus;
-    if (!js_dom_rich_history_resolve_boundary(owner, &snapshot->anchor,
-                                              &anchor) ||
-        !js_dom_rich_history_resolve_boundary(owner, &snapshot->focus,
-                                              &focus)) {
-        return false;
-    }
-
-    const char* exc = nullptr;
-    if (!state_store_set_selection(state, &anchor, &focus, &exc)) {
-        log_debug("js_dom_rich_history_restore_selection: rejected: %s",
-                  exc ? exc : "?");
-        return false;
-    }
-    return true;
 }
 
 static void js_dom_collapse_selection_before_child_replace(DomElement* elem,
@@ -5527,232 +5357,6 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
     log_debug("js_dom_replace_inner_html: replaced <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return true;
-}
-
-typedef struct JsDomRichHistoryEntry {
-    DomElement* owner;
-    char* before_html;
-    char* after_html;
-    JsDomRichHistorySelection before_sel;
-    JsDomRichHistorySelection after_sel;
-} JsDomRichHistoryEntry;
-
-static JsDomRichHistoryEntry js_dom_rich_history[JS_DOM_RICH_HISTORY_CAP];
-static uint32_t js_dom_rich_history_count = 0;
-static uint32_t js_dom_rich_history_cursor = 0;
-
-static void js_dom_rich_history_entry_clear(JsDomRichHistoryEntry* entry) {
-    if (!entry) return;
-    mem_free(entry->before_html);
-    mem_free(entry->after_html);
-    entry->owner = nullptr;
-    entry->before_html = nullptr;
-    entry->after_html = nullptr;
-    memset(&entry->before_sel, 0, sizeof(entry->before_sel));
-    memset(&entry->after_sel, 0, sizeof(entry->after_sel));
-}
-
-static void js_dom_rich_history_truncate_from(uint32_t start) {
-    if (start > js_dom_rich_history_count) start = js_dom_rich_history_count;
-    for (uint32_t i = start; i < js_dom_rich_history_count; i++) {
-        js_dom_rich_history_entry_clear(&js_dom_rich_history[i]);
-    }
-    js_dom_rich_history_count = start;
-    if (js_dom_rich_history_cursor > js_dom_rich_history_count) {
-        js_dom_rich_history_cursor = js_dom_rich_history_count;
-    }
-}
-
-static void js_dom_rich_history_reset() {
-    js_dom_rich_history_truncate_from(0);
-    js_dom_rich_history_cursor = 0;
-}
-
-static bool js_dom_rich_history_should_record(const EditingIntent* intent) {
-    if (!intent) return false;
-    switch (intent->type) {
-        case INPUT_INTENT_NONE:
-        case INPUT_INTENT_HISTORY_UNDO:
-        case INPUT_INTENT_HISTORY_REDO:
-        case INPUT_INTENT_SELECT_ALL:
-            return false;
-        default:
-            return true;
-    }
-}
-
-static void js_dom_rich_history_record(DomElement* owner,
-                                       const char* before_html,
-                                       const char* after_html,
-                                       const JsDomRichHistorySelection* before_sel,
-                                       const JsDomRichHistorySelection* after_sel) {
-    if (!owner || !before_html || !after_html ||
-        strcmp(before_html, after_html) == 0) {
-        return;
-    }
-
-    js_dom_rich_history_truncate_from(js_dom_rich_history_cursor);
-    if (js_dom_rich_history_count == JS_DOM_RICH_HISTORY_CAP) {
-        js_dom_rich_history_entry_clear(&js_dom_rich_history[0]);
-        memmove(&js_dom_rich_history[0], &js_dom_rich_history[1],
-                sizeof(js_dom_rich_history[0]) * (JS_DOM_RICH_HISTORY_CAP - 1));
-        js_dom_rich_history_count = JS_DOM_RICH_HISTORY_CAP - 1;
-        js_dom_rich_history_cursor = js_dom_rich_history_count;
-    }
-
-    JsDomRichHistoryEntry* entry =
-        &js_dom_rich_history[js_dom_rich_history_count];
-    entry->owner = owner;
-    entry->before_html = mem_strdup(before_html, MEM_CAT_JS_RUNTIME);
-    entry->after_html = mem_strdup(after_html, MEM_CAT_JS_RUNTIME);
-    if (before_sel) entry->before_sel = *before_sel;
-    else memset(&entry->before_sel, 0, sizeof(entry->before_sel));
-    if (after_sel) entry->after_sel = *after_sel;
-    else memset(&entry->after_sel, 0, sizeof(entry->after_sel));
-    if (!entry->before_html || !entry->after_html) {
-        js_dom_rich_history_entry_clear(entry);
-        return;
-    }
-    js_dom_rich_history_count++;
-    js_dom_rich_history_cursor = js_dom_rich_history_count;
-    log_debug("js_dom_rich_history_record: depth=%u cursor=%u",
-              js_dom_rich_history_count, js_dom_rich_history_cursor);
-}
-
-static bool js_dom_rich_history_restore(DocState* state,
-                                        const EditingSurface* surface,
-                                        const EditingIntent* intent) {
-    if (!state || !surface || !surface->owner || !intent ||
-        !editing_surface_is_rich(surface)) {
-        return false;
-    }
-
-    JsDomRichHistoryEntry* entry = nullptr;
-    const char* html = nullptr;
-    const JsDomRichHistorySelection* selection = nullptr;
-    if (intent->type == INPUT_INTENT_HISTORY_UNDO) {
-        if (js_dom_rich_history_cursor == 0) return false;
-        entry = &js_dom_rich_history[js_dom_rich_history_cursor - 1];
-        html = entry->before_html;
-        selection = &entry->before_sel;
-    } else if (intent->type == INPUT_INTENT_HISTORY_REDO) {
-        if (js_dom_rich_history_cursor >= js_dom_rich_history_count) return false;
-        entry = &js_dom_rich_history[js_dom_rich_history_cursor];
-        html = entry->after_html;
-        selection = &entry->after_sel;
-    } else {
-        return false;
-    }
-
-    if (!entry || entry->owner != surface->owner ||
-        !js_dom_node_is_connected((DomNode*)entry->owner) || !html) {
-        log_debug("js_dom_rich_history_restore: no matching live rich history entry");
-        return false;
-    }
-
-    if (!js_dom_replace_inner_html(entry->owner, html, false)) {
-        return false;
-    }
-
-    if (!js_dom_rich_history_restore_selection(state, entry->owner,
-                                               selection)) {
-        DomNode* owner_node = (DomNode*)entry->owner;
-        DomBoundary caret = { owner_node, 0 };
-        const char* exc = nullptr;
-        if (!state_store_set_selection(state, &caret, &caret, &exc)) {
-            log_debug("js_dom_rich_history_restore: fallback selection rejected: %s",
-                      exc ? exc : "?");
-        }
-    }
-
-    if (intent->type == INPUT_INTENT_HISTORY_UNDO) {
-        js_dom_rich_history_cursor--;
-    } else {
-        js_dom_rich_history_cursor++;
-    }
-    log_debug("js_dom_rich_history_restore: inputType=%s depth=%u cursor=%u",
-              input_intent_type_name(intent->type),
-              js_dom_rich_history_count, js_dom_rich_history_cursor);
-    return true;
-}
-
-typedef struct JsDomRichHistoryPending {
-    DomElement* owner;
-    char* before_html;
-    JsDomRichHistorySelection before_sel;
-} JsDomRichHistoryPending;
-
-extern "C" void* js_dom_rich_history_capture_before(
-        DocState* state,
-        const EditingSurface* surface,
-        const EditingIntent* intent) {
-    if (!state || !surface || !intent || !surface->owner ||
-        !editing_surface_is_rich(surface) ||
-        !js_dom_rich_history_should_record(intent)) {
-        return nullptr;
-    }
-
-    char* before_html = js_dom_rich_history_snapshot(surface->owner);
-    if (!before_html) return nullptr;
-
-    JsDomRichHistoryPending* pending =
-        (JsDomRichHistoryPending*)mem_calloc(1,
-            sizeof(JsDomRichHistoryPending), MEM_CAT_JS_RUNTIME);
-    if (!pending) {
-        mem_free(before_html);
-        return nullptr;
-    }
-    pending->owner = surface->owner;
-    pending->before_html = before_html;
-    js_dom_rich_history_capture_selection(state, surface->owner,
-                                          &pending->before_sel);
-    return pending;
-}
-
-extern "C" void js_dom_rich_history_commit_after(
-        DocState* state,
-        const EditingSurface* surface,
-        const EditingIntent* intent,
-        void* opaque_pending,
-        bool mutated) {
-    JsDomRichHistoryPending* pending =
-        (JsDomRichHistoryPending*)opaque_pending;
-    if (!pending) return;
-
-    if (mutated && state && surface && intent && surface->owner &&
-        pending->owner == surface->owner &&
-        js_dom_node_is_connected((DomNode*)surface->owner)) {
-        char* after_html = js_dom_rich_history_snapshot(surface->owner);
-        JsDomRichHistorySelection after_sel;
-        memset(&after_sel, 0, sizeof(after_sel));
-        js_dom_rich_history_capture_selection(state, surface->owner,
-                                              &after_sel);
-        js_dom_rich_history_record(surface->owner,
-                                   pending->before_html,
-                                   after_html,
-                                   &pending->before_sel,
-                                   &after_sel);
-        mem_free(after_html);
-    }
-
-    mem_free(pending->before_html);
-    mem_free(pending);
-}
-
-extern "C" bool js_dom_rich_history_restore_for_surface(
-        DocState* state,
-        const EditingSurface* surface,
-        InputIntentType input_type) {
-    if (input_type != INPUT_INTENT_HISTORY_UNDO &&
-        input_type != INPUT_INTENT_HISTORY_REDO) {
-        return false;
-    }
-
-    EditingIntent intent;
-    memset(&intent, 0, sizeof(intent));
-    intent.type = input_type;
-    intent.data = "";
-    return js_dom_rich_history_restore(state, surface, &intent);
 }
 
 // ============================================================================
@@ -9560,14 +9164,15 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetWidth / offsetHeight — border box dimensions
     if (strcmp(prop, "offsetWidth") == 0) {
-        return (Item){.item = i2it(js_dom_headless_dimension(elem, true))};
+        return (Item){.item = i2it(js_dom_geometry_dimension(elem, true))};
     }
     if (strcmp(prop, "offsetHeight") == 0) {
-        return (Item){.item = i2it(js_dom_headless_dimension(elem, false))};
+        return (Item){.item = i2it(js_dom_geometry_dimension(elem, false))};
     }
 
     // clientWidth / clientHeight — border box minus borders
     if (strcmp(prop, "clientWidth") == 0) {
+        js_dom_ensure_layout_for_geometry(elem->doc);
         float bw = 0;
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
@@ -9575,6 +9180,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)(elem->width - bw))};
     }
     if (strcmp(prop, "clientHeight") == 0) {
+        js_dom_ensure_layout_for_geometry(elem->doc);
         float bh = 0;
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
@@ -9584,6 +9190,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetTop / offsetLeft — position relative to offsetParent
     if (strcmp(prop, "offsetTop") == 0) {
+        js_dom_ensure_layout_for_geometry(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
         if (elem->doc && js_dom_ensure_layout_for_geometry(elem->doc))
@@ -9591,6 +9198,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)elem->y)};
     }
     if (strcmp(prop, "offsetLeft") == 0) {
+        js_dom_ensure_layout_for_geometry(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
         if (elem->doc && js_dom_ensure_layout_for_geometry(elem->doc))
@@ -9606,17 +9214,20 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetParent — nearest positioned ancestor (or body)
     if (strcmp(prop, "offsetParent") == 0) {
+        js_dom_ensure_layout_for_geometry(elem->doc);
         DomElement* parent = js_dom_offset_parent_element(elem);
         return parent ? js_dom_wrap_element(parent) : ItemNull;
     }
 
     // scrollWidth / scrollHeight — total scrollable content size
     if (strcmp(prop, "scrollWidth") == 0) {
+        js_dom_ensure_layout_for_geometry(elem->doc);
         float cw = elem->content_width;
         float bw = elem->width;
         return (Item){.item = i2it((int64_t)(cw > bw ? cw : bw))};
     }
     if (strcmp(prop, "scrollHeight") == 0) {
+        js_dom_ensure_layout_for_geometry(elem->doc);
         float ch = elem->content_height;
         float bh = elem->height;
         return (Item){.item = i2it((int64_t)(ch > bh ? ch : bh))};
@@ -11838,7 +11449,11 @@ extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
     float abs_x = 0.0f;
     float abs_y = 0.0f;
     js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
-    return js_dom_make_rect_object(abs_x, abs_y, elem->width, elem->height);
+    float width = elem->width;
+    float height = elem->height;
+    return js_dom_make_rect_object(abs_x, abs_y,
+        width > 0.0f ? width : (float)js_dom_geometry_dimension(elem, true),
+        height > 0.0f ? height : (float)js_dom_geometry_dimension(elem, false));
 }
 
 extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
@@ -11851,6 +11466,8 @@ extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
     js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
     float w = elem->width;
     float h = elem->height;
+    if (w <= 0.0f) w = (float)js_dom_geometry_dimension(elem, true);
+    if (h <= 0.0f) h = (float)js_dom_geometry_dimension(elem, false);
 
     Item rect = js_new_object();
     Item k;
