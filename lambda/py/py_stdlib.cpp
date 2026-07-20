@@ -31,13 +31,6 @@ extern Input* py_input;
 // Lambda format functions (C++ linkage)
 #include "../format/format.h"
 
-// Lambda JS runtime functions
-extern "C" Item js_property_get(Item, Item);
-extern "C" Item js_property_set(Item, Item, Item);
-extern "C" Item js_object_keys(Item);
-extern "C" int64_t js_array_length(Item);
-extern "C" Item js_array_get_int(Item, int64_t);
-
 // Lambda clock function
 extern "C" double pn_clock(void);
 
@@ -259,7 +252,7 @@ static Item py_os_listdir(Item path_item) {
     const char* path = ".";
     if (get_type_id(path_item) == LMD_TYPE_STRING || get_type_id(path_item) == LMD_TYPE_SYMBOL) {
         String* s = it2s(path_item);
-        if (s && s->chars) path = s->chars;
+        if (s) path = s->chars;
     }
 
     Item result = py_list_new(0);
@@ -282,7 +275,7 @@ static Item py_os_path_join(Item a, Item b, Item c, Item d, Item e, Item f) {
     for (int i = 0; i < 6; i++) {
         if (args[i].item == ItemNull.item) break;
         String* s = it2s(args[i]);
-        if (!s || !s->chars) continue;
+        if (!s) continue;
         // if absolute path, reset
         if (s->chars[0] == '/') {
             strbuf_reset(sb);
@@ -301,28 +294,28 @@ static Item py_os_path_join(Item a, Item b, Item c, Item d, Item e, Item f) {
 // os.path.exists(p)
 static Item py_os_path_exists(Item p) {
     String* s = it2s(p);
-    if (!s || !s->chars) return (Item){.item = b2it(false)};
+    if (!s) return (Item){.item = b2it(false)};
     return (Item){.item = b2it(file_exists(s->chars))};
 }
 
 // os.path.isfile(p)
 static Item py_os_path_isfile(Item p) {
     String* s = it2s(p);
-    if (!s || !s->chars) return (Item){.item = b2it(false)};
+    if (!s) return (Item){.item = b2it(false)};
     return (Item){.item = b2it(file_is_file(s->chars))};
 }
 
 // os.path.isdir(p)
 static Item py_os_path_isdir(Item p) {
     String* s = it2s(p);
-    if (!s || !s->chars) return (Item){.item = b2it(false)};
+    if (!s) return (Item){.item = b2it(false)};
     return (Item){.item = b2it(file_is_dir(s->chars))};
 }
 
 // os.path.basename(p)
 static Item py_os_path_basename(Item p) {
     String* s = it2s(p);
-    if (!s || !s->chars) return mk_str("");
+    if (!s) return mk_str("");
     const char* last_slash = strrchr(s->chars, '/');
     return mk_str(last_slash ? last_slash + 1 : s->chars);
 }
@@ -330,7 +323,7 @@ static Item py_os_path_basename(Item p) {
 // os.path.dirname(p)
 static Item py_os_path_dirname(Item p) {
     String* s = it2s(p);
-    if (!s || !s->chars) return mk_str("");
+    if (!s) return mk_str("");
     const char* last_slash = strrchr(s->chars, '/');
     if (!last_slash) return mk_str("");
     // allocate just the dirname portion
@@ -345,7 +338,7 @@ static Item py_os_path_dirname(Item p) {
 // os.path.abspath(p)
 static Item py_os_path_abspath(Item p) {
     String* s = it2s(p);
-    if (!s || !s->chars) return mk_str("");
+    if (!s) return mk_str("");
     char* resolved = file_realpath(s->chars);
     if (resolved) {
         Item result = mk_str(resolved);
@@ -370,7 +363,7 @@ static Item py_os_path_abspath(Item p) {
 // os.path.splitext(p) -> (root, ext) as tuple
 static Item py_os_path_splitext(Item p) {
     String* s = it2s(p);
-    if (!s || !s->chars) {
+    if (!s) {
         Item tup = py_tuple_new(2);
         py_tuple_set(tup, 0, mk_str(""));
         py_tuple_set(tup, 1, mk_str(""));
@@ -413,7 +406,7 @@ extern "C" Item py_stdlib_os_path_init(void) {
 // os.getenv(key, default=None)
 static Item py_os_getenv(Item key, Item defval) {
     String* s = it2s(key);
-    if (!s || !s->chars) return defval;
+    if (!s) return defval;
     const char* val = shell_getenv(s->chars);
     if (!val) return defval;
     return mk_str(val);
@@ -820,7 +813,7 @@ extern "C" Item py_stdlib_re_init(void) {
 // json.loads(s)
 static Item py_json_loads(Item s) {
     String* str = it2s(s);
-    if (!str || !str->chars) return ItemNull;
+    if (!str) return ItemNull;
     // use Lambda's parse function with "json" format specifier
     Item json_sym = mk_str("json");
     return fn_parse2_mir(s, json_sym);
@@ -1077,7 +1070,7 @@ static Item py_collections_Counter(Item iterable) {
     if (len <= 0) {
         // also handle string input
         String* s = it2s(iterable);
-        if (s && s->chars) {
+        if (s) {
             for (size_t i = 0; i < s->len; i++) {
                 char ch[2] = {s->chars[i], '\0'};
                 Item key = mk_str(ch);
@@ -1156,13 +1149,13 @@ static Item py_copy_copy(Item obj) {
         }
         return result;
     }
-    if (t == LMD_TYPE_MAP || t == LMD_TYPE_OBJECT) {
-        Item keys = js_object_keys(obj);
-        int64_t klen = js_array_length(keys);
+    if (t == LMD_TYPE_MAP) {
+        Item keys = py_dict_keys(obj);
+        int64_t klen = py_list_length(keys);
         Item result = py_dict_new();
         for (int64_t i = 0; i < klen; i++) {
-            Item key = js_array_get_int(keys, i);
-            Item val = js_property_get(obj, key);
+            Item key = py_list_get(keys, mk_int(i));
+            Item val = py_dict_get(obj, key);
             py_dict_set(result, key, val);
         }
         return result;
@@ -1181,13 +1174,13 @@ static Item py_copy_deepcopy(Item obj) {
         }
         return result;
     }
-    if (t == LMD_TYPE_MAP || t == LMD_TYPE_OBJECT) {
-        Item keys = js_object_keys(obj);
-        int64_t klen = js_array_length(keys);
+    if (t == LMD_TYPE_MAP) {
+        Item keys = py_dict_keys(obj);
+        int64_t klen = py_list_length(keys);
         Item result = py_dict_new();
         for (int64_t i = 0; i < klen; i++) {
-            Item key = js_array_get_int(keys, i);
-            Item val = js_property_get(obj, key);
+            Item key = py_list_get(keys, mk_int(i));
+            Item val = py_dict_get(obj, key);
             py_dict_set(result, key, py_copy_deepcopy(val));
         }
         return result;

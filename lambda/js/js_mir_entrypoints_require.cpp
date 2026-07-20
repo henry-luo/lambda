@@ -1018,6 +1018,10 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
         js_microtask_flush();
     } else if (!g_jm_preamble_compile_only) {
         if (js_dynamic_import_suppress_module_drain <= 0) {
+            // CLI document sessions have no native frame. Commit pending DOM
+            // mutations before the initial microtask checkpoint so observers
+            // receive the post-mutation geometry without getter reentrancy.
+            if (runtime->dom_doc) js_dom_commit_headless_layout();
             js_event_loop_drain();
         }
         if (runtime->dom_doc) {

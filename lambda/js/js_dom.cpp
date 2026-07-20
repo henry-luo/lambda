@@ -402,9 +402,14 @@ static inline void js_dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATI
         // Layout-affecting JS DOM mutations must request a reflow so JS-built
         // structure (e.g. a script that constructs its UI at load, like the
         // Stage-4B editor's toolbar) gets laid out and becomes hit-testable
-        // without waiting for a later edit to trigger relayout. Paint-only style
-        // changes don't need layout.
-        if (kind != DOM_JS_MUTATION_STYLE_REPAINT) doc_state_request_reflow(st);
+        // without waiting for a later edit to trigger relayout. A transient
+        // CLI document also needs a style-resolution turn for paint-only
+        // mutations: CSS transitions are created by that turn, while the
+        // long-lived renderer already owns its normal style/frame cadence.
+        if (kind != DOM_JS_MUTATION_STYLE_REPAINT ||
+            (_js_current_ui_context && !_js_host_driven_loop)) {
+            doc_state_request_reflow(st);
+        }
     }
 }
 
@@ -432,7 +437,23 @@ extern "C" bool js_dom_force_layout_for_geometry(void* dom_doc) {
     return js_dom_ensure_layout_for_geometry((DomDocument*)dom_doc);
 }
 
+extern "C" bool js_dom_commit_headless_layout(void) {
+    DomDocument* doc = _js_current_ui_context && _js_current_ui_context->document
+        ? _js_current_ui_context->document : _js_current_document;
+    DocState* state = doc && doc->state ? (DocState*)doc->state : nullptr;
+    if (!doc || !state || _js_host_driven_loop || !state->needs_reflow) return false;
+
+    // A transient CLI document has no renderer frame loop. Commit mutations at
+    // the event-loop boundary so observer microtasks see one current box tree,
+    // rather than re-entering layout from an individual geometry getter.
+    layout_html_doc(_js_current_ui_context, doc, true);
+    doc_state_clear_reflow(state);
+    reflow_clear(state);
+    return true;
+}
+
 extern "C" bool js_dom_tick_headless_animation_frame(void) {
+    js_dom_commit_headless_layout();
     DomDocument* doc = _js_current_ui_context && _js_current_ui_context->document
         ? _js_current_ui_context->document : _js_current_document;
     DocState* state = doc && doc->state ? (DocState*)doc->state : nullptr;
@@ -7029,14 +7050,14 @@ static char* _option_text(DomElement* opt) {
 // Default falls back to the `selected` content attribute (defaultSelected).
 static bool _get_selectedness(DomElement* opt) {
     if (!opt) return false;
-    if (opt->has_option_selectedness()) return opt->option_selectedness();
+    if (opt->has_option_selectedness()) return dom_option_is_selected(opt);
     Item exp = expando_get_map((DomNode*)opt);
     if (exp.item != ITEM_NULL) {
         Item key = (Item){.item = s2it(heap_create_name("__selected"))};
         Item v = js_property_get(exp, key);
         if (v.item != ITEM_NULL && !is_js_undefined(v)) return js_is_truthy(v);
     }
-    return opt->has_attribute("selected");
+    return dom_option_is_selected(opt);
 }
 
 extern "C" bool js_dom_option_is_selected(void* dom_elem) {

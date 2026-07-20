@@ -16,7 +16,6 @@ BUILD_LINUX_DIR = build_linux
 LAMBDA_EXE = lambda.exe
 LAMBDA_PROFILE_EXE = lambda-profile.exe
 LAMBDA_CLI_EXE = lambda-cli.exe
-LAMBDA_JUBE_EXE = lambda-jube.exe
 
 # Unicode support is always enabled (utf8proc-based)
 # No longer using conditional compilation flags
@@ -501,8 +500,8 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
-	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup docs intellisense analyze-binary \
+	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-gc-rooting-core test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
+	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python release-lang-python package-standard package-jube verify-jube-package test-jube-module-integrity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
@@ -529,8 +528,8 @@ help:
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
 	@echo "  build-mir     - Build MIR JIT library (clone, patch, compile)"
-	@echo "  build-jube    - Build polyglot runtime (Lambda + JS/TS + Python + Bash + Ruby + Radiant)"
-	@echo "  release-jube  - Build optimized polyglot release version"
+	@echo "  build-jube    - Build the standard host plus hosted Python and a compatibility link"
+	@echo "  release-jube  - Package the full hosted-language bundle (same host binary)"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
 	@echo "  all           - Build all projects"
@@ -549,7 +548,7 @@ help:
 	@echo "  build-test    - Build all test executables using Premake"
 	@echo "  build-radiant-baseline - Build only lambda and the native runners used by test-radiant-baseline"
 	@echo "  build-pdf-render-test - Build PDF render visual gtest executable using Premake"
-	@echo "  build-jube-test - Build lambda-jube and all test executables"
+	@echo "  build-jube-test - Build hosted Python compatibility bundle and test executables"
 	@echo ""
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
@@ -788,41 +787,88 @@ endif
 	@echo "✅ CLI build completed. Executable: lambda-cli.exe"
 	@ls -lh lambda-cli.exe 2>/dev/null || true
 
-# Polyglot Jube build (Lambda + JS/TS + Python + Bash + Ruby + Radiant)
-# Produces lambda-jube.exe with all language runtimes
+# Compatibility name for the former polyglot executable. It is a link to the
+# normal host, never a separately compiled runtime.
 lambda-jube: build-jube
 
-build-jube: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "Building Lambda Jube (polyglot runtime) using Premake build system..."
-	@echo "Includes: Lambda, JS, TS, Python, Bash, Ruby + Radiant"
-	$(PYTHON) utils/generate_premake.py --variant jube --output $(PREMAKE_JUBE_FILE)
-	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_JUBE_FILE)
-	@echo "Building lambda-jube executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda-jube -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-	@echo "✅ Jube build completed. Executable: lambda-jube.exe"
-	@ls -lh lambda-jube.exe 2>/dev/null || true
+build-jube: build build-lang-python
+	@ln -sfn lambda.exe lambda-jube.exe
+	@echo "✅ Jube compatibility name points to the standard host: lambda-jube.exe -> lambda.exe"
 
-release-jube: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "Building Lambda Jube release (polyglot runtime, optimized)..."
-	$(PYTHON) utils/generate_premake.py --variant jube --output $(PREMAKE_JUBE_FILE)
-	$(PREMAKE5) gmake --file=$(PREMAKE_JUBE_FILE)
-	$(MAKE) -C build/premake config=release_native lambda-jube -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
-ifeq ($(OS),Darwin)
-	@strip -x lambda-jube.exe 2>/dev/null || true
-else
-	@strip lambda-jube.exe 2>/dev/null || true
-endif
-	@echo "✅ Jube release build completed. Executable: lambda-jube.exe"
-	@ls -lh lambda-jube.exe 2>/dev/null || true
+# Hosted Python is a separately loaded native module. It is never a dependency
+# of the standard host build, so Python stays absent unless this target is run.
+build-lang-python: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) $(TREE_SITTER_PYTHON_LIB)
+	@echo "Building external lang-python hosted module..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=debug_native lang-python -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/lang-python
+	@ls -lh modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll 2>/dev/null || true
 
-# Build lambda-jube and all test executables
+# The release language module is built independently, then copied next to the
+# full distribution's unchanged host executable.  The standard bundle never
+# depends on this target.
+release-lang-python: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) $(TREE_SITTER_PYTHON_LIB)
+	@echo "Building release lang-python hosted module..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=release_native lang-python -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/lang-python
+	@mkdir -p release/modules/lang-python
+	@cp modules/lang-python/module.json release/modules/lang-python/module.json
+	@cp modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll release/modules/lang-python/ 2>/dev/null || true
+
+# Standard and full Jube packages deliberately reuse the identical host.  The
+# full package adds language modules; it never recompiles a second runtime.
+package-standard: release
+	@mkdir -p release-standard
+	@cp release/lambda release-standard/lambda
+	# Keep a manifest-only descriptor so a missing optional language has a
+	# deterministic diagnostic without putting its grammar or native code in the host.
+	@mkdir -p release-standard/modules/lang-python
+	@cp modules/lang-python/module.json release-standard/modules/lang-python/module.json
+
+package-jube: package-standard release-lang-python
+	@mkdir -p release-jube
+	@cp release-standard/lambda release-jube/lambda
+	@mkdir -p release-jube/modules/lang-python
+	@cp release/modules/lang-python/module.json release-jube/modules/lang-python/module.json
+	@cp release/modules/lang-python/lang-python.dylib release/modules/lang-python/lang-python.so release/modules/lang-python/lang-python.dll release-jube/modules/lang-python/ 2>/dev/null || true
+
+verify-jube-package: package-jube
+	@shasum -a 256 release-standard/lambda release-jube/lambda
+	@cmp -s release-standard/lambda release-jube/lambda
+	@mkdir -p temp/hosted-python-package-check
+	@if cd temp/hosted-python-package-check && ../../release-standard/lambda py ../../test/py/test_py_basic.py --no-log >standard.out 2>standard.err; then \
+		echo "standard bundle unexpectedly loaded lang-python"; exit 1; \
+	fi
+	@rg -q "Hosted language module for 'py' is unavailable or incompatible\." temp/hosted-python-package-check/standard.err
+	@cd release-jube && ./lambda py ../test/py/test_py_basic.py --no-log >/dev/null
+
+# The loader must reject bytes that no longer match the manifest digest before
+# dlopen can execute module initializers. Work only on a disposable copied bundle.
+test-jube-module-integrity: build build-lang-python
+	@mkdir -p temp/jube-integrity/lang-python
+	@cp modules/lang-python/module.json temp/jube-integrity/lang-python/module.json
+	@cp modules/lang-python/lang-python.dylib modules/lang-python/lang-python.so modules/lang-python/lang-python.dll temp/jube-integrity/lang-python/ 2>/dev/null || true
+	@library_path=$$(find temp/jube-integrity/lang-python -maxdepth 1 -type f \( -name 'lang-python.dylib' -o -name 'lang-python.so' -o -name 'lang-python.dll' \) | head -n 1); \
+	if [ -z "$$library_path" ]; then echo "missing copied lang-python library"; exit 1; fi; \
+	printf x | dd of="$$library_path" bs=1 seek=0 conv=notrunc status=none
+	@if JUBE_MODULE_PATH=./temp/jube-integrity ./lambda.exe py test/py/test_py_basic.py --no-log > temp/jube-integrity/stdout 2> temp/jube-integrity/stderr; then \
+		echo "tampered lang-python library was accepted"; exit 1; \
+	fi
+	@rg -q "Hosted language module for 'py' is unavailable or incompatible\." temp/jube-integrity/stderr
+
+release-jube: package-jube
+	@ln -sfn lambda release-jube/lambda-jube
+	@echo "✅ Full Jube bundle uses the standard host plus modules."
+
+# Build the compatibility host/module bundle and all test executables.
 build-jube-test: build-jube build-test
 
-# Run jube-specific tests only (Python, Bash, Ruby)
+# Run hosted Python through the compatibility host name.
 test-jube: build-jube-test
-	@echo "Running jube-specific test suites (Python, Bash, Ruby)..."
-	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=jube --parallel
+	@LAMBDA_PY_HOST_EXE=./lambda-jube.exe ./test/test_py_gtest.exe
 
 # Force rebuild (clean + build)
 rebuild: clean-all
@@ -985,7 +1031,11 @@ test-lambda-baseline: build-test test-input-baseline
 # Permanent exact-root CI lane. Collection is injected only at public allocator
 # boundaries, and poison makes a missed root deterministic instead of relying
 # on a stale native-stack word or recycled slab contents.
-test-gc-rooting: build build-jube
+#
+# Keep the core lane independent of an optional hosted language.  This lets the
+# standard host prove its root invariants without building or initializing
+# Python, while the aggregate target preserves the historical full check.
+test-gc-rooting-core: build
 	@mkdir -p temp
 	@echo "Running LambdaJS JIT precise-only forced-GC gate..."
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
@@ -1003,17 +1053,24 @@ test-gc-rooting: build build-jube
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe run --no-log test/lambda/proc/proc_var.ls > temp/gc_rooting_lambda.txt
 	@diff -u test/lambda/proc/proc_var.txt temp/gc_rooting_lambda.txt
+	@python3 utils/check_gc_effects.py
+	@python3 utils/check_gc_root_hazards.py
+	@echo "Core precise-root forced-GC gates passed."
+
+test-gc-rooting-python: build build-lang-python
+	@mkdir -p temp
 	@echo "Running LambdaPy closure precise-only forced-GC gate..."
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
-		./lambda-jube.exe py --no-log test/py/test_py_closures.py > temp/gc_rooting_py_closures.txt
+		$${LAMBDA_PY_HOST_EXE:-./lambda.exe} py --no-log test/py/test_py_closures.py > temp/gc_rooting_py_closures.txt
 	@diff -u test/py/test_py_closures.txt temp/gc_rooting_py_closures.txt
 	@echo "Running LambdaPy generator precise-only forced-GC gate..."
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
-		./lambda-jube.exe py --no-log test/py/test_py_generators.py > temp/gc_rooting_py_generators.txt
+		$${LAMBDA_PY_HOST_EXE:-./lambda.exe} py --no-log test/py/test_py_generators.py > temp/gc_rooting_py_generators.txt
 	@diff -u test/py/test_py_generators.txt temp/gc_rooting_py_generators.txt
-	@python3 utils/check_gc_effects.py
-	@python3 utils/check_gc_root_hazards.py
-	@echo "Precise-root forced-GC gates passed."
+	@echo "Hosted-Python precise-root forced-GC gates passed."
+
+test-gc-rooting: test-gc-rooting-core test-gc-rooting-python
+	@echo "Aggregate precise-root forced-GC gates passed."
 
 test-redex-baseline: build
 	@echo "Running Redex formal semantics baseline verification..."
@@ -2268,6 +2325,17 @@ check-lambda-dup:
 
 check-radiant-dup:
 	@python3 test/dedup/check_code_dup.py radiant
+
+check-hosted-python-architecture:
+	@python3 utils/check_hosted_python_architecture.py
+
+# Generate the checked review input for every remaining hosted-Python coupling.
+# This is source analysis only; it never loads Jube or changes runtime behavior.
+hosted-python-coupling-inventory:
+	@python3 utils/check_hosted_python_architecture.py --inventory
+
+check-hosted-python-module-boundary: build build-lang-python
+	@python3 utils/check_hosted_python_architecture.py --require-module-binary
 
 # Clang-tidy static analysis
 # tidy / tidy-full / tidy-fix / generate-compile-db were retired in the Phase 3

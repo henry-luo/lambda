@@ -19,6 +19,7 @@ extern "C" Item js_property_get(Item object, Item key);
 extern "C" Item js_new_object();
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" int js_function_get_arity(Item fn_item);
+extern "C" void* js_function_get_ptr(Item fn_item);
 
 // C++ linkage — defined in build_ast.cpp
 bool is_sys_func_name(const char* name, int name_len);
@@ -28,6 +29,18 @@ bool is_sys_func_name(const char* name, int name_len);
 // =============================================================================
 
 static struct hashmap* registry_map = NULL;
+
+static Item js_namespace_get(Item namespace_obj, const char* name) {
+    Item key = {.item = s2it(heap_create_name(name))};
+    return js_property_get(namespace_obj, key);
+}
+
+static const ModuleNamespaceOps js_namespace_ops = {
+    js_new_object,
+    js_namespace_get,
+    js_function_get_arity,
+    js_function_get_ptr,
+};
 
 // hashmap entry for module descriptors
 typedef struct {
@@ -57,7 +70,9 @@ void module_registry_cleanup(void) {
     registry_map = NULL;
 }
 
-void module_register(const char* path, const char* lang, Item namespace_obj, void* mir_ctx) {
+void module_register_with_namespace_ops(const char* path, const char* lang,
+                                        Item namespace_obj, void* mir_ctx,
+                                        const ModuleNamespaceOps* namespace_ops) {
     if (!path) return;
     if (!registry_map) module_registry_init();
 
@@ -67,6 +82,7 @@ void module_register(const char* path, const char* lang, Item namespace_obj, voi
     if (existing && existing->desc) {
         existing->desc->namespace_obj = namespace_obj;
         existing->desc->mir_ctx = mir_ctx;
+        existing->desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
         existing->desc->profile = lang_profile_for_name(lang);
         existing->desc->initialized = true;
         existing->desc->loading = false;
@@ -79,6 +95,7 @@ void module_register(const char* path, const char* lang, Item namespace_obj, voi
     desc->source_lang = lang;  // static string, not owned
     desc->profile = lang_profile_for_name(lang);
     desc->namespace_obj = namespace_obj;
+    desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
     desc->mir_ctx = mir_ctx;
     desc->initialized = true;
     desc->loading = false;
@@ -86,6 +103,10 @@ void module_register(const char* path, const char* lang, Item namespace_obj, voi
     RegistryEntry entry = { .path = desc->path, .desc = desc };
     hashmap_set(registry_map, &entry);
     log_info("module_registry: registered '%s' (lang=%s)", path, lang);
+}
+
+void module_register(const char* path, const char* lang, Item namespace_obj, void* mir_ctx) {
+    module_register_with_namespace_ops(path, lang, namespace_obj, mir_ctx, &js_namespace_ops);
 }
 
 ModuleDescriptor* module_get(const char* path) {
@@ -100,7 +121,8 @@ bool module_is_loaded(const char* path) {
     return desc && desc->initialized;
 }
 
-ModuleDescriptor* module_register_loading(const char* path, const char* lang) {
+ModuleDescriptor* module_register_loading_with_namespace_ops(
+        const char* path, const char* lang, const ModuleNamespaceOps* namespace_ops) {
     if (!path) return NULL;
     if (!registry_map) module_registry_init();
 
@@ -110,6 +132,7 @@ ModuleDescriptor* module_register_loading(const char* path, const char* lang) {
     if (existing && existing->desc) {
         existing->desc->loading = true;
         existing->desc->profile = lang_profile_for_name(lang);
+        existing->desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
         return existing->desc;
     }
 
@@ -117,7 +140,9 @@ ModuleDescriptor* module_register_loading(const char* path, const char* lang) {
     desc->path = mem_strdup(path, MEM_CAT_SYSTEM);
     desc->source_lang = lang;
     desc->profile = lang_profile_for_name(lang);
-    desc->namespace_obj = js_new_object();
+    desc->namespace_obj = namespace_ops && namespace_ops->create
+        ? namespace_ops->create() : js_new_object();
+    desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
     desc->mir_ctx = NULL;
     desc->initialized = false;
     desc->loading = true;
@@ -126,6 +151,10 @@ ModuleDescriptor* module_register_loading(const char* path, const char* lang) {
     hashmap_set(registry_map, &entry);
     log_info("module_registry: marked '%s' as loading (lang=%s)", path, lang);
     return desc;
+}
+
+ModuleDescriptor* module_register_loading(const char* path, const char* lang) {
+    return module_register_loading_with_namespace_ops(path, lang, &js_namespace_ops);
 }
 
 bool module_is_loading(const char* path) {
@@ -207,14 +236,15 @@ Item module_build_lambda_namespace(void* script_ptr) {
 }
 
 // =============================================================================
-// Create a synthetic Script from a JS namespace for Lambda→JS import
+// Create a synthetic Script from a hosted namespace for Lambda imports
 // =============================================================================
 
-void* create_js_import_script(const char* resolved_path, Item namespace_obj, void* runtime_ptr) {
+void* create_module_import_script(const char* resolved_path, Item namespace_obj, void* runtime_ptr) {
     Runtime* runtime = (Runtime*)runtime_ptr;
+    ModuleDescriptor* module = module_get(resolved_path);
     TypeId ns_type = get_type_id(namespace_obj);
     if (ns_type != LMD_TYPE_MAP) {
-        log_error("module_registry: JS namespace is not a map (type=%d)", ns_type);
+        log_error("module_registry: hosted namespace is not a map (type=%d)", ns_type);
         return NULL;
     }
 
@@ -225,8 +255,9 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
     script->reference = mem_strdup(resolved_path, MEM_CAT_SYSTEM);
     script->is_main = false;
     script->is_loading = false;
-    // Synthetic import scripts expose JS namespaces through Lambda's importer.
-    script->profile = &js_profile;
+    // The module's language profile is already resolved at registration; the
+    // synthetic Lambda bridge must not assume a JavaScript namespace.
+    script->profile = module && module->profile ? module->profile : &js_profile;
     script->const_list = arraylist_new(4);
     script->type_list = arraylist_new(4);
 
@@ -244,7 +275,7 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
     Map* map = namespace_obj.map;
     TypeMap* type_map = (TypeMap*)map->type;
     if (!type_map || !type_map->shape) {
-        log_debug("module_registry: JS namespace has no shape entries");
+        log_debug("module_registry: hosted namespace has no shape entries");
         return script;
     }
 
@@ -259,13 +290,12 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
         }
 
         // Read the export value from the namespace
-        Item key = {.item = s2it(heap_create_name(shape->name->str, (int)shape->name->length))};
-        Item value = js_property_get(namespace_obj, key);
+        Item value = module_namespace_get(module, shape->name->str);
         TypeId val_type = get_type_id(value);
 
         if (val_type == LMD_TYPE_FUNC) {
             // Function export — create synthetic AstFuncNode
-            int arity = js_function_get_arity(value);
+            int arity = module_namespace_function_arity(module, value);
 
             if (module_name_collides_with_sys(shape->name->str, (int)shape->name->length)) {
                 log_error("module_registry: JS export '%.*s' shadows system function",
@@ -311,7 +341,7 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
             }
             tail = (AstNode*)fn_node;
 
-            log_debug("module_registry: JS export fn '%.*s' arity=%d offset=%d",
+            log_debug("module_registry: hosted export fn '%.*s' arity=%d offset=%d",
                 (int)shape->name->length, shape->name->str, arity, fn_node->node.context[0]);
         } else if (val_type != LMD_TYPE_NULL) {
             // Variable export — create synthetic pub var node
@@ -343,7 +373,7 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
             }
             tail = (AstNode*)pub_node;
 
-            log_debug("module_registry: JS export var '%.*s' type=%d",
+            log_debug("module_registry: hosted export var '%.*s' type=%d",
                 (int)shape->name->length, shape->name->str, val_type);
         }
 
@@ -351,6 +381,21 @@ void* create_js_import_script(const char* resolved_path, Item namespace_obj, voi
     }
 
     return script;
+}
+
+Item module_namespace_get(const ModuleDescriptor* module, const char* name) {
+    if (!module || !module->namespace_ops || !module->namespace_ops->get || !name) return ItemNull;
+    return module->namespace_ops->get(module->namespace_obj, name);
+}
+
+int module_namespace_function_arity(const ModuleDescriptor* module, Item function_obj) {
+    if (!module || !module->namespace_ops || !module->namespace_ops->function_arity) return 0;
+    return module->namespace_ops->function_arity(function_obj);
+}
+
+void* module_namespace_function_ptr(const ModuleDescriptor* module, Item function_obj) {
+    if (!module || !module->namespace_ops || !module->namespace_ops->function_ptr) return NULL;
+    return module->namespace_ops->function_ptr(function_obj);
 }
 
 // =============================================================================

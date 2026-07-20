@@ -11,6 +11,16 @@ extern "C" {
 
 #define JUBE_ABI_VERSION 2
 #define JUBE_ABI_VERSION_LEGACY 1
+#define JUBE_HOST_API_VERSION 1
+#define JUBE_HOST_LANG_API_VERSION 1
+
+// Hosted compiler services are intentionally build-coupled while their opaque
+// handle contracts evolve. A module validates this at registration, never in
+// an evaluation or generated-code path.
+// Bump this exact-build compiler contract whenever an opaque hosted-compiler
+// service table changes; struct-size checks alone cannot identify stale module
+// binaries built against a prior same-day table shape.
+#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260720-h7d8"
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -22,6 +32,109 @@ typedef struct JubeHostGcAPI JubeHostGcAPI;
 typedef struct JubeHostValueAPI JubeHostValueAPI;
 typedef struct JubeHostScriptAPI JubeHostScriptAPI;
 typedef struct JubeHostDomAPI JubeHostDomAPI;
+typedef struct JubeHostLangAPI JubeHostLangAPI;
+typedef struct JubeSourceAPI JubeSourceAPI;
+typedef struct JubeDiagnosticAPI JubeDiagnosticAPI;
+typedef struct JubeOutputAPI JubeOutputAPI;
+typedef struct JubeSessionMemoryAPI JubeSessionMemoryAPI;
+typedef struct JubeGuestExecutionAPI JubeGuestExecutionAPI;
+typedef struct JubeModuleGraphAPI JubeModuleGraphAPI;
+typedef struct JubeRuntimeCatalogAPI JubeRuntimeCatalogAPI;
+typedef struct JubeRuntimeImport JubeRuntimeImport;
+typedef struct JubeRuntimeImportMetadata JubeRuntimeImportMetadata;
+typedef struct JubeModuleNamespaceOps JubeModuleNamespaceOps;
+typedef struct JubeLanguageDef JubeLanguageDef;
+typedef struct JubeLanguageSession JubeLanguageSession;
+typedef struct JubeLanguageSessionConfig JubeLanguageSessionConfig;
+typedef struct JubeLanguageRunRequest JubeLanguageRunRequest;
+typedef struct JubeLanguageModuleRequest JubeLanguageModuleRequest;
+typedef struct JubeHostedSource JubeHostedSource;
+typedef struct JubeHostedDiagnostic JubeHostedDiagnostic;
+
+typedef enum JubeHostCapability {
+    JUBE_HOST_CAP_NONE = 0,
+    JUBE_HOST_CAP_GC_ROOTS = 1ull << 0,
+    JUBE_HOST_CAP_NEUTRAL_DATA = 1ull << 1,
+    JUBE_HOST_CAP_RUNTIME_CATALOG = 1ull << 2,
+    JUBE_HOST_CAP_MODULE_GRAPH = 1ull << 3,
+    JUBE_HOST_CAP_GUEST_EXECUTION = 1ull << 4,
+    JUBE_HOST_CAP_COMPILER = 1ull << 5,
+} JubeHostCapability;
+
+// Hosted-language service capabilities are separate from the base host
+// capability mask.  A language asks only for the slices it consumes, so a
+// later compiler service can be added without making it part of Lambda or JS
+// execution startup.
+typedef enum JubeHostedLanguageCapability {
+    JUBE_HOSTED_LANG_CAP_NONE = 0,
+    JUBE_HOSTED_LANG_CAP_SOURCE = 1ull << 32,
+    JUBE_HOSTED_LANG_CAP_DIAGNOSTICS = 1ull << 33,
+    JUBE_HOSTED_LANG_CAP_RESULT_FORMAT = 1ull << 34,
+    JUBE_HOSTED_LANG_CAP_SESSION_MEMORY = 1ull << 35,
+    JUBE_HOSTED_LANG_CAP_EXECUTION = 1ull << 36,
+    JUBE_HOSTED_LANG_CAP_MODULE_GRAPH = 1ull << 37,
+} JubeHostedLanguageCapability;
+
+typedef enum JubeHostedDiagnosticSeverity {
+    JUBE_HOSTED_DIAGNOSTIC_ERROR = 1,
+    JUBE_HOSTED_DIAGNOSTIC_WARNING = 2,
+    JUBE_HOSTED_DIAGNOSTIC_NOTE = 3,
+} JubeHostedDiagnosticSeverity;
+
+// The host owns the buffers in this record.  The module must call
+// source_release exactly once after source_read succeeds; source bytes remain
+// valid until then and are always NUL terminated for existing parsers.
+struct JubeHostedSource {
+    uint32_t struct_size;
+    const char* bytes;
+    size_t byte_length;
+    const char* canonical_path;
+    void* host_owner;
+};
+
+// Locations are byte offsets in the source supplied to source_read.  A zero
+// offset/length is valid for a file-level diagnostic.
+struct JubeHostedDiagnostic {
+    uint32_t struct_size;
+    uint32_t severity;
+    const JubeHostedSource* source;
+    size_t byte_offset;
+    size_t byte_length;
+    const char* message;
+};
+
+// A hosted language describes only its own runtime helpers.  The host owns
+// validation, collision handling, metadata defaults, and resolver storage, so
+// generated calls retain their existing direct targets without a per-call
+// language lookup.
+struct JubeRuntimeImport {
+    const char* name;
+    fn_ptr function;
+};
+
+// This mirrors the reviewed, fixed-width import-effect contract without
+// publishing the core JitImportMetadata layout to a hosted language module.
+// Values are copied by the host and remain compile-time metadata only.
+struct JubeRuntimeImportMetadata {
+    uint32_t gc_effect;
+    uint32_t reentry_effect;
+    uint32_t result_class;
+    uint32_t argument_classes;
+    uint32_t flags;
+    uint32_t exception_effect;
+    uint32_t argument_effects;
+};
+
+struct JubeRuntimeCatalogAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    int (*register_imports)(const JubeRuntimeImport* imports, int import_count,
+                            const char* owner_name);
+    // Resolves the host-owned effect contract for a generated call. The
+    // lookup occurs during lowering; generated code keeps its direct target.
+    int (*lookup_import_metadata)(const char* name,
+                                  JubeRuntimeImportMetadata* out_metadata);
+};
 
 typedef enum JubeFuncFlags {
     JUBE_FN_NONE = 0,
@@ -425,13 +538,222 @@ struct JubeHostDomAPI {
     bool (*force_layout_for_geometry)(void* doc);
 };
 
+// Each hosted service table evolves independently. A module checks both the
+// containing hosted-language table and the specific service table before it
+// dereferences a function pointer.
+struct JubeSourceAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    int (*source_read)(const char* path, JubeHostedSource* out_source);
+    void (*source_release)(JubeHostedSource* source);
+    int (*source_line_column)(const JubeHostedSource* source, size_t byte_offset,
+                              size_t* out_line, size_t* out_column);
+};
+
+struct JubeDiagnosticAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    void (*write_diagnostic)(const JubeLanguageRunRequest* request,
+                             const JubeHostedDiagnostic* diagnostic);
+};
+
+struct JubeOutputAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    void (*write_result)(const JubeLanguageRunRequest* request, Item result);
+};
+
+struct JubeSessionMemoryAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    void* (*session_alloc)(size_t size);
+    void (*session_free)(void* memory);
+};
+
+struct JubeGuestExecutionAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    // Creates/destroys a host-owned runtime activation for one guest run. The
+    // returned token is opaque; later compiler services replace its temporary
+    // bridge use without exposing Runtime layout in this ABI.
+    void* (*execution_create)(void);
+    void (*execution_destroy)(void* execution_context);
+    // Owns the host import resolver used when a guest-finalized MIR module is
+    // linked. The guest supplies an opaque MIR context only; it never receives
+    // the resolver function or performs symbol lookup itself.
+    int (*execution_link_module)(void* execution_context, void* mir_context);
+    // These opaque compiler-lifecycle operations preserve the existing MIR/JIT
+    // implementation while keeping context ownership, module loading, and
+    // generated-function lookup in the host. They are compile/link-time only;
+    // Lambda and JavaScript execution paths never consult this table.
+    void* (*mir_context_create)(int optimization_level);
+    void (*mir_context_destroy)(void* mir_context);
+    void* (*mir_module_create)(void* mir_context, const char* module_name);
+    int (*mir_module_finalize_and_load)(void* mir_context, void* mir_module);
+    void* (*mir_function_lookup)(void* mir_context, const char* function_name);
+    // Completes the current function before the module can be finalized. The
+    // guest never imports MIR_finish_func or observes the MIR context layout.
+    void (*mir_function_finish)(void* mir_context);
+    // Enters a host-owned guest activation and creates an opaque compilation
+    // input. The guest may pass that input only to its own semantic adapter;
+    // it never receives an EvalContext, Runtime, or Input layout.
+    int (*execution_activate)(void* execution_context, void** out_input);
+    // Activates a host-created import wrapper. A standalone activation remains
+    // retained until the language releases it from its heap-cleanup hook;
+    // nested imports restore their caller when the wrapper is destroyed.
+    int (*execution_activate_import)(void* execution_context, void** out_input,
+                                    bool* out_retained_until_heap_cleanup);
+    // Executes a generated guest entry under the host recovery boundary. The
+    // entry receives an opaque runtime token whose concrete type is private to
+    // the host implementation.
+    int (*execution_run_main)(void* execution_context, void* entry_function,
+                              Item* out_result);
+    // Completes a guest activation, restoring the saved thread-local state and
+    // transferring any standalone result heap to its host owner.
+    void (*execution_finish_guest)(void* execution_context);
+};
+
+// Module graph operations retain host path/state ownership. The execution
+// context is opaque to a language module and is only associated with Runtime
+// state by the host implementation.
+struct JubeModuleGraphAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    // Returns 1 and a partial namespace for a circular import, 0 when none is
+    // loading, and -1 for an invalid request.
+    int (*loading_namespace)(void* execution_context, const char* source_path,
+                             Item* out_namespace);
+    // Loads a Lambda source module through the host importer. Returns 0 on
+    // success and retains the namespace's language-owned representation.
+    int (*load_lambda_module)(void* execution_context, const char* source_path,
+                              const char* importer_path, Item* out_namespace);
+    // Reports 0 for absent, 1 for loading, and 2 for initialized modules.
+    // A non-absent state returns the language-owned namespace membrane.
+    int (*module_state)(void* execution_context, const char* source_path,
+                        Item* out_namespace);
+    // Publishes a partial namespace before guest execution and replaces it
+    // with the completed namespace after compilation. The host owns all graph
+    // records and only retains the module's supplied export membrane.
+    int (*module_begin_loading)(void* execution_context, const char* source_path,
+                                const char* language,
+                                const JubeModuleNamespaceOps* namespace_ops);
+    int (*module_publish)(void* execution_context, const char* source_path,
+                          const char* language, Item namespace_obj, void* mir_context,
+                          const JubeModuleNamespaceOps* namespace_ops);
+};
+
+struct JubeModuleNamespaceOps {
+    Item (*create)(void);
+    Item (*get)(Item namespace_obj, const char* name);
+    int (*function_arity)(Item function_obj);
+    void* (*function_ptr)(Item function_obj);
+};
+
+// This table establishes the hosted-language negotiation boundary before
+// compiler operations are exposed. Future compiler services join it as opaque,
+// size-gated sub-tables rather than leaking Runtime, AST, or MIR layouts.
+struct JubeHostLangAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    uint64_t capabilities;
+    const char* host_build_id;
+    const JubeSourceAPI* source;
+    const JubeDiagnosticAPI* diagnostic;
+    const JubeOutputAPI* output;
+    const JubeSessionMemoryAPI* session_memory;
+    const JubeGuestExecutionAPI* execution;
+    const JubeModuleGraphAPI* module_graph;
+};
+
 struct JubeHostAPI {
     uint32_t api_version;
+    uint32_t struct_size;
+    uint64_t capabilities;
+    const char* host_build_id;
+    const JubeHostLangAPI* hosted_language;
     const JubeHostGcAPI* gc;
     const JubeHostValueAPI* value;
     const JubeHostScriptAPI* script;
     const JubeHostDomAPI* dom;
+    const JubeRuntimeCatalogAPI* runtime_catalog;
 };
+
+// A hosted language owns parsing and language semantics while the host owns
+// discovery and command routing. This initial file-oriented surface keeps
+// Runtime and MIR implementation layouts out of the module boundary.
+typedef void (*JubeLanguageWriteFn)(void* user, const char* bytes, size_t length);
+
+struct JubeLanguageSessionConfig {
+    uint32_t struct_size;
+};
+
+struct JubeLanguageRunRequest {
+    uint32_t struct_size;
+    const char* source_path;
+    int32_t argc;
+    const char* const* argv;
+    bool show_help;
+    void* output_user;
+    JubeLanguageWriteFn write_stdout;
+    JubeLanguageWriteFn write_stderr;
+};
+
+// This transitional request deliberately exposes only an opaque host context.
+// The final hosted compiler API replaces it with a size-gated execution handle;
+// guest code must never depend on the pointed-to layout.
+struct JubeLanguageModuleRequest {
+    uint32_t struct_size;
+    void* host_context;
+    const char* source_path;
+    const char* importer_path;
+};
+
+struct JubeLanguageDef {
+    uint32_t abi_version;
+    uint32_t struct_size;
+    const char* name;
+    const char* const* aliases;
+    int32_t alias_count;
+    const char* const* extensions;
+    int32_t extension_count;
+    int (*create_session)(const JubeLanguageSessionConfig* config,
+                          JubeLanguageSession** out_session);
+    void (*destroy_session)(JubeLanguageSession* session);
+    int (*run)(JubeLanguageSession* session, const JubeLanguageRunRequest* request);
+    // Optional module loader. It returns a language-owned export membrane in
+    // Item form; the host keeps only neutral path/state bookkeeping.
+    int (*load_module)(JubeLanguageSession* session,
+                       const JubeLanguageModuleRequest* request,
+                       Item* out_namespace);
+
+    // Additive capability/build negotiation tail. A pre-tail v1 descriptor
+    // requests no hosted compiler services and remains valid for base modules.
+    uint64_t required_host_capabilities;
+    uint64_t required_hosted_capabilities;
+    const char* required_host_build_id;
+};
+
+#define JUBE_LANGUAGE_ABI_VERSION 1
+#define JUBE_LANGUAGE_DEF_V1_SIZE offsetof(JubeLanguageDef, required_host_capabilities)
+#define JUBE_LANGUAGE_DEF_CAPABILITIES_SIZE sizeof(JubeLanguageDef)
+#define JUBE_LANGUAGE_SESSION_CONFIG_V1_SIZE sizeof(JubeLanguageSessionConfig)
+#define JUBE_LANGUAGE_RUN_REQUEST_V1_SIZE sizeof(JubeLanguageRunRequest)
+#define JUBE_LANGUAGE_MODULE_REQUEST_V1_SIZE sizeof(JubeLanguageModuleRequest)
+#define JUBE_HOSTED_SOURCE_V1_SIZE sizeof(JubeHostedSource)
+#define JUBE_HOSTED_DIAGNOSTIC_V1_SIZE sizeof(JubeHostedDiagnostic)
+#define JUBE_HOST_SERVICE_API_VERSION 1
+#define JUBE_SOURCE_API_V1_SIZE sizeof(JubeSourceAPI)
+#define JUBE_DIAGNOSTIC_API_V1_SIZE sizeof(JubeDiagnosticAPI)
+#define JUBE_OUTPUT_API_V1_SIZE sizeof(JubeOutputAPI)
+#define JUBE_SESSION_MEMORY_API_V1_SIZE sizeof(JubeSessionMemoryAPI)
+#define JUBE_GUEST_EXECUTION_API_V1_SIZE sizeof(JubeGuestExecutionAPI)
+#define JUBE_MODULE_GRAPH_API_V1_SIZE sizeof(JubeModuleGraphAPI)
+#define JUBE_HOST_LANG_API_V1_SIZE offsetof(JubeHostLangAPI, source)
+#define JUBE_HOST_LANG_API_H7A_SIZE offsetof(JubeHostLangAPI, execution)
+#define JUBE_HOST_LANG_API_H6_EXECUTION_SIZE offsetof(JubeHostLangAPI, module_graph)
+#define JUBE_HOST_LANG_API_H6_MODULE_GRAPH_SIZE sizeof(JubeHostLangAPI)
+#define JUBE_RUNTIME_CATALOG_API_V1_SIZE sizeof(JubeRuntimeCatalogAPI)
+#define JUBE_HOST_API_RUNTIME_CATALOG_SIZE sizeof(JubeHostAPI)
 
 struct JubeModuleDef {
     uint32_t abi_version;
@@ -462,6 +784,10 @@ struct JubeModuleDef {
     // Optional cleanup for values rooted in one Lambda heap. Called while the
     // heap is active, immediately before that runtime destroys it.
     void (*heap_cleanup)(void* heap);
+
+    // Hosted-language descriptor. This additive tail keeps ordinary native
+    // modules independent of language registration and execution.
+    const JubeLanguageDef* language;
 };
 
 // Size of the frozen v1 layout: everything before the DOM3 additive tail.

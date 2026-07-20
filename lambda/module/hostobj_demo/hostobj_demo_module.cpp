@@ -221,7 +221,7 @@ static const JubeFuncDef s_hostobj_demo_functions[] = {
 #pragma clang diagnostic pop
 
 static int hostobj_demo_init(const JubeHostAPI* host) {
-    if (!host || host->api_version != JUBE_ABI_VERSION || !host->gc || !host->value || !host->script) {
+    if (!host || host->api_version != JUBE_HOST_API_VERSION || !host->gc || !host->value || !host->script) {
         log_error("JUBE_HOSTOBJ_DEMO: missing required host API tables");
         return -1;
     }

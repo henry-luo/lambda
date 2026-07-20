@@ -2,7 +2,7 @@
 // Python Transpiler Tests - Auto-Discovery Based
 //
 // Auto-discovers test/py/test_py_*.py files that have a matching .txt
-// expected-output file and runs them in parallel via `./lambda.exe py`.
+// expected-output file and runs them in parallel through the configured host.
 //
 // Each script is spawned in its own thread (SetUpTestSuite), results are
 // cached in a map, and TEST_P compares actual vs expected output.
@@ -77,13 +77,60 @@ static std::vector<LambdaTestInfo> discover_py_tests() {
     return tests;
 }
 
+// Keep discovery strict: silently skipping a newly added script or retaining a
+// stale golden hides a broken hosted-language package.
+static std::string validate_py_golden_inventory() {
+    const char* dir_path = "test/py";
+    std::string errors;
+#ifdef _WIN32
+    std::string search_path = std::string(dir_path) + "\\\\test_py_*.*";
+    WIN32_FIND_DATAA find_data;
+    HANDLE find_handle = FindFirstFileA(search_path.c_str(), &find_data);
+    if (find_handle == INVALID_HANDLE_VALUE) return errors;
+    do {
+        std::string filename = find_data.cFileName;
+#else
+    DIR* dir = opendir(dir_path);
+    if (!dir) return errors;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string filename = entry->d_name;
+#endif
+        if (filename.substr(0, 8) != "test_py_") continue;
+        bool is_script = filename.length() > 3 &&
+            filename.substr(filename.length() - 3) == ".py";
+        bool is_golden = filename.length() > 4 &&
+            filename.substr(filename.length() - 4) == ".txt";
+        if (!is_script && !is_golden) continue;
+        std::string stem = is_script
+            ? filename.substr(0, filename.length() - 3)
+            : filename.substr(0, filename.length() - 4);
+        std::string counterpart = std::string(dir_path) + "/" + stem +
+            (is_script ? ".txt" : ".py");
+        if (!file_exists(counterpart)) {
+            errors += is_script ? "missing golden for " : "orphaned golden ";
+            errors += filename;
+            errors += '\n';
+        }
+#ifdef _WIN32
+    } while (FindNextFileA(find_handle, &find_data));
+    FindClose(find_handle);
+#else
+    }
+    closedir(dir);
+#endif
+    return errors;
+}
+
 // Global test list populated before main().
 static std::vector<LambdaTestInfo> g_py_tests;
 
 //==============================================================================
 // Per-script parallel runner
 //
-// Each script is run with:  ./lambda.exe py --no-log <script>
+// Each script is run with the host selected by LAMBDA_PY_HOST_EXE.  The
+// Python is hosted by the ordinary executable. An override remains useful for
+// packaged-bundle tests without coupling the corpus to another runtime binary.
 // Results are stored in a shared map (writes are protected per-script by
 // running one thread per script — no shared-state writes during execution).
 //==============================================================================
@@ -99,14 +146,17 @@ static std::mutex                                     g_py_results_mutex;
 // Run a single Python script and return its output.
 static PyTestResult run_py_script(const std::string& script_path) {
     char command[512];
+    const char* configured_host = getenv("LAMBDA_PY_HOST_EXE");
+    const char* host_exe = configured_host && configured_host[0]
+        ? configured_host : "./lambda.exe";
 #ifdef _WIN32
     snprintf(command, sizeof(command),
-             "lambda-jube.exe py --no-log \"%s\" 2>NUL", script_path.c_str());
+             "\"%s\" py --no-log \"%s\" 2>NUL", host_exe, script_path.c_str());
 #else
     snprintf(command, sizeof(command),
              // Runtime diagnostics are stderr-only; comparing them with a script's
              // stdout made a debug allocator report look like Python output.
-             "./lambda-jube.exe py --no-log \"%s\" 2>/dev/null", script_path.c_str());
+             "\"%s\" py --no-log \"%s\" 2>/dev/null", host_exe, script_path.c_str());
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -155,6 +205,10 @@ public:
 };
 
 bool PyScriptTest::results_ready = false;
+
+TEST(PyGoldenInventory, ScriptsAndGoldensMatch) {
+    ASSERT_EQ(validate_py_golden_inventory(), "");
+}
 
 TEST_P(PyScriptTest, ExecuteAndCompare) {
     const LambdaTestInfo& info = GetParam();

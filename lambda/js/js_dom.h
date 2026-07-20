@@ -52,6 +52,10 @@ void* js_dom_get_ui_context(void);
  */
 bool js_dom_force_layout_for_geometry(void* dom_doc);
 
+// Commits a pending transient-document reflow at the script/event-loop
+// checkpoint. Long-lived Radiant sessions keep ownership of their frame loop.
+bool js_dom_commit_headless_layout(void);
+
 /** Advance the active document's CSS animation scheduler by one headless frame. */
 bool js_dom_tick_headless_animation_frame(void);
 

@@ -138,6 +138,9 @@ void print_py_ast_node(PyAstNode* node, int depth) {
         case PY_AST_NODE_LITERAL: {
             PyLiteralNode* lit = (PyLiteralNode*)node;
             switch (lit->literal_type) {
+                case AST_LITERAL_NUMBER:
+                    printf(" <untyped-number>\n");
+                    break;
                 case PY_LITERAL_INT:
                     printf(" %lld\n", (long long)lit->value.int_value);
                     break;
@@ -156,6 +159,9 @@ void print_py_ast_node(PyAstNode* node, int depth) {
                     break;
                 case PY_LITERAL_NONE:
                     printf(" None\n");
+                    break;
+                case AST_LITERAL_UNDEFINED:
+                    printf(" <undefined>\n");
                     break;
             }
             break;

@@ -15,12 +15,22 @@ typedef struct LangProfile LangProfile;
 extern "C" {
 #endif
 
+// A namespace stays language-owned. The registry uses this narrow membrane
+// only to enumerate already-published exports for a cross-language import.
+typedef struct ModuleNamespaceOps {
+    Item (*create)(void);
+    Item (*get)(Item namespace_obj, const char* name);
+    int (*function_arity)(Item function_obj);
+    void* (*function_ptr)(Item function_obj);
+} ModuleNamespaceOps;
+
 // Module descriptor — one per loaded module
 typedef struct ModuleDescriptor {
     const char* path;           // resolved absolute path (unique key, owned)
     const char* source_lang;    // "lambda", "js", "python", ... (static string, not owned)
     LangProfile* profile;       // resolved language profile for shared AST phases
     Item namespace_obj;         // namespace Item (map of exported symbols)
+    const ModuleNamespaceOps* namespace_ops; // language-owned export membrane
     void* mir_ctx;              // compiled MIR context (opaque, for function lookup)
     bool initialized;           // true after module code has executed
     bool loading;               // true while module is being loaded (circular import detection)
@@ -34,6 +44,9 @@ void module_registry_cleanup(void);
 
 // Register a compiled + executed module
 void module_register(const char* path, const char* lang, Item namespace_obj, void* mir_ctx);
+void module_register_with_namespace_ops(const char* path, const char* lang,
+                                        Item namespace_obj, void* mir_ctx,
+                                        const ModuleNamespaceOps* namespace_ops);
 
 // Look up a module by resolved path. Returns NULL if not found.
 ModuleDescriptor* module_get(const char* path);
@@ -45,6 +58,8 @@ bool module_is_loaded(const char* path);
 // Creates a partial entry with loading=true, initialized=false, empty namespace.
 // Returns the descriptor so the caller can set namespace_obj after execution.
 ModuleDescriptor* module_register_loading(const char* path, const char* lang);
+ModuleDescriptor* module_register_loading_with_namespace_ops(
+    const char* path, const char* lang, const ModuleNamespaceOps* namespace_ops);
 
 // Check if a module is currently being loaded (circular import in progress)
 bool module_is_loading(const char* path);
@@ -55,12 +70,16 @@ bool module_is_loading(const char* path);
 // Returns the namespace Item (type=MAP).
 Item module_build_lambda_namespace(void* script_ptr);
 
-// Create a synthetic Script from a JS namespace object for Lambda→JS import.
-// Walks the JS namespace map's shape entries and creates synthetic AST nodes
+// Create a synthetic Script from a hosted namespace object for Lambda imports.
+// Walks the language-owned namespace map's shape entries and creates synthetic AST nodes
 // (AstFuncNode/AstNamedNode) so the Lambda import system can bind them.
 // The returned Script has ast_root, reference, and is registered in runtime->scripts.
 // Returns NULL on error.
-void* create_js_import_script(const char* resolved_path, Item namespace_obj, void* runtime_ptr);
+void* create_module_import_script(const char* resolved_path, Item namespace_obj, void* runtime_ptr);
+
+Item module_namespace_get(const ModuleDescriptor* module, const char* name);
+int module_namespace_function_arity(const ModuleDescriptor* module, Item function_obj);
+void* module_namespace_function_ptr(const ModuleDescriptor* module, Item function_obj);
 
 // ---------------------------------------------------------------------------
 // Naming convention helpers (Phase 4)

@@ -2,6 +2,7 @@
 
 #include "py_ast.hpp"
 #include "../transpiler.hpp"
+#include "../jube/jube.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,8 +60,9 @@ typedef struct PyTranspiler {
     TSParser* parser;
     TSTree* tree;
 
-    // runtime integration
-    Runtime* runtime;
+    // The front end carries the opaque host execution token only. Python
+    // parsing/scope analysis must not depend on a Runtime layout.
+    void* host_execution;
 } PyTranspiler;
 
 // Scope management functions
@@ -91,13 +93,28 @@ void py_warning(PyTranspiler* tp, TSNode node, const char* format, ...);
 void print_py_ast_node(PyAstNode* node, int indent);
 
 // Transpiler lifecycle functions
-PyTranspiler* py_transpiler_create(Runtime* runtime);
+PyTranspiler* py_transpiler_create(void* host_execution);
 void py_transpiler_destroy(PyTranspiler* tp);
 bool py_transpiler_parse(PyTranspiler* tp, const char* source, size_t length);
+
+// Registered by the Python Jube descriptor. The compiler retains only this
+// reviewed service table, never module-registry or Script layouts.
+void py_set_hosted_module_graph_api(const JubeModuleGraphAPI* module_graph);
+void py_set_hosted_source_api(const JubeSourceAPI* source_api);
+void py_set_hosted_execution_api(const JubeGuestExecutionAPI* execution_api);
+void py_set_hosted_gc_api(const JubeHostGcAPI* gc_api);
+void py_set_hosted_runtime_catalog_api(const JubeRuntimeCatalogAPI* runtime_catalog);
 
 #ifdef __cplusplus
 }
 #endif
 
 // Direct MIR transpilation entry point
-Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* filename);
+// The Jube adapter supplies a host-owned opaque execution token. Python
+// compilation never receives a Runtime or active-context layout.
+Item transpile_py_to_mir(void* host_execution, const char* py_source, const char* filename);
+
+// Internal static-migration adapter used only by the Python Jube descriptor.
+// Shared host headers intentionally do not expose this Python entry point.
+Item load_py_module(void* host_execution, const char* py_path);
+void py_module_heap_cleanup(void* host_heap);

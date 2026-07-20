@@ -78,6 +78,7 @@ int64_t py_list_length(Item list);
 Item py_dict_new(void);
 Item py_dict_get(Item dict, Item key);
 Item py_dict_set(Item dict, Item key, Item value);
+Item py_dict_keys(Item dict);
 
 Item py_tuple_new(int length);
 Item py_tuple_set(Item tuple, int index, Item value);

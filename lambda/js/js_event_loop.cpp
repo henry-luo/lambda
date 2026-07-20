@@ -641,6 +641,13 @@ static void timer_fire_cb(uv_timer_t *handle) {
         timer_mark_object_destroyed(th);
         timer_close_handle(th);
     }
+    if (th && th->runtime_doc) {
+        // Promise continuations run immediately after a timer callback. Commit
+        // this transient document first so continuation geometry observes the
+        // mutation made by that callback, without changing ordinary timer
+        // execution or the long-lived Radiant frame loop.
+        js_dom_commit_headless_layout();
+    }
     js_microtask_flush();
 }
 static double item_to_ms(Item delay) {

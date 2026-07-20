@@ -3,7 +3,6 @@
 #include "rdt_video.h"
 #include "event.hpp"
 #include "render.hpp"
-#include "../lambda/js/js_dom.h"
 #include "../lib/str.h"
 #include "../lib/strview.h"
 #include "../lib/memtrack.h"
@@ -1719,7 +1718,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 // Script writes to option.selected are live IDL state, not a
                 // selected attribute; preserve that state when DOM mutation
                 // reconciliation rebuilds this form control.
-                if (js_dom_option_is_selected((void*)option) && selected_idx < 0) {
+                if (dom_option_is_selected(option) && selected_idx < 0) {
                     selected_idx = option_count;
                 }
                 option_count++;

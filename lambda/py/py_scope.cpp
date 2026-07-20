@@ -212,7 +212,7 @@ void py_warning(PyTranspiler* tp, TSNode node, const char* format, ...) {
 
 // transpiler lifecycle functions
 
-PyTranspiler* py_transpiler_create(Runtime* runtime) {
+PyTranspiler* py_transpiler_create(void* host_execution) {
     PyTranspiler* tp = (PyTranspiler*)mem_alloc(sizeof(PyTranspiler), MEM_CAT_PY_RUNTIME);
     memset(tp, 0, sizeof(PyTranspiler));
 
@@ -234,7 +234,7 @@ PyTranspiler* py_transpiler_create(Runtime* runtime) {
     tp->temp_var_counter = 0;
     tp->label_counter = 0;
     tp->has_errors = false;
-    tp->runtime = runtime;
+    tp->host_execution = host_execution;
 
     return tp;
 }
