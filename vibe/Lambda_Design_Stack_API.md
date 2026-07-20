@@ -935,6 +935,13 @@ overwriting one global frame state.
 
 ### 8.5 Proposed lifecycle API
 
+> **Implementation note (2026-07-20):** the shipped surface kept granular
+> primitives (`em_frame_dispose/suspend/restore`, `em_finalize_frame_prologue`,
+> `em_finalize_scalar_homes`, `em_finalize_function_metadata`, root finalizers)
+> composed per language (`jm_begin/finish_function_frame` for JS; Lambda's
+> `begin_function_epilogue`/`finalize_side_root_frame`); the monolithic
+> `em_function_begin`/`em_function_finish` names below were not introduced.
+
 ```c
 bool em_function_begin(MirEmitter* em, const MirFunctionPlan* plan);
 
