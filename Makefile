@@ -503,7 +503,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
 	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup docs intellisense analyze-binary \
-	    build-debug build-release build-release-profile clean-all distclean \
+	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
@@ -524,6 +524,7 @@ help:
 	@echo "                  All platforms use Clang as the default compiler"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  build-release - Build optimized release version using Premake"
+	@echo "  build-debug-profile   - Build optimized, symbolized debug profile with JS execution profiling"
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
@@ -750,6 +751,22 @@ build-release-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs
 	@echo "Release profile build completed."
 	@ls -lh lambda-profile.exe 2>/dev/null || true
 	$(call windows_dll_check,lambda-profile.exe)
+
+# Keep regular debug free of profiler hooks so its runtime cost reflects only
+# debugging and sanitizer instrumentation; use this target to collect JS profiles.
+build-debug-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB)
+	@echo "Building debug_profile version using Premake build system..."
+	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
+	$(call toolchain_verify)
+	@echo "Generating Premake configuration..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	@echo "Generating makefiles..."
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	@echo "Building lambda executable (debug_profile) with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_profile_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	@echo "Debug profile build completed. Executable: lambda-debug-profile.exe"
+	@ls -lh lambda-debug-profile.exe 2>/dev/null || true
+	$(call windows_dll_check,lambda-debug-profile.exe)
 
 # Headless CLI build (no Radiant layout engine or GUI support)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)

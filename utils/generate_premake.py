@@ -505,7 +505,7 @@ class PremakeGenerator:
 
         self.premake_content.extend([
             f'workspace "{workspace_name}"',
-            '    configurations { "debug", "release", "release_profile" }',
+            '    configurations { "debug", "debug_profile", "release", "release_profile" }',
             f'    platforms {{ {platform_str} }}',
             f'    location "{location}"',
             f'    startproject "{startup_project}"',
@@ -520,9 +520,17 @@ class PremakeGenerator:
 
         self.premake_content.extend([
             '    filter "configurations:debug"',
+            '        defines { "DEBUG" }',
+            '        symbols "On"',
+            '        -- -Og keeps debugging practical while avoiding the O0 runtime penalty.',
+            '        buildoptions { "-Og", "-fno-omit-frame-pointer" }',
+            '    ',
+            '    filter "configurations:debug_profile"',
+            '        -- Preserve debugger symbols while profiling optimized JS execution.',
             '        defines { "DEBUG", "LAMBDA_JS_EXEC_PROFILE" }',
             '        symbols "On"',
-            '        optimize "Off"',
+            '        optimize "Speed"',
+            '        buildoptions { "-fno-omit-frame-pointer" }',
         ])
 
         # Add Windows-specific linker flags to debug configuration
@@ -2671,6 +2679,8 @@ class PremakeGenerator:
             f'    targetextension "{target_extension}"',
             '    filter "configurations:release_profile"',
             f'        targetname "{target_name}-profile"',
+            '    filter "configurations:debug_profile"',
+            f'        targetname "{target_name}-debug-profile"',
             '    filter {}',
             '    ',
             '    files {',
