@@ -138,13 +138,14 @@ number mistakes removed. Consequence to teach: `if (results)` does **not** ask
   **wraps** (two's complement); constant/literal overflow is a **compile
   error**; division by zero returns `error()` (a deliberate divergence from
   Go's panic — the §7.3 fn-return rule overrides the Go alignment on this
-  corner); `MinInt / -1` wraps.
+  corner); `MinInt div -1` wraps.
 
-*Rationale.* `int ⊂ float64` makes int↔float conversion always lossless, kills
-the mixed-arithmetic precision-loss class, and lets the JIT hold ints in double
-registers with zero observable difference (P6). The rejected alternative —
-promotion to decimal — was tried and abandoned: it never fixed non-overflow
-int/float mixing, and the decimal×float lattice is costly. [C3]
+*Rationale.* `int ⊂ float64` makes each int↔float operand conversion
+lossless and lets the JIT hold ints in double registers with zero observable
+difference (P6). An overflowing integer result can still round after promotion:
+odd or otherwise unrepresentable results above 2⁵³ may lose precision. Keeping
+that boundary behavior is the deliberate practical/performance tradeoff; the
+rejected alternative is automatic overflow into `integer`. [C3]
 
 ### 4.2 Literals are strict; data always fits
 
@@ -167,6 +168,27 @@ int/float mixing, and the decimal×float lattice is costly. [C3]
 The exact meeting type is contagious. **A float entering the decimal world is
 converted by one rule: it denotes its shortest round-trip decimal** (§4.5), and
 the operation proceeds in decimal arithmetic. [C3, C8.5a, C13]
+
+Promotion is type-directed, never selected from the operands' current
+magnitudes. Sized-integer arithmetic has two cases:
+
+- **sized × sized:** select the smallest Lambda machine lane that contains both
+  operand type domains, then stay in that lane for `+`, `-`, `*`, `div`, `%`,
+  bitwise operations, and shifts. Same-signed operands use the wider width; a
+  signed/unsigned pair uses a containing signed width when one exists,
+  otherwise the next wider signed width, otherwise the wider unsigned width.
+  Thus `i8 + u8 → i16`, `i32 + u32 → i64`, and `i64 + u64 → u64`.
+  Runtime overflow then follows §4.1's Go-aligned rule.
+- **sized × non-sized:** leave the machine domain before the operation.
+  `i8`…`u32` enter `int`; `i64` and `u64` enter `integer`. The resulting
+  non-sized operands meet through `int → float` or
+  `int → integer → decimal`. Consequently `u8 + int → int`,
+  `i64 + int → integer`, and both `i64 + float` and `u64 + float` produce
+  `decimal`. Small and large `u64` values take the same path.
+
+True division `/` always leaves the sized machine domain and follows §4.7.
+This operational lane selection is separate from the exact-embedding relation
+used by `is`; neither permits value-dependent promotion.
 
 ### 4.4 Decimal storage tiers
 
@@ -225,8 +247,13 @@ Division by zero never raises, at any width or tier:
 - **A literal zero divisor is a compile error** (`x div 0`, `x % 0`) —
   statically-visible nonsense, caught early like the other literal-strictness
   rules (Go's constant layer). The rules below govern *computed* zeros.
-- `/` is float-producing true division and follows IEEE: `1/0` → `inf`,
-  `0.0/0.0` → `nan`.
+- `/` is true division, but its result is selected by the promoted operand
+  domain rather than by one universal float rule: `int / int → float`;
+  `float` with `int` or `float → float`; `integer / integer → decimal`;
+  `integer / float → decimal`; and any decimal participation → decimal.
+  Sized integer operands first enter the non-sized domains from §4.3, so
+  `i8 / u8 → float` while `i64 / u64 → decimal`. Float-domain division
+  follows IEEE: `1/0` → `inf`, `0.0/0.0` → `nan`.
 - `div` and `%` are integer operations; integers have no `inf`/`nan`, so a zero
   divisor **returns `error()`** (§7.3 poison — flows through pipelines,
   rescued by `or`, never aborts). Applies to flex `int` and machine ints alike.

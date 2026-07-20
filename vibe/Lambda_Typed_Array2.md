@@ -1,5 +1,12 @@
 # Proposal: Lambda Typed Array Phase 2 — N-D, Views, Vectorized Math, JS Unification
 
+> **2026-07-20 numeric-semantics amendment:** the storage/view work remains
+> landed, but arithmetic result selection now follows
+> `Lambda_Semantics_Number_Model.md` and is implemented through
+> `Lambda_Impl_Numbers.md`. Status lines that say vector arithmetic is "done"
+> describe the live pre-realignment kernels, not approval of their legacy
+> `int64`/float promotion shortcuts.
+
 ## Status of Phase 1 (baseline for this proposal)
 
 The Phase 1 work (see [Lambda_Typed_Array.md](Lambda_Typed_Array.md)) is **landed and operational**:
@@ -133,7 +140,7 @@ Two paths into N-D, **both implicit — no new `tensor(...)` builtin**:
 | `expand_dims`, `squeeze` | — *not yet* | Cheap view ops on shape/strides — remaining future work. |
 | `concat`, `stack` | **done (binary)** | `concat(a,b)` (axis 0), `stack(a,b)` (new leading axis). **Variadic `concat(a,b,c,…)` / `stack(a,b,c,…)` and an explicit `axis` arg are deferred to future** — good-to-have. Binary `concat` chains for 3+; binary `stack` can't faithfully stack N>2 (use the `[a,b,c]` nested-literal auto-promotion, which is effectively n-ary stack today). |
 | `split` | **done** | `split(arr, n)` splits into `n` equal parts along axis 0; `split(arr, n, axis)` along the given axis (axis length must be divisible by `n`). Returns a list of `n` sub-arrays. Dispatches on first-arg type so string `split` is unaffected. Non-contiguous sources (e.g. a transpose) are gathered correctly. |
-| `dot` / `matmul` | **done** | `matmul(a,b)` for 2-D·2-D, 1-D·1-D (dot), and vector–matrix mixed cases; int·int→int64 else float. |
+| `dot` / `matmul` | **kernel done; numeric realignment open** | Shapes and kernels are landed. Result-domain selection must use the scalar classifier: sized integer multiply/add stays in the selected lane with Go wrap; any semantic-tower exit uses `int`/`integer`/float/decimal rather than the legacy `int·int→int64 else float` shortcut. |
 
 ### Broadcasting
 

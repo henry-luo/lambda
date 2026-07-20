@@ -1,11 +1,13 @@
 # Lambda Sized Integer Types — Design Record
 
-- **Status:** SETTLED and implemented. The 2026-07-20 Stack API realignment
+- **Status:** representation and sized-lane semantics are settled and
+  implemented. The 2026-07-20 Stack API realignment
   removes the old compact-inline `int64` and transient-heap `uint64` split:
   both full-width integer types use number homes while transient,
   caller-donated homes for generated Item returns, and destination-owned
-  scalar storage when retained. `ushr` and value-preserving mixed `u64`
-  arithmetic are implemented in the same round.
+  scalar storage when retained. `ushr` is implemented. The later
+  type-directed sized/non-sized arithmetic decision supersedes the completed
+  value-based `u64` fold and is pending under `Lambda_Impl_Numbers.md`.
 - **Scope:** Lambda scalar sized integer annotations, literals, and builtins
   (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`), plus the runtime
   representation of the `int` / `int64` / `uint64` scalar family.
@@ -54,18 +56,17 @@ Decisions:
    right-shift behavior on operand signedness. Lambda deliberately differs
    from Go in one respect: mixed compact widths are allowed through the fixed
    promotion table instead of requiring explicit conversion.
-7. **Plain `int` interop:** untyped `int` operands keep legacy behavior among
-   themselves; when one operand is compact and the other is a plain `int`,
-   the plain value converts into the compact result width (bitwise builtins;
-   ordinary arithmetic with `u64` is decision 8).
-8. **`u64` in ordinary (untyped-mixed) arithmetic is value-preserving**
-   (D1-B, implemented 2026-07-20). `u64 ≤ INT64_MAX` folds to `int64`
-   exactly; above that it promotes to **decimal** (the unlimited
-   BigInt-family rank) — consistent with rank promotion
-   `int → int64 → decimal` and with the comparison paths, which already
-   uphold `u64` value semantics. Consequence: untyped arithmetic exits the
-   fixed-width domain — `18446744073709551615u64 * 1` yields a decimal, not
-   a `u64`; mixed float follows the ladder's decimal/float rule.
+7. **Plain `int` interop:** ordinary arithmetic between a sized integer and a
+   non-sized operand exits the fixed-width domain. `i8`…`u32` enter the
+   non-sized tower as `int`; `i64/u64` enter as `integer`. Bitwise builtins
+   retain their explicitly documented width-domain behavior.
+8. **Mixed promotion is type-directed, never value-directed.** Every `u64`,
+   including values at or below `INT64_MAX`, follows the same rule. With a
+   non-sized operand it enters `integer`; with another sized integer it stays
+   in the machine lane selected by decision 2. Thus `u64 + int → integer`,
+   `u64 + float → decimal`, and `i64 + u64 → u64`. The earlier D1-B
+   threshold fold was an implementation repair, not the final semantics, and
+   is superseded.
 
 Why not the alternatives:
 
@@ -186,7 +187,10 @@ run; the *sized* ladders operate on them directly, preserving width and
 signedness.
 
 `i64` and `u64` do not fit the 32-bit NUM_SIZED payload and have their own
-representations — the subject of §5.
+representations — the subject of §5. When ordinary arithmetic mixes a compact
+sized integer with a non-sized value, the target semantics map it to `int`,
+not `int64`; the live `normalize_sized()` implementation still collapses it to
+`INT64` and is an implementation gap tracked in `Lambda_Impl_Numbers.md`.
 
 ---
 
@@ -236,8 +240,9 @@ lattice retain their existing distinction without an inline-int64 marker.
 `uint64` uses the same physical one-word homes as `int64`, with its unsigned
 tag and analysis retaining signedness. There is no `push_u64` heap boxer and
 no transient `uint64` GC allocation. Same-width operations retain modulo-2⁶⁴
-semantics; ordinary mixed arithmetic is value-preserving: values through
-`INT64_MAX` fold exactly to `int64`, and larger values promote to decimal.
+semantics. Ordinary mixed arithmetic maps every `uint64` value to the
+non-sized `integer` domain before operating; the current value never selects
+an `int64` versus decimal path.
 
 The only current standalone numeric heap representation is the explicit
 ownerless-persistence fallback. `lambda_item_heap_rehome()` copies a
@@ -263,18 +268,19 @@ BigInt, type-directed.
 | NUM_SIZED packing, `INT56_MAX`, full-width `i64`/`u64` Item tagging | `lambda/lambda.h` |
 | Sized literal parsing (unsigned parse for `u64`) | `lambda/build_ast.cpp` |
 | Callable conversions, constant-overflow diagnostic E108 | `lambda/build_ast.cpp` (sized type names), `lambda/transpile-mir.cpp` |
-| `normalize_sized`, exact decimal `u64` conversion, sized arithmetic/bitwise/`ushr` | `lambda/lambda-eval-num.cpp`, `lambda/lambda-decimal.cpp` |
+| Current `normalize_sized` shortcut; target type-directed entry mapping; sized arithmetic/bitwise/`ushr` | `lambda/lambda-eval-num.cpp`, `lambda/lambda-decimal.cpp`, `vibe/Lambda_Impl_Numbers.md` |
 | Shared scalar-home return classification and typed bitwise lowering | `lambda/transpile-mir.cpp`, `lambda/mir_emitter_shared.hpp` |
 | Destination scalar storage and typed-array materialization | `lambda/lambda-data-runtime.cpp`, `lambda/lambda-data.cpp`, `lambda/vmap.cpp` |
 | Full-domain number-home boxing, caller-home adoption, ownerless fallback counter | `lambda/lambda-mem.cpp` |
 
 ## 7. Resolved items
 
-1. **`u64` above `INT64_MAX` in ordinary (untyped-mixed) arithmetic — DONE
-   2026-07-20.** `normalize_sized()` folds values through `INT64_MAX` using
-   the full-domain `box_int64_value()` home boxer and promotes larger values
-   through exact decimal conversion. This fixes both the previous signed-value
-   corruption and the `INT64_MAX` sentinel crash.
+1. **Historical high-`u64` corruption repair — DONE 2026-07-20, semantic
+   policy subsequently superseded.** The completed threshold fold fixed signed
+   reinterpretation and the `INT64_MAX` sentinel crash. The latest number model
+   removes that magnitude branch entirely: all `u64` mixed with non-sized
+   values enter `integer`. Replacement work is tracked in
+   `Lambda_Impl_Numbers.md`.
 2. **JS-style `ushr` — DONE 2026-07-20.** The builtin performs a logical
    width-preserving shift, changes signed operands to their unsigned
    counterparts, and uses `u32` for plain `int`; there is still no `>>>`
@@ -285,7 +291,8 @@ BigInt, type-directed.
    sized-numeric wording (type tables, wrap examples, `i64`/`f64` alias
    rows) verified accurate against the current build.
 
-Implementation plan for items 1–2: `vibe/Lambda_Impl_Sized_Int.md`.
+Historical implementation plan for items 1–2: `vibe/Lambda_Impl_Sized_Int.md`.
+Current arithmetic realignment plan: `vibe/Lambda_Impl_Numbers.md`.
 
 ## 8. Test coverage
 
@@ -302,8 +309,9 @@ Implementation plan for items 1–2: `vibe/Lambda_Impl_Sized_Int.md`.
 - `test/lambda/sized_numeric_type_annot.ls`,
   `test/lambda/sized_numeric_mixed_expr.ls`,
   `test/lambda/compact_typed_arrays.ls` — pre-existing coverage.
-- `test/lambda/sized_numeric_u64_mixed.ls` — value-preserving high-`u64`
-  ordinary arithmetic, `INT64_MAX` crash regression, exact `div`/`%`, same
-  width wrap/negation/comparisons, and the high-byte Item-tag boundary.
+- `test/lambda/sized_numeric_u64_mixed.ls` — historical threshold-fold and
+  crash coverage. `Lambda_Impl_Numbers.md` must replace its result-type
+  expectations with magnitude-independent `integer` promotion while retaining
+  the sentinel, same-width wrap, negation, comparison, and Item-tag regressions.
 - `test/lambda/sized_numeric_ushr.ls` — signed/unsigned and plain-`int`
   logical shift results, zero and width-edge counts, plus `u64` maximum.

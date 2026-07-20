@@ -1,7 +1,9 @@
-# Stack API Scalar Realignment and Sized Integers — Implementation Plan
+# Stack API Scalar Realignment and Sized Integers — Historical Implementation Record
 
-- **Status:** IMPLEMENTED — final baseline-gate results are recorded in §0.4.
-  The retained tasks below are now completion records rather than open work.
+- **Status:** IMPLEMENTED for scalar storage and `ushr`; retained as a
+  historical completion record. Item 1's value-based mixed-`u64` policy was
+  implemented at the time but is now superseded by the type-directed number
+  model. Its replacement is planned in `vibe/Lambda_Impl_Numbers.md`.
 - **Date:** 2026-07-16; revised 2026-07-20 for implementation of the
   scalar-storage realignment
 - **Primary design:** `vibe/Lambda_Design_Stack_API.md` Phase 7 and §15.
@@ -12,8 +14,9 @@
 - **Convention:** `file:line` references drift; confirm against symbol names.
 
 This revision retains every original task and its rationale. Item 0 is the
-representation/lifetime prerequisite; Item 1 is the mixed-`u64` correctness
-and crash fix on that representation; Item 2 is the completed `ushr` builtin.
+representation/lifetime prerequisite; Item 1 records the historical
+mixed-`u64` correctness and crash fix but is no longer semantic authority;
+Item 2 is the completed `ushr` builtin.
 
 ---
 
@@ -228,7 +231,14 @@ front ends, rather than moving the work into a wrapper:
 
 ---
 
-## Item 1 — value-preserving `u64` in ordinary mixed arithmetic
+## Item 1 — historical value-preserving `u64` repair (superseded)
+
+> **Superseded 2026-07-20 by the final type-directed rule.** The failure
+> analysis, implementation steps, and tests below are retained as history.
+> They fixed signed reinterpretation and the `INT64_MAX` crash, but the
+> threshold rule `u64 ≤ INT64_MAX → int64; otherwise decimal` must now be
+> removed. Every `u64` mixed with a non-sized number enters `integer`,
+> regardless of magnitude; see `Lambda_Impl_Numbers.md`.
 
 ### 1.1 Verified failure surface (probed 2026-07-16, re-verified 2026-07-20, `m = 18446744073709551615u64`)
 
@@ -267,9 +277,9 @@ directly and are value-correct.
 
 ### 1.2 Decision D1 — semantic model for the fold
 
-**DECIDED 2026-07-20: option B**, user-confirmed. Recorded in
-`Lambda_Type_Int_Sized.md` (§1 decision 8; §7 item 1 flipped to
-decided/implementation-pending).
+**Historical decision:** option B was selected and implemented on 2026-07-20,
+then superseded by the final number-model decision recorded in
+`Lambda_Semantics_Number_Model.md` §3.3.2.
 
 Options considered:
 
@@ -433,7 +443,8 @@ of the documented bitwise surface. It remains a builtin, not grammar syntax.
 2. **DONE:** atomically enable `INT64`/`UINT64` homes, then remove incompatible
    inline and transient-heap paths.
 3. **DONE:** cut datetime over to GC objects and remove its scalar-home lane.
-4. **DONE:** land the D1 value-preserving fold and its regression suite.
+4. **DONE historically; superseded:** the D1 threshold fold landed with its
+   regression suite and is now replacement scope in `Lambda_Impl_Numbers.md`.
 5. **DONE:** land `ushr`, tests, and user-facing documentation.
 6. **DONE:** synchronize the design records; final command results belong in
    §0.4 below.

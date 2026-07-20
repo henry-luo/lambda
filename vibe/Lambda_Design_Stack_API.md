@@ -69,8 +69,10 @@ Phases 0 through 7 are complete. The completed implementation provides:
 - normal/error lane adoption, discard scratch, tail-home validation, wrapper
   heap rehoming, and full callee watermark restoration;
 - full-domain `INT64`/`UINT64` transient homes, unsigned caller-home transfer,
-  destination-owned scalar storage, exact high-`u64` mixed arithmetic, and
-  `ushr` lowering for Lambda and LambdaJS;
+  destination-owned scalar storage, and `ushr` lowering for Lambda and
+  LambdaJS. The high-`u64` corruption repair landed in this implementation
+  round, but its magnitude-based promotion policy was later superseded by the
+  type-directed number model and is tracked in `Lambda_Impl_Numbers.md`;
 - GC-owned datetime objects with no number-home return or relocation lane;
 - a counted `lambda_item_heap_rehome()` fallback only for Item-only numeric
   persistence without a natural destination owner;

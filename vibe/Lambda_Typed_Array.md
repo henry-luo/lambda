@@ -387,8 +387,11 @@ data ++ [5.0f32, 6.0f32]  // f32[]: [1.0, 2.5, 3.7, 0.5, 4.2, 5.0, 6.0]
 
 **Type preservation rules:**
 - Operations that produce elements of the same type → same typed array
-- Operations that widen (e.g., `u8 * u8` can exceed u8 range) → promote to wider type
-- Mixed-type operations → fall back to generic Array or wider typed array
+- Same-lane sized integer operations wrap in that lane; they do not widen merely
+  to avoid overflow.
+- Mixed-sized integer operations select the scalar model's common sized lane.
+  A result falls back to a generic array only when the scalar operation exits
+  the sized domain (for example, full-width true division to decimal).
 
 ### 9. Properties
 
@@ -418,8 +421,8 @@ let b: i16[] = [10i16, 20i16, 30i16]
 
 a + b      // i16[]: [110, 220, 330]
 a - b      // i16[]: [90, 180, 270]
-a * b      // i32[]: [1000, 4000, 9000]  — promoted to avoid overflow
-a / b      // f32[]: [10.0, 10.0, 10.0]  — division always produces float
+a * b      // i16[]: [1000, 4000, 9000]  — same lane; wraps if it overflows
+a / b      // f32[]: [10.0, 10.0, 10.0]  — this compact typed-array path exits to f32
 
 // Scalar broadcast with typed arrays
 let data: f32[] = [1.0f32, 2.0f32, 3.0f32]
@@ -437,23 +440,16 @@ x + y            // i16[]: [101, 202, 303]  — widened to i16
 
 When two typed arrays are combined, the result element type follows these rules:
 
-| Operation | Same type | Different width (same sign) | Signed + Unsigned | Any + float |
-|-----------|-----------|---------------------------|-------------------|-------------|
-| `+` `-` | Same type (wrapping) | Wider type | Next wider signed | Float type |
-| `*` | Next wider type | Wider of the two widened | Next wider signed | Float type |
-| `/` | `f32` or `f64` | `f32` or `f64` | `f32` or `f64` | Float type |
-| `%` | Same type | Wider type | Next wider signed | Float type |
-| `**` | `f64` | `f64` | `f64` | `f64` |
+| Operation | Same integer type | Different integer types | Integer + sized float | Full-width integer + float |
+|-----------|-------------------|-------------------------|-----------------------|----------------------------|
+| `+` `-` `*` `div` `%` | same lane, Go-style wrap | scalar model's containing sized lane | float domain for compact integers | decimal domain; generic/decimal-capable result storage |
+| `/` | compact lane → float; `i64/u64` → decimal | map each lane to `int`/`integer`, then true-divide | float domain for compact integers | decimal domain |
+| `**` | follow the scalar power rule selected by `Lambda_Impl_Numbers.md` | same | same | same |
 
-**Specific widening table for `*` (to prevent overflow):**
-
-| Operand Types | Result Type | Rationale |
-|---------------|-------------|-----------|
-| `i8 * i8` | `i16` | 8×8 fits in 16 bits |
-| `i16 * i16` | `i32` | 16×16 fits in 32 bits |
-| `i32 * i32` | `i64` | 32×32 fits in 64 bits |
-| `u8 * u8` | `u16` | unsigned variant |
-| `f32 * f32` | `f32` | float mul stays same width |
+Examples of the shared integer-lane selection are `i8 + u8 → i16`,
+`i32 + u32 → i64`, and `i64 + u64 → u64`. Once selected, the lane is used for
+multiplication as well as addition and subtraction; `i16 * i16` therefore
+remains `i16` and wraps instead of widening to avoid overflow.
 
 ### 11. Sized Scalar Support in Vector Ops
 

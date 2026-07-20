@@ -1,5 +1,13 @@
 # Lambda Function Parameter Handling Proposal
 
+> **2026-07-20 numeric-model amendment:** parameter compatibility follows the
+> exact-embedding lattice in `Lambda_Semantics_Number_Model.md` §3.4. In
+> particular, `int -> float` and `int -> int64` are exact and may widen
+> implicitly; `int64/u64 -> float` is not exact and is rejected unless the
+> source is explicitly converted. Full-width integers widen to `integer` or
+> `decimal`, not to float based on their current value. The current/live
+> behavior inventory below is not the target contract where it disagrees.
+
 ## Overview
 
 This document analyzes Lambda's current function call parameter handling and proposes improvements for:
@@ -42,7 +50,8 @@ This document analyzes Lambda's current function call parameter handling and pro
   - System functions: special handling for DateTime boxing
   - User functions with typed parameters:
     - Same type: pass directly
-    - `float` param with `int/int64/float` arg: pass directly
+    - `float` param with `int/int64/float` arg: pass directly (**legacy gap for
+      `int64`; only `int` and float are exact-compatible**)
     - `float` param with `ANY` arg: wrap with `it2d()`
     - `int64` param with `int/int64` arg: pass directly
     - `int64` param with `float` arg: cast `((int64_t)...)`
@@ -140,18 +149,11 @@ bool types_compatible(Type* arg_type, Type* param_type) {
     if (param_type->type_id == LMD_TYPE_ANY) return true;  // any accepts all
     if (arg_type->type_id == param_type->type_id) return true;
     
-    // Numeric coercion: int → int64, int → float, int64 → float
-    if (param_type->type_id == LMD_TYPE_FLOAT) {
-        if (arg_type->type_id == LMD_TYPE_INT || 
-            arg_type->type_id == LMD_TYPE_INT64) return true;
-    }
-    if (param_type->type_id == LMD_TYPE_INT64) {
-        if (arg_type->type_id == LMD_TYPE_INT) return true;
-    }
-    if (param_type->type_id == LMD_TYPE_NUMBER) {
-        if (arg_type->type_id == LMD_TYPE_INT || 
-            arg_type->type_id == LMD_TYPE_INT64 ||
-            arg_type->type_id == LMD_TYPE_FLOAT) return true;
+    // Numeric compatibility is a semantic exact-embedding query. It must
+    // inspect complete Type* values because integer and decimal can share a
+    // physical TypeId.
+    if (is_numeric_type(arg_type) && is_numeric_type(param_type)) {
+        return numeric_type_exactly_embeds(arg_type, param_type);
     }
     
     return false;

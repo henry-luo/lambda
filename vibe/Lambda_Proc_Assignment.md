@@ -1,5 +1,13 @@
 # Lambda Assignment — Structural Mutation Design
 
+> **2026-07-20 numeric-model amendment:** implicit annotated assignment is
+> widening by exact embedding, not arbitrary `int`/`float`/`int64`/`decimal`
+> coercion. `int -> float`, `int -> int64`, and all exact paths to
+> `integer`/`decimal` are valid; `int64/u64 -> float` and every narrowing edge
+> require an explicit conversion. Legacy implementation notes below are
+> historical where they claim bidirectional numeric coercion or `INT`/`INT64`
+> interchangeability.
+
 ## 1. Overview
 
 Lambda started as a pure functional engine. Procedural functions (`pn`) introduced mutation via `var` declarations and assignment statements (`assign_stam`). The current mutation support was built ad hoc for specific benchmarks (notably AWFY), resulting in structural gaps, silent data corruption, and inconsistent behavior across data types.
@@ -925,7 +933,7 @@ The current mutation support in Lambda's procedural code has **8 identified bugs
 
 The following are now implemented and passing all 247 baseline tests:
 
-- **Smart type analysis for `var` assignment** (§4.1): The transpiler analyzes all assignments to each `var` during AST building. If types are consistent, the variable uses its concrete C type (zero overhead). If types are inconsistent, the variable is widened to `Item` storage. Type-annotated vars enforce their declared type with static error reporting. Numeric coercion (int↔float↔int64↔decimal) is allowed for annotated vars.
+- **Smart type analysis for `var` assignment** (§4.1): The transpiler analyzes all assignments to each `var` during AST building. If types are consistent, the variable uses its concrete C type (zero overhead). If types are inconsistent, the variable is widened to `Item` storage. Type-annotated vars enforce their declared type with static error reporting. The landed broad numeric coercion is now a realignment gap: annotated vars must accept only exact-embedding widening unless the source contains an explicit conversion.
 
 - **Immutability enforcement** (§4.2): `let` bindings and function parameters now produce a compile-time error (E211) if assigned to in procedural code. Only `var` variables are mutable.
 
@@ -933,7 +941,7 @@ The following are now implemented and passing all 247 baseline tests:
 
 - **Array type conversion** (§4.3): `fn_array_set` now validates value types before storing. When assigning an incompatible type to a specialized array (e.g., float to `ArrayInt`), the array is converted to a generic `Array` in place — the struct pointer stays the same, only `type_id` and the items buffer change. Specialized getters (`array_int_get`, etc.) check `type_id` at runtime to handle converted arrays. Element and List children are also supported.
 
-- **Map shape rebuild** (§4.4): `fn_map_set` now handles type-changing field assignments by rebuilding the shape chain directly. Three helper functions (`map_field_decrement_ref`, `map_field_store`, `map_rebuild_for_type_change`) build a new ShapeEntry chain via `pool_calloc`, create a new TypeMap/TypeElmt, allocate a new data buffer, copy compatible fields, store the new value with proper ref counting, and free the old buffer. Fast paths are preserved: same-type (in-place), FLOAT+INT (widen to double), INT↔INT64 (same byte size). INT→FLOAT now triggers rebuild to preserve float precision.
+- **Map shape rebuild** (§4.4): `fn_map_set` now handles type-changing field assignments by rebuilding the shape chain directly. Three helper functions (`map_field_decrement_ref`, `map_field_store`, `map_rebuild_for_type_change`) build a new ShapeEntry chain via `pool_calloc`, create a new TypeMap/TypeElmt, allocate a new data buffer, copy compatible fields, store the new value with proper ref counting, and free the old buffer. Same-type and exact `INT -> FLOAT`/`INT -> INT64` widening may retain optimized storage paths. The old bidirectional `INT <-> INT64` shortcut is not a semantic compatibility rule and must not bypass the exact-embedding check.
 
 - **Element attribute mutation** (§4.5): `fn_map_set` now accepts `LMD_TYPE_ELEMENT` in addition to `LMD_TYPE_MAP`. Slot pointers (`type_slot`, `data_slot`, `cap_slot`) abstract over the different struct layouts. For element shape rebuilds, a new `TypeElmt` is created preserving element-specific fields (name, content_length, ns).
 
@@ -947,4 +955,3 @@ The following are now implemented and passing all 247 baseline tests:
 
 The remaining phase addresses edge-case testing:
 - **Phase 7: Additional testing** — edge cases for type changes, immutability, arrays, maps, elements, closures
-

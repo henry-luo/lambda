@@ -1,8 +1,17 @@
-# Proposal: Sized Numeric Types for Lambda
+# Sized Numeric Types for Lambda — Design Record
+
+**Status:** implemented representation and sized-lane support; the 2026-07-20
+type-directed mixed-arithmetic realignment is normative but implementation is
+pending in `Lambda_Impl_Numbers.md`. `Lambda_Semantics_Number_Model.md` and
+`doc/Lambda_Formal_Semantics.md` are the semantic authorities.
 
 ## Summary
 
-Introduce sized numeric types (signed/unsigned integers and sized floats) packed inline within the 64-bit `Item` representation. This adds low-level numeric control without heap allocation, enabling efficient interop with binary formats, hardware interfaces, and numerical computing.
+Provide fixed-width signed/unsigned integers and sized floats for storage,
+interop, and Go-style machine arithmetic. Sub-word values are packed directly
+inside `Item`; `i64`/`u64` use the Stack API's number homes, caller-donated
+return homes, and destination-owned scalar storage rather than an inline
+payload or a mandatory standalone heap allocation.
 
 ## Motivation
 
@@ -10,16 +19,18 @@ Lambda currently supports three numeric representations:
 
 | Type | Storage | Range |
 |------|---------|-------|
-| `int` (int56) | Inline in Item | ±36 quadrillion |
-| `int64` | Heap-allocated pointer | Full signed 64-bit |
-| `float` | Heap-allocated pointer (double) | IEEE 754 64-bit |
+| `int` | Inline in Item | ±(2⁵³−1), the float64 safe-integer band |
+| `int64` | Tagged reference to a number home or owner-backed word | Full signed 64-bit |
+| `float` | Canonical self-tagged double; rare residue uses a number home | IEEE 754 binary64 |
 | `decimal` | Heap-allocated mpdecimal | Arbitrary precision |
 
 **Gaps:**
 - No unsigned integers — needed for binary protocol parsing, bitwise operations, hash values
 - No sub-64-bit sized types — wasteful when processing packed binary data (images, audio, network packets)
 - No float32/float16 — needed for ML model weights, GPU data, and memory-efficient numeric arrays
-- `int64` and `float` require heap allocation even for single values
+- Full-width scalar values need an explicit lifetime owner when they outlive an
+  activation; the Stack API supplies caller and destination ownership without
+  making heap allocation the default
 
 ## Design
 
@@ -94,17 +105,18 @@ struct {
 
 ### 2. `LMD_TYPE_UINT64` — Unsigned 64-bit Integer
 
-Like `LMD_TYPE_INT64`, this stores a heap-allocated pointer to a `uint64_t`:
+Like `LMD_TYPE_INT64`, this is a tagged reference to one owner-backed
+`uint64_t` payload word:
 
 ```c
 // In EnumTypeId, add after LMD_TYPE_PATH:
-LMD_TYPE_UINT64,   // unsigned 64-bit integer (heap-allocated)
+LMD_TYPE_UINT64,   // unsigned 64-bit integer (number home or owned word)
 ```
 
 ```
 Item layout:
 ┌──────────┬──────────────────────────────────────────────────────┐
-│ type_id  │              pointer to uint64_t                     │
+│ type_id  │       pointer to owned uint64 payload word          │
 │  8 bits  │                    56 bits                           │
 │ [63:56]  │                   [55:0]                             │
 └──────────┴──────────────────────────────────────────────────────┘
@@ -117,6 +129,12 @@ Item layout:
 ```
 
 **Range:** `[0, 2^64 - 1]` — full unsigned 64-bit.
+
+Transient producers use the current activation's number home. Generated Item
+returns copy to a caller-donated home; retaining arrays/environments copy to
+destination-owned scalar storage. A bare persistent Item without a natural
+owner may use the Stack API's counted interim GC scalar cell. The tag alone
+does not imply GC ownership.
 
 ### 3. Literal Syntax
 
@@ -261,28 +279,38 @@ When two sized numerics appear in an arithmetic expression:
    fixed-width arithmetic rule.
    - `127i8 + 1i8` → `-128i8`
    - `255u8 + 1u8` → `0u8`
-2. **Different sized integer types:** leave the storage lane and promote through
-   the semantic integer tower (`int` when both operand domains fit int53,
-   otherwise `integer`; decimal participation promotes to `decimal`).
-   - `i8 + u8` → `int`
-   - `i32 + u32` → `int`
-   - `i64 + u8` → `integer`
-   - `u64 + i32` → `integer`
+2. **Different sized integer types:** remain sized. Select the smallest Lambda
+   lane that contains both type domains, then apply Go-style overflow in that
+   lane.
+   - `i8 + u8` → `i16`
+   - `i32 + u32` → `i64`
+   - `i64 + u8` → `i64`
+   - `i64 + u64` → `u64`
 3. **Sized + regular `int`/`integer`/`float`/`decimal`:** promote to the smallest
-   semantic common supertype selected by the numeric tower, not by inspecting
-   the current value.
+   semantic common supertype selected by the complete sized type domain, never
+   by inspecting the current value. `i8`…`u32` enter at `int`; `i64/u64`
+   enter at `integer`.
    - `u8 + int` → `int`
    - `u64 + int` → `integer`
+   - `i64 + float` → `decimal`
+   - `u64 + float` → `decimal`
    - `f32 + float` → `float`
    - `f32 + decimal` → `decimal`
 4. **Mixed sized floats:** promote to the wider sized float when one lane exactly
    contains the other.
    - `f16 + f32` → `f32`
 5. **Integer-sized + float-sized:** promote through `float` unless a decimal
-   operand is already present.
+   entry is required by the integer domain. Compact sized integers enter
+   `float`; `i64/u64` meet float at `decimal`.
    - `i32 + f32` → `float`
    - `u16 + f16` → `float`
+   - `i64 + f32` → `decimal`
    - `f32 + int` → `float`
+
+True division `/` always leaves the sized lane: compact sized integers enter
+`int`, so `i8 / u8 → float`; `i64/u64` enter `integer`, so
+`i64 / u64 → decimal`. Integral `div` and `%` remain in the selected sized
+lane when both operands are sized.
 
 **Overflow behavior:** Same-lane sized integer arithmetic follows Go: unsigned
 operations wrap modulo `2^n`; signed operations produce deterministic
@@ -333,10 +361,10 @@ Float-sized conversions round to the destination IEEE format.
 
 ### 6. Comparison with Existing Types
 
-| Property | `int` (int56) | `int64` | New sized ints | New `u64` |
+| Property | `int` | `int64` | Compact sized ints | `u64` |
 |----------|---------------|---------|----------------|-----------|
-| Storage | Inline | Heap ptr | Inline | Heap ptr |
-| Allocation | None | `heap_calloc` | None | `heap_calloc` |
+| Storage | Inline safe-band value | Number home / owner-backed word | Inline | Number home / owner-backed word |
+| Standalone allocation | None | Not normally; counted GC fallback only for ownerless persistence | None | Not normally; counted GC fallback only for ownerless persistence |
 | Signed | Yes | Yes | Both | No |
 | Bit width | 56 | 64 | 8/16/32 | 64 |
 | Arithmetic | Full | Full | Wrapping | Wrapping |
@@ -361,7 +389,11 @@ The JIT transpiler (`transpile-mir.cpp`) needs to:
 3. **Handle coercion at call boundaries** — when passing sized values to functions expecting `Item`, they're already valid Items (just a different type tag).
 4. **Unbox for native math** — when both operands are the same sized type, operate on raw values and re-pack.
 
-Since sized ints are packed inline (no heap pointer), MIR can operate on them efficiently — extract the 32-bit value, do native arithmetic, pack result. No GC interaction needed.
+Compact sized ints are packed inline, so MIR can extract the 32-bit payload,
+perform native arithmetic, and repack it without GC interaction. `i64/u64`
+use raw MIR integer registers and the shared scalar-home ABI at Item boundaries;
+they are not inline Items and must not be mistaken for GC-owned merely from
+their tags.
 
 ### 8. EnumTypeId Changes
 
@@ -372,7 +404,7 @@ enum EnumTypeId {
     LMD_TYPE_PATH,           // 26
 
     LMD_TYPE_NUM_SIZED,      // 27 — inline sized numerics (i8..u32, f16, f32)
-    LMD_TYPE_UINT64,         // 28 — unsigned 64-bit integer (heap pointer)
+    LMD_TYPE_UINT64,         // 28 — unsigned 64-bit integer (owned word reference)
 
     LMD_TYPE_COUNT,          // 29 — must remain last
     LMD_CONTAINER_HEAP_START,
@@ -559,6 +591,11 @@ Lambda follows Rust's convention because:
 Lambda keeps suffixes **lowercase only** (matching Rust, Nim, Crystal) to avoid ambiguity with identifiers and maintain visual consistency.
 
 ## Implementation Phases
+
+Phases 1–6 below are the retained implementation history for introducing the
+types. The remaining arithmetic realignment is tracked only in
+`Lambda_Impl_Numbers.md`; in particular, the live evaluator's current
+`normalize_sized()` shortcut is not the target promotion rule above.
 
 ### Phase 1: Core Infrastructure
 - Add `LMD_TYPE_NUM_SIZED` and `LMD_TYPE_UINT64` to `EnumTypeId`

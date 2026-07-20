@@ -119,7 +119,7 @@ type([1,2]) == array      // true
 // Type literals
 null        // Null type (singleton)
 bool        // Boolean type
-int         // 56-bit signed integer
+int         // exact integer in the ±(2⁵³−1) float64 safe-integer band
 float       // 64-bit floating point
 decimal     // Arbitrary precision decimal
 string      // UTF-8 string
