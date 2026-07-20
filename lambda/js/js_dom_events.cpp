@@ -1041,36 +1041,19 @@ extern "C" Item js_event_defaultprevented_get(void) {
     return (Item){.item = b2it(dp)};
 }
 
-// composedPath() — returns array of targets in the dispatch path. With no
-// shadow DOM, this is just [target, ...ancestors..., document, window].
-// We compute lazily from the stored `target` slot at call time.
+// composedPath() — returns a fresh copy of the frozen in-flight dispatch path.
 extern "C" Item js_event_composed_path() {
     Item ev = js_get_this();
     Item out = js_array_new(0);
     if (get_type_id(ev) != LMD_TYPE_MAP) return out;
-    // Per spec: composedPath() returns the path stored on the event during
-    // dispatch and is empty when not dispatching. We approximate by checking
-    // whether currentTarget is non-null (set during dispatch, cleared after).
-    Item ct = js_property_get(ev, (Item){.item = s2it(heap_create_name("currentTarget"))});
-    if (ct.item == 0 || get_type_id(ct) == LMD_TYPE_NULL ||
-        get_type_id(ct) == LMD_TYPE_UNDEFINED) {
-        return out;
+    Item path = js_property_get(ev,
+        (Item){.item = s2it(heap_create_name("__dispatch_path"))});
+    if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array) return out;
+    // The dispatch path is fixed before listeners run. Copying it prevents a
+    // caller from mutating what later listeners observe.
+    for (int64_t i = 0; i < path.array->length; i++) {
+        js_array_push(out, path.array->items[i]);
     }
-    Item target = js_property_get(ev, (Item){.item = s2it(heap_create_name("target"))});
-    if (target.item == 0 || get_type_id(target) == LMD_TYPE_NULL) return out;
-    js_array_push(out, target);
-    // Walk parent chain if the target is a DOM element wrapper.
-    void* node_ptr = js_dom_unwrap_element(target);
-    if (node_ptr) {
-        DomNode* current = ((DomNode*)node_ptr)->parent;
-        while (current) {
-            Item w = js_dom_wrap_element((void*)current);
-            if (w.item != 0 && get_type_id(w) != LMD_TYPE_NULL) js_array_push(out, w);
-            current = current->parent;
-        }
-    }
-    Item doc = js_get_document_object_value();
-    if (doc.item != 0 && get_type_id(doc) != LMD_TYPE_NULL) js_array_push(out, doc);
     return out;
 }
 
@@ -1186,6 +1169,7 @@ Item js_create_event_init(const char* type, bool bubbles, bool cancelable, bool 
     event_set_bool(event, "__default_prevented", false);
     event_set_bool(event, "__dispatch_flag", false);
     event_set_bool(event, "__in_passive", false);
+    event_set_item(event, "__dispatch_path", ItemNull);
 
     // Static phase constants exposed on each instance for legacy code.
     event_set_int(event, "NONE", 0);
@@ -2363,9 +2347,19 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     int path_len = build_path(elem_item, path, path_is_dom, 128);
 
     if (path_len == 0) {
+        event_set_item(event_item, "__dispatch_path", ItemNull);
         event_set_bool(event_item, "__dispatch_flag", false);
         return (Item){.item = ITEM_TRUE};
     }
+
+    Item dispatch_path = js_array_new(0);
+    for (int i = 0; i < path_len; i++) {
+        js_array_push(dispatch_path, wrap_path_key(path[i], path_is_dom[i]));
+    }
+    // Store the exact path before invoking listeners: DOM mutations during
+    // dispatch must not rewrite composedPath(), and generic targets/window
+    // cannot be reconstructed from a DOM parent chain.
+    event_set_item(event_item, "__dispatch_path", dispatch_path);
 
     // Legacy IE-style `window.event`: set to the in-flight event for the
     // duration of dispatch, restored to its prior value (typically
@@ -2422,6 +2416,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 
     // Clear dispatching flag.
     event_set_bool(event_item, "__dispatch_flag", false);
+    event_set_item(event_item, "__dispatch_path", ItemNull);
 
     // Restore the previous `window.event` value (legacy IE-style).
     js_property_set(global, event_key, prev_global_event);

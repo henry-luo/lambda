@@ -188,15 +188,11 @@ typedef struct Item {
         }
         return *(double*)this->double_ptr;
     }
-    inline bool is_inline_int64() const {
-        return lambda_item_is_inline_int64_bits(this->item);
-    }
     inline int64_t get_int64() const {
-        return is_inline_int64()
-            ? lambda_inline_int64_value(this->item)
-            : *(int64_t*)this->int64_ptr;
+        return *(int64_t*)this->int64_ptr;
     }
     inline uint64_t get_uint64() const { return *(uint64_t*)this->uint64_ptr; }
+    inline DateTime* get_datetime_ptr() const { return (DateTime*)(uintptr_t)this->datetime_ptr; }
     inline DateTime get_datetime() const { return *(DateTime*)this->datetime_ptr; }
     inline Decimal* get_decimal() const { return (Decimal*)this->decimal_ptr; }
     inline String* get_string() const { return (String*)this->string_ptr; }
@@ -656,6 +652,40 @@ struct Map : Container {
     ConstItem get(const char* key_str) const;
     bool has_field(const char* field_name) const;
 };
+
+// Constructor shapes reserve at most 16 fixed-width slots before executing the
+// body. The mask lives in otherwise-unused Container padding, preserving the
+// public Map layout and keeping the state per instance rather than on TypeMap.
+static inline uint16_t map_ctor_reserved_mask(const Map* map) {
+    if (!map || !(map->flags & CONTAINER_FLAG_CTOR_RESERVED)) return 0;
+    return (uint16_t)map->padding[1] |
+        (uint16_t)((uint16_t)map->padding[2] << 8);
+}
+
+static inline void map_ctor_set_reserved_mask(Map* map, uint16_t mask) {
+    if (!map) return;
+    map->padding[1] = (uint8_t)(mask & 0xffu);
+    map->padding[2] = (uint8_t)(mask >> 8);
+    if (mask) map->flags |= CONTAINER_FLAG_CTOR_RESERVED;
+    else map->flags &= (uint8_t)~CONTAINER_FLAG_CTOR_RESERVED;
+}
+
+static inline bool map_ctor_offset_is_reserved(const Map* map,
+                                                int64_t byte_offset) {
+    // Ordinary maps dominate property traffic, so reject them before doing
+    // offset arithmetic for the constructor-only reservation mechanism.
+    if (!map || !(map->flags & CONTAINER_FLAG_CTOR_RESERVED) || byte_offset < 0 ||
+            (byte_offset % (int64_t)sizeof(void*)) != 0) return false;
+    int64_t slot = byte_offset / (int64_t)sizeof(void*);
+    return slot < 16 && (map_ctor_reserved_mask(map) & (uint16_t)(1u << slot));
+}
+
+static inline void map_ctor_initialize_offset(Map* map, int64_t byte_offset) {
+    if (!map_ctor_offset_is_reserved(map, byte_offset)) return;
+    int64_t slot = byte_offset / (int64_t)sizeof(void*);
+    map_ctor_set_reserved_mask(map,
+        (uint16_t)(map_ctor_reserved_mask(map) & (uint16_t)~(1u << slot)));
+}
 
 struct SparseArrayMap : Map {
     struct hashmap* sparse_indices;  // numeric sparse array data entries

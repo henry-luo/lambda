@@ -11,6 +11,7 @@
 #include "../../input/css/css_tokenizer.hpp"
 #include "../../input/css/selector_matcher.hpp"
 #include "../../js/js_class.h"
+#include "../../js/js_dom.h"
 #include "../../../radiant/view.hpp"
 #include "../../../radiant/event.hpp"
 #include "../../../lib/log.h"
@@ -159,7 +160,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
 #define js_dom_notify_mutation radiant_host_api->dom->notify_mutation
 #define js_dom_notify_mutation_detail radiant_host_api->dom->notify_mutation_detail
 #define js_dom_get_ui_context radiant_host_api->dom->get_ui_context
-#define js_dom_force_layout_for_geometry radiant_host_api->dom->force_layout_for_geometry
+#define js_dom_has_committed_geometry_snapshot radiant_host_api->dom->has_committed_geometry_snapshot
 #define js_call_function radiant_host_api->script->call_function
 #define js_check_exception radiant_host_api->script->check_exception
 
@@ -1031,6 +1032,10 @@ static Item radiant_dom_lookup_wrapper(DomNode* node) {
     return ItemNull;
 }
 
+RADIANT_C_API Item radiant_dom_lookup_cached_node(void* dom_node) {
+    return radiant_dom_lookup_wrapper((DomNode*)dom_node);
+}
+
 static RadiantDomWrapperCacheChunk* radiant_dom_alloc_wrapper_cache_chunk() {
     radiant_dom_cache_check_owner("alloc_wrapper_cache_chunk");
     RadiantDomWrapperCacheChunk* chunk = (RadiantDomWrapperCacheChunk*)mem_alloc(
@@ -1225,8 +1230,12 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
     if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
         wrapper.vmap->host_type = radiant_dom_node_host_type();
         wrapper.vmap->host_data = dom_elem;
-        js_dom_initialize_node_wrapper(dom_elem);
+        // Cache identity before initialization because inline handlers and
+        // native DOM state attach expandos to this same wrapper recursively.
         radiant_dom_cache_wrapper(node, wrapper);
+        radiant_host_api->gc->register_root(&wrapper.item);
+        js_dom_initialize_node_wrapper(dom_elem);
+        radiant_host_api->gc->unregister_root(&wrapper.item);
         return wrapper;
     }
     // Phase 7 removes the DOM-node map shell; a failed VMap allocation must
@@ -3451,7 +3460,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         }
         // selector parsing and matching stay on the document pool so returned
         // wrappers are the only GC-managed values created by this read-only path.
-        SelectorMatcher* matcher = selector_matcher_create(elem->doc->document_pool);
+        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
         // Element selector queries walk descendants and must not match the
         // context element itself (Document queries pass true below).
         DomElement* found = radiant_dom_selector_group_find_first(
@@ -3476,7 +3485,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = arr_item;
             return true;
         }
-        SelectorMatcher* matcher = selector_matcher_create(elem->doc->document_pool);
+        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
         ArrayList* results = arraylist_new(16);
         if (!results) {
             *out = arr_item;
@@ -3507,7 +3516,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = (Item){.item = b2it(0)};
             return true;
         }
-        SelectorMatcher* matcher = selector_matcher_create(elem->doc->document_pool);
+        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
         MatchResult result;
         bool matched = selector_matcher_matches_group(matcher, selector_group, elem, &result);
         *out = (Item){.item = b2it(matched ? 1 : 0)};
@@ -3529,7 +3538,7 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             *out = ItemNull;
             return true;
         }
-        SelectorMatcher* matcher = selector_matcher_create(elem->doc->document_pool);
+        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
         MatchResult result;
         DomElement* current = elem;
         while (current) {
@@ -3657,19 +3666,19 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
     }
 
     if (strcmp(method, "getBoundingClientRect") == 0) {
-        radiant_dom_ensure_layout(elem->doc);
+        radiant_dom_has_committed_geometry_snapshot(elem->doc);
         *out = js_dom_get_bounding_client_rect_bridge((void*)elem);
         return true;
     }
 
     if (strcmp(method, "getClientRects") == 0) {
-        radiant_dom_ensure_layout(elem->doc);
+        radiant_dom_has_committed_geometry_snapshot(elem->doc);
         *out = js_dom_get_client_rects_bridge((void*)elem);
         return true;
     }
 
     if (strcmp(method, "scrollIntoView") == 0) {
-        radiant_dom_ensure_layout(elem->doc);
+        radiant_dom_has_committed_geometry_snapshot(elem->doc);
         *out = js_dom_scroll_into_view_bridge((void*)elem);
         return true;
     }
@@ -3850,7 +3859,7 @@ RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name) {
          strcmp(prop, "offsetTop") == 0 || strcmp(prop, "offsetLeft") == 0 ||
          strcmp(prop, "offsetParent") == 0 || strncmp(prop, "client", 6) == 0 ||
          strncmp(prop, "scroll", 6) == 0)) {
-        radiant_dom_ensure_layout(node->as_element()->doc);
+        radiant_dom_has_committed_geometry_snapshot(node->as_element()->doc);
     }
     return js_dom_get_property_impl(elem_item, prop_name);
 }
@@ -4669,7 +4678,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             *out = ItemNull;
             return 1;
         }
-        SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
+        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)doc);
         DomElement* found = radiant_dom_selector_group_find_first(
             matcher, selector_group, root, true);
         *out = radiant_dom_node_item((DomNode*)found);
@@ -4691,7 +4700,7 @@ RADIANT_C_API int radiant_dom_document_method(Item method_name, Item* args, int 
             *out = radiant_dom_array_item();
             return 1;
         }
-        SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
+        SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)doc);
         ArrayList* results = arraylist_new(16);
         Item arr_item = radiant_dom_array_item();
         Array* arr = arr_item.array;
@@ -4913,9 +4922,9 @@ RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item) {
     return js_dom_dispatch_event_bridge(radiant_host_api->script->global_this(), event_item);
 }
 
-RADIANT_C_API bool radiant_dom_ensure_layout(DomDocument* doc) {
-    return doc && js_dom_force_layout_for_geometry &&
-        js_dom_force_layout_for_geometry((void*)doc);
+RADIANT_C_API bool radiant_dom_has_committed_geometry_snapshot(DomDocument* doc) {
+    return doc && js_dom_has_committed_geometry_snapshot &&
+        js_dom_has_committed_geometry_snapshot((void*)doc);
 }
 
 static Item radiant_dom_window_dimension(float value) {

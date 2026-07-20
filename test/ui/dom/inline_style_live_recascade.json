@@ -1,0 +1,19 @@
+{
+  "name": "Post-script cascade reads the live inline style attribute",
+  "html": "test/ui/dom/inline_style_live_recascade.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {"selector": "#result"},
+      "equals": "width: 83px; height: 37px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {"selector": "#target"},
+      "width": 83,
+      "height": 37,
+      "tolerance": 1
+    }
+  ]
+}

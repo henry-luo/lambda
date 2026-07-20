@@ -487,12 +487,8 @@ Item array_num_read_item(ArrayNum* array, int64_t offset) {
         case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[offset])};
         case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[offset]))};
         case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[offset])};
-        case ELEM_UINT64: {
-            uint64_t val = ((uint64_t*)array->data)[offset];
-            uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
-            *heap_val = val;
-            return (Item){.item = u64_to_item(heap_val)};
-        }
+        case ELEM_UINT64:
+            return box_uint64_value(((uint64_t*)array->data)[offset]);
         case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)array->data)[offset] ? BOOL_TRUE : BOOL_FALSE)};
         default:           return ItemNull;
     }
@@ -916,10 +912,7 @@ extern "C" Item coerce_num_sized(Item value, int64_t num_type_int) {
 }
 
 extern "C" Item coerce_uint64(Item value) {
-    uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
-    if (!heap_val) return ItemError;
-    *heap_val = (uint64_t)item_to_int_value(value);
-    return (Item){ .item = u2it(heap_val) };
+    return box_uint64_value((uint64_t)item_to_int_value(value));
 }
 
 double array_num_get_number_value(ArrayNum *arr, int64_t index) {
@@ -2061,14 +2054,12 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
         return {.item = i2it(*(int64_t*)field_ptr)};
     case LMD_TYPE_INT64:
         return box_int64_value(*(int64_t*)field_ptr);
+    case LMD_TYPE_UINT64:
+        return box_uint64_value(*(uint64_t*)field_ptr);
     case LMD_TYPE_FLOAT:
         return push_d(*(double*)field_ptr);
-    case LMD_TYPE_DTIME: {
-        DateTime dt = *(DateTime*)field_ptr;
-        StrBuf *strbuf = strbuf_new();
-        datetime_format_lambda(strbuf, &dt);
-        return push_k(dt);
-    }
+    case LMD_TYPE_DTIME:
+        return {.item = k2it(*(DateTime**)field_ptr)};
     case LMD_TYPE_DECIMAL:
         memcpy(&ptr_val, field_ptr, sizeof(void*));
         return {.item = c2it(ptr_val)};
@@ -2117,16 +2108,16 @@ static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
     void* field_ptr = (char*)map_data + field->byte_offset;
     switch (field->type->type_id) {
     case LMD_TYPE_INT64: {
-        int64_t value = *(int64_t*)field_ptr;
-        return lambda_int64_fits_inline(value)
-            ? Item{.item = lambda_inline_int64_to_item_bits(value)}
-            : Item{.item = l2it(field_ptr)};
+        return Item{.item = l2it(field_ptr)};
+    }
+    case LMD_TYPE_UINT64: {
+        return Item{.item = u2it(field_ptr)};
     }
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:
         return lambda_float_ptr_to_item((double*)field_ptr);
     case LMD_TYPE_DTIME:
-        return Item{.item = k2it(field_ptr)};
+        return {.item = k2it(*(DateTime**)field_ptr)};
     default:
         return _map_read_field(field, map_data);
     }
@@ -2612,7 +2603,7 @@ Item item_attr(Item data, const char* key) {
                 return (Item){.item = b2it((meta->flags & PATH_META_IS_LINK) != 0)};
             }
             if (strcmp(key, "size") == 0) {
-                return push_l(meta->size);  // int64_t size
+                return box_int64_value(meta->size);  // int64_t size
             }
             if (strcmp(key, "modified") == 0) {
                 return push_k(meta->modified);  // DateTime

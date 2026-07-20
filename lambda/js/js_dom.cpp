@@ -46,9 +46,12 @@
 #include "../../radiant/event.hpp"
 #include "../../radiant/render.hpp"
 #include "../input/html5/html5_parser.h"
+#include "../../lib/hashmap.h"
 
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" Item vmap_new(void);
+extern "C" Item vmap_backing_get(VMap* vm, Item key);
+extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value);
 extern void free_document(DomDocument* doc);
 extern Item js_make_number(double d);
 extern __thread EvalContext* context;
@@ -425,31 +428,13 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind, void* targ
                            attribute_name, old_value);
 }
 
-static bool js_dom_ensure_layout_for_geometry(DomDocument* doc) {
+extern "C" bool js_dom_has_committed_geometry_snapshot(void* dom_doc) {
+    DomDocument* doc = (DomDocument*)dom_doc;
     // DOM3 geometry is a read-only snapshot of the last committed layout.
     // Forcing layout from a property getter re-entered the host loop during JS
     // dispatch and made ordinary measurements a synchronous reflow hazard.
     // A pending document reflow is consumed by the normal frame/layout phase.
     return doc && doc->view_tree && doc->view_tree->root;
-}
-
-extern "C" bool js_dom_force_layout_for_geometry(void* dom_doc) {
-    return js_dom_ensure_layout_for_geometry((DomDocument*)dom_doc);
-}
-
-extern "C" bool js_dom_commit_headless_layout(void) {
-    DomDocument* doc = _js_current_ui_context && _js_current_ui_context->document
-        ? _js_current_ui_context->document : _js_current_document;
-    DocState* state = doc && doc->state ? (DocState*)doc->state : nullptr;
-    if (!doc || !state || _js_host_driven_loop || !state->needs_reflow) return false;
-
-    // A transient CLI document has no renderer frame loop. Commit mutations at
-    // the event-loop boundary so observer microtasks see one current box tree,
-    // rather than re-entering layout from an individual geometry getter.
-    layout_html_doc(_js_current_ui_context, doc, true);
-    doc_state_clear_reflow(state);
-    reflow_clear(state);
-    return true;
 }
 
 extern "C" bool js_dom_tick_headless_animation_frame(void) {
@@ -463,6 +448,27 @@ extern "C" bool js_dom_tick_headless_animation_frame(void) {
     // deterministically so transition events cannot remain queued forever.
     double now = scheduler->current_time + (1.0 / 60.0);
     return animation_scheduler_tick(scheduler, now, &state->dirty_tracker);
+}
+
+extern "C" bool js_dom_commit_headless_layout_checkpoint(void) {
+    UiContext* uicon = _js_current_ui_context;
+    DomDocument* doc = uicon && uicon->document
+        ? uicon->document : _js_current_document;
+    if (!uicon || !uicon->headless || js_dom_is_host_driven_loop() ||
+        !doc || !doc->view_tree || !doc->view_tree->root ||
+        doc->js.mutation_count == 0) {
+        return false;
+    }
+    // A one-shot DOM session has no native render loop, so task boundaries must
+    // commit pending mutations; geometry getters remain snapshots and never reflow.
+    radiant_reconcile_js_dom_mutations(uicon, doc);
+    return true;
+}
+
+extern "C" bool js_dom_commit_headless_layout(void) {
+    // Keep the older entry point as a boundary wrapper: geometry readers must
+    // use the same mutation reconciliation checkpoint as the event loop.
+    return js_dom_commit_headless_layout_checkpoint();
 }
 
 // ----------------------------------------------------------------------------
@@ -1054,6 +1060,7 @@ extern "C" void js_dom_batch_reset() {
     js_dom_selection_reset();
     reset_live_dom_collections();
     reset_pending_iframe_loads();
+    expando_reset();
     reset_dom_wrapper_cache();
     js_document_proxy_item = (Item){.item = ITEM_NULL};
     js_document_default_view = (Item){.item = ITEM_NULL};
@@ -1067,7 +1074,6 @@ extern "C" void js_dom_batch_reset() {
     js_storage_reset();
     js_match_media_reset();
     js_dom_observers_reset();
-    expando_reset();
     reset_foreign_document_cache();
     tc_reset_focus_state(state);
 }
@@ -1075,13 +1081,13 @@ extern "C" void js_dom_batch_reset() {
 extern "C" void js_dom_shutdown() {
     reset_live_dom_collections();
     reset_pending_iframe_loads();
+    expando_reset();
     reset_dom_wrapper_cache();
     js_dom_events_reset();
     js_xhr_reset();
     js_storage_reset();
     js_match_media_reset();
     js_dom_observers_reset();
-    expando_reset();
     reset_foreign_document_cache();
     _js_current_document = nullptr;
     _js_main_document = nullptr;
@@ -1103,65 +1109,188 @@ extern "C" bool js_dom_evaluate_media_query(const char* query) {
 // DOM Expando Properties
 // Allows arbitrary JS values to be stored on DOM elements, e.g.
 //   element._myData = { ... }; let x = element._myData;
-// Uses a global side-table mapping DomNode* → JS Map of expandos.
+// DOM expandos live in the owning wrapper's traced VMap backing store.
 // ============================================================================
 
-// simple open-addressing hash table for DomNode* → Item (JS Map)
-#define EXPANDO_TABLE_SIZE 256
-static struct {
-    DomNode* key;
+extern "C" Item radiant_dom_lookup_cached_node(void* dom_node);
+extern "C" Item radiant_dom_wrap_node(void* dom_node);
+
+#define DOM_EXPANDO_BACKING_KEY "__jube_expando__"
+
+typedef struct AttachedExpandoRoot {
+    DomNode* node;
     DomDocument* doc;
     DomNodeRef ref;
     Item map;
-} _expando_table[EXPANDO_TABLE_SIZE];
-static bool _expando_initialized = false;
+} AttachedExpandoRoot;
 
-static void expando_init() {
-    if (!_expando_initialized) {
-        memset(_expando_table, 0, sizeof(_expando_table));
-        _expando_initialized = true;
+typedef struct AttachedExpandoEntry {
+    DomNode* key;
+    AttachedExpandoRoot* root;
+} AttachedExpandoEntry;
+
+static HashMap* s_attached_expando_roots = nullptr;
+
+static uint64_t attached_expando_hash(const void* item,
+        uint64_t seed0, uint64_t seed1) {
+    const AttachedExpandoEntry* entry = (const AttachedExpandoEntry*)item;
+    return hashmap_sip(&entry->key, sizeof(entry->key), seed0, seed1);
+}
+
+static int attached_expando_compare(const void* left, const void* right, void*) {
+    const AttachedExpandoEntry* a = (const AttachedExpandoEntry*)left;
+    const AttachedExpandoEntry* b = (const AttachedExpandoEntry*)right;
+    return a->key == b->key ? 0 : ((uintptr_t)a->key < (uintptr_t)b->key ? -1 : 1);
+}
+
+static HashMap* attached_expando_table() {
+    if (!s_attached_expando_roots) {
+        s_attached_expando_roots = hashmap_new(sizeof(AttachedExpandoEntry),
+            64, 0, 0, attached_expando_hash, attached_expando_compare,
+            nullptr, nullptr);
     }
+    return s_attached_expando_roots;
+}
+
+static AttachedExpandoRoot* attached_expando_find(DomNode* node) {
+    if (!s_attached_expando_roots || !node) return nullptr;
+    AttachedExpandoEntry probe = {.key = node, .root = nullptr};
+    const AttachedExpandoEntry* found = (const AttachedExpandoEntry*)
+        hashmap_get(s_attached_expando_roots, &probe);
+    return found ? found->root : nullptr;
+}
+
+static bool expando_node_is_attached(DomNode* node) {
+    if (!node) return false;
+    DomDocument* doc = js_dom_node_owner_document(node);
+    if (!doc || !doc->root) return false;
+    // A descendant can retain a parent inside a detached subtree; only a
+    // complete ancestry chain to the document root makes native ownership a
+    // valid reason to keep its expando map globally rooted.
+    for (DomNode* current = node; current; current = current->parent) {
+        if (current == (DomNode*)doc->root) return true;
+    }
+    return false;
+}
+
+static void attached_expando_root_add(DomNode* node, Item map,
+                                      bool attachment_confirmed = false) {
+    if (!node || get_type_id(map) != LMD_TYPE_MAP ||
+            (!attachment_confirmed && !expando_node_is_attached(node))) return;
+    DomDocument* doc = js_dom_node_owner_document(node);
+    if (!doc) return;
+    AttachedExpandoRoot* existing = attached_expando_find(node);
+    if (existing) {
+        existing->doc = doc;
+        existing->ref = dom_node_ref(node);
+        existing->map = map;
+        return;
+    }
+    HashMap* table = attached_expando_table();
+    if (!table) return;
+    AttachedExpandoRoot* root = (AttachedExpandoRoot*)mem_calloc(
+        1, sizeof(AttachedExpandoRoot), MEM_CAT_DOM);
+    if (!root) return;
+    root->node = node;
+    root->doc = doc;
+    root->ref = dom_node_ref(node);
+    root->map = map;
+    heap_register_gc_root(&root->map.item);
+    AttachedExpandoEntry entry = {.key = node, .root = root};
+    hashmap_set(table, &entry);
+    if (!hashmap_get(table, &entry)) {
+        heap_unregister_gc_root(&root->map.item);
+        mem_free(root);
+    }
+}
+
+static void attached_expando_root_remove(DomNode* node) {
+    AttachedExpandoRoot* root = attached_expando_find(node);
+    if (!root) return;
+    AttachedExpandoEntry probe = {.key = node, .root = nullptr};
+    heap_unregister_gc_root(&root->map.item);
+    hashmap_delete(s_attached_expando_roots, &probe);
+    mem_free(root);
+}
+
+static Item expando_wrapper(DomNode* node, bool create) {
+    if (!node) return ItemNull;
+    Item wrapper = radiant_dom_lookup_cached_node(node);
+    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) return wrapper;
+    if (!create) {
+        if (!node->is_element() || !node->as_element()->doc ||
+                node->as_element()->doc->js.doc_node != (void*)node) {
+            return ItemNull;
+        }
+    }
+    return radiant_dom_wrap_node(node);
 }
 
 static Item expando_get_map(DomNode* node) {
-    expando_init();
-    uintptr_t h = ((uintptr_t)node >> 4) % EXPANDO_TABLE_SIZE;
-    for (int i = 0; i < EXPANDO_TABLE_SIZE; i++) {
-        int idx = (h + i) % EXPANDO_TABLE_SIZE;
-        if (_expando_table[idx].key == node) return _expando_table[idx].map;
-        if (_expando_table[idx].key == nullptr) return ItemNull;
+    Item wrapper = expando_wrapper(node, false);
+    Item key = js_string_key(DOM_EXPANDO_BACKING_KEY);
+    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
+        Item map = vmap_backing_get(wrapper.vmap, key);
+        if (get_type_id(map) == LMD_TYPE_MAP) return map;
     }
-    return ItemNull;
+    AttachedExpandoRoot* attached = attached_expando_find(node);
+    if (!attached || get_type_id(attached->map) != LMD_TYPE_MAP) return ItemNull;
+    if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
+        vmap_backing_set(wrapper.vmap, key, attached->map);
+    }
+    return attached->map;
 }
 
 static Item expando_get_or_create_map(DomNode* node) {
-    expando_init();
-    uintptr_t h = ((uintptr_t)node >> 4) % EXPANDO_TABLE_SIZE;
-    // look for existing entry or first empty slot
-    int first_empty = -1;
-    for (int i = 0; i < EXPANDO_TABLE_SIZE; i++) {
-        int idx = (h + i) % EXPANDO_TABLE_SIZE;
-        if (_expando_table[idx].key == node) return _expando_table[idx].map;
-        if (_expando_table[idx].key == nullptr) {
-            if (first_empty < 0) first_empty = idx;
-            break;
+    Item wrapper = expando_wrapper(node, true);
+    if (get_type_id(wrapper) != LMD_TYPE_VMAP || !wrapper.vmap) return ItemNull;
+    Item key = js_string_key(DOM_EXPANDO_BACKING_KEY);
+    Item existing = vmap_backing_get(wrapper.vmap, key);
+    if (get_type_id(existing) == LMD_TYPE_MAP) {
+        attached_expando_root_add(node, existing);
+        return existing;
+    }
+    Item m = js_new_object();
+    // The wrapper's VMap backing store owns detached state. Connected nodes
+    // additionally root the map until their native-tree detach transition.
+    if (!vmap_backing_set(wrapper.vmap, key, m)) return ItemNull;
+    attached_expando_root_add(node, m);
+    return m;
+}
+
+extern "C" void js_dom_expando_attachment_changed(
+        DomDocument*, DomNode* root, bool attached) {
+    if (!root) return;
+    if (attached) {
+        Item wrapper = expando_wrapper(root, false);
+        if (get_type_id(wrapper) == LMD_TYPE_VMAP && wrapper.vmap) {
+            Item map = vmap_backing_get(wrapper.vmap,
+                js_string_key(DOM_EXPANDO_BACKING_KEY));
+            attached_expando_root_add(root, map, true);
+        }
+    } else {
+        attached_expando_root_remove(root);
+    }
+    if (root->is_element()) {
+        for (DomNode* child = root->as_element()->first_child;
+             child; child = child->next_sibling) {
+            js_dom_expando_attachment_changed(nullptr, child, attached);
         }
     }
-    if (first_empty < 0) return ItemNull; // table full
-    DomDocument* doc = js_dom_node_owner_document(node);
-    if (!doc) doc = _js_current_document;
-    DomNodeRef ref = dom_node_ref(node);
-    if (!doc || !dom_node_ref_validate(doc, ref) ||
-        !dom_node_pin(doc, ref, DOM_NODE_PIN_EXTERNAL)) return ItemNull;
-    Item m = js_new_object();
-    _expando_table[first_empty].key = node;
-    _expando_table[first_empty].doc = doc;
-    _expando_table[first_empty].ref = ref;
-    _expando_table[first_empty].map = m;
-    // DOM nodes retain expando maps outside the JS object graph; rooting the
-    // side-table slot prevents a collection from recycling live library state.
-    heap_register_gc_root(&_expando_table[first_empty].map.item);
-    return m;
+}
+
+static void expando_reset() {
+    if (!s_attached_expando_roots) return;
+    size_t iter = 0;
+    void* item = nullptr;
+    while (hashmap_iter(s_attached_expando_roots, &iter, &item)) {
+        AttachedExpandoEntry* entry = (AttachedExpandoEntry*)item;
+        if (!entry->root) continue;
+        heap_unregister_gc_root(&entry->root->map.item);
+        mem_free(entry->root);
+    }
+    hashmap_free(s_attached_expando_roots);
+    s_attached_expando_roots = nullptr;
 }
 
 static bool expando_map_has_key(Item exp_map, Item key) {
@@ -1238,18 +1367,6 @@ extern "C" Item js_dom_expando_own_property_names(Item obj) {
         js_array_push(result, key);
     }
     return result;
-}
-
-static void expando_reset() {
-    for (int i = 0; i < EXPANDO_TABLE_SIZE; i++) {
-        if (_expando_table[i].key) {
-            heap_unregister_gc_root(&_expando_table[i].map.item);
-            dom_node_unpin(_expando_table[i].doc, _expando_table[i].ref,
-                           DOM_NODE_PIN_EXTERNAL);
-        }
-    }
-    memset(_expando_table, 0, sizeof(_expando_table));
-    _expando_initialized = false;
 }
 
 static bool js_dom_event_attr_name(const char* attr_name, char* prop_buf, size_t prop_buf_size) {
@@ -1370,6 +1487,12 @@ static SelectorMatcher* js_dom_create_selector_matcher(DomDocument* doc) {
             matcher, js_dom_resolve_selector_pseudo_state, doc);
     }
     return matcher;
+}
+
+extern "C" void* js_dom_create_selector_matcher_bridge(void* dom_doc) {
+    // Native-module selector fast paths must share the DOM resolver so live
+    // form state, including option:checked, agrees with ordinary JS queries.
+    return js_dom_create_selector_matcher((DomDocument*)dom_doc);
 }
 
 // Returns the lowercased input `type` attribute (e.g. "checkbox", "radio",
@@ -3674,6 +3797,21 @@ static Item js_classlist_proxy_invoke(Item rest_args) {
         (int)rest_args.array->length - 2);
 }
 
+static Item js_classlist_iterator_proxy(Item rest_args) {
+    if (get_type_id(rest_args) != LMD_TYPE_ARRAY || !rest_args.array ||
+        rest_args.array->length < 1) {
+        return js_array_new(0);
+    }
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(rest_args.array->items[0]);
+    if (!elem) return js_array_new(0);
+
+    Item values = js_array_new(0);
+    for (int i = 0; i < elem->class_count; i++) {
+        js_array_push(values, (Item){.item = s2it(heap_create_name(elem->class_names[i]))});
+    }
+    return js_get_iterator(values);
+}
+
 static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
     if (!elem) return ItemNull;
     Item exp_map = expando_get_or_create_map((DomNode*)elem);
@@ -3693,6 +3831,14 @@ static Item js_dom_get_classlist_wrapper(DomElement* elem, Item elem_item) {
             js_property_set(wrapper,
                 (Item){.item = s2it(heap_create_name(methods[i]))}, method);
         }
+        Item iterator_args[1] = {elem_item};
+        Item iterator = js_bind_function(
+            js_new_function((void*)js_classlist_iterator_proxy, -1),
+            make_js_undefined(), iterator_args, 1);
+        // DOMTokenList is iterable; delegated UI event routers commonly spread
+        // classList while resolving their target before invoking callbacks.
+        js_property_set(wrapper,
+            (Item){.item = s2it(heap_create_name("__sym_1"))}, iterator);
         if (exp_map.item != ITEM_NULL) js_property_set(exp_map, cache_key, wrapper);
     }
     js_property_set(wrapper, (Item){.item = s2it(heap_create_name("length"))},
@@ -5150,7 +5296,7 @@ static int64_t js_dom_headless_dimension(DomElement* elem, bool width_axis) {
 
 static int64_t js_dom_geometry_dimension(DomElement* elem, bool width_axis) {
     if (!elem) return 0;
-    js_dom_ensure_layout_for_geometry(elem->doc);
+    js_dom_has_committed_geometry_snapshot(elem->doc);
     float layout_value = width_axis ? elem->width : elem->height;
     if (layout_value > 0.0f) return (int64_t)(layout_value + 0.5f);
     // Load-time scripts execute before the first host-loop commit. A resolved
@@ -9206,7 +9352,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // clientWidth / clientHeight — border box minus borders
     if (strcmp(prop, "clientWidth") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         float bw = 0;
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
@@ -9214,7 +9360,7 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = i2it((int64_t)(elem->width - bw))};
     }
     if (strcmp(prop, "clientHeight") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         float bh = 0;
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
@@ -9224,18 +9370,18 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetTop / offsetLeft — position relative to offsetParent
     if (strcmp(prop, "offsetTop") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
-        if (elem->doc && js_dom_ensure_layout_for_geometry(elem->doc))
+        if (elem->doc && js_dom_has_committed_geometry_snapshot(elem->doc))
             return (Item){.item = i2it(js_dom_offset_coordinate(elem, false))};
         return (Item){.item = i2it((int64_t)elem->y)};
     }
     if (strcmp(prop, "offsetLeft") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         if (_is_tag(elem, "body") || _is_tag(elem, "html"))
             return (Item){.item = i2it(0)};
-        if (elem->doc && js_dom_ensure_layout_for_geometry(elem->doc))
+        if (elem->doc && js_dom_has_committed_geometry_snapshot(elem->doc))
             return (Item){.item = i2it(js_dom_offset_coordinate(elem, true))};
         if (elem->x == 0.0f) {
             int64_t synthetic_left = js_dom_synthetic_inline_offset_left(elem);
@@ -9248,20 +9394,20 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // offsetParent — nearest positioned ancestor (or body)
     if (strcmp(prop, "offsetParent") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         DomElement* parent = js_dom_offset_parent_element(elem);
         return parent ? js_dom_wrap_element(parent) : ItemNull;
     }
 
     // scrollWidth / scrollHeight — total scrollable content size
     if (strcmp(prop, "scrollWidth") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         float cw = elem->content_width;
         float bw = elem->width;
         return (Item){.item = i2it((int64_t)(cw > bw ? cw : bw))};
     }
     if (strcmp(prop, "scrollHeight") == 0) {
-        js_dom_ensure_layout_for_geometry(elem->doc);
+        js_dom_has_committed_geometry_snapshot(elem->doc);
         float ch = elem->content_height;
         float bh = elem->height;
         return (Item){.item = i2it((int64_t)(ch > bh ? ch : bh))};
@@ -10664,6 +10810,31 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     //              IDL→HTML name mapping like readOnly→readonly)
     // ------------------------------------------------------------------
     {
+        if (strcmp(prop, "tabIndex") == 0) {
+            long tab_index = 0;
+            TypeId value_type = get_type_id(value);
+            if (value_type == LMD_TYPE_INT) {
+                tab_index = (long)it2i(value);
+            } else if (value_type == LMD_TYPE_FLOAT) {
+                tab_index = (long)it2d(value);
+            } else {
+                const char* text = fn_to_cstr(value);
+                char* end = nullptr;
+                if (text && *text) {
+                    long parsed = strtol(text, &end, 10);
+                    if (end != text) tab_index = parsed;
+                }
+            }
+            // Widgets assign tabIndex=-1 before calling focus(); storing it as
+            // an expando drops the programmatic-focus eligibility and leaves
+            // keyboard events on the previous control.
+            char text[32];
+            snprintf(text, sizeof(text), "%ld", tab_index);
+            elem->set_attribute("tabindex", text);
+            js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+            return value;
+        }
+
         // Boolean reflection — handle BEFORE int/string so e.g. `disabled`
         // assignment of a non-bool truthy value writes empty string, not the
         // raw value.
@@ -11327,7 +11498,7 @@ static Item js_dom_boundary_from_point(DomElement* elem,
                                        Item y_arg,
                                        Item behavior_arg) {
     if (!elem || !elem->doc || !_js_current_ui_context ||
-        !js_dom_ensure_layout_for_geometry(elem->doc) ||
+        !js_dom_has_committed_geometry_snapshot(elem->doc) ||
         !elem->doc->view_tree || !elem->doc->view_tree->root) {
         return ItemNull;
     }
@@ -11365,7 +11536,7 @@ static Item js_dom_document_element_from_point(DomDocument* doc,
                                                Item x_arg,
                                                Item y_arg) {
     if (!doc || !_js_current_ui_context ||
-        !js_dom_ensure_layout_for_geometry(doc) ||
+        !js_dom_has_committed_geometry_snapshot(doc) ||
         !doc->view_tree || !doc->view_tree->root) {
         return ItemNull;
     }
@@ -11428,7 +11599,7 @@ static Item js_dom_text_control_boundary_from_point(DomElement* elem,
                                                     Item x_arg,
                                                     Item y_arg) {
     if (!elem || !tc_is_text_control_elem(elem) || !_js_current_ui_context ||
-        !elem->doc || !js_dom_ensure_layout_for_geometry(elem->doc)) {
+        !elem->doc || !js_dom_has_committed_geometry_snapshot(elem->doc)) {
         return ItemNull;
     }
 
@@ -11479,7 +11650,7 @@ extern "C" Item js_dom_boundary_from_point_bridge(void* elem,
 extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return ItemNull;
-    if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
+    if (elem->doc) js_dom_has_committed_geometry_snapshot(elem->doc);
     float abs_x = 0.0f;
     float abs_y = 0.0f;
     js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
@@ -11493,7 +11664,7 @@ extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
 extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return js_array_new(0);
-    if (elem->doc) js_dom_ensure_layout_for_geometry(elem->doc);
+    if (elem->doc) js_dom_has_committed_geometry_snapshot(elem->doc);
 
     float abs_x = 0.0f;
     float abs_y = 0.0f;
@@ -12152,6 +12323,25 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
 
     log_debug("js_dom_element_method: '%s' on <%s>", method,
               node->node_name() ? node->node_name() : "?");
+
+    Item expando_method = ItemNull;
+    if (expando_get_property(node, method_name, &expando_method) &&
+        get_type_id(expando_method) == LMD_TYPE_FUNC) {
+        // Member-call lowering reaches this native dispatcher directly; own
+        // DOM expandos must still shadow prototype methods so widget callbacks
+        // such as Alpine's `_x_doHide()` remain callable.
+        return js_call_function(expando_method, elem_item, args, argc);
+    }
+
+    bool prototype_method_found = false;
+    Item prototype_method = js_prototype_lookup_ex(elem_item, method_name,
+                                                    &prototype_method_found);
+    if (prototype_method_found && get_type_id(prototype_method) == LMD_TYPE_FUNC) {
+        // DOM calls bypass generic property access, so preserve prototype
+        // dispatch here; otherwise Element.prototype extensions such as
+        // Alpine's `_x_toggleAndCascadeWithTransitions` become no-op methods.
+        return js_call_function(prototype_method, elem_item, args, argc);
+    }
 
     // HTMLSelectElement.remove(index) must be tested before generic
     // ChildNode.remove(); otherwise the select overload is shadowed and

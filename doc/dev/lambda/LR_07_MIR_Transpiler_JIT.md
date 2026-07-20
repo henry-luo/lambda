@@ -43,8 +43,11 @@ Boxing is inline for cheap tags and a runtime call for the rest. `emit_box` (`:1
 
 - `emit_box_int` (`:829`) — inline INT56 range-check and tag, `ITEM_ERROR` on overflow.
 - `emit_box_bool` (`:885`) — `UEXT8` to clear garbage upper bits, error-check, tag.
-- `emit_box_float` (`:916`) → runtime `push_d`; `emit_box_int64` (`:931`) → runtime **`push_l_safe`** (the double-box guard, see §Known Issues #1).
-- `emit_box_string`/`symbol`/`dtime`/`decimal`/`binary` (`:968`–`1055`) — inline null-check and OR-tag.
+- `emit_box_float` routes through canonical `push_d`; `emit_box_int64` and the
+  `uint64` sibling use the shared full-domain number-home boxers.
+- String/symbol/decimal/binary boxing tags their owned pointers. Datetime
+  boxing calls `push_k`, which creates a GC-owned object rather than a number
+  home.
 - `emit_box_container` (`:1011`) — an identity move; the `TypeId` is already in the object header.
 
 Unboxing is the mirror: `emit_unbox` (`:1114`) emits `it2i`/`it2d`/`it2b`/`it2s`/`it2l` runtime calls, or `emit_unbox_container` (`:1096`, an AND-mask to strip the tag). Tying it together is `transpile_box_item` (`:8074`), the **smart gateway**: given a node, it decides whether `transpile_expr` already returned a boxed Item (return it unchanged) or a native value (box it), via a per-operator decision tree (`:8190`) that must *exactly mirror* the producer logic in `transpile_binary`/`transpile_unary`. Any divergence between producer and gateway is a latent double-box or type-confusion bug.
@@ -57,7 +60,7 @@ A user function is built by `transpile_func_def`: it creates the MIR function, l
 
 Calls split by kind. A direct call to a known local or imported function is a `MIR_new_call_insn` against that MIR func item; functions with typed parameters or a native return get a `_w`/`_b` wrapper, decided by `needs_fn_call_wrapper` (`transpile_shared.cpp:39`). Indirect and closure calls go through the runtime `fn_call0`..`fn_call3` family (`:7420`) — and only up to three arguments are supported (§Known Issues #3).
 
-**Parameter-type inference** lets untyped functions still compile to native arithmetic. `infer_param_type` (`:9865`) gathers evidence with the batched `gather_evidence_multi` (`:9957`) and resolves it via `resolve_inferred_type` (`:10103`), caching the result in `infer_cache`. The policy is deliberately conservative: a prior speculative-INT guess truncated float arguments at the call boundary (the cd.ls regression), so a parameter with only weak arithmetic evidence now stays `ANY`/boxed. Positive FLOAT evidence comes specifically from use in true division (`OPERATOR_DIV`) and from typed-array indexing — matching the engine fix recorded in the MEMORY index. The inference is capped (16 parameters in several fixed arrays); see §Known Issues #8.
+**Parameter-type inference** lets untyped functions still compile to native arithmetic. `infer_param_type` gathers evidence and resolves it through the inference cache. The policy is deliberately conservative: a prior speculative-INT guess truncated float arguments at the call boundary, so weak arithmetic evidence stays `ANY`/boxed. The current rule treats every `OPERATOR_DIV` use as positive FLOAT evidence; that is stale because only int/float-domain true division is float, while `integer`/full-width sized division is decimal. `Lambda_Impl_Numbers.md` requires inference to consume the shared numeric-domain result classifier. The existing fixed parameter-count caps remain a separate known issue.
 
 ---
 
@@ -69,7 +72,7 @@ Because generated code allocates freely, every live GC-managed local must be rea
 
 - Root-slot counts are lowering-time facts. The prologue calls `lambda_side_stack_ensure`, saves `side_root_top`/`side_number_top`, and bumps the root top once; rooted assignments are inline frame-relative stores.
 - Heap/pointer/ANY locals get root slots. Reassignment refreshes the slot, and helper-call boundaries publish all live values before the call. The collector scans only `[side_root_base, side_root_top)`.
-- `push_l`/`push_d`/`push_k` allocate raw scalar payloads from `[side_number_base, side_number_top)`. Boxed returns classify their Item inline and donate a normalized frame-base slot when its payload lies in the callee extent; otherwise they restore the watermark exactly. Containers and closure envs own analogous scalar tails.
+- Full-width `INT64`/`UINT64` and out-of-band `FLOAT` payloads use `[side_number_base, side_number_top)`. Generated Item returns copy into a caller-donated canonical home before restoring the complete callee watermark; containers and closure environments own analogous scalar tails. `DTIME` is GC-owned and never enters this number extent.
 - All generated returns branch to one epilogue, including error, generator/async suspension, handler, and TCO-controlled paths. Batch crash-recovery boundaries restore an outer side-stack snapshot because a signal `longjmp` bypasses normal generated epilogues.
 - Module-level BSS globals cannot use a per-call frame, so `register_bss_gc_roots` still registers them after linking.
 
@@ -112,7 +115,7 @@ Both backends share `transpile_shared.cpp`, which was extracted precisely so the
 
 The MIR Direct backend carries a large, deliberate set of workarounds. They cluster around three structural facts: MIR's immutable register types, the dual native-or-boxed value representation, and GC rooting under a non-moving collector.
 
-1. **INT64 dual representation / double-boxing.** `transpile_expr` returns raw `int64` for some INT64 sources but boxed Items for others (the generic binary fallback), so `emit_box_int64` calls `push_l_safe` (`:931`) to avoid re-boxing. The runtime `push_l_safe` has a **false-positive range**: a raw int64 in roughly `[2.88e17, 3.60e17]` has a high byte equal to `LMD_TYPE_INT64` and is mistaken for an already-boxed value. INT64 arithmetic is consequently **never native** — it is forced through the boxed path (`transpile_binary`, `:2356`, `:2422`).
+1. **Numeric semantic result and physical representation are still coupled.** `get_effective_type`, `transpile_binary`, and `transpile_box_item` contain separate repairs for runtime helpers that return boxed Items even when the AST names `INT64` or another concrete numeric type. The latest promotion model adds `integer`/decimal results for full-width mixed arithmetic and `/`; all three sites must consume one shared result-domain decision or a raw register can be mistaken for an Item (and vice versa).
 2. **"undeclared reg 0" guard.** Value-less statements would otherwise return the invalid register 0 and crash MIR; `emit_null_item_reg` (`:344`) synthesizes a boxed-null register instead. The same hazard recurs in `match` (`:3484`) and the let/var/break/continue null-move blocks (`:8504`).
 3. **Indirect calls cap at 3 arguments.** `transpile_call`'s dynamic/closure path logs `mir: calls with >3 args not yet fully supported` and returns the wrong value (`:7466`). Direct calls are unaffected; only `fn_call`-dispatched closure calls hit this hard cap. A bare-expression spread is likewise "not yet handled" (`:9083`).
 4. **Typed-array construction gap.** MIR Direct always builds a generic `Array*`; it never emits `array_int()`/`array_int64()`/`array_float()`. This produces a runtime-type divergence from C2MIR in reductions like `fn_sum`/`fn_min`/`fn_max`. Element access and mutation have partial fast paths gated on an `elem_type` proven through `fill()` narrowing or mutation analysis, guarded by `safe_native_int` (`:5736`, `:6036`), with frequent `item_at`/`fn_array_set` fallbacks — and the AST's `nested` type is explicitly distrusted after mutation (`:5737`).
@@ -128,7 +131,7 @@ The MIR Direct backend carries a large, deliberate set of workarounds. They clus
 14. **Magic struct offset.** The function prologue loads the GC handle using a hard-coded `heap->gc` offset of 8 with `-Winvalid-offsetof` suppressed (`:10622`) — fragile if `EvalContext` layout changes; it is a magic constant rather than an `offsetof`.
 15. **TCO iteration ceiling.** Tail-recursive loops emit a guard that raises a stack-overflow error past `LAMBDA_TCO_MAX_ITERATIONS` (`:10934`) — a hard-coded iteration cap.
 
-Several cross-cutting gaps inherited from the runtime-design notes remain open: there is no single canonical value-representation contract; `SysFuncInfo` has no data-driven `c_ret_type`/`c_arg_convention`, so `transpile_box_item` resolves return conventions with an ad-hoc switch; there are no idempotent `push_d_safe`/`push_k_safe` analogues of `push_l_safe`; and there is no debug-mode validation that a boxed value carries the tag the transpiler believes it does.
+Several cross-cutting gaps remain open: numeric result-domain inference is duplicated across AST/MIR/runtime; `SysFuncInfo` has no complete data-driven argument convention, so some return conventions still use ad-hoc switches; and there is no debug-mode validation that a boxed value carries the representation the transpiler believes it does. The Stack API is the physical ownership authority; `Lambda_Impl_Numbers.md` owns the semantic-promotion consolidation.
 
 ---
 

@@ -487,9 +487,13 @@ Python arithmetic follows Python semantics, not C semantics:
 | `//` | Floor division (rounds toward −∞) | `q = a/b; if ((a^b)<0 && a%b!=0) q--` |
 | `%` | Modulo (sign of divisor) | `r = a%b; if (r!=0 && (r^b)<0) r += b` |
 | `**` | Power | Square-and-multiply for integer exponents |
-| `-x` | Negation | `py_negate()` — int inline, float heap |
+| `-x` | Negation | `py_negate()` — compact int or canonical float Item |
 
-**Overflow handling:** 56-bit inline integers overflow to 64-bit heap-allocated `int64_t*` values. Arithmetic checks value ranges after operations.
+**Overflow handling:** Python compact integers use Lambda's inline safe-integer
+carrier, but Python arithmetic promotes an out-of-band result to the Python
+arbitrary-precision integer carrier (`py_bigint_*`), not Lambda `int64` and not
+a value-dependent float. Python true `/` remains Python-specific float
+division. This guest rule is independent of Lambda's domain-selected `/`.
 
 ### 4.2 String Methods (`py_string_method`)
 

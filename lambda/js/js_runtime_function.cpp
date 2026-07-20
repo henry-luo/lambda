@@ -332,11 +332,10 @@ static bool js_env_slot_is_side_number(Item item) {
     if (item.item & ITEM_DBL_MASK) return false;
 
     uintptr_t payload = item.item & ~ITEM_HIGH_BYTE_MASK;
-    if (tag == LMD_TYPE_INT64) {
-        if (item.is_inline_int64()) return false;
+    if (tag == LMD_TYPE_INT64 || tag == LMD_TYPE_UINT64) {
     } else if (tag == LMD_TYPE_FLOAT || tag == LMD_TYPE_FLOAT64) {
         if (payload <= 1) return false;
-    } else if (tag != LMD_TYPE_DTIME) {
+    } else {
         return false;
     }
 

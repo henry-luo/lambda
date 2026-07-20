@@ -1100,9 +1100,11 @@ Sized integer arithmetic follows a Go-like fixed-width model:
 // Mixed signed/unsigned operands promote to a type that can represent both
 42i8 + 10u8                 // i16 result (52)
 
-// Sized + standard int/float promotes to standard int or float
+// Sized + non-sized arithmetic exits through a type-directed entry domain
 42i8 + 100                  // int result (142)
 100i32 + 3.14               // float result (103.14)
+1i64 + 1                    // integer result (exact 2)
+1u64 + 0.5                  // decimal result (exact 1.5)
 
 // All sized types are compatible with number
 42i8 is number              // true
@@ -1120,6 +1122,14 @@ Mixed signed/unsigned promotion uses these rules:
 | `iN` + `uM`, where signed width can represent all unsigned values | that signed type | example: `i16 + u8 -> i16` |
 | `iN` + `uM`, where the next signed width can represent both | next wider signed type | example: `i8 + u8 -> i16`, `i16 + u16 -> i32`, `i32 + u32 -> i64` |
 | `i64` + `u64` | `u64` | no signed Lambda integer can represent all `u64` values |
+
+When a sized integer mixes with a non-sized number, `i8`…`u32` enter the
+non-sized tower as `int`, while `i64/u64` enter as `integer`. This depends only
+on type, never magnitude. Thus both small and large `u64` values take the same
+route. True `/` also exits the sized lane: compact sized operands produce the
+float-domain result (`i8 / u8 → float`), while full-width operands produce a
+decimal result (`i64 / u64 → decimal`). Integral `div` and `%` remain in the
+selected sized lane when both operands are sized.
 
 Sized values can be passed to wider numeric parameters when the source type
 embeds exactly in the target type, and all numeric values match `number`.

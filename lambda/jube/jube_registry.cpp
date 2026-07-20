@@ -98,7 +98,7 @@ static int jube_script_class_id(Item value) {
 }
 extern "C" void* js_dom_get_document(void);
 extern "C" void* js_dom_get_ui_context(void);
-extern "C" bool js_dom_force_layout_for_geometry(void* doc);
+extern "C" bool js_dom_has_committed_geometry_snapshot(void* doc);
 extern "C" Item js_get_document_object_value(void);
 extern "C" void* js_dom_get_or_create_doc_node(void* doc);
 extern "C" Item js_dom_document_proxy_for_doc_bridge(void* doc);
@@ -577,7 +577,7 @@ static const JubeHostDomAPI jube_host_dom_api = {
     js_cssom_rule_decl_remove_property,
     js_cssom_decl_css_has,
     js_dom_get_ui_context,
-    js_dom_force_layout_for_geometry,
+    js_dom_has_committed_geometry_snapshot,
 };
 
 // H7A source records are intentionally plain C data.  A language can retain

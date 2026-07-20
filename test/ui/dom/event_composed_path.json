@@ -1,0 +1,8 @@
+{
+  "name": "Event composedPath is the frozen in-flight path and empty afterward",
+  "html": "test/ui/dom/event_composed_path.html",
+  "viewport": {"width": 640, "height": 480},
+  "events": [
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "true|true|true|true"}
+  ]
+}

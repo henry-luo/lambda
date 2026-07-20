@@ -1,5 +1,15 @@
 # Proposal: Change LMD_TYPE_INT from int32 to int56
 
+**Status:** mixed sized-integer lane selection at the top of this file remains
+the current design. The int32→int56 material below is a historical
+representation proposal, not the current semantic contract. Lambda now caps
+plain `int` at ±(2⁵³−1), promotes a plain-`int` arithmetic result outside
+that band to float (with accepted boundary rounding), and never promotes plain
+`int` overflow to `int64`. Sized/non-sized promotion and true division are
+owned by `Lambda_Semantics_Number_Model.md` and
+`doc/Lambda_Formal_Semantics.md`; implementation work is tracked in
+`Lambda_Impl_Numbers.md`.
+
 ## Design Decision: Sized Integer Arithmetic Follows Go
 
 Lambda's explicit sized integer arithmetic should use a **Go-like fixed-width model** rather than JS `Number`, C/C++ signed-overflow, or Java-only signed integer promotion.
@@ -402,7 +412,7 @@ Item fn_div(Item item_a, Item item_b) {
             return ItemError;
         }
         
-        // Promote to double for division (always returns float)
+        // Plain int / int is true division and returns float.
         return push_d((double)a / (double)b);
     }
     // ... rest unchanged

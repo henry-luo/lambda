@@ -1026,7 +1026,11 @@ static bool mir_is_native_param_type(TypeId tid) {
 }
 
 static bool mir_is_native_scalar_value_type(TypeId tid) {
-    return tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL;
+    // Generated calls return an Item so scalar-home adoption can preserve the
+    // payload. INT64 callers immediately recover their raw MIR value; otherwise
+    // later boxing would treat the tagged Item bits as an integer payload.
+    return tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 ||
+        tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL;
 }
 
 static TypeId resolve_declared_param_type(AstNamedNode* param, TypeParam* type_param) {
@@ -1394,16 +1398,14 @@ static MIR_reg_t emit_load_string_literal(MirTranspiler* mt, const char* str) {
 
 // Box int64 -> Item through the full-domain number-stack API.
 static MIR_reg_t emit_box_int64(MirTranspiler* mt, MIR_reg_t val_reg) {
-    return emit_call_1(mt, "box_int64_value_safe", MIR_T_I64,
+    return emit_call_1(mt, "box_int64_value", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
 }
 
-// Box DateTime* pointer -> Item (inline k2it)
-// val_reg is a POINTER to DateTime (on the number side stack or consts), not the value itself.
-// Use inline OR tagging: result = DTIME_TAG | ptr
+// Box a raw DateTime pointer by copying its value into a GC DateTime object.
+// Native literal storage belongs to the compiled module, never to an Item.
 static MIR_reg_t emit_box_dtime(MirTranspiler* mt, MIR_reg_t val_reg) {
     MIR_reg_t result = new_reg(mt, "boxk", MIR_T_I64);
-    uint64_t DTIME_TAG = (uint64_t)LMD_TYPE_DTIME << 56;
     uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
     MIR_label_t l_nn = new_label(mt);
     MIR_label_t l_end = new_label(mt);
@@ -1413,15 +1415,19 @@ static MIR_reg_t emit_box_dtime(MirTranspiler* mt, MIR_reg_t val_reg) {
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
     emit_label(mt, l_nn);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-        MIR_new_int_op(mt->ctx, (int64_t)DTIME_TAG), MIR_new_reg_op(mt->ctx, val_reg)));
+    MIR_reg_t raw = new_reg(mt, "dtime", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, val_reg, 0, 1)));
+    MIR_reg_t boxed = emit_call_1(mt, "push_k", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, raw));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, boxed)));
     emit_label(mt, l_end);
     return result;
 }
 
-// Box raw DateTime VALUE -> Item via push_k
+// Box raw DateTime VALUE -> a GC-owned Item via push_k.
 // val_reg is the raw DateTime uint64_t value (NOT a pointer).
-// push_k allocates on the number side stack and returns a properly tagged Item.
 static MIR_reg_t emit_box_dtime_value(MirTranspiler* mt, MIR_reg_t val_reg) {
     return emit_call_1(mt, "push_k", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
 }
@@ -1530,7 +1536,7 @@ static MIR_reg_t emit_box_impl(MirTranspiler* mt, MIR_reg_t val_reg,
     case LMD_TYPE_INT64:
         return emit_box_int64(mt, val_reg);
     case LMD_TYPE_DTIME:
-        return emit_box_dtime(mt, val_reg);
+        return val_reg;
     case LMD_TYPE_STRING:
         return emit_box_string(mt, val_reg);
     case LMD_TYPE_SYMBOL:
@@ -1674,8 +1680,9 @@ static ValueRep lambda_value_rep(TypeId type_id) {
     case LMD_TYPE_INT:
     case LMD_TYPE_BOOL:
     case LMD_TYPE_INT64:
-    case LMD_TYPE_DTIME:
         return VALUE_REP_I64;
+    case LMD_TYPE_DTIME:
+        return VALUE_REP_ITEM;
     case LMD_TYPE_STRING:
     case LMD_TYPE_SYMBOL:
     case LMD_TYPE_BINARY:
@@ -2075,24 +2082,8 @@ static MIR_reg_t emit_load_const_boxed(MirTranspiler* mt, int const_index, TypeI
         emit_label(mt, l_end);
         return result;
     }
-    case LMD_TYPE_DTIME: {
-        // k2it(ptr)
-        MIR_reg_t result = new_reg(mt, "boxk", MIR_T_I64);
-        uint64_t DTIME_TAG = (uint64_t)LMD_TYPE_DTIME << 56;
-        uint64_t ITEM_NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
-        MIR_label_t l_nn = new_label(mt);
-        MIR_label_t l_end = new_label(mt);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_nn),
-            MIR_new_reg_op(mt->ctx, ptr)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-        emit_label(mt, l_nn);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, (int64_t)DTIME_TAG), MIR_new_reg_op(mt->ctx, ptr)));
-        emit_label(mt, l_end);
-        return result;
-    }
+    case LMD_TYPE_DTIME:
+        return emit_box_dtime(mt, ptr);
     case LMD_TYPE_DECIMAL: {
         MIR_reg_t result = new_reg(mt, "boxdc", MIR_T_I64);
         uint64_t DEC_TAG = (uint64_t)LMD_TYPE_DECIMAL << 56;
@@ -2164,7 +2155,7 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
         return false;
     case LMD_TYPE_DTIME:
         if (value_type != LMD_TYPE_DTIME) return false;
-        *(DateTime*)field_ptr = value.get_datetime(); return true;
+        *(DateTime**)field_ptr = value.get_datetime_ptr(); return true;
     case LMD_TYPE_STRING:
         if (value_type != LMD_TYPE_STRING) return false;
         *(String**)field_ptr = value.get_safe_string(); return true;
@@ -2200,7 +2191,7 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
         return true;
     case LMD_TYPE_UINT64:
         if (field_type != value_type) return false;
-        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFF);
+        *(uint64_t*)field_ptr = value.get_uint64();
         return true;
     case LMD_TYPE_NUM_SIZED:
         if (value_type != LMD_TYPE_NUM_SIZED) return false;
@@ -2216,7 +2207,8 @@ static bool static_store_field_value(void* field_ptr, TypeId field_type, Item va
         case LMD_TYPE_INT: titem.int_val = value.int_val; break;
         case LMD_TYPE_INT64: titem.long_val = value.get_int64(); break;
         case LMD_TYPE_FLOAT: titem.double_val = value.get_double(); break;
-        case LMD_TYPE_DTIME: titem.datetime_val = value.get_datetime(); break;
+        case LMD_TYPE_DTIME: titem.datetime_ptr = value.get_datetime_ptr(); break;
+        case LMD_TYPE_UINT64: titem.uint64_val = value.get_uint64(); break;
         case LMD_TYPE_STRING: titem.string = value.get_safe_string(); break;
         case LMD_TYPE_SYMBOL: titem.symbol = value.get_safe_symbol(); break;
         case LMD_TYPE_BINARY: titem.binary = value.get_safe_binary(); break;
@@ -2319,7 +2311,7 @@ static bool static_const_item_from_node(MirTranspiler* mt, AstNode* node, Item* 
         case LMD_TYPE_INT64: { TypeInt64* t = (TypeInt64*)node->type; out->item = l2it(&t->int64_val); return true; }
         case LMD_TYPE_FLOAT: { TypeFloat* t = (TypeFloat*)node->type; *out = lambda_float_ptr_to_item(&t->double_val); return true; }
         case LMD_TYPE_FLOAT64: { TypeFloat* t = (TypeFloat*)node->type; *out = lambda_float_ptr_to_item(&t->double_val); return true; }
-        case LMD_TYPE_DTIME: { TypeDateTime* t = (TypeDateTime*)node->type; out->item = k2it(&t->datetime); return true; }
+        case LMD_TYPE_DTIME: return false;
         case LMD_TYPE_DECIMAL: { TypeDecimal* t = (TypeDecimal*)node->type; out->item = c2it(t->decimal); return true; }
         case LMD_TYPE_STRING: { TypeString* t = (TypeString*)node->type; out->item = s2it(t->string); return true; }
         case LMD_TYPE_SYMBOL: { TypeString* t = (TypeString*)node->type; out->item = y2it((Symbol*)t->string); return true; }
@@ -2441,7 +2433,7 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
         }
         case LMD_TYPE_DTIME: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
+            return emit_box_dtime(mt, emit_load_const(mt, tc->const_index, MIR_T_P));
         }
         case LMD_TYPE_DECIMAL: {
             TypeConst* tc = (TypeConst*)node->type;
@@ -2461,14 +2453,15 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             return r;
         }
         case LMD_TYPE_UINT64: {
-            // u64: tag the const pool pointer to create a valid Item
+            // A literal must get a transient number home; const-pool storage is
+            // neither a stack home nor a destination-owned scalar slot.
             TypeConst* tc = (TypeConst*)node->type;
             MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
-            MIR_reg_t r = new_reg(mt, "u64", MIR_T_I64);
-            uint64_t UINT64_TAG = (uint64_t)LMD_TYPE_UINT64 << 56;
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, r),
-                MIR_new_int_op(mt->ctx, (int64_t)UINT64_TAG), MIR_new_reg_op(mt->ctx, ptr)));
-            return r;
+            MIR_reg_t raw = new_reg(mt, "u64", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ptr, 0, 1)));
+            return emit_call_1(mt, "box_uint64_value", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, raw));
         }
         default: {
             log_error("mir: unhandled literal type %d", tid);
@@ -3269,8 +3262,7 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     // Note: INT64 arithmetic is NOT handled natively because transpile_expr
     // returns inconsistent values for INT64 (raw int64 from literals/fn_int64,
     // but boxed Items from generic binary fallback). All INT64 ops go through
-    // the generic boxed path, and emit_box_int64 uses push_l_safe to handle
-    // both raw and already-boxed values safely.
+    // the generic boxed path, whose result is preserved by transpile_box_item.
 
     if (both_int && (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB || bi->op == OPERATOR_MUL)) {
         // Compact-int arithmetic can promote to boxed float at the 53-bit boundary;
@@ -7899,6 +7891,15 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         // band/bor/bxor → MIR_AND/MIR_OR/MIR_XOR (single instruction, no function call)
         // shl/shr → guarded: negative count is error; b >= 64 yields 0
         // bnot → MIR_XOR with -1 (equivalent to ~a)
+        if (info->fn == SYSFUNC_USHR) {
+            arg = call_node->argument;
+            MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
+            arg = arg->next;
+            MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
+            return emit_call_2(mt, "fn_ushr_item", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
+        }
         if (info->fn == SYSFUNC_BAND || info->fn == SYSFUNC_BOR ||
             info->fn == SYSFUNC_BXOR || info->fn == SYSFUNC_SHL ||
             info->fn == SYSFUNC_SHR) {
@@ -9767,7 +9768,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         }
         case LMD_TYPE_DTIME: {
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const_boxed(mt, tc->const_index, LMD_TYPE_DTIME);
+            return emit_box_dtime(mt, emit_load_const(mt, tc->const_index, MIR_T_P));
         }
         case LMD_TYPE_DECIMAL: {
             TypeConst* tc = (TypeConst*)node->type;
@@ -9987,7 +9988,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             // Legacy INT64-valued runtime helpers still use INT64_ERROR as
             // their error channel. Preserve that adapter at the helper ABI;
             // language-level two-lane returns use the full-domain boxer.
-            return emit_call_1(mt, "push_l_safe", MIR_T_I64,
+            return emit_call_1(mt, "box_int64_result_or_error", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
         }
     }

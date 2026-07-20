@@ -8,6 +8,17 @@
 #include "js/js_exec_profile_weak.h"
 
 extern __thread EvalContext* context;
+extern void* heap_alloc(int size, TypeId type_id);
+
+Item push_k(DateTime val) {
+    // Datetime is deliberately heap-owned: keeping it out of number homes
+    // leaves its object layout free to grow beyond one 64-bit payload word.
+    if (DATETIME_IS_ERROR(val)) return ItemError;
+    DateTime* dtptr = (DateTime*)heap_alloc(sizeof(DateTime), LMD_TYPE_DTIME);
+    if (!dtptr) return ItemError;
+    *dtptr = val;
+    return {.item = k2it(dtptr)};
+}
 
 #ifndef LAMBDA_STATIC
 // ui_mode helper: copy GC-heap string into result arena as fat DomText node
@@ -453,6 +464,17 @@ int64_t it2l(Item itm) {
     return INT64_MAX;  // error sentinel
 }
 
+uint64_t it2u(Item itm) {
+    TypeId type_id = get_type_id(itm);
+    if (type_id == LMD_TYPE_UINT64) return itm.get_uint64();
+    if (type_id == LMD_TYPE_INT) return (uint64_t)itm.get_int56();
+    if (type_id == LMD_TYPE_INT64) return (uint64_t)itm.get_int64();
+    if (type_id == LMD_TYPE_NUM_SIZED) return (uint64_t)itm.get_num_sized_as_int64();
+    if (is_float_type_id(type_id)) return (uint64_t)itm.get_double();
+    if (type_id == LMD_TYPE_BOOL) return itm.bool_val ? 1 : 0;
+    return 0;
+}
+
 String* it2s(Item itm) {
     if (itm._type_id == LMD_TYPE_STRING) {
         return itm.get_safe_string();
@@ -593,14 +615,13 @@ void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
         Item item = new_items[i];
         if (!(((item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1) ||
                     item._type_id == LMD_TYPE_FLOAT64) ||
-                (item._type_id == LMD_TYPE_INT64 && !item.is_inline_int64()) ||
-                item._type_id == LMD_TYPE_DTIME)) continue;
+                item._type_id == LMD_TYPE_INT64 || item._type_id == LMD_TYPE_UINT64)) continue;
         Item* old_pointer = (Item*)item.double_ptr;
         if (old_pointer < old_items || old_pointer >= old_items + old_capacity) continue;
         int64_t end_offset = old_items + old_capacity - old_pointer;
         void* new_pointer = new_items + new_capacity - end_offset;
         new_items[i] = {.item = is_float_type_id(item._type_id) ? d2it(new_pointer) :
-            item._type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : k2it(new_pointer)};
+            item._type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : u2it(new_pointer)};
     }
 
     // Growth copies the old buffer before moving its owned tail. Clear its
@@ -667,14 +688,13 @@ void js_array_set_props(Array* arr, Map* props) {
             Item item = arr->items[i];
             if (!(((item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1) ||
                         item._type_id == LMD_TYPE_FLOAT64) ||
-                    (item._type_id == LMD_TYPE_INT64 && !item.is_inline_int64()) ||
-                    item._type_id == LMD_TYPE_DTIME)) continue;
+                    item._type_id == LMD_TYPE_INT64 || item._type_id == LMD_TYPE_UINT64)) continue;
             Item* pointer = (Item*)item.double_ptr;
             if (pointer < arr->items + old_tail_start ||
                     pointer >= arr->items + arr->capacity) continue;
             void* shifted = pointer - 1;
             arr->items[i] = {.item = is_float_type_id(item._type_id) ? d2it(shifted) :
-                item._type_id == LMD_TYPE_INT64 ? l2it(shifted) : k2it(shifted)};
+                item._type_id == LMD_TYPE_INT64 ? l2it(shifted) : u2it(shifted)};
         }
     }
     arr->items[arr->capacity - 1] = {.map = props};
@@ -734,15 +754,14 @@ void array_set(Array* arr, int64_t index, Item itm) {
         break;
     }
     case LMD_TYPE_INT64: {
-        if (itm.is_inline_int64()) break;
         int64_t* ival = (int64_t*)(arr->items + (arr->capacity - arr->extra - 1));
         *ival = itm.get_int64();  arr->items[index] = {.item = l2it(ival)};
         arr->extra++;
         break;
     }
-    case LMD_TYPE_DTIME:  {
-        DateTime* dtval = (DateTime*)(arr->items + (arr->capacity - arr->extra - 1));
-        *dtval = itm.get_datetime();  arr->items[index] = {.item = k2it(dtval)};
+    case LMD_TYPE_UINT64: {
+        uint64_t* uval = (uint64_t*)(arr->items + (arr->capacity - arr->extra - 1));
+        *uval = itm.get_uint64();  arr->items[index] = {.item = u2it(uval)};
         arr->extra++;
         break;
     }
@@ -775,10 +794,12 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
     Item* payload = &storage[item_count + index];
     switch (get_type_id(item)) {
     case LMD_TYPE_INT64:
-        if (!item.is_inline_int64()) {
-            *(int64_t*)payload = item.get_int64();
-            storage[index] = {.item = l2it(payload)};
-        }
+        *(int64_t*)payload = item.get_int64();
+        storage[index] = {.item = l2it(payload)};
+        break;
+    case LMD_TYPE_UINT64:
+        *(uint64_t*)payload = item.get_uint64();
+        storage[index] = {.item = u2it(payload)};
         break;
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:
@@ -787,10 +808,6 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
             *(double*)payload = item.get_double();
             storage[index] = lambda_float_ptr_to_item((double*)payload);
         }
-        break;
-    case LMD_TYPE_DTIME:
-        *(DateTime*)payload = item.get_datetime();
-        storage[index] = {.item = k2it(payload)};
         break;
     default:
         break;
@@ -815,12 +832,12 @@ Item scalar_storage_read(Item item, bool immortal) {
     // interior scalar references in the current number frame before escape.
     switch (get_type_id(item)) {
     case LMD_TYPE_INT64:
-        return item.is_inline_int64() ? item : box_int64_value(item.get_int64());
+        return box_int64_value(item.get_int64());
+    case LMD_TYPE_UINT64:
+        return box_uint64_value(item.get_uint64());
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64:
         return push_d(item.get_double());
-    case LMD_TYPE_DTIME:
-        return push_k(item.get_datetime());
     default:
         return item;
     }
@@ -1091,18 +1108,14 @@ void list_push(List *list, Item item) {
         break;
     }
     case LMD_TYPE_INT64: {
-        if (item.is_inline_int64()) break;
         int64_t* ival = (int64_t*)(list->items + (list->capacity - list->extra - 1));
         *ival = item.get_int64();  list->items[list->length-1] = {.item = l2it(ival)};
         list->extra++;
         break;
     }
-    case LMD_TYPE_DTIME:  {
-        DateTime* dtval = (DateTime*)(list->items + (list->capacity - list->extra - 1));
-        DateTime dt = *dtval = item.get_datetime();  list->items[list->length-1] = {.item = k2it(dtval)};
-        StrBuf *strbuf = strbuf_new();
-        datetime_format_lambda(strbuf, &dt);
-        strbuf_free(strbuf);
+    case LMD_TYPE_UINT64: {
+        uint64_t* uval = (uint64_t*)(list->items + (list->capacity - list->extra - 1));
+        *uval = item.get_uint64();  list->items[list->length-1] = {.item = u2it(uval)};
         list->extra++;
         break;
     }
@@ -1194,7 +1207,12 @@ Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset) {
     if (!array || offset < 0 || offset >= array->length) return ItemNull;
     switch (array->get_elem_type()) {
         case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
-        case ELEM_INT64:   return (Item){.item = l2it(&array->items[offset])};
+        case ELEM_INT64:
+#ifdef LAMBDA_STATIC
+            return {.item = l2it(&array->items[offset])};
+#else
+            return box_int64_value(array->items[offset]);
+#endif
         case ELEM_FLOAT64: return lambda_float_ptr_to_item(&array->float_items[offset]);
         case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[offset])};
         case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[offset])};
@@ -1205,7 +1223,12 @@ Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset) {
         case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[offset])};
         case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[offset]))};
         case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[offset])};
-        case ELEM_UINT64:  return (Item){.item = u64_to_item(&((uint64_t*)array->data)[offset])};
+        case ELEM_UINT64:
+#ifdef LAMBDA_STATIC
+            return {.item = u2it(&((uint64_t*)array->data)[offset])};
+#else
+            return box_uint64_value(((uint64_t*)array->data)[offset]);
+#endif
         case ELEM_BOOL:    return (Item){.item = b2it(((uint8_t*)array->data)[offset] ? BOOL_TRUE : BOOL_FALSE)};
         default:           return ItemError;
     }
@@ -1271,6 +1294,10 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(int64_t*)field_ptr = item.get_int64();
                 break;
             }
+            case LMD_TYPE_UINT64: {
+                *(uint64_t*)field_ptr = item.get_uint64();
+                break;
+            }
             case LMD_TYPE_FLOAT:
             case LMD_TYPE_FLOAT64: {
                 // handle type coercion: int → float, int64 → float
@@ -1287,11 +1314,9 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_DTIME:  {
-                DateTime dtval = item.get_datetime();
-                // StrBuf *strbuf = strbuf_new();
-                // datetime_format_lambda(strbuf, &dtval);
-                // log_debug("set field of datetime type to: %s", strbuf->str);
-                *(DateTime*)field_ptr = dtval;
+                // Datetime fields retain the GC object itself; copying its raw
+                // bits would create an untraced, non-owning scalar payload.
+                *(DateTime**)field_ptr = item.get_datetime_ptr();
                 break;
             }
             case LMD_TYPE_STRING: {
@@ -1354,11 +1379,13 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.int_val = item.int_val;  break;
                 case LMD_TYPE_INT64:
                     titem.long_val = item.get_int64();  break;
+                case LMD_TYPE_UINT64:
+                    titem.uint64_val = item.get_uint64();  break;
                 case LMD_TYPE_FLOAT:
                 case LMD_TYPE_FLOAT64:
                     titem.double_val = item.get_double();  break;
                 case LMD_TYPE_DTIME:
-                    titem.datetime_val = item.get_datetime();  break;
+                    titem.datetime_ptr = item.get_datetime_ptr();  break;
                 case LMD_TYPE_STRING:
                     titem.string = item.get_safe_string();
                     break;
@@ -1440,12 +1467,18 @@ Item typeditem_to_item(TypedItem *titem) {
         return {.item = i2it(titem->int_val)};
     case LMD_TYPE_INT64:
         return {.item = l2it(&titem->long_val)};
+    case LMD_TYPE_UINT64:
+#ifdef LAMBDA_STATIC
+        return {.item = u2it(&titem->uint64_val)};
+#else
+        return box_uint64_value(titem->uint64_val);
+#endif
     case LMD_TYPE_FLOAT:
         return lambda_float_ptr_to_item(&titem->double_val);
     case LMD_TYPE_FLOAT64:
         return lambda_float_ptr_to_item(&titem->double_val);
     case LMD_TYPE_DTIME:
-        return {.item = k2it(&titem->item)};
+        return {.item = k2it(titem->datetime_ptr)};
     case LMD_TYPE_DECIMAL:
         memcpy(&ptr_val, ((char*)titem) + 1, sizeof(void*));
         return {.item = c2it((Decimal*)ptr_val)};
@@ -1505,7 +1538,11 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         result = {.item = l2it(field_ptr)};  // points to long directly
         break;
     case LMD_TYPE_UINT64:
-        result = {.item = u64_to_item((uint64_t*)field_ptr)};
+#ifdef LAMBDA_STATIC
+        result = {.item = u2it(field_ptr)};
+#else
+        result = box_uint64_value(*(uint64_t*)field_ptr);
+#endif
         break;
     case LMD_TYPE_FLOAT:
         result = lambda_float_ptr_to_item((const double*)field_ptr);
@@ -1514,7 +1551,7 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         result = lambda_float_ptr_to_item((const double*)field_ptr);
         break;
     case LMD_TYPE_DTIME:
-        result = {.item = k2it(field_ptr)};  // points to datetime directly
+        result = {.item = k2it(*(DateTime**)field_ptr)};
         break;
     case LMD_TYPE_DECIMAL:
         memcpy(&ptr_val, field_ptr, sizeof(void*));

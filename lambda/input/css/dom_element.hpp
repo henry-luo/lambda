@@ -360,12 +360,17 @@ enum DomElementFlag : uint32_t {
     // execution context or an expando-map lookup.
     ELMT_FLAG_OPTION_SELECTEDNESS_SET = 1u << 19,
     ELMT_FLAG_OPTION_SELECTEDNESS_VALUE = 1u << 20,
+    // Generated pseudo boxes read their originating element's pseudo tree.
+    // Borrowing is distinct from epoch sharing because it has no epoch refcount.
+    ELMT_FLAG_SPECIFIED_STYLE_BORROWED = 1u << 21,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
               "view-prop ownership flags overlap established element state");
 static_assert((ELMT_FLAG_SPECIFIED_STYLE_SHARED & ELMT_FLAG_INLINE_PROP_SHARED) == 0,
               "style and view-prop ownership flags must remain independent");
+static_assert((ELMT_FLAG_SPECIFIED_STYLE_BORROWED & ELMT_FLAG_SPECIFIED_STYLE_SHARED) == 0,
+              "borrowed and epoch-shared styles must remain independent");
 
 enum FragmentUnionKind : uint8_t {
     FRAGMENT_UNION_INLINE = 0,
@@ -558,8 +563,19 @@ struct DomElement : DomNode {
         set_flag(ELMT_FLAG_INLINE_PROP_SHARED, false);
     }
     bool specified_style_shared() const { return flag(ELMT_FLAG_SPECIFIED_STYLE_SHARED); }
-    void mark_specified_style_owned() { set_flag(ELMT_FLAG_SPECIFIED_STYLE_SHARED, false); }
-    void mark_specified_style_shared() { set_flag(ELMT_FLAG_SPECIFIED_STYLE_SHARED, true); }
+    bool specified_style_borrowed() const { return flag(ELMT_FLAG_SPECIFIED_STYLE_BORROWED); }
+    void mark_specified_style_owned() {
+        set_flag(ELMT_FLAG_SPECIFIED_STYLE_SHARED, false);
+        set_flag(ELMT_FLAG_SPECIFIED_STYLE_BORROWED, false);
+    }
+    void mark_specified_style_shared() {
+        set_flag(ELMT_FLAG_SPECIFIED_STYLE_BORROWED, false);
+        set_flag(ELMT_FLAG_SPECIFIED_STYLE_SHARED, true);
+    }
+    void mark_specified_style_borrowed() {
+        set_flag(ELMT_FLAG_SPECIFIED_STYLE_SHARED, false);
+        set_flag(ELMT_FLAG_SPECIFIED_STYLE_BORROWED, true);
+    }
     bool has_pending_element_scroll_x() const { return flag(ELMT_FLAG_HAS_PENDING_SCROLL_X); }
     void set_has_pending_element_scroll_x(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_X, value); }
     bool has_pending_element_scroll_y() const { return flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y); }
@@ -895,6 +911,8 @@ void dom_element_release_retired_storage(DomElement* element);
  * @param element Element to clear
  */
 void dom_element_clear(DomElement* element);
+void dom_element_clear_cascaded_styles(DomElement* element);
+void dom_element_borrow_specified_style(DomElement* element, StyleTree* style);
 
 // ============================================================================
 // Inline Style Support
@@ -1020,6 +1038,9 @@ bool dom_element_remove_property(DomElement* element, CssPropertyId property_id)
  * Returns true when at least one pseudo style tree was cleared.
  */
 bool dom_element_clear_pseudo_styles(DomElement* element);
+
+/** Return whether target is root or one of root's DOM descendants. */
+bool dom_subtree_contains_node(DomNode* root, DomNode* target);
 
 // ============================================================================
 // Utility Functions

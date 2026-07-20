@@ -1,6 +1,14 @@
 # Lambda Stack Frame Design — Precise Rooting + Frame-Scoped Number Stack
 
 **Status:** IMPLEMENTED (Lambda + LambdaJS) — SF1–SF20 and OS1–OS11 are closed for both MIR-Direct transpilers. The phase records are `vibe/Lambda_Impl_Stack_Frame.md` and `vibe/Lambda_Impl_Stack_Frame_JS.md`.
+**Scalar-storage successor (2026-07-20):** `vibe/Lambda_Design_Stack_API.md`
+Phase 7 supersedes this document's pre-Phase-7 scalar inventory and nursery
+discussion. `INT64`/`UINT64` now use activation/caller number homes and
+destination-owned persistent storage, with an interim GC fallback only at
+ownerless persistent boundaries; `DTIME` is always GC-heap-owned; common
+`DOUBLE` values self-tag and their out-of-band residue uses the number-home
+protocol. Sections 1.2 and the historical motivation below describe the system
+this design replaced, not the current representation contract.
 **Rooting successor (2026-07-18):** the precise-rooting *emission strategy* and conservative-scan *retirement path* — sketched here as SF8/SF9 — are now governed by `vibe/Lambda_Design_Stack_Rooting.md` (safepoint-current canonical slots, CR1–CR8, in implementation). That document supersedes this one on rooting-emission, helper-handle, and scan-retirement questions; the lifetime architecture in this document (side stacks, watermarks, re-homing, SF12–SF20) is unchanged by it.
 **Date:** 2026-07-15
 **Context:** A unified stack-frame architecture for Lambda and hosted languages (LambdaJS, future Jube guests) that addresses two runtime debts at once: (1) JIT GC rooting goes through heap-allocated shadow frames with a C call per rooted store, and (2) the numeric nursery is never collected — an unbounded leak by design. Successor-in-spirit to the G1 honest-rooting fix (`vibe/Lambda_Issue_GC_Root (fixed).md`); feeds the G2 host-API rooting clause (`vibe/Lambda_Semantics_Features.md` §1.8). Detailed current-state design lives in `doc/dev/lambda/LR_08_Memory_and_GC.md`.

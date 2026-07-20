@@ -125,6 +125,12 @@ extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
 
     if (se && m->data && se->byte_offset >= 0 &&
         se->byte_offset <= (int64_t)m->data_cap - (int64_t)sizeof(void*)) {
+        if (get_type_id(object) == LMD_TYPE_MAP &&
+                map_ctor_offset_is_reserved(m, se->byte_offset)) {
+            // Preallocated constructor storage is not an own property before
+            // its source assignment executes.
+            return JS_SHAPE_SLOT_ABSENT;
+        }
         Item slot = _map_read_field(se, m->data);
         if (out_slot) *out_slot = slot;
         if (jspd_is_deleted(se)) return JS_SHAPE_SLOT_DELETED;
@@ -361,6 +367,7 @@ extern "C" JsResolveFieldStatus js_ordinary_resolve_shape_value(ShapeEntry* e,
                                                                   Map* m,
                                                                   Item receiver,
                                                                   Item* out_value) {
+    if (map_ctor_offset_is_reserved(m, e->byte_offset)) return JS_RESOLVE_DELETED;
     Item slot = _map_read_field(e, m->data);
     if (jspd_is_deleted(e)) return JS_RESOLVE_DELETED;
     if (js_props_is_deleted_sentinel(slot)) return JS_RESOLVE_DELETED;
@@ -603,11 +610,14 @@ static bool js_props_store_raw_data_slot(Item target, ShapeEntry* entry, Item va
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = value.get_int64();
         break;
+    case LMD_TYPE_UINT64:
+        *(uint64_t*)field_ptr = value.get_uint64();
+        break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = value.get_double();
         break;
     case LMD_TYPE_DTIME:
-        *(DateTime*)field_ptr = value.get_datetime();
+        *(DateTime**)field_ptr = value.get_datetime_ptr();
         break;
     case LMD_TYPE_STRING:
         *(String**)field_ptr = value.get_safe_string();

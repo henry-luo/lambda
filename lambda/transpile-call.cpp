@@ -633,6 +633,17 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             return;
         }
 
+        // ushr returns the unsigned counterpart of its left operand, so it
+        // must retain the boxed Item instead of using the signed C shift ABI.
+        if (fn_id == SYSFUNC_USHR && first_arg && second_arg && !second_arg->next) {
+            strbuf_append_str(tp->code_buf, "fn_ushr_item(");
+            transpile_box_item(tp, first_arg);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, second_arg);
+            strbuf_append_char(tp->code_buf, ')');
+            return;
+        }
+
         // ==== PRIORITY 2: Native C math functions (single argument, double-based) ====
         const char* native_func = can_use_native_math(sys_fn_node, first_arg);
 

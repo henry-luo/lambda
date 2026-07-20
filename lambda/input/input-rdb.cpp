@@ -86,7 +86,9 @@ static Item rdb_value_to_item(MarkBuilder& builder, RdbValue val, RdbType declar
             // try ISO-8601 first (with 'T' separator), then Lambda format (space separator)
             DateTime* dt = datetime_parse_iso8601(builder.pool(), val.str_val);
             if (!dt) dt = datetime_parse_lambda(builder.pool(), val.str_val);
-            if (dt) return {.item = k2it(dt)};
+            if (dt) {
+                return push_k(*dt);
+            }
             // fallback: return as string if parsing fails
             return builder.createStringItem(val.str_val);
         }

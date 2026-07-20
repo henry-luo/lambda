@@ -121,23 +121,27 @@ Lambda supports vectorized arithmetic on multiple collection types:
 
 ### Type Promotion Rules
 
-When performing arithmetic between different types, Lambda follows NumPy-style promotion:
+Vector arithmetic follows the same type-directed domains as scalar arithmetic;
+vectorization does not introduce a second promotion lattice:
 
 ```
 Operand Type A    Operand Type B    Result Type
 ─────────────────────────────────────────────────
 int               int               int
-int               int64             int64
+int               int64             integer
 int               float             float
-int64             float             float
+int64             float             decimal
+integer           float             decimal
+integer           integer           integer (`/` produces decimal)
 float             float             float
+decimal           any number        decimal
 
 List              scalar            List
 Range             scalar            Array (materialized)
-ArrayLong         int               ArrayLong
-ArrayLong         float             ArrayFloat
-ArrayLong         ArrayLong         ArrayLong
-ArrayLong         ArrayFloat        ArrayFloat
+compact int lane  int               compact int result (overflow may exit to float)
+compact int lane  float             float result
+int64/u64 lane    int               generic/arbitrary-precision integer result
+int64/u64 lane    float             generic decimal result
 ArrayFloat        scalar            ArrayFloat
 ArrayFloat        ArrayFloat        ArrayFloat
 
@@ -146,7 +150,12 @@ scalar            List              List
 scalar            Range             Array (materialized)
 ```
 
-**Division Rule**: Division (`/`) always produces `float`/`ArrayFloat` unless using integer division (`_/`).
+**Division rule:** `/` applies scalar-domain selection element-wise. Compact
+integer lanes produce `float`/`ArrayFloat`; any mapped `integer` domain produces
+decimal values and therefore needs generic or decimal-capable result storage.
+Integral `div`/`%` keep their selected integer lane. The current evaluator's
+broader `ArrayLong → ArrayFloat` shortcut is an implementation gap tracked by
+`Lambda_Impl_Numbers.md`, not the design rule.
 
 ### Type Inference Examples
 
@@ -236,7 +245,7 @@ len([])                    // 0
 | `+` | Add | ✅ | ✅ | Element-wise |
 | `-` | Subtract | ✅ | ✅ | Order matters |
 | `*` | Multiply | ✅ | ✅ | Element-wise |
-| `/` | Divide | ✅ | ✅ | Always float result |
+| `/` | Divide | ✅ | ✅ | Current compact `ArrayLong`/`ArrayFloat` lanes produce float; arbitrary `integer / integer` produces decimal |
 | `_/` | Int Divide | ✅ | ✅ | Integer result |
 | `%` | Modulo | ✅ | ✅ | Integer remainder |
 | `^` | Power | ✅ | ✅ | Element-wise |

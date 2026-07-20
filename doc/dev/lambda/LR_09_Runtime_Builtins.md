@@ -26,7 +26,7 @@ Every runtime builtin reaches its allocators, its GC heap, and its error slot th
 `EvalContext` (`lambda-data.hpp:77`) extends the slim `struct Context` (`lambda.h:1177`, which carries `pool`, `arena`, `consts`, `type_list`, `cwd`, `stack_limit`, `ui_mode`) with the runtime-only fields:
 
 - `Heap* heap` (`:78`) — the GC heap that backs strings, decimals, datetimes, errors, and containers; reached by the builtins via `heap_alloc`/`heap_strcpy` and by the JIT prologue via the `heap->gc` offset ([LR_07 §Known Issues #14](LR_07_MIR_Transpiler_JIT.md#known-issues--future-improvements)).
-- Numeric temporaries (`int64`, `double`, `DateTime`) are **not** an `EvalContext` field: `push_l`/`push_d`/`push_k` box into the per-thread number execution side-stack owned by `lambda-mem.cpp`, watermark-scoped to the executing frame; distinct from the GC data nursery ([LR_03](LR_03_Value_and_Type_Model.md), [LR_08](LR_08_Memory_and_GC.md)).
+- Numeric temporaries (`int64`, `uint64`, and out-of-band `double`) are **not** an `EvalContext` field: they use the per-thread number execution side-stack owned by `lambda-mem.cpp`, watermark-scoped to the executing frame and distinct from the GC data nursery. `DateTime` is always a GC-owned object created by `push_k` ([LR_03](LR_03_Value_and_Type_Model.md), [LR_08](LR_08_Memory_and_GC.md)).
 - `mpd_context_t* decimal_ctx` (`:84`) — the libmpdec context used by decimal arithmetic ([LR_04](LR_04_Numbers_Decimal_DateTime.md)).
 - `void* type_info` (`:82`) and `Item result` (`:83`) — the base-type metadata and the final execution result.
 - `ArrayList* debug_info` (`:88`), `const char* current_file` (`:89`), `LambdaError* last_error` (`:90`) — the error/stack-trace state. `set_runtime_error` (`lambda-eval.cpp:75`) builds a `LambdaError` against `current_file`, captures a native stack trace via `err_capture_stack_trace(context->debug_info, 32)`, frees any prior `last_error`, and stores the new one. The stack-trace machinery is detailed in [LR_10](LR_10_Error_Handling.md).
@@ -52,7 +52,7 @@ Ordered comparison has a two-tier shape. The public wrappers `fn_lt`/`fn_gt`/`fn
 
 ### 3.3 Strings, datetime, calls, errors
 
-String builtins (`fn_substring` `:2961`, plus trim/split/replace/upper/lower/join/index_of) GC-allocate their results via `heap_strcpy`; their UTF-8/normalization semantics are owned by [LR_05](LR_05_Strings_and_Vectors.md). DateTime constructors `fn_datetime0/1` (`:4417`), `fn_date0/1/3` (`:4453`+), and `fn_time0/1/3` (`:4531`+) parse or validate into the packed 64-bit `DateTime` Item ([LR_04](LR_04_Numbers_Decimal_DateTime.md)). `fn_call` (`:534`) is the indirect/closure call dispatcher (capped at 8 args; the JIT-side closure path caps lower — [LR_07 §Known Issues #3](LR_07_MIR_Transpiler_JIT.md#known-issues--future-improvements)). `fn_error` (`:131`) raises `ERR_USER_ERROR`, sets `context->last_error`, and returns a boxed heap `LambdaError`; `set_runtime_error` (`:75`) is the internal raiser used across the library.
+String builtins (`fn_substring` plus trim/split/replace/upper/lower/join/index_of) GC-allocate their results via `heap_strcpy`; their UTF-8/normalization semantics are owned by [LR_05](LR_05_Strings_and_Vectors.md). DateTime constructors parse or validate a native `DateTime` payload and publish it through `push_k` as a GC-owned `LMD_TYPE_DTIME` Item ([LR_04](LR_04_Numbers_Decimal_DateTime.md)). `fn_call` is the indirect/closure call dispatcher. `fn_error` raises `ERR_USER_ERROR`, sets `context->last_error`, and returns a boxed heap `LambdaError`; `set_runtime_error` is the internal raiser used across the library.
 
 ### 3.4 Error propagation: the `GUARD_ERROR*` discipline
 
@@ -155,7 +155,7 @@ The one table feeds two unrelated consumers.
 ## Appendix B — Related documents
 
 - [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md) — the tagged `Item` and `Container` representation the builtins operate on; representation-sensitive equality.
-- [LR_04 — Numbers, Decimal & DateTime](LR_04_Numbers_Decimal_DateTime.md) — the numeric tower (`fn_add`/`fn_div`/promotion), decimal, and the `DateTime` packed Item the constructors build.
+- [LR_04 — Numbers, Decimal & DateTime](LR_04_Numbers_Decimal_DateTime.md) — the numeric tower (`fn_add`/`fn_div`/promotion), decimal, and the GC-owned DateTime Items the constructors build.
 - [LR_05 — Strings, Symbols & Vectors](LR_05_Strings_and_Vectors.md) — UTF-8/normalization string semantics and the `ArrayNum`/`vec_cmp` vector engine the comparison wrappers dispatch into.
 - [LR_07 — The MIR Direct Transpiler & JIT](LR_07_MIR_Transpiler_JIT.md) — how `transpile_call` reads `fn_info` and how `mir.c`'s `import_resolver` binds emitted calls to `func_ptr`.
 - [LR_10 — Error Handling](LR_10_Error_Handling.md) — the `LambdaError` model, error codes, stack traces, and the compile-time `?`/`^err` half of error handling.

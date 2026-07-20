@@ -7,6 +7,14 @@
 - **Convention:** `file:line` references drift; confirm against the symbol name.
 - **Related docs:** [JS_15 — Performance & Optimization](../doc/dev/js/JS_15_Performance.md) (optimization catalog), [JS_03 — Value Model](../doc/dev/js/JS_03_Value_Model.md), [JS_04 — MIR Lowering](../doc/dev/js/JS_04_MIR_Lowering.md), [Lambda_Box_Unbox.md](Lambda_Box_Unbox.md) (Lambda-side dual-version proposal), `Lambda_GC_Root_Issue.md` (open JIT-local rooting issue).
 
+> **2026-07-20 scalar-storage amendment.** Part 2 and the nursery passages are
+> proposal history predating `Lambda_Design_Stack_API.md` Phase 7. The current
+> contract has canonical/self-tagged common doubles, activation/caller number
+> homes for transient `INT64`/`UINT64` and out-of-band doubles,
+> destination-owned numeric storage, an interim GC fallback only for persistent
+> ownerless numeric slots, and always-GC-owned `DTIME`. Phase 7, not the older
+> stack-boxing alternatives below, is authoritative.
+
 This document has six parts:
 
 - **Part 1** — a whole-engine analysis of where LambdaJS loses to Node.js, and a ranked set of tuning proposals.

@@ -11,6 +11,7 @@
 struct DomDocument;
 
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
+RADIANT_C_API Item radiant_dom_lookup_cached_node(void* dom_elem);
 RADIANT_C_API void* radiant_dom_unwrap_node(Item item);
 RADIANT_C_API bool radiant_dom_is_node(Item item);
 RADIANT_C_API Item radiant_dom_get_property(Item elem_item, Item prop_name);
@@ -53,7 +54,7 @@ RADIANT_C_API Item radiant_dom_window_add_event_listener(Item type, Item callbac
 RADIANT_C_API Item radiant_dom_window_remove_event_listener(Item type, Item callback, Item opts);
 RADIANT_C_API Item radiant_dom_window_dispatch_event(Item event_item);
 RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* out);
-RADIANT_C_API bool radiant_dom_ensure_layout(DomDocument* doc);
+RADIANT_C_API bool radiant_dom_has_committed_geometry_snapshot(DomDocument* doc);
 RADIANT_C_API int radiant_dom_cssom_method(Item obj, Item method_name, Item* args,
                                            int argc, Item* out);
 

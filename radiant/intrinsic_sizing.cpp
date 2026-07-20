@@ -1998,18 +1998,6 @@ static bool intrinsic_is_table_structure_container(CssEnum inner_display) {
            inner_display == CSS_VALUE_TABLE_FOOTER_GROUP;
 }
 
-static bool intrinsic_subtree_contains_node(DomNode* root, DomNode* target) {
-    if (!root || !target) return false;
-    if (root == target) return true;
-    if (!root->is_element()) return false;
-
-    DomElement* element = root->as_element();
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (intrinsic_subtree_contains_node(child, target)) return true;
-    }
-    return false;
-}
-
 static bool intrinsic_pseudo_child_is_materialized(DomElement* element, bool is_before) {
     if (!element || !element->pseudo) return false;
 
@@ -2017,7 +2005,7 @@ static bool intrinsic_pseudo_child_is_materialized(DomElement* element, bool is_
     if (!pseudo) return false;
 
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (intrinsic_subtree_contains_node(child, static_cast<DomNode*>(pseudo))) return true;
+        if (dom_subtree_contains_node(child, static_cast<DomNode*>(pseudo))) return true;
     }
     return false;
 }

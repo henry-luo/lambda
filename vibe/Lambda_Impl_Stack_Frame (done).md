@@ -5,6 +5,12 @@
 **Design:** `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20)
 **Scope:** Lambda MIR-Direct plus the shared runtime. JS frame emission remains phase 2 in `vibe/Lambda_Impl_Stack_Frame_JS.md`; C2MIR frame emission is intentionally unchanged per OS6.
 
+> **Scalar-storage successor:** this is the Phase 1 implementation record.
+> `vibe/Lambda_Design_Stack_API.md` Phase 7 supersedes its compact-`INT64`,
+> `DTIME` number-stack, and scalar-tail details. The current runtime has no
+> inline full-width integer; transient `INT64`/`UINT64` use number homes and
+> `DTIME` is always GC-owned.
+
 ---
 
 ## 1. Delivered architecture

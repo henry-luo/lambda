@@ -1,0 +1,12 @@
+{
+  "name": "Tom Select removes a keyboard-committed option with Backspace",
+  "html": "test/ui/dom/tomselect_remove.html",
+  "events": [
+    {"type": "type", "target": {"selector": ".ts-control input"}, "text": "Alpha"},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "key_press", "key": "Enter"},
+    {"type": "assert_value", "target": {"selector": "#select"}, "equals": "a"},
+    {"type": "key_press", "key": "Backspace"},
+    {"type": "assert_value", "target": {"selector": "#select"}, "equals": ""}
+  ]
+}

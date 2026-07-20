@@ -13,14 +13,15 @@ classDiagram
     +ITEM_JS_UNDEFINED
     +ITEM_JS_TDZ
     +NUM_SIZED i8..u32 f16 f32
+    +LMD_TYPE_FLOAT common self-tagged double
   }
   class TaggedPointerScalar {
-    +LMD_TYPE_INT64 heap int64
-    +LMD_TYPE_FLOAT heap double
+    +INT64 UINT64 number home or owned word
+    +FLOAT out-of-band number-home residue
     +LMD_TYPE_DECIMAL Decimal or BigInt
     +LMD_TYPE_STRING String
     +LMD_TYPE_SYMBOL Symbol
-    +LMD_TYPE_DTIME DateTime
+    +LMD_TYPE_DTIME GC-owned DateTime
   }
   class Container {
     +TypeId type_id

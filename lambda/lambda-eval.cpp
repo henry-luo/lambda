@@ -3397,7 +3397,7 @@ Item fn_member(Item item, Item key) {
 
                     // metadata properties (require stat'd metadata)
                     if (path->meta && (path->flags & PATH_FLAG_META_LOADED)) {
-                        if (strcmp(k, "size") == 0) return push_l(path->meta->size);
+                        if (strcmp(k, "size") == 0) return box_int64_value(path->meta->size);
                         if (strcmp(k, "modified") == 0) return push_k(path->meta->modified);
                         if (strcmp(k, "is_dir") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_DIR) != 0)};
                         if (strcmp(k, "is_link") == 0) return {.item = b2it((path->meta->flags & PATH_META_IS_LINK) != 0)};
@@ -3477,7 +3477,7 @@ Item fn_member(Item item, Item key) {
         }
 
         // meta properties
-        if (strcmp(k, "unix") == 0)           return push_l(datetime_to_unix_ms(&dt));
+        if (strcmp(k, "unix") == 0)           return box_int64_value(datetime_to_unix_ms(&dt));
         if (strcmp(k, "is_date") == 0)        return {.item = b2it(dt.precision == DATETIME_PRECISION_DATE_ONLY || dt.precision == DATETIME_PRECISION_YEAR_ONLY)};
         if (strcmp(k, "is_time") == 0)        return {.item = b2it(dt.precision == DATETIME_PRECISION_TIME_ONLY)};
         if (strcmp(k, "is_leap_year") == 0)   return {.item = b2it(datetime_is_leap_year_dt(&dt))};
@@ -5816,9 +5816,10 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
     case LMD_TYPE_BOOL:  *(bool*)field_ptr = value.bool_val; break;
     case LMD_TYPE_INT:   *(int64_t*)field_ptr = value.get_int56(); break;
     case LMD_TYPE_INT64: *(int64_t*)field_ptr = value.get_int64(); break;
+    case LMD_TYPE_UINT64: *(uint64_t*)field_ptr = value.get_uint64(); break;
     case LMD_TYPE_FLOAT:
     case LMD_TYPE_FLOAT64: *(double*)field_ptr = value.get_double(); break;
-    case LMD_TYPE_DTIME: *(DateTime*)field_ptr = value.get_datetime(); break;
+    case LMD_TYPE_DTIME: *(DateTime**)field_ptr = value.get_datetime_ptr(); break;
     case LMD_TYPE_STRING: {
         *(String**)field_ptr = value.get_safe_string();
         break;
@@ -5854,12 +5855,15 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         case LMD_TYPE_INT64:
             titem.long_val = value.get_int64();
             break;
+        case LMD_TYPE_UINT64:
+            titem.uint64_val = value.get_uint64();
+            break;
         case LMD_TYPE_FLOAT:
         case LMD_TYPE_FLOAT64:
             titem.double_val = value.get_double();
             break;
         case LMD_TYPE_DTIME:
-            titem.datetime_val = value.get_datetime();
+            titem.datetime_ptr = value.get_datetime_ptr();
             break;
         case LMD_TYPE_STRING:
             titem.string = value.get_safe_string();
@@ -6529,6 +6533,11 @@ void fn_map_set(Item map_item, Item key, Item value) {
             entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, entry, value_type);
             if (!entry || !entry->type) return;
+            // A reserved constructor slot becomes observable only at the
+            // source assignment that reaches this storage write.
+            if (map_type_id == LMD_TYPE_MAP) {
+                map_ctor_initialize_offset(map_item.map, entry->byte_offset);
+            }
             field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
 

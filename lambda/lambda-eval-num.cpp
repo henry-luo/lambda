@@ -36,7 +36,8 @@ Item push_c(int64_t cval) {
                               (t) == LMD_TYPE_DECIMAL || \
                               (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
 
-// promote NUM_SIZED / UINT64 to native integer values for ordinary arithmetic
+// Promote NUM_SIZED / UINT64 without changing their mathematical value before
+// the ordinary arithmetic ladders choose the final result type.
 static inline void normalize_sized(Item &item, TypeId &type) {
     if (type == LMD_TYPE_NUM_SIZED) {
         NumSizedType st = item.get_num_type();
@@ -44,12 +45,20 @@ static inline void normalize_sized(Item &item, TypeId &type) {
             item = push_d(item.get_num_sized_as_double());
             type = LMD_TYPE_FLOAT;
         } else {
-            item = push_l(item.get_num_sized_as_int64());
+            item = box_int64_value(item.get_num_sized_as_int64());
             type = LMD_TYPE_INT64;
         }
     } else if (type == LMD_TYPE_UINT64) {
-        item = push_l((int64_t)item.get_uint64());
-        type = LMD_TYPE_INT64;
+        uint64_t value = item.get_uint64();
+        if (value <= (uint64_t)INT64_MAX) {
+            item = box_int64_value((int64_t)value);
+            type = LMD_TYPE_INT64;
+        } else {
+            // A signed cast changes u64's value and INT64_MAX is also the
+            // legacy error sentinel. Promote the wide unsigned value directly.
+            item = decimal_from_uint64(value, context);
+            type = LMD_TYPE_DECIMAL;
+        }
     } else if (type == LMD_TYPE_FLOAT64) {
         type = LMD_TYPE_FLOAT;
     }
@@ -91,12 +100,6 @@ static inline int64_t int64_from_bits(uint64_t raw) {
     int64_t result;
     __builtin_memcpy(&result, &raw, sizeof(result));
     return result;
-}
-
-static inline Item push_u64(uint64_t value) {
-    uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
-    *heap_val = value;
-    return (Item){ .item = u2it(heap_val) };
 }
 
 static inline Item pack_compact_int_or_float(__int128 value) {
@@ -197,14 +200,14 @@ static Item pack_sized_integer(bool is_unsigned, int bits, uint64_t raw) {
         case 8:  return (Item){ .item = u8_to_item(raw) };
         case 16: return (Item){ .item = u16_to_item(raw) };
         case 32: return (Item){ .item = u32_to_item(raw) };
-        default: return push_u64(raw);
+        default: return box_uint64_value(raw);
         }
     }
     switch (bits) {
     case 8:  return (Item){ .item = i8_to_item(raw) };
     case 16: return (Item){ .item = i16_to_item(raw) };
     case 32: return (Item){ .item = i32_to_item(raw) };
-    default: return push_l(int64_from_bits(raw));
+    default: return box_int64_value(int64_from_bits(raw));
     }
 }
 
@@ -433,7 +436,7 @@ static Item vector_get(Item item, int64_t index) {
             ArrayNum* arr = item.array_num;
             switch (arr->get_elem_type()) {
                 case ELEM_INT:   return { .item = i2it(arr->items[index]) };
-                case ELEM_INT64: return push_l(arr->items[index]);
+                case ELEM_INT64: return box_int64_value(arr->items[index]);
                 case ELEM_FLOAT64: return push_d(arr->float_items[index]);
                 default: return ItemError;
             }
@@ -497,13 +500,13 @@ Item fn_add(Item item_a, Item item_b) {
         return pack_compact_int_or_float((__int128)a + (__int128)b);
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
-        return push_l(item_a.get_int64() + item_b.get_int64());
+        return box_int64_value(item_a.get_int64() + item_b.get_int64());
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
-        return push_l(item_a.get_int56() + item_b.get_int64());
+        return box_int64_value(item_a.get_int56() + item_b.get_int64());
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
-        return push_l(item_a.get_int64() + item_b.get_int56());
+        return box_int64_value(item_a.get_int64() + item_b.get_int56());
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
         return push_d(item_a.get_double() + item_b.get_double());
@@ -588,7 +591,7 @@ Item fn_mul(Item item_a, Item item_b) {
         return pack_compact_int_or_float((__int128)a * (__int128)b);
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
-        return push_l(item_a.get_int64() * item_b.get_int64());
+        return box_int64_value(item_a.get_int64() * item_b.get_int64());
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
         return push_d(item_a.get_double() * item_b.get_double());
@@ -606,10 +609,10 @@ Item fn_mul(Item item_a, Item item_b) {
         return push_d(item_a.get_double() * (double)item_b.get_int64());
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
-        return push_l(item_a.get_int56() * item_b.get_int64());
+        return box_int64_value(item_a.get_int56() * item_b.get_int64());
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
-        return push_l(item_a.get_int64() * item_b.get_int56());
+        return box_int64_value(item_a.get_int64() * item_b.get_int56());
     }
     // else if (type_a == LMD_TYPE_STRING && type_b == LMD_TYPE_INT) {
     //     String* str_a = (String*)item_a.pointer;
@@ -684,7 +687,7 @@ Item fn_sub(Item item_a, Item item_b) {
         return pack_compact_int_or_float((__int128)a - (__int128)b);
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
-        return push_l(item_a.get_int64() - item_b.get_int64());
+        return box_int64_value(item_a.get_int64() - item_b.get_int64());
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
         return push_d(item_a.get_double() - item_b.get_double());
@@ -696,10 +699,10 @@ Item fn_sub(Item item_a, Item item_b) {
         return push_d(item_a.get_double() - (double)item_b.get_int56());
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
-        return push_l(item_a.get_int56() - item_b.get_int64());
+        return box_int64_value(item_a.get_int56() - item_b.get_int64());
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
-        return push_l(item_a.get_int64() - item_b.get_int56());
+        return box_int64_value(item_a.get_int64() - item_b.get_int56());
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
         return push_d((double)item_a.get_int64() - item_b.get_double());
@@ -883,6 +886,12 @@ Item fn_idiv(Item item_a, Item item_b) {
     normalize_sized(item_a, ta);
     normalize_sized(item_b, tb);
 
+    if (get_type_id(item_a) == LMD_TYPE_DECIMAL || get_type_id(item_b) == LMD_TYPE_DECIMAL) {
+        // A wide u64 normalizes to decimal; preserve its exact integer quotient
+        // instead of falling through the legacy int64-only idiv ladder.
+        return decimal_idiv(item_a, item_b, context);
+    }
+
     // Check for division by zero
     bool is_zero = false;
     if (get_type_id(item_b) == LMD_TYPE_INT) {
@@ -903,15 +912,15 @@ Item fn_idiv(Item item_a, Item item_b) {
         return (Item) { .item = i2it(a_val / b_val) };
     }
     else if (get_type_id(item_a) == LMD_TYPE_INT64 && get_type_id(item_b) == LMD_TYPE_INT64) {
-        return push_l(item_a.get_int64() / item_b.get_int64());
+        return box_int64_value(item_a.get_int64() / item_b.get_int64());
     }
     else if (get_type_id(item_a) == LMD_TYPE_INT && get_type_id(item_b) == LMD_TYPE_INT64) {
         int64_t a_val = item_a.get_int56();
-        return push_l(a_val / item_b.get_int64());
+        return box_int64_value(a_val / item_b.get_int64());
     }
     else if (get_type_id(item_a) == LMD_TYPE_INT64 && get_type_id(item_b) == LMD_TYPE_INT) {
         int64_t b_val = item_b.get_int56();
-        return push_l(item_a.get_int64() / b_val);
+        return box_int64_value(item_a.get_int64() / b_val);
     }
     else {
         log_error("unknown idiv type: %d, %d\n", get_type_id(item_a), get_type_id(item_b));
@@ -1028,7 +1037,7 @@ Item fn_mod(Item item_a, Item item_b) {
             log_error("modulo by zero error");
             return ItemError;
         }
-        return push_l(a_val % b_val);
+        return box_int64_value(a_val % b_val);
     }
     else if (get_type_id(item_a) == LMD_TYPE_INT && get_type_id(item_b) == LMD_TYPE_INT64) {
         int64_t a_val = item_a.get_int56(), b_val = item_b.get_int64();
@@ -1036,7 +1045,7 @@ Item fn_mod(Item item_a, Item item_b) {
             log_error("modulo by zero error");
             return ItemError;
         }
-        return push_l(a_val % b_val);
+        return box_int64_value(a_val % b_val);
     }
     else if (get_type_id(item_a) == LMD_TYPE_INT64 && get_type_id(item_b) == LMD_TYPE_INT) {
         int64_t a_val = item_a.get_int64(), b_val = item_b.get_int56();
@@ -1044,7 +1053,7 @@ Item fn_mod(Item item_a, Item item_b) {
             log_error("modulo by zero error");
             return ItemError;
         }
-        return push_l(a_val % b_val);
+        return box_int64_value(a_val % b_val);
     }
     else if (get_type_id(item_a) == LMD_TYPE_FLOAT || get_type_id(item_b) == LMD_TYPE_FLOAT) {
         // float modulo: promote both operands to double, use fmod()
@@ -1082,7 +1091,7 @@ Item fn_abs(Item item) {
     }
     else if (type == LMD_TYPE_INT64) {
         int64_t val = item.get_int64();
-        return push_l(val < 0 ? -val : val);
+        return box_int64_value(val < 0 ? -val : val);
     }
     else if (type == LMD_TYPE_FLOAT) {
         double val = item.get_double();
@@ -1373,7 +1382,7 @@ Item fn_min1(Item item_a) {
             for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->items[i] < min_val) min_val = arr->items[i];
             }
-            return (et == ELEM_INT64) ? push_l(min_val) : (Item) { .item = i2it(min_val) };
+            return (et == ELEM_INT64) ? box_int64_value(min_val) : (Item) { .item = i2it(min_val) };
         } else {
             // compact element types (i8/u8/i16/u16/i32/u32/f32/f16/f64): read by true type.
             double acc = array_num_reduce_double(arr, ARRAY_RED_MIN);
@@ -1381,7 +1390,7 @@ Item fn_min1(Item item_a) {
                 return push_d(acc);
             }
             int64_t v = (int64_t)acc;
-            return (v > INT_MAX || v < INT_MIN) ? push_l(v)
+            return (v > INT_MAX || v < INT_MIN) ? box_int64_value(v)
                                                 : (Item) { .item = i2it((int32_t)v) };
         }
     }
@@ -1432,7 +1441,7 @@ Item fn_min1(Item item_a) {
         else {
             int64_t ival = (int64_t)min_val;
             if (ival > INT_MAX || ival < INT_MIN) {
-                return push_l(ival);
+                return box_int64_value(ival);
             } else {
                 return {.item = i2it((int32_t)ival)};
             }
@@ -1445,7 +1454,7 @@ Item fn_min1(Item item_a) {
         }
         // For a range, min is the smaller of start or end
         int64_t min_val = (rng->start < rng->end) ? rng->start : rng->end;
-        return push_l(min_val);
+        return box_int64_value(min_val);
     }
     else if (IS_NUMERIC_ID(type_id)) {
         // single numeric value, return as-is
@@ -1561,7 +1570,7 @@ Item fn_max1(Item item_a) {
             for (size_t i = 1; i < (size_t)arr->length; i++) {
                 if (arr->items[i] > max_val) max_val = arr->items[i];
             }
-            return (et == ELEM_INT64) ? push_l(max_val) : (Item) { .item = i2it(max_val) };
+            return (et == ELEM_INT64) ? box_int64_value(max_val) : (Item) { .item = i2it(max_val) };
         } else {
             // compact element types (i8/u8/i16/u16/i32/u32/f32/f16/f64): read by true type.
             double acc = array_num_reduce_double(arr, ARRAY_RED_MAX);
@@ -1569,7 +1578,7 @@ Item fn_max1(Item item_a) {
                 return push_d(acc);
             }
             int64_t v = (int64_t)acc;
-            return (v > INT_MAX || v < INT_MIN) ? push_l(v)
+            return (v > INT_MAX || v < INT_MIN) ? box_int64_value(v)
                                                 : (Item) { .item = i2it((int32_t)v) };
         }
     }
@@ -1612,7 +1621,7 @@ Item fn_max1(Item item_a) {
         else {
             int64_t ival = (int64_t)max_val;
             if (ival > INT_MAX || ival < INT_MIN) {
-                return push_l(ival);
+                return box_int64_value(ival);
             } else {
                 return {.item = i2it((int32_t)ival)};
             }
@@ -1625,7 +1634,7 @@ Item fn_max1(Item item_a) {
         }
         // For a range, max is the larger of start or end
         int64_t max_val = (rng->start > rng->end) ? rng->start : rng->end;
-        return push_l(max_val);
+        return box_int64_value(max_val);
     }
     else if (IS_NUMERIC_ID(type_id)) {
         // single numeric value, return as-is
@@ -1668,7 +1677,7 @@ Item fn_sum(Item item) {
         }
         else {
             if (sum > INT_MAX || sum < INT_MIN) {
-                return push_l((int64_t)sum);
+                return box_int64_value((int64_t)sum);
             } else {
                 return {.item = i2it((int32_t)sum)};
             }
@@ -1695,7 +1704,7 @@ Item fn_sum(Item item) {
             for (size_t i = 0; i < (size_t)arr->length; i++) {
                 sum += arr->items[i];
             }
-            return push_l(sum);
+            return box_int64_value(sum);
         } else {
             // compact element types (i8/u8/i16/u16/i32/u32/f32/f16/f64): the
             // generic reducer reads each element by its true type and vectorizes.
@@ -1704,7 +1713,7 @@ Item fn_sum(Item item) {
                 return push_d(acc);
             }
             int64_t s = (int64_t)acc;
-            return (s > INT_MAX || s < INT_MIN) ? push_l(s)
+            return (s > INT_MAX || s < INT_MIN) ? box_int64_value(s)
                                                 : (Item) { .item = i2it((int32_t)s) };
         }
     }
@@ -1735,7 +1744,7 @@ Item fn_sum(Item item) {
         }
         else {
             if (sum > INT_MAX || sum < INT_MIN) {
-                return push_l(sum);
+                return box_int64_value(sum);
             } else{
                 return {.item = i2it((int32_t)sum)};
             }
@@ -1749,7 +1758,7 @@ Item fn_sum(Item item) {
         // Sum of arithmetic sequence: n * (first + last) / 2
         int64_t n = rng->length;
         int64_t sum = n * (rng->start + rng->end) / 2;
-        return push_l(sum);
+        return box_int64_value(sum);
     }
     else if (IS_NUMERIC_ID(type_id)) {
         // single numeric value, return as-is
@@ -2046,12 +2055,15 @@ Item fn_int(Item item) {
             goto CHECK_DVAL;
         }
         ival = item.get_num_sized_as_int64();
-        if (ival > INT32_MAX || ival < INT32_MIN) return push_l(ival);
+        if (ival > INT32_MAX || ival < INT32_MIN) return box_int64_value(ival);
         return {.item = i2it((int32_t)ival)};
     }
     else if (get_type_id(item) == LMD_TYPE_UINT64) {
         uint64_t uval = item.get_uint64();
-        if (uval > (uint64_t)INT32_MAX) return push_l((int64_t)uval);
+        // Do not reinterpret a wide unsigned value as negative merely because
+        // it crossed INT64_MAX; ordinary numeric conversion preserves value.
+        if (uval > (uint64_t)INT64_MAX) return decimal_from_uint64(uval, context);
+        if (uval > (uint64_t)INT32_MAX) return box_int64_value((int64_t)uval);
         return {.item = i2it((int32_t)uval)};
     }
     else if (get_type_id(item) == LMD_TYPE_DECIMAL) {
@@ -2059,7 +2071,7 @@ Item fn_int(Item item) {
         int64_t result = decimal_to_int64(item);
         if (result == INT64_ERROR) return ItemError;
         if (result > INT32_MAX || result < INT32_MIN) {
-            return push_l(result);
+            return box_int64_value(result);
         }
         return {.item = i2it((int32_t)result)};
     }
@@ -2170,7 +2182,7 @@ Item fn_decimal(Item item) {
         return decimal_from_int64(item.get_num_sized_as_int64(), context);
     }
     else if (get_type_id(item) == LMD_TYPE_UINT64) {
-        return decimal_from_int64((int64_t)item.get_uint64(), context);
+        return decimal_from_uint64(item.get_uint64(), context);
     }
     else if (is_text_type_id(get_type_id(item))) {
         const char* chars = item.get_chars();
@@ -2729,7 +2741,7 @@ extern "C" int64_t fn_band(int64_t a, int64_t b) {
 extern "C" Item fn_band_item(Item a, Item b) {
     Item result;
     if (sized_bitwise_binary(a, b, SIZED_BITWISE_AND, &result)) return result;
-    return push_l(fn_band(_barg(a), _barg(b)));
+    return box_int64_value(fn_band(_barg(a), _barg(b)));
 }
 
 extern "C" int64_t fn_bor(int64_t a, int64_t b) {
@@ -2739,7 +2751,7 @@ extern "C" int64_t fn_bor(int64_t a, int64_t b) {
 extern "C" Item fn_bor_item(Item a, Item b) {
     Item result;
     if (sized_bitwise_binary(a, b, SIZED_BITWISE_OR, &result)) return result;
-    return push_l(fn_bor(_barg(a), _barg(b)));
+    return box_int64_value(fn_bor(_barg(a), _barg(b)));
 }
 
 extern "C" int64_t fn_bxor(int64_t a, int64_t b) {
@@ -2749,7 +2761,7 @@ extern "C" int64_t fn_bxor(int64_t a, int64_t b) {
 extern "C" Item fn_bxor_item(Item a, Item b) {
     Item result;
     if (sized_bitwise_binary(a, b, SIZED_BITWISE_XOR, &result)) return result;
-    return push_l(fn_bxor(_barg(a), _barg(b)));
+    return box_int64_value(fn_bxor(_barg(a), _barg(b)));
 }
 
 extern "C" int64_t fn_bnot(int64_t a) {
@@ -2759,7 +2771,7 @@ extern "C" int64_t fn_bnot(int64_t a) {
 extern "C" Item fn_bnot_item(Item a) {
     Item result;
     if (sized_bitwise_not(a, &result)) return result;
-    return push_l(fn_bnot(_barg(a)));
+    return box_int64_value(fn_bnot(_barg(a)));
 }
 
 extern "C" int64_t fn_shl(int64_t a, int64_t b) {
@@ -2778,7 +2790,7 @@ extern "C" Item fn_shl_item(Item a, Item b) {
         log_error("integer negative shift count");
         return ItemError;
     }
-    return push_l(fn_shl(_barg(a), _barg(b)));
+    return box_int64_value(fn_shl(_barg(a), _barg(b)));
 }
 
 extern "C" int64_t fn_shr(int64_t a, int64_t b) {
@@ -2797,5 +2809,25 @@ extern "C" Item fn_shr_item(Item a, Item b) {
         log_error("integer negative shift count");
         return ItemError;
     }
-    return push_l(fn_shr(_barg(a), _barg(b)));
+    return box_int64_value(fn_shr(_barg(a), _barg(b)));
+}
+
+extern "C" Item fn_ushr_item(Item a, Item b) {
+    BitwiseIntegerValue left, right;
+    read_bitwise_integer(a, &left);
+    read_bitwise_integer(b, &right);
+    int64_t count = right.value.sval;
+    if (count < 0) {
+        log_error("integer unsigned right shift negative count");
+        return ItemError;
+    }
+
+    // ushr is defined in the left operand's unsigned width. An int64 must not
+    // pass through a signed native shift, which would sign-extend its high bit.
+    int bits = left.is_sized ? left.value.bits : 32;
+    uint64_t raw = left.is_sized
+        ? sized_operand_raw(&left.value) & sized_mask(bits)
+        : (uint32_t)_barg(a);
+    raw = count >= bits ? 0 : raw >> count;
+    return pack_sized_integer(true, bits, raw);
 }

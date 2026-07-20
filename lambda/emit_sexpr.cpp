@@ -481,6 +481,9 @@ static bool emit_sys_func_call(const char* source, AstCallNode* call) {
     if (strcmp(name, "shr") == 0 && arg1 && arg2) {
         printf("(bit-shr "); emit_expr(source, arg1); printf(" "); emit_expr(source, arg2); printf(")"); return true;
     }
+    if (strcmp(name, "ushr") == 0 && arg1 && arg2) {
+        printf("(bit-ushr "); emit_expr(source, arg1); printf(" "); emit_expr(source, arg2); printf(")"); return true;
+    }
 
     // sign / trunc
     if (strcmp(name, "sign") == 0 && arg1) {

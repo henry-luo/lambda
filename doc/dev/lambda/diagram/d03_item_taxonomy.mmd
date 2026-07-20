@@ -11,11 +11,12 @@ classDiagram
     +BOOL ITEM_TRUE ITEM_FALSE
     +INT int56 i2it
     +NUM_SIZED i8..u32 f16 f32
+    +FLOAT common self-tagged double
   }
   class TaggedPointerScalar {
-    +INT64 number-stack or owned int64
-    +FLOAT number-stack or owned double
-    +DTIME number-stack or owned DateTime
+    +INT64 UINT64 number home or owned word
+    +FLOAT out-of-band number-home residue
+    +DTIME GC-owned DateTime
     +DECIMAL Decimal or BigInt
     +STRING SYMBOL BINARY
     +PATH ERROR

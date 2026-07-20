@@ -1048,10 +1048,6 @@ static void* item_to_ptr(uint64_t item) {
         return (void*)(uintptr_t)item;
     }
 
-    // Compact INT64 values share the tag with boxed INT64 pointers; the
-    // payload discriminator keeps scalar bits out of the conservative roots.
-    if (tag == LMD_TYPE_INT64_ && (item & ITEM_INT64_INLINE_MARK)) return NULL;
-
     // tags 4-11: tagged pointer types (Int64, Float, Decimal, DateTime, String, etc.)
     // mask off the tag byte in the upper 8 bits to get the actual pointer
     if (tag >= LMD_TYPE_INT64_ && tag <= LMD_TYPE_BINARY_) {
@@ -1526,8 +1522,8 @@ static int gc_drain_mark_stack(gc_heap_t* gc) {
 
 // ---- Data Zone Compaction ----
 
-// Fix up embedded float/int64/datetime pointers within a compacted items[] buffer.
-// array_set() stores float/int64/datetime values at the END of the items[] buffer
+// Fix up embedded float/int64/uint64 pointers within a compacted items[] buffer.
+// array_set() stores float/int64/uint64 values at the END of the items[] buffer
 // (the "extra" area), with tagged pointers in items[0..length) pointing into
 // that same buffer. After copying the buffer to a new address, those embedded
 // pointers still reference the old location and must be updated.
@@ -1542,11 +1538,10 @@ static void gc_fixup_embedded_pointers(uint64_t* old_items, uint64_t* new_items,
         uint64_t item = new_items[i];
         uint8_t item_tag = (uint8_t)(item >> 56);
 
-        // Only fix tagged pointer types that array_set stores inline:
-        // Float (5), Int64 (4), DateTime (8)
+        // Only fix tagged pointer types that array_set stores in its owned tail:
+        // Float (5), Int64 (4), Uint64 (23).
         if (item_tag == LMD_TYPE_FLOAT_ ||
-            (item_tag == LMD_TYPE_INT64_ && !(item & ITEM_INT64_INLINE_MARK)) ||
-            item_tag == LMD_TYPE_DTIME_) {
+            item_tag == LMD_TYPE_INT64_ || item_tag == LMD_TYPE_UINT64_) {
             // Extract the raw pointer (lower 56 bits)
             uint8_t* ptr = (uint8_t*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFFULL);
             if (ptr >= old_start && ptr < old_end) {

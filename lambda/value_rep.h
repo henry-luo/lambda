@@ -21,8 +21,8 @@ typedef enum JitAbiRep {
 typedef enum ScalarReturnClass {
     SCALAR_RETURN_NONE = 0,
     SCALAR_RETURN_I64,
+    SCALAR_RETURN_U64,
     SCALAR_RETURN_F64,
-    SCALAR_RETURN_DTIME,
     SCALAR_RETURN_DYNAMIC,
 } ScalarReturnClass;
 typedef enum ValueRep {
