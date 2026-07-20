@@ -480,12 +480,9 @@ bool editing_surface_is_text_control(const EditingSurface* surface);
 const char* editing_surface_kind_name(EditingSurfaceKind kind);
 const char* editing_mode_name(EditingMode mode);
 
-// Layer-A helpers (formerly in the retired editing_rich_transaction.cpp):
-// `find_text_descendant` backs click-to-place-caret in a rich host;
-// `is_composition_intent` classifies IME composition input. Both are pure
-// classification/navigation, not editing apply.
+// Layer-A helper (formerly in the retired editing_rich_transaction.cpp):
+// `find_text_descendant` backs click-to-place-caret in a rich host.
 DomText* editing_rich_find_text_descendant(DomNode* node, bool last);
-bool editing_rich_is_composition_intent(const EditingIntent* intent);
 
 
 // ===== DOM ranges and selection =====

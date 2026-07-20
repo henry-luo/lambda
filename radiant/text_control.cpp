@@ -15,15 +15,13 @@
 // Headless/no-JS builds get the no-op weak fallback below.
 extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_selectionchange(DomElement* elem);
 extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_selectionchange(DomElement* /*elem*/) {}
-extern "C" __attribute__((weak)) void js_dom_dispatch_textcontrol_select(DomElement* elem);
-extern "C" __attribute__((weak)) void js_dom_dispatch_textcontrol_select(DomElement* /*elem*/) {}
 extern void font_prop_release_handle(FontProp* fprop);
 
 void tc_notify_selection_changed(DomElement* elem) {
     if (!elem) return;
-    // Text controls fire `select` on actual selection mutations; WPT cleanup
-    // relies on it before the coalesced `selectionchange` task drains.
-    js_dom_dispatch_textcontrol_select(elem);
+    // Selection projection updates anchor and focus through nested StateStore
+    // transitions; queue `select` with selectionchange so handlers never
+    // re-enter selectionStart/End against the half-committed projection.
     js_dom_queue_textcontrol_selectionchange(elem);
 }
 

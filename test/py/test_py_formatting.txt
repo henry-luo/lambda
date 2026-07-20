@@ -1,0 +1,17 @@
+Hello, World!
+Name: Alice, Age: 30
+Pi is 3.14
+Hex: ff
+Octal: 10
+Score: 100%
+left      |
+0000000042
+1 + 2 = 3
+hello and world
+00042
+3.14
+     right
+left      |
+  center  
+ff
+1010

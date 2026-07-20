@@ -29,6 +29,7 @@ static int py_item_lt_cmp(const void* a, const void* b, void* udata) {
 }
 
 extern Input* py_input;
+extern __thread EvalContext* context;
 
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern Item _map_get(TypeMap* map_type, void* map_data, const char* key, bool* is_found);
@@ -789,14 +790,20 @@ extern "C" Item py_builtin_list(Item iterable) {
     }
     // general case: use iterator protocol (handles generators, ranges, maps, etc.)
     {
-        Item iter = py_get_iterator(iterable);
+        RootFrame roots((Context*)context, 4);
+        Rooted<Item> rooted_iterable(roots, iterable);
+        Rooted<Item> rooted_iter(roots, py_get_iterator(rooted_iterable.get()));
         Array* result = array();
+        Rooted<Item> rooted_result(roots, (Item){.array = result});
+        Rooted<Item> rooted_item(roots, ItemNull);
         for (;;) {
-            Item item = py_iterator_next(iter);
-            if (py_is_stop_iteration(item)) break;
-            array_push(result, item);
+            rooted_item.set(py_iterator_next(rooted_iter.get()));
+            if (py_is_stop_iteration(rooted_item.get())) break;
+            // A generator resume may collect before array growth; keep both
+            // the accumulating list and the yielded Item in canonical slots.
+            array_push(rooted_result.get().array, rooted_item.get());
         }
-        return (Item){.array = result};
+        return rooted_result.get();
     }
 }
 

@@ -906,8 +906,11 @@ static bool element_has_attr_ci(Element* elem, const char* attr_name) {
 }
 
 static bool script_runner_module_scripts_enabled() {
-    const char* env = getenv("RADIANT_JS_MODULES");
-    return env && strcmp(env, "1") == 0;
+    // DOM3 ships the bounded browser module pipeline. Keeping this behind an
+    // environment switch made identical documents execute differently across
+    // hosts and prevented ordinary `<script type="module">` from being a DOM
+    // capability at all.
+    return true;
 }
 
 static JsScriptTask* script_task_new(JsScriptTaskKind kind, int document_order) {

@@ -13,12 +13,54 @@
 
 // scope management functions
 
-PyScope* py_scope_create(PyTranspiler* tp, PyScopeType scope_type, PyScope* parent) {
-    PyScope* scope = (PyScope*)arena_calloc(tp->ast_arena, sizeof(PyScope));
+static bool py_scope_name_matches(NameEntry* entry, String* name) {
+    return entry && entry->name->len == name->len &&
+        memcmp(entry->name->chars, name->chars, name->len) == 0;
+}
 
-    scope->scope_type = scope_type;
+static NameEntry* py_scope_lookup_in(NameScope* scope, String* name) {
+    if (!scope) return NULL;
+    NameEntry* entry = scope->first;
+    while (entry) {
+        if (py_scope_name_matches(entry, name)) return entry;
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+static NameScope* py_scope_enclosing_function(NameScope* scope) {
+    while (scope && scope->kind != PY_SCOPE_FUNCTION) {
+        scope = scope->parent;
+    }
+    return scope;
+}
+
+static NameEntry* py_scope_append_entry(PyTranspiler* tp, NameScope* scope,
+        String* name, PyAstNode* node) {
+    // Python-only declaration flags must not enlarge every shared JS name entry.
+    NameEntry* entry = (NameEntry*)arena_calloc(tp->ast_arena, sizeof(PyNameEntry));
+    entry->name = name;
+    entry->node = (AstNode*)node;
+    entry->scope = scope;
+
+    if (!scope->first) {
+        scope->first = entry;
+    } else {
+        scope->last->next = entry;
+    }
+    scope->last = entry;
+    return entry;
+}
+
+static PyNameEntry* py_name_entry(NameEntry* entry) {
+    return (PyNameEntry*)entry;
+}
+
+PyScope* py_scope_create(PyTranspiler* tp, PyScopeType scope_type, PyScope* parent) {
+    PyScope* scope = (PyScope*)arena_calloc(tp->ast_arena, sizeof(NameScope));
+
+    scope->kind = scope_type;
     scope->parent = parent;
-    scope->function = NULL;
     scope->first = NULL;
     scope->last = NULL;
 
@@ -28,28 +70,37 @@ PyScope* py_scope_create(PyTranspiler* tp, PyScopeType scope_type, PyScope* pare
 void py_scope_push(PyTranspiler* tp, PyScope* scope) {
     scope->parent = tp->current_scope;
     tp->current_scope = scope;
-    log_debug("py: pushed scope type: %d", scope->scope_type);
+    log_debug("py: pushed scope type: %d", scope->kind);
 }
 
 void py_scope_pop(PyTranspiler* tp) {
     if (tp->current_scope) {
         PyScope* old_scope = tp->current_scope;
         tp->current_scope = old_scope->parent;
-        log_debug("py: popped scope type: %d", old_scope->scope_type);
+        log_debug("py: popped scope type: %d", old_scope->kind);
     }
 }
 
 NameEntry* py_scope_lookup(PyTranspiler* tp, String* name) {
     PyScope* scope = tp->current_scope;
+    bool skip_class_scope = scope && (scope->kind == PY_SCOPE_FUNCTION ||
+        scope->kind == PY_SCOPE_COMPREHENSION);
 
     while (scope) {
-        NameEntry* entry = scope->first;
-        while (entry) {
-            if (entry->name->len == name->len &&
-                memcmp(entry->name->chars, name->chars, name->len) == 0) {
+        if (!(skip_class_scope && scope->kind == PY_SCOPE_CLASS)) {
+            NameEntry* entry = py_scope_lookup_in(scope, name);
+            if (entry) {
+                if (py_name_entry(entry)->is_global_decl) {
+                    NameEntry* module_entry = py_scope_lookup_in(tp->module_scope, name);
+                    return module_entry ? module_entry : entry;
+                }
+                if (py_name_entry(entry)->is_nonlocal_decl) {
+                    NameScope* enclosing = py_scope_enclosing_function(scope->parent);
+                    NameEntry* enclosing_entry = py_scope_lookup_in(enclosing, name);
+                    return enclosing_entry ? enclosing_entry : entry;
+                }
                 return entry;
             }
-            entry = entry->next;
         }
         scope = scope->parent;
     }
@@ -75,60 +126,48 @@ NameEntry* py_scope_lookup_current(PyTranspiler* tp, String* name) {
 void py_scope_define(PyTranspiler* tp, String* name, PyAstNode* node, PyVarKind kind) {
     PyScope* target_scope = tp->current_scope;
 
-    // for global declarations, target the module scope
-    if (kind == PY_VAR_GLOBAL) {
-        target_scope = tp->module_scope;
-    }
-    // for nonlocal, walk up to nearest enclosing function scope
-    else if (kind == PY_VAR_NONLOCAL) {
-        target_scope = tp->current_scope->parent;
-        while (target_scope && target_scope->scope_type != PY_SCOPE_FUNCTION) {
-            target_scope = target_scope->parent;
+    if (!target_scope) target_scope = tp->module_scope;
+
+    if (kind == PY_VAR_GLOBAL || kind == PY_VAR_NONLOCAL) {
+        NameEntry* current = py_scope_lookup_in(target_scope, name);
+        if (current && current->node != (AstNode*)node) {
+            // Python rejects a declaration after a local binding in the same scope.
+            py_error(tp, node->node, "%s declaration follows a local binding for '%.*s'",
+                kind == PY_VAR_GLOBAL ? "global" : "nonlocal", (int)name->len, name->chars);
+            return;
         }
+        if (!current) current = py_scope_append_entry(tp, target_scope, name, node);
+        py_name_entry(current)->is_global_decl = kind == PY_VAR_GLOBAL;
+        py_name_entry(current)->is_nonlocal_decl = kind == PY_VAR_NONLOCAL;
+        return;
+    }
+
+    NameEntry* declaration = py_scope_lookup_in(target_scope, name);
+    if (declaration && py_name_entry(declaration)->is_global_decl) {
+        target_scope = tp->module_scope;
+    } else if (declaration && py_name_entry(declaration)->is_nonlocal_decl) {
+        target_scope = py_scope_enclosing_function(target_scope->parent);
         if (!target_scope) {
-            target_scope = tp->module_scope;
+            // A nonlocal name must resolve to a function scope, never a module.
+            py_error(tp, node->node, "nonlocal binding for '%.*s' not found",
+                (int)name->len, name->chars);
+            return;
         }
     }
 
-    if (!target_scope) {
-        target_scope = tp->module_scope;
-    }
-
-    // check for existing definition in target scope
-    NameEntry* existing = NULL;
-    NameEntry* entry = target_scope->first;
-    while (entry) {
-        if (entry->name->len == name->len &&
-            memcmp(entry->name->chars, name->chars, name->len) == 0) {
-            existing = entry;
-            break;
-        }
-        entry = entry->next;
-    }
+    NameEntry* existing = py_scope_lookup_in(target_scope, name);
 
     if (existing) {
-        // update existing entry
+        // Keep the declaration entry in its source scope; later assignments
+        // update the binding scope selected by that declaration.
         existing->node = (AstNode*)node;
         return;
     }
 
-    // create new name entry
-    NameEntry* new_entry = (NameEntry*)arena_calloc(tp->ast_arena, sizeof(NameEntry));
-    new_entry->name = name;
-    new_entry->node = (AstNode*)node;
-    new_entry->next = NULL;
-    new_entry->import = NULL;
-
-    // add to scope
-    if (!target_scope->first) {
-        target_scope->first = new_entry;
-    } else {
-        target_scope->last->next = new_entry;
-    }
-    target_scope->last = new_entry;
+    py_scope_append_entry(tp, target_scope, name, node);
 
     log_debug("py: defined variable '%.*s' in scope type %d",
-             (int)name->len, name->chars, target_scope->scope_type);
+             (int)name->len, name->chars, target_scope->kind);
 }
 
 // error handling functions

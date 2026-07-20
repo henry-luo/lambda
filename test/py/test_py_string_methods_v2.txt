@@ -1,0 +1,12 @@
+6
+['hello', 'world', 'foo']
+---hello---
+00042
+HELLO
+False
+True
+True
+True
+hello.....
+.....hello
+7

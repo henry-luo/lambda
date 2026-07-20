@@ -9,7 +9,12 @@ extern "C" {
 
 // Forward declarations
 typedef struct PyTranspiler PyTranspiler;
-typedef struct PyScope PyScope;
+typedef NameScope PyScope;
+typedef struct PyNameEntry : NameEntry {
+    // Python declarations are scope directives, not generic name-entry state.
+    bool is_global_decl;
+    bool is_nonlocal_decl;
+} PyNameEntry;
 
 // Python variable kinds
 typedef enum PyVarKind {
@@ -21,22 +26,11 @@ typedef enum PyVarKind {
     PY_VAR_MODULE,      // top-level module variable
 } PyVarKind;
 
-// Python scope types
-typedef enum PyScopeType {
-    PY_SCOPE_MODULE,
-    PY_SCOPE_FUNCTION,
-    PY_SCOPE_CLASS,
-    PY_SCOPE_COMPREHENSION,
-} PyScopeType;
-
-// Python scope structure
-typedef struct PyScope {
-    PyScopeType scope_type;
-    NameEntry* first;
-    NameEntry* last;
-    struct PyScope* parent;
-    PyFunctionDefNode* function;    // associated function (if function scope)
-} PyScope;
+typedef ScopeKind PyScopeType;
+static const PyScopeType PY_SCOPE_MODULE = SCOPE_KIND_MODULE;
+static const PyScopeType PY_SCOPE_FUNCTION = SCOPE_KIND_FUNCTION;
+static const PyScopeType PY_SCOPE_CLASS = (PyScopeType)1000;
+static const PyScopeType PY_SCOPE_COMPREHENSION = (PyScopeType)1001;
 
 // Python transpiler context
 typedef struct PyTranspiler {

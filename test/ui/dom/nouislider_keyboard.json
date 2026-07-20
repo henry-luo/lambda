@@ -1,0 +1,9 @@
+{
+  "name": "noUiSlider changes its value with keyboard arrows",
+  "html": "test/ui/dom/nouislider_keyboard.html",
+  "events": [
+    {"type": "focus", "target": {"selector": ".noUi-handle"}},
+    {"type": "key_press", "key": "ArrowRight"},
+    {"type": "assert_attr", "target": {"selector": ".noUi-handle"}, "attribute": "aria-valuenow", "equals": "26.0"}
+  ]
+}

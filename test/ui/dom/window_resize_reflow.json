@@ -1,10 +1,10 @@
 {
-  "name": "Window resize publishes live metrics and reflows handler mutations",
+  "name": "Window resize publishes live metrics while geometry remains committed",
   "html": "test/ui/dom/window_resize_reflow.html",
   "viewport": {"width": 640, "height": 480},
   "events": [
     {"type": "resize", "width": 800, "height": 500},
-    {"type": "assert_text", "target": {"selector": "#marker"}, "equals": "800x500:400"},
+    {"type": "assert_text", "target": {"selector": "#marker"}, "equals": "800x500:40"},
     {"type": "assert_rect", "target": {"selector": "#marker"}, "width": 400, "height": 24, "tolerance": 1}
   ]
 }

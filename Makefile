@@ -985,7 +985,7 @@ test-lambda-baseline: build-test test-input-baseline
 # Permanent exact-root CI lane. Collection is injected only at public allocator
 # boundaries, and poison makes a missed root deterministic instead of relying
 # on a stale native-stack word or recycled slab contents.
-test-gc-rooting: build
+test-gc-rooting: build build-jube
 	@mkdir -p temp
 	@echo "Running LambdaJS JIT precise-only forced-GC gate..."
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
@@ -1003,6 +1003,14 @@ test-gc-rooting: build
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe run --no-log test/lambda/proc/proc_var.ls > temp/gc_rooting_lambda.txt
 	@diff -u test/lambda/proc/proc_var.txt temp/gc_rooting_lambda.txt
+	@echo "Running LambdaPy closure precise-only forced-GC gate..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda-jube.exe py --no-log test/py/test_py_closures.py > temp/gc_rooting_py_closures.txt
+	@diff -u test/py/test_py_closures.txt temp/gc_rooting_py_closures.txt
+	@echo "Running LambdaPy generator precise-only forced-GC gate..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda-jube.exe py --no-log test/py/test_py_generators.py > temp/gc_rooting_py_generators.txt
+	@diff -u test/py/test_py_generators.txt temp/gc_rooting_py_generators.txt
 	@python3 utils/check_gc_effects.py
 	@python3 utils/check_gc_root_hazards.py
 	@echo "Precise-root forced-GC gates passed."

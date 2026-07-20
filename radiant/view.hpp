@@ -70,6 +70,12 @@ const CssPropAccessor* css_prop_accessor(CssPropertyId id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
 bool css_prop_serialize_computed(DomElement* element, CssPropertyId id,
                                  int pseudo_type, char* out, size_t out_size);
+
+// Return a committed view's visual CSS-pixel bounds, including transforms on
+// the view and its ancestors. Geometry consumers must share this with painting
+// so test assertions and DOM rectangles do not observe different boxes.
+void view_get_visual_bounds(View* view, float* out_x, float* out_y,
+                            float* out_width, float* out_height);
 bool dom_ensure_computed(DomElement* element, bool needs_used_value = false);
 
 // ===== animation =====

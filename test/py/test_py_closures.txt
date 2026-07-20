@@ -1,0 +1,8 @@
+15
+25
+10
+Hello World
+Hello Lambda
+1
+2
+3

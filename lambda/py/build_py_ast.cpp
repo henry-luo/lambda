@@ -152,7 +152,7 @@ static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
         mem_free(temp_str);
     }
 
-    literal->base.type = &TYPE_INT;
+    literal->type = &TYPE_INT;
     return (PyAstNode*)literal;
 }
 
@@ -170,7 +170,7 @@ static PyAstNode* build_py_float(PyTranspiler* tp, TSNode float_node) {
         mem_free(temp_str);
     }
 
-    literal->base.type = &TYPE_FLOAT;
+    literal->type = &TYPE_FLOAT;
     return (PyAstNode*)literal;
 }
 
@@ -179,7 +179,7 @@ static PyAstNode* build_py_boolean(PyTranspiler* tp, TSNode bool_node, bool valu
     PyLiteralNode* literal = (PyLiteralNode*)alloc_py_ast_node(tp, PY_AST_NODE_LITERAL, bool_node, sizeof(PyLiteralNode));
     literal->literal_type = PY_LITERAL_BOOLEAN;
     literal->value.boolean_value = value;
-    literal->base.type = &TYPE_BOOL;
+    literal->type = &TYPE_BOOL;
     return (PyAstNode*)literal;
 }
 
@@ -187,7 +187,7 @@ static PyAstNode* build_py_boolean(PyTranspiler* tp, TSNode bool_node, bool valu
 static PyAstNode* build_py_none(PyTranspiler* tp, TSNode none_node) {
     PyLiteralNode* literal = (PyLiteralNode*)alloc_py_ast_node(tp, PY_AST_NODE_LITERAL, none_node, sizeof(PyLiteralNode));
     literal->literal_type = PY_LITERAL_NONE;
-    literal->base.type = &TYPE_NULL;
+    literal->type = &TYPE_NULL;
     return (PyAstNode*)literal;
 }
 
@@ -213,12 +213,29 @@ static PyAstNode* build_py_identifier(PyTranspiler* tp, TSNode id_node) {
     // scope lookup
     id->entry = py_scope_lookup(tp, id->name);
     if (id->entry) {
-        id->base.type = id->entry->node->type;
+        id->type = id->entry->node->type;
     } else {
-        id->base.type = &TYPE_ANY;
+        id->type = &TYPE_ANY;
     }
 
     return (PyAstNode*)id;
+}
+
+static void py_bind_assignment_target(PyTranspiler* tp, PyAstNode* target) {
+    if (!target) return;
+    if (target->node_type == PY_AST_NODE_IDENTIFIER) {
+        PyIdentifierNode* id = (PyIdentifierNode*)target;
+        py_scope_define(tp, id->name, target, PY_VAR_LOCAL);
+        // The target was parsed before its first assignment created the entry.
+        id->entry = py_scope_lookup_current(tp, id->name);
+        return;
+    }
+    if (target->node_type == PY_AST_NODE_LIST || target->node_type == PY_AST_NODE_TUPLE) {
+        PySequenceNode* sequence = (PySequenceNode*)target;
+        for (PyAstNode* item = sequence->elements; item; item = item->next) {
+            py_bind_assignment_target(tp, item);
+        }
+    }
 }
 
 // ---- String builder ----
@@ -352,14 +369,14 @@ PyAstNode* build_py_string(PyTranspiler* tp, TSNode string_node) {
 
     buf[buf_len] = '\0';
     literal->value.string_value = name_pool_create_len(tp->name_pool, buf, buf_len);
-    literal->base.type = &TYPE_STRING;
+    literal->type = &TYPE_STRING;
     return (PyAstNode*)literal;
 }
 
 // Build f-string node
 PyAstNode* build_py_fstring(PyTranspiler* tp, TSNode string_node) {
     PyFStringNode* fstr = (PyFStringNode*)alloc_py_ast_node(tp, PY_AST_NODE_FSTRING, string_node, sizeof(PyFStringNode));
-    fstr->base.type = &TYPE_STRING;
+    fstr->type = &TYPE_STRING;
 
     PyAstNode* prev = NULL;
     uint32_t child_count = ts_node_named_child_count(string_node);
@@ -374,7 +391,7 @@ PyAstNode* build_py_fstring(PyTranspiler* tp, TSNode string_node) {
             PyLiteralNode* lit = (PyLiteralNode*)alloc_py_ast_node(tp, PY_AST_NODE_LITERAL, child, sizeof(PyLiteralNode));
             lit->literal_type = PY_LITERAL_STRING;
             lit->value.string_value = name_pool_create_len(tp->name_pool, content.str, content.length);
-            lit->base.type = &TYPE_STRING;
+            lit->type = &TYPE_STRING;
             part = (PyAstNode*)lit;
         } else if (strcmp(child_type, "interpolation") == 0) {
             TSNode expr_child = ts_node_child_by_field_name(child, "expression", 10);
@@ -404,7 +421,7 @@ PyAstNode* build_py_fstring(PyTranspiler* tp, TSNode string_node) {
                         tp, PY_AST_NODE_FSTRING_EXPR, child, sizeof(PyFStringExprNode));
                     fse->expression = expr;
                     fse->format_spec = fmt_spec;
-                    fse->base.type = &TYPE_STRING;
+                    fse->type = &TYPE_STRING;
                     part = (PyAstNode*)fse;
                 } else {
                     part = expr;
@@ -443,7 +460,7 @@ static PyAstNode* build_py_binary_op(PyTranspiler* tp, TSNode binary_node) {
         binary->op = py_operator_from_string(op_source.str, op_source.length);
     }
 
-    binary->base.type = &TYPE_ANY;
+    binary->type = &TYPE_ANY;
     return (PyAstNode*)binary;
 }
 
@@ -465,7 +482,7 @@ static PyAstNode* build_py_boolean_op(PyTranspiler* tp, TSNode bool_node) {
         boolean->op = PY_OP_AND;
     }
 
-    boolean->base.type = &TYPE_BOOL;
+    boolean->type = &TYPE_BOOL;
     return (PyAstNode*)boolean;
 }
 
@@ -476,7 +493,7 @@ static PyAstNode* build_py_not_op(PyTranspiler* tp, TSNode not_node) {
     TSNode arg_node = ts_node_child_by_field_name(not_node, "argument", 8);
     unary->operand = build_py_expression(tp, arg_node);
     unary->op = PY_OP_NOT;
-    unary->base.type = &TYPE_BOOL;
+    unary->type = &TYPE_BOOL;
     return (PyAstNode*)unary;
 }
 
@@ -500,7 +517,7 @@ static PyAstNode* build_py_unary_op(PyTranspiler* tp, TSNode unary_node) {
         }
     }
 
-    unary->base.type = &TYPE_ANY;
+    unary->type = &TYPE_ANY;
     return (PyAstNode*)unary;
 }
 
@@ -579,7 +596,7 @@ PyAstNode* build_py_comparison(PyTranspiler* tp, TSNode comp_node) {
         }
     }
 
-    cmp->base.type = &TYPE_BOOL;
+    cmp->type = &TYPE_BOOL;
     return (PyAstNode*)cmp;
 }
 
@@ -613,7 +630,7 @@ static PyAstNode* build_py_call(PyTranspiler* tp, TSNode call_node) {
                     kw->key = name_pool_create_len(tp->name_pool, name_src.str, name_src.length);
                 }
                 kw->value = build_py_expression(tp, kw_value);
-                kw->base.type = &TYPE_ANY;
+                kw->type = &TYPE_ANY;
                 arg_node = (PyAstNode*)kw;
             } else if (strcmp(arg_type, "list_splat") == 0) {
                 // *args
@@ -621,7 +638,7 @@ static PyAstNode* build_py_call(PyTranspiler* tp, TSNode call_node) {
                 if (ts_node_named_child_count(arg) > 0) {
                     starred->value = build_py_expression(tp, ts_node_named_child(arg, 0));
                 }
-                starred->base.type = &TYPE_ANY;
+                starred->type = &TYPE_ANY;
                 arg_node = (PyAstNode*)starred;
             } else if (strcmp(arg_type, "dictionary_splat") == 0) {
                 // **kwargs
@@ -630,7 +647,7 @@ static PyAstNode* build_py_call(PyTranspiler* tp, TSNode call_node) {
                 if (ts_node_named_child_count(arg) > 0) {
                     kw->value = build_py_expression(tp, ts_node_named_child(arg, 0));
                 }
-                kw->base.type = &TYPE_ANY;
+                kw->type = &TYPE_ANY;
                 arg_node = (PyAstNode*)kw;
             } else {
                 arg_node = build_py_expression(tp, arg);
@@ -648,7 +665,7 @@ static PyAstNode* build_py_call(PyTranspiler* tp, TSNode call_node) {
         }
     }
 
-    call->base.type = &TYPE_ANY;
+    call->type = &TYPE_ANY;
     return (PyAstNode*)call;
 }
 
@@ -666,7 +683,7 @@ static PyAstNode* build_py_attribute(PyTranspiler* tp, TSNode attr_node) {
         attr->attribute = name_pool_create_len(tp->name_pool, name_src.str, name_src.length);
     }
 
-    attr->base.type = &TYPE_ANY;
+    attr->type = &TYPE_ANY;
     return (PyAstNode*)attr;
 }
 
@@ -688,7 +705,7 @@ static PyAstNode* build_py_subscript(PyTranspiler* tp, TSNode sub_node) {
         }
     }
 
-    sub->base.type = &TYPE_ANY;
+    sub->type = &TYPE_ANY;
     return (PyAstNode*)sub;
 }
 
@@ -718,7 +735,7 @@ PyAstNode* build_py_slice(PyTranspiler* tp, TSNode slice_node) {
         }
     }
 
-    slice->base.type = &TYPE_ANY;
+    slice->type = &TYPE_ANY;
     return (PyAstNode*)slice;
 }
 
@@ -740,7 +757,7 @@ static PyAstNode* build_py_sequence(PyTranspiler* tp, TSNode seq_node, PyAstNode
             if (ts_node_named_child_count(child) > 0) {
                 starred->value = build_py_expression(tp, ts_node_named_child(child, 0));
             }
-            starred->base.type = &TYPE_ANY;
+            starred->type = &TYPE_ANY;
             elem = (PyAstNode*)starred;
         } else {
             elem = build_py_expression(tp, child);
@@ -758,11 +775,11 @@ static PyAstNode* build_py_sequence(PyTranspiler* tp, TSNode seq_node, PyAstNode
     }
 
     if (type == PY_AST_NODE_LIST) {
-        seq->base.type = &TYPE_LIST;
+        seq->type = &TYPE_LIST;
     } else if (type == PY_AST_NODE_TUPLE) {
-        seq->base.type = &TYPE_LIST; // tuples map to array
+        seq->type = &TYPE_LIST; // tuples map to array
     } else {
-        seq->base.type = &TYPE_LIST; // sets also map to array for now
+        seq->type = &TYPE_LIST; // sets also map to array for now
     }
 
     return (PyAstNode*)seq;
@@ -788,7 +805,7 @@ PyAstNode* build_py_dict(PyTranspiler* tp, TSNode dict_node) {
 
             pair->key = build_py_expression(tp, key_node);
             pair->value = build_py_expression(tp, value_node);
-            pair->base.type = &TYPE_ANY;
+            pair->type = &TYPE_ANY;
 
             dict->length++;
             if (!prev) {
@@ -803,7 +820,7 @@ PyAstNode* build_py_dict(PyTranspiler* tp, TSNode dict_node) {
             if (ts_node_named_child_count(child) > 0) {
                 starred->value = build_py_expression(tp, ts_node_named_child(child, 0));
             }
-            starred->base.type = &TYPE_ANY;
+            starred->type = &TYPE_ANY;
 
             dict->length++;
             if (!prev) {
@@ -815,19 +832,15 @@ PyAstNode* build_py_dict(PyTranspiler* tp, TSNode dict_node) {
         }
     }
 
-    dict->base.type = &TYPE_MAP;
+    dict->type = &TYPE_MAP;
     return (PyAstNode*)dict;
 }
 
 // Build comprehension (list, dict, set, generator)
 PyAstNode* build_py_list_comprehension(PyTranspiler* tp, TSNode comp_node, PyAstNodeType comp_type) {
     PyComprehensionNode* comp = (PyComprehensionNode*)alloc_py_ast_node(tp, comp_type, comp_node, sizeof(PyComprehensionNode));
-
-    // body field contains the output expression
-    TSNode body_node = ts_node_child_by_field_name(comp_node, "body", 4);
-    if (!ts_node_is_null(body_node)) {
-        comp->element = build_py_expression(tp, body_node);
-    }
+    PyScope* comp_scope = py_scope_create(tp, PY_SCOPE_COMPREHENSION, tp->current_scope);
+    py_scope_push(tp, comp_scope);
 
     // iterate named children for for_in_clause and if_clause
     uint32_t child_count = ts_node_named_child_count(comp_node);
@@ -845,11 +858,13 @@ PyAstNode* build_py_list_comprehension(PyTranspiler* tp, TSNode comp_node, PyAst
                 // first for clause
                 current_comp->target = build_py_expression(tp, left);
                 current_comp->iter = build_py_expression(tp, right);
+                py_bind_assignment_target(tp, current_comp->target);
             } else {
                 // nested for clause
                 PyComprehensionNode* inner = (PyComprehensionNode*)alloc_py_ast_node(tp, comp_type, child, sizeof(PyComprehensionNode));
                 inner->target = build_py_expression(tp, left);
                 inner->iter = build_py_expression(tp, right);
+                py_bind_assignment_target(tp, inner->target);
                 current_comp->inner = (PyAstNode*)inner;
                 current_comp = inner;
             }
@@ -868,10 +883,18 @@ PyAstNode* build_py_list_comprehension(PyTranspiler* tp, TSNode comp_node, PyAst
         }
     }
 
+    // Comprehension targets are private to this scope before the result
+    // expression is bound, so they cannot leak into the enclosing function.
+    TSNode body_node = ts_node_child_by_field_name(comp_node, "body", 4);
+    if (!ts_node_is_null(body_node)) {
+        comp->element = build_py_expression(tp, body_node);
+    }
+    py_scope_pop(tp);
+
     if (comp_type == PY_AST_NODE_DICT_COMPREHENSION) {
-        comp->base.type = &TYPE_MAP;
+        comp->type = &TYPE_MAP;
     } else {
-        comp->base.type = &TYPE_LIST;
+        comp->type = &TYPE_LIST;
     }
 
     return (PyAstNode*)comp;
@@ -884,14 +907,21 @@ PyAstNode* build_py_lambda(PyTranspiler* tp, TSNode lambda_node) {
     TSNode params_node = ts_node_child_by_field_name(lambda_node, "parameters", 10);
     TSNode body_node = ts_node_child_by_field_name(lambda_node, "body", 4);
 
+    PyScope* lambda_scope = py_scope_create(tp, PY_SCOPE_FUNCTION, tp->current_scope);
+    lambda->vars = lambda_scope;
+    lambda->analysis = (FnAnalysis*)arena_calloc(tp->ast_arena, sizeof(FnAnalysis));
+    lambda->ext.ptr = arena_calloc(tp->ast_arena, sizeof(PyFnExt));
+    py_scope_push(tp, lambda_scope);
+
     if (!ts_node_is_null(params_node)) {
         lambda->params = build_py_parameters(tp, params_node);
     }
     if (!ts_node_is_null(body_node)) {
         lambda->body = build_py_expression(tp, body_node);
     }
+    py_scope_pop(tp);
 
-    lambda->base.type = &TYPE_FUNC;
+    lambda->type = &TYPE_FUNC;
     return (PyAstNode*)lambda;
 }
 
@@ -902,12 +932,12 @@ PyAstNode* build_py_conditional_expr(PyTranspiler* tp, TSNode cond_node) {
     // conditional_expression: 3 unnamed children — value, condition, alternative
     uint32_t named_count = ts_node_named_child_count(cond_node);
     if (named_count >= 3) {
-        cond->body = build_py_expression(tp, ts_node_named_child(cond_node, 0));
+        cond->then = build_py_expression(tp, ts_node_named_child(cond_node, 0));
         cond->test = build_py_expression(tp, ts_node_named_child(cond_node, 1));
-        cond->else_body = build_py_expression(tp, ts_node_named_child(cond_node, 2));
+        cond->otherwise = build_py_expression(tp, ts_node_named_child(cond_node, 2));
     }
 
-    cond->base.type = &TYPE_ANY;
+    cond->type = &TYPE_ANY;
     return (PyAstNode*)cond;
 }
 
@@ -920,18 +950,14 @@ static PyAstNode* build_py_assignment(PyTranspiler* tp, TSNode assign_node) {
     TSNode left_node = ts_node_child_by_field_name(assign_node, "left", 4);
     TSNode right_node = ts_node_child_by_field_name(assign_node, "right", 5);
 
-    assign->targets = build_py_expression(tp, left_node);
+    assign->left = build_py_expression(tp, left_node);
     if (!ts_node_is_null(right_node)) {
-        assign->value = build_py_expression(tp, right_node);
+        assign->right = build_py_expression(tp, right_node);
     }
 
-    // register variable in scope
-    if (assign->targets && assign->targets->node_type == PY_AST_NODE_IDENTIFIER) {
-        PyIdentifierNode* id = (PyIdentifierNode*)assign->targets;
-        py_scope_define(tp, id->name, assign->targets, PY_VAR_LOCAL);
-    }
+    py_bind_assignment_target(tp, assign->left);
 
-    assign->base.type = &TYPE_ANY;
+    assign->type = &TYPE_ANY;
     return (PyAstNode*)assign;
 }
 
@@ -943,15 +969,15 @@ static PyAstNode* build_py_augmented_assignment(PyTranspiler* tp, TSNode aug_nod
     TSNode right_node = ts_node_child_by_field_name(aug_node, "right", 5);
     TSNode op_node = ts_node_child_by_field_name(aug_node, "operator", 8);
 
-    aug->target = build_py_expression(tp, left_node);
-    aug->value = build_py_expression(tp, right_node);
+    aug->left = build_py_expression(tp, left_node);
+    aug->right = build_py_expression(tp, right_node);
 
     if (!ts_node_is_null(op_node)) {
         StrView op_source = py_node_source(tp, op_node);
         aug->op = py_augmented_operator_from_string(op_source.str, op_source.length);
     }
 
-    aug->base.type = &TYPE_ANY;
+    aug->type = &TYPE_ANY;
     return (PyAstNode*)aug;
 }
 
@@ -965,7 +991,7 @@ static PyAstNode* build_py_return(PyTranspiler* tp, TSNode return_node) {
         ret->value = build_py_expression(tp, ts_node_named_child(return_node, 0));
     }
 
-    ret->base.type = &TYPE_ANY;
+    ret->type = &TYPE_ANY;
     return (PyAstNode*)ret;
 }
 
@@ -1040,7 +1066,7 @@ PyAstNode* build_py_if_statement(PyTranspiler* tp, TSNode if_node) {
         }
     }
 
-    if_stmt->base.type = &TYPE_ANY;
+    if_stmt->type = &TYPE_ANY;
     return (PyAstNode*)if_stmt;
 }
 
@@ -1056,7 +1082,7 @@ PyAstNode* build_py_while_statement(PyTranspiler* tp, TSNode while_node) {
         while_stmt->body = build_py_block(tp, body_node);
     }
 
-    while_stmt->base.type = &TYPE_ANY;
+    while_stmt->type = &TYPE_ANY;
     return (PyAstNode*)while_stmt;
 }
 
@@ -1068,19 +1094,15 @@ PyAstNode* build_py_for_statement(PyTranspiler* tp, TSNode for_node) {
     TSNode right_node = ts_node_child_by_field_name(for_node, "right", 5);
     TSNode body_node = ts_node_child_by_field_name(for_node, "body", 4);
 
-    for_stmt->target = build_py_expression(tp, left_node);
-    for_stmt->iter = build_py_expression(tp, right_node);
+    for_stmt->left = build_py_expression(tp, left_node);
+    for_stmt->right = build_py_expression(tp, right_node);
     if (!ts_node_is_null(body_node)) {
         for_stmt->body = build_py_block(tp, body_node);
     }
 
-    // register loop variable in scope
-    if (for_stmt->target && for_stmt->target->node_type == PY_AST_NODE_IDENTIFIER) {
-        PyIdentifierNode* id = (PyIdentifierNode*)for_stmt->target;
-        py_scope_define(tp, id->name, for_stmt->target, PY_VAR_LOCAL);
-    }
+    py_bind_assignment_target(tp, for_stmt->left);
 
-    for_stmt->base.type = &TYPE_ANY;
+    for_stmt->type = &TYPE_ANY;
     return (PyAstNode*)for_stmt;
 }
 
@@ -1104,7 +1126,9 @@ PyAstNode* build_py_function_def(PyTranspiler* tp, TSNode func_node) {
 
     // create a new function scope
     PyScope* func_scope = py_scope_create(tp, PY_SCOPE_FUNCTION, tp->current_scope);
-    func_scope->function = func;
+    func->vars = func_scope;
+    func->analysis = (FnAnalysis*)arena_calloc(tp->ast_arena, sizeof(FnAnalysis));
+    func->ext.ptr = arena_calloc(tp->ast_arena, sizeof(PyFnExt));
     py_scope_push(tp, func_scope);
 
     // parameters
@@ -1124,7 +1148,7 @@ PyAstNode* build_py_function_def(PyTranspiler* tp, TSNode func_node) {
 
     py_scope_pop(tp);
 
-    func->base.type = &TYPE_FUNC;
+    func->type = &TYPE_FUNC;
     return (PyAstNode*)func;
 }
 
@@ -1143,7 +1167,7 @@ PyAstNode* build_py_parameters(PyTranspiler* tp, TSNode params_node) {
             PyParamNode* p = (PyParamNode*)alloc_py_ast_node(tp, PY_AST_NODE_PARAMETER, child, sizeof(PyParamNode));
             StrView name_src = py_node_source(tp, child);
             p->name = name_pool_create_len(tp->name_pool, name_src.str, name_src.length);
-            p->base.type = &TYPE_ANY;
+            p->type = &TYPE_ANY;
             // register parameter in scope
             py_scope_define(tp, p->name, (PyAstNode*)p, PY_VAR_LOCAL);
             param = (PyAstNode*)p;
@@ -1159,7 +1183,7 @@ PyAstNode* build_py_parameters(PyTranspiler* tp, TSNode params_node) {
             if (!ts_node_is_null(value_node)) {
                 p->default_value = build_py_expression(tp, value_node);
             }
-            p->base.type = &TYPE_ANY;
+            p->type = &TYPE_ANY;
             param = (PyAstNode*)p;
         } else if (strcmp(child_type, "typed_parameter") == 0) {
             PyParamNode* p = (PyParamNode*)alloc_py_ast_node(tp, PY_AST_NODE_TYPED_PARAMETER, child, sizeof(PyParamNode));
@@ -1176,7 +1200,7 @@ PyAstNode* build_py_parameters(PyTranspiler* tp, TSNode params_node) {
             if (!ts_node_is_null(type_node)) {
                 p->annotation = build_py_expression(tp, type_node);
             }
-            p->base.type = &TYPE_ANY;
+            p->type = &TYPE_ANY;
             param = (PyAstNode*)p;
         } else if (strcmp(child_type, "typed_default_parameter") == 0) {
             PyParamNode* p = (PyParamNode*)alloc_py_ast_node(tp, PY_AST_NODE_DEFAULT_PARAMETER, child, sizeof(PyParamNode));
@@ -1190,7 +1214,7 @@ PyAstNode* build_py_parameters(PyTranspiler* tp, TSNode params_node) {
             if (!ts_node_is_null(value_node)) {
                 p->default_value = build_py_expression(tp, value_node);
             }
-            p->base.type = &TYPE_ANY;
+            p->type = &TYPE_ANY;
             param = (PyAstNode*)p;
         } else if (strcmp(child_type, "list_splat_pattern") == 0) {
             PyParamNode* p = (PyParamNode*)alloc_py_ast_node(tp, PY_AST_NODE_LIST_SPLAT_PARAMETER, child, sizeof(PyParamNode));
@@ -1200,7 +1224,7 @@ PyAstNode* build_py_parameters(PyTranspiler* tp, TSNode params_node) {
                 p->name = name_pool_create_len(tp->name_pool, name_src.str, name_src.length);
                 py_scope_define(tp, p->name, (PyAstNode*)p, PY_VAR_LOCAL);
             }
-            p->base.type = &TYPE_ANY;
+            p->type = &TYPE_ANY;
             param = (PyAstNode*)p;
         } else if (strcmp(child_type, "dictionary_splat_pattern") == 0) {
             PyParamNode* p = (PyParamNode*)alloc_py_ast_node(tp, PY_AST_NODE_DICT_SPLAT_PARAMETER, child, sizeof(PyParamNode));
@@ -1210,7 +1234,7 @@ PyAstNode* build_py_parameters(PyTranspiler* tp, TSNode params_node) {
                 p->name = name_pool_create_len(tp->name_pool, name_src.str, name_src.length);
                 py_scope_define(tp, p->name, (PyAstNode*)p, PY_VAR_LOCAL);
             }
-            p->base.type = &TYPE_ANY;
+            p->type = &TYPE_ANY;
             param = (PyAstNode*)p;
         } else if (strcmp(child_type, "keyword_separator") == 0 || strcmp(child_type, "positional_separator") == 0) {
             continue; // skip bare * and / separators
@@ -1288,7 +1312,7 @@ PyAstNode* build_py_class_def(PyTranspiler* tp, TSNode class_node) {
 
     py_scope_pop(tp);
 
-    cls->base.type = &TYPE_MAP;
+    cls->type = &TYPE_MAP;
     return (PyAstNode*)cls;
 }
 
@@ -1348,7 +1372,7 @@ PyAstNode* build_py_try_statement(PyTranspiler* tp, TSNode try_node) {
                 }
             }
 
-            handler->base.type = &TYPE_ANY;
+            handler->AstNode::type = &TYPE_ANY;
             if (!prev_handler) {
                 try_stmt->handlers = (PyAstNode*)handler;
             } else {
@@ -1373,7 +1397,7 @@ PyAstNode* build_py_try_statement(PyTranspiler* tp, TSNode try_node) {
         }
     }
 
-    try_stmt->base.type = &TYPE_ANY;
+    try_stmt->type = &TYPE_ANY;
     return (PyAstNode*)try_stmt;
 }
 
@@ -1383,10 +1407,10 @@ static PyAstNode* build_py_raise(PyTranspiler* tp, TSNode raise_node) {
 
     uint32_t child_count = ts_node_named_child_count(raise_node);
     if (child_count > 0) {
-        raise->exception = build_py_expression(tp, ts_node_named_child(raise_node, 0));
+        raise->value = build_py_expression(tp, ts_node_named_child(raise_node, 0));
     }
 
-    raise->base.type = &TYPE_ANY;
+    raise->type = &TYPE_ANY;
     return (PyAstNode*)raise;
 }
 
@@ -1402,7 +1426,7 @@ static PyAstNode* build_py_assert(PyTranspiler* tp, TSNode assert_node) {
         assert_stmt->message = build_py_expression(tp, ts_node_named_child(assert_node, 1));
     }
 
-    assert_stmt->base.type = &TYPE_ANY;
+    assert_stmt->type = &TYPE_ANY;
     return (PyAstNode*)assert_stmt;
 }
 
@@ -1455,7 +1479,7 @@ PyAstNode* build_py_with_statement(PyTranspiler* tp, TSNode with_node) {
         with->body = build_py_block(tp, body_node);
     }
 
-    with->base.type = &TYPE_ANY;
+    with->type = &TYPE_ANY;
     return (PyAstNode*)with;
 }
 
@@ -1480,7 +1504,7 @@ static PyAstNode* build_py_global_nonlocal(PyTranspiler* tp, TSNode gn_node, PyA
         }
     }
 
-    gn->base.type = &TYPE_ANY;
+    gn->type = &TYPE_ANY;
     return (PyAstNode*)gn;
 }
 
@@ -1503,7 +1527,7 @@ static PyAstNode* build_py_del(PyTranspiler* tp, TSNode del_node) {
         }
     }
 
-    del->base.type = &TYPE_ANY;
+    del->type = &TYPE_ANY;
     return (PyAstNode*)del;
 }
 
@@ -1533,7 +1557,7 @@ static PyAstNode* build_py_import(PyTranspiler* tp, TSNode import_node) {
         }
     }
 
-    imp->base.type = &TYPE_ANY;
+    imp->type = &TYPE_ANY;
     return (PyAstNode*)imp;
 }
 
@@ -1577,7 +1601,7 @@ static PyAstNode* build_py_import_from(PyTranspiler* tp, TSNode import_node) {
                 name_imp->module_name = name_pool_create_len(tp->name_pool, name_src.str, name_src.length);
             }
 
-            name_imp->base.type = &TYPE_ANY;
+            name_imp->type = &TYPE_ANY;
             if (!prev) {
                 imp->names = (PyAstNode*)name_imp;
             } else {
@@ -1588,7 +1612,7 @@ static PyAstNode* build_py_import_from(PyTranspiler* tp, TSNode import_node) {
             // from module import *
             PyImportNode* star_imp = (PyImportNode*)alloc_py_ast_node(tp, PY_AST_NODE_IMPORT, child, sizeof(PyImportNode));
             star_imp->module_name = name_pool_create_len(tp->name_pool, "*", 1);
-            star_imp->base.type = &TYPE_ANY;
+            star_imp->type = &TYPE_ANY;
             if (!prev) {
                 imp->names = (PyAstNode*)star_imp;
             } else {
@@ -1598,7 +1622,7 @@ static PyAstNode* build_py_import_from(PyTranspiler* tp, TSNode import_node) {
         }
     }
 
-    imp->base.type = &TYPE_ANY;
+    imp->type = &TYPE_ANY;
     return (PyAstNode*)imp;
 }
 
@@ -1618,7 +1642,7 @@ PyAstNode* build_py_decorated_definition(PyTranspiler* tp, TSNode dec_node) {
             if (ts_node_named_child_count(child) > 0) {
                 decorator->expression = build_py_expression(tp, ts_node_named_child(child, 0));
             }
-            decorator->base.type = &TYPE_ANY;
+            decorator->type = &TYPE_ANY;
 
             if (!prev_dec) {
                 decorators = (PyAstNode*)decorator;
@@ -1779,7 +1803,7 @@ PyAstNode* build_py_expression(PyTranspiler* tp, TSNode expr_node) {
         if (ts_node_named_child_count(expr_node) > 0) {
             starred->value = build_py_expression(tp, ts_node_named_child(expr_node, 0));
         }
-        starred->base.type = &TYPE_ANY;
+        starred->type = &TYPE_ANY;
         return (PyAstNode*)starred;
     }
 
@@ -1794,9 +1818,9 @@ PyAstNode* build_py_expression(PyTranspiler* tp, TSNode expr_node) {
         PyAssignmentNode* assign = (PyAssignmentNode*)alloc_py_ast_node(tp, PY_AST_NODE_ASSIGNMENT, expr_node, sizeof(PyAssignmentNode));
         TSNode name = ts_node_child_by_field_name(expr_node, "name", 4);
         TSNode value = ts_node_child_by_field_name(expr_node, "value", 5);
-        assign->targets = build_py_expression(tp, name);
-        assign->value = build_py_expression(tp, value);
-        assign->base.type = &TYPE_ANY;
+        assign->left = build_py_expression(tp, name);
+        assign->right = build_py_expression(tp, value);
+        assign->type = &TYPE_ANY;
         return (PyAstNode*)assign;
     }
 
@@ -1853,7 +1877,7 @@ PyAstNode* build_py_expression(PyTranspiler* tp, TSNode expr_node) {
             kw->key = name_pool_create_len(tp->name_pool, name_src.str, name_src.length);
         }
         kw->value = build_py_expression(tp, value);
-        kw->base.type = &TYPE_ANY;
+        kw->type = &TYPE_ANY;
         return (PyAstNode*)kw;
     }
 
@@ -1864,7 +1888,7 @@ PyAstNode* build_py_expression(PyTranspiler* tp, TSNode expr_node) {
         TSNode value = ts_node_child_by_field_name(expr_node, "value", 5);
         pair->key = build_py_expression(tp, key);
         pair->value = build_py_expression(tp, value);
-        pair->base.type = &TYPE_ANY;
+        pair->type = &TYPE_ANY;
         return (PyAstNode*)pair;
     }
 
@@ -2223,7 +2247,7 @@ static PyAstNode* build_py_case_clause(PyTranspiler* tp, TSNode clause_node) {
         c->body = build_py_block(tp, body_node);
     }
 
-    c->base.type = &TYPE_ANY;
+    c->type = &TYPE_ANY;
     return (PyAstNode*)c;
 }
 
@@ -2255,7 +2279,7 @@ static PyAstNode* build_py_match_statement(PyTranspiler* tp, TSNode match_node) 
         }
     }
 
-    m->base.type = &TYPE_ANY;
+    m->type = &TYPE_ANY;
     return (PyAstNode*)m;
 }
 
@@ -2297,7 +2321,7 @@ PyAstNode* build_py_statement(PyTranspiler* tp, TSNode stmt_node) {
         PyExpressionStatementNode* expr_stmt = (PyExpressionStatementNode*)alloc_py_ast_node(
             tp, PY_AST_NODE_EXPRESSION_STATEMENT, stmt_node, sizeof(PyExpressionStatementNode));
         expr_stmt->expression = build_py_expression(tp, child);
-        expr_stmt->base.type = &TYPE_ANY;
+        expr_stmt->type = &TYPE_ANY;
         return (PyAstNode*)expr_stmt;
     }
 
@@ -2381,7 +2405,7 @@ PyAstNode* build_py_statement(PyTranspiler* tp, TSNode stmt_node) {
         PyExpressionStatementNode* expr_stmt = (PyExpressionStatementNode*)alloc_py_ast_node(
             tp, PY_AST_NODE_EXPRESSION_STATEMENT, stmt_node, sizeof(PyExpressionStatementNode));
         expr_stmt->expression = expr;
-        expr_stmt->base.type = &TYPE_ANY;
+        expr_stmt->type = &TYPE_ANY;
         return (PyAstNode*)expr_stmt;
     }
 

@@ -1479,6 +1479,10 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         uint8_t* p = (uint8_t*)obj;
         uint8_t field_count = *(uint8_t*)(p + 2);  // closure_field_count
         void* closure_env = *(void**)(p + 24);
+        // A guest closure can keep a traced environment whose slots are not
+        // all Items (for example a generator state word).  Mark its object
+        // owner first; field_count only describes the legacy Item view.
+        gc_mark_object_ptr(gc, closure_env);
         if (closure_env && field_count > 0) {
             // scan closure env as packed Item fields
             uint64_t* env_items = (uint64_t*)closure_env;

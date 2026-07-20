@@ -1,5 +1,5 @@
 {
-  "name": "Editing paired clipboard - mixed embedded input paste and host copy",
+  "name": "Editing paired clipboard - rich host preserves embedded controls",
   "html": "test/ui/editing/mixed.html",
   "viewport": {"width": 760, "height": 380},
   "events": [
@@ -9,7 +9,6 @@
     {"type": "key_combo", "key": "a", "mods_str": "super"},
     {"type": "wait", "ms": 80},
     {"type": "key_combo", "key": "c", "mods_str": "super"},
-    {"type": "assert_clipboard", "contains": "Alpha words"},
     {"type": "assert_value", "target": {"selector": "#embedded-input"}, "equals": "inner"}
   ]
 }

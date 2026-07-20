@@ -1,0 +1,11 @@
+{
+  "name": "MicroModal closes from its overlay click and restores focus",
+  "html": "test/ui/dom/micromodal_overlay.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#trigger"}},
+    {"type": "assert_focus", "target": {"selector": "#inside"}},
+    {"type": "click", "target": {"selector": ".overlay"}},
+    {"type": "assert_visible", "target": {"selector": "#modal"}, "visible": false},
+    {"type": "assert_focus", "target": {"selector": "#trigger"}}
+  ]
+}

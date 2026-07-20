@@ -18,23 +18,6 @@
 //==============================================================================
 
 //==============================================================================
-// Skip list — tests that are known broken / not yet passing
-//==============================================================================
-
-static const char* PY_SKIP_TESTS[] = {
-    // test_py_import: imports test/py/utils.py (filesystem-based import);
-    // crashes with Bus error — Phase E (full package system) not yet implemented.
-    "py_test_py_import",
-};
-static const size_t NUM_PY_SKIP_TESTS = sizeof(PY_SKIP_TESTS) / sizeof(PY_SKIP_TESTS[0]);
-
-static bool should_skip_py_test(const std::string& test_name) {
-    for (size_t i = 0; i < NUM_PY_SKIP_TESTS; i++) {
-        if (test_name == PY_SKIP_TESTS[i]) return true;
-    }
-    return false;
-}
-
 // Discover all test/py/test_py_*.py files that have a matching .txt file.
 static std::vector<LambdaTestInfo> discover_py_tests() {
     std::vector<LambdaTestInfo> tests;
@@ -56,8 +39,7 @@ static std::vector<LambdaTestInfo> discover_py_tests() {
                     info.expected_path = expected_path;
                     info.test_name     = get_test_name(script_path);
                     info.is_procedural = false;
-                    if (!should_skip_py_test(info.test_name))
-                        tests.push_back(info);
+                    tests.push_back(info);
                 }
             }
         } while (FindNextFileA(find_handle, &find_data));
@@ -81,8 +63,7 @@ static std::vector<LambdaTestInfo> discover_py_tests() {
                     info.expected_path = expected_path;
                     info.test_name     = get_test_name(script_path);
                     info.is_procedural = false;
-                    if (!should_skip_py_test(info.test_name))
-                        tests.push_back(info);
+                    tests.push_back(info);
                 }
             }
         }
@@ -120,10 +101,12 @@ static PyTestResult run_py_script(const std::string& script_path) {
     char command[512];
 #ifdef _WIN32
     snprintf(command, sizeof(command),
-             "lambda-jube.exe py --no-log \"%s\" 2>&1", script_path.c_str());
+             "lambda-jube.exe py --no-log \"%s\" 2>NUL", script_path.c_str());
 #else
     snprintf(command, sizeof(command),
-             "./lambda-jube.exe py --no-log \"%s\" 2>&1", script_path.c_str());
+             // Runtime diagnostics are stderr-only; comparing them with a script's
+             // stdout made a debug allocator report look like Python output.
+             "./lambda-jube.exe py --no-log \"%s\" 2>/dev/null", script_path.c_str());
 #endif
 
     FILE* pipe = popen(command, "r");

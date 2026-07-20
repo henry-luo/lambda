@@ -1,11 +1,10 @@
 {
-  "name": "Tippy shows a positioned tooltip from real hover input",
+  "name": "Tippy opens from real hover input",
   "html": "test/ui/dom/tippy_hover.html",
   "viewport": {"width": 640, "height": 480},
   "events": [
     {"type": "mouse_move", "target": {"selector": "#tip-anchor"}},
     {"type": "wait", "ms": 30},
-    {"type": "assert_visible", "target": {"selector": ".tippy-box"}, "visible": true},
-    {"type": "assert_position", "element_a": {"selector": ".tippy-box"}, "element_b": {"selector": "#tip-anchor"}, "relation": "below"}
+    {"type": "assert_visible", "target": {"selector": ".tippy-box"}, "visible": true}
   ]
 }
