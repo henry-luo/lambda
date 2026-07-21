@@ -145,8 +145,7 @@ $(TS_ENUM_H): $(GRAMMAR_JS)
 	@echo "Updated ts-enum.h from grammar changes"
 
 $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
-	@echo "Generating parser from grammar.js..."
-	@cd lambda/tree-sitter-lambda && npx tree-sitter-cli@0.24.7 generate
+	@out=$$(cd lambda/tree-sitter-lambda && npx tree-sitter-cli@0.24.7 generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Lambda embedding dependencies
 # Auto-generate lambda-embed.h when lambda.h changes
@@ -212,6 +211,14 @@ LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
 LATEX_MATH_GRAMMAR_JS = lambda/tree-sitter-latex-math/grammar.js
 LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
 
+# Quietly build lambda/tree-sitter-$(1)'s static lib: run the sub-make with its
+# output captured and shown only on failure, so a successful parser build is a
+# single status line. $(2) = extra sub-make args (e.g. TS=...).
+define ts_lib_build
+@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-$(1) libtree-sitter-$(1).a CC="$(CC)" CXX="$(CXX)" $(2) 2>&1) || { printf '%s\n' "$$out"; exit 1; }; \
+echo "✅ tree-sitter-$(1) library built"
+endef
+
 # Build tree-sitter library (amalgamated build, no ICU dependency)
 # Uses lib.c single-file approach - no external ICU/Unicode library needed
 $(TREE_SITTER_LIB):
@@ -230,125 +237,53 @@ $(TREE_SITTER_LIB):
 
 # Build tree-sitter-lambda library (depends on parser generation)
 $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
-	@echo "Building tree-sitter-lambda library..."
-	@echo "🔧 Compiler: $(CC)"
-	@echo "🔧 CXX: $(CXX)"
-	@echo "🔧 Environment: MSYSTEM=$(MSYSTEM)"
-	@echo "🔧 Working directory: lambda/tree-sitter-lambda"
-	@echo "🔧 Unsetting OS variable to bypass Windows check..."
-	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-lambda libtree-sitter-lambda.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	$(call ts_lib_build,lambda,)
 
 # Build tree-sitter-javascript library (depends on scanner source)
 $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
-	@echo "Building tree-sitter-javascript library..."
-	@echo "🔧 Compiler: $(CC)"
-	@echo "🔧 CXX: $(CXX)"
-	@echo "🔧 Environment: MSYSTEM=$(MSYSTEM)"
-	@echo "🔧 Working directory: lambda/tree-sitter-javascript"
-	@echo "🔧 Unsetting OS variable to bypass Windows check..."
-	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
-	@# Regenerate before compiling: parser.c is ignored, so an ABI-15 local copy
-	@# can outlive the ABI-14 headers unless the pinned generator replaces it.
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-javascript src/parser.c TS="npx tree-sitter-cli@0.24.7"
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
+	@# regenerate parser.c at ABI 14 (it's gitignored) then build; output is
+	@# captured and shown only on failure so success is a single status line.
+	@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-javascript src/parser.c TS="npx tree-sitter-cli@0.24.7" 2>&1 && \
+		env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+	@echo "✅ tree-sitter-javascript library built"
 
 # Build tree-sitter-bash library
 $(TREE_SITTER_BASH_LIB):
-	@echo "Building tree-sitter-bash library..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-bash libtree-sitter-bash.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
+	$(call ts_lib_build,bash,TS="npx tree-sitter-cli@0.24.7")
 
 # Build tree-sitter-python library
 $(TREE_SITTER_PYTHON_LIB):
-	@echo "Building tree-sitter-python library..."
-	@# Generate at ABI 14 with the pinned CLI (as lambda/typescript/latex do):
-	@# the node_modules CLI defaults to ABI 15 and would emit a parser.c/parser.h
-	@# that mismatches the committed ABI-14 headers.
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
-		libtree-sitter-python.a TS="npx tree-sitter-cli@0.24.7" \
-		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	$(call ts_lib_build,python,TS="npx tree-sitter-cli@0.24.7")
 
 # Generate TypeScript parser from grammar.js when it changes
 $(TS_PARSER_C): $(TS_GRAMMAR_JS)
-	@echo "Generating TypeScript parser from grammar.js..."
-	@echo "🔧 Working directory: lambda/tree-sitter-typescript"
-	@if [ ! -d lambda/tree-sitter-typescript/node_modules/tree-sitter-javascript ]; then \
-		echo "Installing tree-sitter-javascript dependency..."; \
-		cd lambda/tree-sitter-typescript && npm install --save tree-sitter-javascript@file:../tree-sitter-javascript; \
-	fi
-	@if command -v tree-sitter >/dev/null 2>&1; then \
-		echo "Using local tree-sitter CLI"; \
-		cd lambda/tree-sitter-typescript && tree-sitter generate; \
-	elif command -v npx >/dev/null 2>&1; then \
-		echo "Using npx tree-sitter-cli"; \
-		cd lambda/tree-sitter-typescript && npx tree-sitter-cli@0.24.7 generate; \
-	else \
-		echo "❌ Error: tree-sitter CLI not found!"; \
-		echo "Install with: npm install -g tree-sitter-cli"; \
-		exit 1; \
-	fi
-	@echo "✅ TypeScript parser generated successfully"
+	@out=$$(cd lambda/tree-sitter-typescript && \
+		{ [ -d node_modules/tree-sitter-javascript ] || npm install --save tree-sitter-javascript@file:../tree-sitter-javascript; } && \
+		npx tree-sitter-cli@0.24.7 generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-typescript library (depends on parser generation + scanner)
 $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
-	@echo "Building tree-sitter-typescript library..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-typescript libtree-sitter-typescript.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	$(call ts_lib_build,typescript,)
 
 # Build tree-sitter-ruby library
 $(TREE_SITTER_RUBY_LIB):
-	@echo "Building tree-sitter-ruby library..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-ruby libtree-sitter-ruby.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
+	$(call ts_lib_build,ruby,TS="npx tree-sitter-cli@0.24.7")
 
 # Generate LaTeX parser from grammar.js when it changes
 $(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMAR_JS)
-	@echo "Generating LaTeX parser from grammar.js..."
-	@echo "🔧 Working directory: lambda/tree-sitter-latex"
-	@if command -v tree-sitter >/dev/null 2>&1; then \
-		echo "Using local tree-sitter CLI"; \
-		cd lambda/tree-sitter-latex && tree-sitter generate; \
-	elif command -v npx >/dev/null 2>&1; then \
-		echo "Using npx tree-sitter-cli"; \
-		cd lambda/tree-sitter-latex && npx tree-sitter-cli@0.24.7 generate; \
-	else \
-		echo "❌ Error: tree-sitter CLI not found!"; \
-		echo "Install with: npm install -g tree-sitter-cli"; \
-		exit 1; \
-	fi
-	@echo "✅ LaTeX parser generated successfully"
+	@out=$$(cd lambda/tree-sitter-latex && npx tree-sitter-cli@0.24.7 generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-latex library (depends on parser generation)
 $(TREE_SITTER_LATEX_LIB): $(LATEX_PARSER_C)
-	@echo "Building tree-sitter-latex library..."
-	@echo "🔧 Compiler: $(CC)"
-	@echo "🔧 CXX: $(CXX)"
-	@echo "🔧 Environment: MSYSTEM=$(MSYSTEM)"
-	@echo "🔧 Working directory: lambda/tree-sitter-latex"
-	@echo "🔧 Unsetting OS variable to bypass Windows check..."
-	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-latex libtree-sitter-latex.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	$(call ts_lib_build,latex,)
 
 # Generate LaTeX Math parser from grammar.js when it changes
 $(LATEX_MATH_PARSER_C): $(LATEX_MATH_GRAMMAR_JS)
-	@echo "Generating LaTeX Math parser from grammar.js..."
-	@echo "🔧 Working directory: lambda/tree-sitter-latex-math"
-	@if command -v tree-sitter >/dev/null 2>&1; then \
-		echo "Using local tree-sitter CLI"; \
-		cd lambda/tree-sitter-latex-math && tree-sitter generate; \
-	elif command -v npx >/dev/null 2>&1; then \
-		echo "Using npx tree-sitter-cli"; \
-		cd lambda/tree-sitter-latex-math && npx tree-sitter-cli@0.24.7 generate; \
-	else \
-		echo "❌ Error: tree-sitter CLI not found!"; \
-		echo "Install with: npm install -g tree-sitter-cli"; \
-		exit 1; \
-	fi
-	@echo "✅ LaTeX Math parser generated successfully"
+	@out=$$(cd lambda/tree-sitter-latex-math && npx tree-sitter-cli@0.24.7 generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-latex-math library (depends on parser generation)
 $(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
-	@echo "Building tree-sitter-latex-math library..."
-	@echo "🔧 Working directory: lambda/tree-sitter-latex-math"
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-latex-math libtree-sitter-latex-math.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	$(call ts_lib_build,latex-math,)
 
 # Build re2 library (reconfigures cmake if CMakeCache is stale/wrong platform)
 # On Windows/CLANG64: must pass explicit compiler flags so cmake uses clang++
