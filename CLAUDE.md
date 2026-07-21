@@ -50,11 +50,12 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 Lambda uses **tagged pointers/values** in 64-bit `Item` type:
 - **Simple scalars** (null, bool, int): packed directly with TypeId in high bits
 - **Compound scalars** (int64, float, datetime, decimal, symbol, string, binary): tagged pointers
-  - Numerics stored in GC nursery (bump-allocated) at runtime
-  - Strings/symbols/decimals/datetimes are heap-allocated and GC-managed
+  - Full-width integers and out-of-band floats use number homes or destination-owned scalar storage
+  - Dynamic datetimes are GC-managed; static parser-built datetimes are owned by the `Input` arena
+  - Other pointer scalars use the lifetime owner selected by the runtime or Mark-building path
 - **Container types** (array, map, element, range): direct pointers extending `struct Container`
   - All start with `TypeId` field for runtime type identification
-  - Heap-allocated and GC-managed
+  - Runtime containers are GC-managed; static Mark containers are Input-owned
 - **Maps**: Packed structs with linked list of `ShapeEntry` defining fields
 - **Elements**: Extend lists and act as maps simultaneously (dual nature)
 

@@ -40,7 +40,8 @@ phase to reopen.
    ordinary decimal chosen because a `u64` happened to exceed a threshold.
 8. `DOUBLE`, `INT64`, and `UINT64` retain the Stack API Phase 7 ownership model.
    This work must not reintroduce inline full-width integers or use GC ownership
-   as an arithmetic promotion mechanism. `DTIME` remains always GC-owned.
+   as an arithmetic promotion mechanism. `DTIME` remains object-backed:
+   dynamic runtime values are GC-owned and static Mark values are Input-arena-owned.
 9. LambdaJS keeps JavaScript numeric semantics: JS `/` returns a JS Number.
    Python guest-language statements that true division returns float are also
    guest-specific and are not Lambda number-model conflicts.
@@ -100,9 +101,11 @@ conditions, not gaps in the completed tree.
   can silently select float for division. Full-width integer true division
   needs a decimal-capable result container, while integral `div` and `%` stay
   in their selected lane.
-- Phase 7 made datetime always GC-owned, but direct typed-field, formatter,
-  parser and embedding paths still need an implementation audit for
-  retired one-word embedded-`DateTime` assumptions.
+- Phase 7 made dynamically produced datetime values GC-owned and removed them
+  from numeric homes. Static input-parser values built through `MarkBuilder`
+  remain `Input`-arena-owned; typed-field, formatter, parser and embedding paths
+  must preserve the owner-backed object pointer without assuming one-word
+  embedded storage.
 
 ---
 
@@ -244,8 +247,9 @@ the final baseline run.
   records own persistent `INT64`/`UINT64` payloads rather than retaining an
   activation pointer.
 - [x] Remove any surviving direct-field or legacy-C assumption that a datetime
-  is an embedded one-word value. Store the GC-owned datetime pointer and use
-  accessors that permit the object layout to grow.
+  is an embedded one-word value. Store the owner-backed datetime pointer
+  (dynamic GC or static Input arena) and use accessors that permit the object
+  layout to grow.
 - [x] Confirm GC classification roots `DTIME` but does not treat number-home
   `DOUBLE`/`INT64`/`UINT64` payload pointers as independent GC objects. Retain
   the explicit counted fallback for ownerless persistent numeric slots.

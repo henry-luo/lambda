@@ -137,8 +137,8 @@ typedef struct TypedItem {
         String* string;
         Symbol* symbol;
         Binary* binary;
-        // Datetimes are always GC objects.  Keep their pointer in typed
-        // storage so the container tracer can retain the actual allocation.
+        // Runtime datetimes are GC objects; static Mark data may instead point
+        // into its Input arena. Keep the owner-backed object pointer intact.
         DateTime* datetime_ptr;
 
         // containers

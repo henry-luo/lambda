@@ -1058,6 +1058,7 @@ static TypeId resolve_declared_param_type(AstNamedNode* param, TypeParam* type_p
                 case LMD_TYPE_FLOAT:
                 case LMD_TYPE_INT:
                 case LMD_TYPE_INT64:
+                case LMD_TYPE_UINT64:
                     tid = LMD_TYPE_ARRAY_NUM;
                     break;
                 default: break;
@@ -5755,10 +5756,14 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     TypeArray* arr_type = (TypeArray*)arr_node->type;
     bool is_int_array = arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
     bool is_float_array = arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_FLOAT;
-    bool is_sized_array = arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_NUM_SIZED;
+    bool is_sized_array = arr_type && arr_type->nested &&
+        (arr_type->nested->type_id == LMD_TYPE_NUM_SIZED ||
+         arr_type->nested->type_id == LMD_TYPE_UINT64);
     ArrayNumElemType sized_elem_type = ELEM_INT;  // default, overwritten below
     if (is_sized_array) {
-        sized_elem_type = num_sized_to_elem_type(type_num_sized_kind(arr_type->nested));
+        sized_elem_type = arr_type->nested->type_id == LMD_TYPE_UINT64
+            ? ELEM_UINT64
+            : num_sized_to_elem_type(type_num_sized_kind(arr_type->nested));
     }
 
     // Specialized ArrayFloat path: array_float_new(count) + array_float_set(arr, i, val)
@@ -7786,7 +7791,8 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
                 if (inner_type && inner_type->type_id == LMD_TYPE_ARRAY) {
                     TypeArray* arr_type = (TypeArray*)inner_type;
                     if (arr_type->nested && (arr_type->nested->type_id == LMD_TYPE_INT
-                        || arr_type->nested->type_id == LMD_TYPE_INT64)) {
+                        || arr_type->nested->type_id == LMD_TYPE_INT64
+                        || arr_type->nested->type_id == LMD_TYPE_UINT64)) {
                         field_known_int = true;
                     }
                 }
@@ -10592,16 +10598,23 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     MIR_new_reg_op(mt->ctx, flags_byte), MIR_new_int_op(mt->ctx, 0x02)));
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_slow),
                     MIR_new_reg_op(mt->ctx, is_view_bit)));
-                // elem_type lives in map_kind byte at offset 3.
-                // ELEM_FLOAT64=0x10 → fall back to fn_array_set; ELEM_INT=0x00 and ELEM_INT64=0x50 take fast path
+                // elem_type lives in map_kind byte at offset 3. Only the two
+                // signed lanes accept this raw-I64 store; u64 and compact lanes
+                // require type-directed Item coercion in fn_array_set.
                 MIR_reg_t etype = new_reg(mt, "etyp", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, etype),
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 3, arr_ptr, 0, 1)));
-                MIR_reg_t is_float = new_reg(mt, "isfl", MIR_T_I64);
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_float),
-                    MIR_new_reg_op(mt->ctx, etype), MIR_new_int_op(mt->ctx, 0x10)));
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_slow),
-                    MIR_new_reg_op(mt->ctx, is_float)));
+                MIR_reg_t is_int = new_reg(mt, "isei", MIR_T_I64);
+                MIR_reg_t is_int64 = new_reg(mt, "ise64", MIR_T_I64);
+                MIR_reg_t is_raw_int = new_reg(mt, "isri", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_int),
+                    MIR_new_reg_op(mt->ctx, etype), MIR_new_int_op(mt->ctx, ELEM_INT)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_int64),
+                    MIR_new_reg_op(mt->ctx, etype), MIR_new_int_op(mt->ctx, ELEM_INT64)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_raw_int),
+                    MIR_new_reg_op(mt->ctx, is_int), MIR_new_reg_op(mt->ctx, is_int64)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_slow),
+                    MIR_new_reg_op(mt->ctx, is_raw_int)));
 
                 MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),

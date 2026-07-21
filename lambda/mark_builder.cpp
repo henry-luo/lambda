@@ -283,12 +283,30 @@ Item MarkBuilder::createLong(int64_t value) {
     return item;
 }
 
+Item MarkBuilder::createUInt64(uint64_t value) {
+    // Static Mark scalars must share the Input arena lifetime just like int64.
+    uint64_t* uint64_ptr = (uint64_t*)arena_alloc(arena_, sizeof(uint64_t));
+    if (!uint64_ptr) return ItemError;
+    *uint64_ptr = value;
+    return {.item = u2it(uint64_ptr)};
+}
+
 Item MarkBuilder::createFloat(double value) {
     // allocate double from arena
     double* float_ptr = (double*)arena_alloc(arena_, sizeof(double));
     *float_ptr = value;
     Item item = lambda_float_ptr_to_item(float_ptr);
     return item;
+}
+
+Item MarkBuilder::createDateTime(DateTime value) {
+    if (DATETIME_IS_ERROR(value)) return ItemError;
+    // Static parser output is owned by the Input arena; push_k would instead
+    // introduce a GC lifetime into an otherwise arena-owned Mark graph.
+    DateTime* datetime_ptr = (DateTime*)arena_alloc(arena_, sizeof(DateTime));
+    if (!datetime_ptr) return ItemError;
+    *datetime_ptr = value;
+    return {.item = k2it(datetime_ptr)};
 }
 
 Item MarkBuilder::createBool(bool value) {
@@ -416,6 +434,14 @@ ElementBuilder& ElementBuilder::attr(const char* key, int64_t value) {
     return attr(key, builder_->createInt(value));
 }
 
+ElementBuilder& ElementBuilder::attr(const char* key, int32_t value) {
+    return attr(key, builder_->createInt(value));
+}
+
+ElementBuilder& ElementBuilder::attr(const char* key, uint64_t value) {
+    return attr(key, builder_->createUInt64(value));
+}
+
 ElementBuilder& ElementBuilder::attr(const char* key, double value) {
     return attr(key, builder_->createFloat(value));
 }
@@ -436,6 +462,14 @@ ElementBuilder& ElementBuilder::attr(String* key, const char* value) {
 
 ElementBuilder& ElementBuilder::attr(String* key, int64_t value) {
     return attr(key, builder_->createInt(value));
+}
+
+ElementBuilder& ElementBuilder::attr(String* key, int32_t value) {
+    return attr(key, builder_->createInt(value));
+}
+
+ElementBuilder& ElementBuilder::attr(String* key, uint64_t value) {
+    return attr(key, builder_->createUInt64(value));
 }
 
 ElementBuilder& ElementBuilder::attr(String* key, double value) {
@@ -567,6 +601,10 @@ MapBuilder& MapBuilder::put(const char* key, int64_t value) {
     return put(key, builder_->createLong(value));
 }
 
+MapBuilder& MapBuilder::put(const char* key, uint64_t value) {
+    return put(key, builder_->createUInt64(value));
+}
+
 MapBuilder& MapBuilder::put(const char* key, double value) {
     return put(key, builder_->createFloat(value));
 }
@@ -586,6 +624,10 @@ MapBuilder& MapBuilder::put(String* key, const char* value) {
 
 MapBuilder& MapBuilder::put(String* key, int64_t value) {
     return put(key, builder_->createInt(value));
+}
+
+MapBuilder& MapBuilder::put(String* key, uint64_t value) {
+    return put(key, builder_->createUInt64(value));
 }
 
 MapBuilder& MapBuilder::put(String* key, double value) {
@@ -637,6 +679,14 @@ ArrayBuilder& ArrayBuilder::append(const char* str) {
 
 ArrayBuilder& ArrayBuilder::append(int64_t value) {
     return append(builder_->createInt(value));
+}
+
+ArrayBuilder& ArrayBuilder::append(int32_t value) {
+    return append(builder_->createInt(value));
+}
+
+ArrayBuilder& ArrayBuilder::append(uint64_t value) {
+    return append(builder_->createUInt64(value));
 }
 
 ArrayBuilder& ArrayBuilder::append(double value) {
@@ -703,7 +753,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
         return is_pointer_in_arena_chain((void*)item.double_ptr);
 
     // Pointer types - check arena ownership
-    case LMD_TYPE_INT64:  case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_INT64:  case LMD_TYPE_UINT64:  case LMD_TYPE_DECIMAL:
     case LMD_TYPE_STRING:  case LMD_TYPE_BINARY:  case LMD_TYPE_DTIME:
         return is_pointer_in_arena_chain((void*)item.string_ptr);
 
@@ -825,6 +875,9 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         return item;
     } else if constexpr (Tag == LMD_TYPE_INT64) {
         return createLong(typed.value());
+    } else if constexpr (Tag == LMD_TYPE_UINT64) {
+        // uint64 is pointer-backed, so decode its payload instead of using the inline-value API.
+        return createUInt64(typed.raw().get_uint64());
     } else if constexpr (Tag == LMD_TYPE_FLOAT) {
         // Float Items may be self-tagged inline values; never assume pointer storage.
         return createFloat(typed.value());
@@ -845,7 +898,7 @@ Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
         return {.item = x2it(copied)};
     } else if constexpr (Tag == LMD_TYPE_DTIME) {
         DateTime* dt = typed.ptr();
-        return dt ? push_k(*dt) : ItemNull;
+        return dt ? createDateTime(*dt) : ItemNull;
     } else if constexpr (Tag == LMD_TYPE_DECIMAL) {
         // Use centralized decimal_deep_copy function
         return decimal_deep_copy(item, arena_, false);

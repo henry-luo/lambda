@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "../lambda/lambda.hpp"
+#include "../lambda/lambda-data.hpp"
 #include "../lambda/js/js_runtime.h"
 
 extern "C" {
@@ -74,7 +75,7 @@ TEST(ItemRepresentation, SharedMasksKeepSentinelsOutOfDoubleSpace) {
     EXPECT_EQ((uint8_t)(ITEM_FLOAT_N0 >> 56), LMD_TYPE_FLOAT);
 }
 
-TEST(ItemRepresentation, Int64AlwaysUsesPointerBackedNumberHome) {
+TEST(ItemRepresentation, Int64AlwaysUsesPointerBackedPayload) {
     const int64_t values[] = {
         INT64_MIN + 1, INT56_MIN, -1, 0, 1, INT56_MAX, INT64_MAX,
     };
@@ -87,7 +88,7 @@ TEST(ItemRepresentation, Int64AlwaysUsesPointerBackedNumberHome) {
     }
 }
 
-TEST(ItemRepresentation, Uint64AlwaysUsesPointerBackedNumberHome) {
+TEST(ItemRepresentation, Uint64AlwaysUsesPointerBackedPayload) {
     const uint64_t values[] = {0, 1, (uint64_t)INT64_MAX, UINT64_MAX};
     for (const uint64_t& value : values) {
         Item item = {.item = u2it(&value)};
@@ -95,6 +96,42 @@ TEST(ItemRepresentation, Uint64AlwaysUsesPointerBackedNumberHome) {
         EXPECT_EQ((const uint64_t*)(uintptr_t)item.uint64_ptr, &value);
         EXPECT_EQ(item.get_uint64(), value);
     }
+}
+
+TEST(ItemRepresentation, Uint64DeepEqualityUsesPayloadValue) {
+    uint64_t same_left = UINT64_MAX;
+    uint64_t same_right = UINT64_MAX;
+    uint64_t different = UINT64_MAX - 1;
+
+    Item left = {.item = u2it(&same_left)};
+    Item right = {.item = u2it(&same_right)};
+    Item other = {.item = u2it(&different)};
+
+    EXPECT_TRUE(item_deep_equal(left, right));
+    EXPECT_FALSE(item_deep_equal(left, other));
+}
+
+TEST(ItemRepresentation, MapOwnedWideScalarsPreserveOwnerStorage) {
+    int64_t int64_field = INT64_MIN;
+    uint64_t uint64_field = UINT64_MAX;
+    Item int64_item = map_field_to_item(&int64_field, LMD_TYPE_INT64);
+    Item uint64_item = map_field_to_item(&uint64_field, LMD_TYPE_UINT64);
+
+    EXPECT_EQ((int64_t*)(uintptr_t)int64_item.int64_ptr, &int64_field);
+    EXPECT_EQ((uint64_t*)(uintptr_t)uint64_item.uint64_ptr, &uint64_field);
+
+    TypedItem typed_int64 = {};
+    typed_int64.type_id = LMD_TYPE_INT64;
+    typed_int64.long_val = INT64_MAX;
+    TypedItem typed_uint64 = {};
+    typed_uint64.type_id = LMD_TYPE_UINT64;
+    typed_uint64.uint64_val = UINT64_MAX;
+    int64_item = map_field_to_item(&typed_int64, LMD_TYPE_ANY);
+    uint64_item = map_field_to_item(&typed_uint64, LMD_TYPE_ANY);
+
+    EXPECT_EQ((int64_t*)(uintptr_t)int64_item.int64_ptr, &typed_int64.long_val);
+    EXPECT_EQ((uint64_t*)(uintptr_t)uint64_item.uint64_ptr,
+              &typed_uint64.uint64_val);
 }
 
 TEST(ItemRepresentation, ArrayOwnedCopyRebasesWideScalarPayloads) {

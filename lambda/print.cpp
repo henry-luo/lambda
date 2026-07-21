@@ -516,6 +516,9 @@ struct PrintItemVisitor {
             print_double(sb, array->float_items[flat_idx]);
         } else if (et == ELEM_INT || et == ELEM_INT64) {
             strbuf_append_format(sb, "%lld", array->items[flat_idx]);
+        } else if (et == ELEM_UINT64) {
+            // Printing an owner-backed lane must not consume transient number homes.
+            strbuf_append_format(sb, "%" PRIu64, ((uint64_t*)array->data)[flat_idx]);
         } else {
             Item val = array_num_read_borrowed_item(array, flat_idx);
             print_item(sb, val, depth + 1, indent);
@@ -570,6 +573,12 @@ struct PrintItemVisitor {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_str(strbuf, ", ");
                 strbuf_append_format(strbuf, "%lld", array->items[i]);
+            }
+        } else if (et == ELEM_UINT64) {
+            // Printing an owner-backed lane must not consume transient number homes.
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_str(strbuf, ", ");
+                strbuf_append_format(strbuf, "%" PRIu64, ((uint64_t*)array->data)[i]);
             }
         } else {
             // compact sized types: read and print each element

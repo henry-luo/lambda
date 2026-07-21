@@ -29,9 +29,7 @@ static void format_html_attr_value(HtmlContext& ctx, const ItemReader& value) {
     if (value.isString()) {
         String* str = value.asString();
         if (str) format_html_string_safe(ctx.output(), str, true);
-    } else if (value.isInt()) {
-        format_number(ctx.output(), value.item());
-    } else if (value.isFloat()) {
+    } else if (value.isNumber()) {
         format_number(ctx.output(), value.item());
     } else if (value.isBool()) {
         ctx.emit("%b", value.asBool());
@@ -295,7 +293,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                 if (value.asBool()) {
                     stringbuf_append_format(ctx.output(), " %.*s", field_name_len, field_name);
                 }
-            } else if (value.isString() || value.isInt() || value.isFloat() ||
+            } else if (value.isString() || value.isNumber() ||
                        value.isBool() || value.isSymbol()) {
                 stringbuf_append_format(ctx.output(), " %.*s=\"", field_name_len, field_name);
                 format_html_attr_value(ctx, value);

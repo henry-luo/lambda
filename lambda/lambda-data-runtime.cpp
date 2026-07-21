@@ -863,6 +863,9 @@ void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
         case LMD_TYPE_INT64:
             dval = (double)(value.get_int64());
             break;
+        case LMD_TYPE_UINT64:
+            dval = (double)(value.get_uint64());
+            break;
         case LMD_TYPE_INT:
             dval = (double)(value.get_int56());
             break;
@@ -882,6 +885,11 @@ static int64_t item_to_int_value(Item value) {
     return it2i(value);
 }
 
+// helper: preserve all 64 payload bits when storing into an unsigned lane
+static uint64_t item_to_uint64_value(Item value) {
+    return it2u(value);
+}
+
 // helper: extract any numeric Item as double for compact float store
 static double item_to_float_value(Item value) {
     if (get_type_id(value) == LMD_TYPE_BOOL) return value.bool_val ? 1.0 : 0.0;
@@ -890,7 +898,7 @@ static double item_to_float_value(Item value) {
 
 static bool item_is_integer_typed_array_source(Item value) {
     TypeId tid = get_type_id(value);
-    if (is_integer_type_id(tid) || tid == LMD_TYPE_BOOL) return true;
+    if (is_integer_type_id(tid) || tid == LMD_TYPE_UINT64 || tid == LMD_TYPE_BOOL) return true;
     if (tid != LMD_TYPE_NUM_SIZED) return false;
     NumSizedType st = value.get_num_type();
     return st != NUM_FLOAT16 && st != NUM_FLOAT32;
@@ -912,7 +920,7 @@ extern "C" Item coerce_num_sized(Item value, int64_t num_type_int) {
 }
 
 extern "C" Item coerce_uint64(Item value) {
-    return box_uint64_value((uint64_t)item_to_int_value(value));
+    return box_uint64_value(item_to_uint64_value(value));
 }
 
 double array_num_get_number_value(ArrayNum *arr, int64_t index) {
@@ -1139,14 +1147,16 @@ void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
         ((float*)arr->data)[index] = (float)item_to_float_value(value);
         break;
     case ELEM_UINT64:
-        ((uint64_t*)arr->data)[index] = (uint64_t)item_to_int_value(value);
+        // Signed extraction is implementation-defined above INT64_MAX; use the
+        // unsigned boundary helper so the complete u64 domain is preserved.
+        ((uint64_t*)arr->data)[index] = item_to_uint64_value(value);
         break;
     case ELEM_BOOL: {
         TypeId vt = get_type_id(value);
         uint8_t b;
         if (vt == LMD_TYPE_BOOL) {
             b = (value.bool_val == BOOL_TRUE) ? 1 : 0;
-        } else if (is_integer_type_id(vt)) {
+        } else if (is_integer_type_id(vt) || vt == LMD_TYPE_UINT64) {
             b = item_to_int_value(value) ? 1 : 0;
         } else if (vt == LMD_TYPE_FLOAT) {
             b = item_to_float_value(value) != 0.0 ? 1 : 0;
@@ -1264,13 +1274,23 @@ static bool row_summary(Item it, ArrayNumElemType* etype_out, int64_t* len_out, 
         // float actually requires a wider semantic lane.
         bool any_float = false;
         bool any_int64 = false;
+        bool any_uint64 = false;
+        int64_t uint64_count = 0;
         for (int64_t i = 0; i < a->length; i++) {
             TypeId it_tid = get_type_id(a->items[i]);
             if (it_tid == LMD_TYPE_FLOAT) any_float = true;
             else if (it_tid == LMD_TYPE_INT64) any_int64 = true;
+            else if (it_tid == LMD_TYPE_UINT64) {
+                any_uint64 = true;
+                uint64_count++;
+            }
             else if (it_tid != LMD_TYPE_INT) return false;
         }
-        *etype_out = any_float ? ELEM_FLOAT64 : any_int64 ? ELEM_INT64 : ELEM_INT;
+        // Mixed signed/unsigned rows remain boxed; a compact lane must retain
+        // one stable element type for every source value.
+        if (any_uint64 && uint64_count != a->length) return false;
+        *etype_out = any_float ? ELEM_FLOAT64 : any_int64 ? ELEM_INT64 :
+            any_uint64 ? ELEM_UINT64 : ELEM_INT;
         *len_out = a->length;
         *is_arr_num = false;
         return true;
@@ -1355,6 +1375,12 @@ static ArrayNum* try_promote_to_ndim(Array* arr) {
             ArrayNumElemType e2; int64_t l2; bool an2;
             if (!row_summary(arr->items[i], &e2, &l2, &an2)) return NULL;
             if (l2 != inner_len) return NULL;
+            // u64 is a distinct sized lane. Do not make N-D promotion depend on
+            // row order or silently coerce it into a signed/float lane.
+            if (etype == ELEM_UINT64 || e2 == ELEM_UINT64) {
+                if (e2 != etype) return NULL;
+                continue;
+            }
             // widen to float if any row is float
             if (e2 == ELEM_FLOAT64) any_float = true;
             else if (e2 == ELEM_INT64) any_int64 = true;
@@ -1390,6 +1416,8 @@ static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
     int64_t n = arr->length;
     bool any_float = false;
     bool any_int64 = false;
+    bool any_uint64 = false;
+    int64_t uint64_count = 0;
     bool any_sized = false;
     bool mixed_sized = false;
     NumSizedType sized_type = NUM_INT8;
@@ -1403,6 +1431,8 @@ static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
             any_float = true; num_count++;
         } else if (t == LMD_TYPE_INT64) {
             any_int64 = true; num_count++;
+        } else if (t == LMD_TYPE_UINT64) {
+            any_uint64 = true; uint64_count++; num_count++;
         } else if (t == LMD_TYPE_NUM_SIZED) {
             NumSizedType st = arr->items[i].get_num_type();
             if (!any_sized) sized_type = st;
@@ -1426,8 +1456,9 @@ static ArrayNum* try_promote_scalars_to_1d(Array* arr) {
             if (mixed_sized || sized_count != n) return NULL;
             et = num_sized_to_elem_type(sized_type);
         } else {
-            if (any_float && any_int64) return NULL;
-            et = any_float ? ELEM_FLOAT64 : any_int64 ? ELEM_INT64 : ELEM_INT;
+            if ((any_float && any_int64) || (any_uint64 && uint64_count != n)) return NULL;
+            et = any_float ? ELEM_FLOAT64 : any_int64 ? ELEM_INT64 :
+                any_uint64 ? ELEM_UINT64 : ELEM_INT;
         }
     }
     else return NULL;
@@ -2836,7 +2867,8 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         ArrayNumElemType et = arr->get_elem_type();
         if ((element_type_id == LMD_TYPE_INT && et == ELEM_INT) ||
             (element_type_id == LMD_TYPE_FLOAT && et == ELEM_FLOAT64) ||
-            (element_type_id == LMD_TYPE_INT64 && et == ELEM_INT64)) {
+            (element_type_id == LMD_TYPE_INT64 && et == ELEM_INT64) ||
+            (element_type_id == LMD_TYPE_UINT64 && et == ELEM_UINT64)) {
             return (void*)arr;
         }
     }
@@ -2881,6 +2913,13 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             }
             return typed;
         }
+        else if (element_type_id == LMD_TYPE_UINT64) {
+            ArrayNum* typed = array_num_new(ELEM_UINT64, length);
+            for (int64_t i = 0; i < length; i++) {
+                ((uint64_t*)typed->data)[i] = item_to_uint64_value(array_num_get(src, i));
+            }
+            return typed;
+        }
     }
 
     // convert generic Array/List to typed array (Array and List are the same struct)
@@ -2908,7 +2947,8 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_FLOAT && elem_tid != LMD_TYPE_INT &&
-                    elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_DECIMAL &&
+                    elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_UINT64 &&
+                    elem_tid != LMD_TYPE_DECIMAL &&
                     elem_tid != LMD_TYPE_BOOL && elem_tid != LMD_TYPE_NUM_SIZED) {
                     log_error("ensure_typed_array: element %lld has type %s, expected float", i, get_type_name(elem_tid));
                     return NULL;
@@ -2931,6 +2971,19 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                 // boxed sized numerics carry their value in NUM_SIZED payload bits,
                 // not the compact-int slot; decode before widening to int64[].
                 typed->items[i] = item_to_int_value(items[i]);
+            }
+            return typed;
+        }
+        else if (element_type_id == LMD_TYPE_UINT64) {
+            ArrayNum* typed = array_num_new(ELEM_UINT64, length);
+            for (int64_t i = 0; i < length; i++) {
+                TypeId elem_tid = get_type_id(items[i]);
+                if (!item_is_integer_typed_array_source(items[i])) {
+                    log_error("ensure_typed_array: element %lld has type %s, expected uint64",
+                        i, get_type_name(elem_tid));
+                    return NULL;
+                }
+                ((uint64_t*)typed->data)[i] = item_to_uint64_value(items[i]);
             }
             return typed;
         }

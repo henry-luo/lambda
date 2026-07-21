@@ -48,7 +48,7 @@ This is a **high-byte tag scheme, not NaN-boxing**. It works because user-space 
 Boxing is the act of turning a native C value (an `int64_t`, a `double`, a `String*`) into a tagged `Item`; unboxing is the reverse. The rules:
 
 - **Inline scalars are never heap-allocated.** `bool` → `b2it` (`lambda.h:874`); `int` → `i2it` with a range check that degrades overflow to `ITEM_ERROR` (`:879`); sized numerics → the `*_to_item` `NUM_SIZED` packers (`:224`).
-- **Numeric temporaries (`int64`, `uint64`, and out-of-band double) use the raw number execution side-stack.** `box_int64_value`/`box_uint64_value` and the rare `push_d` residue reserve activation-owned words. Generated Item returns copy into caller-donated homes; retaining containers/environments copy into storage-owned tails. `DateTime` is deliberately excluded and `push_k` allocates a GC-owned object. [LR_08](LR_08_Memory_and_GC.md) owns the lifetime rules and the counted ownerless-persistence fallback.
+- **Numeric temporaries (`int64`, `uint64`, and out-of-band double) use the raw number execution side-stack.** `box_int64_value`/`box_uint64_value` and the rare `push_d` residue reserve activation-owned words. Generated Item returns copy into caller-donated homes; retaining containers/environments copy into storage-owned tails. `DateTime` is deliberately excluded: `push_k` allocates dynamic values in GC storage, while `MarkBuilder` owns static parser values in the `Input` arena. [LR_08](LR_08_Memory_and_GC.md) owns the lifetime rules and the counted ownerless-persistence fallback.
 - **Strings, symbols and decimals** are heap- or pool-allocated and GC-managed; boxing is a pure tag-OR (`s2it`/`y2it`/`c2it`), and a NULL pointer always boxes to `ITEM_NULL`.
 - **Containers never box or unbox** — the pointer *is* the Item (`p2it`, `it2map`, …); `type_id()` recovers the tag by dereferencing.
 - **Float double-box guard.** `push_d_safe` recognizes canonical self-tagged or pointer-backed float Items before falling back to `push_d`. Full-width integer boxing uses the explicit `box_int64_value`/`box_uint64_value` paths; datetime uses `push_k`. Generated lowering must track these representations rather than guessing from raw high bytes.
@@ -104,7 +104,7 @@ A **second, parallel type vocabulary** (a `TypeSchema`/`SchemaTypeId` "unified s
 
 - **High-byte tagging over NaN-boxing.** Putting the `TypeId` in the top byte and the value/pointer in the low 56 bits keeps container Items pointer-identical (free pass-through, directly GC-scannable) and lets one `type_id()` rule cover scalars, tagged pointers, and containers. The cost is a hard reliance on 48-bit pointers and on container TypeIds sorting above `LMD_TYPE_RANGE`.
 - **Safe-band inline integers.** Plain `int` avoids allocation inside ±(2⁵³−1). Arithmetic overflow promotes to float, not `int64`; boundary results may round. `int64` is an explicit sized type with its own tag and home.
-- **Frame-scoped numeric homes.** Out-of-band double and full-width signed/unsigned integer temporaries use a raw bump side-stack. Caller homes and destination-owned tails handle escapes. Datetime is always GC-owned ([LR_08](LR_08_Memory_and_GC.md)).
+- **Frame-scoped numeric homes.** Out-of-band double and full-width signed/unsigned integer temporaries use a raw bump side-stack. Caller homes and destination-owned tails handle escapes. Datetime is never activation-backed: dynamic values are GC-owned and static Mark values are Input-arena-owned ([LR_08](LR_08_Memory_and_GC.md)).
 - **Element = List + Map in one struct.** Markup nodes act as both ordered children and keyed attributes without a wrapper, matching XML/HTML/Mark directly.
 - **Shape chain + inline hash table.** The chain is the authoritative ordered field list (cheap to extend, last-writer-wins); the fixed hash table accelerates the overwhelmingly-common small-map lookup, with a pool-owned dynamic table for large maps. Interned names give pointer-equality fast paths.
 - **VMap behind a vtable.** Alternate map representations are hidden from the language, which always sees `"map"`.
@@ -134,7 +134,7 @@ A **second, parallel type vocabulary** (a `TypeSchema`/`SchemaTypeId` "unified s
 | `lambda/lambda-data.hpp` | `Type*` family, `ShapeEntry`/`TypeMap`/`TypeElmt`/`TypeObject`, `JsAccessorPair`/JSPD flags, `TypeInfo`, type singleton externs. |
 | `lambda/lambda-data.cpp` | Scalar unbox (`it2d`/`it2b`/`it2i`/`it2l`/`it2s`), type singletons + `init_typetype()`, `item_deep_equal`, push/splice. |
 | `lambda/lambda-data-runtime.cpp` | Container element reads with boundary boxing (`array_num_get`, `map_get`, `elmt_get`), for-loop iterators, `ensure_typed_array`. |
-| `lambda/lambda-mem.cpp`, `lambda/lambda-data.cpp` | Number homes for full-width integers/out-of-band doubles, caller-home adoption and persistent rehoming; GC-owned datetime construction via `push_k`. |
+| `lambda/lambda-mem.cpp`, `lambda/lambda-data.cpp`, `lambda/mark_builder.cpp` | Number homes for full-width integers/out-of-band doubles, caller-home adoption and persistent rehoming; dynamic-GC and static-Input-arena datetime construction. |
 | `lambda/vmap.cpp` | `VMap` vtable-backed virtual map. |
 
 ## Appendix B — Related documents

@@ -3,7 +3,7 @@
 **Status:** implemented optimization record. Scalar representation details are
 amended to the current `vibe/Lambda_Design_Stack_API.md` Phase 7 contract:
 typed fields own raw `INT64`/`UINT64` payloads, generic owner layouts provide
-numeric sidecars, and `DTIME` fields retain a GC-owned datetime pointer rather
+numeric sidecars, and `DTIME` fields retain an owner-backed datetime pointer rather
 than embedding the datetime payload. Historical implementation notes below are
 labelled where their old storage assumption matters.
 
@@ -116,7 +116,7 @@ push_d(((_type_Point*)v->data)->x)  // zero-cost: known offset, known type
 | `string` | `s2it(st->field)` | Tag pointer |
 | `symbol` | `y2it(st->field)` | Tag pointer |
 | `decimal` | `c2it(st->field)` | Tag pointer |
-| `datetime` | `k2it(st->field)` | Preserve the GC-owned datetime pointer |
+| `datetime` | `k2it(st->field)` | Preserve the dynamic-GC or static-Input-arena datetime pointer |
 | container types | `{.container = st->field}` | Direct pointer, no boxing |
 
 Where `st` is `((_type_Point*)map_ptr->data)`.
@@ -554,7 +554,7 @@ Map literals with known shapes now bypass `map_fill()` (which uses va_list + per
 4. **Historical DateTime value-field fix (superseded by Phase 7)** — This phase
    changed an Item pointer into an embedded `DateTime` word. The current
    contract deliberately does the opposite: the packed field stores the
-   GC-owned datetime pointer/Item, and consumers use datetime accessors without
+   owner-backed datetime pointer/Item, and consumers use datetime accessors without
    assuming a one-word object layout.
 
 5. **`resolve_field_type_id` crash on anonymous maps** — Function blindly cast `Type*` with `type_id == LMD_TYPE_TYPE` to `TypeType*` and accessed `->type`. Anonymous map shape entries store plain `Type` structs (smaller than `TypeType`), causing out-of-bounds memory access. **Fix**: Added `unwrap_type_type` parameter; only unwrap for named types (where shape entries are proper `TypeType` structs).

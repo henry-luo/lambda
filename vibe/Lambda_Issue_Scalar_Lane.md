@@ -4,7 +4,8 @@
 > full-width scalar realignment. Its inline-`INT64` classifications and
 > `DTIME` scalar-lane cases are historical. Current storage/return rules are in
 > `vibe/Lambda_Design_Stack_API.md` Phase 7: `INT64`/`UINT64` use caller-donated
-> homes without an inline form, and `DTIME` uses the ordinary GC-owned Item ABI.
+> homes without an inline form, while `DTIME` uses the ordinary owner-backed
+> Item ABI (dynamic GC or static Mark Input arena).
 
 **Status:** IMPLEMENTED 2026-07-16 — core correctness gates green; one
 parallel-load Node timeout and comparative release profiling remain follow-up

@@ -164,7 +164,9 @@ public:
     bool isNull() const;
     bool isString() const;
     bool isSymbol() const;
+    bool isNumber() const;
     bool isInt() const;
+    bool isUInt64() const;
     bool isFloat() const;
     bool isBool() const;
     bool isElement() const;
@@ -177,6 +179,7 @@ public:
     String* asString() const;
     Symbol* asSymbol() const;  // Returns the Symbol* pointer
     int64_t asInt() const;
+    uint64_t asUInt64() const;
     int32_t asInt32() const;
     double asFloat() const;
     bool asBool() const;

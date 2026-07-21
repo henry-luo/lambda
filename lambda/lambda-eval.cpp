@@ -5401,6 +5401,16 @@ static void convert_specialized_to_generic(Array* arr) {
                 extra_count++;
             }
             arr->extra = extra_count;
+        } else if (etype == ELEM_UINT64) {
+            uint64_t* old_items = (uint64_t*)num_arr->data;
+            int64_t extra_count = 0;
+            for (int64_t i = 0; i < len; i++) {
+                uint64_t* slot = (uint64_t*)(new_items + (new_capacity - extra_count - 1));
+                *slot = old_items[i];
+                new_items[i] = {.item = u2it(slot)};
+                extra_count++;
+            }
+            arr->extra = extra_count;
         } else {
             // ELEM_INT: int56 values pack directly into Item
             int64_t* old_items = num_arr->items;
@@ -5474,6 +5484,8 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
                 num_arr->float_items[index] = (double)value.get_int56();
             } else if (val_type == LMD_TYPE_INT64) {
                 num_arr->float_items[index] = (double)value.get_int64();
+            } else if (val_type == LMD_TYPE_UINT64) {
+                num_arr->float_items[index] = (double)value.get_uint64();
             } else {
                 convert_specialized_to_generic(arr);
                 array_set(arr, index, value);
@@ -5484,6 +5496,17 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
             } else if (val_type == LMD_TYPE_INT) {
                 num_arr->items[index] = (int64_t)value.get_int56();
             } else {
+                convert_specialized_to_generic(arr);
+                array_set(arr, index, value);
+            }
+        } else if (etype == ELEM_UINT64) {
+            if (val_type == LMD_TYPE_UINT64) {
+                ((uint64_t*)num_arr->data)[index] = value.get_uint64();
+            } else if (val_type == LMD_TYPE_INT) {
+                ((uint64_t*)num_arr->data)[index] = (uint64_t)value.get_int56();
+            } else {
+                // Preserve the old elements as owner-backed u64 Items before
+                // widening an inferred typed array to a heterogeneous array.
                 convert_specialized_to_generic(arr);
                 array_set(arr, index, value);
             }

@@ -208,7 +208,9 @@ public:
      */
     Item createInt(int64_t value);  // accepts int64, packs as int56
     Item createLong(int64_t value);
+    Item createUInt64(uint64_t value);
     Item createFloat(double value);
+    Item createDateTime(DateTime value);
     Item createBool(bool value);
     Item createNull();
 
@@ -375,6 +377,12 @@ public:
      */
     ElementBuilder& attr(const char* key, int64_t value);
 
+    // Keep ordinary integer literals unambiguous between signed and unsigned overloads.
+    ElementBuilder& attr(const char* key, int32_t value);
+
+    // Put key-value pair with uint64_t value
+    ElementBuilder& attr(const char* key, uint64_t value);
+
     /**
      * Set attribute with float value (convenience)
      */
@@ -400,6 +408,11 @@ public:
      * Set attribute with String* key and integer value
      */
     ElementBuilder& attr(String* key, int64_t value);
+
+    ElementBuilder& attr(String* key, int32_t value);
+
+    // Put key-value pair with uint64_t value
+    ElementBuilder& attr(String* key, uint64_t value);
 
     /**
      * Set attribute with String* key and float value
@@ -501,6 +514,9 @@ public:
     // Put key-value pair with int64_t value
     MapBuilder& put(const char* key, int64_t value);
 
+    // Put key-value pair with uint64_t value
+    MapBuilder& put(const char* key, uint64_t value);
+
     // Put key-value pair with int32_t value
     MapBuilder& put(const char* key, int32_t value);
 
@@ -524,6 +540,9 @@ public:
      * Put key-value pair with String* key and integer value
      */
     MapBuilder& put(String* key, int64_t value);
+
+    // Put key-value pair with String* key and uint64_t value
+    MapBuilder& put(String* key, uint64_t value);
 
     /**
      * Put key-value pair with String* key and float value
@@ -601,6 +620,10 @@ public:
      * Append integer value (convenience)
      */
     ArrayBuilder& append(int64_t value);
+
+    ArrayBuilder& append(int32_t value);
+
+    ArrayBuilder& append(uint64_t value);
 
     /**
      * Append float value (convenience)

@@ -21,7 +21,7 @@ static void xml_emit_attr_value(XmlContext& ctx, const ItemReader& value) {
         if (str) {
             format_xml_string(ctx, str, true);
         }
-    } else if (value.isInt() || value.isFloat()) {
+    } else if (value.isNumber()) {
         format_number_compact(ctx.output(), value.item());
     } else if (value.isBool()) {
         ctx.emit("%b", value.asBool());
@@ -53,7 +53,7 @@ static void format_map_reader(XmlContext& ctx, const MapReader& map_reader, cons
     const char* key;
     ItemReader value;
     while (iter.next(&key, &value)) {
-        if (value.isString() || value.isInt() || value.isFloat() || value.isBool()) {
+        if (value.isString() || value.isNumber() || value.isBool()) {
             ctx.emit(" %N=\"", key);
             xml_emit_attr_value(ctx, value);
             ctx.write_char('"');

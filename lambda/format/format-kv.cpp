@@ -123,8 +123,8 @@ static void format_kv_item(KeyValueContext& ctx, const ItemReader& item,
                 if (!first) ctx_.write_char(',');
                 first = false;
 
-                if (arr_item.isNull() || arr_item.isBool() || arr_item.isInt() ||
-                    arr_item.isFloat() || arr_item.isString()) {
+                if (arr_item.isNull() || arr_item.isBool() || arr_item.isNumber() ||
+                    arr_item.isString()) {
                     format_kv_item(ctx_, arr_item, cfg_);
                 } else {
                     ctx_.write_text("[complex]");
@@ -249,8 +249,7 @@ static String* format_kv(Pool* pool, Item root_item, const KeyValueFormatConfig*
             }
         }
     }
-    else if (root.isNull() || root.isBool() || root.isInt() ||
-             root.isFloat() || root.isString()) {
+    else if (root.isNull() || root.isBool() || root.isNumber() || root.isString()) {
         // single scalar → value=...
         ctx.write_text("value=");
         format_kv_item(ctx, root, cfg);

@@ -25,8 +25,8 @@ Every runtime builtin reaches its allocators, its GC heap, and its error slot th
 
 `EvalContext` (`lambda-data.hpp:77`) extends the slim `struct Context` (`lambda.h:1177`, which carries `pool`, `arena`, `consts`, `type_list`, `cwd`, `stack_limit`, `ui_mode`) with the runtime-only fields:
 
-- `Heap* heap` (`:78`) — the GC heap that backs strings, decimals, datetimes, errors, and containers; reached by the builtins via `heap_alloc`/`heap_strcpy` and by the JIT prologue via the `heap->gc` offset ([LR_07 §Known Issues #14](LR_07_MIR_Transpiler_JIT.md#known-issues--future-improvements)).
-- Numeric temporaries (`int64`, `uint64`, and out-of-band `double`) are **not** an `EvalContext` field: they use the per-thread number execution side-stack owned by `lambda-mem.cpp`, watermark-scoped to the executing frame and distinct from the GC data nursery. `DateTime` is always a GC-owned object created by `push_k` ([LR_03](LR_03_Value_and_Type_Model.md), [LR_08](LR_08_Memory_and_GC.md)).
+- `Heap* heap` (`:78`) — the GC heap that backs dynamically produced strings, decimals, datetimes, errors, and containers; reached by the builtins via `heap_alloc`/`heap_strcpy` and by the JIT prologue via the `heap->gc` offset ([LR_07 §Known Issues #14](LR_07_MIR_Transpiler_JIT.md#known-issues--future-improvements)). Static Mark values retain their separate Input ownership.
+- Numeric temporaries (`int64`, `uint64`, and out-of-band `double`) are **not** an `EvalContext` field: they use the per-thread number execution side-stack owned by `lambda-mem.cpp`, watermark-scoped to the executing frame and distinct from the GC data nursery. Runtime `DateTime` objects are GC-owned through `push_k`; static input-parser Mark values are owned by their `Input` arena ([LR_03](LR_03_Value_and_Type_Model.md), [LR_08](LR_08_Memory_and_GC.md)).
 - `mpd_context_t* decimal_ctx` (`:84`) — the libmpdec context used by decimal arithmetic ([LR_04](LR_04_Numbers_Decimal_DateTime.md)).
 - `void* type_info` (`:82`) and `Item result` (`:83`) — the base-type metadata and the final execution result.
 - `ArrayList* debug_info` (`:88`), `const char* current_file` (`:89`), `LambdaError* last_error` (`:90`) — the error/stack-trace state. `set_runtime_error` (`lambda-eval.cpp:75`) builds a `LambdaError` against `current_file`, captures a native stack trace via `err_capture_stack_trace(context->debug_info, 32)`, frees any prior `last_error`, and stores the new one. The stack-trace machinery is detailed in [LR_10](LR_10_Error_Handling.md).
@@ -155,7 +155,7 @@ The one table feeds two unrelated consumers.
 ## Appendix B — Related documents
 
 - [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md) — the tagged `Item` and `Container` representation the builtins operate on; representation-sensitive equality.
-- [LR_04 — Numbers, Decimal & DateTime](LR_04_Numbers_Decimal_DateTime.md) — the numeric tower (`fn_add`/`fn_div`/promotion), decimal, and the GC-owned DateTime Items the constructors build.
+- [LR_04 — Numbers, Decimal & DateTime](LR_04_Numbers_Decimal_DateTime.md) — the numeric tower (`fn_add`/`fn_div`/promotion), decimal, and owner-backed DateTime Items.
 - [LR_05 — Strings, Symbols & Vectors](LR_05_Strings_and_Vectors.md) — UTF-8/normalization string semantics and the `ArrayNum`/`vec_cmp` vector engine the comparison wrappers dispatch into.
 - [LR_07 — The MIR Direct Transpiler & JIT](LR_07_MIR_Transpiler_JIT.md) — how `transpile_call` reads `fn_info` and how `mir.c`'s `import_resolver` binds emitted calls to `func_ptr`.
 - [LR_10 — Error Handling](LR_10_Error_Handling.md) — the `LambdaError` model, error codes, stack traces, and the compile-time `?`/`^err` half of error handling.

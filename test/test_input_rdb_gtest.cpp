@@ -29,6 +29,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/lambda-decimal.hpp"
 #include "../lambda/mark_reader.hpp"
+#include "../lib/arena.h"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
 
@@ -413,6 +414,9 @@ TEST_F(InputRdbTest, ValueConversion_Datetime) {
 
     ItemReader dt = prod0.get("created_at");
     EXPECT_TRUE(dt.isDatetime());
+    DateTime* datetime_ptr = dt.item().get_datetime_ptr();
+    ASSERT_NE(datetime_ptr, nullptr);
+    EXPECT_TRUE(arena_owns(input->arena, datetime_ptr));
     DateTime dtime = dt.asDatetime();
     EXPECT_EQ(DATETIME_GET_YEAR(&dtime), 2024);
     EXPECT_EQ(DATETIME_GET_MONTH(&dtime), 1u);

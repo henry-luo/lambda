@@ -18,7 +18,7 @@ There are three principal storage classes:
 | Storage class | Representative values | Where the type comes from | Payload access |
 |---|---|---|---|
 | Inline tagged value | null, bool, compact `int`, sized numerics, canonical common doubles | high byte or canonical float bit pattern | directly from Item bits |
-| Tagged scalar/leaf pointer | string, symbol, binary, decimal, GC-owned datetime, number-home `int64`/`uint64`, out-of-band float residue | Item tag plus the scalar's ownership class | extract the payload pointer, then dereference through the canonical accessor |
+| Tagged scalar/leaf pointer | string, symbol, binary, decimal, owner-backed datetime, number-home `int64`/`uint64`, out-of-band float residue | Item tag plus the scalar's ownership class | extract the payload pointer, then dereference through the canonical accessor |
 | Raw header pointer | array, numeric array, map, object, element, range, path, function, type | first byte of the pointed-to object | the Item word is already the native pointer |
 
 The asymmetry is intentional:
@@ -455,7 +455,7 @@ These assumptions are pragmatically valid on Lambda's supported mainstream confi
 - Raw pointer classification depends on supported virtual-address behavior.
 - Eight-byte references sacrifice the memory-density advantage of V8 pointer compression.
 - Direct raw pointers constrain moving-GC and sandboxing options.
-- Ownerless persistent `DOUBLE`/`INT64`/`UINT64` still require an interim GC scalar cell until the public/foreign lifetime ABI supplies an explicit owner; `DTIME` is intentionally GC-owned.
+- Ownerless persistent `DOUBLE`/`INT64`/`UINT64` still require an interim GC scalar cell until the public/foreign lifetime ABI supplies an explicit owner; `DTIME` is intentionally object-owned, using dynamic GC or static Input-arena storage.
 - Representation-sensitive shortcuts such as raw `_type_id` reads and raw Item equality are sharp edges.
 
 ### 7.3 Assessed structural weaknesses
@@ -471,7 +471,8 @@ container extras. The inline-double work and Stack API Phase 7 retired that
 nursery split: common doubles self-tag; transient `INT64`/`UINT64` and cold
 doubles use activation/caller homes; persistent numeric destinations own their
 payloads; ownerless boundaries use a counted interim GC fallback; and `DTIME`
-is deliberately always GC-owned. The remaining weakness is narrow and visible:
+is deliberately object-owned, using dynamic GC or static Input-arena storage.
+The remaining weakness is narrow and visible:
 the ownerless numeric fallback cannot disappear until public and foreign
 Item-only boundaries acquire an explicit lifetime contract.
 

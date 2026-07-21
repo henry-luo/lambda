@@ -166,6 +166,7 @@ int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
     TypeId nid = type->nested->type_id;
     if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
     if (nid == LMD_TYPE_INT64) { shape_out[0] = type->length; *elem_type_out = ELEM_INT64; return 1; }
+    if (nid == LMD_TYPE_UINT64) { shape_out[0] = type->length; *elem_type_out = ELEM_UINT64; return 1; }
     if (nid == LMD_TYPE_FLOAT) { shape_out[0] = type->length; *elem_type_out = ELEM_FLOAT64; return 1; }
     if (nid == LMD_TYPE_NUM_SIZED) {
         shape_out[0] = type->length;

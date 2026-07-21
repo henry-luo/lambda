@@ -12,7 +12,8 @@
 > contract has canonical/self-tagged common doubles, activation/caller number
 > homes for transient `INT64`/`UINT64` and out-of-band doubles,
 > destination-owned numeric storage, an interim GC fallback only for persistent
-> ownerless numeric slots, and always-GC-owned `DTIME`. Phase 7, not the older
+> ownerless numeric slots, and owner-backed `DTIME` (dynamic GC or static
+> `MarkBuilder` Input arena). Phase 7, not the older
 > stack-boxing alternatives below, is authoritative.
 
 This document has six parts:

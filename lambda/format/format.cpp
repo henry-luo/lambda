@@ -21,6 +21,12 @@ static void format_number_impl(StringBuf* sb, Item item, bool compact_float) {
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%" PRId64, item.get_int64());
         stringbuf_append_str(sb, num_buf);
+    } else if (type == LMD_TYPE_UINT64) {
+        // Preserve the full unsigned domain instead of falling through to the
+        // unknown-number placeholder used for unsupported carriers.
+        char num_buf[32];
+        snprintf(num_buf, sizeof(num_buf), "%" PRIu64, item.get_uint64());
+        stringbuf_append_str(sb, num_buf);
     } else if (is_float_type_id(type)) {
         double d = item.get_double();
         // ItemReader can pass inline floats; get_double() handles both inline and heap encodings.

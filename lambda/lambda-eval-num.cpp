@@ -690,6 +690,41 @@ static Item vector_get(Item item, int64_t index) {
     }
 }
 
+enum NumericVectorUnaryOp {
+    NUMERIC_VECTOR_ABS,
+    NUMERIC_VECTOR_ROUND,
+    NUMERIC_VECTOR_FLOOR,
+    NUMERIC_VECTOR_CEIL,
+};
+
+static Item numeric_vector_unary_float(Item item, NumericVectorUnaryOp op,
+        const char* function_name) {
+    int64_t length = vector_length(item);
+    if (length < 0) return ItemError;
+
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> rooted_source(roots, item);
+    Rooted<ArrayNum*> rooted_result(roots, array_float_new(length));
+    for (int64_t i = 0; i < length; i++) {
+        Item element = vector_get(rooted_source.get(), i);
+        TypeId element_type = get_type_id(element);
+        if (!is_numeric_type_id(element_type)) {
+            log_error("%s: non-numeric element at index %ld, type: %d",
+                function_name, i, element_type);
+            return ItemError;
+        }
+        double value = it2d(element);
+        switch (op) {
+        case NUMERIC_VECTOR_ABS: value = fabs(value); break;
+        case NUMERIC_VECTOR_ROUND: value = round(value); break;
+        case NUMERIC_VECTOR_FLOOR: value = floor(value); break;
+        case NUMERIC_VECTOR_CEIL: value = ceil(value); break;
+        }
+        rooted_result.get()->float_items[i] = value;
+    }
+    return {.array_num = rooted_result.get()};
+}
+
 Item fn_numeric_fold(Item item, int multiply, int skip_null, int64_t* count_out) {
     GUARD_ERROR1(item);
     int64_t length = vector_length(item);
@@ -939,34 +974,7 @@ Item fn_abs(Item item) {
         return push_d(fabs(val));
     }
     else if (IS_VECTOR_TYPE(type)) {
-        int64_t len = vector_length(item);
-        if (len < 0) return ItemError;
-        if (len == 0) {
-            ArrayNum* result = array_float_new(0);
-            return { .array_num = result };
-        }
-        ArrayNum* result = array_float_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            Item elem = vector_get(item, i);
-            TypeId elem_type = get_type_id(elem);
-            if (elem_type == LMD_TYPE_INT) {
-                int64_t val = elem.get_int56();
-                result->float_items[i] = (double)(val < 0 ? -val : val);
-            } else if (elem_type == LMD_TYPE_INT64) {
-                int64_t val = elem.get_int64();
-                result->float_items[i] = (double)(val < 0 ? -val : val);
-            } else if (elem_type == LMD_TYPE_FLOAT) {
-                result->float_items[i] = fabs(elem.get_double());
-            } else if (elem_type == LMD_TYPE_NUM_SIZED) {
-                // Compact typed-array arithmetic keeps its sized lane, so unary
-                // consumers must read that representation instead of rejecting it.
-                result->float_items[i] = fabs(elem.get_num_sized_as_double());
-            } else {
-                log_error("abs: non-numeric element at index %ld, type: %d", i, elem_type);
-                return ItemError;
-            }
-        }
-        return { .array_num = result };
+        return numeric_vector_unary_float(item, NUMERIC_VECTOR_ABS, "abs");
     }
     else if (type == LMD_TYPE_DECIMAL) {
         return decimal_abs(item, context);
@@ -995,28 +1003,7 @@ Item fn_round(Item item) {
         return push_d(round(val));
     }
     else if (IS_VECTOR_TYPE(type)) {
-        int64_t len = vector_length(item);
-        if (len < 0) return ItemError;
-        if (len == 0) {
-            ArrayNum* result = array_float_new(0);
-            return { .array_num = result };
-        }
-        ArrayNum* result = array_float_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            Item elem = vector_get(item, i);
-            TypeId elem_type = get_type_id(elem);
-            if (elem_type == LMD_TYPE_INT) {
-                result->float_items[i] = (double)elem.get_int56();
-            } else if (elem_type == LMD_TYPE_INT64) {
-                result->float_items[i] = (double)elem.get_int64();
-            } else if (elem_type == LMD_TYPE_FLOAT) {
-                result->float_items[i] = round(elem.get_double());
-            } else {
-                log_error("round: non-numeric element at index %ld, type: %d", i, elem_type);
-                return ItemError;
-            }
-        }
-        return { .array_num = result };
+        return numeric_vector_unary_float(item, NUMERIC_VECTOR_ROUND, "round");
     }
     else if (type == LMD_TYPE_DECIMAL) {
         return decimal_round(item, context);
@@ -1044,28 +1031,7 @@ Item fn_floor(Item item) {
         return push_d(floor(val));
     }
     else if (IS_VECTOR_TYPE(type)) {
-        int64_t len = vector_length(item);
-        if (len < 0) return ItemError;
-        if (len == 0) {
-            ArrayNum* result = array_float_new(0);
-            return { .array_num = result };
-        }
-        ArrayNum* result = array_float_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            Item elem = vector_get(item, i);
-            TypeId elem_type = get_type_id(elem);
-            if (elem_type == LMD_TYPE_INT) {
-                result->float_items[i] = (double)elem.get_int56();
-            } else if (elem_type == LMD_TYPE_INT64) {
-                result->float_items[i] = (double)elem.get_int64();
-            } else if (elem_type == LMD_TYPE_FLOAT) {
-                result->float_items[i] = floor(elem.get_double());
-            } else {
-                log_error("floor: non-numeric element at index %ld, type: %d", i, elem_type);
-                return ItemError;
-            }
-        }
-        return { .array_num = result };
+        return numeric_vector_unary_float(item, NUMERIC_VECTOR_FLOOR, "floor");
     }
     else if (type == LMD_TYPE_DECIMAL) {
         return decimal_floor(item, context);
@@ -1093,28 +1059,7 @@ Item fn_ceil(Item item) {
         return push_d(ceil(val));
     }
     else if (IS_VECTOR_TYPE(type)) {
-        int64_t len = vector_length(item);
-        if (len < 0) return ItemError;
-        if (len == 0) {
-            ArrayNum* result = array_float_new(0);
-            return { .array_num = result };
-        }
-        ArrayNum* result = array_float_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            Item elem = vector_get(item, i);
-            TypeId elem_type = get_type_id(elem);
-            if (elem_type == LMD_TYPE_INT) {
-                result->float_items[i] = (double)elem.get_int56();
-            } else if (elem_type == LMD_TYPE_INT64) {
-                result->float_items[i] = (double)elem.get_int64();
-            } else if (elem_type == LMD_TYPE_FLOAT) {
-                result->float_items[i] = ceil(elem.get_double());
-            } else {
-                log_error("ceil: non-numeric element at index %ld, type: %d", i, elem_type);
-                return ItemError;
-            }
-        }
-        return { .array_num = result };
+        return numeric_vector_unary_float(item, NUMERIC_VECTOR_CEIL, "ceil");
     }
     else if (type == LMD_TYPE_DECIMAL) {
         return decimal_ceil(item, context);
@@ -1354,6 +1299,12 @@ Item fn_neg(Item item) {
                 result->float_items[i] = -(double)elem.get_int56();
             } else if (et == LMD_TYPE_INT64) {
                 result->float_items[i] = -(double)elem.get_int64();
+            } else if (et == LMD_TYPE_UINT64) {
+                // u64 uses a distinct pointer-backed tag, so omitting it here
+                // rejected a numeric lane that the scalar path already accepts.
+                result->float_items[i] = -(double)elem.get_uint64();
+            } else if (et == LMD_TYPE_NUM_SIZED) {
+                result->float_items[i] = -elem.get_num_sized_as_double();
             } else if (et == LMD_TYPE_FLOAT) {
                 result->float_items[i] = -elem.get_double();
             } else {
@@ -1583,6 +1534,22 @@ Item fn_decimal(Item item) {
     }
 }
 
+static int format_native_numeric_scalar(Item item, char* buffer, size_t capacity) {
+    TypeId type = get_type_id(item);
+    switch (type) {
+    case LMD_TYPE_INT:
+        return snprintf(buffer, capacity, "%lld", (long long)item.get_int56());
+    case LMD_TYPE_INT64:
+        return snprintf(buffer, capacity, "%" PRId64, item.get_int64());
+    case LMD_TYPE_UINT64:
+        return snprintf(buffer, capacity, "%" PRIu64, item.get_uint64());
+    case LMD_TYPE_FLOAT:
+        return snprintf(buffer, capacity, "%.17g", item.get_double());
+    default:
+        return -1;
+    }
+}
+
 Item fn_binary(Item item) {
     GUARD_ERROR1(item);
     TypeId type_id = get_type_id(item);
@@ -1599,25 +1566,10 @@ Item fn_binary(Item item) {
         Binary* bin = heap_binary_from_bytes(chars, len);
         return bin ? (Item){.item = x2it(bin)} : ItemError;
     }
-    if (type_id == LMD_TYPE_INT) {
-        char buf[32];
-        int len = snprintf(buf, sizeof(buf), "%lld", (long long)item.get_int56());
-        if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
-        Binary* bin = heap_binary_from_bytes(buf, len);
-        return bin ? (Item){.item = x2it(bin)} : ItemError;
-    }
-    if (type_id == LMD_TYPE_INT64) {
-        int64_t val = item.get_int64();
-        char buf[32];
-        int len = snprintf(buf, sizeof(buf), "%" PRId64, val);
-        if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
-        Binary* bin = heap_binary_from_bytes(buf, len);
-        return bin ? (Item){.item = x2it(bin)} : ItemError;
-    }
-    if (type_id == LMD_TYPE_FLOAT) {
-        double val = item.get_double();
+    if (type_id == LMD_TYPE_INT || type_id == LMD_TYPE_INT64 ||
+        type_id == LMD_TYPE_UINT64 || type_id == LMD_TYPE_FLOAT) {
         char buf[64];
-        int len = snprintf(buf, sizeof(buf), "%.17g", val);
+        int len = format_native_numeric_scalar(item, buf, sizeof(buf));
         if (len < 0 || len >= (int)sizeof(buf)) return ItemError;
         Binary* bin = heap_binary_from_bytes(buf, len);
         return bin ? (Item){.item = x2it(bin)} : ItemError;
@@ -1657,48 +1609,16 @@ extern "C" Symbol* fn_symbol(Item item) {
 
         return sym;
     }
-    else if (get_type_id(item) == LMD_TYPE_INT) {
-        // Convert int to symbol
-        char buf[32];
-        int len = snprintf(buf, sizeof(buf), "%lld", (long long)item.get_int56());
-        if (len < 0 || len >= (int)sizeof(buf)) {
-            log_debug("Failed to convert int to symbol");
-            return NULL;
-        }
-
-        Symbol* sym = heap_create_symbol(buf, len);
-        if (!sym) {
-            log_debug("Failed to allocate symbol");
-            return NULL;
-        }
-
-        return sym;
-    }
-    else if (get_type_id(item) == LMD_TYPE_INT64) {
-        // Convert int64 to symbol
-        int64_t val = item.get_int64();
-        char buf[32];
-        int len = snprintf(buf, sizeof(buf), "%" PRId64, val);
-        if (len < 0 || len >= (int)sizeof(buf)) {
-            log_debug("Failed to convert int64 to symbol");
-            return NULL;
-        }
-
-        Symbol* sym = heap_create_symbol(buf, len);
-        if (!sym) {
-            log_debug("Failed to allocate symbol");
-            return NULL;
-        }
-
-        return sym;
-    }
-    else if (get_type_id(item) == LMD_TYPE_FLOAT) {
-        // Convert float to symbol
-        double val = item.get_double();
+    else if (get_type_id(item) == LMD_TYPE_INT ||
+             get_type_id(item) == LMD_TYPE_INT64 ||
+             get_type_id(item) == LMD_TYPE_UINT64 ||
+             get_type_id(item) == LMD_TYPE_FLOAT) {
+        // Numeric-to-text conversion is shared with binary() so signed and
+        // unsigned 64-bit carriers cannot drift again.
         char buf[64];
-        int len = snprintf(buf, sizeof(buf), "%.17g", val);
+        int len = format_native_numeric_scalar(item, buf, sizeof(buf));
         if (len < 0 || len >= (int)sizeof(buf)) {
-            log_debug("Failed to convert float to symbol");
+            log_debug("Failed to convert numeric value to symbol");
             return NULL;
         }
 

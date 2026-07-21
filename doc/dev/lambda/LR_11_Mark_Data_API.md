@@ -30,7 +30,7 @@ The header comment (`mark_builder.cpp:1`–`18`) describes three string tiers, a
 - `createSymbol()` (`mark_builder.cpp:116`–`129`) allocates a `Symbol` struct from the arena with `ns = NULL`. **The header comment claims "Conditionally pooled (only if ≤32 chars, otherwise arena)" (`mark_builder.cpp:12`), but the code is unconditional arena allocation** — there is no pooling branch. This divergence is recorded in §Known Issues #8 and is load-bearing for anyone reasoning about symbol identity.
 - `createDomTextString()` (`mark_builder.cpp:161`–`181`) is the ui_mode variant: it `arena_calloc`s one contiguous `[DomText][String][chars...]` fat block so that text content *is* a layout `DomText` node, returning the embedded `String*` offset by `sizeof(DomText)` from the `DomText` header.
 
-Scalar item helpers sit alongside: `createInt` packs an int56 inline (`mark_builder.cpp:267`), `createLong`/`createFloat` arena-allocate an `int64_t`/`double` and tag with `l2it`/`d2it` (`:272`,`:280`), `createBool`/`createNull` (`:288`,`:292`), `createRange` (`:296`), `createType`/`createMetaType` (`:309`,`:321`). Note `createNameItem` (`:196`) actually builds a `Symbol` and tags it `y2it`, despite its name.
+Scalar item helpers sit alongside: `createInt` packs an int56 inline; `createLong`/`createFloat` arena-allocate an `int64_t`/`double`; and `createDateTime` copies a static parser value into the `Input` arena. The latter deliberately does not call the dynamic-runtime `push_k()` GC allocator. `createBool`/`createNull`, `createRange`, and `createType`/`createMetaType` complete the scalar helpers. Note `createNameItem` actually builds a `Symbol` and tags it `y2it`, despite its name.
 
 ### 2.2 The fluent sub-builders
 
@@ -47,6 +47,10 @@ The whole-object convenience entries `createElement`/`createMap`/`createArray` (
 `final()` on a map or element does not just return the pointer; it canonicalizes the *shape*. `elmt_finalize_shape`/`map_finalize_shape` push the just-built `ShapeEntry` chain through the `ShapePool` so that structurally identical maps and elements share one `ShapeEntry`/`TypeMap`. This is what makes structural typing cheap downstream and what the immutable editor's "same shape" fast path (§4.2) depends on. The shape-construction primitive itself is `ShapeBuilder` (§5), and the pool is owned by [LR_08](LR_08_Memory_and_GC.md).
 
 ### 2.4 Ownership-aware deep copy
+
+The datetime arm routes through `createDateTime`, so copying a dynamically
+GC-owned source into static Mark data produces an Input-arena-owned value and
+does not retain or create a runtime GC allocation.
 
 `deep_copy(Item)` (`mark_builder.cpp:798`) moves an external value into this builder's `Input` arena, but skips the copy when the value is already owned. `is_in_arena` (`:686`) classifies by `TypeId`: inline scalars are always reusable; pointer types are checked against the arena chain by `is_pointer_in_arena_chain` (`:667`), which walks `Input->parent` so a child `Input` can share a parent's data without copying; symbols additionally consult the `NamePool` by chars (`:698`–`709`). The recursive copy is dispatched through `lam::visit` + `DeepCopyVisitor` (`mark_builder.hpp:300`, `mark_builder.cpp:1034`): `deep_copy_typed<Tag>` (`:815`) has explicit per-tag arms for every container and scalar (decimals go through `decimal_deep_copy`, `:849`; element copies attributes then children), with `deep_copy_unknown` (`:1028`) as the fallthrough. The `LMD_TYPE_PATH` arm (`:1005`–`1019`) is a known sharp edge — see §Known Issues #6.
 
@@ -116,7 +120,7 @@ Recursion and width are bounded: `MAX_DEPTH = 2000` and `MAX_FIELD_COUNT = 10000
 
 ## 9. Design decisions & rationale
 
-- **Arena vs pool split.** Builder structs and strings are arena-allocated (bump, O(1), bulk-freed with the `Input`); only the dynamic resize buffers behind `map_put`/`elmt_put` use a `Pool` because they need `pool_free` on growth (`mark_builder.cpp:29`–`41`). This is fast for the common parse-once case but is the root of the editor's ui_mode free hazard (§4.2).
+- **Arena vs pool split.** Builder value structs, strings, and static datetimes are arena-allocated (bump, O(1), bulk-freed with the `Input`); only the dynamic resize buffers behind `map_put`/`elmt_put` use a `Pool` because they need `pool_free` on growth. Mark construction does not allocate value payloads in the runtime GC heap. This is fast for the common parse-once case but is the root of the editor's ui_mode free hazard (§4.2).
 - **Three-tier string interning.** Pooled structural names (identity-comparable, deduplicated across the whole document and across schema/instance via parent `NamePool` inheritance) vs arena content strings vs arena symbols. Names get the hash cost; content does not.
 - **Pool-free readers.** Readers are pure value types so traversal and formatting never allocate, and `ArrayNumView` lets typed numeric arrays masquerade as generic arrays without boxing.
 - **Shape deduplication.** `ShapePool` + `shape_builder_finalize` give identical maps/elements a shared `ShapeEntry`/`TypeMap`, enabling cheap structural typing and the immutable editor's shared-shape fast path.

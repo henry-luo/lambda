@@ -9,7 +9,8 @@
 > `vibe/Lambda_Design_Stack_API.md` Phase 7 supersedes its compact-`INT64`,
 > `DTIME` number-stack, and scalar-tail details. The current runtime has no
 > inline full-width integer; transient `INT64`/`UINT64` use number homes and
-> `DTIME` is always GC-owned.
+> `DTIME` is owner-backed: dynamic values are GC-owned and static Mark values
+> are Input-arena-owned.
 
 ---
 

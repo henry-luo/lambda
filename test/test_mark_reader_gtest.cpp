@@ -76,6 +76,17 @@ TEST_F(MarkReaderTest, ItemReaderInt) {
     EXPECT_EQ(val32, 42);
 }
 
+TEST_F(MarkReaderTest, ItemReaderUInt64) {
+    Item uint_item = builder->createUInt64(UINT64_MAX);
+    ItemReader reader(uint_item.to_const());
+
+    EXPECT_TRUE(reader.isNumber());
+    EXPECT_TRUE(reader.isUInt64());
+    EXPECT_FALSE(reader.isInt());
+    EXPECT_FALSE(reader.isFloat());
+    EXPECT_EQ(reader.asUInt64(), UINT64_MAX);
+}
+
 TEST_F(MarkReaderTest, ItemReaderFloat) {
     Item float_item = builder->createFloat(3.14159);
     ItemReader reader(float_item.to_const());

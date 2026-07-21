@@ -54,12 +54,8 @@ static void format_item(StringBuf* sb, const ItemReader& item, int depth) {
     } else if (item.isSymbol()) {
         Symbol* sym = item.asSymbol();
         if (sym) format_symbol_impl(sb, sym);
-    } else if (item.isInt()) {
-        char buf[32]; snprintf(buf, sizeof(buf), "%d", (int)item.asInt());
-        stringbuf_append_str(sb, buf);
-    } else if (item.isFloat()) {
-        char buf[64]; snprintf(buf, sizeof(buf), "%.10g", item.asFloat());
-        stringbuf_append_str(sb, buf);
+    } else if (item.isNumber()) {
+        format_number(sb, item.item());
     }
 }
 

@@ -5,7 +5,8 @@
 Phase 7 supersedes this document's pre-Phase-7 scalar inventory and nursery
 discussion. `INT64`/`UINT64` now use activation/caller number homes and
 destination-owned persistent storage, with an interim GC fallback only at
-ownerless persistent boundaries; `DTIME` is always GC-heap-owned; common
+ownerless persistent boundaries; `DTIME` is owner-backed (dynamic GC or static
+Mark Input arena); common
 `DOUBLE` values self-tag and their out-of-band residue uses the number-home
 protocol. Sections 1.2 and the historical motivation below describe the system
 this design replaced, not the current representation contract.

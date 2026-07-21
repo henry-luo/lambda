@@ -38,7 +38,8 @@ call ABI and scalar-home decisions for both Lambda and LambdaJS.
 **Scalar-storage and return decision:** legacy callee-frame donation is
 replaced by **activation-owned canonical scalar homes**. Phase 7 realigns the
 type set: `INT64` and `UINT64` have no inline form and use number
-homes while transient, while `DTIME` becomes always heap-backed. A generated
+homes while transient, while `DTIME` becomes object-backed: dynamic runtime
+values use the GC heap and static `MarkBuilder` values use the `Input` arena. A generated
 callee returns a transient numeric `Item` through a **caller-donated canonical
 scalar return home**: it copies the one-word payload into the supplied home,
 restores its complete number extent, retags the returned `Item`, and returns
@@ -73,7 +74,8 @@ Phases 0 through 7 are complete. The completed implementation provides:
   LambdaJS. The high-`u64` corruption repair landed in this implementation
   round, but its magnitude-based promotion policy was later superseded by the
   type-directed number model and is tracked in `Lambda_Impl_Numbers.md`;
-- GC-owned datetime objects with no number-home return or relocation lane;
+- owner-backed datetime objects (dynamic GC or static Input arena) with no
+  number-home return or relocation lane;
 - a counted `lambda_item_heap_rehome()` fallback only for Item-only numeric
   persistence without a natural destination owner;
 - conservative metadata and representation fallback where an edge is not yet
@@ -323,8 +325,10 @@ only one lane is live on an exit. A function with a native normal return can
 still need the hidden home when its Lambda error lane is a boxed `Item`. Native
 scalar returns with no boxed error lane and proven-safe `Item` returns do not
 carry the hidden parameter. Phase 7 adds `UINT64` to this set and removes
-`DTIME`; datetime results are already persistent heap Items and require no
-number home. The shipped Phase 0-through-6 enum still has `SCALAR_RETURN_DTIME`
+`DTIME`; dynamic datetime results are already persistent GC Items and require
+no number home. Static input data is the exception: `MarkBuilder` owns datetime
+objects in the `Input` arena. Neither storage class uses a number home. The
+shipped Phase 0-through-6 enum still has `SCALAR_RETURN_DTIME`
 and lacks `SCALAR_RETURN_U64` until that phase lands.
 
 ### 5.2 Required analysis sequence
@@ -1154,11 +1158,15 @@ The Phase 7 scalar representation set is deliberately narrow:
 - a dynamic `Item` only when runtime classification selects one of those
   representations.
 
-`DTIME` is deliberately absent. Phase 7 makes every datetime payload a GC-heap
-object, even while local, because datetime is rare, heap ownership removes its
-activation-lifetime machinery, and an object representation may grow beyond
-one word without changing the generated-call ABI. The same scalar homes are
-used by local conversions and imported results; "return home" names the
+`DTIME` is deliberately absent. Phase 7 makes dynamically produced datetime
+payloads GC-heap objects, even while local, because datetime is rare, heap
+ownership removes its activation-lifetime machinery, and an object
+representation may grow beyond one word without changing the generated-call
+ABI. Static markup built by input parsers is different: `MarkBuilder` copies
+datetime objects into the owning `Input` arena, alongside its other immutable
+Mark values. Both forms are owner-backed object pointers and neither may point
+into an activation number home. The same scalar homes are used by local
+numeric conversions and imported results; "return home" names the
 generated-call ABI role, not the only source of an activation scalar.
 
 This was a representation and ownership change, not merely a return-classifier
@@ -1447,9 +1455,10 @@ The implementation should assert these invariants in debug builds:
 25. **Uniform 64-bit integer boxing:** after Phase 7, neither `INT64` nor
     `UINT64` has an inline `Item` encoding; transient boxed values use number
     homes regardless of magnitude.
-26. **Datetime heap ownership:** after Phase 7, every `DTIME` payload is
-    GC-heap-owned and no datetime `Item` points into a number frame, caller
-    home, container scalar tail, or async scalar sidecar.
+26. **Datetime object ownership:** after Phase 7, dynamic `DTIME` payloads are
+    GC-heap-owned and static `MarkBuilder` payloads are `Input`-arena-owned. No
+    datetime `Item` points into a number frame, caller home, container scalar
+    tail, or async scalar sidecar.
 27. **Persistent-owner boundary:** an `INT64`/`UINT64` value crossing an
     activation boundary is copied into storage owned by the destination. A
     boundary with no declared owner must use a GC scalar cell under Phase 7; it
@@ -1591,10 +1600,11 @@ must not be added while a runtime-indirect pointer can still target the body.
   heap/persistent rehoming;
 - removed `DTIME` from number-stack allocation, scalar-home classification,
   caller-home transfer, owned scalar tails, and number-frame rebasing;
-- made every datetime constructor and producer return a GC-heap-owned datetime
-  object, including runtime materialization of datetime literals/constants,
-  retaining the same semantic `DTIME` Item tag while allowing the heap object
-  layout to grow beyond 64 bits later;
+- made every dynamic datetime constructor and producer return a GC-heap-owned
+  datetime object, including runtime materialization of datetime
+  literals/constants, while `MarkBuilder` copies static parser values into the
+  owning `Input` arena; both retain the same semantic `DTIME` Item tag and an
+  object layout that may grow beyond 64 bits later;
 - made arrays, maps/objects, closure environments, module/global bindings,
   async/generator frames, and task/promise state own their persistent
   `INT64`/`UINT64` payloads instead of retaining activation pointers;
@@ -1648,9 +1658,10 @@ Every migration phase should pass:
   tail-call tests for both signed and unsigned 64-bit values;
 - Phase 7 container, closure, module/global, async/generator, task/promise,
   exception-slot, public-return, embedding, and cross-thread lifetime tests;
-- Phase 7 datetime tests proving every payload is GC-managed, survives all
-  publication boundaries, never points into the number stack, and is accessed
-  through an object layout that is not assumed to be one word;
+- Phase 7 datetime tests proving dynamic payloads are GC-managed, static Mark
+  payloads are Input-arena-owned, all survive their publication boundaries,
+  none points into the number stack, and consumers do not assume a one-word
+  object layout;
 - release-build performance measurements. Debug builds must not be used for
   performance conclusions.
 
@@ -1759,11 +1770,13 @@ on the GC heap merely because the integer is small or unsigned.
 
 ### 15.2 Datetime policy
 
-Every `DTIME` payload is GC-heap-owned. Datetime is expected to be rare enough
-that eliminating its number-stack classifier, caller-home lane, environment
-sidecar cases, and relocation logic is more valuable than avoiding its
-allocation. Generated functions return the already-persistent datetime Item
-through their ordinary value ABI.
+Every `DTIME` payload is object-owned rather than activation-owned. Dynamic
+runtime producers allocate it in the GC heap. Static input parsers construct it
+through `MarkBuilder::createDateTime()` in the owning `Input` arena. Datetime is
+expected to be rare enough that eliminating its number-stack classifier,
+caller-home lane, environment sidecar cases, and relocation logic is more
+valuable than avoiding dynamic allocation. Generated functions return the
+already-persistent datetime Item through their ordinary value ABI.
 
 The heap object, not the tagged `Item`, defines datetime's payload layout.
 Consumers must use datetime accessors rather than assuming that the object is
@@ -1905,8 +1918,8 @@ The final GC invariant is:
 This removes three value classes from both generated GC-root analysis and the
 collector's managed-object domain. Dynamic `ANY` values can still require a GC
 root because they may contain strings, containers, functions, errors,
-datetimes, or other GC-owned values; at runtime an actual numeric tag is simply
-ignored by the marker.
+dynamically produced datetimes, or other GC-owned values; at runtime an actual
+numeric tag is simply ignored by the marker.
 
 A donated-slot-derived protocol is retained as one option. The terminology is
 important: the retired protocol described in section 8.7 is **callee-frame

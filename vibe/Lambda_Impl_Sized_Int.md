@@ -30,7 +30,8 @@ Item 2 is the completed `ushr` builtin.
 | Generated internal return and imported scalar result | Caller-donated number home; callee restores its watermark | P0.2 |
 | Array/list/map field, environment, module slot, typed storage | Destination-owned raw scalar payload; reads rematerialize into a current home when needed | P0.3 |
 | Item-only public/opaque persistence | Immutable GC scalar cell through `lambda_item_heap_rehome()`; actual allocations are counted per numeric type | P0.5 |
-| Datetime literal, parser, conversion, and return | GC-owned `DateTime` object via `push_k()`; ordinary Item return | P0.4 |
+| Dynamic datetime literal, conversion, and return | GC-owned `DateTime` object via `push_k()`; ordinary Item return | P0.4 |
+| Static input-parser datetime | Input-arena-owned object via `MarkBuilder::createDateTime()` | P0.4 |
 
 The fallback counter is deliberately an allocation counter, not a tag test:
 `lambda_scalar_heap_rehome_count(INT64/UINT64/FLOAT)` only increases when an
@@ -45,11 +46,11 @@ ownership rules and the scenario inventory remain in Stack API §15.
 
 | Situation | `INT64` | `UINT64` | `DTIME` |
 |---|---|---|---|
-| Small/local value | no inline form; number home when transient, or retain verified persistent backing | no inline form; number home when transient, or retain verified persistent backing | GC heap |
-| Wide transient value | number home | number home | GC heap |
-| Generated-function return | caller-donated number home | caller-donated number home | ordinary heap-owned `Item` |
-| Array/environment storage | destination-owned scalar storage | destination-owned scalar storage | GC pointer stored by destination |
-| Persistent slot without natural owner | immutable GC scalar cell for now | immutable GC scalar cell for now | GC heap |
+| Small/local value | no inline form; number home when transient, or retain verified persistent backing | no inline form; number home when transient, or retain verified persistent backing | owner-backed object: dynamic GC or static Mark Input arena |
+| Wide transient value | number home | number home | owner-backed object; never a number home |
+| Generated-function return | caller-donated number home | caller-donated number home | ordinary GC-owned `Item` |
+| Array/environment storage | destination-owned scalar storage | destination-owned scalar storage | retain the owner-backed pointer |
+| Persistent slot without natural owner | immutable GC scalar cell for now | immutable GC scalar cell for now | already owner-backed; no scalar-cell fallback |
 
 Out-of-band `DOUBLE` continues to use number homes, caller-donated homes, and
 destination-owned storage. Its ownerless persistent fallback is the same
@@ -59,9 +60,10 @@ The long-term direction is that `DOUBLE`, `INT64`, and `UINT64` have no
 standalone heap representation and therefore require no numeric GC-root or
 collector cases. That final step is deliberately **not** an acceptance
 condition for this round. `DTIME` is excluded from that direction and remains
-GC-owned. During the transition, provenance and boundary metadata—not the
-numeric type tag alone—must distinguish a number-home/owner-backed value from
-an ownerless persistent GC cell.
+object-owned rather than activation-owned. Dynamic values use GC ownership;
+static Mark values use Input-arena ownership. During the transition, provenance
+and boundary metadata—not the numeric type tag alone—must distinguish a
+number-home/owner-backed value from an ownerless persistent GC cell.
 
 ### 0.2 Non-negotiable representation and lifetime invariants
 
@@ -78,7 +80,8 @@ an ownerless persistent GC cell.
 - An Item-only boundary with no natural owner fails closed by copying a
   `DOUBLE`/`INT64`/`UINT64` payload into an immutable GC scalar cell. Each such
   fallback is counted by boundary class; it must not become the default boxer.
-- Every `DTIME` constructor and producer creates a GC object. Access goes
+- Every dynamic-runtime `DTIME` constructor and producer creates a GC object;
+  `MarkBuilder` creates static parser values in the Input arena. Access goes
   through datetime accessors and must not assume a one-word object layout.
 - Old and new encodings must not coexist in one runtime after the migration.
 
@@ -155,13 +158,15 @@ rebase logic once through shared scalar-storage helpers. Typed-array reads copy
 standalone heap objects. Audit JS `BigInt64Array`/`BigUint64Array` egress as
 part of this stage.
 
-**P0.4 — Move datetime wholly to GC storage — DONE.** Replace `push_k()` and every
-datetime literal, constant, conversion, parser, builtin, and imported producer
-with a GC datetime constructor. Remove `DTIME` from scalar-home return modes,
-caller-home metadata, side-number classification, destination scalar tails,
-and number-frame relocation. Store/root datetime as an ordinary GC Item across
-every `MAY_GC` boundary. Keep object construction and access behind shared
-helpers so the payload may expand beyond 64 bits later.
+**P0.4 — Remove datetime from numeric homes — DONE.** Replace dynamic runtime
+datetime literals, constants, conversions, builtins, and imported producers
+with a GC datetime constructor. Static input-parser output constructed through
+`MarkBuilder` remains owned by the `Input` arena. Remove `DTIME` from
+scalar-home return modes, caller-home metadata, side-number classification,
+destination scalar tails, and number-frame relocation. Root dynamic datetime
+Items across every `MAY_GC` boundary; preserve the input arena for static Mark
+Items. Keep object construction and access behind shared helpers so the payload
+may expand beyond 64 bits later.
 
 **P0.5 — Make ownerless persistence explicit and measurable — DONE.** Extend the
 persistent rehome boundary to create immutable GC scalar cells for
@@ -218,9 +223,10 @@ front ends, rather than moving the work into a wrapper:
   cross-thread transfer. A dynamic root holding an actual GC scalar cell must
   keep it alive, while the same numeric tag backed by a number home must never
   make the collector scan or retain that number-frame address.
-- Prove every datetime payload is GC-managed, survives publication and
-  `MAY_GC`, never points into a number frame, and is accessed without a
-  one-word layout assumption.
+- Prove dynamic datetime payloads are GC-managed, static `MarkBuilder`
+  payloads are Input-arena-owned, both survive their ownership boundaries,
+  none points into a number frame, and consumers make no one-word layout
+  assumption.
 - Run `make build`, `make build-test`, focused representation/GC/sized-numeric
   tests, `make test-lambda-baseline`, the Node preliminary suite, and
   `make test262-baseline` with zero failures and zero retry-only results.

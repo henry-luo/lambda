@@ -112,10 +112,20 @@ bool ItemReader::isSymbol() const {
     return is<LMD_TYPE_SYMBOL>();
 }
 
+bool ItemReader::isNumber() const {
+    // Formatters and generic readers must recognize every numeric carrier;
+    // signed-only accessors remain narrow so wide u64 values cannot be truncated.
+    return is_numeric_type_id(cached_type_);
+}
+
 bool ItemReader::isInt() const {
     if (is<LMD_TYPE_INT>() || is<LMD_TYPE_INT64>()) return true;
     // sized integers (i8..u32) are integral too
     return cached_type_ == LMD_TYPE_NUM_SIZED && !num_sized_is_float(item_);
+}
+
+bool ItemReader::isUInt64() const {
+    return is<LMD_TYPE_UINT64>();
 }
 
 bool ItemReader::isFloat() const {
@@ -168,6 +178,12 @@ int64_t ItemReader::asInt() const {
     } else if (cached_type_ == LMD_TYPE_NUM_SIZED) {
         return item_.get_num_sized_as_int64();
     }
+    return 0;
+}
+
+uint64_t ItemReader::asUInt64() const {
+    // uint64 is pointer-backed, so decode its payload instead of using the inline-value API.
+    if (auto val = asItem<LMD_TYPE_UINT64>()) return val.raw().get_uint64();
     return 0;
 }
 

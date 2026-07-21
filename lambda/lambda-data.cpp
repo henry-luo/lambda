@@ -478,8 +478,8 @@ int64_t it2l(Item itm) {
 }
 
 DateTime* it2k(Item itm) {
-    // Datetime Items always carry a GC-owned object pointer.  Legacy generated
-    // code must retain that pointer instead of copying a one-word DateTime value.
+    // Datetime Items carry an owner-backed object pointer: GC-owned at dynamic
+    // runtime or Input-arena-owned in static Mark data.
     return get_type_id(itm) == LMD_TYPE_DTIME ? itm.get_datetime_ptr() : NULL;
 }
 
@@ -1188,33 +1188,12 @@ void list_push_spread(List *list, Item item) {
             RootFrame roots((Context*)context, 2);
             Rooted<List*> rooted_list(roots, list);
             Rooted<Item> rooted_source(roots, item);
-            switch (arr->get_elem_type()) {
-            case ELEM_INT:
-                for (int64_t i = 0; i < arr->length; i++) {
-                    list = rooted_list.get();
-                    arr = rooted_source.get().array_num;
-                    list_push(list, {.item = i2it(arr->items[i])});
-                }
-                break;
-            case ELEM_INT64:
-                for (int64_t i = 0; i < arr->length; i++) {
-                    list = rooted_list.get();
-                    arr = rooted_source.get().array_num;
-                    int64_t value = arr->items[i];
-                    // Expansion may compact the source data buffer; point the
-                    // transient scalar at stable native storage until copied.
-                    list_push(list, {.item = l2it(&value)});
-                }
-                break;
-            case ELEM_FLOAT64:
-                for (int64_t i = 0; i < arr->length; i++) {
-                    list = rooted_list.get();
-                    arr = rooted_source.get().array_num;
-                    double value = arr->float_items[i];
-                    list_push(list, lambda_float_ptr_to_item(&value));
-                }
-                break;
-            default: break;
+            // One owner-aware reader covers every compact lane, including u64;
+            // list_push immediately copies wide scalars into destination storage.
+            for (int64_t i = 0; i < arr->length; i++) {
+                list = rooted_list.get();
+                arr = rooted_source.get().array_num;
+                list_push(list, array_num_read_borrowed_item(arr, i));
             }
             return;
         }
@@ -1327,6 +1306,9 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     val = (double)item.get_int56();
                 } else if (item_type == LMD_TYPE_INT64) {
                     val = (double)item.get_int64();
+                } else if (item_type == LMD_TYPE_UINT64) {
+                    // A u64 Item carries a pointer, not double payload bits.
+                    val = (double)item.get_uint64();
                 } else {
                     val = item.get_double();
                 }
@@ -1340,8 +1322,8 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_DTIME:  {
-                // Datetime fields retain the GC object itself; copying its raw
-                // bits would create an untraced, non-owning scalar payload.
+                // Retain the owner-backed object pointer rather than embedding
+                // today's one-word payload and losing its storage lifetime.
                 *(DateTime**)field_ptr = item.get_datetime_ptr();
                 break;
             }
@@ -1495,13 +1477,13 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_INT:
         return {.item = i2it(titem->int_val)};
     case LMD_TYPE_INT64:
+        // TypedItem owns wide-scalar payloads alongside the tag, so Items may
+        // borrow that stable field directly instead of consuming a number home.
         return {.item = l2it(&titem->long_val)};
     case LMD_TYPE_UINT64:
-#ifdef LAMBDA_STATIC
+        // TypedItem owns wide-scalar payloads alongside the tag, so Items may
+        // borrow that stable field directly instead of consuming a number home.
         return {.item = u2it(&titem->uint64_val)};
-#else
-        return box_uint64_value(titem->uint64_val);
-#endif
     case LMD_TYPE_FLOAT:
         return lambda_float_ptr_to_item(&titem->double_val);
     case LMD_TYPE_FLOAT64:
@@ -1564,14 +1546,14 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
         result = {.item = i2it(*(int64_t*)field_ptr)};  // read full int64 to preserve 56-bit value
         break;
     case LMD_TYPE_INT64:
-        result = {.item = l2it(field_ptr)};  // points to long directly
+        // The map field is the persistent scalar owner; preserve its payload
+        // address rather than copying wide values into a transient number home.
+        result = {.item = l2it(field_ptr)};
         break;
     case LMD_TYPE_UINT64:
-#ifdef LAMBDA_STATIC
+        // The map field is the persistent scalar owner; preserve its payload
+        // address rather than copying wide values into a transient number home.
         result = {.item = u2it(field_ptr)};
-#else
-        result = box_uint64_value(*(uint64_t*)field_ptr);
-#endif
         break;
     case LMD_TYPE_FLOAT:
         result = lambda_float_ptr_to_item((const double*)field_ptr);
@@ -1787,6 +1769,8 @@ bool item_deep_equal(Item a, Item b) {
             return false;
         case LMD_TYPE_INT64:
             return a.get_int64() == b.get_int64();
+        case LMD_TYPE_UINT64:
+            return a.get_uint64() == b.get_uint64();
         case LMD_TYPE_FLOAT:
         case LMD_TYPE_FLOAT64:
             return a.get_double() == b.get_double();

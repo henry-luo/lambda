@@ -20,10 +20,7 @@ static void format_scalar_value_reader(TextContext& ctx, const ItemReader& item)
         bool val = item.asBool();
         ctx.write_text(val ? "true" : "false");
     }
-    else if (item.isInt()) {
-        format_number(ctx.output(), item.item());
-    }
-    else if (item.isFloat()) {
+    else if (item.isNumber()) {
         format_number(ctx.output(), item.item());
     }
     else if (item.isString()) {

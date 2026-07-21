@@ -87,7 +87,7 @@ static Item rdb_value_to_item(MarkBuilder& builder, RdbValue val, RdbType declar
             DateTime* dt = datetime_parse_iso8601(builder.pool(), val.str_val);
             if (!dt) dt = datetime_parse_lambda(builder.pool(), val.str_val);
             if (dt) {
-                return push_k(*dt);
+                return builder.createDateTime(*dt);
             }
             // fallback: return as string if parsing fails
             return builder.createStringItem(val.str_val);

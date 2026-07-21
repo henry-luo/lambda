@@ -11,6 +11,8 @@
 #include "../lib/test_utils.h"
 #include <cstring>
 
+void parse_mark(Input* input, const char* mark_string);
+
 // Test fixture for deep copy tests
 class MarkBuilderDeepCopyTest : public ::testing::Test {
 protected:
@@ -137,6 +139,22 @@ TEST_F(MarkBuilderDeepCopyTest, CopyLong) {
     EXPECT_EQ(it2l(copied), 9223372036854775807LL);
 }
 
+TEST_F(MarkBuilderDeepCopyTest, CopyUInt64IntoTargetArena) {
+    MarkBuilder builder(input1);
+    uint64_t source = UINT64_MAX;
+    Item source_item = {.item = u2it(&source)};
+
+    ASSERT_FALSE(builder.is_in_arena(source_item));
+    Item copied = builder.deep_copy(source_item);
+
+    ASSERT_EQ(get_type_id(copied), LMD_TYPE_UINT64);
+    EXPECT_EQ(copied.get_uint64(), UINT64_MAX);
+    uint64_t* copied_ptr = (uint64_t*)(uintptr_t)copied.uint64_ptr;
+    EXPECT_NE(copied_ptr, &source);
+    EXPECT_TRUE(arena_owns(input1->arena, copied_ptr));
+    EXPECT_TRUE(builder.is_in_arena(copied));
+}
+
 TEST_F(MarkBuilderDeepCopyTest, CopyFloat) {
     MarkBuilder builder(input1);
     Item float_item = builder.createFloat(3.14159);
@@ -147,6 +165,41 @@ TEST_F(MarkBuilderDeepCopyTest, CopyFloat) {
     // Copy to same input - should return original
     Item copied = builder.deep_copy(float_item);
     EXPECT_DOUBLE_EQ(it2d(copied), 3.14159);
+}
+
+TEST_F(MarkBuilderDeepCopyTest, CopyDateTimeIntoTargetArena) {
+    MarkBuilder builder(input1);
+    DateTime source = {};
+    DATETIME_SET_YEAR_MONTH(&source, 2026, 7);
+    source.day = 21;
+    source.hour = 12;
+    source.minute = 34;
+    source.second = 56;
+    source.precision = DATETIME_PRECISION_DATE_TIME;
+    Item source_item = {.item = k2it(&source)};
+
+    ASSERT_FALSE(builder.is_in_arena(source_item));
+    Item copied = builder.deep_copy(source_item);
+
+    ASSERT_EQ(get_type_id(copied), LMD_TYPE_DTIME);
+    DateTime* copied_datetime = copied.get_datetime_ptr();
+    ASSERT_NE(copied_datetime, nullptr);
+    EXPECT_NE(copied_datetime, &source);
+    EXPECT_TRUE(arena_owns(input1->arena, copied_datetime));
+    EXPECT_TRUE(builder.is_in_arena(copied));
+    EXPECT_EQ(copied_datetime->int64_val, source.int64_val);
+}
+
+TEST_F(MarkBuilderDeepCopyTest, MarkParserCreatesDateTimeInInputArena) {
+    parse_mark(input1, "t'2026-07-21T12:34:56z'");
+
+    ASSERT_EQ(get_type_id(input1->root), LMD_TYPE_DTIME);
+    DateTime* datetime = input1->root.get_datetime_ptr();
+    ASSERT_NE(datetime, nullptr);
+    EXPECT_TRUE(arena_owns(input1->arena, datetime));
+    EXPECT_EQ(DATETIME_GET_YEAR(datetime), 2026);
+    EXPECT_EQ(DATETIME_GET_MONTH(datetime), 7U);
+    EXPECT_EQ(datetime->day, 21U);
 }
 
 TEST_F(MarkBuilderDeepCopyTest, CopyRange) {

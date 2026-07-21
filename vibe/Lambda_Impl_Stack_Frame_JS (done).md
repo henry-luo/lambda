@@ -6,7 +6,8 @@
 
 > **Scalar-storage successor:** `vibe/Lambda_Design_Stack_API.md` Phase 7
 > supersedes this completed plan's pre-Phase-7 `INT64`/`DTIME` inventory.
-> Transient `INT64`/`UINT64` use number homes and `DTIME` is always GC-owned.
+> Transient `INT64`/`UINT64` use number homes; dynamic `DTIME` is GC-owned and
+> static Mark `DTIME` is Input-arena-owned.
 
 ---
 

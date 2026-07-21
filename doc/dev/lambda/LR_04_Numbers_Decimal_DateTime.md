@@ -1,8 +1,8 @@
 # Lambda Runtime — Numbers, Decimal & DateTime
 
-> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the semantic numeric tower, the shared type-directed classifier, sized-machine arithmetic, flex-`int` overflow, decimal/`integer` arithmetic backed by **libmpdec**, and GC-owned `DateTime`. It owns the *operations*; physical representation is owned by [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md). The normative rules are [Lambda Formal Semantics §4](../../Lambda_Formal_Semantics.md#4-numerics) and `vibe/Lambda_Semantics_Number_Model.md`; `vibe/Lambda_Impl_Numbers.md` records the completed 2026-07-20 realignment.
+> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the semantic numeric tower, the shared type-directed classifier, sized-machine arithmetic, flex-`int` overflow, decimal/`integer` arithmetic backed by **libmpdec**, and owner-backed `DateTime`. It owns the *operations*; physical representation is owned by [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md). The normative rules are [Lambda Formal Semantics §4](../../Lambda_Formal_Semantics.md#4-numerics) and `vibe/Lambda_Semantics_Number_Model.md`; `vibe/Lambda_Impl_Numbers.md` records the completed 2026-07-20 realignment.
 >
-> **Primary sources:** `lambda/lambda-number.hpp` (shared numeric kinds, operation families, joins, sized-lane selection, overflow policy), `lambda/lambda-number-types.hpp` and `lambda/lambda-number-runtime.hpp` (static/runtime adapters), `lambda/lambda-eval-num.cpp` (the `fn_*` execution paths and conversions), `lambda/lambda-decimal.cpp` + `lambda/lambda-decimal.hpp` (all decimal/BigInt via mpdecimal), and `lib/datetime.h` / `lib/datetime.c` plus `lambda/lambda-eval.cpp` (GC-owned datetime construction and operations).
+> **Primary sources:** `lambda/lambda-number.hpp` (shared numeric kinds, operation families, joins, sized-lane selection, overflow policy), `lambda/lambda-number-types.hpp` and `lambda/lambda-number-runtime.hpp` (static/runtime adapters), `lambda/lambda-eval-num.cpp` (the `fn_*` execution paths and conversions), `lambda/lambda-decimal.cpp` + `lambda/lambda-decimal.hpp` (all decimal/BigInt via mpdecimal), and `lib/datetime.h` / `lib/datetime.c`, `lambda/lambda-eval.cpp`, and `lambda/mark_builder.cpp` (dynamic-GC and static-arena datetime construction and operations).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names.
 
 ---
@@ -90,9 +90,9 @@ BigInt (`lambda-decimal.cpp`, `bigint_*`) **reuses the same `Decimal` struct and
 
 ---
 
-## 4. DateTime — GC-owned object with a current 64-bit payload
+## 4. DateTime — owner-backed object with a current 64-bit payload
 
-`struct DateTime` (`lib/datetime.h`) currently uses a 64-bit bit-field payload, but every `LMD_TYPE_DTIME` Item points to a GC-owned object created through `push_k()`. Datetime never uses the number stack, a caller-donated numeric home, or destination scalar tails. This ownership rule deliberately leaves the object layout free to grow beyond 64 bits later. The current fields are `year_month:17`, `day:5`, `hour:5`, `minute:6`, `second:6`, `millisecond:10`, `tz_offset_biased:11`, `precision:2`, and `format_hint:2`.
+`struct DateTime` (`lib/datetime.h`) currently uses a 64-bit bit-field payload. Dynamically produced `LMD_TYPE_DTIME` Items point to GC-owned objects created through `push_k()`. Static markup constructed by input parsers instead uses `MarkBuilder::createDateTime()` and stores the object in the owning `Input` arena. Datetime never uses the number stack, a caller-donated numeric home, or destination scalar tails. This object-pointer rule deliberately leaves the layout free to grow beyond 64 bits later. The current fields are `year_month:17`, `day:5`, `hour:5`, `minute:6`, `second:6`, `millisecond:10`, `tz_offset_biased:11`, `precision:2`, and `format_hint:2`.
 
 **Precision** is a 4-value enum (`DateTimePrecision`, `:50`): `YEAR_ONLY`, `DATE_ONLY`, `TIME_ONLY`, `DATE_TIME`. **Format hint** (`DateTimeFormat`, `:58`) doubles as a UTC flag across its 4 values (`ISO8601`, `HUMAN`, `ISO8601_UTC`, `HUMAN_UTC`; `DATETIME_IS_UTC_FORMAT`, `:77`). The **parse formats** are a separate enum (`DateTimeParseFormat`, `:41`): ISO8601, ICS, RFC2822, LAMBDA (`YYYY-MM-DD hh:mm:ss` without the `t'…'` wrapper), and HUMAN, each with its own `datetime_parse_*` entry plus the dispatcher `datetime_parse` (`:126`).
 
@@ -107,7 +107,7 @@ The constructors live in `lambda/lambda-eval.cpp`: `fn_datetime0`/`fn_datetime1`
 - **Domain-selected true division.** `/` is float for the int/float domain and decimal for the integer/decimal domain; `div` remains the integral quotient operator.
 - **Decimal contagion + capped "unlimited".** The unlimited flag spreads through every op so a single unlimited operand pins the whole computation to high precision; the 200-digit cap is a pragmatic workaround for `mpd_pow` crashing at `mpd_maxcontext`, and BigInt gets its own 2000-digit context tuned independently.
 - **Decimal lifetime is GC-owned.** Ref counting was removed; `retain`/`release` are no-ops. This removes a class of leak/double-free bugs at the cost of relying entirely on the collector ([LR_08](LR_08_Memory_and_GC.md)).
-- **DateTime is always GC-owned.** Its present payload is one word, but Item/lifetime semantics do not expose that size and permit future expansion.
+- **DateTime is always owner-backed, never activation-backed.** Dynamic values are GC-owned; static input-parser Mark values are `Input`-arena-owned. Its present payload is one word, but Item/lifetime semantics do not expose that size and permit future expansion.
 
 ---
 

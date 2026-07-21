@@ -533,8 +533,10 @@ static bool typed_array_element_compatible(Type* arg_elem, Type* expected_elem) 
     case LMD_TYPE_FLOAT:
         return is_numeric_type_id(arg_tid) || arg_tid == LMD_TYPE_BOOL;
     case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
         return is_integer_type_id(arg_tid) ||
-               arg_tid == LMD_TYPE_BOOL || type_is_sized_integer(arg_elem);
+               arg_tid == LMD_TYPE_UINT64 || arg_tid == LMD_TYPE_BOOL ||
+               type_is_sized_integer(arg_elem);
     default:
         return false;
     }
@@ -571,7 +573,8 @@ static bool typed_array_annotation_compatible(Type* arg_type, Type* param_type) 
     if (!expected_elem) return false;
     if (expected_elem->type_id != LMD_TYPE_INT &&
         expected_elem->type_id != LMD_TYPE_FLOAT &&
-        expected_elem->type_id != LMD_TYPE_INT64) {
+        expected_elem->type_id != LMD_TYPE_INT64 &&
+        expected_elem->type_id != LMD_TYPE_UINT64) {
         return false;
     }
 
@@ -592,7 +595,8 @@ static Type* typed_array_expected_element(Type* param_type) {
     if (!expected_elem) return NULL;
     if (expected_elem->type_id != LMD_TYPE_INT &&
         expected_elem->type_id != LMD_TYPE_FLOAT &&
-        expected_elem->type_id != LMD_TYPE_INT64) {
+        expected_elem->type_id != LMD_TYPE_INT64 &&
+        expected_elem->type_id != LMD_TYPE_UINT64) {
         return NULL;
     }
     return expected_elem;

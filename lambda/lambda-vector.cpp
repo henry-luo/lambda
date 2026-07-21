@@ -1522,6 +1522,14 @@ Item fn_fill(Item n_item, Item value) {
         }
         return { .array_num = result };
     }
+    else if (val_type == LMD_TYPE_UINT64) {
+        ArrayNum* result = array_num_new(ELEM_UINT64, n);
+        uint64_t val = value.get_uint64();
+        for (int64_t i = 0; i < n; i++) {
+            ((uint64_t*)result->data)[i] = val;
+        }
+        return { .array_num = result };
+    }
     else if (val_type == LMD_TYPE_FLOAT) {
         double val = value.get_double();
         ArrayNum* result = array_float_new(n);
@@ -1981,7 +1989,7 @@ Item fn_math_sqrt(Item item) {
     GUARD_ERROR1(item);
     // Check if scalar
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(sqrt(val));
     }
@@ -1992,7 +2000,7 @@ Item fn_math_sqrt(Item item) {
 Item fn_math_log(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(log(val));
     }
@@ -2003,7 +2011,7 @@ Item fn_math_log(Item item) {
 Item fn_math_log10(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(log10(val));
     }
@@ -2014,7 +2022,7 @@ Item fn_math_log10(Item item) {
 Item fn_math_exp(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(exp(val));
     }
@@ -2025,7 +2033,7 @@ Item fn_math_exp(Item item) {
 Item fn_math_sin(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(sin(val));
     }
@@ -2036,7 +2044,7 @@ Item fn_math_sin(Item item) {
 Item fn_math_cos(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(cos(val));
     }
@@ -2047,7 +2055,7 @@ Item fn_math_cos(Item item) {
 Item fn_math_tan(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(tan(val));
     }
@@ -2058,7 +2066,7 @@ Item fn_math_tan(Item item) {
 Item fn_math_asin(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(asin(val));
     }
@@ -2069,7 +2077,7 @@ Item fn_math_asin(Item item) {
 Item fn_math_acos(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(acos(val));
     }
@@ -2080,7 +2088,7 @@ Item fn_math_acos(Item item) {
 Item fn_math_atan(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(atan(val));
     }
@@ -2105,7 +2113,7 @@ Item fn_math_atan2(Item item_y, Item item_x) {
 Item fn_math_sinh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(sinh(val));
     }
@@ -2116,7 +2124,7 @@ Item fn_math_sinh(Item item) {
 Item fn_math_cosh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(cosh(val));
     }
@@ -2127,7 +2135,7 @@ Item fn_math_cosh(Item item) {
 Item fn_math_tanh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(tanh(val));
     }
@@ -2138,7 +2146,7 @@ Item fn_math_tanh(Item item) {
 Item fn_math_asinh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(asinh(val));
     }
@@ -2149,7 +2157,7 @@ Item fn_math_asinh(Item item) {
 Item fn_math_acosh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(acosh(val));
     }
@@ -2160,7 +2168,7 @@ Item fn_math_acosh(Item item) {
 Item fn_math_atanh(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(atanh(val));
     }
@@ -2171,7 +2179,7 @@ Item fn_math_atanh(Item item) {
 Item fn_math_exp2(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(exp2(val));
     }
@@ -2182,7 +2190,7 @@ Item fn_math_exp2(Item item) {
 Item fn_math_expm1(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(expm1(val));
     }
@@ -2193,7 +2201,7 @@ Item fn_math_expm1(Item item) {
 Item fn_math_log2(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(log2(val));
     }
@@ -2209,7 +2217,7 @@ Item fn_math_pow(Item item_a, Item item_b) {
 Item fn_math_cbrt(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(cbrt(val));
     }
@@ -2220,7 +2228,7 @@ Item fn_math_cbrt(Item item) {
 Item fn_trunc(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(trunc(val));
     }
@@ -2236,6 +2244,7 @@ static inline bool item_to_bool(Item v) {
         case LMD_TYPE_BOOL:  return v.bool_val == BOOL_TRUE;
         case LMD_TYPE_INT:   return v.get_int56() != 0;
         case LMD_TYPE_INT64: return v.get_int64() != 0;
+        case LMD_TYPE_UINT64: return v.get_uint64() != 0;
         case LMD_TYPE_FLOAT: { double d = v.get_double(); return d != 0.0 && !std::isnan(d); }
         case LMD_TYPE_NULL:  return false;
         default:             return true;  // non-null compound values count as truthy
@@ -2356,7 +2365,7 @@ Item fn_math_hypot(Item item_y, Item item_x) {
 Item fn_math_log1p(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         return push_d(log1p(val));
     }
@@ -2367,7 +2376,7 @@ Item fn_math_log1p(Item item) {
 Item fn_sign(Item item) {
     GUARD_ERROR1(item);
     TypeId type = get_type_id(item);
-    if (is_native_numeric_type_id(type)) {
+    if (is_scalar_numeric(type)) {
         double val = item_to_double(item);
         int64_t s = (val > 0) ? 1 : (val < 0) ? -1 : 0;
         return { .item = i2it(s) };
