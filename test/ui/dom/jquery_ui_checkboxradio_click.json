@@ -1,0 +1,18 @@
+{
+  "name": "jQuery UI Checkboxradio keeps native checked state and label classes aligned",
+  "html": "test/ui/dom/jquery_ui_checkboxradio.html",
+  "events": [
+    {"type": "wait", "ms": 30},
+    {"type": "assert_class", "target": {"selector": "#newsletter-label"}, "class": "ui-checkboxradio-label"},
+    {"type": "click", "target": {"selector": "#newsletter-label"}},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_checked", "target": {"selector": "#newsletter"}, "checked": true},
+    {"type": "assert_class", "target": {"selector": "#newsletter-label"}, "class": "ui-checkboxradio-checked"},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "checked"},
+    {"type": "click", "target": {"selector": "#newsletter-label"}},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_checked", "target": {"selector": "#newsletter"}, "checked": false},
+    {"type": "assert_class", "target": {"selector": "#newsletter-label"}, "class": "ui-checkboxradio-checked", "present": false},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "unchecked"}
+  ]
+}

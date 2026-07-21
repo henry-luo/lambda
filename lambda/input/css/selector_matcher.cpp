@@ -59,6 +59,11 @@ SelectorMatcher* selector_matcher_create(Pool* pool) {
     return matcher;
 }
 
+void selector_matcher_set_scope_element(SelectorMatcher* matcher, DomElement* scope_element) {
+    if (!matcher) return;
+    matcher->scope_element = scope_element;
+}
+
 void selector_matcher_destroy(SelectorMatcher* matcher) {
     if (!matcher) {
         return;
@@ -552,6 +557,11 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
                 simple_selector->function_selectors,
                 (int)simple_selector->function_selector_count,
                 element);
+
+        case CSS_SELECTOR_PSEUDO_SCOPE:
+            // Element query APIs must bind :scope to their receiver; jQuery
+            // uses this form to evaluate relative selectors such as "> h3".
+            return matcher->scope_element == element;
 
         // Other pseudo-classes
         default:
