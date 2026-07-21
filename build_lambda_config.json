@@ -3993,6 +3993,7 @@
                         ],
                         "additional_sources": [
                             "lambda/concurrency.cpp",
+                            "lambda/scalar_heap.cpp",
                             "lib/uv_loop.c"
                         ],
                         "binary": "test_lambda_concurrency_gtest.exe",

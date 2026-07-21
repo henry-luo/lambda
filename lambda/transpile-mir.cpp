@@ -437,7 +437,7 @@ static void async_track_reg(MirTranspiler* mt, MIR_reg_t reg, MIR_type_t type) {
         if (mt->async_spill_count < mt->async_spill_capacity) {
             AsyncRegSpill* spill = &mt->async_spills[mt->async_spill_count++];
             spill->reg = reg;
-            spill->mir_type = type == MIR_T_D ? MIR_T_D : MIR_T_I64;
+            spill->mir_type = type;
             spill->slot = mt->async_next_slot++;
         }
     }
@@ -1827,7 +1827,7 @@ static void async_save_spills(MirTranspiler* mt, int count) {
     for (int i = 0; i < count; i++) {
         AsyncRegSpill* spill = &mt->async_spills[i];
         MIR_reg_t bits = spill->reg;
-        const char* setter = "lambda_async_frame_set_raw";
+        const char* setter = "lambda_async_frame_set_word";
         if (spill->mir_type == MIR_T_D) {
             bits = emit_box_float(mt, spill->reg);
             setter = "lambda_async_frame_set";
@@ -1848,7 +1848,7 @@ static void async_restore_spills(MirTranspiler* mt, int count) {
     for (int i = 0; i < count; i++) {
         AsyncRegSpill* spill = &mt->async_spills[i];
         const char* getter = spill->mir_type == MIR_T_D
-            ? "lambda_async_frame_get" : "lambda_async_frame_get_raw";
+            ? "lambda_async_frame_get" : "lambda_async_frame_get_word";
         MIR_reg_t saved = emit_call_2(mt, getter, MIR_T_I64,
             MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
             MIR_T_I64, MIR_new_int_op(mt->ctx, spill->slot));
@@ -1976,14 +1976,17 @@ static void store_global_var(MirTranspiler* mt, GlobalVarEntry* gvar, MIR_reg_t 
     // Box the value first
     MIR_reg_t boxed = emit_box(mt, val, val_tid);
     // Get BSS address
-    MIR_reg_t addr = new_reg(mt, "gv_addr", MIR_T_I64);
+    MIR_reg_t addr = new_reg(mt, "gv_addr", MIR_T_P);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, addr),
         MIR_new_ref_op(mt->ctx, gvar->bss_item)));
-    // Store boxed Item to BSS
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, addr, 0, 1),
-        MIR_new_reg_op(mt->ctx, boxed)));
+    // A bare boxed wide scalar would retain its producer's number-home pointer.
+    // Every BSS binding therefore owns the companion payload word used here.
+    emit_call_void_4(mt, "owned_item_slot_store",
+        MIR_T_P, MIR_new_reg_op(mt->ctx, addr),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 1),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
 }
 
 // ============================================================================
@@ -13496,6 +13499,14 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
 // Only scans TOP-LEVEL declarations (not nested in functions).
 // ============================================================================
 
+static MIR_item_t create_global_var_bss(MirTranspiler* mt, const char* name) {
+    char bss_name[140];
+    snprintf(bss_name, sizeof(bss_name), "_gvar_%s", name);
+    // A binding owns one Item plus one raw scalar sidecar. Keeping the shape
+    // uniform lets ANY bindings rehome INT64, UINT64, or out-of-band FLOAT.
+    return MIR_new_bss(mt->ctx, bss_name, 2 * sizeof(Item));
+}
+
 static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
     while (node) {
         if (node->node_type == AST_NODE_LET_STAM || node->node_type == AST_NODE_PUB_STAM ||
@@ -13508,10 +13519,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                     char name[128];
                     snprintf(name, sizeof(name), "%.*s", (int)asn->name->len, asn->name->chars);
 
-                    // Create BSS for this variable (8 bytes for boxed Item)
-                    char bss_name[140];
-                    snprintf(bss_name, sizeof(bss_name), "_gvar_%s", name);
-                    MIR_item_t bss = MIR_new_bss(mt->ctx, bss_name, 8);
+                    MIR_item_t bss = create_global_var_bss(mt, name);
 
                     TypeId tid = decl->type ? decl->type->type_id : LMD_TYPE_ANY;
                     if (tid == LMD_TYPE_ANY && asn->as && asn->as->type) {
@@ -13531,9 +13539,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                         char err_name[128];
                         snprintf(err_name, sizeof(err_name), "%.*s",
                             (int)asn->error_name->len, asn->error_name->chars);
-                        char err_bss_name[140];
-                        snprintf(err_bss_name, sizeof(err_bss_name), "_gvar_%s", err_name);
-                        MIR_item_t err_bss = MIR_new_bss(mt->ctx, err_bss_name, 8);
+                        MIR_item_t err_bss = create_global_var_bss(mt, err_name);
                         GlobalVarEntry err_entry;
                         memset(&err_entry, 0, sizeof(err_entry));
                         snprintf(err_entry.name, sizeof(err_entry.name), "%s", err_name);
@@ -13548,9 +13554,7 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                         String* name_str = dec->names[i];
                         char name[128];
                         snprintf(name, sizeof(name), "%.*s", (int)name_str->len, name_str->chars);
-                        char bss_name[140];
-                        snprintf(bss_name, sizeof(bss_name), "_gvar_%s", name);
-                        MIR_item_t bss = MIR_new_bss(mt->ctx, bss_name, 8);
+                        MIR_item_t bss = create_global_var_bss(mt, name);
 
                         GlobalVarEntry entry;
                         memset(&entry, 0, sizeof(entry));

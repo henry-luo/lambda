@@ -1016,6 +1016,14 @@ test-gc-rooting-core: build
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe run --no-log test/lambda/proc/proc_var.ls > temp/gc_rooting_lambda.txt
 	@diff -u test/lambda/proc/proc_var.txt temp/gc_rooting_lambda.txt
+	@echo "Running suspended partial-Item construction forced-GC gate..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe run --no-log test/lambda/proc/proc_async_partial_item_gc.ls > temp/gc_rooting_proc_partial_item.txt
+	@diff -u test/lambda/proc/proc_async_partial_item_gc.txt temp/gc_rooting_proc_partial_item.txt
+	@echo "Running module-owned wide-scalar forced-GC gate..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe --no-log test/lambda/uint64_storage_lifetime.ls > temp/gc_rooting_module_scalars.txt
+	@diff -u test/lambda/uint64_storage_lifetime.txt temp/gc_rooting_module_scalars.txt
 	@echo "Running number-model exact-conversion forced-GC gates..."
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe --no-log test/lambda/number_model_realign.ls > temp/gc_rooting_number_model_jit.txt

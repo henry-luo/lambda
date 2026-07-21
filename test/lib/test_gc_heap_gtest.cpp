@@ -455,6 +455,34 @@ TEST_F(GCHeapTest, MarkInlineValueIgnored) {
     EXPECT_EQ(gc->mark_top, 0);
 }
 
+TEST_F(GCHeapTest, RootedWideIntegerFallbackCellsSurviveCollection) {
+    int64_t* signed_cell = (int64_t*)gc_heap_alloc(gc, sizeof(int64_t), LMD_TYPE_INT64);
+    uint64_t* unsigned_cell = (uint64_t*)gc_heap_alloc(gc, sizeof(uint64_t), LMD_TYPE_UINT64);
+    ASSERT_NE(signed_cell, nullptr);
+    ASSERT_NE(unsigned_cell, nullptr);
+    *signed_cell = INT64_MAX;
+    *unsigned_cell = UINT64_MAX;
+
+    uint64_t signed_root = l2it(signed_cell);
+    uint64_t unsigned_root = u2it(unsigned_cell);
+    gc_register_root(gc, &signed_root);
+    gc_register_root(gc, &unsigned_root);
+    gc_set_poison_freed(gc, 1);
+
+    gc_collect(gc, NULL, 0, 0, 0);
+
+    // Ownerless wide scalars use leaf GC cells; both signedness tags must keep
+    // the payload alive without tracing its arbitrary bits as child Items.
+    EXPECT_EQ(gc->object_count, 2u);
+    EXPECT_EQ(*signed_cell, INT64_MAX);
+    EXPECT_EQ(*unsigned_cell, UINT64_MAX);
+    EXPECT_EQ(gc_get_header(signed_cell)->type_tag, LMD_TYPE_INT64);
+    EXPECT_EQ(gc_get_header(unsigned_cell)->type_tag, LMD_TYPE_UINT64);
+
+    gc_unregister_root(gc, &signed_root);
+    gc_unregister_root(gc, &unsigned_root);
+}
+
 TEST_F(GCHeapTest, MarkListTracesChildren) {
     // create a list with two string children
     void* str_a = make_string("alpha");

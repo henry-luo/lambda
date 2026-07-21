@@ -86,6 +86,8 @@ Item lambda_async_frame_get(LambdaAsyncFrame* frame, int slot);
 void lambda_async_frame_set(LambdaAsyncFrame* frame, int slot, Item value);
 uint64_t lambda_async_frame_get_raw(LambdaAsyncFrame* frame, int slot);
 void lambda_async_frame_set_raw(LambdaAsyncFrame* frame, int slot, uint64_t value);
+uint64_t lambda_async_frame_get_word(LambdaAsyncFrame* frame, int slot);
+void lambda_async_frame_set_word(LambdaAsyncFrame* frame, int slot, uint64_t value);
 void lambda_async_frame_complete(LambdaAsyncFrame* frame);
 LambdaTaskScope* lambda_async_frame_scope_base(LambdaAsyncFrame* frame);
 int lambda_task_has_current(void);

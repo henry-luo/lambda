@@ -1349,7 +1349,14 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR)}},
-    {"owned_item_slot_store", FPTR(owned_item_slot_store)},
+    {"owned_item_slot_store", FPTR(owned_item_slot_store),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(3, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"push_d_safe", FPTR(push_d_safe),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -2729,6 +2736,19 @@ JitImport jit_runtime_imports[] = {
     {"lambda_async_frame_enter_current", FPTR(lambda_async_frame_enter_current)},
     {"lambda_async_frame_get_raw", FPTR(lambda_async_frame_get_raw)},
     {"lambda_async_frame_set_raw", FPTR(lambda_async_frame_set_raw)},
+    {"lambda_async_frame_get_word", FPTR(lambda_async_frame_get_word),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_async_frame_set_word", FPTR(lambda_async_frame_set_word),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_async_frame_scope_base", FPTR(lambda_async_frame_scope_base)},
     {"lambda_task_scope_enter", FPTR(lambda_task_scope_enter)},
     {"lambda_task_scope_current", FPTR(lambda_task_scope_current)},
@@ -3001,7 +3021,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
     static const char* audited[] = {
         "memset", "memcpy", "fmod", "is_truthy",
         "lambda_mir_double_bits", "lambda_mir_bits_double",
-        "lambda_item_adopt_scalar_home",
+        "lambda_item_adopt_scalar_home", "owned_item_slot_store",
+        "lambda_async_frame_get_word", "lambda_async_frame_set_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         "js_is_truthy", "js_is_nullish", "js_args_save", "js_args_restore",
         "js_check_exception", "js_set_this", "js_get_new_target",

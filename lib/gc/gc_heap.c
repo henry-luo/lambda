@@ -1213,6 +1213,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     }
     // types with no outgoing Item pointers — nothing to trace
     case LMD_TYPE_INT64_:
+    case LMD_TYPE_UINT64_:
     case LMD_TYPE_FLOAT_:
     case LMD_TYPE_DTIME_:
     case LMD_TYPE_STRING_:
@@ -1538,8 +1539,7 @@ static void gc_fixup_embedded_pointers(uint64_t* old_items, uint64_t* new_items,
         uint64_t item = new_items[i];
         uint8_t item_tag = (uint8_t)(item >> 56);
 
-        // Only fix tagged pointer types that array_set stores in its owned tail:
-        // Float (5), Int64 (4), Uint64 (23).
+        // Only fix tagged pointer types that array_set stores in its owned tail.
         if (item_tag == LMD_TYPE_FLOAT_ ||
             item_tag == LMD_TYPE_INT64_ || item_tag == LMD_TYPE_UINT64_) {
             // Extract the raw pointer (lower 56 bits)

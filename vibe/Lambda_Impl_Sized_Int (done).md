@@ -212,6 +212,23 @@ front ends, rather than moving the work into a wrapper:
 | Lambda `_phase7_dtime_return_107` | 31 instructions, 21 locals | 22 instructions, 15 locals | 29.0% instructions |
 | LambdaJS `_js_phase7BigIntReturn_146_body` | 17 instructions, 10 locals | 15 instructions, 9 locals | 11.8% instructions |
 
+### 0.5 Reopened destination-ownership audit — completed 2026-07-21
+
+The later `Lambda_Impl_Numbers.md` F0–F5 audit replaced the broad P0.3 claim
+with a live boundary inventory and closed the gaps it found. Module/global BSS
+bindings now own a companion payload; suspended MIR words preserve managed
+Items and number-home values in a rooted Item half while arbitrary raw words
+stay unscanned; task result/resume slots, mailboxes, JS promises, and bound
+argument environments own wide scalars; and the remaining fixed one-word or
+opaque ABI slots use the explicit counted ownerless fallback. Signed and
+unsigned values share every ownership shape.
+
+The follow-up passed 61/61 collector tests, 10/10 concurrency tests,
+3,507/3,507 Lambda baseline tests, 40,261/40,261 test262 cases with zero retry,
+and the complete precise-only forced-GC aggregate including hosted Python.
+`Lambda_Impl_Numbers.md` §5 is the detailed completion record and current
+implementation checklist.
+
 - Rewrite `test/test_item_repr_gtest.cpp` to prove small, zero, boundary, and
   full-width `INT64`/`UINT64` values have no inline representation.
 - Add repeated local, imported-result, normal/error-return, discarded-result,

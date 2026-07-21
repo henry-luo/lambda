@@ -13552,8 +13552,9 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->builtin_id = orig->builtin_id;
     bound->flags = orig->flags; // preserve strict/arrow flags from original
     bound->flags |= JS_FUNC_FLAG_HAS_BOUND_THIS; // always mark as having bound this
-    bound->bound_this = (orig->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
-        ? orig->bound_this : this_root.get();
+    bound->bound_this = lambda_item_heap_rehome(
+        (orig->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
+            ? orig->bound_this : this_root.get());
     Item bound_item = bound_root.get();
     {
         Item target_key = (Item){.item = s2it(heap_create_name(JS_BOUND_TARGET_KEY, JS_BOUND_TARGET_KEY_LEN))};
@@ -13583,15 +13584,16 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     if (total_bound_argc > 0) {
         bound->bound_args = js_alloc_env(total_bound_argc);
         for (int i = 0; i < orig_bound_argc; i++) {
-            bound->bound_args[i] = orig->bound_args[i];
+            owned_item_slot_store(bound->bound_args, total_bound_argc, i,
+                orig->bound_args[i]);
         }
         for (int i = 0; i < new_bound_argc; i++) {
-            bound->bound_args[orig_bound_argc + i] = (Item){
-                .item = arg_roots[i] ? *arg_roots[i] : 0
-            };
+            owned_item_slot_store(bound->bound_args, total_bound_argc,
+                orig_bound_argc + i, (Item){
+                    .item = arg_roots[i] ? *arg_roots[i] : 0
+                });
         }
         bound->bound_argc = total_bound_argc;
-        js_env_rehome_scalars(bound->bound_args);
     }
     {
         Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
@@ -13644,17 +13646,20 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
             bound->formal_length = 0;
             bound->env_size = 1;
             bound->env = js_alloc_env(1);
-            bound->env[0] = func_item;
-            js_env_rehome_scalars(bound->env);
+            owned_item_slot_store(bound->env, 1, 0, func_item);
             bound->flags = JS_FUNC_FLAG_HAS_BOUND_THIS;
-            bound->bound_this = bound_this;
+            // JsFunction's fixed ABI has no adjacent scalar payload for this
+            // one persistent slot, so use the explicit ownerless fallback.
+            bound->bound_this = lambda_item_heap_rehome(bound_this);
             bound->name = heap_create_name("bound ", 6);
             Item bound_item = (Item){.function = (Function*)bound};
             if (bound_argc > 0 && bound_args) {
                 bound->bound_args = js_alloc_env(bound_argc);
-                for (int i = 0; i < bound_argc; i++) bound->bound_args[i] = bound_args[i];
+                for (int i = 0; i < bound_argc; i++) {
+                    owned_item_slot_store(bound->bound_args, bound_argc, i,
+                        bound_args[i]);
+                }
                 bound->bound_argc = bound_argc;
-                js_env_rehome_scalars(bound->bound_args);
             }
             Item target_key = (Item){.item = s2it(heap_create_name(JS_BOUND_TARGET_KEY, JS_BOUND_TARGET_KEY_LEN))};
             js_func_init_property(bound_item, target_key, func_item);
@@ -28133,12 +28138,16 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
 
 // Helper: create {value, done} iterator result object
 static Item js_make_iter_result(Item value, bool done) {
-    Item result = js_new_object();
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> result_root(roots, js_new_object());
     String* val_key = heap_create_name("value", 5);
     String* done_key = heap_create_name("done", 4);
-    js_property_set(result, (Item){.item = s2it(val_key)}, value);
-    js_property_set(result, (Item){.item = s2it(done_key)}, (Item){.item = b2it(done)});
-    return result;
+    // Property insertion may collect; retain both the fresh result map and a
+    // scalar payload still owned by the generator state-result container.
+    js_property_set(result_root.get(), (Item){.item = s2it(val_key)}, value_root.get());
+    js_property_set(result_root.get(), (Item){.item = s2it(done_key)}, (Item){.item = b2it(done)});
+    return result_root.get();
 }
 
 static Item js_async_generator_wrap_yield_value(Item value) {
@@ -28504,6 +28513,11 @@ static Item js_async_generator_await_reject(Item generator, Item reason) {
 }
 
 extern "C" Item js_generator_next(Item generator, Item input) {
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> generator_root(roots, generator);
+    Rooted<Item> input_root(roots, input);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> value_root(roots, ItemNull);
     JsGenerator* gen = js_get_generator(generator);
     if (!gen) {
         log_error("generator_next: invalid generator object");
@@ -28541,6 +28555,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             gen->delegate_resume = -1;
             gen->delegate_idx = 0;
             input = make_js_undefined();
+            input_root.set(input);
             // Resume the generator state machine with the pending exception so
             // its normal try/catch/finally lowering can handle the abrupt step.
             goto run_state_machine;
@@ -28552,6 +28567,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             gen->delegate_resume = -1;
             gen->delegate_idx = 0;
             input = make_js_undefined();
+            input_root.set(input);
             goto run_state_machine;
         }
         if (del_done) {
@@ -28562,6 +28578,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
                 gen->delegate_resume = -1;
                 gen->delegate_idx = 0;
                 input = make_js_undefined();
+                input_root.set(input);
                 goto run_state_machine;
             }
             // Delegate exhausted — clear it and resume our state machine
@@ -28570,6 +28587,7 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             gen->delegate_resume = -1;
             gen->delegate_idx = 0;
             input = return_val;
+            input_root.set(input);
             // Fall through to call state machine at resumed state
         } else {
             gen->executing = false;
@@ -28592,11 +28610,13 @@ run_state_machine:
     // If next_state == -3, this is yield* delegation: value is the iterable
     typedef Item (*GenFn)(Item*, Item, int64_t);
 
-    Item result = ((GenFn)gen->state_fn)(gen->env, input, gen->state);
+    result_root.set(((GenFn)gen->state_fn)(gen->env, input_root.get(), gen->state));
+    Item result = result_root.get();
 
     if (get_type_id(result) == LMD_TYPE_ARRAY) {
         Array* arr = result.array;
         Item value = (arr->length > 0) ? arr->items[0] : ItemNull;
+        value_root.set(value);
         int64_t next_state = -1;
         if (arr->length > 1 && get_type_id(arr->items[1]) == LMD_TYPE_INT) {
             next_state = it2i(arr->items[1]);
@@ -28612,6 +28632,7 @@ run_state_machine:
                 gen->delegate_resume = -1;
                 gen->delegate_idx = 0;
                 input = make_js_undefined();
+                input_root.set(input);
                 goto run_state_machine;
             }
             gen->delegate = iterator;
@@ -29831,6 +29852,7 @@ struct JsPromise {
     TypeId type_id;                // LMD_TYPE_MAP
     JsPromiseState state;
     Item result;                   // fulfilled value or rejection reason
+    uint64_t result_scalar;        // destination-owned wide-scalar payload
     Item on_fulfilled[8];          // then() callbacks (max chain depth)
     Item on_rejected[8];
     Item next_promise[8];          // chained promise for each then() handler
@@ -30604,7 +30626,9 @@ static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
     if (p->state != JS_PROMISE_PENDING) return; // already settled
 
     p->state = state;
-    p->result = result;
+    // Promise records outlive the producer activation; retain wide numerics in
+    // the adjacent destination-owned payload instead of borrowing its home.
+    owned_item_slot_store(&p->result, 1, 0, result);
     Item promise_resource = js_promise_to_item(p);
     js_async_hooks_emit_promise_resolve_resource(promise_resource);
     if (state == JS_PROMISE_REJECTED) {

@@ -42,7 +42,7 @@ Objects live in one of four sub-regions, but all are reclaimed by one collector:
 
 It owns the **GC driver** `heap_gc_collect`, the callback `gc_data_alloc` invokes when the data zone crosses its threshold. The driver issues a `setjmp` to flush callee-saved registers onto the C stack, reads the bounds from `_lambda_stack_base`, derives the live precise-root slice from `Context.side_root_base/top`, and passes that slice to `gc_collect_with_root_region`.
 
-It owns side-stack binding/checking plus the root-registration wrappers around `gc_register_root`/`gc_register_root_range` (§5–§6). It owns number-home allocation for full-width `INT64`/`UINT64` and out-of-band `FLOAT`, caller-home adoption, destination/persistent rehoming support, and the interned single-char ASCII table. `push_k` is separate GC-owned dynamic datetime construction, not number-stack allocation; static parser datetimes are owned by their `Input` arena through `MarkBuilder`. Finally it owns teardown finalization, which walks surviving objects and runs external finalizers at context end.
+It owns side-stack binding/checking plus the root-registration wrappers around `gc_register_root`/`gc_register_root_range` (§5–§6). It owns number-home allocation for full-width `INT64`/`UINT64` and out-of-band `FLOAT`, caller-home adoption, destination-owned scalar-slot support, and the interned single-char ASCII table. The isolated ownerless GC scalar-cell fallback and its counters live in `scalar_heap.cpp`. `push_k` is separate GC-owned dynamic datetime construction, not number-stack allocation; static parser datetimes are owned by their `Input` arena through `MarkBuilder`. Finally it owns teardown finalization, which walks surviving objects and runs external finalizers at context end.
 
 Several exported symbols here are **dead stubs** kept only for API compatibility — `free_item`, `free_container`, `frame_start`, `frame_end` (`lambda-mem.cpp:759`–`776`) are no-ops; all reclamation is mark-and-sweep or teardown, not per-frame.
 
@@ -92,7 +92,7 @@ A cycle is **triggered** from `gc_data_alloc` (`gc_heap.c:601`) when nursery dat
 
 The root set is gathered at the top of `gc_collect` from five sources:
 
-1. **Registered root slots** — `uint64_t*` pointers to single boxed Items: BSS module-level globals (each module-level `let`) and `context->heap->result_root` (`lambda-mem.cpp:215`). Registered via `gc_register_root`.
+1. **Registered root slots** — `uint64_t*` pointers to boxed Items: the first word of each two-word BSS module/global binding and `context->heap->result_root` (`lambda-mem.cpp:215`). The BSS companion is a raw destination-owned scalar payload and is deliberately outside the registered Item count. Roots are registered via `gc_register_root`/`gc_register_root_range`.
 2. **Registered root ranges** — persistent contiguous `Item[]` stores such as module variables and the JS argument stack, via `gc_register_root_range`.
 3. **Execution root side-stack** — the live `[Context.side_root_base, Context.side_root_top)` slice supplied by `heap_gc_collect` as precise extra roots.
 4. **Other caller-supplied `extra_roots`** — passed through to `gc_collect`.
@@ -156,7 +156,8 @@ The memory subsystem carries a set of structural risks and hard-coded caps; seve
 | `lib/gc/gc_heap.c` / `.h` | The collector engine: `gc_collect`, mark (`gc_mark_item`/`gc_trace_object`/`gc_scan_stack`), compact (`gc_compact_data`), sweep (`gc_sweep`), allocators (`gc_heap_alloc`/`gc_heap_bump_alloc`/`gc_data_alloc`), root slot/range registries, adaptive threshold, finalization. |
 | `lib/gc/gc_object_zone.h` | Non-moving size-class free-list allocator for fixed object structs; sorted range table for ownership. |
 | `lib/gc/gc_data_zone.h` | Bump allocator for variable-size data buffers; nursery + tenured instances, reset/compact. |
-| `lambda/lambda-mem.cpp` | Allocation entry points, `heap_gc_collect` driver, execution side-stack binding/checking, root-registration wrappers, numeric boxing and scalar-lane helpers, teardown finalization, ASCII char table, dead stubs. |
+| `lambda/lambda-mem.cpp` | Allocation entry points, `heap_gc_collect` driver, execution side-stack binding/checking, root-registration wrappers, numeric boxing and destination scalar-lane helpers, teardown finalization, ASCII char table, dead stubs. |
+| `lambda/scalar_heap.cpp` | Counted immutable GC scalar-cell fallback for ownerless persistent `DOUBLE`/`INT64`/`UINT64` Items. |
 | `lambda/name_pool.cpp` / `.hpp` | StrView-keyed, parent-chained, ref-counted identifier interning. |
 | `lambda/shape_pool.cpp` / `.hpp` | `ShapeSignature`-keyed `ShapeEntry`-chain dedup; arena-built chains; 64-field cap. |
 | `lambda/mem_factory_rt.cpp` / `.h` | Factory that registers gc_heap / NamePool / ShapePool in the `MemContext` registry and installs release hooks. |

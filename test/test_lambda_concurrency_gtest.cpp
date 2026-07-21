@@ -45,6 +45,11 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
         ? gc_heap_calloc(concurrency_test_gc, size, (uint16_t)type_id) : NULL;
 }
 
+void* heap_alloc(int size, TypeId type_id) {
+    return concurrency_test_gc
+        ? gc_heap_alloc(concurrency_test_gc, (size_t)size, (uint16_t)type_id) : NULL;
+}
+
 extern "C" void heap_register_gc_root(uint64_t* slot) {
     if (concurrency_test_gc && slot) gc_register_root(concurrency_test_gc, slot);
 }
@@ -173,6 +178,42 @@ TEST_F(LambdaConcurrencyRuntime, SchedulerRunsRunnableTasksInFifoOrder) {
     EXPECT_EQ(lambda_scheduler_live_count(scheduler), 0);
 }
 
+TEST_F(LambdaConcurrencyRuntime, OwnerlessWideIntegerFallbacksAreTypedAndRooted) {
+    int64_t source_i = INT64_MAX;
+    uint64_t source_u = UINT64_MAX;
+    uint64_t before_i = lambda_scalar_heap_rehome_count(LMD_TYPE_INT64);
+    uint64_t before_u = lambda_scalar_heap_rehome_count(LMD_TYPE_UINT64);
+    uint64_t before_f = lambda_scalar_heap_rehome_count(LMD_TYPE_FLOAT);
+
+    EXPECT_FALSE(gc_is_managed(concurrency_test_gc, &source_i));
+    EXPECT_FALSE(gc_is_managed(concurrency_test_gc, &source_u));
+
+    Item owned_i = lambda_item_heap_rehome((Item){.item = l2it(&source_i)});
+    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_INT64), before_i + 1);
+    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_UINT64), before_u);
+    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_FLOAT), before_f);
+    Item owned_u = lambda_item_heap_rehome((Item){.item = u2it(&source_u)});
+
+    ASSERT_EQ(get_type_id(owned_i), LMD_TYPE_INT64);
+    ASSERT_EQ(get_type_id(owned_u), LMD_TYPE_UINT64);
+    EXPECT_TRUE(gc_is_managed(concurrency_test_gc,
+        (void*)(uintptr_t)owned_i.int64_ptr));
+    EXPECT_TRUE(gc_is_managed(concurrency_test_gc,
+        (void*)(uintptr_t)owned_u.uint64_ptr));
+    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_INT64), before_i + 1);
+    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_UINT64), before_u + 1);
+    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_FLOAT), before_f);
+
+    gc_register_root(concurrency_test_gc, &owned_i.item);
+    gc_register_root(concurrency_test_gc, &owned_u.item);
+    gc_set_poison_freed(concurrency_test_gc, 1);
+    gc_collect(concurrency_test_gc, NULL, 0, 0, 0);
+    EXPECT_EQ(owned_i.get_int64(), INT64_MAX);
+    EXPECT_EQ(owned_u.get_uint64(), UINT64_MAX);
+    gc_unregister_root(concurrency_test_gc, &owned_i.item);
+    gc_unregister_root(concurrency_test_gc, &owned_u.item);
+}
+
 TEST_F(LambdaConcurrencyRuntime, MailboxIsBoundedAndDequeuesOnlyFromFifoHead) {
     ParkFrame target_frame = {};
     LambdaTask* target = lambda_task_create(scheduler, park_then_finish, &target_frame, NULL);
@@ -192,6 +233,44 @@ TEST_F(LambdaConcurrencyRuntime, MailboxIsBoundedAndDequeuesOnlyFromFifoHead) {
     ASSERT_TRUE(lambda_task_mailbox_receive(target, &value));
     EXPECT_EQ(it2i(value), 30);
     EXPECT_FALSE(lambda_task_mailbox_receive(target, &value));
+}
+
+TEST_F(LambdaConcurrencyRuntime, TaskPersistentSlotsOwnWideIntegerPayloads) {
+    int order[1] = {};
+    int count = 0;
+    int64_t result_source = INT64_MAX;
+    RecordFrame result_frame = {
+        1, order, &count, {.item = l2it(&result_source)}, NULL, ItemNull};
+    LambdaTask* completed = lambda_task_create(
+        scheduler, record_and_complete, &result_frame, NULL);
+    ASSERT_NE(completed, nullptr);
+    ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
+    result_source = 0;
+
+    ParkFrame parked_frame = {};
+    LambdaTask* parked = lambda_task_create(
+        scheduler, park_then_finish, &parked_frame, NULL);
+    ASSERT_NE(parked, nullptr);
+    ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
+    uint64_t message_source = UINT64_MAX;
+    ASSERT_EQ(lambda_task_send(NULL, parked,
+        (Item){.item = u2it(&message_source)}), LAMBDA_SEND_OK);
+    message_source = 0;
+
+    gc_set_poison_freed(concurrency_test_gc, 1);
+    gc_collect(concurrency_test_gc, NULL, 0, 0, 0);
+
+    EXPECT_EQ(lambda_task_result(completed).get_int64(), INT64_MAX);
+    Item message = ItemNull;
+    ASSERT_TRUE(lambda_task_mailbox_receive(parked, &message));
+    EXPECT_EQ(message.get_uint64(), UINT64_MAX);
+
+    uint64_t resume_source = UINT64_MAX - 1;
+    lambda_task_resume_external(parked,
+        (Item){.item = u2it(&resume_source)});
+    resume_source = 0;
+    ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
+    EXPECT_EQ(lambda_task_result(parked).get_uint64(), UINT64_MAX - 1);
 }
 
 TEST_F(LambdaConcurrencyRuntime, CompletionIsPublishedAfterFinalSend) {

@@ -1681,6 +1681,32 @@ instructions/15 locals (29.0% fewer instructions). LambdaJS
 instructions/9 locals (11.8% fewer instructions). These are body-frame counts,
 so the reduction is not hidden in a public wrapper.
 
+### Phase 7 lifetime follow-up record (2026-07-21)
+
+A reopened live audit found that the representation lanes were aligned but
+four persistent boundaries still needed stronger ownership proof. The landed
+follow-up gives every MIR module/global BSS binding a rooted Item plus an
+unscanned scalar companion; classifies suspended MIR words into a rooted Item
+half or unscanned raw half only after the async frame has reserved its complete
+layout; gives task result/resume slots, mailboxes, and JS promise results
+destination-owned companions; and stores JS bound arguments through their
+environment-owned scalar sidecars. The fixed one-word `bound_this` field and
+other genuinely ownerless one-word ABIs use the explicit counted GC fallback.
+
+The new forced-GC regression suspends while an array expression is only partly
+built, then verifies its array owner and signed/unsigned scalar payloads after
+the source activation has ended. A second regression rereads module exports
+after later full-width scalar churn. Direct collector and concurrency tests
+verify signed and unsigned fallback tags, heap membership, per-type counters,
+root survival, task publication, mailbox transfer, and resume storage.
+
+The closeout passed `make test-lambda-baseline` at 3,507/3,507 with zero
+failures, `make test262-baseline` at 40,261/40,261 with zero failures and
+`retry 0.0s`, and the complete `make test-gc-rooting` aggregate across Lambda,
+LambdaJS JIT, LambdaJS MIR interpreter, and hosted Python. The root gate
+verified 34 transitive `NO_GC` imports and 12,350 migrated native functions
+without an automatic-local root or transient-registration hazard.
+
 The common API is complete only when:
 
 - Lambda and JS no longer own separate generated root-frame state;
@@ -1719,8 +1745,9 @@ sharp is what allows the implementation to be both shared and fast.
 
 ## 15. Numeric scalar representation realignment
 
-**Status:** implemented Phase 7; GC scalar-cell fallback is active and counted
-for persistent slots without a natural owner. The general direction is that `DOUBLE`,
+**Status:** implemented and live-audited through the 2026-07-21 lifetime
+follow-up; GC scalar-cell fallback is active and counted for persistent slots
+without a natural owner. The general direction is that `DOUBLE`,
 `INT64`, and `UINT64` ultimately have no standalone heap representation and are
 not GC-rootable value classes; that final step is deferred.
 

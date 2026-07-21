@@ -4,6 +4,7 @@
 #include "lambda-data.hpp"
 #include "lambda-error.h"
 #include "transpiler.hpp"
+#include "../lib/gc/gc_heap.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
@@ -78,6 +79,7 @@ struct LambdaAsyncFrame {
     LambdaTask* task;
     int state;
     Item* slots;
+    uint8_t* slot_is_item;
     int slot_count;
     int slot_capacity;
     LambdaAsyncFrame* next;
@@ -117,7 +119,9 @@ struct LambdaTask {
     int frame_root_count;
     Item handle;
     Item result;
+    uint64_t result_scalar;
     Item resume_value;
+    uint64_t resume_value_scalar;
     bool has_resume_value;
     bool cancel_requested;
     bool cleanup_masked;
@@ -210,6 +214,7 @@ static void async_frame_reset_from(LambdaAsyncFrame* frame) {
         frame->state = 0;
         for (int i = 0; i < frame->slot_count; i++) {
             owned_item_slot_store(frame->slots, frame->slot_capacity, i, ItemNull);
+            if (frame->slot_is_item) frame->slot_is_item[i] = 1;
         }
         frame = frame->next;
     }
@@ -223,6 +228,7 @@ static void async_frames_destroy(LambdaTask* task) {
             heap_unregister_gc_root_range((uint64_t*)frame->slots);
         }
         mem_free(frame->slots);
+        mem_free(frame->slot_is_item);
         mem_free(frame);
         frame = next;
     }
@@ -353,7 +359,7 @@ static void task_resume_with(LambdaTask* task, Item value) {
         wait_group_free(group);
     }
     task_timer_close(task);
-    task->resume_value = value;
+    owned_item_slot_store(&task->resume_value, 1, 0, value);
     task->has_resume_value = true;
     task->park_kind = LAMBDA_PARK_NONE;
     scheduler_enqueue(task);
@@ -664,7 +670,7 @@ extern "C" LambdaTask* lambda_task_create(LambdaScheduler* scheduler,
     if (!scheduler || !scheduler_has_heap()) return NULL;
     LambdaTask* task = (LambdaTask*)mem_calloc(1, sizeof(LambdaTask), MEM_CAT_EVAL);
     if (!task) return NULL;
-    task->mailbox.items = (Item*)mem_calloc((size_t)scheduler->mailbox_capacity,
+    task->mailbox.items = (Item*)mem_calloc((size_t)scheduler->mailbox_capacity * 2,
         sizeof(Item), MEM_CAT_EVAL);
     if (!task->mailbox.items) {
         mem_free(task);
@@ -879,7 +885,9 @@ extern "C" LambdaSendStatus lambda_task_send(
     LambdaMailbox* mailbox = &target->mailbox;
     if (mailbox->count >= mailbox->capacity) return LAMBDA_SEND_FULL;
     int tail = (mailbox->head + mailbox->count) % mailbox->capacity;
-    mailbox->items[tail] = message;
+    // Mailboxes persist across sender activations; the receiving task must not
+    // borrow a boxed numeric payload from the sender's number extent.
+    owned_item_slot_store(mailbox->items, mailbox->capacity, tail, message);
     mailbox->count++;
     LambdaScheduler* scheduler = target->scheduler;
     uint64_t sequence = ++scheduler->event_sequence;
@@ -937,7 +945,9 @@ extern "C" void lambda_task_resume_external(LambdaTask* task, Item result) {
 extern "C" void lambda_task_complete(LambdaTask* task, Item result) {
     if (!task || task->state == LAMBDA_TASK_DONE) return;
     task_timer_close(task);
-    task->result = result;
+    // Completion is published after the task frame can unwind, so retain any
+    // wide scalar in the task-owned companion word before waking observers.
+    owned_item_slot_store(&task->result, 1, 0, result);
     task->completion_sequence = ++task->scheduler->event_sequence;
     // K20e is a sequencing invariant: completion is published only after the
     // sender's final successful enqueue has acquired an earlier event number.
@@ -950,7 +960,7 @@ extern "C" void lambda_task_complete(LambdaTask* task, Item result) {
     task->observers = NULL;
     while (observer) {
         LambdaTaskObserver* next = observer->next;
-        if (observer->callback) observer->callback(task, result, observer->data);
+        if (observer->callback) observer->callback(task, task->result, observer->data);
         if (observer->destroy_data) observer->destroy_data(observer->data);
         mem_free(observer);
         observer = next;
@@ -1001,19 +1011,32 @@ static bool async_frame_reserve(LambdaAsyncFrame* frame, int slot_capacity) {
     if (!frame || slot_capacity <= frame->slot_capacity) return frame != NULL;
     Item* resized = (Item*)mem_calloc((size_t)slot_capacity * 2,
         sizeof(Item), MEM_CAT_EVAL);
-    if (!resized) return false;
+    uint8_t* resized_kinds = (uint8_t*)mem_calloc((size_t)slot_capacity,
+        sizeof(uint8_t), MEM_CAT_EVAL);
+    if (!resized || !resized_kinds) {
+        mem_free(resized);
+        mem_free(resized_kinds);
+        return false;
+    }
     for (int i = 0; i < frame->slot_count; i++) {
-        owned_item_slot_store(resized, slot_capacity, i, frame->slots[i]);
-        // Raw MIR spills occupy the unscanned tail. Preserve them separately;
-        // the Item half can be zero for a raw-only slot.
-        resized[slot_capacity + i].item =
-            frame->slots[frame->slot_capacity + i].item;
+        if (frame->slot_is_item && frame->slot_is_item[i]) {
+            owned_item_slot_store(resized, slot_capacity, i, frame->slots[i]);
+            resized_kinds[i] = 1;
+        } else {
+            // Raw MIR spills occupy the unscanned tail. Preserve them without
+            // interpreting arbitrary bits as Items during frame growth.
+            resized[i] = ItemNull;
+            resized[slot_capacity + i].item =
+                frame->slots[frame->slot_capacity + i].item;
+        }
     }
     if (frame->slots && scheduler_has_heap()) {
         heap_unregister_gc_root_range((uint64_t*)frame->slots);
     }
     mem_free(frame->slots);
+    mem_free(frame->slot_is_item);
     frame->slots = resized;
+    frame->slot_is_item = resized_kinds;
     frame->slot_capacity = slot_capacity;
     if (scheduler_has_heap()) {
         heap_register_gc_root_range((uint64_t*)frame->slots, frame->slot_capacity);
@@ -1067,6 +1090,7 @@ extern "C" void lambda_async_frame_set(LambdaAsyncFrame* frame, int slot, Item v
         if (!async_frame_reserve(frame, next_capacity)) return;
     }
     owned_item_slot_store(frame->slots, frame->slot_capacity, slot, value);
+    frame->slot_is_item[slot] = 1;
     if (slot >= frame->slot_count) frame->slot_count = slot + 1;
 }
 
@@ -1087,7 +1111,65 @@ extern "C" void lambda_async_frame_set_raw(LambdaAsyncFrame* frame, int slot,
     // tail so the precise root range never interprets payload bits as Items.
     frame->slots[slot] = ItemNull;
     frame->slots[frame->slot_capacity + slot].item = value;
+    frame->slot_is_item[slot] = 0;
     if (slot >= frame->slot_count) frame->slot_count = slot + 1;
+}
+
+static bool async_word_is_number_home(uint64_t value) {
+    if (!context || !context->side_number_base || !context->side_number_top ||
+            (value & ITEM_DBL_MASK)) return false;
+    uint8_t tag = (uint8_t)(value >> 56);
+    uintptr_t payload = value & ~ITEM_HIGH_BYTE_MASK;
+    if (tag == LMD_TYPE_FLOAT || tag == LMD_TYPE_FLOAT64) {
+        if (payload <= 1) return false;
+    } else if (tag != LMD_TYPE_INT64 && tag != LMD_TYPE_UINT64) {
+        return false;
+    }
+    uintptr_t base = (uintptr_t)context->side_number_base;
+    uintptr_t top = (uintptr_t)context->side_number_top;
+    return payload >= base && payload < top &&
+        (payload - base) % sizeof(uint64_t) == 0;
+}
+
+static void* async_word_gc_pointer(uint64_t value) {
+    if (!value || (value & ITEM_DBL_MASK)) return NULL;
+    uint8_t tag = (uint8_t)(value >> 56);
+    if (tag == 0) return (void*)(uintptr_t)value;
+    if ((tag >= LMD_TYPE_INT64 && tag <= LMD_TYPE_BINARY) ||
+            tag == LMD_TYPE_ERROR) {
+        return (void*)(uintptr_t)(value & ~ITEM_HIGH_BYTE_MASK);
+    }
+    return NULL;
+}
+
+extern "C" void lambda_async_frame_set_word(LambdaAsyncFrame* frame, int slot,
+                                                uint64_t value) {
+    // Generated prologues reserve the complete spill layout before any value is
+    // saved. Keeping this setter allocation-free lets managed Item words remain
+    // borrowed safely across the store and preserves its audited NO_GC contract.
+    if (!frame || slot < 0 || slot >= frame->slot_capacity) return;
+    void* gc_ptr = async_word_gc_pointer(value);
+    bool managed_item = gc_ptr && context && context->heap && context->heap->gc &&
+        gc_is_managed(context->heap->gc, gc_ptr);
+    if (async_word_is_number_home(value) || managed_item) {
+        // Suspension ends the native number/root frame. Rehome scalar Items and
+        // retain managed Items; arbitrary words stay outside the scanned half.
+        owned_item_slot_store(frame->slots, frame->slot_capacity, slot,
+            (Item){.item = value});
+        frame->slot_is_item[slot] = 1;
+    } else {
+        frame->slots[slot] = ItemNull;
+        frame->slots[frame->slot_capacity + slot].item = value;
+        frame->slot_is_item[slot] = 0;
+    }
+    if (slot >= frame->slot_count) frame->slot_count = slot + 1;
+}
+
+extern "C" uint64_t lambda_async_frame_get_word(LambdaAsyncFrame* frame, int slot) {
+    if (!frame || slot < 0 || slot >= frame->slot_count) return 0;
+    return frame->slot_is_item && frame->slot_is_item[slot]
+        ? frame->slots[slot].item
+        : frame->slots[frame->slot_capacity + slot].item;
 }
 
 extern "C" void lambda_async_frame_complete(LambdaAsyncFrame* frame) {

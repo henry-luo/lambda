@@ -1,9 +1,8 @@
 # Lambda Number Model Realignment — Implementation Plan
 
-**Status:** FOLLOW-UP IN PROGRESS — numeric arithmetic completed 2026-07-20
-and the raw `UINT64` MIR representation follow-up completed 2026-07-21.
-Section 5 reopens the broader lifetime/ownership proof after a live audit found
-that its implementation and permanent verification were not yet complete.
+**Status:** IMPLEMENTED — numeric arithmetic completed 2026-07-20; the raw
+`UINT64` MIR representation and the reopened lifetime/ownership follow-up
+completed 2026-07-21.
 **Design authorities:** `Lambda_Semantics_Number_Model.md` Part 1,
 `../doc/Lambda_Formal_Semantics.md` §4, and
 `Lambda_Design_Stack_API.md` Phase 7
@@ -443,10 +442,10 @@ final change, not inferred from focused tests:
 
 ## 5. `UINT64` lifetime, ownership, and rooting follow-up
 
-**Status:** IN PROGRESS — opened 2026-07-21 after the live-code audit following
-N5.1. This phase is part of the implementation, not a documentation-only
-cleanup. Earlier completion records remain historical evidence but do not close
-the tasks below.
+**Status:** COMPLETE — opened and completed 2026-07-21 after the live-code audit
+following N5.1. Earlier completion records remain historical evidence; the
+inventory and gates below are the closeout proof for the broader ownership
+claim.
 
 The raw-register work in N5.1 is valid: typed `INT64` and `UINT64` locals,
 parameters, arithmetic results, typed-array reads, and native direct returns are
@@ -455,82 +454,129 @@ outlive the producer's number extent. Except where signed arithmetic semantics
 require different MIR operations, `INT64` and `UINT64` must use the same
 lifetime, ownership, scalar-home, destination-storage, and rooting mechanisms.
 
+### Live ownership inventory
+
+| Boundary | `INT64` / `UINT64` representation | Root and lifetime rule |
+|---|---|---|
+| typed local, parameter, arithmetic result, typed-array read | `VALUE_REP_I64` / `VALUE_REP_U64` raw MIR word | non-GC scalar; no root slot and no number home until boxing is demanded |
+| boxed activation temporary | tagged pointer to a number home | activation-owned, unscanned, and restored by the number watermark |
+| direct generated return | raw native lane when possible; otherwise caller-donated one-word home | signed and unsigned lanes use the same coloring, discard, error, and tail-forwarding machinery |
+| array, typed/`ANY` map field, closure/JS environment | destination-owned scalar tail or typed field | only the logical Item range is traced; raw companion words are not roots |
+| module/global binding | two-word BSS slot: one rooted Item plus one scalar companion | every normal, error-destructured, and decomposed store uses `owned_item_slot_store()` |
+| async/generator suspension | reserved Item/raw halves plus a per-slot kind bit | number-home and managed Item words enter the rooted Item half; arbitrary MIR words stay in the unscanned raw half |
+| task result/resume, mailbox message, JS promise result | destination-owned companion word | publication never borrows the producer's activation home |
+| JS bound argument vector | destination-owned JS-environment sidecar | fixed `bound_this`, which has no natural sidecar in the public function layout, uses the explicit fallback |
+| exception/singleton, public or indirect one-word ABI, opaque retention | `lambda_item_heap_rehome()` immutable GC leaf cell | boxed `ANY` is rooted normally; per-type counters expose each actual fallback allocation |
+
+Signedness is intentionally relevant only to representation identity,
+unboxing/boxing, arithmetic and comparison opcodes, conversions, parsing,
+formatting, bounds, and typed-memory selection. It does not select an owner,
+home lifetime, root class, or destination-storage shape.
+
 ### F0 — Reopen and pin the live ownership inventory
 
-- [ ] Replace broad "P0.3 complete" claims with a live path inventory that
+- [x] Replace broad "P0.3 complete" claims with a live path inventory that
   distinguishes implemented destination ownership from execution-extent or
   ownerless fallback behavior.
-- [ ] Audit both Lambda MIR-Direct and the shared LambdaJS emitter for raw,
+- [x] Audit both Lambda MIR-Direct and the shared LambdaJS emitter for raw,
   boxed, direct, indirect, normal, error, discarded, and tail-call results.
-- [ ] Record the exact places where signedness is intentionally relevant and
+- [x] Record the exact places where signedness is intentionally relevant and
   reject every lifetime/ownership branch selected merely by `INT64` versus
   `UINT64`.
 
 ### F1 — Destination-owned module and global bindings
 
-- [ ] Give every Lambda MIR module/global BSS binding an owned scalar payload
+- [x] Give every Lambda MIR module/global BSS binding an owned scalar payload
   word beside its boxed `Item` slot. A store of `DOUBLE`, `INT64`, or `UINT64`
   must copy and retag into that stable payload rather than retain a pointer into
   the current number extent.
-- [ ] Use one shared owned-slot store shape for typed, `ANY`, error-destructured,
+- [x] Use one shared owned-slot store shape for typed, `ANY`, error-destructured,
   decomposed, exported, and imported binding paths. Do not create separate
   signed and unsigned storage implementations.
-- [ ] Verify imported bindings after the producer module has returned and after
+- [x] Verify imported bindings after the producer module has returned and after
   enough wide-scalar churn to reuse the producer's former activation slots.
 
 ### F2 — Caller homes and ownerless fallback
 
-- [ ] Verify `SCALAR_RETURN_I64` and `SCALAR_RETURN_U64` use the same home
+- [x] Verify `SCALAR_RETURN_I64` and `SCALAR_RETURN_U64` use the same home
   allocation, liveness coloring, discard scratch, normal/error adoption, tail
   forwarding, and complete callee-watermark restoration.
-- [ ] Keep raw native `VALUE_REP_I64`/`VALUE_REP_U64` returns home-free; caller
+- [x] Keep raw native `VALUE_REP_I64`/`VALUE_REP_U64` returns home-free; caller
   homes are required only when a returned `Item` points at scalar payload
   storage.
-- [ ] Add direct tests for `lambda_item_heap_rehome()` proving that both signed
+- [x] Add direct tests for `lambda_item_heap_rehome()` proving that both signed
   and unsigned immutable fallback cells survive precise collection while
   rooted, are not confused with number-home pointers, and increment only their
   own diagnostic counters.
-- [ ] Confirm public/indirect wrappers invoke the fallback only where the
+- [x] Confirm public/indirect wrappers invoke the fallback only where the
   one-word public ABI has no caller-owned persistent home.
 
 ### F3 — Destination-storage and suspended-lifetime parity matrix
 
-- [ ] Add permanent `INT64`/`UINT64` parity cases for arrays and relocation,
+- [x] Add permanent `INT64`/`UINT64` parity cases for arrays and relocation,
   typed and `ANY` map fields, closure/dynamic environments, module/import
   bindings, async/generator frames, tasks/messages, and exception/completion
   storage.
-- [ ] Exercise small values, signed/unsigned boundaries, `INT64_MAX`, and
+- [x] Exercise small values, signed/unsigned boundaries, `INT64_MAX`, and
   `UINT64_MAX`; magnitude must not select a different lifetime route.
-- [ ] Force collection and freed-memory poisoning after each relevant escape,
+- [x] Force collection and freed-memory poisoning after each relevant escape,
   then read the value only after its source activation or storage buffer can no
   longer be borrowed.
 
 ### F4 — GC-root classification proof
 
-- [ ] Prove raw `VALUE_REP_I64` and `VALUE_REP_U64` registers and number-home
+- [x] Prove raw `VALUE_REP_I64` and `VALUE_REP_U64` registers and number-home
   pointers are `JIT_VALUE_NON_GC_SCALAR` and never receive GC root slots.
-- [ ] Prove boxed `ANY` values that reference actual ownerless GC scalar cells
+- [x] Prove boxed `ANY` values that reference actual ownerless GC scalar cells
   remain rooted and markable until the persistent slot releases them.
-- [ ] Keep destination-owned raw payload sidecars outside scanned Item ranges;
+- [x] Keep destination-owned raw payload sidecars outside scanned Item ranges;
   only their tagged Item slots participate in normal owner tracing.
-- [ ] Remove stale collector comments/cases that describe the retired `UINT64`
+- [x] Remove stale collector comments/cases that describe the retired `UINT64`
   tag position or imply a different unsigned ownership policy.
 
 ### F5 — Regressions, gates, and documentation closeout
 
-- [ ] Isolate and fix the precise-only forced-GC crash in
+- [x] Isolate and fix the precise-only forced-GC crash in
   `proc_stack_frame.ls`; add the minimal reproducer as a permanent regression.
-- [ ] Restore `make test-gc-rooting-core`, including the current LambdaJS
+- [x] Restore `make test-gc-rooting-core`, including the current LambdaJS
   `regression_side_stack_frame_gc.js` mismatch, before claiming the shared
   emitter/root model is verified.
-- [ ] Run focused representation and ownership tests with zero failures.
-- [ ] Run `make test-lambda-baseline` with zero failed tests.
-- [ ] Run `make test262-baseline` with zero failed tests and zero retries.
-- [ ] Run `make test-gc-rooting` with every supported precise/forced-GC lane
+- [x] Run focused representation and ownership tests with zero failures.
+- [x] Run `make test-lambda-baseline` with zero failed tests.
+- [x] Run `make test262-baseline` with zero failed tests and zero retries.
+- [x] Run `make test-gc-rooting` with every supported precise/forced-GC lane
   passing.
-- [ ] Remove temporary probes and retired implementation paths, run
+- [x] Remove temporary probes and retired implementation paths, run
   `git diff --check`, and synchronize `Lambda_Design_Stack_API.md`, the sized-int
   historical record, and this completion record with the landed behavior.
+
+### Follow-up completion record — 2026-07-21
+
+- The live audit closed four ownership gaps rather than only adding unsigned
+  cases: MIR module/global BSS values now have a companion scalar word;
+  suspended raw-word spills preserve partially constructed managed Items;
+  tasks, mailboxes, promises, and bound environments own their scalar payloads;
+  and ownerless fallback code is isolated in `lambda/scalar_heap.cpp` for direct
+  testing without pulling the evaluator into the concurrency unit target.
+- The minimal suspended-expression regression is
+  `test/lambda/proc/proc_async_partial_item_gc.ls`. The module-lifetime parity
+  regression is `test/lambda/uint64_storage_lifetime.ls`; it churns later homes
+  before rereading small and boundary signed/unsigned exports.
+- Focused unit suites passed: all 61 collector tests and all 10 concurrency
+  runtime tests. The ownerless test proves non-managed input homes become typed
+  managed fallback cells, survive precise poisoned collection while rooted,
+  and increment only the matching signed or unsigned counter.
+- `make test-lambda-baseline` passed 3,507/3,507 tests: 2,105 input-parser and
+  1,402 Lambda-runtime cases, with zero failures.
+- `make test262-baseline` passed 40,261/40,261 runnable cases with zero failed,
+  zero non-fully-passing, zero regressions, and `retry 0.0s`.
+- `make test-gc-rooting` passed every supported Lambda, LambdaJS JIT,
+  LambdaJS MIR-interpreter, and hosted-Python precise-only forced-GC lane. Its
+  static audits verified 34 `NO_GC` imports and 12,350 migrated native
+  functions with no automatic-local roots or transient-registration hazards.
+- The aggregate gate regenerated the hosted-Python binary integrity value as a
+  local build side effect; that unrelated manifest drift was removed. Final
+  source cleanup and `git diff --check` completed cleanly.
 
 ---
 
