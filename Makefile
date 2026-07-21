@@ -248,9 +248,9 @@ $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
 	@echo "🔧 Working directory: lambda/tree-sitter-javascript"
 	@echo "🔧 Unsetting OS variable to bypass Windows check..."
 	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
-	@# Generate at ABI 14 with the pinned CLI (as lambda/typescript/latex do):
-	@# the node_modules CLI defaults to ABI 15 and would emit a parser.c/parser.h
-	@# that mismatches the committed ABI-14 headers.
+	@# Regenerate before compiling: parser.c is ignored, so an ABI-15 local copy
+	@# can outlive the ABI-14 headers unless the pinned generator replaces it.
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-javascript src/parser.c TS="npx tree-sitter-cli@0.24.7"
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
 
 # Build tree-sitter-bash library
