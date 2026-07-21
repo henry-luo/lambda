@@ -207,6 +207,12 @@ LATEX_PARSER_C = lambda/tree-sitter-latex/src/parser.c
 LATEX_GRAMMAR_JSON = lambda/tree-sitter-latex/src/grammar.json
 LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
 
+# Python grammar dependencies. parser.c is generated and gitignored, but the
+# premake tests build compiles it directly (build_lambda_config.json lang-python),
+# so it must exist on disk before that build runs. grammar.json is tracked.
+PYTHON_PARSER_C = lambda/tree-sitter-python/src/parser.c
+PYTHON_GRAMMAR_JSON = lambda/tree-sitter-python/src/grammar.json
+
 # LaTeX Math grammar dependencies
 LATEX_MATH_GRAMMAR_JS = lambda/tree-sitter-latex-math/grammar.js
 LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
