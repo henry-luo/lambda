@@ -258,14 +258,17 @@ $(TREE_SITTER_BASH_LIB):
 	@echo "Building tree-sitter-bash library..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-bash libtree-sitter-bash.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
 
+# Regenerate the ignored Python parser before a direct Premake compile.
+# The ABI-14 header cannot compile a stale ABI-15 parser.c from an older CLI.
+generate-tree-sitter-python-parser:
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-python \
+		src/parser.c TS="$(CURDIR)/node_modules/.bin/tree-sitter"
+
 # Build tree-sitter-python library
-$(TREE_SITTER_PYTHON_LIB):
+$(TREE_SITTER_PYTHON_LIB): generate-tree-sitter-python-parser
 	@echo "Building tree-sitter-python library..."
-	@# Generate at ABI 14 with the pinned CLI (as lambda/typescript/latex do):
-	@# the node_modules CLI defaults to ABI 15 and would emit a parser.c/parser.h
-	@# that mismatches the committed ABI-14 headers.
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
-		libtree-sitter-python.a TS="npx tree-sitter-cli@0.24.7" \
+		libtree-sitter-python.a TS="$(CURDIR)/node_modules/.bin/tree-sitter" \
 		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # Generate TypeScript parser from grammar.js when it changes
@@ -523,7 +526,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-gc-rooting-core test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python release-lang-python package-standard package-jube verify-jube-package test-jube-module-integrity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
-	    tree-sitter-libs tree-sitter-core-libs \
+	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir \
@@ -2485,7 +2488,7 @@ build-lambda-input:
 	$(call run_make_with_error_summary,lambda-input,debug_native,,lambda-input-full-cpp)
 	@echo "✅ lambda-input DLLs built successfully!"
 
-build-test: build-lambda-input
+build-test: build-lambda-input generate-tree-sitter-python-parser
 	@echo "Building tests using Premake5..."
 	@echo "Building configurations..."
 	@mkdir -p build/premake
