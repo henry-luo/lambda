@@ -207,6 +207,12 @@ LATEX_PARSER_C = lambda/tree-sitter-latex/src/parser.c
 LATEX_GRAMMAR_JSON = lambda/tree-sitter-latex/src/grammar.json
 LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
 
+# Python grammar dependencies. parser.c is generated and gitignored, but the
+# premake tests build compiles it directly (build_lambda_config.json lang-python),
+# so it must exist on disk before that build runs. grammar.json is tracked.
+PYTHON_PARSER_C = lambda/tree-sitter-python/src/parser.c
+PYTHON_GRAMMAR_JSON = lambda/tree-sitter-python/src/grammar.json
+
 # LaTeX Math grammar dependencies
 LATEX_MATH_GRAMMAR_JS = lambda/tree-sitter-latex-math/grammar.js
 LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
@@ -251,8 +257,14 @@ $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
 $(TREE_SITTER_BASH_LIB):
 	$(call ts_lib_build,bash,TS="npx tree-sitter-cli@0.24.7")
 
+# Regenerate the gitignored Python parser.c from the tracked grammar.json when
+# missing or stale. Keyed on grammar.json (not grammar.js) so it needs no node
+# deps, matching the vendored tree-sitter-python Makefile.
+$(PYTHON_PARSER_C): $(PYTHON_GRAMMAR_JSON)
+	@out=$$(cd lambda/tree-sitter-python && npx tree-sitter-cli@0.24.7 generate src/grammar.json 2>&1) || { printf '%s\n' "$$out"; exit 1; }
+
 # Build tree-sitter-python library
-$(TREE_SITTER_PYTHON_LIB):
+$(TREE_SITTER_PYTHON_LIB): $(PYTHON_PARSER_C)
 	$(call ts_lib_build,python,TS="npx tree-sitter-cli@0.24.7")
 
 # Generate TypeScript parser from grammar.js when it changes
@@ -2420,7 +2432,7 @@ build-lambda-input:
 	$(call run_make_with_error_summary,lambda-input,debug_native,,lambda-input-full-cpp)
 	@echo "✅ lambda-input DLLs built successfully!"
 
-build-test: build-lambda-input
+build-test: $(PYTHON_PARSER_C) build-lambda-input
 	@echo "Building tests using Premake5..."
 	@echo "Building configurations..."
 	@mkdir -p build/premake
