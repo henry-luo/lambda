@@ -7,7 +7,7 @@
 #include "../lib/log.h"
 
 extern "C" {
-#include "../lib/gc/gc_heap.h"
+#include "../lambda/runtime/gc/gc_heap.h"
 }
 
 namespace {

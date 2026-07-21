@@ -1,5 +1,6 @@
 #include "../../jube/jube_registry.h"
 #include "../../input/css/dom_element.hpp"
+#include "../../io/input-allocation-context.h"
 #include "../../lambda-error.h"
 #include "../../transpiler.hpp"
 #include "radiant_host_api.hpp"
@@ -11,8 +12,8 @@
 #include "../../../lib/mem_context.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/mempool.h"
-#include "../../../lib/side_stack.h"
-#include "../../../lib/gc/gc_heap.h"
+#include "../../runtime/side_stack.h"
+#include "../../runtime/gc/gc_heap.h"
 #include "../../../lib/url.h"
 #include <limits.h>
 #include <string.h>

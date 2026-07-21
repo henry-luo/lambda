@@ -12,7 +12,7 @@
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/file.h"
-#include "../lib/gc/gc_heap.h"
+#include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "../lib/arena.h"

@@ -8,7 +8,7 @@
 //   - native_binary_funcs[] from transpile.cpp (native binary func optimization)
 //
 // Adding a new system function now requires editing ONLY this file.
-// When built for the dylib (LAMBDA_STATIC defined), all function pointers
+// When built for the IO dylib (LAMBDA_IO_STATIC_VALUES defined), all function pointers
 // resolve to a dummy stub via FPTR()/NPTR() macros.
 
 #include <stdio.h>
@@ -19,7 +19,7 @@
 #include "sys_func_registry.h"  // includes lambda.h (brings in FPTR/NPTR macros)
 #include "lambda-error.h"
 #include "concurrency.h"
-#include "../lib/side_stack.h"
+#include "runtime/side_stack.h"
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT;
@@ -28,7 +28,7 @@ extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYP
 // ============================================================================
 // Runtime-only declarations (not needed for dylib / AST metadata builds)
 // ============================================================================
-#ifndef LAMBDA_STATIC
+#ifndef LAMBDA_IO_STATIC_VALUES
 #include "../lib/stringbuf.h"
 #include "lambda-path.h"
 
@@ -232,7 +232,7 @@ static Item pipe_map_key(void* keys_ptr, int64_t index) {
     if (!key_sym) return ITEM_NULL;
     return y2it(key_sym);
 }
-#endif // !LAMBDA_STATIC
+#endif // !LAMBDA_IO_STATIC_VALUES
 
 
 // ============================================================================
@@ -1003,7 +1003,7 @@ const int sys_func_def_count = SYS_FUNC_DEF_COUNT;
 // transpiler emits calls to but are not system functions (no AST metadata).
 // Only needed for the main executable build (JIT compilation).
 
-#ifndef LAMBDA_STATIC
+#ifndef LAMBDA_IO_STATIC_VALUES
 
 // MIR JIT wrapper declarations for RetItem-returning functions
 extern Item fn_parse1_mir(Item str_item);
@@ -3009,13 +3009,13 @@ JitImport jit_runtime_imports[] = {
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);
 
 #else
-// LAMBDA_STATIC build (dylib): provide empty stubs
+// IO static-values build (dylib): provide empty stubs
 JitImport jit_runtime_imports[] = {{NULL, NULL}};
 const int jit_runtime_import_count = 0;
-#endif // !LAMBDA_STATIC
+#endif // !LAMBDA_IO_STATIC_VALUES
 
 bool jit_import_validate_no_gc_allowlist(void) {
-#ifdef LAMBDA_STATIC
+#ifdef LAMBDA_IO_STATIC_VALUES
     return true;
 #else
     static const char* audited[] = {

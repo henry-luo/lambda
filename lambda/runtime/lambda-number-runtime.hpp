@@ -1,9 +1,9 @@
 #ifndef LAMBDA_NUMBER_RUNTIME_HPP
 #define LAMBDA_NUMBER_RUNTIME_HPP
 
-#include "lambda-number.hpp"
-#include "lambda-data.hpp"
-#include "lambda-decimal.hpp"
+#include "../lambda-number.hpp"
+#include "../lambda-data.hpp"
+#include "../lambda-decimal.hpp"
 #include <math.h>
 
 static inline LambdaNumericKind lambda_numeric_kind_from_item_type(

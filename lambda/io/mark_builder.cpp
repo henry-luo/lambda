@@ -18,18 +18,18 @@
 //   - Content strings remain fast with arena allocation
 
 #include "mark_builder.hpp"
-#include "lambda-decimal.hpp"
-#include "lambda-data.hpp"
-#include "lambda.h"  // for it2l, it2s, it2b, it2i, it2d, etc.
-#include "mark_reader.hpp"  // for ArrayReader
-#include "../lib/lambda_typed.hpp"
-#include "../lib/str.h"
-#include "input/input.hpp"
-#include "input/css/dom_node.hpp"      // for DomText, dom_text_to_string
-#include "input/css/dom_element.hpp"   // for DomElement, dom_element_to_element
-#include "../lib/mempool.h"
-#include "../lib/arena.h"
-#include "../lib/strbuf.h"
+#include "../lambda-decimal.hpp"
+#include "../lambda-data.hpp"
+#include "../lambda.h"  // for it2l, it2s, it2b, it2i, it2d, etc.
+#include "../mark_reader.hpp"  // for ArrayReader
+#include "../core/lambda_typed.hpp"
+#include "../../lib/str.h"
+#include "../input/input.hpp"
+#include "../input/css/dom_node.hpp"      // for DomText, dom_text_to_string
+#include "../input/css/dom_element.hpp"   // for DomElement, dom_element_to_element
+#include "../../lib/mempool.h"
+#include "../../lib/arena.h"
+#include "../../lib/strbuf.h"
 #include "../lib/stringbuf.h"
 #include "../lib/arraylist.h"
 #include "../lib/hashmap.h"

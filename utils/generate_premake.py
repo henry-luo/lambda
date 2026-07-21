@@ -10,6 +10,7 @@ import os
 import sys
 import glob
 import platform
+import copy
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -76,7 +77,36 @@ class PremakeGenerator:
         if self.variant:
             self._apply_variant_overlay(self.variant)
 
+        self._expand_validation_source_targets()
+
         self.external_libraries = self._parse_external_libraries()
+
+    def _expand_validation_source_targets(self) -> None:
+        """Reuse a shipped module's exact source manifest for a validation DSO.
+
+        The validation image must compile the same sources as its shipped
+        archive.  Keeping that relationship declarative prevents a reduced
+        probe from silently passing while an unlisted provider leaks upward.
+        """
+        targets = self.config.get('targets', [])
+        configured = {target.get('name'): target for target in targets if target.get('name')}
+        inherited_keys = (
+            'source_files', 'sources', 'source_patterns', 'exclude_patterns',
+            'objcxx_source_files', 'libraries', 'macos', 'linux', 'windows',
+            'defines', 'include',
+        )
+        for target in targets:
+            source_target_name = target.get('validation_source_target')
+            if not source_target_name:
+                continue
+            source_target = configured.get(source_target_name)
+            if not source_target:
+                raise ValueError(
+                    f"Validation target {target.get('name')} references missing source target "
+                    f"{source_target_name}")
+            for key in inherited_keys:
+                if key not in target and key in source_target:
+                    target[key] = copy.deepcopy(source_target[key])
 
     def _parse_external_libraries(self) -> Dict[str, Dict[str, str]]:
         """Parse external library definitions from JSON config
@@ -223,7 +253,7 @@ class PremakeGenerator:
         return libraries
 
     def _is_lambda_input_full_dependent_test(self, target_name: str) -> bool:
-        """Check if a test target depends on lambda-input-full libraries"""
+        """Check if a test target depends on lambda-data libraries"""
         # Try to match by binary name (with or without .exe and with or without test/ prefix)
         target_binary = target_name + '.exe' if not target_name.endswith('.exe') else target_name
         target_binary_with_path = 'test/' + target_binary
@@ -242,9 +272,9 @@ class PremakeGenerator:
                         if (binary == target_binary or
                             binary == target_binary_with_path or
                             name == target_name):
-                            result = any(dep in ['lambda-runtime-full', 'lambda-input-full'] or
+                            result = any(dep in ['lambda-runtime-full', 'lambda-data'] or
                                       dep.startswith('lambda-runtime-full-') or
-                                      dep.startswith('lambda-input-full-')
+                                      dep.startswith('lambda-data-')
                                       for dep in dependencies)
                             return result
 
@@ -260,9 +290,9 @@ class PremakeGenerator:
                             binary == target_binary_with_path or
                             name == target_name):
                             dependencies = test.get('dependencies', [])
-                            result = any(dep in ['lambda-runtime-full', 'lambda-input-full'] or
+                            result = any(dep in ['lambda-runtime-full', 'lambda-data'] or
                                       dep.startswith('lambda-runtime-full-') or
-                                      dep.startswith('lambda-input-full-')
+                                      dep.startswith('lambda-data-')
                                       for dep in dependencies)
                             return result
 
@@ -913,6 +943,41 @@ class PremakeGenerator:
         excluded = set(platform_overrides.get('exclude_libraries', []))
         return [library for library in libraries if library not in excluded]
 
+    def _executable_external_dependencies(self, target: Dict[str, Any]) -> List[str]:
+        """Return the ordered static/dynamic external closure for an executable.
+
+        Static archives do not carry their own link requirements.  A final
+        executable therefore has to name the platform-filtered requirements of
+        every reachable internal module after those module archives.  Keep the
+        configured traversal order: it is also the dependency order expected by
+        the static third-party libraries.
+        """
+        ordered = []
+        seen_targets = set()
+        seen_external = set()
+        configured_targets = {
+            item.get('name'): item for item in self.config.get('targets', [])
+            if item.get('name')
+        }
+
+        def visit(current: Dict[str, Any]) -> None:
+            name = current.get('name')
+            if name in seen_targets:
+                return
+            seen_targets.add(name)
+            for dependency in self._target_libraries_for_platform(current):
+                if dependency in self.external_libraries:
+                    if dependency not in seen_external:
+                        ordered.append(dependency)
+                        seen_external.add(dependency)
+                    continue
+                child = configured_targets.get(dependency)
+                if child:
+                    visit(child)
+
+        visit(target)
+        return ordered
+
     def _generate_complex_library(self, lib: Dict[str, Any]) -> None:
         """Generate complex library with multiple source files and dependencies"""
         lib_name = lib['name']
@@ -924,10 +989,12 @@ class PremakeGenerator:
         # Separate C and C++ files
         c_files = [f for f in source_files if f.endswith('.c')]
         cpp_files = [f for f in source_files if f.endswith('.cpp')]
+        has_c_pattern = any('*.c' in pattern for pattern in source_patterns)
+        has_cpp_pattern = any('*.cpp' in pattern for pattern in source_patterns)
 
         # If we have both C and C++ files, create a single C++ project that includes all files
         # No need for separate -c project since C++ project already includes C files for proper linking
-        if c_files and cpp_files and not lib.get('single_project', False):
+        if (c_files or has_c_pattern) and (cpp_files or has_cpp_pattern) and not lib.get('single_project', False):
             # Create C++ project - include ALL C files for proper linking
             all_files = cpp_files + c_files
             self._create_language_project(lib, all_files, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
@@ -968,11 +1035,14 @@ class PremakeGenerator:
         # Determine library type based on link attribute
         link_type = lib.get('link', 'static')
 
-        # Force DLL for lambda-input-full on Windows to avoid static library dependency issues
-        # if self.use_windows_config and project_name.startswith('lambda-input-full'):
+        # Force DLL for lambda-data on Windows to avoid static library dependency issues
+        # if self.use_windows_config and project_name.startswith('lambda-data'):
         #     link_type = 'dynamic'
 
-        kind = "SharedLib" if link_type == 'dynamic' else "StaticLib"
+        if link_type == 'executable':
+            kind = "ConsoleApp"
+        else:
+            kind = "SharedLib" if link_type == 'dynamic' else "StaticLib"
 
         self.premake_content.extend([
             f'project "{project_name}"',
@@ -998,6 +1068,18 @@ class PremakeGenerator:
                 self.premake_content.append(f'        "{source}",')
             self.premake_content.append('    }')
             self.premake_content.append('    ')
+
+        # Premake's gmake action does not create Objective-C++ rules for .mm
+        # files. Platform shims use C++ wrapper TUs marked here so the normal
+        # C++ object rule invokes clang in Objective-C++ mode on those files.
+        objcxx_sources = lib.get('objcxx_source_files', [])
+        for source in objcxx_sources:
+            self.premake_content.extend([
+                f'    filter "files:{source}"',
+                '        buildoptions { "-x", "objective-c++" }',
+                '    filter {}',
+                '    '
+            ])
 
         # Add source patterns
         if source_patterns:
@@ -1069,12 +1151,22 @@ class PremakeGenerator:
         # Add build options
         base_compiler, _ = self._get_compiler_info()
         build_opts = self._get_build_options(base_compiler)
+        # Static archives do not export a runtime ABI, but compiling their
+        # objects hidden makes an accidental public symbol visible as soon as
+        # P2 links the module-validation DSOs.  Dynamic hosted modules retain
+        # their existing explicitly reviewed visibility path.
+        if link_type == 'static':
+            for option in ('-fvisibility=hidden', '-fvisibility-inlines-hidden'):
+                if option not in build_opts:
+                    build_opts.append(option)
         if lib.get('pic') and '-fPIC' not in build_opts:
             build_opts.append('-fPIC')
 
         # Check if this project has mixed C/C++ files
-        c_files_present = any(f.endswith('.c') for f in source_files)
-        cpp_files_present = any(f.endswith('.cpp') for f in source_files)
+        c_files_present = any(f.endswith('.c') for f in source_files) or any(
+            '*.c' in pattern for pattern in source_patterns)
+        cpp_files_present = any(f.endswith('.cpp') for f in source_files) or any(
+            '*.cpp' in pattern for pattern in source_patterns)
 
         if c_files_present and cpp_files_present and final_language == "C++":
             # Mixed project: use file-specific build options
@@ -1118,9 +1210,9 @@ class PremakeGenerator:
                     _, c_standard, _ = self._get_language_info(lib)
                     build_opts.append(f'-std={c_standard}')
 
-            # Add Windows DLL export flags for lambda-input-full projects - moved to linkoptions
+            # Add Windows DLL export flags for lambda-data projects - moved to linkoptions
             # if (self.use_windows_config and link_type == 'dynamic' and
-            #     project_name.startswith('lambda-input-full')):
+            #     project_name.startswith('lambda-data')):
             #     build_opts.extend(['-Wl,--export-all-symbols', '-Wl,--enable-auto-import'])
 
             self.premake_content.extend([
@@ -1136,15 +1228,42 @@ class PremakeGenerator:
 
         # Add library dependencies
         if dependencies:
+            executable_external_deps = []
+            if link_type == 'executable' or lib.get('validation_source_target'):
+                executable_external_deps = self._executable_external_dependencies(lib)
             # Separate internal and external dependencies
             internal_deps = []
             external_deps = []
+            configured_targets = {
+                target.get('name'): target for target in self.config.get('targets', [])
+                if target.get('name')
+            }
 
             for dep in dependencies:
                 if dep in self.external_libraries:
                     external_deps.append(dep)
                 else:
-                    internal_deps.append(dep)
+                    target = configured_targets.get(dep)
+                    if target:
+                        target_sources = target.get('source_files', []) or target.get('sources', [])
+                        target_patterns = target.get('source_patterns', [])
+                        has_c = any(path.endswith('.c') for path in target_sources) or any(
+                            '*.c' in pattern for pattern in target_patterns)
+                        has_cpp = any(path.endswith('.cpp') for path in target_sources) or any(
+                            '*.cpp' in pattern for pattern in target_patterns)
+                        # Mixed targets have an empty wrapper archive; final
+                        # consumers must link the concrete mixed-language
+                        # project or none of its object files are reachable.
+                        internal_deps.append(f'{dep}-cpp' if has_c and has_cpp else dep)
+                    else:
+                        internal_deps.append(dep)
+
+            # A static archive cannot propagate its own requirements.  Final
+            # executables must link the transitive external closure after the
+            # internal archive list; otherwise ld sees providers too early and
+            # reports their symbols as unresolved.
+            if executable_external_deps:
+                external_deps = executable_external_deps
 
             # Process special_flags for frameworks
             special_flags_frameworks = []
@@ -1215,40 +1334,74 @@ class PremakeGenerator:
                             else:
                                 dynamic_libs.append(lib_path)
                         else:
-                            # Static library - handle all static libraries consistently
-                            if not lib_path.startswith('/') and not lib_path.startswith('-l'):
+                            # Premake rewrites links relative to build/premake.
+                            # Executable links must retain the config-relative
+                            # path so its generated -L directory lands at the
+                            # repository root; archive linkoptions retain the
+                            # historical spelling for compatibility.
+                            if (link_type != 'executable' and
+                                    not lib_path.startswith('/') and
+                                    not lib_path.startswith('-l')):
                                 lib_path = f"../../{lib_path}"
                             static_libs.append(lib_path)
 
-                # Add static libraries to linkoptions
+                # Static libraries on a final executable must be emitted in
+                # links, after internal archive dependencies. Premake places
+                # linkoptions before LIBS on gmake, which breaks one-pass
+                # archive resolution for the Lambda module graph.
                 if static_libs:
-                    self.premake_content.append('    linkoptions {')
-                    for lib_path in static_libs:
-                        self.premake_content.append(f'        "{lib_path}",')
-                    # Add Windows system libraries that static libraries depend on
-                    if self.use_windows_config:
-                        # Windows networking libraries for CURL
+                    if link_type == 'executable':
+                        static_link_dirs = []
+                        static_link_names = []
+                        for static_lib in static_libs:
+                            if static_lib.startswith('-l'):
+                                static_link_names.append(static_lib[2:])
+                                continue
+                            directory, filename = os.path.split(static_lib)
+                            if directory and directory not in static_link_dirs:
+                                static_link_dirs.append(directory)
+                            name, extension = os.path.splitext(filename)
+                            if extension == '.a' and name.startswith('lib'):
+                                name = name[3:]
+                            if not self.use_macos_config:
+                                static_link_names.append(f'{name}:static')
+                        if static_link_dirs:
+                            self.premake_content.append('    libdirs {')
+                            for directory in static_link_dirs:
+                                self.premake_content.append(f'        "{directory}",')
+                            self.premake_content.extend([
+                                '    }',
+                                '    '
+                            ])
+                    else:
+                        self.premake_content.append('    linkoptions {')
+                        for lib_path in static_libs:
+                            self.premake_content.append(f'        "{lib_path}",')
+                        # Add Windows system libraries that static libraries depend on
+                        if self.use_windows_config:
+                            # Windows networking libraries for CURL
+                            self.premake_content.extend([
+                                '        "-lws2_32",',
+                                '        "-lwsock32",',
+                                '        "-lwinmm",',
+                                '        "-lcrypt32",',
+                                '        "-lbcrypt",',
+                                '        "-ladvapi32",',
+                            ])
+                        # Add Windows DLL export flags for lambda-data projects
+                        if (self.use_windows_config and link_type == 'dynamic' and project_name.startswith('lambda-data')):
+                            self.premake_content.extend([
+                                '        "-Wl,--export-all-symbols",',
+                                '        "-Wl,--enable-auto-import",',
+                            ])
                         self.premake_content.extend([
-                            '        "-lws2_32",',
-                            '        "-lwsock32",',
-                            '        "-lwinmm",',
-                            '        "-lcrypt32",',
-                            '        "-lbcrypt",',
-                            '        "-ladvapi32",',
+                            '    }',
+                            '    '
                         ])
-                    # Add Windows DLL export flags for lambda-input-full projects
-                    if (self.use_windows_config and link_type == 'dynamic' and project_name.startswith('lambda-input-full')):
-                        self.premake_content.extend([
-                            '        "-Wl,--export-all-symbols",',
-                            '        "-Wl,--enable-auto-import",',
-                        ])
-                    self.premake_content.extend([
-                        '    }',
-                        '    '
-                    ])
 
                 # Add frameworks, dynamic libraries, and internal libraries to links
-                if frameworks or dynamic_libs or internal_deps or special_flags_frameworks:
+                if frameworks or dynamic_libs or internal_deps or special_flags_frameworks or \
+                        (link_type == 'executable' and static_libs):
                     self.premake_content.append('    links {')
                     # Add frameworks from external dependencies (macOS only)
                     if not self.use_windows_config:
@@ -1262,6 +1415,9 @@ class PremakeGenerator:
                         self.premake_content.append(f'        "{dyn_lib}",')
                     for dep in internal_deps:
                         self.premake_content.append(f'        "{dep}",')
+                    if link_type == 'executable':
+                        for static_link_name in static_link_names:
+                            self.premake_content.append(f'        "{static_link_name}",')
                     # Add late-binding static libraries (must come after internal deps)
                     if self.use_windows_config:
                         late_binding_lib_names = ['rpmalloc']
@@ -1288,15 +1444,15 @@ class PremakeGenerator:
                         '    '
                     ])
 
-        # Add Windows DLL export flags for lambda-input-full projects as separate linkoptions
+        # Add Windows DLL export flags for lambda-data projects as separate linkoptions
         if (self.use_windows_config and link_type == 'dynamic' and
-            project_name.startswith('lambda-input-full')):
-            if project_name == 'lambda-input-full-cpp':
+            project_name.startswith('lambda-data')):
+            if project_name == 'lambda-data-cpp':
                 # Use .def file for C++ project for precise symbol export
                 self.premake_content.extend([
                     '    linkoptions {',
-                    '        "-Wl,--output-def,lambda-input-full-cpp.def",',
-                    '        "../../lambda-input-full-cpp.def",',
+                    '        "-Wl,--output-def,lambda-data-cpp.def",',
+                    '        "../../lambda-data-cpp.def",',
                     '    }',
                     '    '
                 ])
@@ -1395,8 +1551,8 @@ class PremakeGenerator:
         # Determine library type based on link attribute
         link_type = lib.get('link', 'static') if lib else 'static'
 
-        # Force DLL for lambda-input-full on Windows to avoid static library dependency issues
-        # if self.use_windows_config and lib_name.startswith('lambda-input-full'):
+        # Force DLL for lambda-data on Windows to avoid static library dependency issues
+        # if self.use_windows_config and lib_name.startswith('lambda-data'):
         #     link_type = 'dynamic'
 
         kind = "SharedLib" if link_type == 'dynamic' else "StaticLib"
@@ -1532,7 +1688,7 @@ class PremakeGenerator:
                 # `librpmalloc_no_override.a` and `build_temp/utf8proc/build/...`
                 # don't live in any standard libdir. For static archives, the
                 # plain `links { "<name>" }` form is fine: symbols get deferred
-                # to the final exe link, where lambda-input-full or the test
+                # to the final exe link, where lambda-data or the test
                 # entry provides the resolved paths.
                 if link_type == 'dynamic':
                     self.premake_content.append('    linkoptions {')
@@ -1598,9 +1754,9 @@ class PremakeGenerator:
                 '    '
             ])
 
-        # Add Windows DLL export flags for lambda-input-full projects as separate linkoptions
+        # Add Windows DLL export flags for lambda-data projects as separate linkoptions
         if (self.use_windows_config and lib.get('link') == 'dynamic' and
-            lib_name.startswith('lambda-input-full')):
+            lib_name.startswith('lambda-data')):
             # Curl's transitive static dependencies (not listed separately in dependencies[])
             curl_static_deps = [
                 '/clang64/lib/libnghttp3.a',
@@ -1618,13 +1774,13 @@ class PremakeGenerator:
                 '-ldbghelp',
                 '-luserenv',
             ]
-            if lib_name == 'lambda-input-full-cpp':
+            if lib_name == 'lambda-data-cpp':
                 # Use .def file for C++ project for precise symbol export
                 link_opts = ['    linkoptions {']
                 link_opts.extend(f'        "{dep}",' for dep in curl_static_deps)
                 link_opts += [
-                    '        "-Wl,--output-def,lambda-input-full-cpp.def",',
-                    '        "../../lambda-input-full-cpp.def",',
+                    '        "-Wl,--output-def,lambda-data-cpp.def",',
+                    '        "../../lambda-data-cpp.def",',
                     '    }',
                     '    '
                 ]
@@ -2119,15 +2275,19 @@ class PremakeGenerator:
             for dep in dependencies:
                 if dep == 'criterion':
                     self.premake_content.append('        "criterion",')
-                elif dep in ['lambda-runtime-full', 'lambda-input-full']:
+                elif dep in ['lambda-runtime-full', 'lambda-data']:
                     # Special handling for MIR, Lambda, Math, and Markup tests
                     if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
                         # All tests only need the -cpp versions (C++ project includes all C files)
                         self.premake_content.append('        "lambda-runtime-full-cpp",')
-                        self.premake_content.append('        "lambda-input-full-cpp",')
+                        self.premake_content.append('        "lambda-data-cpp",')
                     else:
                         # Regular tests: only need -cpp version (C++ project includes all C files)
                         self.premake_content.append(f'        "{dep}-cpp",')
+                    if dep == 'lambda-data':
+                        # lambda-data consumes the lower general-purpose archive;
+                        # link its concrete mixed-language project for test executables.
+                        self.premake_content.append('        "lambda-lib-cpp",')
                 elif dep in configured_targets:
                     target = configured_targets[dep]
                     target_sources = target.get('source_files', []) or target.get('sources', [])
@@ -2301,8 +2461,8 @@ class PremakeGenerator:
                     '    '
                 ])
 
-        # Add external library paths for linking when lambda-runtime-full or lambda-input-full are used
-        has_input_full_deps = any(dep in ['lambda-runtime-full', 'lambda-input-full'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-input-full-') for dep in dependencies)
+        # Add external library paths for linking when lambda-runtime-full or lambda-data are used
+        has_input_full_deps = any(dep in ['lambda-runtime-full', 'lambda-data'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-data-') for dep in dependencies)
         if has_input_full_deps:
             self.premake_content.extend([
                 '    linkoptions {',
@@ -2315,7 +2475,7 @@ class PremakeGenerator:
             # Add static external libraries with explicit paths like the main lambda program
             if self.use_windows_config:
                 # Windows: allow multiple definitions to avoid duplicate _Unwind_Resume from libgcc_eh
-                # This is needed because lambda-input-full DLL includes exception handling code
+                # This is needed because lambda-data DLL includes exception handling code
                 self.premake_content.append('        "-Wl,--allow-multiple-definition",')
 
                 # Windows: use the same explicit paths as the main lambda program
@@ -2354,7 +2514,7 @@ class PremakeGenerator:
                     '        "-luserenv",',
                 ])
                 # Non-Windows: use the original approach with external library definitions
-                # If lambda-input-full is a dependency, we need to include curl/ssl/crypto for proper linking
+                # If lambda-data is a dependency, we need to include curl/ssl/crypto for proper linking
                 # since static libraries don't propagate their dependencies in Premake
                 # Note: Lambda's custom curl was built with external nghttp2 dependency
                 base_libs = ['mpdec', 'utf8proc', 'mir', 'nghttp2', 'curl', 'ssl', 'crypto']
@@ -2508,9 +2668,9 @@ class PremakeGenerator:
                     '    ',
                 ])
 
-        # Add tree-sitter libraries as linker options for tests with lambda-input-full dependencies
+        # Add tree-sitter libraries as linker options for tests with lambda-data dependencies
         # Use platform-specific flags to force inclusion of all symbols from tree-sitter libraries
-        if any(dep == 'lambda-input-full' for dep in dependencies):
+        if any(dep == 'lambda-data' for dep in dependencies):
             self.premake_content.extend([
                 '    filter {}',
                 '    linkoptions {',

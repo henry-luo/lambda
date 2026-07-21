@@ -4,6 +4,7 @@
  */
 
 #include "view.hpp"
+#include "../lambda/input/css/css_symbol_hook.h"
 #include "../lib/html_entities.h"
 #include <cstring>
 
@@ -513,4 +514,16 @@ SymbolResolution resolve_symbol_string(const void* string_ptr) {
     // view.hpp exposes the canonical Lambda String; keep symbol decoding on that single layout.
     const String* str = (const String*)string_ptr;
     return resolve_symbol(str->chars, str->len);
+}
+
+static CssSymbolResolution radiant_css_symbol_resolve(const char* name, size_t length) {
+    SymbolResolution result = resolve_symbol(name, length);
+    CssSymbolKind kind = CSS_SYMBOL_UNKNOWN;
+    if (result.type == SYMBOL_EMOJI) kind = CSS_SYMBOL_EMOJI;
+    else if (result.type == SYMBOL_HTML_ENTITY) kind = CSS_SYMBOL_HTML_ENTITY;
+    return {kind, result.utf8};
+}
+
+void radiant_register_css_symbol_hook() {
+    css_symbol_resolve_register(radiant_css_symbol_resolve);
 }

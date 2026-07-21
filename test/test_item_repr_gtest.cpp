@@ -10,7 +10,7 @@
 #include "../lambda/js/js_runtime.h"
 
 extern "C" {
-#include "../lib/gc/gc_heap.h"
+#include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/shell.h"
 }
 

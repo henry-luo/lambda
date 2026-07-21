@@ -3,8 +3,8 @@
 #include <assert.h>
 #include <stdint.h>
 
-#include "ownership.hpp"
-#include "../lambda/lambda-data.hpp"
+#include "../../lib/ownership.hpp"
+#include "../lambda-data.hpp"
 
 namespace lam {
 

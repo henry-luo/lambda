@@ -4,7 +4,7 @@
 #ifndef RESOURCE_LOADERS_H
 #define RESOURCE_LOADERS_H
 
-#include "network_resource_manager.h"
+#include "../lambda/network/network_resource_manager.h"
 
 #ifdef __cplusplus
 extern "C" {

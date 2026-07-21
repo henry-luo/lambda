@@ -33,15 +33,15 @@
 #endif
 #endif
 #include "../lib/log.h"  // Add logging support
-#include "../lib/side_stack.h"
+#include "runtime/side_stack.h"
 #include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
-#include "emit_sexpr.h"  // For --emit-sexpr command
+#include "runtime/emit_sexpr.h"  // For --emit-sexpr command
 
 // Error handling with stack traces
 #include "lambda-error.h"
-#include "lambda-stack.h"
+#include "runtime/lambda-stack.h"
 
 // System info for sys.* paths
 #include "sysinfo.h"
@@ -425,8 +425,6 @@ static bool g_lambda_main_memtrack_shutdown_done = false;
 static bool g_lambda_main_mempool_cleanup_done = false;
 static const char* g_lambda_main_mem_dump_path = nullptr;
 static bool g_lambda_main_pre_memtrack_cleanup_done = false;
-
-extern "C" void log_mem_stage(const char* stage);
 
 static void lambda_main_pre_memtrack_cleanup_once(void) {
     if (g_lambda_main_pre_memtrack_cleanup_done) {

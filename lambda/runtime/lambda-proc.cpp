@@ -1,11 +1,12 @@
-#include "transpiler.hpp"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
-#include "../lib/mem_factory.h"
-#include "../lib/file.h"
-#include "../lib/shell.h"
-#include "utf_string.h"
-#include "format/format.h"
+#include "../transpiler.hpp"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/mem_factory.h"
+#include "../../lib/file.h"
+#include "../../lib/shell.h"
+#include "../utf_string.h"
+#include "../format/format.h"
+#include "radiant_event_hook.h"
 
 #include <stdarg.h>
 #include <time.h>
@@ -15,11 +16,13 @@
 #include <process.h>
 #endif
 #include <string.h>  // for strlen
-#include "input/input.hpp"
+#include "../input/input.hpp"
 
 extern __thread EvalContext* context;
 
-// Global dry-run flag: when true, IO operations return fabricated results
+// Global dry-run flag: when true, IO operations return fabricated results.
+// Its declaration is runtime-owned in runtime-state.h; C2MIR's legacy copy
+// remains frozen and is not an active module interface.
 bool g_dry_run = false;
 
 // ============================================================================
@@ -66,11 +69,10 @@ Item pn_print(Item item) {
 /**
  * emit(event_name, event_data) — Dispatch a custom event to the nearest
  * parent template handler that matches the event name.
- * Delegates to dispatch_emit() which lives in radiant/event.cpp and has
- * access to DOM tree and handler context.
+ * The optional Radiant handler is registered by the upper UI layer.
  */
 Item pn_emit(Item event_name, Item event_data) {
-    return dispatch_emit(event_name, event_data);
+    return lambda_radiant_emit(event_name, event_data);
 }
 
 /**
@@ -79,7 +81,7 @@ Item pn_emit(Item event_name, Item event_data) {
  * transaction. See Radiant_Rich_Text_Editing.md §7.4.
  */
 Item pn_set_selection(Item selection) {
-    return dispatch_set_selection(selection);
+    return lambda_radiant_set_selection(selection);
 }
 
 double pn_clock() {

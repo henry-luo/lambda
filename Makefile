@@ -474,7 +474,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python release-lang-python package-standard package-jube verify-jube-package test-jube-module-integrity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
-	    generate-premake clean-premake build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
+	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
@@ -1311,7 +1311,9 @@ test-input-baseline: build-test ensure-yaml-submodule
 
 # Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
 LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-text wpt-css-inline wpt-css-images wpt-css-multicol puppertino markdown
-LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only
+# The layout runner selects the recorded baseline through the requested category;
+# it has no --baseline-only CLI mode.
+LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js
 LAYOUT_BASELINE_RESULTS = temp/_layout_baseline_results.txt
 
 # Run the shared layout baseline inventory without building. Suites with a
@@ -1600,9 +1602,9 @@ run-radiant-baseline:
 		printf "%s\n" "$$layout_results" | while IFS='|' read -r sname sstatus spassed spartial sfailed sskipped selapsed; do \
 			suite_idx=$$((suite_idx + 1)); \
 			if [ $$suite_idx -eq $$suite_count ]; then \
-				printf "   │   └── %-14s $$sstatus  (%s, $$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js --baseline-only -c $$sname)\n" "$$sname" "$$(format_duration "$$selapsed")"; \
+				printf "   │   └── %-14s $$sstatus  (%s, $$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname" "$$(format_duration "$$selapsed")"; \
 			else \
-				printf "   │   ├── %-14s $$sstatus  (%s, $$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js --baseline-only -c $$sname)\n" "$$sname" "$$(format_duration "$$selapsed")"; \
+				printf "   │   ├── %-14s $$sstatus  (%s, $$spassed passed, $$spartial partially passing, $$sfailed failed, $$sskipped skipped) (test_radiant_layout.js -c $$sname)\n" "$$sname" "$$(format_duration "$$selapsed")"; \
 			fi; \
 		done; \
 	fi; \
@@ -1677,7 +1679,7 @@ test-radiant-online: build-test
 		exit 1; \
 	fi
 
-build-pdf-render-test: build-lambda-input
+build-pdf-render-test: build-lambda-data
 	@echo "Building PDF render visual gtest executable using Premake5..."
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
@@ -2319,6 +2321,19 @@ hosted-python-coupling-inventory:
 check-hosted-python-module-boundary: build build-lang-python
 	@python3 utils/check_hosted_python_architecture.py --require-module-binary
 
+# Report the current provider/include/capability debt for the static-module
+# split.  P0 is intentionally observational; P5 makes this a hard boundary
+# gate once the source groups and public headers have moved.
+static-module-inventory:
+	@mkdir -p temp
+	@python3 utils/check_static_module_architecture.py --json > temp/static-module-inventory.json
+	@echo "Static-module inventory: temp/static-module-inventory.json"
+
+static-module-boundary-baseline:
+	@mkdir -p temp
+	@python3 utils/check_static_module_architecture.py --boundary-baseline > temp/static-module-boundary-baseline.json
+	@echo "Static-module boundary baseline: temp/static-module-boundary-baseline.json"
+
 # Clang-tidy static analysis
 # tidy / tidy-full / tidy-fix / generate-compile-db were retired in the Phase 3
 # unification: the `bugprone-* + clang-analyzer-* + cert-*` subset (minus
@@ -2433,17 +2448,51 @@ clean-premake:
 	@rm -f dummy.cpp
 	@echo "Premake5 artifacts cleaned."
 
-build-lambda-input:
-	@echo "Building lambda-input DLLs..."
+build-lambda-data:
+	@echo "Building the lambda-data static archive..."
 	@echo "Generating Premake configuration..."
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
 	@echo "Generating makefiles..."
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	$(call run_make_with_error_summary,lambda-input,debug_native,,lambda-input-full-cpp)
-	@echo "✅ lambda-input DLLs built successfully!"
+	$(call run_make_with_error_summary,lambda-data,debug_native,,lambda-data-cpp)
+	@echo "✅ lambda-data static archive built successfully!"
 
-build-test: build-lambda-input generate-tree-sitter-python-parser
+build-lambda-rt: build-lambda-data
+	@echo "Building the lambda-rt static archive..."
+	@mkdir -p build/premake
+	$(MAKE) generate-premake
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	$(call run_make_with_error_summary,lambda-rt,debug_native,,lambda-rt-cpp)
+	@echo "✅ lambda-rt static archive built successfully!"
+
+build-radiant: build-lambda-rt
+	@echo "Building the radiant static archive..."
+	@mkdir -p build/premake
+	$(MAKE) generate-premake
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	$(call run_make_with_error_summary,radiant,debug_native,,radiant-cpp)
+	@echo "✅ radiant static archive built successfully!"
+
+build-lambda-static: build-radiant
+	@echo "Linking the static-module Lambda executable..."
+	@mkdir -p build/premake
+	$(MAKE) generate-premake
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	$(PYTHON) utils/patch_static_module_makefile.py
+	$(call run_make_with_error_summary,lambda-exe,debug_native,,lambda-exe)
+	@echo "✅ static-module Lambda executable built successfully!"
+
+check-module-boundary:
+	@echo "Building static-module validation DSOs..."
+	@mkdir -p build/premake
+	$(MAKE) generate-premake
+	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=debug_native lambda-boundary-lib lambda-boundary-core lambda-boundary-io lambda-boundary-rt lambda-boundary-radiant -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	$(PYTHON) utils/check_module_boundary.py
+	@echo "✅ module-boundary validation completed (Class-F ratcheted deferment)"
+
+build-test: build-lambda-data generate-tree-sitter-python-parser
 	@echo "Building tests using Premake5..."
 	@echo "Building configurations..."
 	@mkdir -p build/premake
@@ -2471,8 +2520,8 @@ build-radiant-baseline:
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	@echo "Building lambda-input DLLs with $(TEST_JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda-input-full-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@echo "Building lambda-data static archive with $(TEST_JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_native lambda-data-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
 		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \

@@ -3,6 +3,7 @@
 #include "dom_lifecycle.hpp"
 #include "css_formatter.hpp"
 #include "css_style_node.hpp"
+#include "css_symbol_hook.h"
 #include "../../../lib/log.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/strbuf.h"
@@ -11,7 +12,6 @@
 #include "../../../lib/hashmap.h"
 #include "../../../lib/str.h"
 #include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
-#include "../../../radiant/view.hpp"  // For symbol resolution
 #include <strings.h>  // For strcasecmp
 
 /**
@@ -248,8 +248,8 @@ unsigned char* DomNode::text_data() const {
 
     // For symbol nodes, resolve to UTF-8 representation
     if (text->is_symbol() && text->text) {
-        SymbolResolution resolved = resolve_symbol(text->text, text->length);
-        if (resolved.type != SYMBOL_UNKNOWN && resolved.utf8) {
+        CssSymbolResolution resolved = css_symbol_resolve(text->text, text->length);
+        if (resolved.utf8) {
             return (unsigned char*)resolved.utf8;
         }
         // Unknown symbol - fall through to return raw text

@@ -4,13 +4,10 @@
 #include "network_resource_manager.h"
 #include "network_downloader.h"
 #include "network_scheduler.h"
-#include "network_integration.h"
 #include "font_resource_faces.h"
-#include "resource_loaders.h"
+#include "resource_processor_hook.h"
 #include "cookie_jar.h"
 #include "../input/css/dom_element.hpp"
-#include "../../radiant/view.hpp"
-#include "../../radiant/event.hpp"
 #include "../../lib/url.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
@@ -72,51 +69,16 @@ NetworkResource* create_network_resource(const char* url,
     return res;
 }
 
-void detach_image_surface_from_tree(DomNode* node, ImageSurface* surface) {
-    while (node) {
-        if (node->is_element()) {
-            DomElement* elem = node->as_element();
-            if (elem->embed) {
-                if (elem->embed->img == surface) {
-                    elem->embed->img = nullptr;
-                }
-                if (elem->embed->poster == surface) {
-                    elem->embed->poster = nullptr;
-                }
-            }
-            detach_image_surface_from_tree(elem->first_child, surface);
-        }
-        node = node->next_sibling;
-    }
-}
-
 // free network resource
 void free_network_resource(NetworkResource* res) {
     if (!res) return;
 
     if (res->type == RESOURCE_IMAGE && res->image_surface) {
-        // NetworkResource-owned images and UI-cache-owned SVG images share DOM
-        // borrow slots, so always detach before releasing whichever owner applies.
-        if (res->manager && res->manager->document) {
-            DomDocument* doc = res->manager->document;
-            detach_image_surface_from_tree((DomNode*)doc->root, res->image_surface);
-            if (doc->view_tree && doc->view_tree->root &&
-                    doc->view_tree->root != (View*)doc->root) {
-                detach_image_surface_from_tree((DomNode*)doc->view_tree->root, res->image_surface);
-            }
-        }
-        if (!res->image_surface_borrowed) {
-            image_surface_destroy(res->image_surface);
-        }
+        const NetworkResourceProcessor* processor = network_resource_processor_get();
+        // Decoded images are Radiant objects. IO only requests their release
+        // through its lower-owned registration table and never calls Radiant.
+        if (processor && processor->release_image) processor->release_image(res);
         res->image_surface = nullptr;
-    } else if (res->type == RESOURCE_IMAGE && res->owner_element && res->owner_element->embed) {
-        EmbedProp* embed = res->owner_element->embed;
-        // Image resources processed by the async loader attach directly to the
-        // owner element and may be detached from the final DOM/view cleanup path.
-        if (embed->img && !embed->img->url) {
-            image_surface_destroy(embed->img);
-            embed->img = nullptr;
-        }
     }
 
     if (res->type == RESOURCE_FONT && res->user_data) {
@@ -232,16 +194,18 @@ static void process_ready_resource_on_main(NetworkResourceManager* mgr, NetworkR
     if (res->on_complete) {
         res->on_complete(res, res->user_data);
     } else if (doc) {
+        const NetworkResourceProcessor* processor = network_resource_processor_get();
+        if (!processor) return;
         switch (res->type) {
             case RESOURCE_HTML:
-                process_html_resource(res, doc);
+                if (processor->process_html) processor->process_html(res, doc);
                 break;
             case RESOURCE_CSS:
-                process_css_resource(res, doc);
+                if (processor->process_css) processor->process_css(res, doc);
                 break;
             case RESOURCE_IMAGE:
                 if (res->owner_element) {
-                    process_image_resource(res, res->owner_element);
+                    if (processor->process_image) processor->process_image(res, res->owner_element);
                 }
                 break;
             case RESOURCE_FONT:
@@ -251,11 +215,11 @@ static void process_ready_resource_on_main(NetworkResourceManager* mgr, NetworkR
                 break;
             case RESOURCE_SVG:
                 if (res->owner_element) {
-                    process_svg_resource(res, res->owner_element);
+                    if (processor->process_svg) processor->process_svg(res, res->owner_element);
                 }
                 break;
             case RESOURCE_SCRIPT:
-                process_script_resource(res, doc);
+                if (processor->process_script) processor->process_script(res, doc);
                 break;
         }
     }
@@ -291,8 +255,9 @@ static void process_failed_resource_on_main(NetworkResourceManager* mgr, Network
     if (mgr->error_callback) {
         mgr->error_callback(res, mgr->error_callback_data);
     }
-    if (mgr->document) {
-        handle_resource_failure(res, mgr->document);
+    const NetworkResourceProcessor* processor = network_resource_processor_get();
+    if (mgr->document && processor && processor->handle_failure) {
+        processor->handle_failure(res, mgr->document);
     }
 
     if (resource_failure_is_optional(res)) {
@@ -801,18 +766,11 @@ void resource_manager_flush_layout_updates(NetworkResourceManager* mgr) {
         resource_manager_flush_layout_updates(mgr);
     }
     
-    // trigger reflow/repaint via document state (main thread safe)
-    DomDocument* doc = mgr->document;
-    if (doc && doc->state) {
-        DocState* state = (DocState*)doc->state;
-        if (needs_reflow) {
-            state->needs_reflow = true;
-            state->is_dirty = true;
-            log_debug("network: triggered document reflow from resource completion");
-        } else if (needs_repaint) {
-            state->is_dirty = true;
-            log_debug("network: triggered document repaint from resource completion");
-        }
+    const NetworkResourceProcessor* processor = network_resource_processor_get();
+    // Layout dirtiness belongs to Radiant. IO reports completed resource work
+    // through its registration seam instead of dereferencing Radiant DocState.
+    if (processor && processor->request_layout_update) {
+        processor->request_layout_update(mgr, needs_reflow, needs_repaint);
     }
 }
 

@@ -8,7 +8,8 @@
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
-#include "../lib/side_stack.h"
+#include "../lambda/runtime/side_stack.h"
+#include "../lambda/runtime/radiant_event_hook.h"
 #include "../lib/utf.h"
 #include "../lib/str.h"
 // str.h included via view.hpp
@@ -2002,6 +2003,10 @@ extern "C" Item dispatch_set_selection(Item selection) {
         log_debug("dispatch_set_selection: deferred selection until after rebuild");
     }
     return ItemNull;
+}
+
+void radiant_register_event_hooks() {
+    lambda_radiant_event_register(dispatch_emit, dispatch_set_selection);
 }
 
 /**

@@ -16,13 +16,13 @@
 #include <errno.h>
 #include <stdbool.h>
 
-#include "lambda-data.hpp"
-#include "../lib/strbuf.h"
-#include "../lib/log.h"
-#include "../lib/memtrack.h"
-#include "../lib/url.h"
-#include "../lib/hashmap.h"
-#include "../lib/file.h"
+#include "../lambda-data.hpp"
+#include "../../lib/strbuf.h"
+#include "../../lib/log.h"
+#include "../../lib/memtrack.h"
+#include "../../lib/url.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/file.h"
 
 #ifdef _WIN32
 // (no special includes needed)
@@ -481,17 +481,6 @@ void target_free(Target* target) {
     // Don't free Path - it may be shared/managed elsewhere
 
     mem_free(target);
-}
-
-/**
- * Check if two targets refer to the same resource.
- * Compares by pre-computed URL hash for fast equality.
- * Both NULL targets are considered equal.
- */
-bool target_equal(Target* a, Target* b) {
-    if (a == b) return true;         // same pointer or both NULL
-    if (!a || !b) return false;      // one NULL, one not
-    return a->url_hash == b->url_hash;
 }
 
 } // extern "C"

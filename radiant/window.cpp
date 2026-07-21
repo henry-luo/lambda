@@ -19,7 +19,7 @@
 #include "render.hpp"
 #include "radiant.hpp"
 #include "../lambda/network/network_resource_manager.h"
-#include "../lambda/network/network_integration.h"
+#include "network_integration.h"
 #include "../lambda/network/network_thread_pool.h"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
@@ -118,33 +118,6 @@ bool radiant_advance_js_event_loop(UiContext* uicon, double delta_ms, int frame_
     return radiant_service_js_event_loop(uicon, RADIANT_JS_LOOP_ADVANCE,
                                          -1, delta_ms, frame_steps);
 }
-
-#ifdef __APPLE__
-#include <mach/mach.h>
-// Sample current and peak phys_footprint, log under tag MEMSTAGE if VIEW_MEM_STAGES=1.
-extern "C" void log_mem_stage(const char* stage) {
-    static int env_checked = 0;
-    static int enabled = 0;
-    if (!env_checked) {
-        const char* e = getenv("VIEW_MEM_STAGES");
-        enabled = (e && *e && strcmp(e, "0") != 0) ? 1 : 0;
-        env_checked = 1;
-    }
-    if (!enabled) return;
-    task_vm_info_data_t info;
-    mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
-    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &cnt) != KERN_SUCCESS) {
-        return;
-    }
-    fprintf(stderr, "[MEMSTAGE] %-28s footprint=%6lluMB peak=%6lluMB resident=%6lluMB\n", // PRINTF_OK: env-gated VIEW_MEM_STAGES dev profiler.
-            stage,
-            (unsigned long long)(info.phys_footprint / (1024 * 1024)),
-            (unsigned long long)(info.ledger_phys_footprint_peak / (1024 * 1024)),
-            (unsigned long long)(info.resident_size / (1024 * 1024)));
-}
-#else
-extern "C" void log_mem_stage(const char*) {}
-#endif
 
 void render(GLFWwindow* window);
 // load_html_doc is declared in view.hpp (via layout.hpp)

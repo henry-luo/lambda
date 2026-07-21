@@ -135,6 +135,9 @@ int log_error(const char *format, ...);
 int log_warn(const char *format, ...);
 int log_notice(const char *format, ...);
 
+/* Emit an opt-in process memory checkpoint when VIEW_MEM_STAGES is enabled. */
+void log_mem_stage(const char *stage);
+
 /*
  * Release build optimization: log_debug() and log_info() are stripped
  * When NDEBUG is defined (release builds), these become no-ops that the

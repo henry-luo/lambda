@@ -201,6 +201,7 @@ extern "C" {
 #endif
 
 #include "lambda-data.hpp"
+#include "core/print.h"
 #include "sys_func_registry.h"
 
 typedef struct JubeModuleImport {
@@ -505,7 +506,6 @@ typedef struct Transpiler : Script {
 // Helper to check if arg_type is compatible with param_type
 bool types_compatible(Type* arg_type, Type* param_type);
 
-void print_item(StrBuf *strbuf, Item item, int depth=0, const char* indent="  ");
 void format_binary_literal(StrBuf* strbuf, Binary* bin);
 void print_root_item(StrBuf *strbuf, Item item, const char* indent="  ");
 // for C to access

@@ -35,6 +35,8 @@ STRUCTURAL_CHECKS=(
   "gc-effects:python3 $ROOT/utils/check_gc_effects.py"
   "gc-root-hazards:python3 $ROOT/utils/check_gc_root_hazards.py"
   "no-new-per-file-header:python3 $ROOT/utils/lint/rules/structural/no_new_per_file_header.py"
+  "static-module-architecture:python3 $ROOT/utils/check_static_module_architecture.py"
+  "module-boundary-link:make -C $ROOT check-module-boundary"
   # ls-test-has-golden moved from Python to alint (see .alint.yml).
   # `check_state_machine.py` stays — it parses C++ enum tables and correlates,
   # which neither ast-grep nor alint can express.
@@ -283,6 +285,7 @@ if (( run_struct )); then
   for entry in "${STRUCTURAL_CHECKS[@]}"; do
     id="${entry%%:*}"; cmd="${entry#*:}"
     [[ -n "$RULE_FILTER" && ! "$id" =~ $RULE_FILTER ]] && continue
+    [[ -z "$RULE_FILTER" && "$id" == "module-boundary-link" ]] && continue
     if [[ "$FORMAT" == "github" ]]; then
       # CI: keep each check's full report inline in the build log.
       $cmd || { struct_fail=1; printf '❌ structural:%s failed\n' "$id" >&2; }

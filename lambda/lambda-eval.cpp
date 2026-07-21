@@ -1,6 +1,7 @@
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
-#include "lambda-number-runtime.hpp"
+#include "runtime/lambda-number-runtime.hpp"
+#include "runtime/heap_api.h"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "concurrency.h"
@@ -65,8 +66,6 @@ extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
 #define Malloc malloc
 #define Realloc realloc
 
-extern "C" void* heap_data_alloc(size_t size);
-extern "C" void* heap_data_calloc(size_t size);
 
 Item _map_get(TypeMap* map_type, void* map_data, const char *key, bool *is_found);
 

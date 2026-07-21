@@ -8,7 +8,7 @@
 #include "../lib/mem_grow.hpp"
 #include "../lib/url.h"
 #include "../lambda/input/css/dom_element.hpp"
-#include "../lambda/network/network_integration.h"
+#include "network_integration.h"
 #include <assert.h>
 #include <string.h>
 

@@ -1,6 +1,7 @@
 
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
+#include "runtime/heap_api.h"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/arraylist.hpp"
@@ -12,8 +13,6 @@
 #include <math.h>
 
 // data zone allocation helpers (defined in lambda-mem.cpp)
-extern "C" void* heap_data_alloc(size_t size);
-extern "C" void* heap_data_calloc(size_t size);
 
 extern __thread EvalContext* context;
 extern "C" Context* _lambda_rt;
@@ -22,6 +21,17 @@ void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
 Item typeditem_to_item(TypedItem *titem);
 RetItem fn_input1(Item url);
+
+Item push_k(DateTime val) {
+    // Datetime must be heap-owned because this active-runtime constructor can
+    // cross a collection safepoint and its value cannot live in a transient
+    // number frame.
+    if (DATETIME_IS_ERROR(val)) return ItemError;
+    DateTime* dtptr = (DateTime*)heap_alloc(sizeof(DateTime), LMD_TYPE_DTIME);
+    if (!dtptr) return ItemError;
+    *dtptr = val;
+    return {.item = k2it(dtptr)};
+}
 
 // External: path resolution for iteration (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);

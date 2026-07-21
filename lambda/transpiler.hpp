@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../lib/log.h"
+#include "io/input-allocation-context.h"
 
-#undef LAMBDA_STATIC
 #include "lambda-data.hpp"
 
 #include "ast.hpp"
@@ -104,7 +104,7 @@ void mir_guest_finish_context(Runtime* runtime, EvalContext* old_context,
                               bool reusing_context);
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
-extern bool g_dry_run;
+#include "runtime/runtime-state.h"
 
 // Lambda home: directory containing runtime assets (package/, input/).
 // Dev default: "./lambda"  Release: "./lmd"  Override: LAMBDA_HOME env var.

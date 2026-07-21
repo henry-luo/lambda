@@ -42,6 +42,7 @@
 #include "../input/css/css_style_node.hpp"
 #include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
+#include "../io/input-allocation-context.h"
 #include "../../radiant/view.hpp"
 #include "../../radiant/event.hpp"
 #include "../../radiant/render.hpp"
@@ -55,7 +56,6 @@ extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value);
 extern void free_document(DomDocument* doc);
 extern Item js_make_number(double d);
 extern __thread EvalContext* context;
-extern __thread Context* input_context;
 extern "C" Context* _lambda_rt;
 
 #include <cstring>

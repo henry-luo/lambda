@@ -2,7 +2,7 @@
 
 #include <assert.h>
 
-#include "../lambda/lambda-data.hpp"
+#include "../lambda-data.hpp"
 
 namespace lam {
 

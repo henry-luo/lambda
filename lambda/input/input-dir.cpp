@@ -117,7 +117,7 @@ Input* input_from_directory(const char* directory_path, const char* original_url
         // Add child path to list
         Item child_item;
         child_item.item = (uint64_t)child_path;
-        list_push(children, child_item);
+        list_push_pooled(children, child_item, pool);
         
         dir_entry_free(entry);
     }

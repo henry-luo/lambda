@@ -6,7 +6,7 @@
 // bridge (ast-bridge.rkt) can directly read and feed to eval-lambda
 // or eval-proc.
 //
-#include "../lib/memtrack.h"
+#include "../../lib/memtrack.h"
 
 // Top-level format:
 //   (script "fn" form ...)      ; functional script
@@ -20,10 +20,10 @@
 //   expr                        ; expression (produces output)
 
 #include "emit_sexpr.h"
-#include "transpiler.hpp"
-#include "lambda-decimal.hpp"
-#include "../lib/file.h"
-#include "../lib/log.h"
+#include "../transpiler.hpp"
+#include "../lambda-decimal.hpp"
+#include "../../lib/file.h"
+#include "../../lib/log.h"
 
 // from parse.c (C linkage)
 extern "C" {

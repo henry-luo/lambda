@@ -23,14 +23,19 @@ extern Target* item_to_target(uint64_t item, Url* cwd);
 extern bool target_exists(Target* target);
 extern void target_free(Target* target);
 
-// Forward declaration for EvalContext (defined in lambda-data.hpp as C++ class)
-typedef struct EvalContext EvalContext;
+#ifndef LAMBDA_PATH_RUNTIME_IMPLEMENTATION
 
-// Thread-local eval context (defined in runner.cpp)
-extern __thread EvalContext* context;
+static PathPoolProvider path_pool_provider = NULL;
 
-// Helper functions to access context members (implemented in runner.cpp)
-extern Pool* eval_context_get_pool(EvalContext* ctx);
+void path_register_pool_provider(PathPoolProvider provider) {
+    // Keep runtime TLS ownership above lambda-io; allocation always asks the
+    // registered current-runtime provider rather than retaining a stale pool.
+    path_pool_provider = provider;
+}
+
+Pool* path_get_pool(void) {
+    return path_pool_provider ? path_pool_provider() : NULL;
+}
 
 // Root sentinel - parent of all scheme roots (has NULL parent itself)
 static Path ROOT_SENTINEL = {
@@ -62,14 +67,9 @@ void path_init(void) {
         return;  // already initialized
     }
 
-    if (!context) {
-        log_error("path_init: no context available");
-        return;
-    }
-
-    Pool* pool = eval_context_get_pool(context);
+    Pool* pool = path_get_pool();
     if (!pool) {
-        log_error("path_init: no pool available");
+        log_error("path_init: no registered pool provider");
         return;
     }
 
@@ -139,14 +139,9 @@ Path* path_append_len(Path* parent, const char* segment, size_t len) {
         return parent;
     }
 
-    if (!context) {
-        log_error("path_append_len: no context");
-        return NULL;
-    }
-
-    Pool* pool = eval_context_get_pool(context);
+    Pool* pool = path_get_pool();
     if (!pool) {
-        log_error("path_append_len: no pool available");
+        log_error("path_append_len: no registered pool provider");
         return NULL;
     }
 
@@ -619,6 +614,12 @@ bool path_has_wildcards(Path* path) {
 // and is only compiled when not building standalone input library
 // Use PATH_NO_ITERATION to exclude this section (more specific than LAMBDA_STATIC)
 
+#endif // LAMBDA_PATH_RUNTIME_IMPLEMENTATION
+
+#ifdef LAMBDA_PATH_RUNTIME_IMPLEMENTATION
+extern Pool* path_get_pool(void);
+#endif
+
 #ifndef PATH_NO_ITERATION
 
 #include "../lib/file.h"
@@ -648,14 +649,9 @@ void path_load_metadata(Path* path) {
     if (!path) return;
     if (path->flags & PATH_FLAG_META_LOADED) return;  // already loaded
     
-    if (!context) {
-        log_error("path_load_metadata: no context");
-        return;
-    }
-    
-    Pool* pool = eval_context_get_pool(context);
+    Pool* pool = path_get_pool();
     if (!pool) {
-        log_error("path_load_metadata: no pool");
+        log_error("path_load_metadata: no registered pool provider");
         return;
     }
     
@@ -787,18 +783,11 @@ static Item resolve_directory_children(Path* parent_path, const char* dir_path) 
         return ITEM_NULL;
     }
     
-    if (!context) {
-        for (int i = 0; i < entries->length; i++) dir_entry_free((DirEntry*)entries->data[i]);
-        arraylist_free(entries);
-        log_error("resolve_directory_children: no context");
-        return ITEM_ERROR;
-    }
-    
-    Pool* pool = eval_context_get_pool(context);
+    Pool* pool = path_get_pool();
     if (!pool) {
         for (int i = 0; i < entries->length; i++) dir_entry_free((DirEntry*)entries->data[i]);
         arraylist_free(entries);
-        log_error("resolve_directory_children: no pool");
+        log_error("resolve_directory_children: no registered pool provider");
         return ITEM_ERROR;
     }
     
@@ -875,8 +864,8 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
                                        int depth, int max_depth);
 
 static Item expand_wildcard(Path* base_path, const char* dir_path, bool recursive) {
-    if (!context) {
-        log_error("expand_wildcard: no context");
+    if (!path_get_pool()) {
+        log_error("expand_wildcard: no registered pool provider");
         return ITEM_ERROR;
     }
     
@@ -897,7 +886,7 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
     ArrayList* entries = dir_list(dir_path);
     if (!entries) return;
     
-    Pool* pool = eval_context_get_pool(context);
+    Pool* pool = path_get_pool();
     if (!pool) {
         for (int i = 0; i < entries->length; i++) dir_entry_free((DirEntry*)entries->data[i]);
         arraylist_free(entries);

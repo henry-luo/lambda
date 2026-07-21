@@ -17,6 +17,7 @@
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
 #include "../transpiler.hpp"
+#include "../runtime/heap_api.h"
 #include "../name_pool.hpp"
 #include <mir.h>
 #include <mir-gen.h>
@@ -36,9 +37,6 @@ extern "C" {
 }
 
 extern __thread EvalContext* context;
-extern void* heap_alloc(int size, TypeId type_id);
-extern void heap_init();
-extern void heap_destroy();
 extern "C" void rb_reset_module_vars();
 
 // cross-language interop

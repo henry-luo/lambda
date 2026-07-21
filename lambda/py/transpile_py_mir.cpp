@@ -20,6 +20,7 @@
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/mempool.h"
 #include "../transpiler.hpp"
+#include "../runtime/heap_api.h"
 #include <mir.h>
 #include <mir-gen.h>
 #include <cstring>
@@ -32,7 +33,6 @@
 #endif
 #include <sys/stat.h>
 
-extern void* heap_alloc(int size, TypeId type_id);
 extern "C" void py_reset_module_vars();
 
 // ============================================================================

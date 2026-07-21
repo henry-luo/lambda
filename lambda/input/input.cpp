@@ -7,7 +7,7 @@
 #include "../../lib/mime-detect.h"
 #include "../../lib/arena.h"
 #include "../../lib/mem_factory.h"
-#include "../mem_factory_rt.h"
+#include "../core/mem_factory_core.h"
 #include "../../lib/log.h"  // add logging support
 #include "../../lib/memtrack.h"
 #include "../../lib/file.h"
@@ -25,6 +25,7 @@ extern "C" {
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 __thread Context* input_context = NULL;
+__thread InputAllocationContext* input_allocation_context = NULL;
 
 ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
     ShapeEntry* shape_entry = NULL;
@@ -1079,17 +1080,18 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
         input->root = {.item = s2it(str)};
     }
     else {
-        Context context;  Context *pa_input_context = input_context;
+        InputAllocationContext allocation_context = {};
+        InputAllocationContext* saved_allocation_context = input_allocation_context;
         input = InputManager::create_input(abs_url);
         if (!input) {
             log_error("input_from_source: Failed to create input for type '%s'", effective_type);
             return NULL;
         }
-        context.pool = input->pool;  context.arena = input->arena;
-        context.consts = NULL;
-        context.cwd = NULL;  context.run_main = false;
-        context.disable_string_merging = false;  // default: allow string merging
-        input_context = &context;
+        allocation_context.pool = input->pool;
+        allocation_context.arena = input->arena;
+        allocation_context.disable_string_merging = false;
+        allocation_context.ui_mode = input->ui_mode;
+        input_allocation_context = &allocation_context;
 
         if (strcmp(effective_type, "markup") == 0) {
             // Generic markup type - use flavor to select format
@@ -1132,7 +1134,7 @@ extern "C" Input* input_from_source_n(const char* source, size_t source_len, Url
         else {
             log_debug("Unknown input type: %s\n", effective_type);
         }
-        input_context = pa_input_context;
+        input_allocation_context = saved_allocation_context;
     }
     // Note: don't mem_free(source) here - it's the caller's responsibility
     return input;

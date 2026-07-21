@@ -1,9 +1,8 @@
 #ifndef FORMAT_H
 #define FORMAT_H
 
-#ifndef LAMBDA_STATIC
-#define LAMBDA_STATIC
-#endif
+// Formatting is an io consumer.  Do not select a different Lambda ABI merely
+// because this public header was included before a runtime header.
 #include "../lambda-data.hpp"
 #include "../../lib/stringbuf.h"
 

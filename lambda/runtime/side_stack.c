@@ -1,7 +1,7 @@
 #include "side_stack.h"
 
-#include "../lambda/lambda.h"
-#include "log.h"
+#include "../lambda.h"
+#include "../../lib/log.h"
 
 #if defined(_WIN32)
 #include <windows.h>

@@ -25,6 +25,10 @@ extern __thread EvalContext* context;
 // Provided by lambda/path.c.
 extern "C" void path_init(void);
 
+static Pool* test_path_pool_provider(void) {
+    return ::context && ::context->heap ? ::context->heap->pool : nullptr;
+}
+
 void tu_setup_runtime(Pool** out_pool, Heap* heap, EvalContext* ctx) {
     log_init(NULL);
 
@@ -44,6 +48,7 @@ void tu_setup_runtime(Pool** out_pool, Heap* heap, EvalContext* ctx) {
     ctx->pool = pool;
 
     ::context = ctx;
+    path_register_pool_provider(test_path_pool_provider);
     path_init();
 
     if (out_pool) *out_pool = pool;

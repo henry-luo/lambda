@@ -60,6 +60,11 @@ typedef enum {
     PATH_SCHEME_COUNT
 } PathScheme;
 
+// Path allocation stays in lambda-io; active runtimes provide their current
+// pool explicitly instead of exposing runtime TLS state to this lower layer.
+typedef Pool* (*PathPoolProvider)(void);
+void path_register_pool_provider(PathPoolProvider provider);
+
 // Path API (defined in path.c)
 void path_init(void);                                   // Initialize root scheme paths
 void path_reset(void);                                  // Reset scheme roots (call between batch scripts)

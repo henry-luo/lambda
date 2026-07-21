@@ -29,7 +29,7 @@
 #include <cstring>
 #include <cstdio>
 #include "../../lib/mem.h"
-#include "../lambda-stack.h"
+#include "../runtime/lambda-stack.h"
 #ifdef _WIN32
 #include <malloc.h>  // alloca on Windows
 #include <direct.h>  // _getcwd

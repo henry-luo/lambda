@@ -1,5 +1,5 @@
 #include "format.h"
-#include "../ast.hpp"
+#include "../core/print.h"
 #include "../../lib/base64.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"

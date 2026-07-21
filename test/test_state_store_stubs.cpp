@@ -11,6 +11,12 @@
 TemplateRegistry* g_template_registry = NULL;
 UiContext ui_context{};
 
+extern "C" void heap_register_gc_root(uint64_t* slot) {
+    (void)slot;
+    // This pool-backed state-store target omits lambda-rt and never compacts;
+    // render_map's process slot therefore needs no GC registration here.
+}
+
 extern "C" bool js_dom_option_is_selected(void* dom_elem) {
     DomElement* option = (DomElement*)dom_elem;
     if (!option) return false;

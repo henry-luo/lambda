@@ -9,6 +9,7 @@
 #include "ast.hpp"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "lambda.hpp"
+#include "runtime/heap_api.h"
 #endif
 #include "../lib/re2_glue.hpp"
 #include "../lib/log.h"
@@ -28,7 +29,6 @@ extern "C" {
     void* heap_data_calloc(size_t size);
     String* heap_strcpy(const char* src, int64_t len);
 }
-extern void* heap_alloc(int size, TypeId type_id);
 extern __thread EvalContext* context;
 #endif
 

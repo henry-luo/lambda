@@ -3,7 +3,7 @@
  */
 #include "js_runtime_internal.hpp"
 #include "../../lib/memtrack.h"
-#include "../../lib/gc/gc_heap.h"
+#include "../runtime/gc/gc_heap.h"
 
 extern __thread EvalContext* context;
 extern void heap_register_gc_root(uint64_t* slot);

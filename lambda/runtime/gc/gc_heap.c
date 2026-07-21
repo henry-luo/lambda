@@ -9,11 +9,11 @@
  * Data zone buffers of surviving objects are compacted to tenured data zone.
  */
 #include "gc_heap.h"
-#include "../log.h"
-#include "../memtrack.h"
-#include "../hashmap.h"
-#include "../../lambda/lambda.h"
-#include "../../lambda/js/js_exec_profile_weak.h"
+#include "../../../lib/log.h"
+#include "../../../lib/memtrack.h"
+#include "../../../lib/hashmap.h"
+#include "../../lambda.h"
+#include "../../js/js_exec_profile_weak.h"
 #include <stdlib.h>
 #include <string.h>
 

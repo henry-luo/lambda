@@ -38,6 +38,10 @@ __thread EvalContext* context;
 extern __thread EvalContext* context;
 #endif
 
+static Pool* test_path_pool_provider(void) {
+    return context && context->heap ? context->heap->pool : nullptr;
+}
+
 // Test fixture for Path tests
 class PathTest : public ::testing::Test {
 protected:
@@ -59,6 +63,7 @@ protected:
 
         // Set thread-local context
         context = &test_context;
+        path_register_pool_provider(test_path_pool_provider);
 
         // Initialize path system
         path_init();

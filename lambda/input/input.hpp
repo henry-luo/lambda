@@ -2,10 +2,11 @@
 #ifndef LAMBDA_INPUT_H
 #define LAMBDA_INPUT_H
 
-#ifndef LAMBDA_STATIC
-#define LAMBDA_STATIC
-#endif
+// Input is an io consumer.  It must not change the declarations selected by
+// its dependencies: ownership is expressed by the API it calls, not include
+// order or a public-header build macro.
 #include "../lambda-data.hpp"
+#include "../io/input-allocation-context.h"
 #include "../../lib/url.h"
 #include "../../lib/log.h"
 #include "markup-format.h"  // For MarkupFormat enum

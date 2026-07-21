@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "../lambda/input/css/css_counter_hook.h"
 #include "../lib/arena.h"
 #include "../lib/hashmap.h"
 #include "../lib/hashmap_helpers.h"
@@ -828,4 +829,20 @@ int counters_format(CounterContext* ctx, const char* name, const char* separator
     }
 
     return len;
+}
+
+static int radiant_css_counter_format(void* counter_context, const char* name,
+                                      uint32_t style, char* buffer, size_t buffer_size) {
+    return counter_format((CounterContext*)counter_context, name, style, buffer, buffer_size);
+}
+
+static int radiant_css_counters_format(void* counter_context, const char* name,
+                                       const char* separator, uint32_t style,
+                                       char* buffer, size_t buffer_size) {
+    return counters_format((CounterContext*)counter_context, name, separator, style,
+                           buffer, buffer_size);
+}
+
+void radiant_register_css_counter_hooks() {
+    css_counter_format_register(radiant_css_counter_format, radiant_css_counters_format);
 }

@@ -19,7 +19,7 @@
 #include "../lambda-decimal.hpp"
 #include "../transpiler.hpp"
 #include "../module_registry.h"
-#include "../../lib/lambda_typed.hpp"
+#include "../core/lambda_typed.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/str.h"

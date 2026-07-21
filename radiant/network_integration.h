@@ -1,7 +1,7 @@
 #ifndef NETWORK_INTEGRATION_H
 #define NETWORK_INTEGRATION_H
 
-#include "../input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_element.hpp"
 
 #ifdef __cplusplus
 extern "C" {

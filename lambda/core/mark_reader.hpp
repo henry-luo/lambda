@@ -1,7 +1,7 @@
 #pragma once
 
-#include "lambda-data.hpp"
-#include "../lib/lambda_typed.hpp"
+#include "../lambda-data.hpp"
+#include "lambda_typed.hpp"
 #include <cstdint>
 #include <functional>
 

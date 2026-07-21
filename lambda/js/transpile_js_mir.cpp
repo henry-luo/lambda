@@ -6,8 +6,6 @@
 
 #include "js_mir_internal.hpp"
 
-extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.cpp; no-op when VIEW_MEM_STAGES unset
-
 // External reference to Lambda runtime context pointer (defined in mir.c)
 extern "C" Context* _lambda_rt;
 extern "C" {
@@ -16,8 +14,6 @@ extern "C" {
 
 // External from runner.cpp
 extern __thread EvalContext* context;
-extern void* heap_alloc(int size, TypeId type_id);
-extern void heap_init();
 
 // External from js_runtime.cpp
 extern "C" void js_reset_module_vars();

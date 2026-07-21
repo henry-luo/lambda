@@ -13,8 +13,8 @@
 #include "mark_builder.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
-#include "lambda-stack.h"
-#include "../lib/side_stack.h"
+#include "runtime/lambda-stack.h"
+#include "runtime/side_stack.h"
 #include "concurrency.h"
 #include "module_registry.h"
 #include "jube/jube_registry.h"
@@ -472,6 +472,10 @@ NamePool* eval_context_get_name_pool(EvalContext* ctx) {
     if (!ctx) return nullptr;
     return ctx->name_pool;
 }
+}
+
+static Pool* runner_path_pool_provider(void) {
+    return context ? eval_context_get_pool(context) : NULL;
 }
 
 
@@ -1396,7 +1400,7 @@ void runner_init(Runtime *runtime, Runner* runner) {
 
 #include "../lib/url.h"
 #include "validator/validator.hpp"
-#include "lambda-stack.h"
+#include "runtime/lambda-stack.h"
 
 void runner_setup_context(Runner* runner) {
     log_debug("runner setup exec context");
@@ -1466,6 +1470,8 @@ void runner_setup_context(Runner* runner) {
         // must not disable the native-stack roots on the same activation chain.
         heap_gc_force_compatibility(context->heap);
     }
+
+    path_register_pool_provider(runner_path_pool_provider);
 
     if (rt && rt->scheduler) {
         context->scheduler = rt->scheduler;

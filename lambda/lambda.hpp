@@ -2,8 +2,9 @@
 #pragma once
 #include "lambda.h"
 #include "lambda-path.h"
+#include "io/target.h"
 #include "../lib/byte_storage.h"
-#include "../lib/side_stack.h"
+#include "runtime/side_stack.h"
 
 // ============================================================================
 // Definitions moved from lambda.h to keep the JIT-embedded header slim.
@@ -20,53 +21,6 @@ enum TypeKind {
     TYPE_KIND_PATTERN,      // TypePattern: compiled regex pattern
     TYPE_KIND_CONSTRAINED,  // TypeConstrained: type with where constraint
 };
-
-// ============================================================================
-// Target: Unified I/O target for input/output operations
-// ============================================================================
-
-// Forward declaration for Url (defined in lib/url.h)
-typedef struct Url Url;
-
-// Target scheme (derived from URL or Path)
-typedef enum {
-    TARGET_SCHEME_FILE = 0,     // local file (file:// or relative path)
-    TARGET_SCHEME_HTTP,         // HTTP URL
-    TARGET_SCHEME_HTTPS,        // HTTPS URL
-    TARGET_SCHEME_SYS,          // system info (sys://)
-    TARGET_SCHEME_FTP,          // FTP (future)
-    TARGET_SCHEME_DATA,         // data: URL (future)
-    TARGET_SCHEME_UNKNOWN       // unrecognized scheme
-} TargetScheme;
-
-// Target type (how the target was specified)
-typedef enum {
-    TARGET_TYPE_URL = 0,        // parsed from URL string
-    TARGET_TYPE_PATH            // Lambda Path object
-} TargetType;
-
-// Target structure - unified I/O target
-typedef struct Target {
-    TargetScheme scheme;        // scheme type (file, http, https, sys, etc.)
-    TargetType type;            // source type (url or path)
-    uint64_t url_hash;          // hash of normalized URL for fast equality comparison
-    const char* original;       // original input string (for relative path preservation)
-    union {
-        Url* url;               // parsed URL (when type == TARGET_TYPE_URL)
-        Path* path;             // Lambda Path (when type == TARGET_TYPE_PATH)
-    };
-} Target;
-
-// Target API (defined in target.cpp)
-Target* item_to_target(uint64_t item, Url* cwd);
-void* target_to_local_path(Target* target, Url* cwd);
-const char* target_to_url_string(Target* target, void* out_buf);
-bool target_is_local(Target* target);
-bool target_is_remote(Target* target);
-bool target_is_dir(Target* target);
-bool target_exists(Target* target);
-void target_free(Target* target);
-bool target_equal(Target* a, Target* b);
 
 // Name - a qualified name with optional namespace
 // Pool-managed (no refcount). Used for element tag names and map field names.
@@ -319,181 +273,9 @@ inline ConstItem Item::to_const() const {
 // get type_id from an Item
 static inline TypeId get_type_id(Item value) { return value.type_id(); }
 
-#ifdef __cplusplus
-extern "C++" {
-#endif
-
-// Canonical native-helper root frame. Its slots compose with JIT frames:
-// nested generated calls start above this watermark and destruction restores
-// the exact incoming top on every structured exit.
-class RootFrame {
-    LambdaRootFrame frame_;
-
-public:
-    RootFrame(Context* runtime, size_t slot_count) : frame_{} {
-        // Pool/arena-backed input paths have no collecting runtime, so their
-        // fallback homes are safe; only a real runtime reservation may fail closed.
-        if (runtime && !lambda_root_frame_begin(runtime, &frame_, slot_count)) {
-            lambda_root_frame_overflow_error();
-        }
-    }
-
-    ~RootFrame() { lambda_root_frame_end(&frame_); }
-
-    bool valid() const { return frame_.active; }
-    uint64_t* slot(size_t index) { return lambda_root_frame_slot(&frame_, index); }
-    uint64_t* take_slot() { return lambda_root_frame_take_slot(&frame_); }
-
-    RootFrame(const RootFrame&) = delete;
-    RootFrame& operator=(const RootFrame&) = delete;
-};
-
-template <typename T>
-class Rooted {
-    uint64_t* slot_;
-    uint64_t fallback_slot_;
-
-public:
-    Rooted(RootFrame& frame, T value)
-        : slot_(frame.take_slot()), fallback_slot_(0) { set(value); }
-
-    T get() const {
-        return (T)(uintptr_t)*(slot_ ? slot_ : &fallback_slot_);
-    }
-
-    void set(T value) {
-        *(slot_ ? slot_ : &fallback_slot_) = (uint64_t)(uintptr_t)value;
-    }
-
-    // GC-free input/format libraries deliberately have no runtime side stack.
-    // Preserve handle semantics locally when their non-collecting RootFrame is invalid.
-    uint64_t* home() { return slot_ ? slot_ : &fallback_slot_; }
-    const uint64_t* home() const { return slot_ ? slot_ : &fallback_slot_; }
-
-    Rooted(const Rooted&) = delete;
-    Rooted& operator=(const Rooted&) = delete;
-};
-
-template <>
-class Rooted<Item> {
-    uint64_t* slot_;
-    uint64_t fallback_slot_;
-
-public:
-    Rooted(RootFrame& frame, Item value)
-        : slot_(frame.take_slot()), fallback_slot_(0) { set(value); }
-
-    Item get() const { return (Item){.item = *(slot_ ? slot_ : &fallback_slot_)}; }
-    void set(Item value) { *(slot_ ? slot_ : &fallback_slot_) = value.item; }
-    uint64_t* home() { return slot_ ? slot_ : &fallback_slot_; }
-    const uint64_t* home() const { return slot_ ? slot_ : &fallback_slot_; }
-
-    Rooted(const Rooted&) = delete;
-    Rooted& operator=(const Rooted&) = delete;
-};
-
-template <typename T>
-class LambdaHandle {
-    const uint64_t* slot_;
-
-public:
-    explicit LambdaHandle(const Rooted<T>& rooted) : slot_(rooted.home()) {}
-    T get() const { return slot_ ? (T)(uintptr_t)*slot_ : (T)nullptr; }
-};
-
-template <>
-class LambdaHandle<Item> {
-    const uint64_t* slot_;
-
-public:
-    explicit LambdaHandle(const Rooted<Item>& rooted) : slot_(rooted.home()) {}
-    Item get() const { return (Item){.item = slot_ ? *slot_ : 0}; }
-};
-
-template <typename T>
-class LambdaMutableHandle {
-    uint64_t* slot_;
-
-public:
-    explicit LambdaMutableHandle(Rooted<T>& rooted) : slot_(rooted.home()) {}
-    T get() const { return slot_ ? (T)(uintptr_t)*slot_ : (T)nullptr; }
-    void set(T value) { if (slot_) *slot_ = (uint64_t)(uintptr_t)value; }
-};
-
-template <>
-class LambdaMutableHandle<Item> {
-    uint64_t* slot_;
-
-public:
-    explicit LambdaMutableHandle(Rooted<Item>& rooted) : slot_(rooted.home()) {}
-    Item get() const { return (Item){.item = slot_ ? *slot_ : 0}; }
-    void set(Item value) { if (slot_) *slot_ = value.item; }
-};
-
-template <typename T>
-class PersistentRooted {
-    Context* runtime_;
-    uint64_t slot_;
-    bool registered_;
-
-public:
-    PersistentRooted(Context* runtime, T value)
-        : runtime_(runtime), slot_((uint64_t)(uintptr_t)value),
-          registered_(heap_register_gc_root_for(runtime_, &slot_)) {}
-
-    ~PersistentRooted() {
-        if (registered_) heap_unregister_gc_root_for(runtime_, &slot_);
-    }
-
-    T get() const { return (T)(uintptr_t)slot_; }
-    void set(T value) { slot_ = (uint64_t)(uintptr_t)value; }
-    bool valid() const { return registered_; }
-    uint64_t* home() { return &slot_; }
-
-    PersistentRooted(const PersistentRooted&) = delete;
-    PersistentRooted& operator=(const PersistentRooted&) = delete;
-};
-
-template <>
-class PersistentRooted<Item> {
-    Context* runtime_;
-    uint64_t slot_;
-    bool registered_;
-
-public:
-    PersistentRooted(Context* runtime, Item value)
-        : runtime_(runtime), slot_(value.item),
-          registered_(heap_register_gc_root_for(runtime_, &slot_)) {}
-
-    ~PersistentRooted() {
-        if (registered_) heap_unregister_gc_root_for(runtime_, &slot_);
-    }
-
-    Item get() const { return (Item){.item = slot_}; }
-    void set(Item value) { slot_ = value.item; }
-    bool valid() const { return registered_; }
-    uint64_t* home() { return &slot_; }
-
-    PersistentRooted(const PersistentRooted&) = delete;
-    PersistentRooted& operator=(const PersistentRooted&) = delete;
-};
-
-class AutoAssertNoGC {
-    Context* runtime_;
-
-public:
-    explicit AutoAssertNoGC(Context* runtime) : runtime_(runtime) {
-        heap_no_gc_scope_begin(runtime_);
-    }
-    ~AutoAssertNoGC() { heap_no_gc_scope_end(runtime_); }
-
-    AutoAssertNoGC(const AutoAssertNoGC&) = delete;
-    AutoAssertNoGC& operator=(const AutoAssertNoGC&) = delete;
-};
-
-#ifdef __cplusplus
-}
-#endif
+// Compatibility aggregate: the native root/GC helpers are provided by rt.
+// Keep the include after Item so the Item-specialized root handles are complete.
+#include "runtime/lambda-root-frame.hpp"
 
 static inline Item lambda_float_ptr_to_item(const double* double_ptr) {
     if (!double_ptr) return {.item = ITEM_NULL};

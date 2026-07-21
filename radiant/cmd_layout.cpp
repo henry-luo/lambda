@@ -80,7 +80,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
-#include "../lambda/network/network_integration.h"
+#include "network_integration.h"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/mark_builder.hpp"
 #include "../radiant/view.hpp"

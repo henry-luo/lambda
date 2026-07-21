@@ -1,7 +1,7 @@
 #include "mark_reader.hpp"
-#include "lambda-data.hpp"
-#include "../lib/stringbuf.h"
-#include "../lib/memtrack.h"
+#include "../lambda-data.hpp"
+#include "../../lib/stringbuf.h"
+#include "../../lib/memtrack.h"
 #include <cstring>
 #include <cstdlib>
 #include <new>

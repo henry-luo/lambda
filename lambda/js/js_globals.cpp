@@ -25,6 +25,7 @@
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
 #include "../lambda.hpp"
+#include "../runtime/heap_api.h"
 #include "../transpiler.hpp"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
@@ -1037,7 +1038,6 @@ static bool js_regexp_virtual_prop_name(const char* name, int len) {
            (len == 11 && strncmp(name, "unicodeSets", 11) == 0);
 }
 
-extern void* heap_alloc(int size, TypeId type_id);
 extern Item fn_array_set(Array* arr, int64_t index, Item value);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_get_prototype(Item object);

@@ -3,6 +3,7 @@
 #include "rb_runtime.h"
 #include "rb_transpiler.hpp"
 #include "../lambda-data.hpp"
+#include "../runtime/heap_api.h"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 
@@ -18,12 +19,9 @@ extern "C" Item rb_call_spaceship(Item left, Item right);
 
 // push_d boxes a double into an Item via the shared number-stack API (C linkage)
 extern "C" Item push_d(double dval);
-extern "C" void* heap_data_alloc(size_t size);
-extern "C" void heap_register_gc_root(uint64_t* slot);
 extern __thread EvalContext* context;
 
 // forward declarations
-extern String* heap_create_name(const char* str, size_t len);
 
 // global state
 static void* rb_input = NULL;

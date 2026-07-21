@@ -1,12 +1,12 @@
 #include "mark_editor.hpp"
-#include "input/css/dom_node.hpp"
-#include "input/css/dom_element.hpp"
-#include "../lib/log.h"
-#include "../lib/arena.h"
+#include "../input/css/dom_node.hpp"
+#include "../input/css/dom_element.hpp"
+#include "../../lib/log.h"
+#include "../../lib/arena.h"
 #include <string.h>
 #include <stdlib.h>
 #include <new>
-#include "../lib/memtrack.h"
+#include "../../lib/memtrack.h"
 
 // Maximum number of batch updates supported
 #define MAX_BATCH_UPDATES 64

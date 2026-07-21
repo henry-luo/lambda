@@ -21,11 +21,11 @@
 
 extern "C" {
 #include "../../lambda/lambda.h"
-#include "../../lib/gc/gc_heap.h"
-#include "../../lib/gc/gc_object_zone.h"
-#include "../../lib/gc/gc_data_zone.h"
+#include "../../lambda/runtime/gc/gc_heap.h"
+#include "../../lambda/runtime/gc/gc_object_zone.h"
+#include "../../lambda/runtime/gc/gc_data_zone.h"
 #include "../../lib/mempool.h"
-#include "../../lib/side_stack.h"
+#include "../../lambda/runtime/side_stack.h"
 }
 
 // Use LMD_TYPE_* enum values from lambda.h directly — no local aliases needed.

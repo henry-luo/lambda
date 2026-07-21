@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../lambda.h"
-#include "../../lib/side_stack.h"
+#include "../runtime/side_stack.h"
 #include <stdint.h>
 #include <stddef.h>
 

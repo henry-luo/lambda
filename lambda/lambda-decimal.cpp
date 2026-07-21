@@ -5,6 +5,7 @@
 
 #include "lambda-decimal.hpp"
 #include "lambda-data.hpp"
+#include "runtime/heap_api.h"
 #include "../lib/log.h"
 #include "../lib/mem.h"
 #include "../lib/strbuf.h"
@@ -14,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
 // ─────────────────────────────────────────────────────────────────────
 // Global Contexts
 // ─────────────────────────────────────────────────────────────────────
@@ -233,7 +235,9 @@ mpd_t* decimal_parse_fixed_str(const char* str) {
 mpd_t* decimal_parse_unlimited_str(const char* str) {
     return decimal_parse_str(str, decimal_unlimited_context());
 }
+#endif
 
+#ifndef LAMBDA_IO_STATIC_VALUES
 // ─────────────────────────────────────────────────────────────────────
 // Forward Declarations
 // ─────────────────────────────────────────────────────────────────────
@@ -297,7 +301,9 @@ Item decimal_from_string(const char* str, EvalContext* ctx) {
     
     return decimal_push_result(dec_val, false);  // fixed precision
 }
+#endif
 
+#ifndef LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
 void decimal_free_string(char* str) {
     if (str) mpd_free(str);
 }
@@ -507,7 +513,9 @@ Item decimal_from_int64_arena(int64_t val, void* arena_ptr) {
     result.item = c2it(dec);
     return result;
 }
+#endif
 
+#ifndef LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
 // ─────────────────────────────────────────────────────────────────────
 // Formatting
 // ─────────────────────────────────────────────────────────────────────
@@ -533,25 +541,16 @@ void decimal_big_print(StrBuf* strbuf, Decimal* decimal) {
     // Same implementation - no truncation for either type
     decimal_print(strbuf, decimal);
 }
+#endif
 
+#ifndef LAMBDA_IO_STATIC_VALUES
 // ─────────────────────────────────────────────────────────────────────
 // Memory Management  
 // ─────────────────────────────────────────────────────────────────────
 
-// External heap allocation function
-// We provide a weak default that returns NULL for libraries that don't link heap.
-// The actual implementation in lambda-mem.cpp will override this.
-// weak fallback for heap_alloc - real implementation in lambda-mem.cpp
-// This allows lambda-decimal.cpp to be linked into libraries that don't include lambda-mem
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((weak)) void* heap_alloc(int size, TypeId type_id) {
-    (void)size;
-    (void)type_id;
-    return NULL;  // default stub - real impl in lambda-mem.cpp
-}
-#else
-extern void* heap_alloc(int size, TypeId type_id);
-#endif
+// Heap-backed decimal and BigInt results are runtime-only. Standalone input
+// paths use the explicit arena constructors above; they must not silently
+// convert a missing runtime provider into a null-producing weak fallback.
 
 Decimal* decimal_create(mpd_t* mpd_val) {
     if (!mpd_val) return NULL;
@@ -573,7 +572,9 @@ void decimal_retain(Decimal* dec) {
 void decimal_release(Decimal* dec) {
     // no-op: ref counting removed, gc_finalize_all_objects handles cleanup
 }
+#endif
 
+#ifndef LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
 // ─────────────────────────────────────────────────────────────────────
 // Type Conversion
 // ─────────────────────────────────────────────────────────────────────
@@ -672,7 +673,9 @@ bool decimal_is_unlimited(Item item) {
 bool decimal_is_any(Item item) {
     return item._type_id == LMD_TYPE_DECIMAL;
 }
+#endif
 
+#ifndef LAMBDA_IO_STATIC_VALUES
 // ─────────────────────────────────────────────────────────────────────
 // Helper: Push decimal result
 // ─────────────────────────────────────────────────────────────────────
@@ -1047,7 +1050,9 @@ Item decimal_abs(Item a, EvalContext* ctx) {
     if (decimal_item_is_bigint(a)) return decimal_push_bigint_result(result);
     return decimal_push_result(result, is_unlimited);
 }
+#endif
 
+#ifndef LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
 // ─────────────────────────────────────────────────────────────────────
 // Comparison
 // ─────────────────────────────────────────────────────────────────────
@@ -1123,7 +1128,9 @@ char* decimal_to_string(Decimal* decimal) {
     if (!decimal || !decimal->dec_val) return NULL;
     return mpd_to_sci(decimal->dec_val, 1);  // caller must free with decimal_free_string
 }
+#endif
 
+#ifndef LAMBDA_IO_STATIC_VALUES
 // ─────────────────────────────────────────────────────────────────────
 // Rounding Operations (floor, ceil, round, trunc)
 // ─────────────────────────────────────────────────────────────────────
@@ -1198,7 +1205,9 @@ Item decimal_trunc(Item a, EvalContext* ctx) {
     mpd_trunc(result, dec_ptr->dec_val, dec_ctx);
     return decimal_push_result(result, is_unlimited);
 }
+#endif
 
+#ifndef LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
 // Convert decimal Item to int64 (truncates toward zero)
 int64_t decimal_to_int64(Item item) {
     if (!decimal_is_any(item)) return 0;
@@ -1232,7 +1241,9 @@ bool decimal_to_int64_exact(Item item, int64_t* out) {
     *out = (int64_t)value;
     return true;
 }
+#endif
 
+#ifndef LAMBDA_IO_STATIC_VALUES
 // ═════════════════════════════════════════════════════════════════════
 // BigInt Support — JS BigInt backed by libmpdec integer arithmetic
 // ═════════════════════════════════════════════════════════════════════
@@ -1961,3 +1972,4 @@ char* bigint_to_cstring_radix(Item bi, int radix) {
     mpd_del(n); mpd_del(base); mpd_del(q); mpd_del(rem);
     return out;
 }
+#endif

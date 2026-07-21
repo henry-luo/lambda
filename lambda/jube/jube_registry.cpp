@@ -8,8 +8,8 @@
 #include "../format/format.h"
 #include "../input/css/dom_element.hpp"
 #include "../js/js_class.h"
-#include "../lambda-stack.h"
-#include "../../lib/side_stack.h"
+#include "../runtime/lambda-stack.h"
+#include "../runtime/side_stack.h"
 #include "../../lib/file.h"
 #include "../../lib/digest.h"
 #include "../../lib/hex.h"
@@ -17,7 +17,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mem_factory.h"
-#include "../../lib/gc/gc_heap.h"
+#include "../runtime/gc/gc_heap.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>

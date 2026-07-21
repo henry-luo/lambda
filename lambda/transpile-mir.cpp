@@ -14,9 +14,10 @@
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
 #include "../lib/hashmap_helpers.h"
-#include "../lib/gc/gc_heap.h"
+#include "runtime/gc/gc_heap.h"
 #include "validator/validator.hpp"
-#include "lambda-stack.h"
+#include "runtime/lambda-stack.h"
+#include "runtime/heap_api.h"
 #include <mir.h>
 #include <mir-gen.h>
 #include <stddef.h>
@@ -31,9 +32,6 @@
 #include <time.h>
 
 extern Type TYPE_ANY, TYPE_INT;
-extern void* heap_alloc(int size, TypeId type_id);
-extern void heap_init();
-extern void heap_destroy();
 
 extern "C" {
     int gc_object_zone_class_index(size_t size);

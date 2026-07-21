@@ -18,6 +18,10 @@
 void fontface_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);
 extern "C" void radiant_dom_invalidate_document(DomDocument* doc);
+void radiant_register_css_counter_hooks();
+void radiant_register_css_symbol_hook();
+void radiant_register_resource_processor();
+void radiant_register_event_hooks();
 
 // F7: platform IME shims (radiant/ime_mac.mm, radiant/ime_win.cpp).
 // Take an opaque GLFWwindow*; resolve focus/state through provided
@@ -67,6 +71,10 @@ void UiContext::create_surface(int pixel_width, int pixel_height) {
 }
 
 int ui_context_init(UiContext* uicon, bool headless) {
+    radiant_register_css_counter_hooks();
+    radiant_register_css_symbol_hook();
+    radiant_register_resource_processor();
+    radiant_register_event_hooks();
     if (!uicon) return EXIT_FAILURE;
     return uicon->init(headless);
 }

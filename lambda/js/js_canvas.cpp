@@ -13,6 +13,7 @@
 #include "js_class.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../runtime/heap_api.h"
 #include "../../lib/font/font.h"
 #include "../../lib/log.h"
 
@@ -20,7 +21,6 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-extern void* heap_alloc(int size, TypeId type_id);
 
 // ============================================================================
 // Lazy FontContext singleton — no UiContext/GLFW required

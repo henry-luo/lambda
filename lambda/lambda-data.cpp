@@ -1,6 +1,10 @@
 #include "ast.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-number-runtime.hpp"
+#include "core/collection_storage.h"
+#include "core/target_identity.h"
+#include "io/input-allocation-context.h"
+#include "runtime/heap_api.h"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 #include "../lib/memtrack.h"
@@ -9,19 +13,9 @@
 #include "js/js_exec_profile_weak.h"
 
 extern __thread EvalContext* context;
-extern void* heap_alloc(int size, TypeId type_id);
+extern __thread Context* input_context;
 
-Item push_k(DateTime val) {
-    // Datetime is deliberately heap-owned: keeping it out of number homes
-    // leaves its object layout free to grow beyond one 64-bit payload word.
-    if (DATETIME_IS_ERROR(val)) return ItemError;
-    DateTime* dtptr = (DateTime*)heap_alloc(sizeof(DateTime), LMD_TYPE_DTIME);
-    if (!dtptr) return ItemError;
-    *dtptr = val;
-    return {.item = k2it(dtptr)};
-}
-
-#ifndef LAMBDA_STATIC
+#ifndef LAMBDA_IO_STATIC_VALUES
 // ui_mode helper: copy GC-heap string into result arena as fat DomText node
 // (defined in lambda-data-runtime.cpp which has access to DOM headers)
 Item ui_copy_string_to_arena(Arena* arena, Item str_item);
@@ -30,46 +24,6 @@ Item ui_copy_string_to_arena(Arena* arena, Item str_item);
 // (defined in lambda-data-runtime.cpp which has access to DOM headers)
 Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next);
 #endif
-
-// data zone allocation helper (defined in lambda-mem.cpp)
-// weak fallback uses malloc — overridden by real GC implementation when linked
-extern "C" {
-    __attribute__((weak))
-    void* heap_data_alloc(size_t size) {
-        return raw_malloc(size);  // RAWALLOC_OK: GC heap allocation — managed by garbage collector, not memtrack
-    }
-
-    __attribute__((weak))
-    void heap_register_gc_root(uint64_t* slot) {
-        (void)slot;
-    }
-
-    __attribute__((weak))
-    void heap_unregister_gc_root(uint64_t* slot) {
-        (void)slot;
-    }
-
-    __attribute__((weak))
-    void heap_register_gc_weak(uint64_t* slot,
-            void (*on_clear)(uint64_t*, void*), void* context) {
-        (void)slot;
-        (void)on_clear;
-        (void)context;
-    }
-
-    __attribute__((weak))
-    void heap_unregister_gc_weak(uint64_t* slot) {
-        (void)slot;
-    }
-
-    __attribute__((weak))
-    void lambda_root_frame_overflow_error(void) {
-        // The standalone input library links this file with malloc-backed,
-        // non-collecting allocation and no execution recovery layer. A null
-        // RootFrame therefore means no GC is possible; the full runtime's
-        // strong fail-closed implementation overrides this fallback.
-    }
-}
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
 Type TYPE_UNDEFINED = {.type_id = LMD_TYPE_UNDEFINED};  // JavaScript undefined
@@ -231,8 +185,6 @@ alignas(ConstItem) static uint64_t null_result_storage = ITEM_NULL;
 
 ConstItem& error_result = *reinterpret_cast<ConstItem*>(&error_result_storage);
 ConstItem& null_result = *reinterpret_cast<ConstItem*>(&null_result_storage);
-
-extern __thread Context* input_context;
 
 void init_typetype() {
     *(Type*)&TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
@@ -531,6 +483,7 @@ const char* fn_to_cstr(Item itm) {
 
 } // extern "C"
 
+#if 0 // moved to lambda/runtime/collection_runtime.cpp
 void expand_list(List *list, Arena* arena = nullptr) {
     JS_WEAK_PROPERTY_SET_BRANCH("expand_list_total");
     // P8 fix: do NOT bump list->capacity until the new buffer has been allocated
@@ -551,8 +504,8 @@ void expand_list(List *list, Arena* arena = nullptr) {
 
     // If no arena explicitly passed, check input_context for arena fallback
     // (input parsing path where GC heap is not initialized)
-    if (!arena && input_context && input_context->arena) {
-        arena = input_context->arena;
+    if (!arena && input_allocation_context && input_allocation_context->arena) {
+        arena = input_allocation_context->arena;
     }
 
     bool use_arena = (arena != nullptr && (old_items == nullptr || arena_owns(arena, old_items)));
@@ -617,45 +570,6 @@ void expand_list(List *list, Arena* arena = nullptr) {
 
     list_relocate_owned_tail(list, old_items, prev_capacity,
         list->items, list->capacity);
-}
-
-void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
-                              Item* new_items, int64_t new_capacity) {
-    if (!list || !old_items || !new_items || list->extra <= 0 ||
-            old_capacity < list->extra || new_capacity < list->extra) return;
-
-    memmove(new_items + (new_capacity - list->extra),
-        old_items + (old_capacity - list->extra),
-        (size_t)list->extra * sizeof(Item));
-
-    int64_t dense_capacity = new_capacity - list->extra;
-    int64_t dense_count = list->length < dense_capacity ? list->length : dense_capacity;
-    for (int64_t i = 0; i < dense_count; i++) {
-        Item item = new_items[i];
-        if (!(((item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1) ||
-                    item._type_id == LMD_TYPE_FLOAT64) ||
-                item._type_id == LMD_TYPE_INT64 || item._type_id == LMD_TYPE_UINT64)) continue;
-        Item* old_pointer = (Item*)item.double_ptr;
-        if (old_pointer < old_items || old_pointer >= old_items + old_capacity) continue;
-        int64_t end_offset = old_items + old_capacity - old_pointer;
-        void* new_pointer = new_items + new_capacity - end_offset;
-        new_items[i] = {.item = is_float_type_id(item._type_id) ? d2it(new_pointer) :
-            item._type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : u2it(new_pointer)};
-    }
-
-    // Growth copies the old buffer before moving its owned tail. Clear its
-    // vacated source; for JS arrays, also stamp every newly exposed dense slot
-    // so a sparse spec length cannot observe stale payloads or zeroed nulls.
-    int64_t new_tail_start = new_capacity - list->extra;
-    int64_t old_tail_start = old_capacity - list->extra;
-    Item vacant = (list->flags & CONTAINER_FLAG_JS_PROPS) != 0 ?
-        Item{.item = ITEM_JS_DELETED_SENTINEL} : ItemNull;
-    int64_t vacant_end = (list->flags & CONTAINER_FLAG_JS_PROPS) != 0 ?
-        new_tail_start : old_capacity;
-    if (vacant_end > new_tail_start) vacant_end = new_tail_start;
-    for (int64_t i = old_tail_start; i < vacant_end; i++) {
-        new_items[i] = vacant;
-    }
 }
 
 bool js_array_has_props(const Array* arr) {
@@ -727,6 +641,7 @@ void js_array_set_props(Array* arr, Map* props) {
         arr->items[i] = {.item = ITEM_JS_DELETED_SENTINEL};
     }
 }
+#endif
 
 Array* array_pooled(Pool *pool) {
     Array* arr = (Array*)pool_calloc(pool, sizeof(Array));
@@ -841,7 +756,7 @@ Item owned_item_slot_read(Item* storage, int64_t item_count,
 
 Item scalar_storage_read(Item item, bool immortal) {
     if (immortal) return item;
-#ifdef LAMBDA_STATIC
+#ifdef LAMBDA_IO_STATIC_VALUES
     // The standalone input library has no execution side stack; all of its
     // container storage is owned by the live input pool, so the reference is
     // already stable for the reader's lifetime.
@@ -863,6 +778,7 @@ Item scalar_storage_read(Item item, bool immortal) {
 #endif
 }
 
+#if 0 // moved to lambda/runtime/collection_runtime.cpp; array_append is lambda-io
 void array_append(Array* arr, Item itm, Pool *pool, Arena* arena) {
     if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr, arena); }
     (void)pool;
@@ -1022,19 +938,23 @@ void list_push(List *list, Item item) {
 
     // 3. need to merge with previous string if any (unless disabled)
     if (type_id == LMD_TYPE_STRING) {
-#ifndef LAMBDA_STATIC
+#ifndef LAMBDA_IO_STATIC_VALUES
         // ui_mode: copy GC-heap string to result arena as fat DomText when adding to element content
-        bool is_ui = input_context && input_context->ui_mode && input_context->arena;
+        bool is_ui = input_allocation_context && input_allocation_context->ui_mode && input_allocation_context->arena;
         if (is_ui && list->is_content) {
-            item = ui_copy_string_to_arena(input_context->arena, item);
+            item = ui_copy_string_to_arena(input_allocation_context->arena, item);
         }
 #else
         bool is_ui = false;
 #endif
 
-        // Only attempt string merging if input_context is available and merging is enabled
-        bool should_merge = input_context != NULL &&
-                           !input_context->disable_string_merging &&
+        // `disable_string_merging` is the semantic guard: ordinary runtime
+        // lists also coalesce adjacent text, while split() scopes that flag to
+        // preserve its individual result strings.
+        bool should_merge = (input_context || input_allocation_context) &&
+                           !(input_allocation_context
+                               ? input_allocation_context->disable_string_merging
+                               : input_context->disable_string_merging) &&
                            list->length > 0 &&
                            list->items != NULL;
 
@@ -1044,7 +964,7 @@ void list_push(List *list, Item item) {
                 String *prev_str = prev_item.get_safe_string();
                 String *new_str = item.get_safe_string();
                 if (prev_str && new_str) {
-#ifndef LAMBDA_STATIC
+#ifndef LAMBDA_IO_STATIC_VALUES
                     if (is_ui) {
                         // ui_mode: merge into a new fat DomText on the arena
                         list->items[list->length - 1] = ui_merge_strings_to_arena(
@@ -1055,18 +975,23 @@ void list_push(List *list, Item item) {
                     // merge the two strings
                     size_t new_len = prev_str->len + new_str->len;
                     String *merged_str;
-                    if (input_context->consts) { // dynamic runtime context
+                    // An active document builder owns this value even if a
+                    // previous runtime left TLS context bound on the thread.
+                    // Parsing must never select a GC home from stale rt state.
+                    if (input_context && input_context->consts) {
                         // The merge allocation may collect; preserve both the
                         // destination owner and the not-yet-stored new string.
                         RootFrame roots((Context*)context, 2);
                         Rooted<List*> rooted_list(roots, list);
                         Rooted<Item> rooted_item(roots, item);
-                        merged_str = (String *)input_context->context_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
+                        merged_str = (String *)context->context_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
                         list = rooted_list.get();
                         item = rooted_item.get();
                         prev_str = list->items[list->length - 1].get_safe_string();
                         new_str = item.get_safe_string();
-                    } else {  // static (input) context
+                    } else if (input_allocation_context) {
+                        merged_str = (String*)pool_calloc(input_allocation_context->pool, sizeof(String) + new_len + 1);
+                    } else {
                         merged_str = (String*)pool_calloc(input_context->pool, sizeof(String) + new_len + 1);
                     }
                     memcpy(merged_str->chars, prev_str->chars, prev_str->len);
@@ -1201,13 +1126,14 @@ void list_push_spread(List *list, Item item) {
     // not spreadable, push as-is
     list_push(list, item);
 }
+#endif
 
 Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset) {
     if (!array || offset < 0 || offset >= array->length) return ItemNull;
     switch (array->get_elem_type()) {
         case ELEM_INT:     return (Item){.item = i2it(array->items[offset])};
         case ELEM_INT64:
-#ifdef LAMBDA_STATIC
+#ifdef LAMBDA_IO_STATIC_VALUES
             return {.item = l2it(&array->items[offset])};
 #else
             return box_int64_value(array->items[offset]);
@@ -1223,7 +1149,7 @@ Item array_num_read_borrowed_item(ArrayNum* array, int64_t offset) {
         case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[offset]))};
         case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[offset])};
         case ELEM_UINT64:
-#ifdef LAMBDA_STATIC
+#ifdef LAMBDA_IO_STATIC_VALUES
             return {.item = u2it(&((uint64_t*)array->data)[offset])};
 #else
             return box_uint64_value(((uint64_t*)array->data)[offset]);

@@ -1,7 +1,7 @@
 
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
-#include "lambda-number-runtime.hpp"
+#include "runtime/lambda-number-runtime.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/str.h"

@@ -4,7 +4,7 @@
 #include "../lambda/lambda.hpp"
 #include "../lambda/lambda-error.h"
 #include "../lambda/transpiler.hpp"
-#include "../lib/gc/gc_heap.h"
+#include "../lambda/runtime/gc/gc_heap.h"
 #include "../lib/uv_loop.h"
 
 extern __thread EvalContext* context;

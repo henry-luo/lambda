@@ -1,11 +1,13 @@
 #include "lambda-data.hpp"
 #include "lambda-decimal.hpp"
-#include "../lib/lambda_typed.hpp"
+#include "core/lambda_typed.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include <math.h>
 #include <inttypes.h>  // for PRId64
+#ifndef LAMBDA_PRINT_VALUE_ONLY
 #include "ast.hpp"
+#endif
 
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
@@ -49,7 +51,9 @@ void format_binary_literal_stringbuf(StringBuf* sb, Binary* bin) {
 }
 
 void print_typeditem(StrBuf *strbuf, TypedItem* citem, int depth, const char* indent);
+void print_item(StrBuf *strbuf, Item item, int depth, const char* indent);
 
+#ifndef LAMBDA_PRINT_VALUE_ONLY
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
     if (indent > 0) log_enter();
@@ -84,6 +88,7 @@ void print_ts_root(const char *source, TSTree* syntax_tree) {
     TSNode root_node = ts_tree_root_node(syntax_tree);
     print_ts_node(source, root_node, 0);
 }
+#endif
 
 // write the native C type for the lambda type
 void write_type(StrBuf* code_buf, Type *type) {
@@ -862,6 +867,7 @@ void log_item(Item item, const char* msg) {
     strbuf_free(strbuf);
 }
 
+#ifndef LAMBDA_PRINT_VALUE_ONLY
 void print_label(int indent, const char *label) {
     log_debug("  %s", label);
 }
@@ -1280,3 +1286,4 @@ void print_ast_root(Script *script) {
     AstNode *node = script->ast_root;
     print_ast_node(script, node, 0);
 }
+#endif

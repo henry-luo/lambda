@@ -25,6 +25,10 @@ static char* log_strdup(const char *s) {
 #include <ctype.h>
 #include <stdbool.h>  // for bool type
 
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+
 /* Cross-platform strcasecmp */
 #ifndef strcasecmp
 #ifdef _WIN32
@@ -71,6 +75,34 @@ static int log_disabled = 0;
 static int timestamps_enabled = 1;
 static int colors_enabled = 0;
 static int env_min_level = 0;
+
+void log_mem_stage(const char *stage) {
+#ifdef __APPLE__
+    static int env_checked = 0;
+    static int enabled = 0;
+    if (!env_checked) {
+        const char* value = getenv("VIEW_MEM_STAGES");
+        enabled = (value && *value && strcmp(value, "0") != 0) ? 1 : 0;
+        env_checked = 1;
+    }
+    if (!enabled) return;
+
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) {
+        return;
+    }
+    // Memory checkpoints are requested by Lambda and Radiant alike, so their
+    // provider belongs to the shared log layer instead of the UI module.
+    log_notice("MEMSTAGE: %-28s footprint=%6lluMB peak=%6lluMB resident=%6lluMB",
+               stage,
+               (unsigned long long)(info.phys_footprint / (1024 * 1024)),
+               (unsigned long long)(info.ledger_phys_footprint_peak / (1024 * 1024)),
+               (unsigned long long)(info.resident_size / (1024 * 1024)));
+#else
+    (void)stage;
+#endif
+}
 
 /* Default format configuration */
 static log_format_t default_format = {

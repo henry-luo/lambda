@@ -1,10 +1,10 @@
 #pragma once
 
-#include "lambda-data.hpp"
+#include "../lambda-data.hpp"
 #include "mark_builder.hpp"
-#include "shape_builder.hpp"
-#include "shape_pool.hpp"
-#include "name_pool.hpp"
+#include "../shape_builder.hpp"
+#include "../shape_pool.hpp"
+#include "../name_pool.hpp"
 #include <stdarg.h>
 
 // Forward declarations

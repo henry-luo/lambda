@@ -778,6 +778,15 @@ extern "C" {
 // Pool-based allocation (for runtime)
 Array* array_pooled(Pool* pool);
 void array_append(Array* arr, Item itm, Pool* pool, Arena* arena = nullptr);
+// Input construction never borrows the active runtime heap. These explicit
+// append entry points keep parser-owned list growth in its Pool/Arena owner.
+void list_push_io(List* list, Item item);
+void list_push_pooled(List* list, Item item, Pool* pool);
+#ifdef LAMBDA_IO_STATIC_VALUES
+// C2MIR's frozen declaration remains runtime-owned.  Static input sources
+// select their explicit Pool/Arena provider at compile time instead.
+#define list_push list_push_io
+#endif
 Map* map_pooled(Pool* pool);
 Element* elmt_pooled(Pool* pool);
 

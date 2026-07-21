@@ -10,6 +10,7 @@
 #include "../binary.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
+#include "../runtime/heap_api.h"
 #include "../lambda-decimal.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
@@ -42,7 +43,6 @@
 #define JS_TA_SET_STATS_PID() getpid()
 #endif
 
-extern void* heap_alloc(int size, TypeId type_id);
 extern "C" int js_check_exception(void);
 extern "C" Item js_get_constructor(Item name_item);
 extern "C" Item js_property_get(Item object, Item key);

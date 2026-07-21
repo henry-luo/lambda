@@ -5,6 +5,7 @@
 #include "css_formatter.hpp"
 #include "css_style_node.hpp"
 #include "css_parser.hpp"
+#include "css_counter_hook.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/hashmap_helpers.h"
@@ -23,13 +24,6 @@
 #include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
 
 void element_dom_map_remove(HashMap* map, Element* elem);
-
-// Forward declarations for counter system (avoid circular dependency)
-typedef struct CounterContext CounterContext;
-int counter_format(CounterContext* ctx, const char* name, uint32_t style,
-                  char* buffer, size_t buffer_size);
-int counters_format(CounterContext* ctx, const char* name, const char* separator,
-                   uint32_t style, char* buffer, size_t buffer_size);
 
 extern "C" __attribute__((weak)) void svg_unregister_image_resolvers_for_tree(Element* root) {
     (void)root;
@@ -1765,7 +1759,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                     // Format counter value
                     char* buffer = (char*)arena_alloc(arena, 64);
                     if (buffer && counter_name) {
-                        counter_format((CounterContext*)counter_context, counter_name,
+                        css_counter_format(counter_context, counter_name,
                                      style_type, buffer, 64);
                         log_debug("[Counter] counter(%s, style=%u) = '%s'", counter_name, style_type, buffer);
                         return buffer;
@@ -1786,7 +1780,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                     // Format counters with separator
                     char* buffer = (char*)arena_alloc(arena, 128);
                     if (buffer && counter_name) {
-                        counters_format((CounterContext*)counter_context, counter_name,
+                        css_counters_format(counter_context, counter_name,
                                       separator ? separator : ".", style_type, buffer, 128);
                         log_debug("[Counter] counters(%s, \"%s\") = %s",
                                 counter_name, separator ? separator : ".", buffer);
@@ -1848,7 +1842,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                         }
 
                         if (counter_name) {
-                            counter_format((CounterContext*)counter_context, counter_name,
+                            css_counter_format(counter_context, counter_name,
                                          style_type, temp_buffer, sizeof(temp_buffer));
                             int temp_len = strlen(temp_buffer);
                             if (result_len + temp_len < (int)sizeof(result_buffer) - 1) {
@@ -1868,7 +1862,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
                         }
 
                         if (counter_name) {
-                            counters_format((CounterContext*)counter_context, counter_name,
+                            css_counters_format(counter_context, counter_name,
                                           separator ? separator : ".", style_type,
                                           temp_buffer, sizeof(temp_buffer));
                             int temp_len = strlen(temp_buffer);

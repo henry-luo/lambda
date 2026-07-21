@@ -3,23 +3,24 @@
 // Integrates with CSS parser, image loader, native font system, and SVG parser
 
 #include "resource_loaders.h"
-#include "network_resource_manager.h"
-#include "../../lib/log.h"
-#include "../../lib/image.h"
-#include "../../lib/file_utils.h"
-#include "../../lib/mempool.h"
-#include "../../lib/str.h"
-#include "../input/css/dom_element.hpp"
-#include "../input/css/css_parser.hpp"
-#include "../input/css/css_engine.hpp"
-#include "../input/css/css_font_face.hpp"
-#include "../../radiant/view.hpp"
-#include "../../radiant/layout.hpp"
-#include "../../radiant/view.hpp"
-#include "../../lib/font/font.h"
+#include "../lambda/network/network_resource_manager.h"
+#include "../lambda/network/resource_processor_hook.h"
+#include "../lib/log.h"
+#include "../lib/image.h"
+#include "../lib/file_utils.h"
+#include "../lib/mempool.h"
+#include "../lib/str.h"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/css_parser.hpp"
+#include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/css_font_face.hpp"
+#include "view.hpp"
+#include "layout.hpp"
+#include "event.hpp"
+#include "../lib/font/font.h"
 #include <string.h>
-#include "../../lib/mem.h"
-#include "../../lib/url.h"
+#include "../lib/mem.h"
+#include "../lib/url.h"
 #include <strings.h>  // for strcasecmp
 
 // Helper: Read file contents into a string
@@ -382,6 +383,54 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     log_debug("network: image resource processed successfully: %s", res->url);
 }
 
+static void detach_image_surface_from_tree(DomNode* node, ImageSurface* surface) {
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = node->as_element();
+            if (elem->embed) {
+                if (elem->embed->img == surface) elem->embed->img = nullptr;
+                if (elem->embed->poster == surface) elem->embed->poster = nullptr;
+            }
+            detach_image_surface_from_tree(elem->first_child, surface);
+        }
+        node = node->next_sibling;
+    }
+}
+
+static void release_network_image(NetworkResource* res) {
+    if (!res) return;
+    ImageSurface* surface = res->image_surface;
+    if (surface && res->manager && res->manager->document) {
+        DomDocument* doc = res->manager->document;
+        detach_image_surface_from_tree((DomNode*)doc->root, surface);
+        if (doc->view_tree && doc->view_tree->root && doc->view_tree->root != (View*)doc->root) {
+            detach_image_surface_from_tree((DomNode*)doc->view_tree->root, surface);
+        }
+    }
+    if (surface && !res->image_surface_borrowed) image_surface_destroy(surface);
+    if (!surface && res->owner_element && res->owner_element->embed) {
+        EmbedProp* embed = res->owner_element->embed;
+        if (embed->img && !embed->img->url) {
+            image_surface_destroy(embed->img);
+            embed->img = nullptr;
+        }
+    }
+}
+
+static void request_network_layout_update(NetworkResourceManager* mgr,
+                                          bool needs_reflow, bool needs_repaint) {
+    if (!mgr || !mgr->document || !mgr->document->state) return;
+    DocState* state = (DocState*)mgr->document->state;
+    if (needs_reflow) {
+        state->needs_reflow = true;
+        state->is_dirty = true;
+        log_debug("network: triggered document reflow from resource completion");
+    } else if (needs_repaint) {
+        state->is_dirty = true;
+        log_debug("network: triggered document repaint from resource completion");
+    }
+}
+
 // Font resource handler
 void process_font_resource(NetworkResource* res, const struct CssFontFaceDescriptor* font_face) {
     if (!res || (res->state != STATE_COMPLETED && res->state != STATE_CACHED) || !font_face) return;
@@ -591,4 +640,13 @@ void handle_resource_failure(NetworkResource* res, struct DomDocument* doc) {
             // Script won't execute
             break;
     }
+}
+
+void radiant_register_resource_processor() {
+    static const NetworkResourceProcessor processor = {
+        process_css_resource, process_image_resource, process_font_resource,
+        process_svg_resource, process_html_resource, process_script_resource,
+        handle_resource_failure, release_network_image, request_network_layout_update
+    };
+    network_resource_processor_register(&processor);
 }

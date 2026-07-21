@@ -22,7 +22,7 @@
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_xhr.h"
 #include "../lambda/transpiler.hpp"
-#include "../lib/gc/gc_heap.h"
+#include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/mark_reader.hpp"
@@ -43,7 +43,6 @@
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/network/network_resource_manager.h"
 
-extern "C" void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 extern "C" bool js_dom_is_host_driven_loop(void);  // defined in lambda/js/js_dom.cpp
 
 #include <cstring>

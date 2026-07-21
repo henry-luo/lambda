@@ -3,13 +3,11 @@
 // js_mir_internal.hpp - shared declarations for the split JS MIR transpiler.
 
 #include "js_mir_context.hpp"
+#include "../runtime/heap_api.h"
 
-extern "C" void log_mem_stage(const char* stage);
 extern "C" Context* _lambda_rt;
 extern "C" void *import_resolver(const char *name);
 extern __thread EvalContext* context;
-extern void* heap_alloc(int size, TypeId type_id);
-extern void heap_init();
 extern "C" void js_reset_module_vars();
 extern "C" Item* js_alloc_module_vars(void);
 extern "C" Item* js_get_active_module_vars(void);

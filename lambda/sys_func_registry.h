@@ -12,11 +12,11 @@ extern "C" {
 #endif
 
 // ============================================================================
-// LAMBDA_STATIC guard: when defined (dylib/input builds), runtime function
+// IO static-values guard: when defined (dylib/input builds), runtime function
 // pointers are unavailable. Use FPTR()/NPTR() macros to resolve to a dummy
 // stub, so sys_func_defs[] compiles without linking the full runtime.
 // ============================================================================
-#ifdef LAMBDA_STATIC
+#ifdef LAMBDA_IO_STATIC_VALUES
     static void* __attribute__((unused)) _sys_func_dummy(void) { return (void*)0; }
     #define FPTR(x)  (fn_ptr) _sys_func_dummy  // stub for func_ptr
     #define NPTR(x)  (fn_ptr) _sys_func_dummy  // stub for native_func_ptr

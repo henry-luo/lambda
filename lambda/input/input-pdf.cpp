@@ -4,6 +4,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
+#include "../io/pdf_content_stream.h"
 #include "lib/log.h"
 #include "lib/str.h"
 #include <stdlib.h>
@@ -21,7 +22,6 @@ static Item parse_pdf_trailer(InputContext& ctx, const char **pdf);
 static Item analyze_pdf_content_stream(Input *input, const char *stream_data, int length);
 static bool is_valid_pdf_header(const char *pdf_content);
 static void advance_safely(const char **pdf, int max_advance);
-extern __thread EvalContext* context;
 
 // PDF object types
 typedef enum {
@@ -321,13 +321,13 @@ static Item pdf_cs_op_record(MarkBuilder& builder, const char* op, size_t op_len
     return rec.final();
 }
 
-extern "C" Item pdf_parse_content_stream(Item bytes_item) {
+extern "C" Item pdf_parse_content_stream_io(Pool* pool, Item bytes_item) {
     String* text = bytes_item.get_safe_string();
     Binary* binary = bytes_item.get_safe_binary();
     if (!text && !binary) return ItemNull;
-    if (!context || !context->pool) return ItemNull;
+    if (!pool) return ItemNull;
 
-    Input* input = Input::create(context->pool, nullptr, nullptr);
+    Input* input = Input::create(pool, nullptr, nullptr);
     if (!input) return ItemNull;
     MarkBuilder builder(input);
     ArrayBuilder ops = builder.array();
@@ -365,10 +365,6 @@ extern "C" Item pdf_parse_content_stream(Item bytes_item) {
         p = r.end > p ? r.end : p + 1;
     }
     return ops.final();
-}
-
-extern "C" Item fn_pdf_parse_content_stream(Item bytes_item) {
-    return pdf_parse_content_stream(bytes_item);
 }
 
 typedef struct {

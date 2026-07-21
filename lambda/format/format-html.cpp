@@ -3,10 +3,10 @@
 #include "format-utils.hpp"
 #include "html-defs.h"
 #include "../mark_reader.hpp"
+#include "../input/css/css_symbol_hook.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
 #include "../../lib/mem_factory.h"
-#include "../../radiant/view.hpp"
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
@@ -359,10 +359,10 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
             (void)item;
             if (!sym) return;
             // resolve emoji before HTML entities to preserve existing shortcode priority.
-            SymbolResolution res = resolve_symbol(sym->chars, sym->len);
-            if (res.type == SYMBOL_EMOJI && res.utf8) {
+            CssSymbolResolution res = css_symbol_resolve(sym->chars, sym->len);
+            if (res.kind == CSS_SYMBOL_EMOJI && res.utf8) {
                 stringbuf_append_str(ctx_.output(), res.utf8);
-            } else if (res.type == SYMBOL_HTML_ENTITY) {
+            } else if (res.kind == CSS_SYMBOL_HTML_ENTITY) {
                 stringbuf_append_format(ctx_.output(), "&%.*s;", (int)sym->len, sym->chars);
             } else {
                 stringbuf_append_format(ctx_.output(), ":%.*s:", (int)sym->len, sym->chars);

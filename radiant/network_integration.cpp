@@ -1,15 +1,15 @@
 #include "network_integration.h"
-#include "network_resource_manager.h"
-#include "network_thread_pool.h"
-#include "enhanced_file_cache.h"
-#include "font_resource_faces.h"
-#include "resource_loaders.h"
-#include "../input/css/dom_element.hpp"
-#include "../../lib/log.h"
-#include "../../lib/url.h"
-#include "../../lib/mem.h"
-#include "../../lib/time_util.h"
-#include "../input/css/css_font_face.hpp"
+#include "../lambda/network/network_resource_manager.h"
+#include "../lambda/network/network_thread_pool.h"
+#include "../lambda/network/enhanced_file_cache.h"
+#include "../lambda/network/font_resource_faces.h"
+#include "../lambda/network/resource_processor_hook.h"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lib/log.h"
+#include "../lib/url.h"
+#include "../lib/mem.h"
+#include "../lib/time_util.h"
+#include "../lambda/input/css/css_font_face.hpp"
 #include <strings.h>
 #include <time.h>
 
@@ -49,7 +49,10 @@ static bool is_http_resource_url(const char* url) {
 
 static void process_registered_font_resource(const CssFontFaceDescriptor* descriptor,
                                              void* user_data) {
-    process_font_resource((NetworkResource*)user_data, descriptor);
+    const NetworkResourceProcessor* processor = network_resource_processor_get();
+    if (processor && processor->process_font) {
+        processor->process_font((NetworkResource*)user_data, descriptor);
+    }
 }
 
 static void font_resource_complete_callback(NetworkResource* res, void* user_data) {
@@ -66,7 +69,8 @@ static void attach_font_resource_callback(NetworkResource* res,
 
     if (res->processed &&
         (res->state == STATE_COMPLETED || res->state == STATE_CACHED)) {
-        process_font_resource(res, face);
+        const NetworkResourceProcessor* processor = network_resource_processor_get();
+        if (processor && processor->process_font) processor->process_font(res, face);
         return;
     }
 
