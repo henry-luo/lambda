@@ -320,8 +320,8 @@ fn _pick_info(s14_info, fallback_info) {
 fn _has_flag(flags, mask) {
     // Lambda has no bitwise ops in the path used here; integer
     // arithmetic via mod/div is sufficient for single-bit checks.
-    let q = flags / mask
-    (q - ((q / 2) * 2)) == 1
+    let q = flags div mask
+    (q - ((q div 2) * 2)) == 1
 }
 
 fn _ends_with(s: string, suffix: string) {
@@ -450,7 +450,9 @@ pub fn resolve_font(pdf, page, name: string) {
 fn _hex_to_codes(hex: string) {
     let clean = util.clean_hex(hex)
     let n = len(clean)
-    let pairs = (n + 1) / 2
+    // Pair count is an integer ceiling; true division now preserves the
+    // fractional decimal result and must not be used as an implicit floor.
+    let pairs = (n + 1) div 2
     if (pairs == 0) { [] }
     else {
         for (k in 0 to (pairs - 1)) util.hex_byte_at(clean, k * 2)

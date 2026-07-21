@@ -160,7 +160,6 @@ static const JubeRuntimeImport python_runtime_imports[] = {
     {"py_string_method", FPTR(py_string_method)},
     {"py_list_method", FPTR(py_list_method)},
     {"py_dict_method", FPTR(py_dict_method)},
-    {"py_runtime_set_input", FPTR(py_runtime_set_input)},
     {"py_stop_iteration", FPTR(py_stop_iteration)},
     {"py_is_stop_iteration", FPTR(py_is_stop_iteration)},
     {"py_gen_create", FPTR(py_gen_create)},

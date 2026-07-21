@@ -31,9 +31,9 @@ i8
 u8
 "=== mixed compact/default ==="
 255
-u32
+int
 15
-u8
+int
 4294967295
 int64
 -1

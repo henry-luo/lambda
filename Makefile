@@ -258,7 +258,13 @@ $(TREE_SITTER_BASH_LIB):
 # Build tree-sitter-python library
 $(TREE_SITTER_PYTHON_LIB):
 	@echo "Building tree-sitter-python library..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python libtree-sitter-python.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	@# Python's current generated parser/header use ABI 15; an older global CLI
+	@# emits the removed `.version` field and makes a clean Jube build fail.
+	@test -x "$(CURDIR)/node_modules/.bin/tree-sitter" || \
+		(echo "Missing project tree-sitter CLI; run npm install" && exit 1)
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
+		libtree-sitter-python.a TS="$(CURDIR)/node_modules/.bin/tree-sitter" \
+		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # Generate TypeScript parser from grammar.js when it changes
 $(TS_PARSER_C): $(TS_GRAMMAR_JS)
@@ -518,7 +524,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    tree-sitter-libs tree-sitter-core-libs \
 	    generate-premake clean-premake build-test build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
-	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick test-c2mir type-chart build-mir \
+	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir \
 	    ensure-test262-gtest test262-baseline test262-full \
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
@@ -591,7 +597,6 @@ help:
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-validator- Run validator tests only"
 	@echo "  test-mir      - Run MIR JIT tests only"
-	@echo "  test-c2mir    - Run Lambda baseline tests with legacy C2MIR JIT path"
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
@@ -1065,6 +1070,16 @@ test-gc-rooting-core: build
 	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe run --no-log test/lambda/proc/proc_var.ls > temp/gc_rooting_lambda.txt
 	@diff -u test/lambda/proc/proc_var.txt temp/gc_rooting_lambda.txt
+	@echo "Running number-model exact-conversion forced-GC gates..."
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe --no-log test/lambda/number_model_realign.ls > temp/gc_rooting_number_model_jit.txt
+	@diff -u test/lambda/number_model_realign.txt temp/gc_rooting_number_model_jit.txt
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe --mir-interp --no-log test/lambda/number_model_realign.ls > temp/gc_rooting_number_model_interp.txt
+	@diff -u test/lambda/number_model_realign.txt temp/gc_rooting_number_model_interp.txt
+	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+		./lambda.exe run --no-log test/lambda/proc/proc_number_model_realign.ls > temp/gc_rooting_number_model_proc.txt
+	@diff -u -b -B test/lambda/proc/proc_number_model_realign.txt temp/gc_rooting_number_model_proc.txt
 	@python3 utils/check_gc_effects.py
 	@python3 utils/check_gc_root_hazards.py
 	@echo "Core precise-root forced-GC gates passed."
@@ -1091,12 +1106,6 @@ test-redex-baseline: build
 test-bash-baseline: build-jube-test
 	@echo "Running Bash transpiler baseline tests (requires lambda-jube)..."
 	@./test/test_bash_run_gtest.exe
-
-test-c2mir: build-test
-	@echo "Clearing HTTP cache for clean test runs..."
-	@rm -rf temp/cache
-	@echo "Running LAMBDA baseline tests with C2MIR (legacy JIT path)..."
-	@LAMBDA_USE_C2MIR=1 LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --parallel
 
 # Build only the js262 gtest runner if it is missing; full build-test is too broad here.
 ensure-test262-gtest:

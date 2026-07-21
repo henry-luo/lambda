@@ -52,6 +52,19 @@ make verify-jube-package   # identical-host hash plus hosted Python smoke test
 Only the full bundle carries the `lang-python` native library and resources;
 the standard bundle carries its small manifest-only descriptor.
 
+## JIT compilation
+
+Supported builds use only the MIR Direct path:
+
+```text
+Lambda AST -> transpile-mir.cpp -> MIR API -> native code
+```
+
+The retired C2MIR implementation in `transpile.cpp` and
+`transpile-call.cpp` remains as legacy reference source. It is excluded from
+the host and CLI build configurations and from generated test projects;
+supported binaries do not expose `--c2mir`.
+
 ## Boundary and ownership
 
 The host owns Jube discovery, lifecycle, capability/build negotiation,

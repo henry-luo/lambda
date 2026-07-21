@@ -119,7 +119,6 @@ When `grammar.js` is modified, `parser.c` and `ts-enum.h` are regenerated before
 | `test-input`     | Run input processing tests (MIME detection & math). |
 | `test-validator` | Run validator tests only.                           |
 | `test-mir`       | Run MIR JIT tests only.                             |
-| `test-c2mir`     | Run Lambda baseline tests with legacy C2MIR JIT path (`--c2mir` flag). |
 | `test-std`       | Run Lambda Standard Tests (custom test runner).     |
 
 ### Math Tests

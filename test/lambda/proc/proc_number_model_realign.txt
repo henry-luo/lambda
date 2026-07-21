@@ -1,0 +1,17 @@
+i8:-128
+i16:2
+int64:2
+u64:2
+int:256
+int:256
+integer:9223372036854775808
+integer:9223372036854775809
+integer:18446744073709551616
+decimal:1.5
+decimal:1.5
+float:3.5
+decimal:3.5
+integer:3
+int:2
+int64:2
+integer:18446744073709551616

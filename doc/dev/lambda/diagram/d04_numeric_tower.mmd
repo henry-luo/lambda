@@ -1,17 +1,20 @@
 flowchart TD
-  subgraph tower["Numeric promotion rank — widen toward higher"]
-    INT["INT (int56, packed inline)"]
-    INT64["INT64 (tagged ptr, side stack or owned tail)"]
-    FLOAT["FLOAT (tagged ptr double, side stack or owned tail)"]
-    DECIMAL["DECIMAL (heap mpd_t*, GC)"]
-    INT --> INT64 --> FLOAT --> DECIMAL
-  end
-  NUM_SIZED["NUM_SIZED i8..f32 / UINT64"]
-  NUM_SIZED -->|normalize_sized| INT64
-  NUM_SIZED -->|float subtypes| FLOAT
-  INT -->|overflow add/sub/mul| ERR["ItemError (no wrap)"]
-  INT64 -->|__builtin_*_overflow| ERR
-  DIV["true '/' fn_div"] -->|always| FLOAT
-  IDIV["'//' fn_idiv"] -->|stays| INT64
-  POW["fn_pow"] -->|always pow double| FLOAT
-  ANY["either operand DECIMAL"] -->|delegate decimal_*| DECIMAL
+  INPUT["operand kinds + operation"] --> CLASSIFY["lambda_numeric_classify"]
+  CLASSIFY --> SIZED["sized integer x sized integer"]
+  SIZED -->|"+ - * div % bitwise shift"| LANE["selected sized lane<br/>Go-style wrap"]
+  SIZED -->|"true /"| ENTRY
+  CLASSIFY --> COMPACT["i8..u32 mixed with non-sized"]
+  COMPACT -->|"enter by type"| INT["int domain"]
+  CLASSIFY --> WIDE["i64/u64 mixed with non-sized"]
+  WIDE -->|"enter exactly, independent of magnitude"| INTEGER["integer domain<br/>DECIMAL_BIGINT"]
+  CLASSIFY --> SFLOAT["f16/f32 mixed with non-sized"]
+  SFLOAT --> FLOAT["float domain"]
+  INT --> JOIN["semantic join"]
+  INTEGER --> JOIN
+  FLOAT --> JOIN
+  DECIMAL["decimal operand"] --> JOIN
+  ENTRY["map sized operand to int or integer"] --> JOIN
+  JOIN --> IRESULT["int + - *<br/>safe-band int, overflow to float"]
+  JOIN --> FRESULT["float result<br/>int/int true / also enters here"]
+  JOIN --> BIGRESULT["integer result<br/>exact arbitrary precision"]
+  JOIN --> DRESULT["decimal result<br/>integer true / enters here"]

@@ -4413,19 +4413,6 @@
                         "icon": "🐚"
                     },
                     {
-                        "source": "test/test_c2mir_gtest.cpp",
-                        "name": "C2MIR JIT Execution Tests",
-                        "dependencies": [],
-                        "binary": "test_c2mir_gtest.exe",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "requires_lambda_exe": true,
-                        "requires_jube_exe": true,
-                        "icon": "⚡"
-                    },
-                    {
                         "source": "test/test_js_test262_gtest.cpp",
                         "name": "test262 Compliance Tests",
                         "category": "extended",

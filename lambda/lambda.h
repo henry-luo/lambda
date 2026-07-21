@@ -1634,6 +1634,7 @@ extern "C" {
     double it2d(Item item);
     bool it2b(Item item);
     int64_t it2i(Item item);
+    DateTime* it2k(Item item);
     String* it2s(Item item);
     Binary* it2x(Item item);
     const char* fn_to_cstr(Item item);  // convert Item to C string (for path segment names)
@@ -1653,6 +1654,7 @@ extern "C" {
 
     // generic field access function
     Item fn_index(Item item, Item index);
+    int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
     // length function
     int64_t fn_len(Item item);

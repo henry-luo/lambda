@@ -1,9 +1,8 @@
 # Sized Numeric Types for Lambda — Design Record
 
-**Status:** implemented representation and sized-lane support; the 2026-07-20
-type-directed mixed-arithmetic realignment is normative but implementation is
-pending in `Lambda_Impl_Numbers.md`. `Lambda_Semantics_Number_Model.md` and
-`doc/Lambda_Formal_Semantics.md` are the semantic authorities.
+**Status:** implemented, including the 2026-07-20 type-directed mixed-arithmetic
+realignment recorded in `Lambda_Impl_Numbers.md`. `Lambda_Semantics_Number_Model.md`
+and `doc/Lambda_Formal_Semantics.md` are the semantic authorities.
 
 ## Summary
 
@@ -413,23 +412,14 @@ enum EnumTypeId {
 
 **Important:** `LMD_TYPE_COUNT` is used for array sizing. Adding two new types before it shifts its value, which is safe as long as all `TypeId`-indexed arrays are sized by `LMD_TYPE_COUNT`.
 
-### 9. Future Phase: Typed Arrays
+### 9. Typed Arrays — Implemented
 
-In a subsequent phase, add specialized typed arrays for each sized numeric type:
-
-```c
-LMD_TYPE_ARRAY_INT8,
-LMD_TYPE_ARRAY_INT16,
-LMD_TYPE_ARRAY_INT32,
-LMD_TYPE_ARRAY_UINT8,
-LMD_TYPE_ARRAY_UINT16,
-LMD_TYPE_ARRAY_UINT32,
-LMD_TYPE_ARRAY_UINT64,
-LMD_TYPE_ARRAY_FLOAT16,
-LMD_TYPE_ARRAY_FLOAT32,
-```
-
-These would store values in native-width packed buffers (e.g., `uint8_t*` for `ARRAY_UINT8`), enabling:
+Sized numeric arrays use the unified `LMD_TYPE_ARRAY_NUM` container. Its
+`EnumArrayNumElemType` lane selects `ELEM_INT8` through `ELEM_INT64`,
+`ELEM_UINT8` through `ELEM_UINT64`, or `ELEM_FLOAT16`/`ELEM_FLOAT32`; the same
+container also owns the standard `ELEM_INT` and `ELEM_FLOAT64` lanes. Values
+are stored in native-width packed buffers (for example, `uint8_t*` for an
+`ELEM_UINT8` array), enabling:
 - Compact memory representation (8x savings for `u8[]` vs `Array`)
 - SIMD-friendly memory layout
 - Direct interop with binary file formats and C libraries
@@ -592,10 +582,10 @@ Lambda keeps suffixes **lowercase only** (matching Rust, Nim, Crystal) to avoid 
 
 ## Implementation Phases
 
-Phases 1–6 below are the retained implementation history for introducing the
-types. The remaining arithmetic realignment is tracked only in
-`Lambda_Impl_Numbers.md`; in particular, the live evaluator's current
-`normalize_sized()` shortcut is not the target promotion rule above.
+Phases 1–6 below are retained implementation history. The later arithmetic
+realignment is complete in `Lambda_Impl_Numbers.md`: the live evaluator,
+AST/MIR paths, vectors, and reductions consume the shared type-directed
+classifier, and the former value-directed normalization shortcut is gone.
 
 ### Phase 1: Core Infrastructure
 - Add `LMD_TYPE_NUM_SIZED` and `LMD_TYPE_UINT64` to `EnumTypeId`
@@ -630,8 +620,8 @@ types. The remaining arithmetic realignment is tracked only in
 - Update `fn_type()` to return specific sized type names
 - Add to type hierarchy (subtype relationships for widening)
 
-### Phase 6 (Future): Typed Arrays
-- Add `LMD_TYPE_ARRAY_*` variants for each sized type
+### Phase 6: Typed Arrays — DONE
+- Use unified `LMD_TYPE_ARRAY_NUM` storage with an `EnumArrayNumElemType` lane
 - Implement packed native-width array storage
-- Array construction from sized literals
-- SIMD optimization opportunities
+- Construct and convert typed arrays from sized values
+- Preserve lane-aware arithmetic, reductions, and destination conversion

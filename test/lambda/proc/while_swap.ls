@@ -86,7 +86,7 @@ pn test_collatz() {
     var steps: int = 0
     while (val > 1) {
         if (val % 2 == 0) {
-            val = val / 2
+            val = val div 2
         } else {
             val = val * 3 + 1
         }

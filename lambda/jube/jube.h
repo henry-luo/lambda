@@ -20,7 +20,7 @@ extern "C" {
 // Bump this exact-build compiler contract whenever an opaque hosted-compiler
 // service table changes; struct-size checks alone cannot identify stale module
 // binaries built against a prior same-day table shape.
-#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260720-h7d8"
+#define JUBE_HOST_BUILD_ID "lambda-hosted-lang-20260721-h7e9"
 
 typedef struct JubeHostAPI JubeHostAPI;
 typedef struct JubeTypeDef JubeTypeDef;
@@ -29,6 +29,9 @@ typedef struct JubeNamespaceDef JubeNamespaceDef;
 typedef struct JubeModuleDef JubeModuleDef;
 typedef struct JubeHostObjectOps JubeHostObjectOps;
 typedef struct JubeHostGcAPI JubeHostGcAPI;
+typedef struct JubeRootFrame JubeRootFrame;
+typedef struct JubeHostRootAPI JubeHostRootAPI;
+typedef struct JubeHostDataAPI JubeHostDataAPI;
 typedef struct JubeHostValueAPI JubeHostValueAPI;
 typedef struct JubeHostScriptAPI JubeHostScriptAPI;
 typedef struct JubeHostDomAPI JubeHostDomAPI;
@@ -251,6 +254,13 @@ typedef struct JubeTypeBinding {
 
 typedef void (*JubeGcWeakClearFn)(uint64_t* slot, void* context);
 
+// Guest code may reserve this object on its native stack, but its storage is
+// private to the host.  That prevents hosted languages from depending on
+// LambdaRootFrame's runtime pointer and side-stack watermark layout.
+struct JubeRootFrame {
+    uintptr_t storage[8];
+};
+
 struct JubeHostGcAPI {
     void (*register_root)(uint64_t* slot);
     void (*unregister_root)(uint64_t* slot);
@@ -261,6 +271,49 @@ struct JubeHostGcAPI {
     // additive tail so existing rooting-capable modules keep their ABI.
     void (*register_weak)(uint64_t* slot, JubeGcWeakClearFn on_clear, void* context);
     void (*unregister_weak)(uint64_t* slot);
+};
+
+// This independently versioned table replaces the legacy JubeHostGcAPI root
+// signatures for hosted languages.  It is an additive hosted-language tail so
+// existing generic modules retain their unchanged GC table ABI.
+struct JubeHostRootAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    bool (*root_frame_begin)(JubeRootFrame* frame, size_t slot_count);
+    uint64_t* (*root_frame_take_slot)(JubeRootFrame* frame);
+    void (*root_frame_end)(JubeRootFrame* frame);
+    // Persistent slots belong to a guest runtime, not to a stack frame.  The
+    // session token prevents a module from registering roots in another run.
+    int (*persistent_root_register)(void* session, uint64_t* slot);
+};
+
+// Language-neutral projection of Lambda Item/container mechanics.  The
+// session is an opaque host token valid only during an active guest execution
+// on this thread.  JavaScript property/prototype/coercion semantics are
+// intentionally absent. Returned Items are borrowed and must be rooted by a
+// caller before an operation that can allocate or re-enter the host.
+struct JubeHostDataAPI {
+    uint32_t api_version;
+    uint32_t struct_size;
+    Item (*name_from_utf8)(void* session, const char* text);
+    int (*map_set)(void* session, Item map, Item key, Item value);
+    Item (*float_from_f64)(void* session, double value);
+    Item (*format_json)(void* session, Item value);
+    // Closure environments are neutral traced Item storage.  The host retains
+    // allocation layout, bounds validation, and write barriers; Python owns
+    // only closure semantics and may not inspect Context/GC internals.
+    void* (*closure_env_alloc)(void* session, size_t item_count);
+    int (*closure_env_store)(void* session, void* environment, int slot, Item value);
+    int (*closure_env_load)(void* session, void* environment, int slot, Item* out_value);
+    int (*item_slots_store)(void* session, Item* storage, int64_t item_count,
+                            int64_t slot, Item value);
+    // Moves a scalar payload out of the current activation's number stack so
+    // an Item retained by guest TLS remains valid after that frame returns.
+    Item (*item_heap_rehome)(void* session, Item value);
+    // Standard host allocations retain their existing object layouts and GC
+    // registration; a hosted language receives only the resulting Item.
+    Item (*map_new)(void* session);
+    Item (*function_new)(void* session, void* function_ptr, int param_count);
 };
 
 struct JubeHostValueAPI {
@@ -611,6 +664,32 @@ struct JubeGuestExecutionAPI {
     // Completes a guest activation, restoring the saved thread-local state and
     // transferring any standalone result heap to its host owner.
     void (*execution_finish_guest)(void* execution_context);
+    // Returns an opaque address whose current value is the active frame runtime.
+    // It is valid only for the active execution and is consumed by the reviewed
+    // shared frame emitter; the guest never names or accesses host storage.
+    void* (*execution_frame_runtime_slot)(void* execution_context);
+    // Creates a function whose result and parameters use Lambda's boxed Item
+    // ABI. Parameter names are borrowed for this call only; the returned item
+    // and function handles remain opaque and belong to the MIR context.
+    // Keep this tail-appended: size-gated older guests retain every preceding
+    // execution-service offset unchanged.
+    int (*mir_item_function_create)(void* mir_context, const char* function_name,
+                                    uint32_t parameter_count,
+                                    const char* const* parameter_names,
+                                    void** out_function_item, void** out_function);
+    // Declares a forward target for an in-context direct call. The opaque item
+    // is valid only until the owning MIR context is destroyed.
+    int (*mir_function_forward_create)(void* mir_context, const char* function_name,
+                                       void** out_function_item);
+    // Creates the boxed-Item signature used by an in-context direct call.
+    // The returned prototype is opaque and owned by the MIR context.
+    int (*mir_item_function_proto_create)(void* mir_context, const char* prototype_name,
+                                          uint32_t parameter_count,
+                                          void** out_prototype_item);
+    // Resolves a register name within an opaque, context-bound function.
+    int (*mir_function_register_lookup)(void* mir_context, void* function,
+                                        const char* register_name,
+                                        uint32_t* out_register);
 };
 
 // Module graph operations retain host path/state ownership. The execution
@@ -663,6 +742,7 @@ struct JubeHostLangAPI {
     const JubeSessionMemoryAPI* session_memory;
     const JubeGuestExecutionAPI* execution;
     const JubeModuleGraphAPI* module_graph;
+    const JubeHostRootAPI* roots;
 };
 
 struct JubeHostAPI {
@@ -676,6 +756,8 @@ struct JubeHostAPI {
     const JubeHostScriptAPI* script;
     const JubeHostDomAPI* dom;
     const JubeRuntimeCatalogAPI* runtime_catalog;
+    // Additive tail: old generic Jube modules must size-gate this service.
+    const JubeHostDataAPI* data;
 };
 
 // A hosted language owns parsing and language semantics while the host owns
@@ -746,14 +828,28 @@ struct JubeLanguageDef {
 #define JUBE_DIAGNOSTIC_API_V1_SIZE sizeof(JubeDiagnosticAPI)
 #define JUBE_OUTPUT_API_V1_SIZE sizeof(JubeOutputAPI)
 #define JUBE_SESSION_MEMORY_API_V1_SIZE sizeof(JubeSessionMemoryAPI)
-#define JUBE_GUEST_EXECUTION_API_V1_SIZE sizeof(JubeGuestExecutionAPI)
+#define JUBE_GUEST_EXECUTION_API_V1_SIZE offsetof(JubeGuestExecutionAPI, execution_frame_runtime_slot)
+#define JUBE_GUEST_EXECUTION_API_H7C_RUNTIME_SLOT_SIZE offsetof(JubeGuestExecutionAPI, mir_item_function_create)
+#define JUBE_GUEST_EXECUTION_API_H7C_FUNCTION_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_forward_create)
+#define JUBE_GUEST_EXECUTION_API_H7C_FORWARD_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_item_function_proto_create)
+#define JUBE_GUEST_EXECUTION_API_H7C_PROTO_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_register_lookup)
+#define JUBE_GUEST_EXECUTION_API_H7C_REGISTER_LOOKUP_SIZE sizeof(JubeGuestExecutionAPI)
 #define JUBE_MODULE_GRAPH_API_V1_SIZE sizeof(JubeModuleGraphAPI)
 #define JUBE_HOST_LANG_API_V1_SIZE offsetof(JubeHostLangAPI, source)
 #define JUBE_HOST_LANG_API_H7A_SIZE offsetof(JubeHostLangAPI, execution)
 #define JUBE_HOST_LANG_API_H6_EXECUTION_SIZE offsetof(JubeHostLangAPI, module_graph)
 #define JUBE_HOST_LANG_API_H6_MODULE_GRAPH_SIZE sizeof(JubeHostLangAPI)
 #define JUBE_RUNTIME_CATALOG_API_V1_SIZE sizeof(JubeRuntimeCatalogAPI)
-#define JUBE_HOST_API_RUNTIME_CATALOG_SIZE sizeof(JubeHostAPI)
+#define JUBE_HOST_ROOT_API_V1_SIZE offsetof(JubeHostRootAPI, persistent_root_register)
+#define JUBE_HOST_ROOT_API_H5_PERSISTENT_SIZE sizeof(JubeHostRootAPI)
+#define JUBE_HOST_LANG_API_H7E2_ROOTS_SIZE sizeof(JubeHostLangAPI)
+#define JUBE_HOST_API_RUNTIME_CATALOG_SIZE offsetof(JubeHostAPI, data)
+#define JUBE_HOST_DATA_API_V1_SIZE offsetof(JubeHostDataAPI, closure_env_alloc)
+#define JUBE_HOST_DATA_API_H5_CLOSURE_ENV_SIZE offsetof(JubeHostDataAPI, item_slots_store)
+#define JUBE_HOST_DATA_API_H5_STORAGE_SIZE offsetof(JubeHostDataAPI, item_heap_rehome)
+#define JUBE_HOST_DATA_API_H5_REHOME_SIZE offsetof(JubeHostDataAPI, map_new)
+#define JUBE_HOST_DATA_API_H5_ALLOCATORS_SIZE sizeof(JubeHostDataAPI)
+#define JUBE_HOST_API_DATA_SIZE sizeof(JubeHostAPI)
 
 struct JubeModuleDef {
     uint32_t abi_version;

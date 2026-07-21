@@ -1,5 +1,6 @@
 #include "ast.hpp"
 #include "lambda-decimal.hpp"
+#include "lambda-number-runtime.hpp"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 #include "../lib/memtrack.h"
@@ -79,6 +80,7 @@ Type TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_FLOAT64 = {.type_id = LMD_TYPE_FLOAT};
 Type TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
 Type TYPE_INTEGER = {.type_id = LMD_TYPE_TYPE};
+Type TYPE_INTEGER_VALUE = {.type_id = LMD_TYPE_DECIMAL};
 Type TYPE_NUMBER = {.type_id = LMD_TYPE_TYPE};
 Type TYPE_STRING = {.type_id = LMD_TYPE_STRING};
 Type TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
@@ -427,6 +429,13 @@ int64_t it2i(Item itm) {
     else if (type_id == LMD_TYPE_UINT64) {
         return (int64_t)itm.get_uint64();
     }
+    else if (type_id == LMD_TYPE_DECIMAL) {
+        int64_t value = 0;
+        // Native inferred integer parameters still form a representation
+        // boundary: ordinary arithmetic may deliver the exact semantic
+        // `integer` carrier here even when its value fits the native lane.
+        return decimal_to_int64_exact(itm, &value) ? value : INT64_MAX;
+    }
     else if (type_id == LMD_TYPE_ERROR) {
         return 0;  // error items return 0 (callers should check type before calling it2i)
     }
@@ -461,7 +470,17 @@ int64_t it2l(Item itm) {
     else if (type_id == LMD_TYPE_UINT64) {
         return (int64_t)itm.get_uint64();
     }
+    else if (type_id == LMD_TYPE_DECIMAL) {
+        int64_t value = 0;
+        return decimal_to_int64_exact(itm, &value) ? value : INT64_MAX;
+    }
     return INT64_MAX;  // error sentinel
+}
+
+DateTime* it2k(Item itm) {
+    // Datetime Items always carry a GC-owned object pointer.  Legacy generated
+    // code must retain that pointer instead of copying a one-word DateTime value.
+    return get_type_id(itm) == LMD_TYPE_DTIME ? itm.get_datetime_ptr() : NULL;
 }
 
 uint64_t it2u(Item itm) {
@@ -919,13 +938,14 @@ Item pn_splice(Item arr_item, Item start_item, Item count_item) {
         log_error("splice: expected a growable array, got %s", get_type_name(tid));
         return arr_item;
     }
-    TypeId st = get_type_id(start_item), ct = get_type_id(count_item);
-    if (!is_integer_type_id(st) || !is_integer_type_id(ct)) {
-        log_error("splice: start and count must be integers");
+    int64_t start = 0, count = 0;
+    // Count-like boundaries consume mathematical integers, including the
+    // decimal-backed `integer` produced by ordinary integer arithmetic.
+    if (!lambda_item_to_int64_exact(start_item, &start) ||
+            !lambda_item_to_int64_exact(count_item, &count)) {
+        log_error("splice: start and count must be integer-valued numbers");
         return arr_item;
     }
-    int64_t start = (st == LMD_TYPE_INT) ? start_item.get_int56() : start_item.get_int64();
-    int64_t count = (ct == LMD_TYPE_INT) ? count_item.get_int56() : count_item.get_int64();
 
     if (tid == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = arr_item.array_num;
@@ -1313,6 +1333,12 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(double*)field_ptr = val;
                 break;
             }
+            case LMD_TYPE_DECIMAL: {
+                // Integer-domain arithmetic uses the decimal payload carrier too;
+                // map fields must retain that GC object instead of dropping it.
+                *(Decimal**)field_ptr = item.get_decimal();
+                break;
+            }
             case LMD_TYPE_DTIME:  {
                 // Datetime fields retain the GC object itself; copying its raw
                 // bits would create an untraced, non-owning scalar payload.
@@ -1384,6 +1410,9 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 case LMD_TYPE_FLOAT:
                 case LMD_TYPE_FLOAT64:
                     titem.double_val = item.get_double();  break;
+                case LMD_TYPE_DECIMAL:
+                    // Preserve both decimal and integer-domain payloads in `any` fields.
+                    titem.decimal = item.get_decimal();  break;
                 case LMD_TYPE_DTIME:
                     titem.datetime_ptr = item.get_datetime_ptr();  break;
                 case LMD_TYPE_STRING:

@@ -1,35 +1,48 @@
 # Lambda Runtime — Numbers, Decimal & DateTime
 
-> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the semantic numeric tower, sized-machine arithmetic, the current runtime ladders and their known realignment gap, flex-`int` overflow, decimal/`integer` arithmetic backed by **libmpdec**, and GC-owned `DateTime`. It owns the *operations*; physical representation is owned by [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md). The normative rules are [Lambda Formal Semantics §4](../../Lambda_Formal_Semantics.md#4-numerics) and `vibe/Lambda_Semantics_Number_Model.md`; `vibe/Lambda_Impl_Numbers.md` tracks the remaining code realignment.
+> **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the semantic numeric tower, the shared type-directed classifier, sized-machine arithmetic, flex-`int` overflow, decimal/`integer` arithmetic backed by **libmpdec**, and GC-owned `DateTime`. It owns the *operations*; physical representation is owned by [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md). The normative rules are [Lambda Formal Semantics §4](../../Lambda_Formal_Semantics.md#4-numerics) and `vibe/Lambda_Semantics_Number_Model.md`; `vibe/Lambda_Impl_Numbers.md` records the completed 2026-07-20 realignment.
 >
-> **Primary sources:** `lambda/lambda-eval-num.cpp` (the `fn_*` numeric builtins: promotion ladders, overflow, conversions), `lambda/lambda-decimal.cpp` + `lambda/lambda-decimal.hpp` (all decimal/BigInt via mpdecimal), `lib/datetime.h` / `lib/datetime.c` (the packed `DateTime` word and its ops), with the numeric helper macros (`i2it`, `INT56_MIN/MAX`, `DATETIME_MAKE_ERROR`) in `lambda/lambda.h` and the datetime constructors in `lambda/lambda-eval.cpp`.
+> **Primary sources:** `lambda/lambda-number.hpp` (shared numeric kinds, operation families, joins, sized-lane selection, overflow policy), `lambda/lambda-number-types.hpp` and `lambda/lambda-number-runtime.hpp` (static/runtime adapters), `lambda/lambda-eval-num.cpp` (the `fn_*` execution paths and conversions), `lambda/lambda-decimal.cpp` + `lambda/lambda-decimal.hpp` (all decimal/BigInt via mpdecimal), and `lib/datetime.h` / `lib/datetime.c` plus `lambda/lambda-eval.cpp` (GC-owned datetime construction and operations).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names.
 
 ---
 
 ## 1. Purpose & scope
 
-Lambda is **JIT-only** — there is no tree-walking interpreter ([LR_07](LR_07_MIR_Transpiler_JIT.md)). Numeric operations are implemented by the `fn_*` runtime support library called from generated MIR: `fn_add`/`fn_sub`/`fn_mul`/`fn_div`/`fn_idiv`/`fn_mod`/`fn_pow`, the unary/reduction family, and conversions. These live in `lambda/lambda-eval-num.cpp`, use `__thread EvalContext* context`, and delegate decimal/`integer` work to `lambda/lambda-decimal.cpp`. This document distinguishes the settled semantic model from the legacy promotion shortcut that still exists in the live evaluator.
+Lambda is **JIT-only** — there is no tree-walking interpreter ([LR_07](LR_07_MIR_Transpiler_JIT.md)). Numeric operations are implemented by the `fn_*` runtime support library called from generated MIR: `fn_add`/`fn_sub`/`fn_mul`/`fn_div`/`fn_idiv`/`fn_mod`/`fn_pow`, the unary/reduction family, and conversions. These live in `lambda/lambda-eval-num.cpp`, use `__thread EvalContext* context`, and delegate decimal/`integer` work to `lambda/lambda-decimal.cpp`. AST inference, MIR lowering, runtime scalar execution, vectors, and reductions consume the same operation classification instead of reconstructing a promotion ladder from `TypeId` order or operand magnitude.
 
 The semantic value tower is `int`, `integer`, `float`, `decimal`. `INT` is an inline value capped to ±(2⁵³−1); `integer` is the arbitrary-precision `DECIMAL_BIGINT` carrier; `FLOAT` uses canonical self-tagged binary64 with a number-home residue; and `decimal` is a GC-owned `Decimal*`. Sized storage types are orthogonal: compact `NUM_SIZED` values and full-width `INT64`/`UINT64` values remain machine lanes when both operands are sized, but enter the semantic tower by type when mixed with non-sized numbers. `INT64`/`UINT64` have no inline form and use the Stack API's number homes or destination-owned words. The exact physical representation is owned by [LR_03 §2](LR_03_Value_and_Type_Model.md).
 
-<img alt="Numeric promotion tower and operation routing" src="diagram/d04_numeric_tower.svg" width="720">
+```mermaid
+flowchart TD
+  INPUT["operand kinds + operation"] --> CLASSIFY["lambda_numeric_classify"]
+  CLASSIFY --> SIZED["sized integer x sized integer"]
+  SIZED -->|"+ - * div % bitwise shift"| LANE["selected sized lane; Go-style wrap"]
+  SIZED -->|"true /"| ENTRY["map by type to int or integer"]
+  CLASSIFY --> COMPACT["i8..u32 mixed with non-sized"] --> INT["int domain"]
+  CLASSIFY --> WIDE["i64/u64 mixed with non-sized"] --> INTEGER["integer domain; exact and magnitude-independent"]
+  CLASSIFY --> SFLOAT["f16/f32 mixed with non-sized"] --> FLOAT["float domain"]
+  INT --> JOIN["semantic join"]
+  INTEGER --> JOIN
+  FLOAT --> JOIN
+  DECIMAL["decimal operand"] --> JOIN
+  ENTRY --> JOIN
+  JOIN --> RESULTS["selected sized, int, integer, float, or decimal result"]
+```
 
 ---
 
-## 2. The promotion tower and the per-op ladders
+## 2. The promotion tower and shared operation classification
 
-### 2.1 Settled promotion model and current ladder gap
+### 2.1 Settled promotion model
 
 The settled non-sized joins are `int + float → float`, `int + integer → integer`, and `integer + float → decimal`; decimal participation remains decimal. Sized×sized integer operations select a machine lane and wrap there. Sized×non-sized operations first map compact integer lanes to `int` and `i64/u64` to `integer`, irrespective of magnitude. True `/` uses the same entry mapping, with `int / int → float` and `integer / integer → decimal`.
 
-The live evaluator has not completed that model. Each binary operator still hand-codes a ladder over `{INT, INT64, FLOAT, DECIMAL}` after calling `normalize_sized()`. That duplication is now a correctness gap, not a design choice: it preserves legacy `INT64 + INT → INT64`, routes `INT64 + FLOAT → FLOAT`, and makes it easy for AST, MIR, and runtime result types to disagree. `Lambda_Impl_Numbers.md` replaces it with one shared type-directed classification/dispatch contract while retaining native fast paths after the domain is known.
+`lambda-number.hpp` expresses this model as a C-compatible numeric-kind and operation-family classifier. `lambda-number-types.hpp` preserves the complete semantic `Type*`, including the `integer` carrier distinction that a bare `LMD_TYPE_DECIMAL` cannot express. `lambda-number-runtime.hpp` classifies complete `Item` values and provides exact integral consumers. Execution still uses specialized native, decimal, and vector kernels after the result domain and overflow policy are known.
 
-The current common skeleton is: error/null guards, vector dispatch, independent `normalize_sized()` calls, a per-operator type-pair ladder, decimal delegation, and array fallbacks. The target keeps the guards and optimized kernels but replaces independent normalization with one pair-aware semantic classification performed before either value is converted.
+### 2.2 Exact sized-domain entry
 
-### 2.2 `normalize_sized` — current implementation shortcut
-
-The live `normalize_sized(Item&, TypeId&)` converts compact sized floats to `FLOAT`, compact sized integers to `INT64`, and chooses `INT64` versus ordinary decimal for `UINT64` by comparing the current value with `INT64_MAX`. The latter repaired an older signed-reinterpretation bug, but both integer branches now conflict with the settled model. The replacement must classify the *operand pair and operator* before conversion: preserve sized×sized machine arithmetic; otherwise map compact sized integers to `int`, and convert every `i64/u64` to the `integer` (`DECIMAL_BIGINT`) carrier. Ordinary decimal is not a substitute for `integer`, even though both share `LMD_TYPE_DECIMAL`.
+The retired `normalize_sized(Item&, TypeId&)` shortcut no longer exists. The operation pair is classified before either operand is converted. Sized×sized integral operations preserve their selected machine lane. A compact sized integer leaving that domain converts to `int`; every `i64/u64` converts exactly to the `integer` (`DECIMAL_BIGINT`) carrier, including `UINT64_MAX` through `bigint_from_uint64`; compact sized floats enter `float`. Ordinary decimal is not substituted for `integer`, even though both share `LMD_TYPE_DECIMAL` physically.
 
 ### 2.3 Overflow depends on the arithmetic domain
 
@@ -37,11 +50,11 @@ Flex-`int` `+`, `-`, and `*` compute through `__int128`: results inside ±(2⁵�
 
 ### 2.4 True division is domain-selected
 
-`/` is true division, but "always float" is over-generalized. `int / int`, `int / float`, and `float / float` produce float; `integer / integer`, `integer / float`, and any decimal participation produce decimal. Sized integer operands leave their machine lane first, so compact sized division enters the float route while `i64/u64` division enters the decimal route. Integral `div` and `%` stay in a selected sized lane when both operands are sized, or operate in the selected non-sized `int`/`integer` domain after a mixed expression. The live `fn_div` still converts non-decimal `INT64` pairings to double; that is an explicit implementation gap.
+`/` is true division, but "always float" is over-generalized. `int / int`, `int / float`, and `float / float` produce float; `integer / integer`, `integer / float`, and any decimal participation produce decimal. Sized integer operands leave their machine lane first, so compact sized division enters the float route while `i64/u64` division enters the decimal route. Integral `div` and `%` stay in a selected sized lane when both operands are sized, or operate in the selected non-sized `int`/`integer` domain after a mixed expression. Scalar, vector, and reduction implementations now apply this distinction uniformly.
 
 ### 2.5 Reductions and conversions
 
-Reductions and conversions must use the same domains as scalar arithmetic. In particular, an `int` result remains compact only inside the safe band and otherwise becomes float; explicit `int64`/`uint64` conversions retain their sized type; explicit `integer` construction produces `DECIMAL_BIGINT`. Existing reduction and conversion helpers still contain older int32/int64 preference checks and are part of the audit in `Lambda_Impl_Numbers.md` whenever their public result type is governed by the number model.
+Reductions and conversions use the same domains as scalar arithmetic. An `int` result remains compact only inside the safe band and otherwise becomes float; explicit `int64`/`uint64` conversions retain their sized type; explicit `integer` construction produces `DECIMAL_BIGINT`. Vector result containers are chosen from the classified result before execution, so full-width true division can materialize decimal Items while integral sized operations stay in compact homogeneous lanes.
 
 ---
 
@@ -90,7 +103,7 @@ The constructors live in `lambda/lambda-eval.cpp`: `fn_datetime0`/`fn_datetime1`
 ## 5. Design decisions & rationale
 
 - **Safe-band `int`, float overflow.** Plain integers are inline inside ±(2⁵³−1); `+`/`-`/`*` overflow enters float and may round. Sized lanes instead wrap, and `integer` stays arbitrary precision.
-- **One semantic promoter, specialized execution.** The target uses one shared type-directed classification for AST, MIR, and runtime, while retaining per-domain native fast paths after classification. The hand-coded legacy ladders are migration input, not the desired architecture.
+- **One semantic promoter, specialized execution.** One shared type-directed classification drives AST, MIR, runtime, vectors, and reductions, while retaining per-domain native fast paths after classification.
 - **Domain-selected true division.** `/` is float for the int/float domain and decimal for the integer/decimal domain; `div` remains the integral quotient operator.
 - **Decimal contagion + capped "unlimited".** The unlimited flag spreads through every op so a single unlimited operand pins the whole computation to high precision; the 200-digit cap is a pragmatic workaround for `mpd_pow` crashing at `mpd_maxcontext`, and BigInt gets its own 2000-digit context tuned independently.
 - **Decimal lifetime is GC-owned.** Ref counting was removed; `retain`/`release` are no-ops. This removes a class of leak/double-free bugs at the cost of relying entirely on the collector ([LR_08](LR_08_Memory_and_GC.md)).
@@ -105,11 +118,9 @@ The constructors live in `lambda/lambda-eval.cpp`: `fn_datetime0`/`fn_datetime1`
 3. **Trapping `mpd_get_ssize` can SIGFPE.** `decimal_to_int64` (`:926`/`:939`) and `decimal_mpd_to_int64` (`:394`) use the **trapping** `mpd_get_ssize`, which can SIGFPE on overflow. BigInt shift/pow paths use quiet extraction before narrowing, but the decimal conversion helpers remain an unhandled-crash risk on out-of-range magnitudes.
 4. **`decimal_cmp` swallows conversion failure as equality.** On a failed operand conversion, `decimal_cmp` returns `0` (`lambda-decimal.cpp:788`), so a malformed comparand compares **equal** rather than raising — a silent-wrong-answer path feeding `decimal_cmp_items`.
 5. **Float↔decimal round-trip via `%.17g` is lossy/fragile.** `decimal_item_to_mpd` converts a `FLOAT` by `snprintf("%.17g")` then `mpd_qset_string` (`:376`), and `decimal_mpd_to_double` reverses it through `mpd_to_sci` + `strtod` (`:400`). `%.17g` is round-trip-safe for most doubles but fragile at subnormals/edge magnitudes, and the string detour is a hot-path cost.
-6. **`normalize_sized` is value- and representation-directed.** Compact sized integers become `INT64`; `UINT64` chooses `INT64` or ordinary decimal at `INT64_MAX`. The target is compact → `int`, every `i64/u64` → `integer`, selected solely from type and operator.
-7. **Static and generated-code result typing still mirrors the legacy ladder.** AST inference uses enum ranges/`std::max`, MIR has separate effective-type repairs, and the C transpiler owns another numeric dispatch. These must move atomically with runtime promotion to avoid boxed/native mismatches.
-8. **`error_code`/sentinel coupling.** Division-by-zero and invalid decimal results can still collapse to generic `ItemError`; the structured `LambdaError` codes are attached upstream in [LR_10](LR_10_Error_Handling.md).
-9. **DateTime range caps.** `year_month:17` bounds years to −4000…+4191 (`lib/datetime.h:22`, `DATETIME_MAX_YEAR 4191`), `tz_offset_biased:11` bounds the offset to ±1023 minutes (`:103`), and milliseconds are the finest precision (no microseconds). Out-of-range construction yields `DATETIME_MAKE_ERROR()`.
-10. **No literal `TODO`/`FIXME` markers.** The caveats above are structural, expressed only as "for now" / "far more than needed" comments and discoverable by reading the code, not by grepping for tags.
+6. **`error_code`/sentinel coupling.** Division-by-zero and invalid decimal results can still collapse to generic `ItemError`; the structured `LambdaError` codes are attached upstream in [LR_10](LR_10_Error_Handling.md).
+7. **DateTime range caps.** `year_month:17` bounds years to −4000…+4191 (`lib/datetime.h:22`, `DATETIME_MAX_YEAR 4191`), `tz_offset_biased:11` bounds the offset to ±1023 minutes (`:103`), and milliseconds are the finest precision (no microseconds). Out-of-range construction yields `DATETIME_MAKE_ERROR()`.
+8. **No literal `TODO`/`FIXME` markers.** The caveats above are structural, expressed only as "for now" / "far more than needed" comments and discoverable by reading the code, not by grepping for tags.
 
 ---
 
@@ -117,7 +128,9 @@ The constructors live in `lambda/lambda-eval.cpp`: `fn_datetime0`/`fn_datetime1`
 
 | File | Responsibility (this doc) |
 |---|---|
-| `lambda/lambda-eval-num.cpp` | The numeric tower: `fn_add`/`sub`/`mul`/`div`/`idiv`/`mod`/`pow`, unary/reduction ops, conversions (`fn_int`/`int64`/`float`/`decimal`/`binary`), `normalize_sized`, the per-op promotion ladders and overflow checks. |
+| `lambda/lambda-number.hpp` | Shared numeric kinds, operand-domain joins, sized-lane selection, result kind, and overflow policy. |
+| `lambda/lambda-number-types.hpp` / `lambda/lambda-number-runtime.hpp` | Complete static `Type*` and runtime `Item` adapters, including semantic `integer` and exact integral consumers. |
+| `lambda/lambda-eval-num.cpp` | Scalar execution, sized-lane kernels, unary/reduction ops, and explicit conversions after shared classification. |
 | `lambda/lambda-decimal.cpp` | All decimal/BigInt via libmpdec: the three contexts, `decimal_create`/`push_result`, `decimal_item_to_mpd`, the arithmetic ops + `should_be_unlimited` contagion, `decimal_cmp`, and the full BigInt surface (`bigint_*`, `bigint_to_cstring_radix`). |
 | `lambda/lambda-decimal.hpp` | The slim mpdecimal-free API: constants (`DECIMAL_FIXED_PRECISION`), context/parse/creation/format/arithmetic/comparison declarations, and the `extern "C"` BigInt block. |
 | `lib/datetime.h` / `lib/datetime.c` | The packed `DateTime` bit-field word, precision/format/parse enums, field macros, `datetime_parse_*`, `datetime_compare`, unix conversions, calendar utilities. |

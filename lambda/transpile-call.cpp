@@ -8,6 +8,7 @@
  */
 
 #include "transpiler.hpp"
+#include "lambda-number-types.hpp"
 #include "safety_analyzer.hpp"
 #include "../lib/log.h"
 
@@ -47,8 +48,32 @@ static inline bool is_native_type(AstNode* arg) {
     return is_native_numeric_or_bool_type_id(t);
 }
 
-static inline bool is_compact_integer_type(Type* type) {
-    return type && (type->type_id == LMD_TYPE_NUM_SIZED || type->type_id == LMD_TYPE_UINT64);
+static inline bool bitwise_binary_uses_native_int(
+        AstNode* first, AstNode* second, Type* result_type) {
+    return first && second &&
+        lambda_numeric_kind_from_type(first->type) == LAMBDA_NUM_INT &&
+        lambda_numeric_kind_from_type(second->type) == LAMBDA_NUM_INT &&
+        lambda_numeric_kind_from_type(result_type) == LAMBDA_NUM_INT;
+}
+
+// Report the representation produced by specialized bitwise lowering so the
+// generic boxing layer does not wrap an Item using its semantic result type.
+bool c2mir_sys_call_returns_boxed_item(AstCallNode* call) {
+    if (!call || !call->function ||
+            call->function->node_type != AST_NODE_SYS_FUNC) return false;
+    AstSysFuncNode* sys = (AstSysFuncNode*)call->function;
+    if (!sys->fn_info) return false;
+    SysFunc fn = sys->fn_info->fn;
+    if (fn == SYSFUNC_USHR) return true;
+    AstNode* first = call->argument;
+    if (fn == SYSFUNC_BNOT) {
+        return lambda_numeric_kind_from_type(first ? first->type : NULL) !=
+            LAMBDA_NUM_INT;
+    }
+    if (fn != SYSFUNC_BAND && fn != SYSFUNC_BOR && fn != SYSFUNC_BXOR &&
+            fn != SYSFUNC_SHL && fn != SYSFUNC_SHR) return false;
+    AstNode* second = first ? first->next : NULL;
+    return !bitwise_binary_uses_native_int(first, second, call->type);
 }
 
 static void emit_boxed_bitwise_call(Transpiler* tp, const char* fn_name, AstNode* first_arg, AstNode* second_arg) {
@@ -491,7 +516,9 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 first_print_arg = false;
                 print_arg = print_arg->next;
             }
-            strbuf_append_str(tp->code_buf, "ItemNull;})");
+            // Generated C is parsed as C, where the C++ ItemNull object is not
+            // declared; use the representation-level null constant instead.
+            strbuf_append_str(tp->code_buf, "ITEM_NULL;})");
             return;
         }
 
@@ -528,7 +555,8 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
             // bnot(a) — unary bitwise NOT: inline as ~a
             if (fn_id == SYSFUNC_BNOT) {
-                if (is_compact_integer_type(call_node->type)) {
+                if (lambda_numeric_kind_from_type(first_arg ? first_arg->type : NULL) !=
+                    LAMBDA_NUM_INT) {
                     emit_boxed_bitwise_call(tp, "fn_bnot_item", first_arg, NULL);
                     return;
                 }
@@ -586,7 +614,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             default: break;
             }
             if (c_op) {
-                if (is_compact_integer_type(call_node->type)) {
+                if (!bitwise_binary_uses_native_int(first_arg, second_arg, call_node->type)) {
                     const char* boxed_fn = NULL;
                     switch (fn_id) {
                     case SYSFUNC_BAND: boxed_fn = "fn_band_item"; break;

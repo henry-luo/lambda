@@ -446,9 +446,9 @@ static Item arr_num_leaf_item(ArrayNum* a, int64_t off) {
         case ELEM_UINT8_CLAMPED: return Item{ .item = u8_to_item(((uint8_t*)a->data)[off]) };
         case ELEM_UINT16:  return Item{ .item = u16_to_item(((uint16_t*)a->data)[off]) };
         case ELEM_UINT32:  return Item{ .item = u32_to_item(((uint32_t*)a->data)[off]) };
-        // uint64 has no dedicated formatter path; reinterpret the live 8 bytes as
-        // int64 (correct for values <= INT64_MAX; the rare huge value is acceptable)
-        case ELEM_UINT64:  return Item{ .item = l2it((int64_t*)&((uint64_t*)a->data)[off]) };
+        // Preserve the unsigned tag so readers never reinterpret the upper half
+        // of the uint64 domain as a negative int64 value.
+        case ELEM_UINT64:  return Item{ .item = u2it(&((uint64_t*)a->data)[off]) };
         case ELEM_FLOAT16: return Item{ .item = f16_to_item(f16_bits_to_f32(((uint16_t*)a->data)[off])) };
         case ELEM_FLOAT32: return Item{ .item = f32_to_item(((float*)a->data)[off]) };
         case ELEM_BOOL:    return Item{ .item = b2it(((uint8_t*)a->data)[off] ? BOOL_TRUE : BOOL_FALSE) };

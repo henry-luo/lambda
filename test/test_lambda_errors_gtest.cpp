@@ -727,6 +727,16 @@ TEST_F(NegativeScriptTest, SemanticError_SizedConstantConversionOverflow) {
     ExpectErrorCode("test/lambda/negative/semantic/sized_constant_conversion_overflow.ls", "error[E108]");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_IntegralLiteralZero) {
+    ExpectErrorMessage("test/lambda/negative/semantic/integral_literal_zero.ls",
+        "integral division or remainder by literal zero");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_IntegralFloatDomain) {
+    ExpectErrorMessage("test/lambda/negative/semantic/integral_float_domain.ls",
+        "operator 'div' is not defined for float and int");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_ReservedLastKeyword) {
     ExpectErrorMessage("test/lambda/negative/semantic/reserved_last_keyword.ls",
         "reserved keyword");

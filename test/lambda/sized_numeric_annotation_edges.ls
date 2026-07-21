@@ -18,11 +18,14 @@ let e: u64 = 18446744073709551615u64
 
 "=== params ==="
 fn take_i32(x: i32) => [x, type(x)]
-take_i32(2147483648)
+let param_i32: i32 = 2147483648
+take_i32(param_i32)
 fn take_u8(x: u8) => [x, type(x)]
-take_u8(256)
+let param_u8: u8 = 256
+take_u8(param_u8)
 fn take_u16(x: u16) => [x, type(x)]
-take_u16(65536)
+let param_u16: u16 = 65536
+take_u16(param_u16)
 
 "=== returns ==="
 fn ret_i8() i8 => 128

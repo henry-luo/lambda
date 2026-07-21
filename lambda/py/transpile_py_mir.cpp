@@ -10,6 +10,7 @@
 #include "py_async.h"
 #include "py_stdlib.h"
 #include "../lambda-data.hpp"
+#define MIR_EMITTER_NO_DIRECT_REGISTER_LOOKUP 1
 #include "../mir_emitter_shared.hpp"
 #include "../jube/jube_language.h"
 #include "../../lib/log.h"
@@ -60,8 +61,8 @@ static char py_entry_script_dir[512] = "";
 static const JubeModuleGraphAPI* py_hosted_module_graph_api = NULL;
 static const JubeSourceAPI* py_hosted_source_api = NULL;
 static const JubeGuestExecutionAPI* py_hosted_execution_api = NULL;
-static const JubeHostGcAPI* py_hosted_gc_api = NULL;
 static const JubeRuntimeCatalogAPI* py_hosted_runtime_catalog_api = NULL;
+static thread_local MirEmitter* py_mir_argument_emitter = NULL;
 
 void py_set_hosted_module_graph_api(const JubeModuleGraphAPI* module_graph) {
     py_hosted_module_graph_api = module_graph;
@@ -73,10 +74,6 @@ void py_set_hosted_source_api(const JubeSourceAPI* source_api) {
 
 void py_set_hosted_execution_api(const JubeGuestExecutionAPI* execution_api) {
     py_hosted_execution_api = execution_api;
-}
-
-void py_set_hosted_gc_api(const JubeHostGcAPI* gc_api) {
-    py_hosted_gc_api = gc_api;
 }
 
 void py_set_hosted_runtime_catalog_api(const JubeRuntimeCatalogAPI* runtime_catalog) {
@@ -105,24 +102,13 @@ static bool pm_lookup_hosted_import_metadata(const char* name,
 // Jube root-frame service keeps that namespace live without exposing the
 // active host context to normal Python compilation.
 class PmHostedItemRoot {
-    LambdaRootFrame frame_;
-    const JubeHostGcAPI* gc_;
+    PyHostedRootFrame frame_;
     uint64_t* slot_;
     Item fallback_;
 
 public:
-    PmHostedItemRoot(Item value) : frame_{}, gc_(py_hosted_gc_api), slot_(NULL), fallback_(value) {
-        if (!gc_ || !gc_->root_frame_begin || !gc_->root_frame_take_slot ||
-            !gc_->root_frame_end || !gc_->root_frame_begin(&frame_, 1)) {
-            gc_ = NULL;
-            return;
-        }
-        slot_ = gc_->root_frame_take_slot(&frame_);
+    PmHostedItemRoot(Item value) : frame_(1), slot_(frame_.take_slot()), fallback_(value) {
         if (slot_) *slot_ = value.item;
-    }
-
-    ~PmHostedItemRoot() {
-        if (gc_) gc_->root_frame_end(&frame_);
     }
 
     Item get(void) const {
@@ -171,6 +157,62 @@ static void pm_finish_hosted_mir_function(MIR_context_t mir_context) {
     py_hosted_execution_api->mir_function_finish(mir_context);
 }
 
+static bool pm_create_hosted_item_function(MIR_context_t mir_context,
+        const char* function_name, int parameter_count,
+        const char* const* parameter_names, MIR_item_t* out_function_item,
+        MIR_func_t* out_function) {
+    if (!mir_context || !function_name || parameter_count < 0 || !out_function_item ||
+        !out_function || !py_hosted_execution_api ||
+        !py_hosted_execution_api->mir_item_function_create) return false;
+    void* function_item = NULL;
+    void* function = NULL;
+    if (py_hosted_execution_api->mir_item_function_create(mir_context, function_name,
+            (uint32_t)parameter_count, parameter_names, &function_item, &function) != 0) {
+        return false;
+    }
+    *out_function_item = (MIR_item_t)function_item;
+    *out_function = (MIR_func_t)function;
+    return true;
+}
+
+static bool pm_create_hosted_function_forward(MIR_context_t mir_context,
+        const char* function_name, MIR_item_t* out_function_item) {
+    if (!mir_context || !function_name || !out_function_item ||
+        !py_hosted_execution_api ||
+        !py_hosted_execution_api->mir_function_forward_create) return false;
+    void* function_item = NULL;
+    if (py_hosted_execution_api->mir_function_forward_create(mir_context, function_name,
+            &function_item) != 0) return false;
+    *out_function_item = (MIR_item_t)function_item;
+    return true;
+}
+
+static bool pm_create_hosted_item_function_proto(MIR_context_t mir_context,
+        const char* prototype_name, int parameter_count, MIR_item_t* out_prototype_item) {
+    if (!mir_context || !prototype_name || parameter_count < 0 || !out_prototype_item ||
+        !py_hosted_execution_api ||
+        !py_hosted_execution_api->mir_item_function_proto_create) return false;
+    void* prototype_item = NULL;
+    if (py_hosted_execution_api->mir_item_function_proto_create(mir_context, prototype_name,
+            (uint32_t)parameter_count, &prototype_item) != 0) return false;
+    *out_prototype_item = (MIR_item_t)prototype_item;
+    return true;
+}
+
+static MIR_reg_t pm_lookup_hosted_function_register(MIR_context_t mir_context,
+        MIR_func_t function, const char* register_name) {
+    if (!mir_context || !function || !register_name || !py_hosted_execution_api ||
+        !py_hosted_execution_api->mir_function_register_lookup) return 0;
+    uint32_t register_id = 0;
+    if (py_hosted_execution_api->mir_function_register_lookup(mir_context, function,
+            register_name, &register_id) != 0) return 0;
+    MIR_reg_t reg = (MIR_reg_t)register_id;
+    // Parameter binding is the only point where the hosted lowerer receives
+    // this identity; retain it for entry-root liveness without a raw lookup.
+    em_function_argument_register(py_mir_argument_emitter, reg);
+    return reg;
+}
+
 static bool pm_activate_hosted_guest_execution(void* host_execution, void** out_input) {
     return py_hosted_execution_api && py_hosted_execution_api->execution_activate &&
         py_hosted_execution_api->execution_activate(host_execution, out_input) == 0;
@@ -192,6 +234,15 @@ static bool pm_run_hosted_guest_main(void* host_execution, void* entry_function,
 static void pm_finish_hosted_guest_execution(void* host_execution) {
     if (!py_hosted_execution_api || !py_hosted_execution_api->execution_finish_guest) return;
     py_hosted_execution_api->execution_finish_guest(host_execution);
+}
+
+static void* pm_hosted_frame_runtime_slot(void* host_execution) {
+    if (!py_hosted_execution_api ||
+        py_hosted_execution_api->struct_size < JUBE_GUEST_EXECUTION_API_H7C_RUNTIME_SLOT_SIZE ||
+        !py_hosted_execution_api->execution_frame_runtime_slot) {
+        return NULL;
+    }
+    return py_hosted_execution_api->execution_frame_runtime_slot(host_execution);
 }
 
 static Item pm_loading_module_namespace(void* host_execution, const char* source_path) {
@@ -334,6 +385,9 @@ struct PyMirTranspiler {
     // Opaque host execution token for cross-language module loading. The
     // lowering layer never needs the Runtime record itself.
     void* host_execution;
+    // Host-owned address of the active runtime token. It is valid only while
+    // the matching guest activation remains active.
+    void* frame_runtime_slot;
 
     // ---- TCO (Tail Call Optimization) state ----
     PyFuncCollected* tco_func;      // current function being TCO'd (NULL if not TCO)
@@ -362,6 +416,24 @@ struct PyMirTranspiler {
 };
 
 static thread_local PyMirTranspiler* py_mir_telemetry_owner = NULL;
+
+static void pm_select_hosted_function(PyMirTranspiler* mt, MIR_item_t function_item,
+        MIR_func_t function) {
+    if (!mt) return;
+    mt->em.func_item = function_item;
+    mt->em.func = function;
+    py_mir_argument_emitter = &mt->em;
+    em_function_arguments_clear(&mt->em);
+}
+
+static void pm_restore_hosted_function(PyMirTranspiler* mt, MIR_item_t function_item,
+        MIR_func_t function, MirFunctionArgumentState arguments) {
+    if (!mt) return;
+    mt->em.func_item = function_item;
+    mt->em.func = function;
+    py_mir_argument_emitter = &mt->em;
+    em_function_arguments_restore(&mt->em, arguments);
+}
 
 static bool pm_require_capacity(PyMirTranspiler* mt, int used, int capacity,
         const char* subject) {
@@ -436,14 +508,14 @@ static void pm_emit_label(PyMirTranspiler* mt, MIR_label_t label) {
 }
 
 static MIR_reg_t pm_load_side_stack_runtime(PyMirTranspiler* mt) {
-    MirImportEntry* runtime_import = em_ensure_import(&mt->em, "_lambda_rt",
-        MIR_T_I64, 0, NULL, 0, true);
-    if (!runtime_import) return 0;
-    MIR_reg_t address = pm_new_reg(mt, "py_side_rt_addr", MIR_T_I64);
+    if (!mt || !mt->frame_runtime_slot) return 0;
+    MIR_reg_t address = pm_new_reg(mt, "py_side_rt_slot", MIR_T_I64);
     pm_emit_raw(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
         MIR_new_reg_op(mt->em.ctx, address),
-        MIR_new_ref_op(mt->em.ctx, runtime_import->import)));
+        MIR_new_int_op(mt->em.ctx, (int64_t)(uintptr_t)mt->frame_runtime_slot)));
     MIR_reg_t runtime = pm_new_reg(mt, "py_side_rt", MIR_T_I64);
+    // Read the host-issued slot before frame setup so nested functions use the
+    // activation that owns their root and number stacks.
     pm_emit_raw(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
         MIR_new_reg_op(mt->em.ctx, runtime),
         MIR_new_mem_op(mt->em.ctx, MIR_T_I64, 0, address, 0, 1)));
@@ -2429,14 +2501,6 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             // determine total MIR params (regular + optional varargs pair + optional kwargs map)
             int mir_total = total_params + (target_fc->has_star_args ? 2 : 0) + (target_fc->has_kwargs ? 1 : 0);
 
-            // build proto for the call
-            MIR_var_t pvars[20];
-            for (int i = 0; i < mir_total && i < 20; i++) {
-                char* pb = (char*)alloca(8);
-                snprintf(pb, 8, "p%d", i);
-                pvars[i] = {MIR_T_I64, pb, 0};
-            }
-
             // check import cache for proto (avoid duplicate proto names)
             char proto_key[148];
             snprintf(proto_key, sizeof(proto_key), "%s_local", fn_name);
@@ -2451,8 +2515,12 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             } else {
                 char proto_name[160];
                 snprintf(proto_name, sizeof(proto_name), "%s_lp", fn_name);
-                MIR_type_t res_types[1] = { MIR_T_I64 };
-                proto = MIR_new_proto_arr(mt->em.ctx, proto_name, 1, res_types, mir_total, pvars);
+                if (!pm_create_hosted_item_function_proto(mt->em.ctx, proto_name,
+                        mir_total, &proto)) {
+                    log_error("py-mir: host could not create direct-call prototype '%s'", proto_name);
+                    mt->has_compile_error = true;
+                    return pm_emit_null(mt);
+                }
                 MirImportCacheEntry new_entry;
                 memset(&new_entry, 0, sizeof(new_entry));
                 snprintf(new_entry.name, sizeof(new_entry.name), "%s", proto_key);
@@ -6801,7 +6869,6 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // ---- Step 3: Build param descriptor for both functions ----
     int offset = 0;
-    MIR_var_t params[20];
     char* param_name_bufs[20];
 
     PyAstNode* pnode = fc->node->params;
@@ -6824,14 +6891,13 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
         }
         if (pn) snprintf(param_name_bufs[i + offset], 128, "_py_%.*s", (int)pn->len, pn->chars);
         else    snprintf(param_name_bufs[i + offset], 128, "_py_p%d", i);
-        params[i + offset] = {MIR_T_I64, param_name_bufs[i + offset], 0};
     }
     int mir_param_count = fc->param_count + offset;
-    MIR_type_t res_type = MIR_T_I64;
 
     // ---- Step 4: Save transpiler state ----
     MIR_item_t old_func_item      = mt->em.func_item;
     MIR_func_t old_func           = mt->em.func;
+    MirFunctionArgumentState old_argument_registers = em_function_arguments_suspend(&mt->em);
     int        old_scope_depth    = mt->scope_depth;
     int        old_func_index     = mt->current_func_index;
     MIR_reg_t  old_env_reg        = mt->scope_env_reg;
@@ -6850,15 +6916,17 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     char rp0_buf[] = "_gen_frame";
     char rp1_buf[] = "_gen_sent";
-    MIR_var_t resume_params[2] = {
-        {MIR_T_I64, rp0_buf, 0},
-        {MIR_T_I64, rp1_buf, 0}
-    };
-    MIR_item_t resume_func_item = MIR_new_func_arr(mt->em.ctx, resume_name,
-                                                    1, &res_type, 2, resume_params);
+    const char* resume_params[] = {rp0_buf, rp1_buf};
+    MIR_item_t resume_func_item = NULL;
+    MIR_func_t resume_func = NULL;
+    if (!pm_create_hosted_item_function(mt->em.ctx, resume_name, 2, resume_params,
+            &resume_func_item, &resume_func)) {
+        log_error("py-mir: host could not create generator resume function '%s'", resume_name);
+        mt->has_compile_error = true;
+        return;
+    }
 
-    mt->em.func_item  = resume_func_item;
-    mt->em.func       = resume_func_item->u.func;
+    pm_select_hosted_function(mt, resume_func_item, resume_func);
     // A resume activation can allocate between yields just like a normal
     // Python function; it must publish its locals before any helper call.
     pm_begin_function_frame(mt, pm_load_side_stack_runtime(mt));
@@ -6866,8 +6934,8 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     mt->scope_env_slot_count = 0;
     mt->in_generator       = true;
     mt->in_async           = fc->is_async;
-    mt->gen_frame_reg      = MIR_reg(mt->em.ctx, "_gen_frame", mt->em.func);
-    mt->gen_sent_reg       = MIR_reg(mt->em.ctx, "_gen_sent",  mt->em.func);
+    mt->gen_frame_reg      = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_gen_frame");
+    mt->gen_sent_reg       = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_gen_sent");
     mt->gen_yield_count    = 0;
     mt->gen_iter_count     = 0;
 
@@ -6951,10 +7019,14 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     // ---- Step 6: Compile WRAPPER function ----
     // The wrapper: same name/params as original Python function.
     // Body: allocate generator object with resume func ptr + frame, store params, return gen.
-    fc->func_item = MIR_new_func_arr(mt->em.ctx, fn_name, 1, &res_type,
-                                      mir_param_count, params);
-    mt->em.func_item = fc->func_item;
-    mt->em.func      = fc->func_item->u.func;
+    MIR_func_t wrapper_func = NULL;
+    if (!pm_create_hosted_item_function(mt->em.ctx, fn_name, mir_param_count,
+            (const char* const*)param_name_bufs, &fc->func_item, &wrapper_func)) {
+        log_error("py-mir: host could not create generator wrapper '%s'", fn_name);
+        mt->has_compile_error = true;
+        return;
+    }
+    pm_select_hosted_function(mt, fc->func_item, wrapper_func);
     pm_begin_function_frame(mt, pm_load_side_stack_runtime(mt));
 
     // load address of resume function as i64
@@ -6975,7 +7047,8 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // store params into frame slots 1..param_count
     for (int i = 0; i < fc->param_count && i < num_locals; i++) {
-        MIR_reg_t preg = MIR_reg(mt->em.ctx, param_name_bufs[i + offset], mt->em.func);
+        MIR_reg_t preg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func,
+            param_name_bufs[i + offset]);
         pm_store_env_slot(mt, fptr_reg, i + 1, preg);
     }
 
@@ -6984,8 +7057,7 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     pm_finish_hosted_mir_function(mt->em.ctx);
 
     // restore remaining parent state
-    mt->em.func_item = old_func_item;
-    mt->em.func      = old_func;
+    pm_restore_hosted_function(mt, old_func_item, old_func, old_argument_registers);
     mt->scope_depth       = old_scope_depth;
     mt->gen_local_count   = old_gen_lcount;
 
@@ -7005,14 +7077,12 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
     PyLambdaNode* lam = lc->node;
 
     int mir_param_count = lc->param_count + (lc->is_closure ? 1 : 0);
-    MIR_var_t params[17];
     char* param_name_bufs[17];
     int offset = 0;
 
     if (lc->is_closure) {
         param_name_bufs[0] = (char*)alloca(128);
         snprintf(param_name_bufs[0], 128, "_py__env");
-        params[0] = {MIR_T_I64, param_name_bufs[0], 0};
         offset = 1;
     }
 
@@ -7033,33 +7103,37 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
         } else {
             snprintf(param_name_bufs[i + offset], 128, "_py_p%d", i);
         }
-        params[i + offset] = {MIR_T_I64, param_name_bufs[i + offset], 0};
     }
 
-    MIR_type_t res_type = MIR_T_I64;
-    lc->func_item = MIR_new_func_arr(mt->em.ctx, lc->name, 1, &res_type,
-        mir_param_count, params);
+    MIR_func_t lambda_func = NULL;
+    if (!pm_create_hosted_item_function(mt->em.ctx, lc->name, mir_param_count,
+            (const char* const*)param_name_bufs, &lc->func_item, &lambda_func)) {
+        log_error("py-mir: host could not create lambda '%s'", lc->name);
+        mt->has_compile_error = true;
+        return;
+    }
 
     MIR_item_t old_func_item = mt->em.func_item;
     MIR_func_t old_func = mt->em.func;
+    MirFunctionArgumentState old_argument_registers = em_function_arguments_suspend(&mt->em);
     int old_scope_depth = mt->scope_depth;
     MIR_reg_t old_env_reg = mt->scope_env_reg;
     int old_env_slot_count = mt->scope_env_slot_count;
 
-    mt->em.func_item = lc->func_item;
-    mt->em.func = lc->func_item->u.func;
+    pm_select_hosted_function(mt, lc->func_item, lambda_func);
     pm_begin_function_frame(mt, pm_load_side_stack_runtime(mt));
 
     pm_push_scope(mt);
 
     for (int i = 0; i < lc->param_count && i < 16; i++) {
-        MIR_reg_t preg = MIR_reg(mt->em.ctx, param_name_bufs[i + offset], mt->em.func);
+        MIR_reg_t preg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func,
+            param_name_bufs[i + offset]);
         pm_set_var(mt, param_name_bufs[i + offset], preg);
     }
 
     // if this is a closure, load captured variables from env
     if (lc->is_closure) {
-        MIR_reg_t env_reg = MIR_reg(mt->em.ctx, "_py__env", mt->em.func);
+        MIR_reg_t env_reg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__env");
         mt->scope_env_reg = env_reg;
         mt->scope_env_slot_count = lc->capture_count;
         for (int i = 0; i < lc->capture_count; i++) {
@@ -7086,8 +7160,7 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
     pm_finish_hosted_mir_function(mt->em.ctx);
 
     pm_pop_scope(mt);
-    mt->em.func_item = old_func_item;
-    mt->em.func = old_func;
+    pm_restore_hosted_function(mt, old_func_item, old_func, old_argument_registers);
     mt->scope_depth = old_scope_depth;
     mt->scope_env_reg = old_env_reg;
     mt->scope_env_slot_count = old_env_slot_count;
@@ -7106,14 +7179,12 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     // build parameter list; closures get _py__env as hidden first param
     // *args functions get _py__varargs (ptr) + _py__varargc (count) as extra params
     int mir_param_count = fc->param_count + (fc->is_closure ? 1 : 0) + (fc->has_star_args ? 2 : 0) + (fc->has_kwargs ? 1 : 0);
-    MIR_var_t params[20];
     char* param_name_bufs[20];
     int offset = 0;
 
     if (fc->is_closure) {
         param_name_bufs[0] = (char*)alloca(128);
         snprintf(param_name_bufs[0], 128, "_py__env");
-        params[0] = {MIR_T_I64, param_name_bufs[0], 0};
         offset = 1;
     }
 
@@ -7140,7 +7211,6 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         } else {
             snprintf(param_name_bufs[i + offset], 128, "_py_p%d", i);
         }
-        params[i + offset] = {MIR_T_I64, param_name_bufs[i + offset], 0};
     }
 
     // add *args extra params after regular params
@@ -7148,33 +7218,34 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     if (fc->has_star_args) {
         param_name_bufs[varargs_param_offset] = (char*)alloca(128);
         snprintf(param_name_bufs[varargs_param_offset], 128, "_py__varargs");
-        params[varargs_param_offset] = {MIR_T_I64, param_name_bufs[varargs_param_offset], 0};
         param_name_bufs[varargs_param_offset + 1] = (char*)alloca(128);
         snprintf(param_name_bufs[varargs_param_offset + 1], 128, "_py__varargc");
-        params[varargs_param_offset + 1] = {MIR_T_I64, param_name_bufs[varargs_param_offset + 1], 0};
     }
     // add **kwargs map parameter after *args (if any)
     int kwargs_param_offset = varargs_param_offset + (fc->has_star_args ? 2 : 0);
     if (fc->has_kwargs) {
         param_name_bufs[kwargs_param_offset] = (char*)alloca(128);
         snprintf(param_name_bufs[kwargs_param_offset], 128, "_py__kwargs_map");
-        params[kwargs_param_offset] = {MIR_T_I64, param_name_bufs[kwargs_param_offset], 0};
     }
 
-    MIR_type_t res_type = MIR_T_I64;
-    fc->func_item = MIR_new_func_arr(mt->em.ctx, fn_name, 1, &res_type,
-        mir_param_count, params);
+    MIR_func_t compiled_func = NULL;
+    if (!pm_create_hosted_item_function(mt->em.ctx, fn_name, mir_param_count,
+            (const char* const*)param_name_bufs, &fc->func_item, &compiled_func)) {
+        log_error("py-mir: host could not create function '%s'", fn_name);
+        mt->has_compile_error = true;
+        return;
+    }
 
     // save parent state
     MIR_item_t old_func_item = mt->em.func_item;
     MIR_func_t old_func = mt->em.func;
+    MirFunctionArgumentState old_argument_registers = em_function_arguments_suspend(&mt->em);
     int old_scope_depth = mt->scope_depth;
     int old_func_index = mt->current_func_index;
     MIR_reg_t old_env_reg = mt->scope_env_reg;
     int old_env_slot_count = mt->scope_env_slot_count;
 
-    mt->em.func_item = fc->func_item;
-    mt->em.func = fc->func_item->u.func;
+    pm_select_hosted_function(mt, fc->func_item, compiled_func);
     pm_begin_function_frame(mt, pm_load_side_stack_runtime(mt));
 
     // find this function's index in func_entries
@@ -7187,14 +7258,15 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // register params as variables
     for (int i = 0; i < fc->param_count && i < 16; i++) {
-        MIR_reg_t preg = MIR_reg(mt->em.ctx, param_name_bufs[i + offset], mt->em.func);
+        MIR_reg_t preg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func,
+            param_name_bufs[i + offset]);
         pm_set_var(mt, param_name_bufs[i + offset], preg);
     }
 
     // if function has *args, build a list from the varargs pointer + count
     if (fc->has_star_args) {
-        MIR_reg_t va_ptr = MIR_reg(mt->em.ctx, "_py__varargs", mt->em.func);
-        MIR_reg_t va_cnt = MIR_reg(mt->em.ctx, "_py__varargc", mt->em.func);
+        MIR_reg_t va_ptr = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__varargs");
+        MIR_reg_t va_cnt = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__varargc");
         // call py_build_list_from_args(ptr, count) → list Item
         MIR_reg_t star_list = pm_call_2(mt, "py_build_list_from_args", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->em.ctx, va_ptr),
@@ -7208,7 +7280,7 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // if function has **kwargs, bind the kwargs map param to the user's variable
     if (fc->has_kwargs) {
-        MIR_reg_t kw_reg = MIR_reg(mt->em.ctx, "_py__kwargs_map", mt->em.func);
+        MIR_reg_t kw_reg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__kwargs_map");
         MIR_reg_t kw_var = pm_new_reg(mt, fc->kwargs_name, MIR_T_I64);
         pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
             MIR_new_reg_op(mt->em.ctx, kw_var),
@@ -7218,7 +7290,7 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // if this is a closure, load captured variables from env
     if (fc->is_closure) {
-        MIR_reg_t env_reg = MIR_reg(mt->em.ctx, "_py__env", mt->em.func);
+        MIR_reg_t env_reg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "_py__env");
         mt->scope_env_reg = env_reg;
         mt->scope_env_slot_count = fc->capture_count;
         for (int i = 0; i < fc->capture_count; i++) {
@@ -7271,7 +7343,8 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
             if (dp->node_type == PY_AST_NODE_DEFAULT_PARAMETER) {
                 PyParamNode* pp = (PyParamNode*)dp;
                 if (pp->default_value) {
-                    MIR_reg_t preg = MIR_reg(mt->em.ctx, param_name_bufs[pi + offset], mt->em.func);
+                    MIR_reg_t preg = pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func,
+                        param_name_bufs[pi + offset]);
                     MIR_reg_t is_null = pm_new_reg(mt, "dnull", MIR_T_I64);
                     MIR_label_t l_no_default = pm_new_label(mt);
                     pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_NE,
@@ -7331,12 +7404,14 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         // overflow path: call lambda_stack_overflow_error(func_name)
         // lambda_stack_overflow_error takes a const char* — pass a raw C string pointer
         String* fn_str = name_pool_create_len(mt->tp->name_pool, fc->name, strlen(fc->name));
-        MIR_reg_t fn_name_ptr = pm_new_reg(mt, "tco_fn", MIR_T_I64);
+        MIR_reg_t fn_name_ptr = pm_new_reg(mt, "tco_fn", MIR_T_P);
         pm_emit(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
             MIR_new_reg_op(mt->em.ctx, fn_name_ptr),
             MIR_new_int_op(mt->em.ctx, (int64_t)(uintptr_t)fn_str->chars)));
+        // Keep the pointer ABI identical to the shared side-stack error call;
+        // an I64 variant created a second same-name MIR prototype at finalize.
         pm_call_void_1(mt, "lambda_stack_overflow_error",
-            MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_name_ptr));
+            MIR_T_P, MIR_new_reg_op(mt->em.ctx, fn_name_ptr));
 
         // emit a ret after overflow call (unreachable but needed for MIR validation)
         pm_emit(mt, MIR_new_ret_insn(mt->em.ctx, 1,
@@ -7366,8 +7441,7 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // restore parent state
     pm_pop_scope(mt);
-    mt->em.func_item = old_func_item;
-    mt->em.func = old_func;
+    pm_restore_hosted_function(mt, old_func_item, old_func, old_argument_registers);
     mt->scope_depth = old_scope_depth;
     mt->current_func_index = old_func_index;
     mt->scope_env_reg = old_env_reg;
@@ -7512,7 +7586,12 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
         if (fc->is_method) continue;  // methods are accessed via py_getattr
         char fn_name[260];
         pm_make_mir_func_name(mt, fc, fn_name, sizeof(fn_name));
-        MIR_item_t fwd = MIR_new_forward(mt->em.ctx, fn_name);
+        MIR_item_t fwd = NULL;
+        if (!pm_create_hosted_function_forward(mt->em.ctx, fn_name, &fwd)) {
+            log_error("py-mir: host could not declare forward function '%s'", fn_name);
+            mt->has_compile_error = true;
+            return;
+        }
         fc->func_item = fwd;  // direct-call path uses this; overwritten by real func later
         PyLocalFuncEntry lfe;
         memset(&lfe, 0, sizeof(lfe));
@@ -7527,12 +7606,18 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     }
 
     // Phase 4: create py_main function
-    MIR_type_t res_type = MIR_T_I64;
-    MIR_var_t main_param = {MIR_T_I64, "ctx", 0};
-    mt->em.func_item = MIR_new_func_arr(mt->em.ctx, "py_main", 1, &res_type, 1, &main_param);
-    mt->em.func = mt->em.func_item->u.func;
+    const char* main_params[] = {"ctx"};
+    MIR_item_t main_function_item = NULL;
+    MIR_func_t main_function = NULL;
+    if (!pm_create_hosted_item_function(mt->em.ctx, "py_main", 1, main_params,
+            &main_function_item, &main_function)) {
+        log_error("py-mir: host could not create py_main");
+        mt->has_compile_error = true;
+        return;
+    }
+    pm_select_hosted_function(mt, main_function_item, main_function);
     mt->in_main = true;
-    pm_begin_function_frame(mt, MIR_reg(mt->em.ctx, "ctx", mt->em.func));
+    pm_begin_function_frame(mt, pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "ctx"));
 
     pm_push_scope(mt);
 
@@ -7617,7 +7702,7 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
         py_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
-    py_runtime_set_input(runtime_input);
+    py_runtime_set_data_session(runtime_input);
 
     // init MIR context
     MIR_context_t ctx = pm_create_hosted_mir_context();
@@ -7648,6 +7733,15 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
     mt->em.lookup_import_metadata = pm_lookup_hosted_import_metadata;
     mt->filename = filename;
     mt->host_execution = host_execution;
+    mt->frame_runtime_slot = pm_hosted_frame_runtime_slot(host_execution);
+    if (!mt->frame_runtime_slot) {
+        log_error("py-mir: host did not provide an active frame runtime slot");
+        mem_free(mt);
+        pm_destroy_hosted_mir_context(ctx);
+        py_transpiler_destroy(tp);
+        pm_finish_hosted_guest_execution(host_execution);
+        return (Item){.item = ITEM_ERROR};
+    }
 
     // store entry-point script directory for sub-module import resolution
     if (filename) {
@@ -7815,7 +7909,7 @@ void py_module_heap_cleanup(void* host_heap) {
         py_hosted_execution_api->execution_destroy(pm_module_owned_execution);
     }
     pm_module_owned_execution = NULL;
-    py_runtime_set_input(NULL);
+    py_runtime_set_data_session(NULL);
 }
 
 // ============================================================================
@@ -7852,6 +7946,20 @@ static void pm_module_source_release(JubeHostedSource* source) {
     if (!source || !py_hosted_source_api || !py_hosted_source_api->source_release) return;
     py_hosted_source_api->source_release(source);
 }
+
+class PmDataSessionScope {
+    void* previous_session_;
+    bool restore_;
+
+public:
+    PmDataSessionScope() : previous_session_(py_runtime_data_session()), restore_(true) {}
+
+    ~PmDataSessionScope() {
+        if (restore_) py_runtime_restore_data_session(previous_session_);
+    }
+
+    void retain_current_session() { restore_ = false; }
+};
 
 static void pm_module_lowering_cleanup(PyMirTranspiler* mt, MIR_context_t mir_context,
                                        PyTranspiler* transpiler, JubeHostedSource* source,
@@ -7911,7 +8019,8 @@ Item load_py_module(void* host_execution, const char* py_path) {
         pm_module_source_release(&source_record);
         return ItemNull;
     }
-    py_runtime_set_input(import_input);
+    PmDataSessionScope data_session_scope;
+    py_runtime_set_data_session(import_input);
 
     // create Python transpiler (parsing + AST building)
     PyTranspiler* tp = py_transpiler_create(host_execution);
@@ -7964,6 +8073,12 @@ Item load_py_module(void* host_execution, const char* py_path) {
     mt->em.lookup_import_metadata = pm_lookup_hosted_import_metadata;
     mt->filename = py_path;
     mt->host_execution = host_execution;
+    mt->frame_runtime_slot = pm_hosted_frame_runtime_slot(host_execution);
+    if (!mt->frame_runtime_slot) {
+        log_error("py-mir: module: host did not provide an active frame runtime slot for '%s'", py_path);
+        pm_module_lowering_cleanup(mt, ctx, tp, &source_record, false);
+        return ItemNull;
+    }
     mt->em.import_cache = em_import_cache_new(64);
     mt->local_funcs  = py_local_func_new(32);
     mt->var_scopes[0] = em_var_scope_new(16);
@@ -8075,6 +8190,7 @@ Item load_py_module(void* host_execution, const char* py_path) {
             return ItemNull;
         }
         pm_module_owned_execution = host_execution;
+        data_session_scope.retain_current_session();
     }
 
     log_info("py-mir: module '%s' loaded successfully", py_path);

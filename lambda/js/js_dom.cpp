@@ -1195,13 +1195,15 @@ static void attached_expando_root_add(DomNode* node, Item map,
     root->doc = doc;
     root->ref = dom_node_ref(node);
     root->map = map;
-    heap_register_gc_root(&root->map.item);
     AttachedExpandoEntry entry = {.key = node, .root = root};
     hashmap_set(table, &entry);
     if (!hashmap_get(table, &entry)) {
-        heap_unregister_gc_root(&root->map.item);
         mem_free(root);
+        return;
     }
+    // Persistent root lifetime begins only after the owning table accepts the
+    // entry; otherwise the failure path resembles an unsafe transient root.
+    heap_register_gc_root(&root->map.item);
 }
 
 static void attached_expando_root_remove(DomNode* node) {

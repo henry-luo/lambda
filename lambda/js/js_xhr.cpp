@@ -458,14 +458,10 @@ extern "C" Item js_xhr_open(Item method_arg, Item url_arg, Item async_arg) {
     TypeId async_type = get_type_id(async_arg);
     bool async_argument_omitted = async_type == LMD_TYPE_UNDEFINED ||
         async_type == LMD_TYPE_NULL;
+    // Omitted async must remain asynchronous for file URLs: forcing the
+    // in-process reader through send() exposed completed response state before
+    // the script's next statement and broke XMLHttpRequest turn ordering.
     xhr->async_flag = async_argument_omitted || it2b(js_to_boolean(async_arg));
-    if (async_argument_omitted && xhr->url && strncmp(xhr->url, "file:", 5) == 0) {
-        // The in-process file reader has no network turn to await. Preserve
-        // Lambda's established local-resource XHR contract: omitted async for
-        // file URLs completes in send(), while explicit async=true keeps the
-        // browser-style queued path for callers that require it.
-        xhr->async_flag = false;
-    }
     xhr->send_pending = false;
     xhr->async_dispatching = false;
     xhr->request_token++;

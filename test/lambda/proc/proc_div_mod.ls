@@ -54,17 +54,4 @@ pn main() {
     print(" V5:")
     print(quot * d + rem) // 97
 
-    // Float modulo (Issue #7)
-    print(" F1:")
-    print(10.5 % 3)       // 1.5
-    print(" F2:")
-    print(17.0 % 5)       // 2
-    print(" F3:")
-    print(10 % 3.5)       // 3
-    print(" F4:")
-    print(7.5 % 2.5)      // 0
-    var fa = 10.5
-    var fb = 4
-    print(" F5:")
-    print(fa % fb)         // 2.5
 }

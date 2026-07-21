@@ -1,4 +1,6 @@
 #include "transpiler.hpp"
+#include "lambda-number-types.hpp"
+#include "lambda-number-runtime.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "concurrency.h"
@@ -42,28 +44,6 @@ extern "C" Map* create_match_map_ext(const char* match_str, size_t match_len, in
 
 // forward declaration of static error string (defined later in this file)
 extern String& STR_ERROR;
-
-static bool item_to_integral_index(Item item, int64_t* out) {
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT) {
-        *out = item.get_int56();
-        return true;
-    }
-    if (type == LMD_TYPE_INT64) {
-        *out = item.get_int64();
-        return true;
-    }
-    if (is_float_type_id(type)) {
-        double val = item.get_double();
-        if (isnan(val) || isinf(val)) return false;
-        if (val < (double)LLONG_MIN || val > (double)LLONG_MAX) return false;
-        int64_t int_val = (int64_t)val;
-        if ((double)int_val != val) return false;
-        *out = int_val;
-        return true;
-    }
-    return false;
-}
 
 // External path resolution function (implemented in path.c)
 extern "C" Item path_resolve_for_iteration(Path* path);
@@ -512,14 +492,10 @@ Item fn_normalize(Item str_item, Item type_item) {
 }
 
 Range* fn_to(Item item_a, Item item_b) {
-    TypeId item_a_type = get_type_id(item_a);
-    TypeId item_b_type = get_type_id(item_b);
-    if ((is_integer_type_id(item_a_type) || is_float_type_id(item_a_type)) &&
-        (is_integer_type_id(item_b_type) || is_float_type_id(item_b_type))) {
-        int64_t start = item_a_type == LMD_TYPE_INT ? item_a.get_int56() :
-            item_a_type == LMD_TYPE_INT64 ? item_a.get_int64() : (int64_t)item_a.get_double();
-        int64_t end = item_b_type == LMD_TYPE_INT ? item_b.get_int56() :
-            item_b_type == LMD_TYPE_INT64 ? item_b.get_int64() : (int64_t)item_b.get_double();
+    int64_t start = 0;
+    int64_t end = 0;
+    if (lambda_item_to_int64_exact(item_a, &start) &&
+            lambda_item_to_int64_exact(item_b, &end)) {
         if (start > end) {
             // return empty range instead of NULL
             log_debug("Error: start of range is greater than end: %ld > %ld", start, end);
@@ -536,7 +512,8 @@ Range* fn_to(Item item_a, Item item_b) {
         return range;
     }
     else {
-        log_error("unknown range type: %s, %s", get_type_name(item_a._type_id), get_type_name(item_b._type_id));
+        log_error("unknown range type: %s, %s",
+            get_type_name(get_type_id(item_a)), get_type_name(get_type_id(item_b)));
         return NULL;
     }
 }
@@ -844,77 +821,16 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
     }
 }
 
-static bool sized_kind_is_integer(NumSizedType kind) {
-    return kind == NUM_INT8 || kind == NUM_INT16 || kind == NUM_INT32 ||
-           kind == NUM_UINT8 || kind == NUM_UINT16 || kind == NUM_UINT32;
-}
-
-static bool numeric_type_subsumes_sized(NumSizedType actual, NumSizedType target) {
-    if (actual == target) return true;
-    switch (target) {
-    case NUM_INT16:
-        return actual == NUM_INT8 || actual == NUM_UINT8;
-    case NUM_INT32:
-        return actual == NUM_INT8 || actual == NUM_INT16 ||
-               actual == NUM_UINT8 || actual == NUM_UINT16;
-    case NUM_UINT16:
-        return actual == NUM_UINT8;
-    case NUM_UINT32:
-        return actual == NUM_UINT8 || actual == NUM_UINT16;
-    case NUM_FLOAT16:
-        return actual == NUM_INT8 || actual == NUM_UINT8;
-    case NUM_FLOAT32:
-        return actual == NUM_FLOAT16 || actual == NUM_INT8 || actual == NUM_INT16 ||
-               actual == NUM_UINT8 || actual == NUM_UINT16;
-    default:
-        return false;
-    }
-}
-
 static bool numeric_type_subsumes(Type* actual, Type* target) {
     if (!actual || !target) return false;
     if (target == &TYPE_NUMBER) return IS_NUMERIC_ID(actual->type_id);
     if (actual == &TYPE_NUMBER) return target == &TYPE_NUMBER;
-    if (target == &TYPE_INTEGER) {
-        return actual == &TYPE_INTEGER || actual->type_id == LMD_TYPE_INT ||
-               actual->type_id == LMD_TYPE_INT64 || actual->type_id == LMD_TYPE_UINT64 ||
-               (actual->type_id == LMD_TYPE_NUM_SIZED && sized_kind_is_integer((NumSizedType)actual->kind));
+    LambdaNumericKind actual_kind = lambda_numeric_kind_from_type(actual);
+    LambdaNumericKind target_kind = lambda_numeric_kind_from_type(target);
+    if (actual_kind != LAMBDA_NUM_INVALID && target_kind != LAMBDA_NUM_INVALID) {
+        return lambda_numeric_kind_exactly_embeds(actual_kind, target_kind);
     }
-    if (target->type_id == LMD_TYPE_DECIMAL) {
-        return actual == &TYPE_INTEGER || IS_NUMERIC_ID(actual->type_id);
-    }
-    if (actual == &TYPE_INTEGER) return false;
-    if (actual->type_id == LMD_TYPE_FLOAT64) actual = &TYPE_FLOAT;
-    if (target->type_id == LMD_TYPE_FLOAT64) target = &TYPE_FLOAT;
-    if (actual->type_id == target->type_id) {
-        if (actual->type_id != LMD_TYPE_NUM_SIZED) return true;
-        return numeric_type_subsumes_sized((NumSizedType)actual->kind, (NumSizedType)target->kind);
-    }
-    if (actual->type_id == LMD_TYPE_NUM_SIZED) {
-        NumSizedType kind = (NumSizedType)actual->kind;
-        if (target->type_id == LMD_TYPE_INT) {
-            return sized_kind_is_integer(kind);
-        }
-        if (target->type_id == LMD_TYPE_INT64) {
-            return kind == NUM_INT8 || kind == NUM_INT16 || kind == NUM_INT32 ||
-                   kind == NUM_UINT8 || kind == NUM_UINT16 || kind == NUM_UINT32;
-        }
-        if (target->type_id == LMD_TYPE_UINT64) {
-            return kind == NUM_UINT8 || kind == NUM_UINT16 || kind == NUM_UINT32;
-        }
-        if (target->type_id == LMD_TYPE_FLOAT) {
-            return kind == NUM_FLOAT16 || kind == NUM_FLOAT32 ||
-                   kind == NUM_INT8 || kind == NUM_INT16 || kind == NUM_INT32 ||
-                   kind == NUM_UINT8 || kind == NUM_UINT16 || kind == NUM_UINT32;
-        }
-    }
-    if (actual->type_id == LMD_TYPE_INT) {
-        return target->type_id == LMD_TYPE_INT64 || target->type_id == LMD_TYPE_FLOAT;
-    }
-    if (actual->type_id == LMD_TYPE_INT64) return false;
-    if (actual->type_id == LMD_TYPE_UINT64) return false;
-    if (actual->type_id == LMD_TYPE_FLOAT) return false;
-    return false;
+    return actual->type_id == target->type_id;
 }
 
 static Type* item_static_type_for_is(Item item, Type* scratch) {
@@ -922,6 +838,11 @@ static Type* item_static_type_for_is(Item item, Type* scratch) {
     if (type_id == LMD_TYPE_TYPE) {
         TypeType* tt = (TypeType*)item.type;
         return tt ? tt->type : NULL;
+    }
+    if (type_id == LMD_TYPE_DECIMAL) {
+        Decimal* decimal = item.get_decimal();
+        return decimal && decimal->unlimited == DECIMAL_BIGINT ?
+            &TYPE_INTEGER_VALUE : &TYPE_DECIMAL;
     }
     scratch->type_id = type_id;
     scratch->kind = 0;
@@ -977,10 +898,9 @@ Bool fn_is(Item a, Item b) {
         if (base->type_id != LMD_TYPE_TYPE) {
             // Base is a primitive type like int, string, etc.
             if (a_type_id != base->type_id) {
-                // Allow numeric coercion: int is valid for int64, float is valid for float64, etc.
-                if (!(base == &TYPE_NUMBER && IS_NUMERIC_ID(a_type_id)) &&
-                    !(IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(base->type_id) &&
-                      LMD_TYPE_INT <= a_type_id && a_type_id <= base->type_id)) {
+                Type actual_scratch = {};
+                Type* actual_type = item_static_type_for_is(a, &actual_scratch);
+                if (!numeric_type_subsumes(actual_type, base)) {
                     return BOOL_FALSE;
                 }
             }
@@ -1149,82 +1069,10 @@ Bool fn_is_nan(Item a) {
 // forward declaration for recursive structural equality
 static Bool fn_eq_depth(Item a_item, Item b_item, int depth);
 
-enum EqNumberKind {
-    EQ_NUMBER_SIGNED,
-    EQ_NUMBER_UNSIGNED,
-    EQ_NUMBER_FLOAT
-};
-
-static bool numeric_item_parts(Item item, EqNumberKind* kind, int64_t* sval, uint64_t* uval, double* fval) {
-    switch (get_type_id(item)) {
-    case LMD_TYPE_INT:
-        *kind = EQ_NUMBER_SIGNED; *sval = item.get_int56(); return true;
-    case LMD_TYPE_INT64:
-        *kind = EQ_NUMBER_SIGNED; *sval = item.get_int64(); return true;
-    case LMD_TYPE_UINT64:
-        *kind = EQ_NUMBER_UNSIGNED; *uval = item.get_uint64(); return true;
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
-        *kind = EQ_NUMBER_FLOAT; *fval = item.get_double(); return true;
-    case LMD_TYPE_NUM_SIZED:
-        switch (item.get_num_type()) {
-        case NUM_INT8:    *kind = EQ_NUMBER_SIGNED; *sval = item.get_i8(); return true;
-        case NUM_INT16:   *kind = EQ_NUMBER_SIGNED; *sval = item.get_i16(); return true;
-        case NUM_INT32:   *kind = EQ_NUMBER_SIGNED; *sval = item.get_i32(); return true;
-        case NUM_UINT8:   *kind = EQ_NUMBER_UNSIGNED; *uval = item.get_u8(); return true;
-        case NUM_UINT16:  *kind = EQ_NUMBER_UNSIGNED; *uval = item.get_u16(); return true;
-        case NUM_UINT32:  *kind = EQ_NUMBER_UNSIGNED; *uval = item.get_u32(); return true;
-        case NUM_FLOAT16: *kind = EQ_NUMBER_FLOAT; *fval = item.get_f16(); return true;
-        case NUM_FLOAT32: *kind = EQ_NUMBER_FLOAT; *fval = item.get_f32(); return true;
-        default:          return false;
-        }
-    default:
-        return false;
-    }
-}
-
-static bool double_equals_int64_exact(double d, int64_t value) {
-    if (!isfinite(d) || d != trunc(d) || d < -0x1p63 || d >= 0x1p63) return false;
-    int64_t di = (int64_t)d;
-    return di == value && (double)di == d;
-}
-
-static bool double_equals_uint64_exact(double d, uint64_t value) {
-    if (!isfinite(d) || d != trunc(d) || d < 0.0 || d >= 0x1p64) return false;
-    uint64_t du = (uint64_t)d;
-    return du == value && (double)du == d;
-}
-
 static Bool numeric_items_equal_exact(Item a_item, Item b_item) {
-    if (a_item._type_id == LMD_TYPE_DECIMAL || b_item._type_id == LMD_TYPE_DECIMAL) {
-        int cmp = decimal_cmp_items(a_item, b_item);
-        return (cmp == 0) ? BOOL_TRUE : BOOL_FALSE;
-    }
-
-    EqNumberKind ak, bk;
-    int64_t as = 0, bs = 0;
-    uint64_t au = 0, bu = 0;
-    double af = 0.0, bf = 0.0;
-    if (!numeric_item_parts(a_item, &ak, &as, &au, &af) ||
-        !numeric_item_parts(b_item, &bk, &bs, &bu, &bf)) {
-        return BOOL_FALSE;
-    }
-
-    // equality must not collapse large integer lanes through binary64 rounding.
-    if (ak == EQ_NUMBER_FLOAT && bk == EQ_NUMBER_FLOAT) return (af == bf) ? BOOL_TRUE : BOOL_FALSE;
-    if (ak == EQ_NUMBER_SIGNED && bk == EQ_NUMBER_SIGNED) return (as == bs) ? BOOL_TRUE : BOOL_FALSE;
-    if (ak == EQ_NUMBER_UNSIGNED && bk == EQ_NUMBER_UNSIGNED) return (au == bu) ? BOOL_TRUE : BOOL_FALSE;
-    if (ak == EQ_NUMBER_SIGNED && bk == EQ_NUMBER_UNSIGNED) {
-        return (as >= 0 && (uint64_t)as == bu) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    if (ak == EQ_NUMBER_UNSIGNED && bk == EQ_NUMBER_SIGNED) {
-        return (bs >= 0 && au == (uint64_t)bs) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    if (ak == EQ_NUMBER_FLOAT && bk == EQ_NUMBER_SIGNED) return double_equals_int64_exact(af, bs) ? BOOL_TRUE : BOOL_FALSE;
-    if (ak == EQ_NUMBER_SIGNED && bk == EQ_NUMBER_FLOAT) return double_equals_int64_exact(bf, as) ? BOOL_TRUE : BOOL_FALSE;
-    if (ak == EQ_NUMBER_FLOAT && bk == EQ_NUMBER_UNSIGNED) return double_equals_uint64_exact(af, bu) ? BOOL_TRUE : BOOL_FALSE;
-    if (ak == EQ_NUMBER_UNSIGNED && bk == EQ_NUMBER_FLOAT) return double_equals_uint64_exact(bf, au) ? BOOL_TRUE : BOOL_FALSE;
-    return BOOL_FALSE;
+    LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
+    return comparison.valid && !comparison.unordered && comparison.order == 0 ?
+        BOOL_TRUE : BOOL_FALSE;
 }
 
 // forward declaration: get field value from a map's packed data by shape entry
@@ -1491,6 +1339,9 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
 
     TypeId a_type_id = get_type_id(a_item);
     TypeId b_type_id = get_type_id(b_item);
+    if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
+        return numeric_items_equal_exact(a_item, b_item);
+    }
     if (a_type_id != b_type_id) {
         // special case: type(null) == null, type(error) == error
         // when one side is a type value and the other is null/error,
@@ -1511,11 +1362,6 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
             TypeType* tt = (TypeType*)type_item.type;
             return (tt->type->type_id == get_type_id(value_item)) ? BOOL_TRUE : BOOL_FALSE;
         }
-        // number promotion - only for numeric types (int/int64/float/decimal/num_sized/uint64)
-        if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
-            return numeric_items_equal_exact(a_item, b_item);
-        }
-
         // cross-type sequence comparison: range, list, and array types
         // all represent ordered sequences and can be compared element-wise
         TypeId a_tid = a_type_id;
@@ -1541,25 +1387,6 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
     }
     else if (a_type_id == LMD_TYPE_BOOL) {
         return (a_item.bool_val == b_item.bool_val) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_INT) {
-        return (a_item.get_int56() == b_item.get_int56()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_INT64) {
-        return (a_item.get_int64() == b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (is_float_type_id(a_type_id)) {
-        return (a_item.get_double() == b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_NUM_SIZED) {
-        return (a_item.get_num_sized_as_double() == b_item.get_num_sized_as_double()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_UINT64) {
-        return (a_item.get_uint64() == b_item.get_uint64()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_DECIMAL) {
-        int cmp = decimal_cmp_items(a_item, b_item);
-        return (cmp == 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
@@ -1800,13 +1627,10 @@ int total_cmp(Item a_item, Item b_item) {
     TypeId a_tid = get_type_id(a_item);
     TypeId b_tid = get_type_id(b_item);
     if (rank_a == 3) {
-        if (a_tid == LMD_TYPE_DECIMAL || b_tid == LMD_TYPE_DECIMAL) {
-            int cmp = decimal_cmp_items(a_item, b_item);
-            return (cmp > 0) - (cmp < 0);
-        }
-        double av = it2d(a_item);
-        double bv = it2d(b_item);
-        return (av > bv) - (av < bv);
+        LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
+        // Preserve total_cmp's established equivalence for unordered NaNs while
+        // keeping full-width integer ordering exact.
+        return comparison.valid && !comparison.unordered ? comparison.order : 0;
     }
     if (a_tid == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();
@@ -1896,17 +1720,12 @@ static bool datetime_magnitude_comparable(DateTime* a, DateTime* b) {
 Bool fn_lt_scalar(Item a_item, Item b_item) {
     TypeId a_type_id = get_type_id(a_item);
     TypeId b_type_id = get_type_id(b_item);
+    if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
+        LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
+        return comparison.valid && !comparison.unordered && comparison.order < 0 ?
+            BOOL_TRUE : BOOL_FALSE;
+    }
     if (a_type_id != b_type_id) {
-        // number promotion - only for numeric types
-        if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
-            if (a_type_id == LMD_TYPE_DECIMAL || b_type_id == LMD_TYPE_DECIMAL) {
-                // Decimal-visible ordering uses the same canonical float conversion as equality.
-                int cmp = decimal_cmp_items(a_item, b_item);
-                return (cmp < 0) ? BOOL_TRUE : BOOL_FALSE;
-            }
-            double a_val = it2d(a_item), b_val = it2d(b_item);
-            return (a_val < b_val) ? BOOL_TRUE : BOOL_FALSE;
-        }
         // Type mismatch error for ordered comparisons
         return BOOL_ERROR;
     }
@@ -1916,25 +1735,6 @@ Bool fn_lt_scalar(Item a_item, Item b_item) {
     }
     else if (a_type_id == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
-    }
-    else if (a_type_id == LMD_TYPE_INT) {
-        return (a_item.get_int56() < b_item.get_int56()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_INT64) {
-        return (a_item.get_int64() < b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (is_float_type_id(a_type_id)) {
-        return (a_item.get_double() < b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_NUM_SIZED) {
-        return (a_item.get_num_sized_as_double() < b_item.get_num_sized_as_double()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_UINT64) {
-        return (a_item.get_uint64() < b_item.get_uint64()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_DECIMAL) {
-        int cmp = decimal_cmp_items(a_item, b_item);
-        return (cmp < 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
@@ -1957,17 +1757,12 @@ Bool fn_lt_scalar(Item a_item, Item b_item) {
 Bool fn_gt_scalar(Item a_item, Item b_item) {
     TypeId a_type_id = get_type_id(a_item);
     TypeId b_type_id = get_type_id(b_item);
+    if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
+        LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
+        return comparison.valid && !comparison.unordered && comparison.order > 0 ?
+            BOOL_TRUE : BOOL_FALSE;
+    }
     if (a_type_id != b_type_id) {
-        // number promotion - only for numeric types
-        if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
-            if (a_type_id == LMD_TYPE_DECIMAL || b_type_id == LMD_TYPE_DECIMAL) {
-                // Decimal-visible ordering uses the same canonical float conversion as equality.
-                int cmp = decimal_cmp_items(a_item, b_item);
-                return (cmp > 0) ? BOOL_TRUE : BOOL_FALSE;
-            }
-            double a_val = it2d(a_item), b_val = it2d(b_item);
-            return (a_val > b_val) ? BOOL_TRUE : BOOL_FALSE;
-        }
         // Type mismatch error for ordered comparisons
         return BOOL_ERROR;
     }
@@ -1977,25 +1772,6 @@ Bool fn_gt_scalar(Item a_item, Item b_item) {
     }
     else if (a_type_id == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
-    }
-    else if (a_type_id == LMD_TYPE_INT) {
-        return (a_item.get_int56() > b_item.get_int56()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_INT64) {
-        return (a_item.get_int64() > b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (is_float_type_id(a_type_id)) {
-        return (a_item.get_double() > b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_NUM_SIZED) {
-        return (a_item.get_num_sized_as_double() > b_item.get_num_sized_as_double()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_UINT64) {
-        return (a_item.get_uint64() > b_item.get_uint64()) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_DECIMAL) {
-        int cmp = decimal_cmp_items(a_item, b_item);
-        return (cmp > 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
@@ -2231,6 +2007,24 @@ Item fn_child_query(Item data, Item type_val) {
     return {.array = result};
 }
 
+static int64_t array_num_find_equal(ArrayNum* array, Item needle, bool reverse) {
+    if (!array) return -1;
+    RootFrame roots((Context*)context, 2);
+    Rooted<ArrayNum*> rooted_array(roots, array);
+    Rooted<Item> rooted_needle(roots, needle);
+    int64_t index = reverse ? array->length - 1 : 0;
+    int64_t limit = reverse ? -1 : array->length;
+    int64_t step = reverse ? -1 : 1;
+    for (; index != limit; index += step) {
+        // Compact arrays can contain sized and ordinary numeric lanes. Compare
+        // boxed lane values through the language equality relation so an
+        // arithmetic-derived `integer` is never truncated through binary64.
+        Item value = array_num_get(rooted_array.get(), index);
+        if (fn_eq(value, rooted_needle.get()) == BOOL_TRUE) return index;
+    }
+    return -1;
+}
+
 Bool fn_in(Item a_item, Item b_item) {
     if (b_item._type_id) { // b is scalar
         if (b_item._type_id == LMD_TYPE_STRING && a_item._type_id == LMD_TYPE_STRING) {
@@ -2264,7 +2058,8 @@ Bool fn_in(Item a_item, Item b_item) {
         }
         else if (b_type == LMD_TYPE_RANGE) {
             Range *range = b_item.range;
-            int64_t a_val = it2l(a_item);
+            int64_t a_val = 0;
+            if (!lambda_item_to_int64_exact(a_item, &a_val)) return false;
             return range->start <= a_val && a_val <= range->end;
         }
         else if (b_type == LMD_TYPE_ARRAY) {
@@ -2277,23 +2072,7 @@ Bool fn_in(Item a_item, Item b_item) {
             return false;
         }
         else if (b_type == LMD_TYPE_ARRAY_NUM) {
-            ArrayNum *arr = b_item.array_num;
-            if (arr->get_elem_type() == ELEM_FLOAT64) {
-                double a_val = it2d(a_item);
-                for (int64_t i = 0; i < arr->length; i++) {
-                    if (arr->float_items[i] == a_val) {
-                        return true;
-                    }
-                }
-            } else {
-                int64_t a_val = it2l(a_item);
-                for (int64_t i = 0; i < arr->length; i++) {
-                    if (arr->items[i] == a_val) {
-                        return true;
-                    }
-                }
-            }
-            return false;
+            return array_num_find_equal(b_item.array_num, a_item, false) >= 0;
         }
         else if (b_type == LMD_TYPE_MAP || b_type == LMD_TYPE_OBJECT) {
             // value membership: check if a matches any field value
@@ -2348,28 +2127,7 @@ Bool fn_in(Item a_item, Item b_item) {
 }
 
 static bool item_to_possession_index(Item item, int64_t* out) {
-    TypeId type = get_type_id(item);
-    if (type == LMD_TYPE_INT) {
-        *out = item.get_int56();
-        return true;
-    }
-    if (type == LMD_TYPE_INT64) {
-        *out = item.get_int64();
-        return true;
-    }
-    if (type == LMD_TYPE_NUM_SIZED) {
-        NumSizedType st = item.get_num_type();
-        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return false;
-        *out = item.get_num_sized_as_int64();
-        return true;
-    }
-    if (type == LMD_TYPE_UINT64) {
-        uint64_t u = item.get_uint64();
-        if (u > (uint64_t)INT64_MAX) return false;
-        *out = (int64_t)u;
-        return true;
-    }
-    return false;
+    return lambda_item_to_int64_exact(item, out) != 0;
 }
 
 static bool shape_has_named_key(TypeMap* map_type, Item key_item) {
@@ -3279,32 +3037,17 @@ Item fn_index(Item item, Item index_item) {
         return ItemNull;
     }
 
-    // Determine the type and delegate to appropriate getter
+    // Arithmetic-derived semantic integers are decimal-backed Items. Sequence
+    // access must consume their exact value instead of rejecting the storage tag.
     int64_t index = -1;
-    switch (get_type_id(index_item)) {
-    case LMD_TYPE_INT:
-        index = index_item.get_int56();
-        break;
-    case LMD_TYPE_INT64:
-        index = index_item.get_int64();
-        break;
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
-        double dval = index_item.get_double();
-        // check dval is an integer
-        if (dval == (int64_t)dval) {
-            index = (int64_t)dval;
-        } else {
-        log_debug("index must be an integer, got float %g", dval);
-            return ItemNull;  // todo: push error
-        }
-        break;
-    }
+    if (lambda_item_to_int64_exact(index_item, &index)) return item_at(item, index);
+
+    TypeId index_type = get_type_id(index_item);
+    switch (index_type) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:
         return fn_member(item, index_item);
     default: {
         // check for type value (pointer-based, so _type_id is 0)
-        TypeId index_type = get_type_id(index_item);
         if (index_type == LMD_TYPE_TYPE) {
             return fn_child_query(item, index_item);
         }
@@ -3327,7 +3070,12 @@ Item fn_index(Item item, Item index_item) {
     }
     }
 
-    return item_at(item, index);
+    return ItemNull;
+}
+
+int64_t fn_int64_index(Item item) {
+    int64_t value = INT64_MIN;
+    return lambda_item_to_int64_exact(item, &value) ? value : INT64_MIN;
 }
 
 Item fn_member(Item item, Item key) {
@@ -3731,12 +3479,12 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
 
     int64_t start = 0;
     int64_t end = 0;
-    if (!item_to_integral_index(start_item, &start)) {
+    if (!lambda_item_to_int64_exact(start_item, &start)) {
         log_debug("fn_substring: start index must be an integer-valued number");
         return ItemError;
     }
 
-    if (!item_to_integral_index(end_item, &end)) {
+    if (!lambda_item_to_int64_exact(end_item, &end)) {
         log_debug("fn_substring: end index must be an integer-valued number");
         return ItemError;
     }
@@ -3848,19 +3596,7 @@ Bool fn_contains(Item str_item, Item substr_item) {
     }
     if (coll_type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = str_item.array_num;
-        if (!arr) return BOOL_FALSE;
-        if (arr->get_elem_type() == ELEM_FLOAT64) {
-            double val = it2d(substr_item);
-            for (int64_t i = 0; i < arr->length; i++) {
-                if (arr->float_items[i] == val) return BOOL_TRUE;
-            }
-        } else {
-            int64_t val = it2l(substr_item);
-            for (int64_t i = 0; i < arr->length; i++) {
-                if (arr->items[i] == val) return BOOL_TRUE;
-            }
-        }
-        return BOOL_FALSE;
+        return array_num_find_equal(arr, substr_item, false) >= 0 ? BOOL_TRUE : BOOL_FALSE;
     }
 
     // --- Map: check if any key matches ---
@@ -4014,19 +3750,7 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
     }
     if (coll_type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = str_item.array_num;
-        if (!arr) return -1;
-        if (arr->get_elem_type() == ELEM_FLOAT64) {
-            double val = it2d(sub_item);
-            for (int64_t i = 0; i < arr->length; i++) {
-                if (arr->float_items[i] == val) return i;
-            }
-        } else {
-            int64_t val = it2l(sub_item);
-            for (int64_t i = 0; i < arr->length; i++) {
-                if (arr->items[i] == val) return i;
-            }
-        }
-        return -1;
+        return array_num_find_equal(arr, sub_item, false);
     }
 
     // --- String/Symbol: substring search ---
@@ -4099,19 +3823,7 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
     }
     if (coll_type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = str_item.array_num;
-        if (!arr) return -1;
-        if (arr->get_elem_type() == ELEM_FLOAT64) {
-            double val = it2d(sub_item);
-            for (int64_t i = arr->length - 1; i >= 0; i--) {
-                if (arr->float_items[i] == val) return i;
-            }
-        } else {
-            int64_t val = it2l(sub_item);
-            for (int64_t i = arr->length - 1; i >= 0; i--) {
-                if (arr->items[i] == val) return i;
-            }
-        }
-        return -1;
+        return array_num_find_equal(arr, sub_item, true);
     }
 
     // --- String/Symbol: substring search from end ---
@@ -4516,11 +4228,11 @@ Item fn_split(Item str_item, Item sep_item) {
 
     // typed array split: split(arr, n) → n equal parts along axis 0
     if (str_type == LMD_TYPE_ARRAY_NUM) {
-        if (!is_integer_type_id(sep_type)) {
-            log_error("split: section count must be an integer");
+        int64_t n = 0;
+        if (!lambda_item_to_int64_exact(sep_item, &n)) {
+            log_error("split: section count must be an integer-valued number");
             return ItemError;
         }
-        int64_t n = (sep_type == LMD_TYPE_INT) ? sep_item.get_int56() : sep_item.get_int64();
         return fn_array_split(str_item, n, 0);
     }
 
@@ -4653,12 +4365,12 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
 
     // typed array split with explicit axis: split(arr, n, axis)
     if (str_type == LMD_TYPE_ARRAY_NUM) {
-        if (!is_integer_type_id(sep_type) || !is_integer_type_id(keep_type)) {
-            log_error("split: section count and axis must be integers");
+        int64_t n = 0, axis = 0;
+        if (!lambda_item_to_int64_exact(sep_item, &n) ||
+                !lambda_item_to_int64_exact(keep_item, &axis)) {
+            log_error("split: section count and axis must be integer-valued numbers");
             return ItemError;
         }
-        int64_t n    = (sep_type == LMD_TYPE_INT) ? sep_item.get_int56() : sep_item.get_int64();
-        int64_t axis = (keep_type == LMD_TYPE_INT) ? keep_item.get_int56() : keep_item.get_int64();
         return fn_array_split(str_item, n, axis);
     }
 
@@ -4792,8 +4504,9 @@ Item fn_chr(Item cp_item) {
         return {.item = s2it(empty)};
     }
 
-    int64_t codepoint = it2l(cp_item);
-    if (codepoint < 0 || codepoint > 0x10FFFF) {
+    int64_t codepoint = 0;
+    if (!lambda_item_to_int64_exact(cp_item, &codepoint) ||
+            codepoint < 0 || codepoint > 0x10FFFF) {
         log_debug("fn_chr: code point %lld out of range (0..0x10FFFF)", (long long)codepoint);
         String* empty = heap_strcpy("", 0);
         return {.item = s2it(empty)};
@@ -4951,7 +4664,7 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
     Item limit_item = _map_get((TypeMap*)options_map->type, options_map->data, "limit", &is_found);
     if (is_found && get_type_id(limit_item) != LMD_TYPE_NULL) {
         int64_t limit = 0;
-        if (!item_to_integral_index(limit_item, &limit)) {
+        if (!lambda_item_to_int64_exact(limit_item, &limit)) {
             log_debug("parse_find_replace_options: limit must be an integer");
             return false;
         }
@@ -4967,7 +4680,7 @@ static bool parse_find_replace_options(Item options_item, FindReplaceOptions* op
     Item last_item = _map_get((TypeMap*)options_map->type, options_map->data, "last", &is_found);
     if (is_found && get_type_id(last_item) != LMD_TYPE_NULL) {
         int64_t last = 0;
-        if (!item_to_integral_index(last_item, &last)) {
+        if (!lambda_item_to_int64_exact(last_item, &last)) {
             log_debug("parse_find_replace_options: last must be an integer");
             return false;
         }
@@ -5355,18 +5068,18 @@ DateTime fn_datetime1(Item arg) {
         }
         log_error("datetime: failed to parse string '%.*s'", (int)len, chars);
     }
-    else if (is_integer_type_id(arg_type)) {
+    else {
         // interpret as unix milliseconds
-        int64_t ms = arg_type == LMD_TYPE_INT ? (int64_t)arg.get_int56() : arg.get_int64();
-        DateTime* parsed = datetime_from_unix_ms(context->pool, ms);
-        if (parsed) {
-            DateTime dt = *parsed;
-            dt.precision = DATETIME_PRECISION_DATE_TIME;
-            return dt;
+        int64_t ms = 0;
+        if (lambda_item_to_int64_exact(arg, &ms)) {
+            DateTime* parsed = datetime_from_unix_ms(context->pool, ms);
+            if (parsed) {
+                DateTime dt = *parsed;
+                dt.precision = DATETIME_PRECISION_DATE_TIME;
+                return dt;
+            }
         }
-    }
-    else if (arg_type == LMD_TYPE_DTIME) {
-        return arg.get_datetime();
+        if (arg_type == LMD_TYPE_DTIME) return arg.get_datetime();
     }
 
     return DATETIME_MAKE_ERROR();  // error sentinel instead of all-zeros
@@ -5429,9 +5142,17 @@ DateTime fn_date3(Item y, Item m, Item d) {
     DateTime dt;
     memset(&dt, 0, sizeof(DateTime));
 
-    int year = (int)(get_type_id(y) == LMD_TYPE_INT ? y.get_int56() : (get_type_id(y) == LMD_TYPE_INT64 ? (int)y.get_int64() : 0));
-    int month = (int)(get_type_id(m) == LMD_TYPE_INT ? m.get_int56() : (get_type_id(m) == LMD_TYPE_INT64 ? (int)m.get_int64() : 0));
-    int day_val = (int)(get_type_id(d) == LMD_TYPE_INT ? d.get_int56() : (get_type_id(d) == LMD_TYPE_INT64 ? (int)d.get_int64() : 0));
+    int64_t year_value = 0, month_value = 0, day_value = 0;
+    if (!lambda_item_to_int64_exact(y, &year_value) ||
+            !lambda_item_to_int64_exact(m, &month_value) ||
+            !lambda_item_to_int64_exact(d, &day_value) ||
+            year_value < INT_MIN || year_value > INT_MAX) {
+        log_error("date: year, month, and day must be integer-valued numbers");
+        return DATETIME_MAKE_ERROR();
+    }
+    int year = (int)year_value;
+    int month = (int)month_value;
+    int day_val = (int)day_value;
 
     // validate ranges
     if (month < 1 || month > 12) {
@@ -5524,9 +5245,16 @@ DateTime fn_time3(Item h, Item m, Item s) {
     DateTime dt;
     memset(&dt, 0, sizeof(DateTime));
 
-    int hour_val = (int)(get_type_id(h) == LMD_TYPE_INT ? h.get_int56() : (get_type_id(h) == LMD_TYPE_INT64 ? (int)h.get_int64() : 0));
-    int minute_val = (int)(get_type_id(m) == LMD_TYPE_INT ? m.get_int56() : (get_type_id(m) == LMD_TYPE_INT64 ? (int)m.get_int64() : 0));
-    int second_val = (int)(get_type_id(s) == LMD_TYPE_INT ? s.get_int56() : (get_type_id(s) == LMD_TYPE_INT64 ? (int)s.get_int64() : 0));
+    int64_t hour_value = 0, minute_value = 0, second_value = 0;
+    if (!lambda_item_to_int64_exact(h, &hour_value) ||
+            !lambda_item_to_int64_exact(m, &minute_value) ||
+            !lambda_item_to_int64_exact(s, &second_value)) {
+        log_error("time: hour, minute, and second must be integer-valued numbers");
+        return DATETIME_MAKE_ERROR();
+    }
+    int hour_val = (int)hour_value;
+    int minute_val = (int)minute_value;
+    int second_val = (int)second_value;
 
     // validate ranges
     if (hour_val < 0 || hour_val > 23) {
@@ -5612,7 +5340,11 @@ Item fn_varg0() {
 
 // varg(n) - returns the nth variadic argument
 Item fn_varg1(Item index_item) {
-    int64_t index = it2l(index_item);
+    int64_t index = 0;
+    if (!lambda_item_to_int64_exact(index_item, &index)) {
+        log_debug("fn_varg1: index must be an integer-valued number");
+        return ItemNull;
+    }
     if (current_vargs == NULL) {
         log_debug("fn_varg1: no variadic args available");
         return ItemNull;

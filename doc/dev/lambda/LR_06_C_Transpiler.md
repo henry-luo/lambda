@@ -3,15 +3,15 @@
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the **legacy code-generation backend**: how the typed AST is lowered to **C source text** that is then handed to an embedded C compiler (c2mir) to produce MIR IR, which the JIT generator turns into native code. It owns the `Transpiler` struct and its `StrBuf` emission model, the per-node `transpile_*` family, the generated-C naming conventions, the `TypeBoxInfo` box/unbox table, the `lambda-embed.h` header-prepend trick, the `define_func`/`define_func_boxed` wrappers, the `_store_i64`/`_store_f64` SSA-reorder workaround, the `is_idiv_expr` unbox case, and the call-site parameter inference. The *default* backend — AST lowered directly to MIR with no C text — is a separate document, [LR_07 — The MIR Direct Transpiler & JIT](LR_07_MIR_Transpiler_JIT.md); this doc deliberately contrasts with it rather than repeating it.
 >
 > **Primary sources:** `lambda/transpile.cpp` (~8000 lines: the C-text emitter, all `transpile_*`/`define_*` node functions, call-site inference, loop-safety analysis), `lambda/transpile-call.cpp` (call-expression lowering split out of `transpile.cpp`), `lambda/transpile_shared.cpp` (naming/wrapper helpers shared with MIR Direct), `lambda/lambda-embed.h` (the bin2c dump of `lambda.h`), `lambda/mir.c` (`jit_compile_to_mir`, the c2mir entry).
-> **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names. **Status warning:** this entire path is `#ifdef LAMBDA_C2MIR`-gated and is **not compiled into a default build** — it is the mature reference backend, kept for `--c2mir`, and is *stale relative to MIR Direct* in several places noted below.
+> **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names. **Status warning:** this entire path is archived source. No supported core or Jube build defines `LAMBDA_C2MIR`, its source files are excluded from build configuration, the CLI no longer advertises it, and no test target builds it. The mechanics below are retained as historical reference and may be stale.
 
 ---
 
 ## 1. Purpose & scope
 
-Lambda is JIT-only, with two backends sharing one runtime. The **C2MIR** path documented here is the original: it walks the typed AST and emits C source text into a growable `StrBuf`, prepends the runtime API header, and feeds the whole thing to c2mir (the MIR project's embedded C compiler), which produces MIR IR; the MIR generator then emits native code. The **MIR Direct** path ([LR_07](LR_07_MIR_Transpiler_JIT.md)) skips the C-text and IR-from-C steps entirely, lowering the AST straight to MIR instructions. C2MIR remains the feature-complete reference (notably it has *full native typed-array support* that MIR Direct still lacks, §7), but it is slower to compile and is no longer the default.
+Lambda is JIT-only, with MIR Direct as its sole supported backend. The archived **C2MIR** path documented here was the original: it walked the typed AST and emitted C source text into a growable `StrBuf`, prepended the runtime API header, and fed the whole thing to c2mir (the MIR project's embedded C compiler), which produced MIR IR for native generation. **MIR Direct** ([LR_07](LR_07_MIR_Transpiler_JIT.md)) skips the C-text and IR-from-C steps entirely, lowering the AST straight to MIR instructions.
 
-Path selection is the `runtime->use_mir_direct` flag. `runner.cpp:594` routes the default to `compile_script_as_mir_direct`; the CLI `--c2mir` flag clears the flag (`main.cpp:3508`) and falls through to the C-text path, where `runner.cpp:668` skips past the embedded header and `runner.cpp:672` calls `jit_compile_to_mir`. Because the whole backend is compiled out by default (`jit_compile_to_mir` itself is `#ifdef LAMBDA_C2MIR` in `mir.c:149`), reading these files in a default checkout shows code that the build never links.
+Historical path selection used `runtime->use_mir_direct` and the `--c2mir` CLI flag. The guarded C-text arm and `jit_compile_to_mir` entry remain in source, but supported configurations neither compile nor expose them. Reading those files therefore describes an archived implementation, not a selectable runtime path.
 
 This doc owns the **AST → C-text → c2mir → MIR** lowering. The *value representation* the generated C manipulates is owned by [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); the *memory and GC* it allocates against by [LR_08 — Memory Management & Garbage Collection](LR_08_Memory_and_GC.md); the *runtime functions* it calls (`fn_*`, `array_*`, `push_*`, `it2*`) by [LR_09 — Runtime Builtins](LR_09_Runtime_Builtins.md); the *AST* it consumes by [LR_02 — Parsing & AST Construction](LR_02_Parsing_AST.md).
 
@@ -96,9 +96,9 @@ The main boxing emitter is `transpile_box_item` (`:996`). It first **short-circu
 | Param inference | `infer_proc_param_types_from_callsites` (call-site) | `infer_param_type` (evidence) — separate engine |
 | GC rooting | via runtime/embed model | precise root side-stack ([LR_07 §6](LR_07_MIR_Transpiler_JIT.md)) |
 | Debug dump | `temp/_transpiled*.c` | `temp/mir_dump.txt` |
-| Selection | `--c2mir`, `#ifdef LAMBDA_C2MIR` (legacy) | **default** (`use_mir_direct`) |
+| Selection | archived; excluded from builds/tests | sole supported path |
 
-Both backends share `transpile_shared.cpp` (naming + wrapper helpers), the `sys_func_defs[]`/`SysFuncInfo` table and runtime function set, and the `mir.c` import resolver — so a runtime function added once is reachable from either path.
+The archived source shares `transpile_shared.cpp`, the `sys_func_defs[]`/`SysFuncInfo` table, and parts of the runtime declarations with MIR Direct. That source sharing is not a compatibility promise and does not make C2MIR an acceptance target.
 
 ---
 
