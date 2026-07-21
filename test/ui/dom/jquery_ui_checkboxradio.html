@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>jQuery UI Checkboxradio — Radiant adapter</title>
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/core.css">
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/button.css">
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/checkboxradio.css">
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/theme.css">
+  <style>body { margin: 20px; font: 16px sans-serif; }</style>
+</head>
+<body>
+  <input id="newsletter" type="checkbox">
+  <label id="newsletter-label" for="newsletter">Newsletter</label>
+  <output id="status">unchecked</output>
+
+  <script src="../../jquery-ui/external/jquery/jquery.js"></script>
+  <script src="../../jquery-ui/ui/version.js"></script>
+  <script src="../../jquery-ui/ui/widget.js"></script>
+  <script src="../../jquery-ui/ui/form-reset-mixin.js"></script>
+  <script src="../../jquery-ui/ui/labels.js"></script>
+  <script src="../../jquery-ui/ui/widgets/checkboxradio.js"></script>
+  <script>
+    $("#newsletter").checkboxradio();
+    $("#newsletter").on("change", function() {
+      $("#status").text(this.checked ? "checked" : "unchecked");
+    });
+  </script>
+</body>
+</html>

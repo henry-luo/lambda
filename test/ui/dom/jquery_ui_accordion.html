@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>jQuery UI Accordion — Radiant adapter</title>
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/core.css">
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/accordion.css">
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/theme.css">
+  <style>
+    body { margin: 20px; font: 16px sans-serif; }
+    #accordion { width: 360px; }
+    #status { display: block; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div id="accordion">
+    <h3 id="section-one">One</h3>
+    <div id="panel-one"><p>First panel</p></div>
+    <h3 id="section-two">Two</h3>
+    <div id="panel-two"><p>Second panel</p></div>
+  </div>
+  <output id="status">initial</output>
+
+  <script src="../../jquery-ui/external/jquery/jquery.js"></script>
+  <script src="../../jquery-ui/ui/version.js"></script>
+  <script src="../../jquery-ui/ui/keycode.js"></script>
+  <script src="../../jquery-ui/ui/unique-id.js"></script>
+  <script src="../../jquery-ui/ui/widget.js"></script>
+  <script src="../../jquery-ui/ui/widgets/accordion.js"></script>
+  <script>
+    $("#accordion").accordion({
+      animate: false,
+      collapsible: true,
+      heightStyle: "content",
+      activate: function(event, ui) {
+        $("#status").text(ui.newHeader.attr("id") || "collapsed");
+      }
+    });
+  </script>
+</body>
+</html>

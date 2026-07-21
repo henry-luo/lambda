@@ -1,0 +1,21 @@
+{
+  "name": "jQuery UI Accordion switches and collapses panels through native clicks",
+  "html": "test/ui/dom/jquery_ui_accordion.html",
+  "events": [
+    {"type": "wait", "ms": 30},
+    {"type": "assert_class", "target": {"selector": "#section-one"}, "class": "ui-accordion-header"},
+    {"type": "assert_visible", "target": {"selector": "#panel-one"}, "visible": true},
+    {"type": "assert_style", "target": {"selector": "#panel-two"}, "property": "display", "equals": "none"},
+    {"type": "assert_visible", "target": {"selector": "#panel-two"}, "visible": false},
+    {"type": "click", "target": {"selector": "#section-two"}},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_class", "target": {"selector": "#section-two"}, "class": "ui-accordion-header-active"},
+    {"type": "assert_visible", "target": {"selector": "#panel-one"}, "visible": false},
+    {"type": "assert_visible", "target": {"selector": "#panel-two"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "section-two"},
+    {"type": "click", "target": {"selector": "#section-two"}},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_visible", "target": {"selector": "#panel-two"}, "visible": false},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "collapsed"}
+  ]
+}

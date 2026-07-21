@@ -1,0 +1,12 @@
+{
+  "name": "Bootstrap toast opens and closes through native controls",
+  "html": "test/ui/dom/bootstrap_overlays.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#toast-trigger"}},
+    {"type": "assert_class", "target": {"selector": "#toast"}, "class": "show"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "toast:shown.bs.toast"},
+    {"type": "click", "target": {"selector": "#toast-close"}},
+    {"type": "assert_class", "target": {"selector": "#toast"}, "class": "show", "present": false},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "toast:hidden.bs.toast"}
+  ]
+}

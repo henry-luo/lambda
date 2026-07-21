@@ -10272,45 +10272,6 @@ static bool js_inline_style_cssom_property_exposed(const char* css_prop) {
     return true;
 }
 
-// Helper: parse class_names from space-separated string, updates elem->class_names/class_count
-static void parse_class_names(DomElement* elem, const char* class_str) {
-    if (!elem || !class_str) return;
-
-    // count classes
-    int count = 0;
-    const char* p = class_str;
-    while (*p) {
-        while (*p == ' ') p++;
-        if (!*p) break;
-        count++;
-        while (*p && *p != ' ') p++;
-    }
-
-    // allocate class_names array in the document arena
-    Pool* pool = elem->doc ? elem->doc->document_pool : nullptr;
-    const char** names = nullptr;
-    if (count > 0 && pool) {
-        names = (const char**)pool_alloc(pool, count * sizeof(const char*));
-        int idx = 0;
-        p = class_str;
-        while (*p) {
-            while (*p == ' ') p++;
-            if (!*p) break;
-            const char* start = p;
-            while (*p && *p != ' ') p++;
-            size_t len = p - start;
-            char* cname = (char*)pool_alloc(pool, len + 1);
-            memcpy(cname, start, len);
-            cname[len] = '\0';
-            names[idx++] = cname;
-        }
-    }
-
-    elem->class_names = names;
-    elem->class_count = count;
-    elem->set_styles_resolved(false);  // mark for re-cascading
-}
-
 extern "C" Item radiant_dom_set_property(Item elem_item, Item prop_name, Item value);
 
 extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) {
@@ -10436,8 +10397,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     if (strcmp(prop, "className") == 0) {
         const char* class_str = fn_to_cstr(value);
         if (class_str) {
-            parse_class_names(elem, class_str);
-            // also update the native element attribute
+            // set_attribute owns the pooled class cache; writing class_names
+            // directly bypasses its persistent-field lifetime bookkeeping.
             elem->set_attribute("class", class_str);
             js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("js_dom_set_property: set className='%s' on <%s>",
@@ -12056,9 +12017,6 @@ extern "C" Item js_dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has
             }
         }
     }
-    clone->id = elem->id;
-    clone->class_names = elem->class_names;
-    clone->class_count = elem->class_count;
     clone->tag_id = elem->tag_id;
     if (deep) {
         DomNode* child = elem->first_child;
@@ -12577,6 +12535,9 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (!selector_group) return ItemNull;
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
+        // CSS Selectors defines :scope relative to the Element query receiver.
+        // Without this binding, jQuery's scoped relative selectors match no descendants.
+        selector_matcher_set_scope_element(matcher, elem);
         DomElement* found = js_dom_selector_group_find_first(
             matcher, selector_group, elem, false);
         return found ? js_dom_wrap_element(found) : ItemNull;
@@ -12600,6 +12561,8 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
         if (!selector_group) return (Item){.array = arr};
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
+        // Keep :scope anchored to this Element for relative selector queries.
+        selector_matcher_set_scope_element(matcher, elem);
         ArrayList* results = arraylist_new(16);
         if (!results) return (Item){.array = arr};
         js_dom_selector_group_collect_all(
@@ -12873,10 +12836,9 @@ extern "C" Item js_dom_element_method_impl(Item elem_item, Item method_name, Ite
                 }
             }
         }
-        // copy id and class
-        clone->id = elem->id;
-        clone->class_names = elem->class_names;
-        clone->class_count = elem->class_count;
+        // Attributes above already create independent ID/class selector caches;
+        // sharing those pooled entries makes a later clone mutation free the
+        // original element's cache.
         clone->tag_id = elem->tag_id;
         // deep clone: recursively clone children
         if (deep) {
@@ -13907,6 +13869,19 @@ static Item _iface_proto(Item global, const char* name) {
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
+static void _install_nodelist_for_each(Item global) {
+    Item node_list_proto = _iface_proto(global, "NodeList");
+    Item array_ctor = js_property_get(global, js_string_key("Array"));
+    Item array_proto = js_property_get(array_ctor, js_string_key("prototype"));
+    Item array_for_each = js_property_get(array_proto, js_string_key("forEach"));
+    if (get_type_id(node_list_proto) == LMD_TYPE_MAP &&
+        get_type_id(array_for_each) == LMD_TYPE_FUNC) {
+        // Query APIs return Arrays, but libraries feature-detect the WebIDL
+        // NodeList prototype before choosing their iteration path.
+        js_property_set(node_list_proto, js_string_key("forEach"), array_for_each);
+    }
+}
+
 static void _link_iface_proto(Item global, const char* name, const char* base_name) {
     Item proto = _iface_proto(global, name);
     Item base_proto = _iface_proto(global, base_name);
@@ -14101,6 +14076,7 @@ extern "C" void js_dom_install_collection_globals(void) {
     _install_iface(global, "HTMLFormControlsCollection");
     _install_iface(global, "HTMLOptionsCollection");
     _install_iface(global, "NodeList");
+    _install_nodelist_for_each(global);
     _install_iface(global, "RadioNodeList");
     _install_xpath_evaluator(global);
     log_debug("js_dom_install_collection_globals: installed collection interfaces");

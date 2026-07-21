@@ -3999,7 +3999,9 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     }
 
     // Pre-create destructuring variable registers
-    bool left_creates_bindings = left_is_decl || fo->kind == 1 || fo->kind == 2;
+    // `var` is represented by zero, which also used to mean an assignment
+    // head; preserve the parser's declaration marker so pattern names exist.
+    bool left_creates_bindings = left_is_decl || fo->declares_binding;
     if (destr_pattern && left_creates_bindings) {
         JsAstNode* pe = destr_pattern->elements;
         while (pe) {

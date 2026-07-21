@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<style>
+body { margin: 0; font: 16px sans-serif; }
+button { margin: 8px; padding: 5px; }
+.tooltip, .popover, .toast { display: none; }
+.tooltip.show, .popover.show, .toast.show { display: block; }
+.tooltip, .popover { position: absolute; width: 110px; min-height: 24px; background: #222; color: white; }
+.toast { width: 150px; height: 30px; }
+</style>
+</head>
+<body>
+<button id="tooltip-trigger" title="Helpful tooltip">tooltip</button>
+<button id="popover-trigger" title="Details" data-bs-content="Popover body">popover</button>
+<button id="toast-trigger">toast</button>
+<div id="toast" class="toast"><span class="toast-body">Saved</span><button id="toast-close" data-bs-dismiss="toast">close</button></div>
+<button id="outside">outside</button>
+<output id="events"></output>
+<script src="../../js/popper_src_min.js"></script>
+<script src="../../js/bootstrap.min.js"></script>
+<script>
+var events = document.getElementById('events');
+function record(node, names) {
+  names.forEach(function (name) {
+    node.addEventListener(name, function () { events.textContent += node.id + ':' + name + ';'; });
+  });
+}
+var tooltipNode = document.getElementById('tooltip-trigger');
+var popoverNode = document.getElementById('popover-trigger');
+var toastNode = document.getElementById('toast');
+record(tooltipNode, ['show.bs.tooltip', 'shown.bs.tooltip', 'hide.bs.tooltip', 'hidden.bs.tooltip']);
+record(popoverNode, ['show.bs.popover', 'shown.bs.popover', 'hide.bs.popover', 'hidden.bs.popover']);
+record(toastNode, ['show.bs.toast', 'shown.bs.toast', 'hide.bs.toast', 'hidden.bs.toast']);
+bootstrap.Tooltip.getOrCreateInstance(tooltipNode, { trigger: 'hover focus', animation: false });
+bootstrap.Popover.getOrCreateInstance(popoverNode, { trigger: 'click', animation: false });
+var toast = bootstrap.Toast.getOrCreateInstance(toastNode, { animation: false, autohide: false });
+document.getElementById('toast-trigger').addEventListener('click', function () { toast.show(); });
+</script>
+</body>
+</html>

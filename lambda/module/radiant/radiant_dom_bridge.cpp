@@ -3354,6 +3354,18 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
 
     if (node->is_text()) {
         DomText* text = node->as_text();
+        if (strcmp(method, "cloneNode") == 0) {
+            DomNode* ancestor = text->parent;
+            DomDocument* doc = nullptr;
+            while (ancestor && !ancestor->is_element()) ancestor = ancestor->parent;
+            if (ancestor) doc = ancestor->as_element()->doc;
+            // jQuery clones label text before wrapping it; returning null here
+            // makes its clone cleanup query a non-node instead of a Text clone.
+            DomText* clone = doc ? DomText::create_detached_copy(doc,
+                text->text ? text->text : "", text->length) : nullptr;
+            *out = radiant_dom_node_item((DomNode*)clone);
+            return true;
+        }
         if (strcmp(method, "replaceData") == 0) {
             *out = js_dom_text_replace_data_bridge((void*)text,
                 argc >= 1 ? args[0] : radiant_dom_undefined_item(),
@@ -3461,6 +3473,9 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
         // selector parsing and matching stay on the document pool so returned
         // wrappers are the only GC-managed values created by this read-only path.
         SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
+        // jQuery scopes relative .find() selectors through :scope; bind it to
+        // this receiver before matching its descendants.
+        selector_matcher_set_scope_element(matcher, elem);
         // Element selector queries walk descendants and must not match the
         // context element itself (Document queries pass true below).
         DomElement* found = radiant_dom_selector_group_find_first(
@@ -3486,6 +3501,8 @@ static bool radiant_dom_element_method_basic(Item elem_item, Item method_name, I
             return true;
         }
         SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)elem->doc);
+        // Preserve the Element query root so :scope selectors match correctly.
+        selector_matcher_set_scope_element(matcher, elem);
         ArrayList* results = arraylist_new(16);
         if (!results) {
             *out = arr_item;

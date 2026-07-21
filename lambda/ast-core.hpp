@@ -520,6 +520,7 @@ typedef struct AstForOfNode : AstNode {
     AstNode* right;
     AstNode* body;
     int kind;
+    bool declares_binding;
     bool is_await;
 } AstForOfNode;
 

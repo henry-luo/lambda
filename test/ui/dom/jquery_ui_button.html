@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>jQuery UI Button — Radiant adapter</title>
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/core.css">
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/button.css">
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/theme.css">
+  <style>body { margin: 20px; font: 16px sans-serif; }</style>
+</head>
+<body>
+  <button id="primary" type="button">Run</button>
+  <output id="status">0</output>
+
+  <script src="../../jquery-ui/external/jquery/jquery.js"></script>
+  <script src="../../jquery-ui/ui/version.js"></script>
+  <script src="../../jquery-ui/ui/keycode.js"></script>
+  <script src="../../jquery-ui/ui/widget.js"></script>
+  <script src="../../jquery-ui/ui/widgets/button.js"></script>
+  <script>
+    var runs = 0;
+    $("#primary").button({ icon: "ui-icon-gear" });
+    $("#primary").on("click", function() {
+      runs++;
+      $("#status").text(String(runs));
+      if (runs === 1) {
+        $(this).button("disable");
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "jQuery UI Button runs native clicks and honours disabled state",
+  "html": "test/ui/dom/jquery_ui_button.html",
+  "events": [
+    {"type": "wait", "ms": 30},
+    {"type": "assert_class", "target": {"selector": "#primary"}, "class": "ui-button"},
+    {"type": "assert_class", "target": {"selector": "#primary .ui-button-icon"}, "class": "ui-icon-gear"},
+    {"type": "click", "target": {"selector": "#primary"}},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "1"},
+    {"type": "assert_attr", "target": {"selector": "#primary"}, "attribute": "disabled", "equals": ""},
+    {"type": "assert_class", "target": {"selector": "#primary"}, "class": "ui-state-disabled"},
+    {"type": "click", "target": {"selector": "#primary"}},
+    {"type": "wait", "ms": 30},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "1"}
+  ]
+}

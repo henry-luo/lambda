@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+<style>
+body { margin: 0; font: 16px sans-serif; }
+button { margin: 4px; padding: 5px; }
+.collapse, .dropdown-menu, .modal, .offcanvas, .carousel-item { display: none; }
+.collapse.show, .dropdown-menu.show, .modal.show, .offcanvas.show, .carousel-item.active { display: block; }
+.dropdown { position: relative; min-height: 38px; }
+.dropdown-menu { position: absolute; top: 32px; left: 0; }
+.modal { position: fixed; top: 20px; left: 20px; width: 220px; height: 90px; background: white; }
+.offcanvas { position: fixed; top: 0; left: 0; width: 170px; height: 120px; background: white; }
+.carousel-item { width: 180px; height: 40px; }
+</style>
+</head>
+<body>
+<button id="alert-close" data-bs-dismiss="alert" data-bs-target="#alert">dismiss alert</button>
+<div id="alert" class="alert show">notice</div>
+
+<button id="button-toggle" data-bs-toggle="button" aria-pressed="false">toggle</button>
+
+<button id="collapse-trigger" data-bs-toggle="collapse" data-bs-target="#collapse">collapse</button>
+<div id="collapse" class="collapse">collapsible content</div>
+
+<div class="dropdown">
+  <button id="dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">menu</button>
+  <div id="dropdown-menu" class="dropdown-menu"><button id="dropdown-item" class="dropdown-item">item</button></div>
+</div>
+<button id="outside">outside</button>
+
+<button id="modal-trigger" data-bs-toggle="modal" data-bs-target="#modal">open modal</button>
+<div id="modal" class="modal" tabindex="-1"><button id="modal-close" data-bs-dismiss="modal">close modal</button></div>
+
+<button id="offcanvas-trigger" data-bs-toggle="offcanvas" data-bs-target="#offcanvas">open panel</button>
+<aside id="offcanvas" class="offcanvas" tabindex="-1"><button id="offcanvas-close" data-bs-dismiss="offcanvas">close panel</button></aside>
+
+<div role="tablist">
+  <button id="tab-one" class="nav-link active" data-bs-toggle="tab" data-bs-target="#pane-one" aria-selected="true">one</button>
+  <button id="tab-two" class="nav-link" data-bs-toggle="tab" data-bs-target="#pane-two" aria-selected="false">two</button>
+</div>
+<div id="pane-one" class="tab-pane active show">first pane</div>
+<div id="pane-two" class="tab-pane">second pane</div>
+
+<div id="carousel" class="carousel" tabindex="0">
+  <div class="carousel-inner"><div id="slide-one" class="carousel-item active">one</div><div id="slide-two" class="carousel-item">two</div></div>
+  <button id="carousel-next" data-bs-target="#carousel" data-bs-slide="next">next</button>
+  <button id="carousel-prev" data-bs-target="#carousel" data-bs-slide="prev">previous</button>
+</div>
+
+<output id="events"></output>
+<script src="../../js/popper_src_min.js"></script>
+<script src="../../js/bootstrap.min.js"></script>
+<script>
+var events = document.getElementById('events');
+function record(component, names) {
+  names.forEach(function (name) {
+    component.addEventListener(name, function () {
+      events.textContent += component.id + ':' + name + ';';
+    });
+  });
+}
+record(document.getElementById('collapse'), ['show.bs.collapse', 'shown.bs.collapse', 'hide.bs.collapse', 'hidden.bs.collapse']);
+record(document.getElementById('dropdown-toggle'), ['show.bs.dropdown', 'shown.bs.dropdown', 'hide.bs.dropdown', 'hidden.bs.dropdown']);
+record(document.getElementById('modal'), ['show.bs.modal', 'shown.bs.modal', 'hide.bs.modal', 'hidden.bs.modal']);
+record(document.getElementById('offcanvas'), ['show.bs.offcanvas', 'shown.bs.offcanvas', 'hide.bs.offcanvas', 'hidden.bs.offcanvas']);
+record(document.getElementById('tab-two'), ['show.bs.tab', 'shown.bs.tab']);
+record(document.getElementById('carousel'), ['slide.bs.carousel', 'slid.bs.carousel']);
+document.getElementById('alert').addEventListener('closed.bs.alert', function () { events.textContent += 'alert:closed;'; });
+bootstrap.Carousel.getOrCreateInstance(document.getElementById('carousel'), { interval: false, touch: true });
+</script>
+</body>
+</html>

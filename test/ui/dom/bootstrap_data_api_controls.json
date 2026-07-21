@@ -1,0 +1,12 @@
+{
+  "name": "Bootstrap data API drives button and collapse controls",
+  "html": "test/ui/dom/bootstrap_data_api.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#button-toggle"}},
+    {"type": "assert_class", "target": {"selector": "#button-toggle"}, "class": "active"},
+    {"type": "assert_attr", "target": {"selector": "#button-toggle"}, "attribute": "aria-pressed", "equals": "true"},
+    {"type": "click", "target": {"selector": "#collapse-trigger"}},
+    {"type": "assert_class", "target": {"selector": "#collapse"}, "class": "show"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "collapse:shown.bs.collapse"}
+  ]
+}

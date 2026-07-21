@@ -49,8 +49,9 @@ void font_prop_release_handle(FontProp* fprop) {
 }
 
 static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
+                                     const char* family,
                                      FontWeight weight, FontSlant slant) {
-    if (!handle || !fprop || !fprop->family) return false;
+    if (!handle || !fprop || !family) return false;
     const char* handle_family = NULL;
     float handle_size = 0.0f;
     FontWeight handle_weight = FONT_WEIGHT_NORMAL;
@@ -59,12 +60,12 @@ static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
                                &handle_weight, &handle_slant)) {
         return false;
     }
-    bool family_matches = handle_family && strcmp(handle_family, fprop->family) == 0;
+    bool family_matches = handle_family && strcmp(handle_family, family) == 0;
 #ifdef __APPLE__
-    if (!family_matches && handle_family && fprop->family &&
-        (strcasecmp(fprop->family, "system-ui") == 0 ||
-         strcasecmp(fprop->family, "-apple-system") == 0 ||
-         strcasecmp(fprop->family, "BlinkMacSystemFont") == 0)) {
+    if (!family_matches && handle_family &&
+        (strcasecmp(family, "system-ui") == 0 ||
+         strcasecmp(family, "-apple-system") == 0 ||
+         strcasecmp(family, "BlinkMacSystemFont") == 0)) {
         // CoreText reports the resolved macOS system face as "System Font";
         // treating that as stale made event reflows retain replacement handles.
         family_matches = strcasecmp(handle_family, "System Font") == 0;
@@ -121,13 +122,19 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     if (fprop->font_style == CSS_VALUE_ITALIC) fs = FONT_SLANT_ITALIC;
     else if (fprop->font_style == CSS_VALUE_OBLIQUE) fs = FONT_SLANT_OBLIQUE;
 
+    // Some intrinsic-layout paths create a FontProp only for a non-family
+    // property (for example list-marker spacing). A missing family still has
+    // the CSS initial serif value; do not pass an invalid style to the resolver.
+    const char* family = fprop->family;
+    if ((!family || !family[0]) && uicon) family = uicon->default_font.family;
+
     FontStyleDesc style = {};
-    style.family  = fprop->family;
+    style.family  = family;
     style.size_px = fprop->font_size;
     style.weight  = fw;
     style.slant   = fs;
 
-    if (font_handle_matches_prop(fprop->font_handle, fprop, fw, fs)) {
+    if (font_handle_matches_prop(fprop->font_handle, fprop, family, fw, fs)) {
         fbox->font_handle = fprop->font_handle;
         populate_font_prop_metrics(uicon, fprop, fprop->font_handle, &style);
         return;
@@ -137,7 +144,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 
     // font_resolve handles everything: @font-face descriptors, generic families,
     // database lookup, platform fallback, and fallback font chain — all with caching.
-    FontHandle* handle = font_resolve(uicon->font_ctx, &style);
+    FontHandle* handle = family ? font_resolve(uicon->font_ctx, &style) : NULL;
     if (handle) {
         fbox->font_handle = handle;
         fprop->font_handle = handle;
@@ -148,7 +155,8 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
         return;
     }
 
-    log_error("setup_font: font_resolve failed for '%s' (and all fallbacks)", fprop->family);
+    log_error("setup_font: font_resolve failed for '%s' (and all fallbacks)",
+              family ? family : "(null)");
 }
 
 void fontface_cleanup(UiContext* uicon) {

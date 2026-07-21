@@ -110,6 +110,10 @@ typedef struct SelectorMatcher {
     bool case_sensitive_classes;     // Case-sensitive class name matching
     bool case_sensitive_attrs;       // Case-sensitive attribute matching
 
+    // Element.querySelector(All) binds :scope to its receiver. Stylesheet
+    // matching deliberately leaves this null because it has no query root.
+    DomElement* scope_element;
+
     // Dynamic pseudo-state resolution
     SelectorPseudoStateResolver pseudo_state_resolver;
     void* pseudo_state_context;
@@ -169,6 +173,9 @@ void selector_matcher_set_case_sensitive_classes(SelectorMatcher* matcher, bool 
  * @param case_sensitive true for case-sensitive, false for case-insensitive
  */
 void selector_matcher_set_case_sensitive_attributes(SelectorMatcher* matcher, bool case_sensitive);
+
+// Bind :scope for an Element query. Pass NULL for stylesheet matching.
+void selector_matcher_set_scope_element(SelectorMatcher* matcher, DomElement* scope_element);
 
 /**
  * Set dynamic pseudo-state resolver

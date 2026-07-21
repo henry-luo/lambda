@@ -5787,10 +5787,12 @@ static View* find_checkbox_radio_input(View* target) {
                 }
             }
             // Depth-first traversal
-            if (search->is_block()) {
-                ViewBlock* block = lam::view_require_block(search);
-                if (block->first_child) {
-                    search = block->first_child;
+            if (search->is_element()) {
+                ViewElement* search_elem = lam::view_require_element(search);
+                // Form controls can be visually hidden by widget CSS, so this
+                // must follow DOM children rather than only laid-out blocks.
+                if (search_elem->first_child) {
+                    search = static_cast<View*>(search_elem->first_child);
                     continue;
                 }
             }
@@ -5813,9 +5815,9 @@ static View* find_checkbox_radio_input(View* target) {
             return child;
         }
         // Check children recursively
-        if (child->is_block()) {
-            ViewBlock* block = lam::view_require_block(child);
-            View* nested = block->first_child;
+        if (child->is_element()) {
+            ViewElement* child_elem = lam::view_require_element(child);
+            View* nested = static_cast<View*>(child_elem->first_child);
             while (nested) {
                 if (is_checkbox(nested) || is_radio(nested)) {
                     return nested;
@@ -5827,6 +5829,24 @@ static View* find_checkbox_radio_input(View* target) {
     }
 
     return nullptr;
+}
+
+static void dispatch_checkbox_radio_change(EventContext* evcon, View* input) {
+    // Associated-label activation is implemented by Radiant after the label's
+    // click dispatch, so it must publish the control events explicitly.
+    radiant_dispatch_simple_event(evcon, input, "input", true, false);
+    radiant_dispatch_simple_event(evcon, input, "change", true, false);
+}
+
+static bool click_target_is_disabled_control(DocState* state, View* target) {
+    for (View* current = target; current; current = current->parent) {
+        if (!current->is_element()) continue;
+        DomElement* elem = lam::dom_require_element(current);
+        if (elem->form_control() && form_control_is_disabled(state, current)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -5857,6 +5877,8 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
         form_control_set_checked(state, input, new_state);
         sync_pseudo_state(input, PSEUDO_STATE_CHECKED, new_state);
 
+        dispatch_checkbox_radio_change(evcon, input);
+
         log_debug("handle_checkbox_radio_click: input->is_block()=%d view_type=%d", input->is_block(), input->view_type);
 
         log_debug("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
@@ -5885,6 +5907,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
             // Check this radio button through centralized writer API.
             form_control_set_checked(state, input, true);
             sync_pseudo_state(input, PSEUDO_STATE_CHECKED, true);
+            dispatch_checkbox_radio_change(evcon, input);
 
             log_debug("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
             doc_state_request_repaint(state);
@@ -8128,7 +8151,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                              click_check_radio,
                                              PSEUDO_STATE_CHECKED)
                     : false;
-                if (evcon.target) {
+                // Native disabled controls suppress click dispatch even when
+                // hit testing lands on a child created by a widget library.
+                bool click_on_disabled_control = click_target_is_disabled_control(
+                    state, evcon.target);
+                if (evcon.target && !click_on_disabled_control) {
                     bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
                         "click", mouse_x, mouse_y,
                         btn_event->button, 0,
@@ -8140,7 +8167,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         &js_click_dispatched);
                     if (prevented) evcon.default_prevented = true;
                 }
-
                 // Handle checkbox/radio click toggle
                 log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
                 bool click_check_radio_changed = false;

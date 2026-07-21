@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>jQuery UI Tabs — Radiant adapter</title>
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/core.css">
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/tabs.css">
+  <link rel="stylesheet" href="../../jquery-ui/themes/base/theme.css">
+  <style>body { margin: 20px; font: 16px sans-serif; } #tabs { width: 420px; }</style>
+</head>
+<body>
+  <div id="tabs">
+    <ul>
+      <li id="tab-item-one"><a id="tab-one" href="#tab-panel-one">One</a></li>
+      <li id="tab-item-two"><a id="tab-two" href="#tab-panel-two">Two</a></li>
+    </ul>
+    <div id="tab-panel-one">First tab panel</div>
+    <div id="tab-panel-two">Second tab panel</div>
+  </div>
+  <output id="status">initial</output>
+
+  <script src="../../jquery-ui/external/jquery/jquery.js"></script>
+  <script src="../../jquery-ui/ui/version.js"></script>
+  <script src="../../jquery-ui/ui/keycode.js"></script>
+  <script src="../../jquery-ui/ui/unique-id.js"></script>
+  <script src="../../jquery-ui/ui/widget.js"></script>
+  <script src="../../jquery-ui/ui/widgets/tabs.js"></script>
+  <script>
+    $("#tabs").tabs({
+      activate: function(event, ui) {
+        $("#status").text(ui.newTab.attr("id"));
+      }
+    });
+  </script>
+</body>
+</html>

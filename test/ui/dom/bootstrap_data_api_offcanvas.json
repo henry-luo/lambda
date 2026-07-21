@@ -1,0 +1,13 @@
+{
+  "name": "Bootstrap data API offcanvas opens and dismisses with Escape",
+  "html": "test/ui/dom/bootstrap_data_api.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#offcanvas-trigger"}},
+    {"type": "assert_class", "target": {"selector": "#offcanvas"}, "class": "show"},
+    {"type": "assert_focus", "target": {"selector": "#offcanvas"}},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "offcanvas:shown.bs.offcanvas"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "assert_class", "target": {"selector": "#offcanvas"}, "class": "show", "present": false},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "offcanvas:hidden.bs.offcanvas"}
+  ]
+}
