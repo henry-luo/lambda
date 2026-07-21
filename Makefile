@@ -261,12 +261,11 @@ $(TREE_SITTER_BASH_LIB):
 # Build tree-sitter-python library
 $(TREE_SITTER_PYTHON_LIB):
 	@echo "Building tree-sitter-python library..."
-	@# Python's current generated parser/header use ABI 15; an older global CLI
-	@# emits the removed `.version` field and makes a clean Jube build fail.
-	@test -x "$(CURDIR)/node_modules/.bin/tree-sitter" || \
-		(echo "Missing project tree-sitter CLI; run npm install" && exit 1)
+	@# Generate at ABI 14 with the pinned CLI (as lambda/typescript/latex do):
+	@# the node_modules CLI defaults to ABI 15 and would emit a parser.c/parser.h
+	@# that mismatches the committed ABI-14 headers.
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
-		libtree-sitter-python.a TS="$(CURDIR)/node_modules/.bin/tree-sitter" \
+		libtree-sitter-python.a TS="npx tree-sitter-cli@0.24.7" \
 		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # Generate TypeScript parser from grammar.js when it changes
