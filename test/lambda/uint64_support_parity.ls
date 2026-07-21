@@ -28,3 +28,13 @@ type(converted[0])
 let filled = fill(2, 18446744073709551615u64)
 filled
 type(filled[0])
+
+"=== MIR raw parity ==="
+fn add_u64(left: u64, right: u64) u64 => left + right
+let raw_local: u64 = add_u64(1u64, 2u64)
+raw_local
+type(raw_local)
+add_u64(18446744073709551615u64, 1u64)
+type(add_u64(18446744073709551615u64, 1u64))
+wide[1]
+type(wide[1])

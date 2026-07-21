@@ -2759,6 +2759,8 @@ static inline void em_call_void_with_args(MirEmitter* em,
 }
 
 static inline MIR_type_t em_mir_type_for_rep(ValueRep rep) {
+    // MIR's virtual register file has one canonical 64-bit integer carrier.
+    // VALUE_REP_U64 preserves signedness for opcode/conversion selection.
     return rep == VALUE_REP_F64 ? MIR_T_D : rep == VALUE_REP_RAW_GC_POINTER ||
         rep == VALUE_REP_RAW_NON_GC_POINTER ? MIR_T_P : MIR_T_I64;
 }
