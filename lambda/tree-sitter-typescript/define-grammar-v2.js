@@ -137,8 +137,12 @@ module.exports = function defineGrammar(dialect) {
       // EXPRESSION OVERRIDES (assignment, lhs, primary, expression)
       // ================================================================
 
+      // NOTE: no `using` here — `using` declarations are handled by the base
+      // grammar's lexical_declaration (kind: let|const|using / await using).
+      // A stray `optional('using')` prefix on assignment_expression duplicated
+      // that and made `using x = e` ambiguous (declaration vs using-modified
+      // assignment), which was the source of the tree-sitter LR conflicts.
       assignment_expression: $ => prec.right('assign', seq(
-        optional('using'),
         field('left', choice($.parenthesized_expression, $._lhs_expression)),
         '=',
         field('right', $.expression),

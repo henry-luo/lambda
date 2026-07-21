@@ -220,6 +220,12 @@ INFO_COUNT=$(count_sev info)
 RED=""; YELLOW=""; GREEN=""; DIM=""; RESET=""
 if [[ -t 1 ]]; then RED=$'\e[31m'; YELLOW=$'\e[33m'; GREEN=$'\e[32m'; DIM=$'\e[2m'; RESET=$'\e[0m'; fi
 
+# Detailed output (per-rule file:line findings + each structural check's full
+# report) is written here; the CLI shows only per-rule counts / per-check
+# status. Truncated fresh on every run.
+LINT_LOG="$ROOT/temp/lint-findings.log"
+mkdir -p "$ROOT/temp"; : > "$LINT_LOG"
+
 ag_fail=0
 (( ERROR_COUNT > 0 )) && ag_fail=1
 
@@ -231,15 +237,23 @@ if (( FILTERED_COUNT > 0 )); then
         + "::[\(.ruleId)] \(.message // "" | gsub("\\s+"; " "))"'
       ;;
     *)
-      # group by rule, print header (colored by severity) + indented findings
+      # The per-rule file:line findings (390+ lines on a full run) go to the log
+      # under ./temp; the CLI shows only the per-rule count so the summary stays
+      # scannable. Full detail: temp/lint-findings.log.
+      printf '%s\n' "$FILTERED" | jq -sr '
+        def icon: if . == "error" then "❌" elif . == "warning" then "⚠️" else "ℹ️" end;
+        group_by(.ruleId)[]
+        | "\(.[0].severity | icon) \(.[0].ruleId) [\(.[0].severity)]: \(length) finding(s)\n"
+          + (map("   \(.file):\(.range.start.line+1)  \(.lines // .text // "" | sub("^\\s+";""))")
+             | join("\n")) + "\n"' >> "$LINT_LOG"
+      # group by rule, print count header only (colored by severity) to the CLI
       printf '%s\n' "$FILTERED" | jq -sr \
         --arg red "$RED" --arg yellow "$YELLOW" --arg dim "$DIM" --arg reset "$RESET" '
         def icon: if . == "error" then "❌" elif . == "warning" then "⚠️ " else "ℹ️ " end;
         def color: if . == "error" then $red elif . == "warning" then $yellow else $dim end;
         group_by(.ruleId)[]
-        | "\(.[0].severity | color)\(.[0].severity | icon) \(.[0].ruleId) [\(.[0].severity)]: \(length) finding(s)\($reset)\n"
-          + (map("   \(.file):\(.range.start.line+1)  \($dim)\(.lines // .text // "" | sub("^\\s+";""))\($reset)")
-             | join("\n"))'
+        | "\(.[0].severity | color)\(.[0].severity | icon) \(.[0].ruleId) [\(.[0].severity)]: \(length) finding(s)\($reset)"'
+      printf '%s   ↳ %d finding(s) detailed in temp/lint-findings.log%s\n' "$DIM" "$FILTERED_COUNT" "$RESET"
       ;;
   esac
 elif (( ! STRUCTURAL_ONLY )); then
@@ -269,9 +283,21 @@ if (( run_struct )); then
   for entry in "${STRUCTURAL_CHECKS[@]}"; do
     id="${entry%%:*}"; cmd="${entry#*:}"
     [[ -n "$RULE_FILTER" && ! "$id" =~ $RULE_FILTER ]] && continue
-    if ! $cmd; then
+    if [[ "$FORMAT" == "github" ]]; then
+      # CI: keep each check's full report inline in the build log.
+      $cmd || { struct_fail=1; printf '❌ structural:%s failed\n' "$id" >&2; }
+      continue
+    fi
+    # Each structural check prints its own detailed report (the state-machine
+    # coverage dump alone is ~24 lines). Capture it to the log; the CLI shows
+    # only a one-line pass/fail status.
+    struct_out=$($cmd 2>&1); struct_rc=$?
+    { printf '=== structural:%s ===\n' "$id"; printf '%s\n\n' "$struct_out"; } >> "$LINT_LOG"
+    if (( struct_rc != 0 )); then
       struct_fail=1
-      printf '%s❌ structural:%s failed%s\n' "$RED" "$id" "$RESET" >&2
+      printf '%s❌ structural:%s failed (see temp/lint-findings.log)%s\n' "$RED" "$id" "$RESET" >&2
+    else
+      printf '%s✅ structural:%s%s\n' "$GREEN" "$id" "$RESET"
     fi
   done
 fi
