@@ -248,22 +248,24 @@ $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
 	@echo "🔧 Working directory: lambda/tree-sitter-javascript"
 	@echo "🔧 Unsetting OS variable to bypass Windows check..."
 	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="$(CURDIR)/node_modules/.bin/tree-sitter" V=1 VERBOSE=1
+	@# Generate at ABI 14 with the pinned CLI (as lambda/typescript/latex do):
+	@# the node_modules CLI defaults to ABI 15 and would emit a parser.c/parser.h
+	@# that mismatches the committed ABI-14 headers.
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
 
 # Build tree-sitter-bash library
 $(TREE_SITTER_BASH_LIB):
 	@echo "Building tree-sitter-bash library..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-bash libtree-sitter-bash.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-bash libtree-sitter-bash.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
 
 # Build tree-sitter-python library
 $(TREE_SITTER_PYTHON_LIB):
 	@echo "Building tree-sitter-python library..."
-	@# Python's current generated parser/header use ABI 15; an older global CLI
-	@# emits the removed `.version` field and makes a clean Jube build fail.
-	@test -x "$(CURDIR)/node_modules/.bin/tree-sitter" || \
-		(echo "Missing project tree-sitter CLI; run npm install" && exit 1)
+	@# Generate at ABI 14 with the pinned CLI (as lambda/typescript/latex do):
+	@# the node_modules CLI defaults to ABI 15 and would emit a parser.c/parser.h
+	@# that mismatches the committed ABI-14 headers.
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
-		libtree-sitter-python.a TS="$(CURDIR)/node_modules/.bin/tree-sitter" \
+		libtree-sitter-python.a TS="npx tree-sitter-cli@0.24.7" \
 		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # Generate TypeScript parser from grammar.js when it changes
@@ -295,7 +297,7 @@ $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
 # Build tree-sitter-ruby library
 $(TREE_SITTER_RUBY_LIB):
 	@echo "Building tree-sitter-ruby library..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-ruby libtree-sitter-ruby.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-ruby libtree-sitter-ruby.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
 
 # Generate LaTeX parser from grammar.js when it changes
 $(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMAR_JS)
