@@ -1768,6 +1768,17 @@ different physical home. A transient value that is already backed by verified
 persistent storage may remain there, but a transient producer must not allocate
 on the GC heap merely because the integer is small or unsigned.
 
+The matrix above governs payload ownership once a boxed `Item` is required.
+Before that boundary, typed MIR locals, parameters, arithmetic results, and
+direct generated returns remain raw non-GC scalars and need no number home.
+`INT64` uses `VALUE_REP_I64`; `UINT64` uses the distinct `VALUE_REP_U64`, so
+representation analysis cannot lose signedness. The bundled MIR register file
+uses `MIR_T_I64` as its canonical physical 64-bit integer carrier for both;
+unsigned meaning is preserved by `VALUE_REP_U64` and by selecting unsigned
+comparison, division, remainder, shift, and conversion operations. Boxing uses
+`box_int64_value` versus `box_uint64_value`, and unboxing uses `it2l` versus
+`it2u`, only at an actual `Item` boundary.
+
 ### 15.2 Datetime policy
 
 Every `DTIME` payload is object-owned rather than activation-owned. Dynamic
