@@ -1,7 +1,9 @@
 # Lambda Number Model Realignment — Implementation Plan
 
-**Status:** IMPLEMENTED — completed 2026-07-20; this document retains the task
-inventory and final verification record for the numeric arithmetic realignment
+**Status:** FOLLOW-UP IN PROGRESS — numeric arithmetic completed 2026-07-20
+and the raw `UINT64` MIR representation follow-up completed 2026-07-21.
+Section 5 reopens the broader lifetime/ownership proof after a live audit found
+that its implementation and permanent verification were not yet complete.
 **Design authorities:** `Lambda_Semantics_Number_Model.md` Part 1,
 `../doc/Lambda_Formal_Semantics.md` §4, and
 `Lambda_Design_Stack_API.md` Phase 7
@@ -38,10 +40,14 @@ phase to reopen.
    it does not trigger automatic `integer` promotion.
 7. `integer` is the arbitrary-precision `DECIMAL_BIGINT` carrier. It is not an
    ordinary decimal chosen because a `u64` happened to exceed a threshold.
-8. `DOUBLE`, `INT64`, and `UINT64` retain the Stack API Phase 7 ownership model.
-   This work must not reintroduce inline full-width integers or use GC ownership
-   as an arithmetic promotion mechanism. `DTIME` remains object-backed:
-   dynamic runtime values are GC-owned and static Mark values are Input-arena-owned.
+8. `DOUBLE`, `INT64`, and `UINT64` retain the Stack API Phase 7 ownership model
+   once an `Item` or persistent storage location is required. Before that
+   boundary, typed MIR locals, parameters, arithmetic intermediates, typed-array
+   reads, and generated direct-call returns keep `INT64`/`UINT64` as raw register
+   values. This work must not reintroduce inline full-width `Item` payloads or
+   use GC ownership as an arithmetic promotion mechanism. `DTIME` remains
+   object-backed: dynamic runtime values are GC-owned and static Mark values are
+   Input-arena-owned.
 9. LambdaJS keeps JavaScript numeric semantics: JS `/` returns a JS Number.
    Python guest-language statements that true division returns float are also
    guest-specific and are not Lambda number-model conflicts.
@@ -62,6 +68,28 @@ phase to reopen.
 
 All rows are symmetric in operand order. Converting an operand into the selected
 domain must be exact. Only the documented operation itself may round or wrap.
+
+### 0.2 `INT64`/`UINT64` representation policy
+
+`INT64` and `UINT64` have the same lifetime and storage policy. They differ only
+where signedness changes observable behavior:
+
+- semantic MIR representation is `VALUE_REP_I64` versus `VALUE_REP_U64`;
+- boxing/unboxing is `box_int64_value`/`it2l` versus
+  `box_uint64_value`/`it2u`;
+- comparisons, division, remainder, right shift, conversions, parsing,
+  formatting, range checks, and typed-memory element selection use signed or
+  unsigned behavior as appropriate; and
+- a raw `UINT64` lane cannot reserve an in-band error sentinel because every
+  64-bit bit pattern is a valid value. Error-capable operations therefore keep
+  an `Item` or explicit value/error transport where required.
+
+The bundled MIR backend uses `MIR_T_I64` as the physical 64-bit register
+carrier for both representations; it does not accept `MIR_T_U64` as a virtual
+register type. `VALUE_REP_U64` preserves the unsigned semantic lane used to
+choose operations and conversions. `MIR_T_U64` remains valid for typed-memory
+loads. This physical carrier choice must never collapse `UINT64` back into
+signed semantics or make a raw numeric register look like a boxed GC root.
 
 ---
 
@@ -221,6 +249,34 @@ the final baseline run.
 - [x] Consolidate duplicated result/boxing switches after the new path is
   working; do not leave old and new promotion systems selectable in one build.
 
+### N5.1 — `UINT64` MIR representation follow-up
+
+- [x] Add `VALUE_REP_U64` beside `VALUE_REP_I64`; stop using boxed `Item` as
+  the semantic representation of a typed `UINT64` solely because MIR has no
+  unsigned virtual-register type.
+- [x] Use raw `UINT64` representation consistently for literals, typed locals,
+  parameters, arithmetic intermediates, typed-array scalar reads, generated
+  direct calls, and generated direct returns. Box only at a real `Item`
+  boundary and unbox when entering a raw typed lane.
+- [x] Keep both raw signed and unsigned lanes on physical `MIR_T_I64` registers,
+  while retaining `MIR_T_U64` for unsigned typed-memory operands and selecting
+  unsigned MIR operations from `VALUE_REP_U64`.
+- [x] Align native-parameter, typed-wrapper-parameter, and wrapper-return
+  classification for `UINT64` with `INT64`.
+- [x] Populate direct-call `FnParamAnalysis` for raw full-width parameters so
+  their physical `MIR_T_I64` registers are not classified or published as
+  boxed GC roots.
+- [x] Give exact boxed `UINT64` constants stable backing storage using the same
+  constant-lifetime rule as `INT64`.
+- [x] Preserve boxed representation for nullable or otherwise union-valued
+  expressions. In particular, a multidimensional typed-array lookup that can
+  produce `null` must not unbox that `null` into numeric zero.
+- [x] Fix unsigned logical-right-shift lowering so a helper result advertised
+  as raw `VALUE_REP_U64` is actually unboxed before later raw consumers use it.
+- [x] Keep the true signedness differences listed in §0.2; do not duplicate
+  `INT64` lowering merely to express unsigned opcode, conversion, or memory
+  semantics.
+
 ### N6 — Arrays, vectors, and reductions
 
 - [x] Route scalar-vector and vector-vector result selection through the scalar
@@ -240,8 +296,9 @@ the final baseline run.
 
 ### N7 — Phase 7 storage-boundary audit
 
-- [x] Verify that small and wide `INT64`/`UINT64` take identical number-home,
-  caller-return, destination-owner, and ownerless-fallback paths.
+- [x] Verify that small and wide `INT64`/`UINT64` take identical raw-register
+  paths before an `Item` boundary, then identical number-home, caller-return,
+  destination-owner, and ownerless-fallback paths when storage is required.
 - [x] Verify typed maps/objects, arrays, closure environments, module/global
   bindings, async/generator state, tasks/promises, and exception/completion
   records own persistent `INT64`/`UINT64` payloads rather than retaining an
@@ -264,6 +321,8 @@ the final baseline run.
 - [x] Cover locals, arguments, generated returns, closures, arrays/maps,
   persistent ownerless slots, and repeated calls so arithmetic changes also
   exercise the Phase 7 lifetime rules.
+- [x] Extend `uint64_support_parity.ls` with raw-MIR coverage for typed calls,
+  locals, wrap at `UINT64_MAX`, result types, and typed-array reads.
 - [x] Add direct evaluator/unit tests for the result classifier and exact
   `u64 -> integer` conversion.
 - [x] Remove `normalize_sized`, retired threshold helpers, stale comments,
@@ -355,9 +414,127 @@ final change, not inferred from focused tests:
   `UINT64 <= INT64_MAX` promotion branch. Historical design records retain the
   old spelling only when explicitly labeling the retired policy.
 
+### 4.2 `UINT64` representation follow-up record — 2026-07-21
+
+- `make build` completed with zero errors and zero warnings.
+- The literal `make test-lambda-baseline` invocation was blocked in its
+  `build-test` prerequisite by a pre-existing generated
+  `tree-sitter-python/src/parser.c`/parser-header version mismatch. Neither
+  vendored file is part of this change. Running the target's exact baseline
+  test-runner command against the freshly built executable passed 3,503/3,503:
+  2,105 input-parser cases and 1,398 Lambda runtime cases, including 561 core
+  Lambda, 386 LambdaJS, and 110 Node preliminary tests.
+- `make test262-baseline` fully passed 40,261/40,261 runnable tests with zero
+  failures, zero non-fully-passing tests, zero regressions, and `retry 0.0s`.
+- The focused `uint64_support_parity.ls` probe passed with precise-only rooting,
+  allocation on every GC opportunity, and freed-memory poisoning enabled.
+- Generated MIR inspection confirmed that typed `UINT64` wrapper parameters
+  unbox through `it2u`, direct generated calls pass raw values without GC-root
+  publication, and boxing/rooting occurs only for the resulting `Item`
+  boundary.
+- Full-baseline validation exposed and fixed two representation bugs: unsigned
+  logical right shift returned a boxed value on a raw path, and nullable
+  multidimensional typed-array indexing was incorrectly unboxed, turning
+  `null` into zero. Focused regressions for both passed before the final full
+  baseline run.
+- `git diff --check` completed cleanly.
+
 ---
 
-## 5. Main implementation risks
+## 5. `UINT64` lifetime, ownership, and rooting follow-up
+
+**Status:** IN PROGRESS — opened 2026-07-21 after the live-code audit following
+N5.1. This phase is part of the implementation, not a documentation-only
+cleanup. Earlier completion records remain historical evidence but do not close
+the tasks below.
+
+The raw-register work in N5.1 is valid: typed `INT64` and `UINT64` locals,
+parameters, arithmetic results, typed-array reads, and native direct returns are
+non-GC scalars. This follow-up covers every boundary at which a boxed value must
+outlive the producer's number extent. Except where signed arithmetic semantics
+require different MIR operations, `INT64` and `UINT64` must use the same
+lifetime, ownership, scalar-home, destination-storage, and rooting mechanisms.
+
+### F0 — Reopen and pin the live ownership inventory
+
+- [ ] Replace broad "P0.3 complete" claims with a live path inventory that
+  distinguishes implemented destination ownership from execution-extent or
+  ownerless fallback behavior.
+- [ ] Audit both Lambda MIR-Direct and the shared LambdaJS emitter for raw,
+  boxed, direct, indirect, normal, error, discarded, and tail-call results.
+- [ ] Record the exact places where signedness is intentionally relevant and
+  reject every lifetime/ownership branch selected merely by `INT64` versus
+  `UINT64`.
+
+### F1 — Destination-owned module and global bindings
+
+- [ ] Give every Lambda MIR module/global BSS binding an owned scalar payload
+  word beside its boxed `Item` slot. A store of `DOUBLE`, `INT64`, or `UINT64`
+  must copy and retag into that stable payload rather than retain a pointer into
+  the current number extent.
+- [ ] Use one shared owned-slot store shape for typed, `ANY`, error-destructured,
+  decomposed, exported, and imported binding paths. Do not create separate
+  signed and unsigned storage implementations.
+- [ ] Verify imported bindings after the producer module has returned and after
+  enough wide-scalar churn to reuse the producer's former activation slots.
+
+### F2 — Caller homes and ownerless fallback
+
+- [ ] Verify `SCALAR_RETURN_I64` and `SCALAR_RETURN_U64` use the same home
+  allocation, liveness coloring, discard scratch, normal/error adoption, tail
+  forwarding, and complete callee-watermark restoration.
+- [ ] Keep raw native `VALUE_REP_I64`/`VALUE_REP_U64` returns home-free; caller
+  homes are required only when a returned `Item` points at scalar payload
+  storage.
+- [ ] Add direct tests for `lambda_item_heap_rehome()` proving that both signed
+  and unsigned immutable fallback cells survive precise collection while
+  rooted, are not confused with number-home pointers, and increment only their
+  own diagnostic counters.
+- [ ] Confirm public/indirect wrappers invoke the fallback only where the
+  one-word public ABI has no caller-owned persistent home.
+
+### F3 — Destination-storage and suspended-lifetime parity matrix
+
+- [ ] Add permanent `INT64`/`UINT64` parity cases for arrays and relocation,
+  typed and `ANY` map fields, closure/dynamic environments, module/import
+  bindings, async/generator frames, tasks/messages, and exception/completion
+  storage.
+- [ ] Exercise small values, signed/unsigned boundaries, `INT64_MAX`, and
+  `UINT64_MAX`; magnitude must not select a different lifetime route.
+- [ ] Force collection and freed-memory poisoning after each relevant escape,
+  then read the value only after its source activation or storage buffer can no
+  longer be borrowed.
+
+### F4 — GC-root classification proof
+
+- [ ] Prove raw `VALUE_REP_I64` and `VALUE_REP_U64` registers and number-home
+  pointers are `JIT_VALUE_NON_GC_SCALAR` and never receive GC root slots.
+- [ ] Prove boxed `ANY` values that reference actual ownerless GC scalar cells
+  remain rooted and markable until the persistent slot releases them.
+- [ ] Keep destination-owned raw payload sidecars outside scanned Item ranges;
+  only their tagged Item slots participate in normal owner tracing.
+- [ ] Remove stale collector comments/cases that describe the retired `UINT64`
+  tag position or imply a different unsigned ownership policy.
+
+### F5 — Regressions, gates, and documentation closeout
+
+- [ ] Isolate and fix the precise-only forced-GC crash in
+  `proc_stack_frame.ls`; add the minimal reproducer as a permanent regression.
+- [ ] Restore `make test-gc-rooting-core`, including the current LambdaJS
+  `regression_side_stack_frame_gc.js` mismatch, before claiming the shared
+  emitter/root model is verified.
+- [ ] Run focused representation and ownership tests with zero failures.
+- [ ] Run `make test-lambda-baseline` with zero failed tests.
+- [ ] Run `make test262-baseline` with zero failed tests and zero retries.
+- [ ] Run `make test-gc-rooting` with every supported precise/forced-GC lane
+  passing.
+- [ ] Remove temporary probes and retired implementation paths, run
+  `git diff --check`, and synchronize `Lambda_Design_Stack_API.md`, the sized-int
+  historical record, and this completion record with the landed behavior.
+
+---
+
+## 6. Main implementation risks
 
 1. **`integer` erased to `DECIMAL`.** This causes a result to use the wrong
    precision/context even when its printed value looks correct. Tests must
@@ -374,6 +551,12 @@ final change, not inferred from focused tests:
 6. **Representation regression.** Arithmetic realignment must not revive inline
    full-width integers, the numeric nursery, or standalone numeric GC objects
    outside the explicit ownerless persistent fallback.
+7. **Signedness erased by the physical carrier.** A raw `UINT64` virtual value
+   occupies `MIR_T_I64`, so opcode/conversion selection must use
+   `VALUE_REP_U64`, never the physical register type alone.
+8. **Union value unboxed as a scalar.** Effective-type inference must retain an
+   `Item` whenever a producer can also return `null` or `error`; unboxing such a
+   join can silently manufacture a numeric value.
 
 The order above addresses the highest-risk invariant first: define one result
 decision, make entry conversions exact, then let runtime and code generators
