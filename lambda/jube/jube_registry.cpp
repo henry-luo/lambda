@@ -17,6 +17,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mem_factory.h"
+#include "../../lib/gc/gc_heap.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -65,6 +66,33 @@ static uint64_t* jube_host_root_frame_take_slot(LambdaRootFrame* frame) {
 static void jube_host_root_frame_end(LambdaRootFrame* frame) {
     lambda_root_frame_end(frame);
 }
+
+static LambdaRootFrame* jube_host_opaque_root_frame(JubeRootFrame* frame) {
+    static_assert(sizeof(JubeRootFrame) >= sizeof(LambdaRootFrame),
+        "JubeRootFrame storage must contain the host root frame");
+    return frame ? (LambdaRootFrame*)frame->storage : NULL;
+}
+
+static bool jube_host_opaque_root_frame_begin(JubeRootFrame* frame,
+        size_t slot_count) {
+    LambdaRootFrame* host_frame = jube_host_opaque_root_frame(frame);
+    if (!host_frame) return false;
+    // Reused guest stack storage must not retain a prior activation watermark.
+    memset(host_frame, 0, sizeof(*host_frame));
+    return lambda_root_frame_begin((Context*)context, host_frame, slot_count);
+}
+
+static uint64_t* jube_host_opaque_root_frame_take_slot(JubeRootFrame* frame) {
+    LambdaRootFrame* host_frame = jube_host_opaque_root_frame(frame);
+    return host_frame ? lambda_root_frame_take_slot(host_frame) : NULL;
+}
+
+static void jube_host_opaque_root_frame_end(JubeRootFrame* frame) {
+    LambdaRootFrame* host_frame = jube_host_opaque_root_frame(frame);
+    if (host_frame) lambda_root_frame_end(host_frame);
+}
+
+static int jube_host_opaque_persistent_root_register(void* session, uint64_t* slot);
 extern "C" Item vmap_new(void);
 extern "C" Item js_new_object(void);
 extern "C" Item js_array_new(int capacity);
@@ -321,6 +349,15 @@ static const JubeHostGcAPI jube_host_gc_api = {
     jube_host_root_frame_end,
     heap_register_gc_weak,
     heap_unregister_gc_weak,
+};
+
+static const JubeHostRootAPI jube_host_root_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostRootAPI),
+    jube_host_opaque_root_frame_begin,
+    jube_host_opaque_root_frame_take_slot,
+    jube_host_opaque_root_frame_end,
+    jube_host_opaque_persistent_root_register,
 };
 
 static const JubeHostValueAPI jube_host_value_api = {
@@ -707,7 +744,12 @@ struct JubeGuestExecution {
     bool import_execution;
     bool import_retained;
     Input* input;
+    JubeGuestExecution* previous_active_execution;
 };
+
+// This TLS state belongs exclusively to hosted guest activation. Lambda and
+// JavaScript evaluation never read it, preserving their existing hot paths.
+static thread_local JubeGuestExecution* jube_active_guest_execution = NULL;
 
 static JubeGuestExecution* jube_guest_execution_from_handle(void* execution_context) {
     JubeGuestExecution* execution = (JubeGuestExecution*)execution_context;
@@ -717,6 +759,8 @@ static JubeGuestExecution* jube_guest_execution_from_handle(void* execution_cont
 static Runtime* jube_guest_execution_runtime(JubeGuestExecution* execution) {
     return execution ? execution->runtime_owner : NULL;
 }
+
+static void jube_host_execution_finish_guest(void* execution_context);
 
 static void* jube_host_execution_create(void) {
     JubeGuestExecution* execution = (JubeGuestExecution*)mem_calloc(
@@ -733,10 +777,9 @@ static void jube_host_execution_destroy(void* execution_context) {
     JubeGuestExecution* execution = jube_guest_execution_from_handle(execution_context);
     if (!execution) return;
     if (execution->activation_active) {
-        // An aborted guest compile must restore the caller before its Runtime
-        // owner is destroyed; otherwise the TLS context points at freed state.
-        mir_guest_finish_context(jube_guest_execution_runtime(execution), execution->previous_context,
-                                 execution->reusing_context);
+        // Destruction must follow the same path as normal completion: bypassing
+        // it left the active Jube execution pointing at freed import state.
+        jube_host_execution_finish_guest(execution_context);
     }
     if (!execution->import_execution) runtime_cleanup(&execution->runtime);
     execution->magic = 0;
@@ -813,6 +856,90 @@ static void jube_host_mir_function_finish(void* mir_context) {
     MIR_finish_func((MIR_context_t)mir_context);
 }
 
+static int jube_host_mir_item_function_create(void* mir_context, const char* function_name,
+        uint32_t parameter_count, const char* const* parameter_names,
+        void** out_function_item, void** out_function) {
+    if (!mir_context || !function_name || !*function_name || !out_function_item ||
+        !out_function || (parameter_count > 0 && !parameter_names) ||
+        parameter_count > 1024) return -1;
+    MIR_var_t* parameters = NULL;
+    if (parameter_count > 0) {
+        parameters = (MIR_var_t*)mem_calloc(parameter_count, sizeof(MIR_var_t), MEM_CAT_SYSTEM);
+        if (!parameters) return -1;
+        for (uint32_t i = 0; i < parameter_count; i++) {
+            if (!parameter_names[i] || !*parameter_names[i]) {
+                mem_free(parameters);
+                return -1;
+            }
+            parameters[i] = {MIR_T_I64, parameter_names[i], 0};
+        }
+    }
+    MIR_type_t result_type = MIR_T_I64;
+    MIR_item_t function_item = MIR_new_func_arr((MIR_context_t)mir_context, function_name,
+        1, &result_type, parameter_count, parameters);
+    if (parameters) mem_free(parameters);
+    if (!function_item) return -1;
+    // Keep the host as the only owner of MIR item/function construction; the
+    // guest may use these opaque handles only while this context remains live.
+    *out_function_item = function_item;
+    *out_function = function_item->u.func;
+    return 0;
+}
+
+static int jube_host_mir_function_forward_create(void* mir_context,
+        const char* function_name, void** out_function_item) {
+    if (!mir_context || !function_name || !*function_name || !out_function_item) return -1;
+    MIR_item_t function_item = MIR_new_forward((MIR_context_t)mir_context, function_name);
+    if (!function_item) return -1;
+    // A forward item is owned by the module context; publishing its raw MIR
+    // layout would let a guest outlive or mutate the host compilation graph.
+    *out_function_item = function_item;
+    return 0;
+}
+
+static int jube_host_mir_item_function_proto_create(void* mir_context,
+        const char* prototype_name, uint32_t parameter_count, void** out_prototype_item) {
+    if (!mir_context || !prototype_name || !*prototype_name || !out_prototype_item ||
+        parameter_count > 1024) return -1;
+    MIR_var_t* parameters = NULL;
+    char (*parameter_names)[16] = NULL;
+    if (parameter_count > 0) {
+        parameters = (MIR_var_t*)mem_calloc(parameter_count, sizeof(MIR_var_t), MEM_CAT_SYSTEM);
+        parameter_names = (char (*)[16])mem_calloc(parameter_count, sizeof(*parameter_names),
+            MEM_CAT_SYSTEM);
+        if (!parameters || !parameter_names) {
+            if (parameters) mem_free(parameters);
+            if (parameter_names) mem_free(parameter_names);
+            return -1;
+        }
+        for (uint32_t i = 0; i < parameter_count; i++) {
+            snprintf(parameter_names[i], sizeof(parameter_names[i]), "p%u", i);
+            parameters[i] = {MIR_T_I64, parameter_names[i], 0};
+        }
+    }
+    MIR_type_t result_type = MIR_T_I64;
+    MIR_item_t prototype = MIR_new_proto_arr((MIR_context_t)mir_context, prototype_name,
+        1, &result_type, parameter_count, parameters);
+    if (parameters) mem_free(parameters);
+    if (parameter_names) mem_free(parameter_names);
+    if (!prototype) return -1;
+    // Parameter descriptors are temporary host construction state; the guest
+    // receives only the context-bound opaque prototype handle.
+    *out_prototype_item = prototype;
+    return 0;
+}
+
+static int jube_host_mir_function_register_lookup(void* mir_context, void* function,
+        const char* register_name, uint32_t* out_register) {
+    if (!mir_context || !function || !register_name || !*register_name || !out_register) {
+        return -1;
+    }
+    // MIR's function register table stays host-private; only the numeric
+    // register identity required by the lowering service crosses this boundary.
+    *out_register = MIR_reg((MIR_context_t)mir_context, register_name, (MIR_func_t)function);
+    return 0;
+}
+
 static int jube_host_execution_activate(void* execution_context, void** out_input) {
     JubeGuestExecution* execution = jube_guest_execution_from_handle(execution_context);
     if (!execution || !out_input || execution->activation_active) return -1;
@@ -835,6 +962,8 @@ static int jube_host_execution_activate(void* execution_context, void** out_inpu
         return -1;
     }
     execution->activation_active = true;
+    execution->previous_active_execution = jube_active_guest_execution;
+    jube_active_guest_execution = execution;
     *out_input = execution->input;
     return 0;
 }
@@ -886,6 +1015,9 @@ static int jube_host_execution_run_main(void* execution_context, void* entry_fun
 static void jube_host_execution_finish_guest(void* execution_context) {
     JubeGuestExecution* execution = jube_guest_execution_from_handle(execution_context);
     if (!execution || !execution->activation_active) return;
+    // Restore nested activation state before releasing the opaque data token.
+    jube_active_guest_execution = execution->previous_active_execution;
+    execution->previous_active_execution = NULL;
     mir_guest_finish_context(jube_guest_execution_runtime(execution), execution->previous_context,
                              execution->reusing_context);
     execution->input = NULL;
@@ -893,6 +1025,145 @@ static void jube_host_execution_finish_guest(void* execution_context) {
     execution->reusing_context = false;
     execution->activation_active = false;
 }
+
+static void* jube_host_execution_frame_runtime_slot(void* execution_context) {
+    JubeGuestExecution* execution = jube_guest_execution_from_handle(execution_context);
+    if (!execution || !execution->activation_active || execution != jube_active_guest_execution) {
+        return NULL;
+    }
+    // The slot preserves the proven load-before-frame-prologue order while
+    // preventing a guest compiler from importing mutable host storage itself.
+    return &_lambda_rt;
+}
+
+static Input* jube_host_data_input(void* session) {
+    JubeGuestExecution* execution = jube_active_guest_execution;
+    if (!execution || !execution->activation_active || !execution->input ||
+        session != execution->input) {
+        return NULL;
+    }
+    return execution->input;
+}
+
+static int jube_host_opaque_persistent_root_register(void* session, uint64_t* slot) {
+    if (!jube_host_data_input(session) || !slot) return -1;
+    // A TLS address is invisible to stack scanning, so keep its registration
+    // with the active guest heap rather than exposing that heap to the module.
+    heap_register_gc_root(slot);
+    return 0;
+}
+
+static Item jube_host_data_name_from_utf8(void* session, const char* text) {
+    if (!jube_host_data_input(session) || !text) return ItemNull;
+    return (Item){.item = s2it(heap_create_name(text))};
+}
+
+static int jube_host_data_map_set(void* session, Item map, Item key, Item value) {
+    Input* input = jube_host_data_input(session);
+    if (!input || get_type_id(map) != LMD_TYPE_MAP || get_type_id(key) != LMD_TYPE_STRING) {
+        return -1;
+    }
+    Map* target = it2map(map);
+    String* name = it2s(key);
+    if (!target || !name) return -1;
+    map_put(target, name, value, input);
+    return 0;
+}
+
+static Item jube_host_data_float_from_f64(void* session, double value) {
+    if (!jube_host_data_input(session)) return ItemNull;
+    return push_d(value);
+}
+
+static Item jube_host_data_format_json(void* session, Item value) {
+    Input* input = jube_host_data_input(session);
+    if (!input) return ItemNull;
+    String* result = format_json(input->pool, value);
+    return result ? (Item){.item = s2it(result)} : ItemNull;
+}
+
+static int jube_host_data_closure_env_item_count(void* session, void* environment) {
+    Input* input = jube_host_data_input(session);
+    if (!input || !environment || !context || !context->heap || !context->heap->gc ||
+        !gc_is_managed(context->heap->gc, environment)) {
+        return 0;
+    }
+    gc_header_t* header = gc_get_header(environment);
+    if (!header || header->type_tag != GC_TYPE_JS_ENV || header->alloc_size == 0) return 0;
+    return (int)(header->alloc_size / (2 * sizeof(Item)));
+}
+
+static void* jube_host_data_closure_env_alloc(void* session, size_t item_count) {
+    if (!jube_host_data_input(session) || item_count == 0) return NULL;
+    return heap_calloc_closure_env(item_count * sizeof(Item));
+}
+
+static int jube_host_data_closure_env_store(void* session, void* environment,
+                                             int slot, Item value) {
+    int item_count = jube_host_data_closure_env_item_count(session, environment);
+    if (item_count <= 0 || slot < 0 || slot >= item_count) return -1;
+    owned_item_slot_store((Item*)environment, item_count, slot, value);
+    return 0;
+}
+
+static int jube_host_data_closure_env_load(void* session, void* environment,
+                                            int slot, Item* out_value) {
+    int item_count = jube_host_data_closure_env_item_count(session, environment);
+    if (!out_value || item_count <= 0 || slot < 0 || slot >= item_count) return -1;
+    *out_value = owned_item_slot_read((Item*)environment, item_count, slot, false);
+    return 0;
+}
+
+static int jube_host_data_item_slots_store(void* session, Item* storage,
+                                            int64_t item_count, int64_t slot,
+                                            Item value) {
+    if (!jube_host_data_input(session) || !storage || item_count <= 0 ||
+        slot < 0 || slot >= item_count) return -1;
+    owned_item_slot_store(storage, item_count, slot, value);
+    return 0;
+}
+
+static Item jube_host_data_item_heap_rehome(void* session, Item value) {
+    if (!jube_host_data_input(session)) return value;
+    return lambda_item_heap_rehome(value);
+}
+
+static Item jube_host_data_map_new(void* session) {
+    if (!jube_host_data_input(session)) return ItemNull;
+    Map* map = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, 1);
+    if (!map) return ItemNull;
+    map->type_id = LMD_TYPE_MAP;
+    map->type = &EmptyMap;
+    return (Item){.map = map};
+}
+
+static Item jube_host_data_function_new(void* session, void* function_ptr, int param_count) {
+    if (!jube_host_data_input(session) || !function_ptr || param_count < 0 || param_count > 255) {
+        return ItemNull;
+    }
+    Function* function = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
+    if (!function) return ItemNull;
+    function->type_id = LMD_TYPE_FUNC;
+    function->ptr = (fn_ptr)function_ptr;
+    function->arity = (uint8_t)param_count;
+    return (Item){.function = function};
+}
+
+static const JubeHostDataAPI jube_host_data_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostDataAPI),
+    jube_host_data_name_from_utf8,
+    jube_host_data_map_set,
+    jube_host_data_float_from_f64,
+    jube_host_data_format_json,
+    jube_host_data_closure_env_alloc,
+    jube_host_data_closure_env_store,
+    jube_host_data_closure_env_load,
+    jube_host_data_item_slots_store,
+    jube_host_data_item_heap_rehome,
+    jube_host_data_map_new,
+    jube_host_data_function_new,
+};
 
 static int jube_host_module_loading_namespace(void* execution_context,
                                               const char* source_path,
@@ -1003,6 +1274,11 @@ static const JubeGuestExecutionAPI jube_host_execution_api = {
     jube_host_execution_activate_import,
     jube_host_execution_run_main,
     jube_host_execution_finish_guest,
+    jube_host_execution_frame_runtime_slot,
+    jube_host_mir_item_function_create,
+    jube_host_mir_function_forward_create,
+    jube_host_mir_item_function_proto_create,
+    jube_host_mir_function_register_lookup,
 };
 
 static const JubeModuleGraphAPI jube_host_module_graph_api = {
@@ -1085,6 +1361,7 @@ static const JubeHostLangAPI jube_host_lang_api = {
     &jube_host_session_memory_api,
     &jube_host_execution_api,
     &jube_host_module_graph_api,
+    &jube_host_root_api,
 };
 
 static JubeHostAPI jube_host_api = {
@@ -1102,6 +1379,7 @@ static JubeHostAPI jube_host_api = {
     &jube_host_script_api,
     &jube_host_dom_api,
     &jube_host_runtime_catalog_api,
+    &jube_host_data_api,
 };
 
 extern "C" const JubeHostAPI* jube_internal_host_api(void) {

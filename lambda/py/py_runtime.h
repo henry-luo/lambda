@@ -8,6 +8,8 @@ extern "C" {
 #endif
 
 #include "../lambda.h"
+#include "../lambda-data.hpp"
+#include "../jube/jube.h"
 
 // ========================================================================
 // Type conversion
@@ -227,7 +229,26 @@ Item py_dict_method(Item dict, Item method_name, Item* args, int argc);
 // ========================================================================
 // Runtime initialization
 // ========================================================================
-void py_runtime_set_input(void* input);
+// This token is opaque to Python; neutral data operations remain host-owned.
+void py_runtime_set_data_session(void* session);
+void* py_runtime_data_session(void);
+void py_runtime_restore_data_session(void* session);
+void py_set_hosted_data_api(const JubeHostDataAPI* data_api);
+void py_set_hosted_root_api(const JubeHostRootAPI* root_api);
+const JubeHostRootAPI* py_hosted_root_api(void);
+void py_register_hosted_gc_root(uint64_t* slot);
+void py_register_hosted_gc_root_range(uint64_t* slots, size_t slot_count);
+Item py_data_name_from_utf8(const char* text);
+bool py_data_map_set(Item map, Item key, Item value);
+Item py_data_float_from_f64(double value);
+Item py_data_format_json(Item value);
+void* py_data_closure_env_alloc(size_t item_count);
+bool py_data_closure_env_store(uint64_t* environment, int slot, Item value);
+bool py_data_closure_env_load(uint64_t* environment, int slot, Item* out_value);
+bool py_data_item_slots_store(Item* storage, int64_t item_count, int64_t slot, Item value);
+Item py_data_item_heap_rehome(Item value);
+Item py_data_map_new(void);
+Item py_data_function_new(void* function_ptr, int param_count);
 
 // ========================================================================
 // Stop iteration sentinel
@@ -255,4 +276,50 @@ Item    py_coro_drive(Item coro);
 
 #ifdef __cplusplus
 }
+
+// This wrapper keeps Python native helpers on the host's existing side-root
+// stack while hiding host root-frame internals from the language module.
+class PyHostedRootFrame {
+    JubeRootFrame frame_;
+    const JubeHostRootAPI* root_api_;
+
+public:
+    explicit PyHostedRootFrame(size_t slot_count) : frame_{}, root_api_(py_hosted_root_api()) {
+        if (!root_api_ || root_api_->api_version != JUBE_HOST_SERVICE_API_VERSION ||
+            root_api_->struct_size < JUBE_HOST_ROOT_API_V1_SIZE ||
+            !root_api_->root_frame_begin || !root_api_->root_frame_take_slot ||
+            !root_api_->root_frame_end ||
+            !root_api_->root_frame_begin(&frame_, slot_count)) {
+            root_api_ = NULL;
+        }
+    }
+
+    ~PyHostedRootFrame() {
+        if (root_api_) root_api_->root_frame_end(&frame_);
+    }
+
+    uint64_t* take_slot(void) {
+        return root_api_ ? root_api_->root_frame_take_slot(&frame_) : NULL;
+    }
+
+    PyHostedRootFrame(const PyHostedRootFrame&) = delete;
+    PyHostedRootFrame& operator=(const PyHostedRootFrame&) = delete;
+};
+
+class PyHostedItemRoot {
+    uint64_t* slot_;
+    Item fallback_;
+
+public:
+    PyHostedItemRoot(PyHostedRootFrame& frame, Item value) :
+        slot_(frame.take_slot()), fallback_(value) {
+        if (slot_) *slot_ = value.item;
+    }
+
+    Item get(void) const { return slot_ ? (Item){.item = *slot_} : fallback_; }
+    void set(Item value) {
+        if (slot_) *slot_ = value.item;
+        else fallback_ = value;
+    }
+};
 #endif

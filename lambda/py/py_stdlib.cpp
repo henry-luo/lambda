@@ -25,9 +25,6 @@
 #include "../../lib/shell.h"
 #include "../sysinfo.h"
 
-// Lambda runtime externs (defined in py_runtime.cpp)
-extern Input* py_input;
-
 // Lambda format functions (C++ linkage)
 #include "../format/format.h"
 
@@ -41,15 +38,12 @@ extern "C" Item fn_parse2_mir(Item, Item);
 // Helper: create a name item (symbol/key) for dict keys
 // =========================================================================
 static Item mk_name(const char* s) {
-    return (Item){.item = s2it(heap_create_name(s))};
+    return py_data_name_from_utf8(s);
 }
 
 // Helper: create a float item from a double
 static Item mk_float(double d) {
-    if (!py_input) return ItemNull;
-    double* pd = (double*)pool_calloc(py_input->pool, sizeof(double));
-    *pd = d;
-    return lambda_float_ptr_to_item(pd);
+    return py_data_float_from_f64(d);
 }
 
 // Helper: create an int item
@@ -59,7 +53,7 @@ static Item mk_int(int64_t v) {
 
 // Helper: create a string item
 static Item mk_str(const char* s) {
-    return (Item){.item = s2it(heap_create_name(s))};
+    return py_data_name_from_utf8(s);
 }
 
 // Helper: register a C function in a module namespace dict
@@ -821,10 +815,9 @@ static Item py_json_loads(Item s) {
 
 // json.dumps(obj, indent=None)
 static Item py_json_dumps(Item obj, Item indent) {
-    if (!py_input) return mk_str("null");
-    String* result = format_json(py_input->pool, obj);
-    if (!result) return mk_str("null");
-    return (Item){.item = s2it(result)};
+    (void)indent;
+    Item result = py_data_format_json(obj);
+    return get_type_id(result) == LMD_TYPE_STRING ? result : mk_str("null");
 }
 
 extern "C" Item py_stdlib_json_init(void) {

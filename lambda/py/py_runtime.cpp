@@ -7,22 +7,22 @@
 #include "py_runtime.h"
 #include "py_class.h"
 #include "py_bigint.h"
+#include "../jube/jube.h"
 #include "../lambda-data.hpp"
-#include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/strbuf.h"
-#include "../../lib/gc/gc_heap.h"
 #include <cstring>
 #include <cmath>
 #include "../../lib/mem.h"
 #include <cstdio>
 
-extern __thread EvalContext* context;
-
-// Global Input context for Python runtime (for map_put, pool allocations)
-Input* py_input = NULL;
+// Python retains only an opaque host data-session token.  Input/Pool layouts
+// remain inside the Jube host data service.
+static const JubeHostDataAPI* py_hosted_data_api = NULL;
+static const JubeHostRootAPI* py_runtime_root_api = NULL;
+static thread_local void* py_data_session = NULL;
 
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern "C" Item py_builtin_repr(Item obj);
@@ -55,19 +55,118 @@ static thread_local bool py_stop_iteration_initialized = false;
 // Runtime initialization
 // ============================================================================
 
-extern "C" void py_runtime_set_input(void* input) {
-    py_input = (Input*)input;
+extern "C" void py_set_hosted_data_api(const JubeHostDataAPI* data_api) {
+    py_hosted_data_api = data_api;
+}
+
+extern "C" void py_set_hosted_root_api(const JubeHostRootAPI* root_api) {
+    py_runtime_root_api = root_api;
+}
+
+extern "C" const JubeHostRootAPI* py_hosted_root_api(void) {
+    return py_runtime_root_api;
+}
+
+extern "C" void py_register_hosted_gc_root(uint64_t* slot) {
+    if (!slot || !py_runtime_root_api ||
+        py_runtime_root_api->api_version != JUBE_HOST_SERVICE_API_VERSION ||
+        py_runtime_root_api->struct_size < JUBE_HOST_ROOT_API_H5_PERSISTENT_SIZE ||
+        !py_runtime_root_api->persistent_root_register) {
+        return;
+    }
+    // Persistent Python TLS roots must be registered against the currently
+    // active guest session; the host owns heap selection and GC bookkeeping.
+    (void)py_runtime_root_api->persistent_root_register(py_data_session, slot);
+}
+
+extern "C" void py_register_hosted_gc_root_range(uint64_t* slots, size_t slot_count) {
+    if (!slots) return;
+    for (size_t index = 0; index < slot_count; index++) {
+        py_register_hosted_gc_root(&slots[index]);
+    }
+}
+
+extern "C" Item py_data_name_from_utf8(const char* text) {
+    if (!py_hosted_data_api || !py_hosted_data_api->name_from_utf8) return ItemNull;
+    return py_hosted_data_api->name_from_utf8(py_data_session, text);
+}
+
+extern "C" bool py_data_map_set(Item map, Item key, Item value) {
+    return py_hosted_data_api && py_hosted_data_api->map_set &&
+        py_hosted_data_api->map_set(py_data_session, map, key, value) == 0;
+}
+
+extern "C" Item py_data_float_from_f64(double value) {
+    if (!py_hosted_data_api || !py_hosted_data_api->float_from_f64) return ItemNull;
+    return py_hosted_data_api->float_from_f64(py_data_session, value);
+}
+
+extern "C" Item py_data_format_json(Item value) {
+    if (!py_hosted_data_api || !py_hosted_data_api->format_json) return ItemNull;
+    return py_hosted_data_api->format_json(py_data_session, value);
+}
+
+extern "C" void* py_data_closure_env_alloc(size_t item_count) {
+    if (!py_hosted_data_api || !py_hosted_data_api->closure_env_alloc) return NULL;
+    return py_hosted_data_api->closure_env_alloc(py_data_session, item_count);
+}
+
+extern "C" bool py_data_closure_env_store(uint64_t* environment, int slot, Item value) {
+    return py_hosted_data_api && py_hosted_data_api->closure_env_store &&
+        py_hosted_data_api->closure_env_store(py_data_session, environment, slot, value) == 0;
+}
+
+extern "C" bool py_data_closure_env_load(uint64_t* environment, int slot, Item* out_value) {
+    return py_hosted_data_api && py_hosted_data_api->closure_env_load &&
+        py_hosted_data_api->closure_env_load(py_data_session, environment, slot, out_value) == 0;
+}
+
+extern "C" bool py_data_item_slots_store(Item* storage, int64_t item_count,
+                                           int64_t slot, Item value) {
+    return py_hosted_data_api && py_hosted_data_api->item_slots_store &&
+        py_hosted_data_api->item_slots_store(py_data_session, storage, item_count,
+                                             slot, value) == 0;
+}
+
+extern "C" Item py_data_item_heap_rehome(Item value) {
+    if (!py_hosted_data_api || !py_hosted_data_api->item_heap_rehome) return value;
+    return py_hosted_data_api->item_heap_rehome(py_data_session, value);
+}
+
+extern "C" Item py_data_map_new(void) {
+    if (!py_hosted_data_api || !py_hosted_data_api->map_new) return ItemNull;
+    return py_hosted_data_api->map_new(py_data_session);
+}
+
+extern "C" Item py_data_function_new(void* function_ptr, int param_count) {
+    if (!py_hosted_data_api || !py_hosted_data_api->function_new) return ItemNull;
+    return py_hosted_data_api->function_new(py_data_session, function_ptr, param_count);
+}
+
+extern "C" void py_runtime_set_data_session(void* session) {
+    py_data_session = session;
+    if (!session) return;
     py_init_builtin_classes();
     // TLS addresses differ per guest thread; register this thread's persistent
     // slots with the active heap each time its Python runtime is entered.
-    heap_register_gc_root(&py_exception_value.item);
-    heap_register_gc_root(&py_stop_iteration_sentinel.item);
-    heap_register_gc_root_range((uint64_t*)py_module_vars, PY_MODULE_VAR_MAX);
-    heap_register_gc_root_range((uint64_t*)py_args_stack, PY_ARGS_STACK_CAP);
+    py_register_hosted_gc_root(&py_exception_value.item);
+    py_register_hosted_gc_root(&py_stop_iteration_sentinel.item);
+    py_register_hosted_gc_root_range((uint64_t*)py_module_vars, PY_MODULE_VAR_MAX);
+    py_register_hosted_gc_root_range((uint64_t*)py_args_stack, PY_ARGS_STACK_CAP);
     // Recovery can bypass a lexical py_args_restore.  Clear both the Item and
     // scalar-tail halves so an abandoned call frame cannot retain old values.
     memset(py_args_stack, 0, sizeof(py_args_stack));
     py_args_stack_top = 0;
+}
+
+extern "C" void* py_runtime_data_session(void) {
+    return py_data_session;
+}
+
+extern "C" void py_runtime_restore_data_session(void* session) {
+    // A nested import temporarily switches the opaque token; restoring it must
+    // not reset the caller's live Python argument or exception state.
+    py_data_session = session;
 }
 
 extern "C" int64_t py_args_save(void) {
@@ -89,7 +188,11 @@ extern "C" void py_args_store(Item* args, int index, Item value) {
     if (!args || index < 0) return;
     int base = (int)(args - py_args_stack);
     if (base < 0 || base >= py_args_stack_top || index >= py_args_stack_top - base) return;
-    owned_item_slot_store(py_args_stack, PY_ARGS_STACK_CAP, base + index, value);
+    if (!py_data_item_slots_store(py_args_stack, PY_ARGS_STACK_CAP, base + index, value)) {
+        // The no-session fallback is only reachable before a hosted run; it
+        // preserves the non-GC stack representation without a host barrier.
+        py_args_stack[base + index] = value;
+    }
 }
 
 extern "C" void py_args_restore(int64_t mark) {
@@ -1151,13 +1254,8 @@ extern "C" Item py_match_mapping_rest(Item obj, Item excluded_keys) {
 // Object/attribute operations
 // ============================================================================
 
-#define PY_MAP_SIZE_CLASS 1
-
 extern "C" Item py_new_object(void) {
-    Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, PY_MAP_SIZE_CLASS);
-    m->type_id = LMD_TYPE_MAP;
-    m->type = &EmptyMap;
-    return (Item){.map = m};
+    return py_data_map_new();
 }
 
 extern "C" Item py_getattr(Item object, Item name) {
@@ -1271,7 +1369,7 @@ extern "C" Item py_setattr(Item object, Item name, Item value) {
     if (get_type_id(object) != LMD_TYPE_MAP) return object;
 
     Map* m = it2map(object);
-    if (!m || !py_input) return object;
+    if (!m) return object;
 
     // descriptor protocol: if instance's class has a data descriptor (__set__), invoke it
     if (py_is_instance(object)) {
@@ -1305,7 +1403,7 @@ extern "C" Item py_setattr(Item object, Item name, Item value) {
 
     String* key = it2s(name);
     // always write to this object's own dict (instance or class dict)
-    map_put(m, key, value, py_input);
+    py_data_map_set(object, name, value);
     return value;
 }
 
@@ -1349,9 +1447,9 @@ extern "C" Item py_delattr(Item object, Item name) {
     // no descriptor: remove own attribute by setting to a deleted sentinel
     // We don't have map_remove, so store ItemNull to shadow the attribute
     Map* m = it2map(object);
-    if (m && py_input) {
+    if (m) {
         String* key = it2s(name);
-        map_put(m, key, ItemNull, py_input);
+        if (key) py_data_map_set(object, name, ItemNull);
     }
     return ItemNull;
 }
@@ -1925,8 +2023,8 @@ extern "C" Item py_get_iterator(Item iterable) {
 }
 
 extern "C" Item py_iterator_next(Item iterator) {
-    RootFrame roots((Context*)context, 1);
-    Rooted<Item> rooted_iterator(roots, iterator);
+    PyHostedRootFrame roots(1);
+    PyHostedItemRoot rooted_iterator(roots, iterator);
     iterator = rooted_iterator.get();
     // generator objects: call resume function
     if (get_type_id(iterator) == LMD_TYPE_FUNC) {
@@ -1998,13 +2096,9 @@ extern "C" Item py_range_new(Item start, Item stop, Item step) {
 // ============================================================================
 
 static Function* py_alloc_function(void* func_ptr, int param_count) {
-    if (!py_input) return NULL;
-    Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
-    if (!fn) return NULL;
-    fn->type_id = LMD_TYPE_FUNC;
-    fn->ptr = (fn_ptr)func_ptr;
-    fn->arity = (uint8_t)param_count;
-    return fn;
+    if (!py_data_session) return NULL;
+    Item item = py_data_function_new(func_ptr, param_count);
+    return get_type_id(item) == LMD_TYPE_FUNC ? item.function : NULL;
 }
 
 extern "C" Item py_new_function(void* func_ptr, int param_count) {
@@ -2018,8 +2112,8 @@ extern "C" Item py_new_closure(void* func_ptr, int param_count, int env_size) {
     Function* fn = py_alloc_function(func_ptr, param_count);
     if (!fn) return ItemNull;
 
-    RootFrame roots((Context*)context, 1);
-    Rooted<Item> rooted_fn(roots, (Item){.function = fn});
+    PyHostedRootFrame roots(1);
+    PyHostedItemRoot rooted_fn(roots, (Item){.function = fn});
     uint64_t* env = py_alloc_env(env_size);
     if (!env) return ItemNull;
     fn = rooted_fn.get().function;
@@ -2043,16 +2137,8 @@ extern "C" Item py_new_closure_with_env(void* func_ptr, int param_count,
 }
 
 extern "C" uint64_t* py_alloc_env(int size) {
-    if (!py_input || size <= 0) return NULL;
-    return (uint64_t*)heap_calloc_closure_env((size_t)size * sizeof(Item));
-}
-
-static int py_env_item_count(uint64_t* env) {
-    if (!env || !context || !context->heap || !context->heap->gc ||
-            !gc_is_managed(context->heap->gc, env)) return 0;
-    gc_header_t* header = gc_get_header(env);
-    if (!header || header->type_tag != GC_TYPE_JS_ENV) return 0;
-    return (int)(header->alloc_size / (2 * sizeof(Item)));
+    if (!py_data_session || size <= 0) return NULL;
+    return (uint64_t*)py_data_closure_env_alloc((size_t)size);
 }
 
 extern "C" int64_t py_closure_get_env(Item closure) {
@@ -2061,17 +2147,13 @@ extern "C" int64_t py_closure_get_env(Item closure) {
 }
 
 extern "C" void py_env_store(uint64_t* env, int slot, Item value) {
-    int count = py_env_item_count(env);
-    if (count > 0) {
-        owned_item_slot_store((Item*)env, count, slot, value);
-        return;
-    }
+    if (py_data_closure_env_store(env, slot, value)) return;
     if (env && slot >= 0) env[slot] = value.item;
 }
 
 extern "C" Item py_env_load(uint64_t* env, int slot) {
-    int count = py_env_item_count(env);
-    if (count > 0) return owned_item_slot_read((Item*)env, count, slot, false);
+    Item value = ItemNull;
+    if (py_data_closure_env_load(env, slot, &value)) return value;
     if (!env || slot < 0) return ItemNull;
     return (Item){.item = env[slot]};
 }
@@ -2095,9 +2177,9 @@ extern "C" Item py_dict_merge(Item dst, Item src) {
     TypeMap* stm = (TypeMap*)src_map->type;
     FOR_EACH_MAP_FIELD(stm, field) {
         Item val = _map_read_field(field, src_map->data);
-        if (field->name && py_input) {
-            String* key_name = heap_create_name(field->name->str);
-            map_put(dst_map, key_name, val, py_input);
+        if (field->name) {
+            Item key_name = py_data_name_from_utf8(field->name->str);
+            py_data_map_set(dst, key_name, val);
         }
     }
     return dst;
@@ -2118,8 +2200,8 @@ extern "C" Item py_call_function_kw(Item func, Item* args, int arg_count, Item k
         log_error("py-call: keyword call argument count %d exceeds native dispatch limit", arg_count);
         return ItemNull;
     }
-    RootFrame roots((Context*)context, 18);
-    Rooted<Item> rooted_func(roots, func);
+    PyHostedRootFrame roots(18);
+    PyHostedItemRoot rooted_func(roots, func);
     uint64_t fallback_args[16] = {};
     uint64_t* rooted_args = roots.take_slot();
     for (int i = 1; i < 16; i++) roots.take_slot();
@@ -2128,7 +2210,7 @@ extern "C" Item py_call_function_kw(Item func, Item* args, int arg_count, Item k
         if (rooted_args) rooted_args[i] = value;
         else fallback_args[i] = value;
     }
-    Rooted<Item> rooted_kwargs(roots, kwargs_map);
+    PyHostedItemRoot rooted_kwargs(roots, kwargs_map);
     func = rooted_func.get();
     args = (Item*)(rooted_args ? rooted_args : fallback_args);
     kwargs_map = rooted_kwargs.get();
@@ -2223,8 +2305,8 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
         log_error("py-call: argument count %d exceeds native dispatch limit", arg_count);
         return ItemNull;
     }
-    RootFrame roots((Context*)context, 17);
-    Rooted<Item> rooted_func(roots, func);
+    PyHostedRootFrame roots(17);
+    PyHostedItemRoot rooted_func(roots, func);
     uint64_t fallback_args[16] = {};
     uint64_t* rooted_args = roots.take_slot();
     for (int i = 1; i < 16; i++) roots.take_slot();
@@ -2351,7 +2433,7 @@ extern "C" void py_raise(Item exception) {
     py_exception_pending = true;
     // The exception slot outlives the raising MIR frame, so relocate scalar
     // payloads before its number-stack extent is restored.
-    py_exception_value = lambda_item_heap_rehome(exception);
+    py_exception_value = py_data_item_heap_rehome(exception);
 }
 
 extern "C" Item py_check_exception(void) {
@@ -2480,11 +2562,11 @@ extern "C" bool py_is_stop_iteration(Item value) {
 // Frame layout: slot 0 = state (0=fresh, N=resume point, -1=exhausted),
 //               slots 1..N = local variables (params first).
 extern "C" Item py_gen_create(void* resume_fn_ptr, int frame_size) {
-    if (!py_input || frame_size <= 0 || frame_size > 256) return ItemNull;
+    if (!py_data_session || frame_size <= 0 || frame_size > 256) return ItemNull;
     Function* fn = py_alloc_function(resume_fn_ptr, 0);
     if (!fn) return ItemNull;
-    RootFrame roots((Context*)context, 1);
-    Rooted<Item> rooted_fn(roots, (Item){.function = fn});
+    PyHostedRootFrame roots(1);
+    PyHostedItemRoot rooted_fn(roots, (Item){.function = fn});
     uint64_t* frame = py_alloc_env(frame_size);
     if (!frame) return ItemNull;
     fn = rooted_fn.get().function;
@@ -2508,8 +2590,8 @@ extern "C" int64_t py_gen_get_frame_c(Item gen) {
 // Advance a generator by sending ItemNull (used by next()).
 // Also callable from py_iterator_next above.
 extern "C" Item py_gen_next(Item gen) {
-    RootFrame roots((Context*)context, 1);
-    Rooted<Item> rooted_gen(roots, gen);
+    PyHostedRootFrame roots(1);
+    PyHostedItemRoot rooted_gen(roots, gen);
     gen = rooted_gen.get();
     if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
     Function* fn = gen.function;
@@ -2524,9 +2606,9 @@ extern "C" Item py_gen_next(Item gen) {
 
 // Send a value into a generator (used by gen.send(val)).
 extern "C" Item py_gen_send(Item gen, Item value) {
-    RootFrame roots((Context*)context, 2);
-    Rooted<Item> rooted_gen(roots, gen);
-    Rooted<Item> rooted_value(roots, value);
+    PyHostedRootFrame roots(2);
+    PyHostedItemRoot rooted_gen(roots, gen);
+    PyHostedItemRoot rooted_value(roots, value);
     gen = rooted_gen.get();
     if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
     Function* fn = gen.function;

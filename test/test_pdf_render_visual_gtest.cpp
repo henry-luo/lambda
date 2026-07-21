@@ -1,11 +1,38 @@
 /**
- * GTest PDF visual regression coverage.
+ * GTest visual regression coverage for Radiant's SVG/PDF/PNG export backends.
  *
- * Reference rendering uses Poppler (`pdfinfo` + `pdftoppm`), the most
- * widely deployed and stable open-source PDF rasterizer available from the
- * command line. Each PDF page is rendered to a 600px-wide PNG under
- * temp/pdf_visual/reference. Lambda renders the same page through the PDF package
- * (`pdf.pdf_to_svg`) and Radiant's PNG renderer, then the test compares pixels.
+ * This file holds two independent groups of tests:
+ *
+ * 1. RenderOutputParity.* — export-backend correctness on small, hand-written
+ *    HTML snippets rendered through `./lambda.exe render`. Two sub-themes:
+ *      - Pixel parity across render paths: render the same HTML two ways
+ *        (tiled vs. untiled, 1 vs. 2 render threads, embedded-SVG replay) and
+ *        require byte-identical PNGs via expect_pngs_exactly_equal().
+ *      - Effect lowering / fallback strategy: verify that CSS effects the SVG
+ *        and PDF backends cannot express natively are lowered to the expected
+ *        fallback, by grepping the output file for marker bytes. Examples:
+ *        inline SVG -> PDF inline image / SVG subscene; filter/box-shadow/
+ *        blend-mode/gradient -> raster fallback (SVG `effect-raster`, PDF inline
+ *        image or `/XObject`); alpha effects -> PDF soft mask (`/SMask`);
+ *        backdrop-filter -> opaque flattened raster (no `/SMask`); plain
+ *        opacity -> native PDF `ExtGState` rather than rasterizing.
+ *
+ * 2. PdfRenderVisual.CompareLambdaPagesAgainstPopplerReference — end-to-end
+ *    fidelity of Lambda's own PDF import-and-render path. For every `*.pdf`
+ *    fixture under test/pdf (up to MAX_PAGES_PER_PDF pages each), the reference
+ *    page is rasterized with Poppler (`pdfinfo` + `pdftoppm`) — the most widely
+ *    deployed, stable open-source PDF rasterizer available from the command
+ *    line — to a RENDER_WIDTH-wide PNG under temp/pdf_visual/reference. Lambda
+ *    renders the same page through the PDF package (`pdf.pdf_to_svg`) and
+ *    Radiant's PNG renderer, then the two images are compared pixel-by-pixel
+ *    (composited over white). Each page's mismatch percentage is checked
+ *    against test/pdf/baseline.txt and fails on regression beyond
+ *    BASELINE_REGRESSION_EPSILON; a magenta-highlighted diff PNG is written to
+ *    temp/pdf_visual/diff for inspection. New/missing baselines auto-initialize,
+ *    and `--update-baseline` rewrites the baseline when there are no regressions.
+ *
+ * All tests skip gracefully when lambda.exe is unbuilt, Poppler is missing, or
+ * no PDF fixtures are present.
  */
 
 #include <gtest/gtest.h>

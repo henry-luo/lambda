@@ -152,6 +152,51 @@ def check_python_has_no_js_runtime_calls() -> None:
                 fail(f"{path.relative_to(ROOT)} references JavaScript implementation token {token}")
 
 
+def check_python_uses_neutral_data_membrane() -> None:
+    # H5 has retired the only runtime Input bridge.  Keep this narrow so the
+    # compiler's separately tracked AST/session migration is not hidden behind
+    # a premature broad ban on all core names.
+    runtime_files = (
+        PYTHON_DIR / "py_runtime.cpp",
+        PYTHON_DIR / "py_async.cpp",
+        PYTHON_DIR / "py_class.cpp",
+        PYTHON_DIR / "py_builtins.cpp",
+        PYTHON_DIR / "py_stdlib.cpp",
+    )
+    for path in runtime_files:
+        source = text(path)
+        for token in ("py_input", "map_put(", "->name_pool", "->pool",
+                      "heap_calloc_closure_env", "owned_item_slot_store(",
+                      "owned_item_slot_read(", "gc_is_managed(", "gc_get_header(",
+                      "heap_calloc_class(", "heap_calloc(sizeof(Function)"):
+            if token in source:
+                fail(f"{path.relative_to(ROOT)} bypasses JubeHostDataAPI via {token}")
+        for token in ("heap_register_gc_root(", "lambda_item_heap_rehome("):
+            if token in source:
+                fail(f"{path.relative_to(ROOT)} bypasses hosted root/data service via {token}")
+    source = text(PYTHON_JUBE_ADAPTER)
+    if "py_set_hosted_data_api" not in source or "host->data" not in source:
+        fail("lambda/py/python_jube_module.cpp does not negotiate JubeHostDataAPI")
+
+
+def check_python_uses_opaque_hosted_roots() -> None:
+    # H5's root-frame projection must not quietly fall back to Lambda's C++
+    # helper or raw C frame representation in a newly added Python helper.
+    for path in sorted(PYTHON_DIR.rglob("*")):
+        if path.suffix not in {".c", ".cc", ".cpp", ".h", ".hpp"}:
+            continue
+        source = text(path)
+        for token in ("LambdaRootFrame", "Rooted<", "lambda_root_frame_"):
+            if token in source:
+                fail(f"{path.relative_to(ROOT)} bypasses opaque Jube root API via {token}")
+        if re.search(r"\bRootFrame\s+[A-Za-z_]", source):
+            fail(f"{path.relative_to(ROOT)} constructs a legacy RootFrame directly")
+    adapter = text(PYTHON_JUBE_ADAPTER)
+    for token in ("hosted_language->roots", "py_set_hosted_root_api"):
+        if token not in adapter:
+            fail("lambda/py/python_jube_module.cpp does not negotiate JubeHostRootAPI")
+
+
 def check_main_has_no_python_branch() -> None:
     source = text(MAIN)
     forbidden = ("py/py_transpiler", "transpile_py_to_mir", "LAMBDA_PYTHON")
@@ -228,6 +273,10 @@ def check_python_adapter_uses_hosted_services() -> None:
         "mir_module_finalize_and_load",
         "mir_function_lookup",
         "mir_function_finish",
+        "mir_item_function_create",
+        "mir_function_forward_create",
+        "mir_item_function_proto_create",
+        "mir_function_register_lookup",
         "execution_activate",
         "execution_activate_import",
         "execution_run_main",
@@ -252,6 +301,12 @@ def check_python_runtime_catalog_uses_jube_api() -> None:
     for token in ("JubeRuntimeImport", "JubeRuntimeCatalogAPI", "register_imports"):
         if token not in source:
             fail(f"lambda/py/python_runtime_imports.cpp no longer uses Jube runtime catalog {token}")
+
+
+def check_python_frontend_has_no_monolithic_transpiler_header() -> None:
+    source = text(PYTHON_DIR / "py_transpiler.hpp")
+    if '"../transpiler.hpp"' in source:
+        fail("lambda/py/py_transpiler.hpp retains the monolithic core transpiler header")
 
 
 def check_python_import_lowering_uses_module_graph() -> None:
@@ -286,6 +341,7 @@ def check_python_import_lowering_uses_module_graph() -> None:
                   "module_register_", "module_build_lambda_namespace", "load_script(",
                   "read_text_file", "import_resolver", "jit_init(", "MIR_finish(",
                   "MIR_finish_module(", "MIR_load_module(", "find_func(",
+                  "MIR_new_func_arr(", "MIR_new_forward(", "MIR_new_proto_arr(", "MIR_reg(",
                   "mir_guest_finish_context("):
         if token in source:
             fail(f"Python compiler bypasses hosted graph/source service via {token}")
@@ -299,6 +355,8 @@ def check_python_import_lowering_uses_module_graph() -> None:
                   "mir_guest_finish_context(", "lambda_recovery_"):
         if token in source:
             fail(f"Python compiler retains raw host execution internals via {token}")
+    if '"_lambda_rt"' in source:
+        fail("Python compiler retains direct _lambda_rt storage import")
 
 
 def check_dynamic_module_has_no_retired_host_imports() -> None:
@@ -330,9 +388,23 @@ def check_dynamic_module_has_no_retired_host_imports() -> None:
         "_MIR_finish_func",
         "_MIR_load_module",
         "_MIR_new_module",
+        "_MIR_new_func_arr",
+        "_MIR_new_forward",
+        "_MIR_reg",
         "_find_func",
         "_mir_guest_finish_context",
         "_jit_import_get_metadata",
+        "_lambda_rt",
+        "_lambda_root_frame_begin",
+        "_lambda_root_frame_end",
+        "_lambda_root_frame_take_slot",
+        "_lambda_root_frame_overflow_error",
+        "_context",
+        "_heap_calloc_closure_env",
+        "_owned_item_slot_store",
+        "_owned_item_slot_read",
+        "_gc_is_managed",
+        "_gc_get_header",
     )
     for symbol in forbidden:
         if re.search(rf"(?:^|\s){re.escape(symbol)}$", output, re.MULTILINE):
@@ -364,6 +436,8 @@ def main() -> None:
         write_inventory()
         return
     check_python_has_no_js_runtime_calls()
+    check_python_uses_neutral_data_membrane()
+    check_python_uses_opaque_hosted_roots()
     check_main_has_no_python_branch()
     check_core_jit_catalog_has_no_python_ownership()
     check_core_importer_has_no_python_loader()
@@ -371,6 +445,7 @@ def main() -> None:
     check_python_goldens_are_complete()
     check_no_second_jube_runtime_target()
     check_python_adapter_uses_hosted_services()
+    check_python_frontend_has_no_monolithic_transpiler_header()
     check_python_runtime_catalog_uses_jube_api()
     check_python_import_lowering_uses_module_graph()
     check_dynamic_module_has_no_retired_host_imports()

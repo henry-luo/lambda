@@ -1,7 +1,6 @@
 #pragma once
 
 #include "py_ast.hpp"
-#include "../transpiler.hpp"
 #include "../jube/jube.h"
 
 #ifdef __cplusplus
@@ -102,8 +101,9 @@ bool py_transpiler_parse(PyTranspiler* tp, const char* source, size_t length);
 void py_set_hosted_module_graph_api(const JubeModuleGraphAPI* module_graph);
 void py_set_hosted_source_api(const JubeSourceAPI* source_api);
 void py_set_hosted_execution_api(const JubeGuestExecutionAPI* execution_api);
-void py_set_hosted_gc_api(const JubeHostGcAPI* gc_api);
+void py_set_hosted_root_api(const JubeHostRootAPI* root_api);
 void py_set_hosted_runtime_catalog_api(const JubeRuntimeCatalogAPI* runtime_catalog);
+void py_set_hosted_data_api(const JubeHostDataAPI* data_api);
 
 #ifdef __cplusplus
 }

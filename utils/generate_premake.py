@@ -14,6 +14,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+# Verbosity: progress/DEBUG output is silenced by default so build invocations
+# stay quiet; pass --verbose (-V) to restore it. Real errors and warnings always
+# go to stderr via elog() regardless, so silencing stdout never hides failures.
+_VERBOSE = False
+
+def vlog(*args, **kwargs):
+    """Progress/DEBUG output — shown only when --verbose is set."""
+    if _VERBOSE:
+        print(*args, **kwargs)
+
+def elog(*args, **kwargs):
+    """Error/warning output — always shown, on stderr."""
+    kwargs.setdefault('file', sys.stderr)
+    print(*args, **kwargs)
+
 class PremakeGenerator:
     def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None, variant: str = None):
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -299,7 +314,10 @@ class PremakeGenerator:
             build_opts.extend(['-fdiagnostics-color=auto'])
             # gcc doesn't need -fms-extensions and doesn't support -fcolor-diagnostics
         elif base_compiler == 'clang':
-            build_opts.extend(['-fms-extensions', '-fcolor-diagnostics'])
+            # color=auto (not forced -fcolor-diagnostics) so diagnostics stay
+            # plain when the build is redirected to a log file, keeping the
+            # error summary free of ANSI escape codes.
+            build_opts.extend(['-fms-extensions', '-fdiagnostics-color=auto'])
 
         # Add global flags from configuration
         global_flags = self.config.get('flags', [])
@@ -345,16 +363,16 @@ class PremakeGenerator:
         platforms_config = self.config.get('platforms', {})
         variant_config = platforms_config.get(variant)
         if not variant_config:
-            print(f"Warning: variant '{variant}' not found in platforms config, ignoring")
+            elog(f"Warning: variant '{variant}' not found in platforms config, ignoring")
             return
 
-        print(f"DEBUG: Applying variant overlay '{variant}'")
+        vlog(f"DEBUG: Applying variant overlay '{variant}'")
 
         # Override top-level keys if the variant specifies them
         overlay_keys = ['output', 'source_dirs', 'exclude_source_files', 'includes']
         for key in overlay_keys:
             if key in variant_config:
-                print(f"DEBUG: Variant override: {key} = {variant_config[key]}")
+                vlog(f"DEBUG: Variant override: {key} = {variant_config[key]}")
                 self.config[key] = variant_config[key]
 
         # Merge variant defines into the config (additive)
@@ -364,7 +382,7 @@ class PremakeGenerator:
                 if d not in existing_defines:
                     existing_defines.append(d)
             self.config['defines'] = existing_defines
-            print(f"DEBUG: Variant defines: {self.config['defines']}")
+            vlog(f"DEBUG: Variant defines: {self.config['defines']}")
 
         # Store variant build_dir for reference
         if 'build_dir' in variant_config:
@@ -376,7 +394,7 @@ class PremakeGenerator:
             for lib in variant_config['additional_libraries']:
                 existing_libs.append(lib)
             self.config['libraries'] = existing_libs
-            print(f"DEBUG: Variant added {len(variant_config['additional_libraries'])} additional libraries")
+            vlog(f"DEBUG: Variant added {len(variant_config['additional_libraries'])} additional libraries")
 
     def _get_consolidated_includes(self) -> List[str]:
         """Get consolidated include directories from global and platform-specific configurations"""
@@ -417,10 +435,10 @@ class PremakeGenerator:
         try:
             return self.config
         except FileNotFoundError:
-            print(f"Error: Configuration file not found")
+            elog(f"Error: Configuration file not found")
             sys.exit(1)
         except json.JSONDecodeError as e:
-            print(f"Error: Invalid JSON: {e}")
+            elog(f"Error: Invalid JSON: {e}")
             sys.exit(1)
 
     def _get_platform_info(self) -> tuple[str, List[str]]:
@@ -476,22 +494,22 @@ class PremakeGenerator:
 
     def generate_workspace(self) -> None:
         """Generate the main workspace configuration"""
-        print("DEBUG: Generating workspace configuration...")
+        vlog("DEBUG: Generating workspace configuration...")
 
         # Get workspace name from config or default
         workspace_name = self.config.get('workspace_name', 'Lambda')
         output = self.config.get('output', 'lambda.exe')
         startup_project = output.replace('.exe', '')
 
-        print(f"DEBUG: workspace_name={workspace_name}, output={output}, startup_project={startup_project}")
+        vlog(f"DEBUG: workspace_name={workspace_name}, output={output}, startup_project={startup_project}")
 
         # Get compiler information
         base_compiler, toolset = self._get_compiler_info()
-        print(f"DEBUG: base_compiler={base_compiler}, toolset={toolset}")
+        vlog(f"DEBUG: base_compiler={base_compiler}, toolset={toolset}")
 
         # Get platform and architecture information
         arch, platforms = self._get_platform_info()
-        print(f"DEBUG: arch={arch}, platforms={platforms}")
+        vlog(f"DEBUG: arch={arch}, platforms={platforms}")
 
         platform_str = ', '.join([f'"{p}"' for p in platforms])
 
@@ -501,7 +519,7 @@ class PremakeGenerator:
             location = 'build_linux/test'
         else:
             location = 'build/premake'
-        print(f"DEBUG: platform_config={platform_config}, location={location}")
+        vlog(f"DEBUG: platform_config={platform_config}, location={location}")
 
         self.premake_content.extend([
             f'workspace "{workspace_name}"',
@@ -538,7 +556,7 @@ class PremakeGenerator:
             platforms_config = self.config.get('platforms', {})
             windows_config = platforms_config.get('windows', {})
             linker_flags = windows_config.get('linker_flags', [])
-            print(f"DEBUG: Adding Windows linker flags to Debug configuration: {linker_flags}")
+            vlog(f"DEBUG: Adding Windows linker flags to Debug configuration: {linker_flags}")
 
             if linker_flags:
                 self.premake_content.append('        linkoptions {')
@@ -546,46 +564,46 @@ class PremakeGenerator:
                     if flag.startswith('l'):
                         # Library flags start with 'l' (like lwinmm)
                         self.premake_content.append(f'            "-{flag}",')
-                        print(f"DEBUG: Added Windows library flag to Debug: -{flag}")
+                        vlog(f"DEBUG: Added Windows library flag to Debug: -{flag}")
                     elif flag.startswith('Wl,'):
                         # Linker options start with 'Wl,'
                         self.premake_content.append(f'            "-{flag}",')
-                        print(f"DEBUG: Added Windows linker option to Debug: -{flag}")
+                        vlog(f"DEBUG: Added Windows linker option to Debug: -{flag}")
                     else:
                         # Other flags like 'static', 'static-libgcc'
                         self.premake_content.append(f'            "-{flag}",')
-                        print(f"DEBUG: Added Windows other flag to Debug: -{flag}")
+                        vlog(f"DEBUG: Added Windows other flag to Debug: -{flag}")
                 self.premake_content.extend([
                     '        }',
                 ])
-                print("DEBUG: Added Windows linker flags to Debug configuration")
+                vlog("DEBUG: Added Windows linker flags to Debug configuration")
 
         self.premake_content.extend([
             '    ',
         ])
 
-        print("DEBUG: Added Debug configuration filter")
+        vlog("DEBUG: Added Debug configuration filter")
 
         # Check if sanitizer should be disabled for linux platform
         platforms_config = self.config.get('platforms', {})
         linux_config = platforms_config.get('linux', {})
         disable_sanitizer = linux_config.get('disable_sanitizer', False)
 
-        print(f"DEBUG: platforms_config keys: {list(platforms_config.keys())}")
-        print(f"DEBUG: linux_config: {linux_config}")
-        print(f"DEBUG: disable_sanitizer: {disable_sanitizer}")
+        vlog(f"DEBUG: platforms_config keys: {list(platforms_config.keys())}")
+        vlog(f"DEBUG: linux_config: {linux_config}")
+        vlog(f"DEBUG: disable_sanitizer: {disable_sanitizer}")
 
         # AddressSanitizer is applied to the main lambda.exe debug build via
         # enable_sanitizer_main. Test executables default to the fastest debug
         # build and can opt in separately with enable_sanitizer_tests.
         if not disable_sanitizer:
-            print("DEBUG: AddressSanitizer is available for opt-in debug targets")
+            vlog("DEBUG: AddressSanitizer is available for opt-in debug targets")
         else:
             self.premake_content.extend([
                 '    -- AddressSanitizer disabled for Linux platform',
                 '    ',
             ])
-            print("DEBUG: AddressSanitizer disabled")
+            vlog("DEBUG: AddressSanitizer disabled")
 
         # Release configuration with size optimizations
         # Use -flto=thin (ThinLTO) on macOS/Clang and Linux/Clang, -flto on Linux/GCC
@@ -1649,7 +1667,7 @@ class PremakeGenerator:
 
             # Skip disabled test suites
             if suite.get('disabled', False):
-                print(f"Skipping disabled test suite: {suite_name}")
+                vlog(f"Skipping disabled test suite: {suite_name}")
                 continue
 
             # Determine test framework type for this suite
@@ -1827,7 +1845,7 @@ class PremakeGenerator:
                 # Skip tests marked with "skip": true or "disabled": true
                 if test.get('skip', False) or test.get('disabled', False):
                     test_name = test.get('name', test.get('source', 'unknown'))
-                    print(f"Skipping test: {test_name}")
+                    vlog(f"Skipping test: {test_name}")
                     continue
 
                 source = test.get('source', '')
@@ -1905,7 +1923,7 @@ class PremakeGenerator:
                 actual_path = source if source.startswith("test/") else f"test/{source}"
                 full_path = os.path.join(os.getcwd(), actual_path)
                 if not os.path.exists(full_path):
-                    print(f"Warning: Test file not found: {actual_path}")
+                    elog(f"Warning: Test file not found: {actual_path}")
                     continue
 
                 test_disable_sanitizer = test.get('disable_sanitizer', False)
@@ -2619,7 +2637,7 @@ class PremakeGenerator:
             exclude_macos_libs = set(variant_config.get('exclude_macos_libraries', []))
             all_excluded = exclude_libs | exclude_macos_libs
             if all_excluded:
-                print(f"DEBUG: Variant '{self.variant}' excluding libraries: {all_excluded}")
+                vlog(f"DEBUG: Variant '{self.variant}' excluding libraries: {all_excluded}")
                 dependencies = [d for d in dependencies if d not in all_excluded]
 
         # NOTE: dev_libraries (ginac, cln, gmp, criterion, catch2) are NOT included
@@ -3083,7 +3101,7 @@ class PremakeGenerator:
 
     def generate_premake_file(self, output_path: str = "premake5.lua") -> None:
         """Generate the complete premake5.lua file"""
-        print(f"DEBUG: Starting premake file generation, output_path={output_path}")
+        vlog(f"DEBUG: Starting premake file generation, output_path={output_path}")
 
         # Determine platform from filename or current platform detection
         platform_name = "unknown"
@@ -3111,33 +3129,33 @@ class PremakeGenerator:
             '',
         ])
 
-        print(f"DEBUG: Added header comment for {platform_name}")
+        vlog(f"DEBUG: Added header comment for {platform_name}")
 
         # Generate all sections
-        print("DEBUG: Generating workspace...")
+        vlog("DEBUG: Generating workspace...")
         self.generate_workspace()
-        print("DEBUG: Generating library projects...")
+        vlog("DEBUG: Generating library projects...")
         self.generate_library_projects()
-        print("DEBUG: Generating complex libraries...")
+        vlog("DEBUG: Generating complex libraries...")
         self.generate_complex_libraries()
-        print("DEBUG: Generating main program...")
+        vlog("DEBUG: Generating main program...")
         self.generate_main_program()
-        print("DEBUG: Generating test projects...")
+        vlog("DEBUG: Generating test projects...")
         self.generate_test_projects()
 
-        print(f"DEBUG: Total premake content lines: {len(self.premake_content)}")
+        vlog(f"DEBUG: Total premake content lines: {len(self.premake_content)}")
 
         # Write to file
         try:
-            print(f"DEBUG: Attempting to write to {output_path}")
+            vlog(f"DEBUG: Attempting to write to {output_path}")
             with open(output_path, 'w') as f:
                 content_str = '\n'.join(self.premake_content)
                 f.write(content_str)
-                print(f"DEBUG: Successfully wrote {len(content_str)} characters to {output_path}")
-            print(f"Generated {platform_name} premake file: {output_path}")
+                vlog(f"DEBUG: Successfully wrote {len(content_str)} characters to {output_path}")
+            vlog(f"Generated {platform_name} premake file: {output_path}")
 
         except IOError as e:
-            print(f"Error writing {output_path}: {e}")
+            elog(f"Error writing {output_path}: {e}")
             sys.exit(1)
 
     def validate_config(self) -> bool:
@@ -3145,21 +3163,23 @@ class PremakeGenerator:
         required_sections = ['libraries']
         for section in required_sections:
             if section not in self.config:
-                print(f"Error: Missing required section '{section}' in configuration")
+                elog(f"Error: Missing required section '{section}' in configuration")
                 return False
 
         # Test section is optional for non-test builds (like Linux cross-compilation)
         if 'test' in self.config:
             test_config = self.config['test']
             if 'test_suites' not in test_config:
-                print("Error: Missing 'test_suites' in test configuration")
+                elog("Error: Missing 'test_suites' in test configuration")
                 return False
 
         return True
 
 def main():
     """Main entry point"""
-    print(f"DEBUG: sys.argv = {sys.argv}")
+    global _VERBOSE
+    _VERBOSE = ('--verbose' in sys.argv) or ('-V' in sys.argv)
+    vlog(f"DEBUG: sys.argv = {sys.argv}")
 
     config_file = "build_lambda_config.json"
     output_file = None  # Will be determined based on platform
@@ -3170,7 +3190,9 @@ def main():
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
-        if arg in ['--output', '-o'] and i + 1 < len(sys.argv):
+        if arg in ['--verbose', '-V']:
+            i += 1
+        elif arg in ['--output', '-o'] and i + 1 < len(sys.argv):
             output_file = sys.argv[i + 1]
             i += 2
         elif arg in ['--config', '-c'] and i + 1 < len(sys.argv):
@@ -3208,7 +3230,7 @@ def main():
             elif explicit_platform in ['windows', 'win']:
                 output_file = "premake5.win.lua"
             else:
-                print(f"Error: Unknown platform '{explicit_platform}'. Use 'mac', 'linux', or 'windows'")
+                elog(f"Error: Unknown platform '{explicit_platform}'. Use 'mac', 'linux', or 'windows'")
                 sys.exit(1)
         elif current_platform == 'Darwin':
             output_file = "premake5.mac.lua"
@@ -3217,10 +3239,10 @@ def main():
         elif current_platform == 'Windows' or current_platform.startswith('MINGW') or current_platform.startswith('MSYS'):
             output_file = "premake5.win.lua"
         else:
-            print(f"Warning: Unknown platform '{current_platform}', defaulting to premake5.mac.lua")
+            elog(f"Warning: Unknown platform '{current_platform}', defaulting to premake5.mac.lua")
             output_file = "premake5.mac.lua"
 
-    print(f"DEBUG: Final config_file={config_file}, output_file={output_file}, variant={variant}")
+    vlog(f"DEBUG: Final config_file={config_file}, output_file={output_file}, variant={variant}")
 
     # Generate Premake5 configuration
     generator = PremakeGenerator(config_file, explicit_platform, variant)
@@ -3230,16 +3252,16 @@ def main():
         sys.exit(1)
 
     generator.generate_premake_file(output_file)
-    print(f"Premake5 migration completed successfully!")
-    print(f"Generated platform-specific file: {output_file}")
-    print(f"Next steps:")
-    print(f"  1. Run: premake5 gmake2 --file={output_file}")
-    print(f"  2. Run: make -C build/premake config=debug_native")
-    print(f"")
-    print(f"To generate for other platforms, use:")
-    print(f"  python3 utils/generate_premake.py --platform mac")
-    print(f"  python3 utils/generate_premake.py --platform linux")
-    print(f"  python3 utils/generate_premake.py --platform windows")
+    vlog(f"Premake5 migration completed successfully!")
+    vlog(f"Generated platform-specific file: {output_file}")
+    vlog(f"Next steps:")
+    vlog(f"  1. Run: premake5 gmake2 --file={output_file}")
+    vlog(f"  2. Run: make -C build/premake config=debug_native")
+    vlog(f"")
+    vlog(f"To generate for other platforms, use:")
+    vlog(f"  python3 utils/generate_premake.py --platform mac")
+    vlog(f"  python3 utils/generate_premake.py --platform linux")
+    vlog(f"  python3 utils/generate_premake.py --platform windows")
 
 if __name__ == "__main__":
     main()

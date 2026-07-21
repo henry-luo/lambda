@@ -316,6 +316,16 @@ struct MirFunctionPlan {
     const char* debug_name;
 };
 
+// Parameter registers arrive initialized at function entry, even though no
+// MIR instruction defines them.  Hosted lowering records the opaque register
+// identities as it binds parameters so its module never needs MIR's private
+// name-to-register lookup during root-liveness finalization.
+static const uint32_t MIR_SHARED_MAX_FUNCTION_ARGUMENT_REGS = 32;
+struct MirFunctionArgumentState {
+    uint32_t count;
+    MIR_reg_t regs[MIR_SHARED_MAX_FUNCTION_ARGUMENT_REGS];
+};
+
 // One shared owner prevents physical-frame facts from being mirrored in
 // language-specific contexts while those contexts retain semantic exits.
 struct MirFrameState {
@@ -398,7 +408,39 @@ struct MirEmitter {
     MIR_item_t consts_bss;        // per-module BSS slot holding const_list->data
     MirFrameState frame;           // canonical physical activation state
     MirFunctionMetadata last_function;
+    MirFunctionArgumentState argument_registers;
 };
+
+static inline void em_function_arguments_clear(MirEmitter* em) {
+    if (!em) return;
+    memset(&em->argument_registers, 0, sizeof(em->argument_registers));
+}
+
+static inline void em_function_argument_register(MirEmitter* em, MIR_reg_t reg) {
+    if (!em || !reg) return;
+    MirFunctionArgumentState* arguments = &em->argument_registers;
+    for (uint32_t i = 0; i < arguments->count; i++) {
+        if (arguments->regs[i] == reg) return;
+    }
+    if (arguments->count < MIR_SHARED_MAX_FUNCTION_ARGUMENT_REGS) {
+        arguments->regs[arguments->count++] = reg;
+    }
+}
+
+static inline MirFunctionArgumentState em_function_arguments_suspend(
+        MirEmitter* em) {
+    MirFunctionArgumentState saved = {};
+    if (!em) return saved;
+    saved = em->argument_registers;
+    em_function_arguments_clear(em);
+    return saved;
+}
+
+static inline void em_function_arguments_restore(MirEmitter* em,
+        MirFunctionArgumentState saved) {
+    if (!em) return;
+    em->argument_registers = saved;
+}
 
 static inline void em_frame_dispose(MirEmitter* em) {
     if (!em) return;
@@ -1181,7 +1223,14 @@ static inline bool em_is_eager_root_store(MIR_insn_t insn,
 
 static inline bool em_root_is_function_argument_reg(const MirEmitter* em,
         MIR_reg_t reg) {
-    if (!em || !em->func || !em->func->vars || !reg) return false;
+    if (!em || !reg) return false;
+#if defined(MIR_EMITTER_NO_DIRECT_REGISTER_LOOKUP)
+    for (uint32_t i = 0; i < em->argument_registers.count; i++) {
+        if (em->argument_registers.regs[i] == reg) return true;
+    }
+    return false;
+#else
+    if (!em->func || !em->func->vars) return false;
     MIR_var_t* vars = VARR_ADDR(MIR_var_t, em->func->vars);
     for (uint32_t i = 0; i < em->func->nargs; i++) {
         if (vars[i].name && MIR_reg(em->ctx, vars[i].name, em->func) == reg) {
@@ -1189,6 +1238,7 @@ static inline bool em_root_is_function_argument_reg(const MirEmitter* em,
         }
     }
     return false;
+#endif
 }
 
 static inline void em_collect_root_candidate_bits(MIR_context_t ctx,

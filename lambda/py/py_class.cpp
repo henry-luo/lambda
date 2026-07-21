@@ -14,15 +14,12 @@
 #include "py_class.h"
 #include "py_runtime.h"
 #include "../lambda-data.hpp"
-#include "../lambda.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include "../../lib/mem.h"
 
-extern Input* py_input;
-extern __thread EvalContext* context;
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern Item _map_get(TypeMap* map_type, void* map_data, const char* key, bool* is_found);
 extern TypeMap EmptyMap;
@@ -59,16 +56,16 @@ extern "C" Item py_map_get_cstr(Item obj, const char* key) {
 
 // Write a field by C string key. Returns value.
 extern "C" Item py_map_set_cstr(Item obj, const char* key, Item value) {
-    RootFrame roots((Context*)context, 2);
-    Rooted<Item> rooted_obj(roots, obj);
-    Rooted<Item> rooted_value(roots, value);
+    PyHostedRootFrame roots(2);
+    PyHostedItemRoot rooted_obj(roots, obj);
+    PyHostedItemRoot rooted_value(roots, value);
     if (get_type_id(rooted_obj.get()) != LMD_TYPE_MAP) return rooted_value.get();
     Map* m = it2map(rooted_obj.get());
-    if (!m || !py_input) return rooted_value.get();
-    String* k = (String*)heap_create_name(key);
+    if (!m) return rooted_value.get();
+    Item name = py_data_name_from_utf8(key);
     // map_put can grow the shape/data storage after name interning; both
     // receiver and value must survive that collection boundary exactly.
-    map_put(m, k, rooted_value.get(), py_input);
+    py_data_map_set(rooted_obj.get(), name, rooted_value.get());
     return rooted_value.get();
 }
 
@@ -282,10 +279,7 @@ static Item py_class_new_core(Item name, Item bases, Item methods) {
                 // method maps may carry spread slots; class attribute names must be named fields.
                 if (!field->name) continue;
                 Item val = _map_read_field(field, mm->data);
-                py_setattr(cls,
-                    (Item){.item = s2it((String*)name_pool_create_len(
-                        py_input->name_pool, field->name->str, field->name->length))},
-                    val);
+                py_setattr(cls, py_data_name_from_utf8(field->name->str), val);
             }
         }
     }
@@ -525,9 +519,10 @@ extern "C" void py_init_builtin_classes(void) {
 
     // register static Item variables as GC roots (BSS memory invisible to stack scanning)
     {
-        heap_register_gc_root(&py_object_class.item);
-        heap_register_gc_root(&py_type_class.item);
-        heap_register_gc_root_range((uint64_t*)py_builtin_class_items, PY_BUILTIN_CLASS_MAX);
+        py_register_hosted_gc_root(&py_object_class.item);
+        py_register_hosted_gc_root(&py_type_class.item);
+        py_register_hosted_gc_root_range((uint64_t*)py_builtin_class_items,
+                                         PY_BUILTIN_CLASS_MAX);
     }
 
     // 'object' — base of all classes, no bases

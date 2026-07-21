@@ -140,6 +140,7 @@ static const JubeLanguageDef python_jube_language = {
     python_jube_run,
     python_jube_load_module,
     JUBE_HOST_CAP_GC_ROOTS |
+        JUBE_HOST_CAP_NEUTRAL_DATA |
         JUBE_HOST_CAP_RUNTIME_CATALOG |
         JUBE_HOST_CAP_MODULE_GRAPH |
         JUBE_HOST_CAP_GUEST_EXECUTION,
@@ -157,17 +158,27 @@ static void python_jube_heap_cleanup(void* host_heap) {
 }
 
 static int python_jube_init(const JubeHostAPI* host) {
-    if (!host || host->struct_size < JUBE_HOST_API_RUNTIME_CATALOG_SIZE ||
+    if (!host || host->struct_size < JUBE_HOST_API_DATA_SIZE ||
         !host->runtime_catalog ||
         host->runtime_catalog->api_version != JUBE_HOST_SERVICE_API_VERSION ||
         host->runtime_catalog->struct_size < JUBE_RUNTIME_CATALOG_API_V1_SIZE ||
         !host->runtime_catalog->register_imports ||
-        !host->runtime_catalog->lookup_import_metadata || !host->hosted_language ||
+        !host->runtime_catalog->lookup_import_metadata || !host->data ||
+        host->data->api_version != JUBE_HOST_SERVICE_API_VERSION ||
+        host->data->struct_size < JUBE_HOST_DATA_API_H5_ALLOCATORS_SIZE ||
+        !host->data->name_from_utf8 || !host->data->map_set ||
+        !host->data->float_from_f64 || !host->data->format_json ||
+        !host->data->closure_env_alloc || !host->data->closure_env_store ||
+        !host->data->closure_env_load || !host->data->item_slots_store ||
+        !host->data->item_heap_rehome || !host->data->map_new ||
+        !host->data->function_new ||
+        !host->hosted_language ||
         host->hosted_language->api_version != JUBE_HOST_LANG_API_VERSION ||
-        host->hosted_language->struct_size < JUBE_HOST_LANG_API_H6_MODULE_GRAPH_SIZE ||
+        host->hosted_language->struct_size < JUBE_HOST_LANG_API_H7E2_ROOTS_SIZE ||
         !host->hosted_language->source || !host->hosted_language->diagnostic ||
         !host->hosted_language->output || !host->hosted_language->session_memory ||
         !host->hosted_language->execution || !host->hosted_language->module_graph ||
+        !host->hosted_language->roots ||
         host->hosted_language->source->api_version != JUBE_HOST_SERVICE_API_VERSION ||
         host->hosted_language->source->struct_size < JUBE_SOURCE_API_V1_SIZE ||
         !host->hosted_language->source->source_read ||
@@ -183,7 +194,7 @@ static int python_jube_init(const JubeHostAPI* host) {
         !host->hosted_language->session_memory->session_alloc ||
         !host->hosted_language->session_memory->session_free ||
         host->hosted_language->execution->api_version != JUBE_HOST_SERVICE_API_VERSION ||
-        host->hosted_language->execution->struct_size < JUBE_GUEST_EXECUTION_API_V1_SIZE ||
+        host->hosted_language->execution->struct_size < JUBE_GUEST_EXECUTION_API_H7C_REGISTER_LOOKUP_SIZE ||
         !host->hosted_language->execution->execution_create ||
         !host->hosted_language->execution->execution_destroy ||
         !host->hosted_language->execution->execution_link_module ||
@@ -196,7 +207,18 @@ static int python_jube_init(const JubeHostAPI* host) {
         !host->hosted_language->execution->execution_activate ||
         !host->hosted_language->execution->execution_activate_import ||
         !host->hosted_language->execution->execution_run_main ||
-        !host->hosted_language->execution->execution_finish_guest) {
+        !host->hosted_language->execution->execution_finish_guest ||
+        !host->hosted_language->execution->execution_frame_runtime_slot ||
+        !host->hosted_language->execution->mir_item_function_create ||
+        !host->hosted_language->execution->mir_function_forward_create ||
+        !host->hosted_language->execution->mir_item_function_proto_create ||
+        !host->hosted_language->execution->mir_function_register_lookup ||
+        host->hosted_language->roots->api_version != JUBE_HOST_SERVICE_API_VERSION ||
+        host->hosted_language->roots->struct_size < JUBE_HOST_ROOT_API_H5_PERSISTENT_SIZE ||
+        !host->hosted_language->roots->root_frame_begin ||
+        !host->hosted_language->roots->root_frame_take_slot ||
+        !host->hosted_language->roots->root_frame_end ||
+        !host->hosted_language->roots->persistent_root_register) {
         return -1;
     }
     if (host->hosted_language->module_graph->api_version != JUBE_HOST_SERVICE_API_VERSION ||
@@ -212,8 +234,9 @@ static int python_jube_init(const JubeHostAPI* host) {
     py_set_hosted_module_graph_api(host->hosted_language->module_graph);
     py_set_hosted_source_api(host->hosted_language->source);
     py_set_hosted_execution_api(host->hosted_language->execution);
-    py_set_hosted_gc_api(host->gc);
+    py_set_hosted_root_api(host->hosted_language->roots);
     py_set_hosted_runtime_catalog_api(host->runtime_catalog);
+    py_set_hosted_data_api(host->data);
     // Register imports at descriptor activation so static and dlopen paths
     // publish the same MIR runtime surface before Python code is compiled.
     return python_jube_register_runtime_imports(host->runtime_catalog) ? 0 : -1;

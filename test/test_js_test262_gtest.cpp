@@ -1269,6 +1269,7 @@ struct BatchResult {
     long execute_us;
     long cleanup_us;
     long phase_total_us;
+    long cpu_us;
 };
 
 static const size_t T262_DEFAULT_BATCH_CHUNK_SIZE = 100;
@@ -1459,6 +1460,7 @@ static bool g_persistent_workers = false; // --persistent-workers: one lambda wo
 static bool g_mir_interp = false;
 static bool g_no_stripped = false;  // --no-stripped: force original test files
 static bool g_diagnose_mode = false; // --diagnose: run diagnose list and pass --diagnose to lambda.exe
+static bool g_verbose = false;       // --verbose: dump per-batch-timing + memory-growth detail (else summary-only)
 static std::string g_batch_file;   // --batch-file=<path>: run only tests from this list in a single batch
 static std::string g_diagnose_list_file = DIAGNOSE_LIST_FILE;
 static bool g_run_async = false;     // --run-async: permit allowlisted async-flagged tests
@@ -2544,14 +2546,14 @@ static int run_t262_sub_batch(
                     long elapsed_us = 0;
                     size_t rss_before = 0, rss_after = 0;
                     long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
-                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0;
-                    sscanf(buf + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld",
+                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0, cpu_us = 0;
+                    sscanf(buf + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld",
                            &status, &elapsed_us, &rss_before, &rss_after,
                            &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
-                           &link_us, &execute_us, &cleanup_us, &phase_total_us);
+                           &link_us, &execute_us, &cleanup_us, &phase_total_us, &cpu_us);
                     results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
                                                parse_us, ast_us, early_us, imports_us, mir_us,
-                                               link_us, execute_us, cleanup_us, phase_total_us};
+                                               link_us, execute_us, cleanup_us, phase_total_us, cpu_us};
                     in_script = false;
                 } else if (strncmp(buf + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buf + 1, "BATCH_DIAG ", 11) == 0) {
@@ -2678,14 +2680,14 @@ static int run_t262_sub_batch(
                     long elapsed_us = 0;
                     size_t rss_before = 0, rss_after = 0;
                     long parse_us = 0, ast_us = 0, early_us = 0, imports_us = 0, mir_us = 0;
-                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0;
-                    sscanf(buffer + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld",
+                    long link_us = 0, execute_us = 0, cleanup_us = 0, phase_total_us = 0, cpu_us = 0;
+                    sscanf(buffer + 11, "%d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld",
                            &status, &elapsed_us, &rss_before, &rss_after,
                            &parse_us, &ast_us, &early_us, &imports_us, &mir_us,
-                           &link_us, &execute_us, &cleanup_us, &phase_total_us);
+                           &link_us, &execute_us, &cleanup_us, &phase_total_us, &cpu_us);
                     results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after,
                                                parse_us, ast_us, early_us, imports_us, mir_us,
-                                               link_us, execute_us, cleanup_us, phase_total_us};
+                                               link_us, execute_us, cleanup_us, phase_total_us, cpu_us};
                     in_script = false;
                 } else if (strncmp(buffer + 1, "BATCH_EXIT ", 11) == 0 ||
                            strncmp(buffer + 1, "BATCH_DIAG ", 11) == 0) {
@@ -3161,17 +3163,8 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 auto t0 = std::chrono::steady_clock::now();
                 size_t batch_num_tests = batches[i].end - batches[i].start;
                 bool is_non_batched = batch_num_tests == 1;
-                {
-                    std::lock_guard<std::mutex> lock(g_progress_mutex);
-                    fprintf(stderr, "[test262] batch[%zu/%zu] start worker=%zu kind=%s tests=%zu range=%zu..%zu\n",
-                            i + 1, batches.size(), w,
-                            batches[i].native ? "native" :
-                                (batches[i].module ? "js-module" :
-                                (batches[i].slow_test ? "js-slow" :
-                                (js_groups[batches[i].group].is_async ? "js-async" :
-                                    (js_groups[batches[i].group].special_includes.empty() ? "js" : "js-special")))),
-                            batch_num_tests, batches[i].start, batches[i].end - 1);
-                }
+                // per-batch "start" line intentionally omitted to keep progress output
+                // to one line per batch; the "finished" line below carries the outcome.
                 int worker_status = run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests);
                 auto t1 = std::chrono::steady_clock::now();
                 bool is_async_batch = !batches[i].native && js_groups[batches[i].group].is_async;
@@ -3196,8 +3189,9 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     }
     for (auto& t : threads) t.join();
 
-    // Report per-batch timing — sort by elapsed time, show top 20 slowest
-    {
+    // Report per-batch timing — top 20 slowest batches + per-test detail for the
+    // top 5. Verbose-only; per-test timings are always in the timing TSV regardless.
+    if (g_verbose) {
         std::vector<size_t> order(batches.size());
         for (size_t i = 0; i < order.size(); i++) order[i] = i;
         std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
@@ -3628,9 +3622,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 if (written.count(kv.first)) continue;
                 if (g_slow_tests.count(kv.first)) continue;
                 long threshold_us = slow_threshold_for_test(kv.first);
-                if (kv.second.elapsed_us >= threshold_us) {
+                long execution_us = kv.second.cpu_us > 0 ? kv.second.cpu_us : kv.second.elapsed_us;
+                if (execution_us >= threshold_us) {
                     char tag[32];
-                    snprintf(tag, sizeof(tag), "SLOW_%ld", kv.second.elapsed_us / 1000);
+                    snprintf(tag, sizeof(tag), "SLOW_%ld", execution_us / 1000);
                     if (write_partial_once(tag, kv.first, prepared_path_for(kv.first)))
                         slow_count++;
                 }
@@ -3774,20 +3769,22 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                 fprintf(stderr, "[test262]   Peak RSS test: %s\n", peak_rss_test.c_str());
             }
 
-            // Print top 20 tests by RSS delta (descending)
-            std::vector<std::pair<long, std::string>> by_delta;
-            for (auto& kv : batch_results) {
-                if (kv.second.rss_after == 0) continue;
-                long delta = (long)(kv.second.rss_after) - (long)(kv.second.rss_before);
-                by_delta.push_back({delta, kv.first});
-            }
-            std::sort(by_delta.begin(), by_delta.end(),
-                      [](const auto& a, const auto& b) { return a.first > b.first; });
-
-            fprintf(stderr, "[test262]   Top 20 tests by memory growth:\n");
-            for (size_t i = 0; i < 20 && i < by_delta.size(); i++) {
-                fprintf(stderr, "[test262]     %+8.1f KB  %s\n",
-                        by_delta[i].first / 1024.0, by_delta[i].second.c_str());
+            // Print top 20 tests by RSS delta (descending) — verbose-only; the full
+            // per-test deltas are always written to the mem_path TSV below.
+            if (g_verbose) {
+                std::vector<std::pair<long, std::string>> by_delta;
+                for (auto& kv : batch_results) {
+                    if (kv.second.rss_after == 0) continue;
+                    long delta = (long)(kv.second.rss_after) - (long)(kv.second.rss_before);
+                    by_delta.push_back({delta, kv.first});
+                }
+                std::sort(by_delta.begin(), by_delta.end(),
+                          [](const auto& a, const auto& b) { return a.first > b.first; });
+                fprintf(stderr, "[test262]   Top 20 tests by memory growth:\n");
+                for (size_t i = 0; i < 20 && i < by_delta.size(); i++) {
+                    fprintf(stderr, "[test262]     %+8.1f KB  %s\n",
+                            by_delta[i].first / 1024.0, by_delta[i].second.c_str());
+                }
             }
             fprintf(stderr, "[test262]   Memory data → %s\n", mem_path);
         }
@@ -3839,11 +3836,13 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             } else if (clean_set.count(name) && !g_slow_tests.count(name)) {
                 auto br_it = batch_results.find(name);
                 long threshold_us = slow_threshold_for_test(name);
-                if (br_it != batch_results.end() && br_it->second.elapsed_us >= threshold_us) {
+                long execution_us = br_it != batch_results.end() && br_it->second.cpu_us > 0
+                    ? br_it->second.cpu_us : br_it->second.elapsed_us;
+                if (br_it != batch_results.end() && execution_us >= threshold_us) {
                     // Test passed in batch but exceeded its slow threshold.
                     // Slow tests are not "fully passing" for baseline purposes:
                     // they go to t262_partial.txt and are excluded from baseline updates.
-                    long elapsed_ms = br_it->second.elapsed_us / 1000;
+                    long elapsed_ms = execution_us / 1000;
                     long threshold_ms = threshold_us / 1000;
                     result = {T262_PARTIAL_PASS,
                               "non-fully-passing: slow batch runtime " +
@@ -4039,18 +4038,9 @@ public:
     }
 
     void OnTestProgramEnd(const testing::UnitTest& unit_test) override {
-        int total = passed + failed + partial;
-        double pct = total > 0 ? 100.0 * passed / total : 0.0;
-        printf("\n");
-        printf("╔══════════════════════════════════════════════════╗\n");
-        printf("║         test262 Compliance Summary               ║\n");
-        printf("╠══════════════════════════════════════════════════╣\n");
-        printf("║  Fully passed: %5d / %5d  (%.1f%%)             ║\n", passed, total, pct);
-        printf("║  Non-fully-passing: %5d  (batch-unstable or slow)   ║\n", partial);
-        printf("║  Failed:       %5d                             ║\n", failed);
-        printf("║  Skipped:      %5d                             ║\n", skipped);
-        printf("╚══════════════════════════════════════════════════╝\n");
-
+        // test262 Compliance Summary box removed to avoid duplicating the Regression
+        // Check vs Baseline box below (which carries the pass/fail/regression verdict
+        // for baseline runs). GTest still prints its own overall pass/fail line.
         if (partial > 0) {
             printf("\n⚡ NON-FULLY-PASSING tests (%d):\n", partial);
             std::lock_guard<std::mutex> lock(g_results_mutex);
@@ -4210,6 +4200,7 @@ static void print_test262_help(const char* program) {
     printf("\n");
     printf("Common js262 options:\n");
     printf("  --batch-only              Run the js262 batch runner path.\n");
+    printf("  --verbose                 Dump per-batch timing (top 20/top 5) and top-20 memory growth.\n");
     printf("  --baseline-only           Run only tests listed in the baseline file.\n");
     printf("  --update-baseline         Update the baseline when stability gates pass.\n");
     printf("  --batch-file=<path>       Run tests listed in a newline-separated file.\n");
@@ -4310,6 +4301,9 @@ int main(int argc, char** argv) {
         }
         if (strcmp(argv[i], "--batch-only") == 0) {
             g_batch_only = true;
+        }
+        if (strcmp(argv[i], "--verbose") == 0) {
+            g_verbose = true;
         }
         if (strcmp(argv[i], "--diagnose") == 0) {
             g_diagnose_mode = true;

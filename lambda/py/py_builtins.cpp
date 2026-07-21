@@ -28,9 +28,6 @@ static int py_item_lt_cmp(const void* a, const void* b, void* udata) {
     return 0;
 }
 
-extern Input* py_input;
-extern __thread EvalContext* context;
-
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern Item _map_get(TypeMap* map_type, void* map_data, const char* key, bool* is_found);
 
@@ -790,12 +787,12 @@ extern "C" Item py_builtin_list(Item iterable) {
     }
     // general case: use iterator protocol (handles generators, ranges, maps, etc.)
     {
-        RootFrame roots((Context*)context, 4);
-        Rooted<Item> rooted_iterable(roots, iterable);
-        Rooted<Item> rooted_iter(roots, py_get_iterator(rooted_iterable.get()));
+        PyHostedRootFrame roots(4);
+        PyHostedItemRoot rooted_iterable(roots, iterable);
+        PyHostedItemRoot rooted_iter(roots, py_get_iterator(rooted_iterable.get()));
         Array* result = array();
-        Rooted<Item> rooted_result(roots, (Item){.array = result});
-        Rooted<Item> rooted_item(roots, ItemNull);
+        PyHostedItemRoot rooted_result(roots, (Item){.array = result});
+        PyHostedItemRoot rooted_item(roots, ItemNull);
         for (;;) {
             rooted_item.set(py_iterator_next(rooted_iter.get()));
             if (py_is_stop_iteration(rooted_item.get())) break;
@@ -1611,8 +1608,8 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
                 FOR_EACH_MAP_FIELD(otm, field) {
                     Item val = _map_read_field(field, other->data);
                     if (field->name) {
-                        String* key_name = heap_create_name(field->name->str);
-                        if (py_input) map_put(m, key_name, val, py_input);
+                        Item key_name = py_data_name_from_utf8(field->name->str);
+                        py_data_map_set(dict_item, key_name, val);
                     }
                 }
             }
@@ -1637,12 +1634,11 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
     if (strcmp(method->chars, "copy") == 0) {
         // shallow copy via walking shape entries
         Item new_dict = py_dict_new();
-        Map* nm = it2map(new_dict);
         FOR_EACH_MAP_FIELD(tm, field) {
             Item val = _map_read_field(field, m->data);
-            if (field->name && py_input) {
-                String* key_name = heap_create_name(field->name->str);
-                map_put(nm, key_name, val, py_input);
+            if (field->name) {
+                Item key_name = py_data_name_from_utf8(field->name->str);
+                py_data_map_set(new_dict, key_name, val);
             }
         }
         return new_dict;
@@ -1654,7 +1650,7 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
         Item val = _map_get(tm, m->data, key->chars, &found);
         if (found) return val;
         Item def_val = (argc >= 2) ? args[1] : ItemNull;
-        if (py_input) map_put(m, heap_create_name(key->chars), def_val, py_input);
+        py_data_map_set(dict_item, args[0], def_val);
         return def_val;
     }
     if (strcmp(method->chars, "popitem") == 0) {

@@ -25,6 +25,7 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/resource.h>
 #include <sys/time.h>
 #include <pthread.h>
 #ifdef __APPLE__
@@ -69,6 +70,21 @@
 #include "network/network_thread_pool.h"
 
 extern __thread EvalContext* context;
+
+static long js_batch_process_cpu_us(void) {
+#ifdef _WIN32
+    FILETIME created, exited, kernel, user;
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return 0;
+    ULARGE_INTEGER kernel_ticks = {.LowPart = kernel.dwLowDateTime, .HighPart = kernel.dwHighDateTime};
+    ULARGE_INTEGER user_ticks = {.LowPart = user.dwLowDateTime, .HighPart = user.dwHighDateTime};
+    return (long)((kernel_ticks.QuadPart + user_ticks.QuadPart) / 10);
+#else
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) != 0) return 0;
+    return (usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) * 1000000L +
+        usage.ru_utime.tv_usec + usage.ru_stime.tv_usec;
+#endif
+}
 
 static bool js_test262_global_flag_is_true(const char* name) {
     Item key = (Item){.item = s2it(heap_create_name(name))};
@@ -4311,6 +4327,7 @@ int main(int argc, char *argv[]) {
             size_t rss_before = get_rss_bytes();
             struct timeval tv_start, tv_end;
             gettimeofday(&tv_start, NULL);
+            long cpu_start_us = js_batch_process_cpu_us();
             js_mir_reset_last_phase_timing();
             JsBatchDocument batch_document;
             js_batch_document_init(&batch_document);
@@ -4476,14 +4493,15 @@ int main(int argc, char *argv[]) {
 
             gettimeofday(&tv_end, NULL);
             long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
+            long cpu_us = js_batch_process_cpu_us() - cpu_start_us;
             size_t rss_after = get_rss_bytes();
             JsMirPhaseTiming phase_timing;
             js_mir_get_last_phase_timing(&phase_timing);
-            printf("\x01" "BATCH_END %d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld\n",
+            printf("\x01" "BATCH_END %d %ld %zu %zu %ld %ld %ld %ld %ld %ld %ld %ld %ld %ld\n",
                    result, elapsed_us, rss_before, rss_after,
                    phase_timing.parse_us, phase_timing.ast_us, phase_timing.early_us,
                    phase_timing.imports_us, phase_timing.mir_us, phase_timing.link_us,
-                   phase_timing.execute_us, phase_timing.cleanup_us, phase_timing.total_us);
+                   phase_timing.execute_us, phase_timing.cleanup_us, phase_timing.total_us, cpu_us);
             fflush(stdout);
             batch_in_test = false;
 
