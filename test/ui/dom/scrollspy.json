@@ -1,5 +1,6 @@
-{"name":"Bootstrap ScrollSpy initializes with committed snapshot geometry","html":"test/ui/dom/bootstrap_ui.html","events":[
+{"name":"Bootstrap ScrollSpy activates the visible section after a native scroll","html":"test/ui/dom/bootstrap_ui.html","events":[
   {"type":"assert_visible","target":{"selector":"#spy"},"visible":true},
   {"type":"scroll","target":{"selector":"#spy"},"x":0,"y":0,"dx":0,"dy":-80},
-  {"type":"wait","ms":50}
+  {"type":"wait","ms":50},
+  {"type":"assert_class","target":{"selector":"#nav-two"},"class":"active"}
 ]}

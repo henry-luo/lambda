@@ -1,0 +1,13 @@
+{
+  "name": "Bootstrap data API tabs and carousel controls update active content",
+  "html": "test/ui/dom/bootstrap_data_api.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#tab-two"}},
+    {"type": "assert_class", "target": {"selector": "#tab-two"}, "class": "active"},
+    {"type": "assert_class", "target": {"selector": "#pane-two"}, "class": "active"},
+    {"type": "assert_attr", "target": {"selector": "#tab-two"}, "attribute": "aria-selected", "equals": "true"},
+    {"type": "click", "target": {"selector": "#carousel-next"}},
+    {"type": "assert_class", "target": {"selector": "#slide-two"}, "class": "active"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "carousel:slid.bs.carousel"}
+  ]
+}

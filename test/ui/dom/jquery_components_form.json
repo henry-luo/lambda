@@ -1,0 +1,14 @@
+{
+  "name": "jQuery observes native form input change and checked-control events",
+  "html": "test/ui/dom/jquery_components.html",
+  "events": [
+    {"type": "type", "target": {"selector": "#query"}, "text": "radiant"},
+    {"type": "assert_value", "target": {"selector": "#query"}, "equals": "radiant"},
+    {"type": "assert_text", "target": {"selector": "#form-status"}, "equals": "query=radiant:input"},
+    {"type": "select_option", "target": {"selector": "#role"}, "value": "maintainer"},
+    {"type": "assert_value", "target": {"selector": "#role"}, "equals": "maintainer"},
+    {"type": "assert_text", "target": {"selector": "#form-status"}, "equals": "role=maintainer:change"},
+    {"type": "click", "target": {"selector": "#enabled"}},
+    {"type": "assert_checked", "target": {"selector": "#enabled"}, "checked": true}
+  ]
+}

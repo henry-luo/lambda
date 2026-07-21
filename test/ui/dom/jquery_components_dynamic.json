@@ -1,0 +1,17 @@
+{
+  "name": "jQuery one-time namespaced handlers and queued effects respond to native input",
+  "html": "test/ui/dom/jquery_components.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#once"}},
+    {"type": "click", "target": {"selector": "#once"}},
+    {"type": "assert_text", "target": {"selector": "#event-status"}, "equals": "once:1"},
+    {"type": "click", "target": {"selector": "#panel-toggle"}},
+    {"type": "wait", "ms":80},
+    {"type": "assert_visible", "target": {"selector": "#panel"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#fx-status"}, "equals": "open"},
+    {"type": "click", "target": {"selector": "#panel-toggle"}},
+    {"type": "wait", "ms":80},
+    {"type": "assert_visible", "target": {"selector": "#panel"}, "visible": false},
+    {"type": "assert_text", "target": {"selector": "#fx-status"}, "equals": "closed"}
+  ]
+}

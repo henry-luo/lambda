@@ -1,0 +1,13 @@
+{
+  "name": "Bootstrap data API modal receives focus and dismisses from its control",
+  "html": "test/ui/dom/bootstrap_data_api.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#modal-trigger"}},
+    {"type": "assert_class", "target": {"selector": "#modal"}, "class": "show"},
+    {"type": "assert_focus", "target": {"selector": "#modal"}},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "modal:shown.bs.modal"},
+    {"type": "click", "target": {"selector": "#modal-close"}},
+    {"type": "assert_class", "target": {"selector": "#modal"}, "class": "show", "present": false},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "modal:hidden.bs.modal"}
+  ]
+}

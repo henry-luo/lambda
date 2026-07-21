@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<style>
+body { margin: 0; font: 16px sans-serif; }
+button, input, select { margin: 4px; padding: 4px; }
+#panel { display: none; width: 140px; height: 24px; }
+</style>
+</head>
+<body>
+<form id="profile">
+  <input id="query" name="query" value="">
+  <select id="role" name="role"><option value="reader">Reader</option><option value="maintainer">Maintainer</option></select>
+  <label><input id="enabled" name="enabled" type="checkbox" value="yes"> enabled</label>
+</form>
+<output id="form-status">idle</output>
+
+<button id="once">once</button><button id="panel-toggle">toggle panel</button>
+<div id="panel">panel content</div>
+<output id="event-status">idle</output><output id="fx-status">idle</output>
+
+<script>globalThis.__JQUERY_LIBRARY_ONLY__ = true;</script>
+<script src="../../js/dom_jquery_lib.js"></script>
+<script>
+$('#profile').on('input change click', ':input', function (event) {
+  $('#form-status').text(this.name + '=' + $(this).val() + ':' + event.type);
+});
+$('#once').one('click.ui', function () { $('#event-status').text('once:1'); });
+$('#panel-toggle').on('click', function () {
+  $('#panel').stop(true, true).slideToggle(20).promise().done(function () {
+    $('#fx-status').text($('#panel').css('display') !== 'none' ? 'open' : 'closed');
+  });
+});
+</script>
+</body>
+</html>

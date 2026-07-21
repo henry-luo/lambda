@@ -1,0 +1,9 @@
+{
+  "name": "Bootstrap data API dismisses an alert from its native control",
+  "html": "test/ui/dom/bootstrap_data_api.html",
+  "events": [
+    {"type": "click", "target": {"selector": "#alert-close"}},
+    {"type": "assert_count", "target": {"selector": "#alert"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": "#events"}, "contains": "alert:closed"}
+  ]
+}
