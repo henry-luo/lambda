@@ -79,7 +79,11 @@ endif
 
 # Detect Premake5 executable
 # On MSYS2/Windows, prefer MINGW64 over CLANG64 for Universal CRT avoidance
-PREMAKE5 := $(shell command -v premake5 2>/dev/null || command -v /mingw64/bin/premake5 2>/dev/null || command -v /clang64/bin/premake5 2>/dev/null || echo premake5)
+PREMAKE5_BIN := $(shell command -v premake5 2>/dev/null || command -v /mingw64/bin/premake5 2>/dev/null || command -v /clang64/bin/premake5 2>/dev/null || echo premake5)
+# Route every `$(PREMAKE5) gmake` through a wrapper that suppresses premake5's
+# noisy per-file "Generated ..." progress (185+ lines) while keeping errors and
+# its exit status. Absolute path so it also works from `cd build/premake` sites.
+PREMAKE5 := bash $(CURDIR)/utils/premake_quiet.sh $(PREMAKE5_BIN)
 
 # MSYS2/Windows Environment Detection
 MSYSTEM_DETECTED := $(shell echo $$MSYSTEM)
@@ -429,16 +433,23 @@ define windows_dll_check
 	fi
 endef
 
-# Function to run make with error collection and summary
-# Usage: $(call run_make_with_error_summary,TARGET)
-# TARGET: The make target to build (e.g., lambda, radiant)
+# Function to run make with error collection and summary.
+# Full clang output goes to temp/build_<TARGET>.log; only errors + a summary
+# print to the terminal (keeps agent/CI logs small and readable).
+# Usage: $(call run_make_with_error_summary,LABEL[,CONFIG[,EXTRA_FLAGS[,MAKE_TARGET]]])
+# LABEL:       log/message label; also the make target unless MAKE_TARGET is set
+#              (e.g., lambda, lambda-cli, tests). Log goes to temp/build_<LABEL>.log
+# CONFIG:      premake config (default: debug_native; e.g. release_native)
+# EXTRA_FLAGS: extra flags/vars appended to the sub-make (e.g. -s CFLAGS="-w")
+# MAKE_TARGET: actual make target when it differs from LABEL (e.g. 'all' to build
+#              every project while logging under a friendly label)
 define run_make_with_error_summary
-	@echo "🔨 Starting build process for target: $(1)..."
-	@BUILD_LOG=$$(mktemp) && \
-	if $(MAKE) -C build/premake config=debug_native $(1) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)" 2>&1 | tee "$$BUILD_LOG"; then \
-		echo "✅ Build completed successfully for target: $(1)"; \
+	@echo "🔨 Building '$(1)' (config: $(if $(2),$(2),debug_native)) — full clang log: temp/build_$(1).log"
+	@mkdir -p temp && BUILD_LOG="temp/build_$(1).log" && \
+	if $(MAKE) -C build/premake --no-print-directory config=$(if $(2),$(2),debug_native) $(if $(4),$(4),$(1)) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)" $(3) > "$$BUILD_LOG" 2>&1; then \
+		BUILD_RC=0; echo "✅ Build completed successfully for target: $(1)"; \
 	else \
-		echo "❌ Build failed for target: $(1)"; \
+		BUILD_RC=$$?; echo "❌ Build failed for target: $(1)"; \
 	fi; \
 	echo ""; \
 	echo "📋 Build Summary:"; \
@@ -485,7 +496,8 @@ define run_make_with_error_summary
 		echo ""; \
 		echo "💡 Click on the file:// links above to jump to errors in VS Code"; \
 	fi; \
-	rm -f "$$BUILD_LOG"
+	echo "📄 Full build log: temp/build_$(1).log"; \
+	exit $$BUILD_RC
 endef
 
 # Combined tree-sitter libraries target
@@ -662,7 +674,7 @@ else
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	@$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	# Ensure explicit compiler variables are passed to Premake build
 	@echo "Using CC=$(CC) CXX=$(CXX)"
@@ -724,7 +736,7 @@ build-release-compile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	@echo "Building lambda executable (release) with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=release_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	$(call run_make_with_error_summary,lambda,release_native)
 ifeq ($(OS),Darwin)
 	@echo "Stripping debug symbols (macOS)..."
 	@strip -x lambda_release.exe 2>/dev/null || strip -x lambda.exe 2>/dev/null || true
@@ -746,7 +758,7 @@ build-release-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	@echo "Building lambda executable (release_profile) with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=release_profile_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	$(call run_make_with_error_summary,lambda,release_profile_native)
 	@echo "Release profile build completed."
 	@ls -lh lambda-profile.exe 2>/dev/null || true
 	$(call windows_dll_check,lambda-profile.exe)
@@ -762,7 +774,7 @@ build-debug-profile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
 	@echo "Building lambda executable (debug_profile) with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_profile_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	$(call run_make_with_error_summary,lambda,debug_profile_native)
 	@echo "Debug profile build completed. Executable: lambda-debug-profile.exe"
 	@ls -lh lambda-debug-profile.exe 2>/dev/null || true
 	$(call windows_dll_check,lambda-debug-profile.exe)
@@ -778,7 +790,7 @@ build-cli: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake --file=$(PREMAKE_CLI_FILE)
 	@echo "Building lambda-cli executable (release) with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=release_native lambda-cli -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(call run_make_with_error_summary,lambda-cli,release_native,-s CFLAGS="-w" CXXFLAGS="-w")
 ifeq ($(OS),Darwin)
 	@strip -x lambda-cli.exe 2>/dev/null || true
 else
@@ -1099,25 +1111,26 @@ ensure-test262-gtest:
 	fi
 
 # test262 baseline: run only tests in baseline, must pass 100%
+# Add VERBOSE=1 to dump per-batch timing (top 20/top 5) and top-20 memory growth.
 test262-baseline: ensure-test262-gtest
 	@echo "Running test262 baseline ($(shell wc -l < test/js262/test262_baseline.txt | tr -d ' ') entries)..."
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile
-	@./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async --async-list=test/js262/test262_baseline.txt
+	@./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async --async-list=test/js262/test262_baseline.txt $(if $(VERBOSE),--verbose)
 
 # test262 full: run all discovered test262 tests (slow, ~5min)
 test262-full: ensure-test262-gtest
 	@echo "Running full test262 suite..."
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile
-	@./test/test_js_test262_gtest.exe --batch-only --run-async --async-list=test/js262/test262_baseline.txt
+	@./test/test_js_test262_gtest.exe --batch-only --run-async --async-list=test/js262/test262_baseline.txt $(if $(VERBOSE),--verbose)
 
 # test262 update baseline: run all tests and update baseline with current passing set
 test262-update-baseline: build-test
 	@echo "Running full test262 suite and updating baseline..."
 	@echo "Ensuring release lambda.exe for js262 runtime performance..."
 	@$(MAKE) build-release-compile
-	@./test/test_js_test262_gtest.exe --batch-only --run-async --async-list=test/js262/test262_baseline.txt --update-baseline
+	@./test/test_js_test262_gtest.exe --batch-only --run-async --async-list=test/js262/test262_baseline.txt --update-baseline $(if $(VERBOSE),--verbose)
 
 # Node.js official: install Lambda-compatible shims for test harness
 node-shim:
@@ -2458,8 +2471,7 @@ build-lambda-input:
 	$(MAKE) generate-premake
 	@echo "Generating makefiles..."
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
-	@echo "Building lambda-input DLLs with $(TEST_JOBS) parallel jobs..."
-	cd build/premake && $(MAKE) config=debug_native lambda-input-full-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	$(call run_make_with_error_summary,lambda-input,debug_native,,lambda-input-full-cpp)
 	@echo "✅ lambda-input DLLs built successfully!"
 
 build-test: build-lambda-input
@@ -2470,12 +2482,13 @@ build-test: build-lambda-input
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
 	@# If last build was release, rebuild lambda.exe incrementally in release mode
 	@if [ -f .lambda_release_build ]; then \
-		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
-		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)"; \
+		echo "Rebuilding lambda.exe in release mode (incremental) — log: temp/build_tests_lambda.log"; \
+		mkdir -p temp; \
+		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" > temp/build_tests_lambda.log 2>&1 || { echo "❌ release lambda rebuild failed (see temp/build_tests_lambda.log):"; tail -20 temp/build_tests_lambda.log; exit 1; }; \
 		cp -p lambda.exe .lambda_build_backup.exe; \
 	fi
 	@echo "Building all test executables (debug mode, $(TEST_JOBS) jobs)..."
-	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	$(call run_make_with_error_summary,tests,debug_native,,all)
 	@# Restore release lambda.exe over the debug one
 	@if [ -f .lambda_build_backup.exe ]; then \
 		echo "Restoring release lambda.exe..."; \
