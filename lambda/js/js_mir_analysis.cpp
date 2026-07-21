@@ -1284,9 +1284,10 @@ void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_on
                     while (d) { jm_collect_body_locals(d, locals, var_only); d = d->next; }
                 }
             } else {
-                // destructuring declaration: for (let/const [a,b] of arr) or for ({x} of arr)
-                // Assignment-form for-of heads like `for ([a] of arr)` do not create locals.
-                if (!var_only && (fo->kind == 1 || fo->kind == 2)) {
+                // Assignment-form heads do not create locals. A var pattern
+                // has kind zero, so the explicit marker distinguishes it from
+                // `for ([a] of arr)` and keeps function-local bindings visible.
+                if (fo->declares_binding && (!var_only || fo->kind == JS_VAR_VAR)) {
                     jm_collect_pattern_names(fo->left, locals);
                 }
             }

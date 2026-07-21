@@ -3265,7 +3265,8 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
                 uint32_t e = ts_node_end_byte(obj);
                 if (e - s == 3 && strncmp(tp->source + s, "let", 3) == 0) {
                     // Misparse detected: reinterpret as let [array_pattern]
-                    for_of->kind = 1; // let
+                    for_of->kind = JS_VAR_LET;
+                    for_of->declares_binding = true;
                     TSNode idx = ts_node_child_by_field_name(left_node, "index", 5);
                     if (!ts_node_is_null(idx)) {
                         JsArrayPatternNode* pattern = (JsArrayPatternNode*)alloc_js_ast_node(
@@ -3300,17 +3301,35 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
     }
     for_in_left_done:
 
-    // Determine the variable kind from the first child (var/let/const keyword)
+    // Determine whether the head declares bindings and its kind from the first
+    // child. `var` is enum value zero, so kind alone cannot distinguish
+    // `for (var [x] of xs)` from the assignment form `for ([x] of xs)`.
     // (skip if already set by the let[...] misparse fixup above)
     if (for_of->kind == 0) {
         uint32_t child_count = ts_node_child_count(for_node);
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_child(for_node, i);
             const char* child_type = ts_node_type(child);
-            if (strcmp(child_type, "var") == 0) { for_of->kind = 0; break; }
-            if (strcmp(child_type, "let") == 0) { for_of->kind = 1; break; }
-            if (strcmp(child_type, "const") == 0) { for_of->kind = 2; break; }
-            if (strcmp(child_type, "using") == 0) { for_of->kind = 1; break; }
+            if (strcmp(child_type, "var") == 0) {
+                for_of->kind = JS_VAR_VAR;
+                for_of->declares_binding = true;
+                break;
+            }
+            if (strcmp(child_type, "let") == 0) {
+                for_of->kind = JS_VAR_LET;
+                for_of->declares_binding = true;
+                break;
+            }
+            if (strcmp(child_type, "const") == 0) {
+                for_of->kind = JS_VAR_CONST;
+                for_of->declares_binding = true;
+                break;
+            }
+            if (strcmp(child_type, "using") == 0) {
+                for_of->kind = JS_VAR_LET;
+                for_of->declares_binding = true;
+                break;
+            }
             if (strcmp(child_type, "of") == 0 || strcmp(child_type, "in") == 0) break;
         }
     }

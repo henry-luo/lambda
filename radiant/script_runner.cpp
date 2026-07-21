@@ -334,6 +334,14 @@ static bool is_body_element(Element* elem) {
  * Extract the text content of a <script> Element.
  * Script elements store their source as child String items in the Element.
  */
+static bool script_source_is_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+static void script_source_trim_end(const char* start, const char** end) {
+    while (*end > start && script_source_is_space((*end)[-1])) (*end)--;
+}
+
 static void extract_script_text(Element* script_elem, StrBuf* buf) {
     if (!script_elem) return;
     for (int64_t i = 0; i < script_elem->length; i++) {
@@ -344,10 +352,39 @@ static void extract_script_text(Element* script_elem, StrBuf* buf) {
             if (s && s->len > 0) {
                 const char* start = s->chars;
                 int len = s->len;
-                // strip XHTML CDATA markers: <![CDATA[ ... ]]>
-                // also handle // or /* commented variants used in HTML/XHTML polyglots
+                // WordPress uses `/* <![CDATA[ */` wrappers; leaving its closing `*/`
+                // at offset zero turns otherwise valid configuration scripts into syntax errors.
                 const char* cdata_open = strstr(start, "<![CDATA[");
-                if (cdata_open && cdata_open - start < 40) {
+                const char* before_open = cdata_open;
+                if (before_open) {
+                    while (before_open > start && script_source_is_space(before_open[-1])) before_open--;
+                }
+                bool wordpress_cdata_wrapper = cdata_open && cdata_open - start < 40 &&
+                    before_open >= start + 2 && before_open[-2] == '/' && before_open[-1] == '*';
+                if (wordpress_cdata_wrapper) {
+                    const char* source_end = start + len;
+                    const char* after_open = cdata_open + 9;
+                    while (after_open < source_end && script_source_is_space(*after_open)) after_open++;
+                    if (after_open + 2 <= source_end && after_open[0] == '*' && after_open[1] == '/') {
+                        after_open += 2;
+                        script_source_trim_end(after_open, &source_end);
+                        if (source_end >= after_open + 2 && source_end[-2] == '*' && source_end[-1] == '/') {
+                            source_end -= 2;
+                            script_source_trim_end(after_open, &source_end);
+                        }
+                        if (source_end >= after_open + 3 && source_end[-3] == ']' &&
+                            source_end[-2] == ']' && source_end[-1] == '>') {
+                            source_end -= 3;
+                            script_source_trim_end(after_open, &source_end);
+                            if (source_end >= after_open + 2 && source_end[-2] == '/' && source_end[-1] == '*') {
+                                source_end -= 2;
+                                script_source_trim_end(after_open, &source_end);
+                            }
+                            start = after_open;
+                            len = (int)(source_end - start); // INT_CAST_OK: script String length is int-sized.
+                        }
+                    }
+                } else if (cdata_open && cdata_open - start < 40) {
                     // find the actual CDATA open, skip past it
                     const char* after_open = cdata_open + 9; // skip "<![CDATA["
                     // skip optional newline after CDATA open

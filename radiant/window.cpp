@@ -1330,7 +1330,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         glfwPollEvents();
         uv_loop_t* uv_loop = lambda_uv_loop();
         if (uv_loop) {
-            uv_run(uv_loop, UV_RUN_NOWAIT);
+            // Document timers run after script loading restored its transient context;
+            // enter the retained document runtime before libuv invokes their callbacks.
+            radiant_pump_js_event_loop(&ui_context, -1);
         }
 
         if (js_animation_frame_has_pending()) {

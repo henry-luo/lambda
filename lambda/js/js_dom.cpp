@@ -13907,6 +13907,19 @@ static Item _iface_proto(Item global, const char* name) {
     return get_type_id(proto) == LMD_TYPE_MAP ? proto : ItemNull;
 }
 
+static void _install_nodelist_for_each(Item global) {
+    Item node_list_proto = _iface_proto(global, "NodeList");
+    Item array_ctor = js_property_get(global, js_string_key("Array"));
+    Item array_proto = js_property_get(array_ctor, js_string_key("prototype"));
+    Item array_for_each = js_property_get(array_proto, js_string_key("forEach"));
+    if (get_type_id(node_list_proto) == LMD_TYPE_MAP &&
+        get_type_id(array_for_each) == LMD_TYPE_FUNC) {
+        // Query APIs return Arrays, but libraries feature-detect the WebIDL
+        // NodeList prototype before choosing their iteration path.
+        js_property_set(node_list_proto, js_string_key("forEach"), array_for_each);
+    }
+}
+
 static void _link_iface_proto(Item global, const char* name, const char* base_name) {
     Item proto = _iface_proto(global, name);
     Item base_proto = _iface_proto(global, base_name);
@@ -14101,6 +14114,7 @@ extern "C" void js_dom_install_collection_globals(void) {
     _install_iface(global, "HTMLFormControlsCollection");
     _install_iface(global, "HTMLOptionsCollection");
     _install_iface(global, "NodeList");
+    _install_nodelist_for_each(global);
     _install_iface(global, "RadioNodeList");
     _install_xpath_evaluator(global);
     log_debug("js_dom_install_collection_globals: installed collection interfaces");
