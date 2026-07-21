@@ -668,8 +668,31 @@
                 "lambda-data",
                 "lambda-lib",
                 "mir",
+                "tree-sitter",
+                "tree-sitter-lambda",
+                "tree-sitter-javascript",
+                "tree-sitter-typescript",
+                "tree-sitter-latex",
+                "tree-sitter-latex-math",
                 "gif",
-                "re2"
+                "re2",
+                "mpdec",
+                "utf8proc",
+                "nghttp2",
+                "curl",
+                "brotlidec",
+                "brotlicommon",
+                "mbedtls",
+                "mbedx509",
+                "mbedcrypto",
+                "zlib",
+                "libuv",
+                "rpmalloc",
+                "pthread",
+                "png",
+                "turbojpeg",
+                "ThorVG",
+                "glfw"
             ],
             "target_name": "lambda-static",
             "target_prefix": "",
@@ -1803,7 +1826,7 @@
                         "source": "lib/test_gc_heap_gtest.cpp",
                         "name": "GC Heap Tests",
                         "dependencies": [
-                            "lambda-data"
+                            "lambda-rt"
                         ],
                         "libraries": [
                             "gtest",
@@ -3514,7 +3537,8 @@
                         ],
                         "additional_sources": [
                             "lib/test_utils.c",
-                            "lib/test_utils_runtime.cpp"
+                            "lib/test_utils_runtime.cpp",
+                            "lambda/runtime/runtime-state.cpp"
                         ],
                         "binary": "test_dir_gtest.exe",
                         "icon": "📁"
@@ -4244,7 +4268,7 @@
                         "source": "test/test_lambda_concurrency_gtest.cpp",
                         "name": "Lambda Concurrency Runtime Tests",
                         "dependencies": [
-                            "lambda-data"
+                            "lambda-rt"
                         ],
                         "additional_sources": [
                             "lambda/concurrency.cpp",
@@ -4264,7 +4288,7 @@
                         "source": "test/test_item_repr_gtest.cpp",
                         "name": "Lambda Item Representation Tests",
                         "dependencies": [
-                            "lambda-data"
+                            "lambda-rt"
                         ],
                         "binary": "test_item_repr_gtest.exe",
                         "libraries": [
@@ -4278,7 +4302,7 @@
                         "source": "test/test_binary_storage_gtest.cpp",
                         "name": "Lambda Binary Storage Tests",
                         "dependencies": [
-                            "lambda-data"
+                            "lambda-rt"
                         ],
                         "binary": "test_binary_storage_gtest.exe",
                         "libraries": [
@@ -4292,7 +4316,7 @@
                         "source": "test/test_lambda_errors_gtest.cpp",
                         "name": "Lambda Error System Tests",
                         "dependencies": [
-                            "lambda-data"
+                            "lambda-rt"
                         ],
                         "additional_sources": [
                             "lambda/lambda-error.cpp"

@@ -301,8 +301,7 @@ void ensure_sys_func_maps_initialized(void);
 void check_memory_leak();
 void print_heap_entries();
 
-// thread-specific runtime context
-__thread EvalContext* context = NULL;
+// thread-specific runtime context is provided by runtime/runtime-state.cpp.
 extern __thread Context* input_context;
 
 // Thread-local parser for parallel module compilation.

@@ -1286,7 +1286,12 @@ class PremakeGenerator:
             ])
 
             # Add platform-specific library paths
-            if self.use_windows_config:
+            if link_type == 'executable':
+                # Final executables add configured external directories below.
+                # Do not put /usr/local ahead of them: on Apple Silicon it can
+                # select an x86_64 dylib instead of the configured ARM archive.
+                self.premake_content.append('        "build/lib",')
+            elif self.use_windows_config:
                 self.premake_content.extend([
                     '        "/clang64/lib",',
                     '        "win-native-deps/lib",',
@@ -1350,7 +1355,23 @@ class PremakeGenerator:
                 # linkoptions before LIBS on gmake, which breaks one-pass
                 # archive resolution for the Lambda module graph.
                 if static_libs:
-                    if link_type == 'executable':
+                    if link_type == 'executable' and self.use_macos_config:
+                        # Force-load the configured archive instead of a bare
+                        # -l name: ld otherwise prefers a same-named dylib,
+                        # leaving lambda-static with accidental local runtime
+                        # dependencies and incompatible provider ABIs.
+                        self.premake_content.append('    linkoptions {')
+                        for static_lib in static_libs:
+                            mac_static_lib = static_lib
+                            if not mac_static_lib.startswith('/'):
+                                mac_static_lib = f'../../{mac_static_lib}'
+                            self.premake_content.append(
+                                f'        "-Wl,-force_load,{mac_static_lib}",')
+                        self.premake_content.extend([
+                            '    }',
+                            '    '
+                        ])
+                    elif link_type == 'executable':
                         static_link_dirs = []
                         static_link_names = []
                         for static_lib in static_libs:
@@ -1363,11 +1384,21 @@ class PremakeGenerator:
                             name, extension = os.path.splitext(filename)
                             if extension == '.a' and name.startswith('lib'):
                                 name = name[3:]
-                            if not self.use_macos_config:
-                                static_link_names.append(f'{name}:static')
+                            # macOS still needs a late -l entry: omitting it
+                            # leaves static runtime providers unresolved after
+                            # the concrete module archives are linked.
+                            static_link_names.append(
+                                name if self.use_macos_config else f'{name}:static')
                         if static_link_dirs:
                             self.premake_content.append('    libdirs {')
-                            for directory in static_link_dirs:
+                            # Project-local archives must win over package-manager
+                            # directories: Homebrew can provide ABI-incompatible
+                            # RE2/ThorVG variants with the same -l names.
+                            ordered_static_dirs = sorted(
+                                static_link_dirs,
+                                key=lambda directory: directory.startswith('/opt/') or
+                                directory.startswith('/usr/'))
+                            for directory in ordered_static_dirs:
                                 self.premake_content.append(f'        "{directory}",')
                             self.premake_content.extend([
                                 '    }',
@@ -1401,7 +1432,7 @@ class PremakeGenerator:
 
                 # Add frameworks, dynamic libraries, and internal libraries to links
                 if frameworks or dynamic_libs or internal_deps or special_flags_frameworks or \
-                        (link_type == 'executable' and static_libs):
+                        (link_type == 'executable' and static_libs and not self.use_macos_config):
                     self.premake_content.append('    links {')
                     # Add frameworks from external dependencies (macOS only)
                     if not self.use_windows_config:
@@ -1415,7 +1446,7 @@ class PremakeGenerator:
                         self.premake_content.append(f'        "{dyn_lib}",')
                     for dep in internal_deps:
                         self.premake_content.append(f'        "{dep}",')
-                    if link_type == 'executable':
+                    if link_type == 'executable' and not self.use_macos_config:
                         for static_link_name in static_link_names:
                             self.premake_content.append(f'        "{static_link_name}",')
                     # Add late-binding static libraries (must come after internal deps)
@@ -2275,7 +2306,7 @@ class PremakeGenerator:
             for dep in dependencies:
                 if dep == 'criterion':
                     self.premake_content.append('        "criterion",')
-                elif dep in ['lambda-runtime-full', 'lambda-data']:
+                elif dep in ['lambda-runtime-full', 'lambda-data', 'lambda-rt']:
                     # Special handling for MIR, Lambda, Math, and Markup tests
                     if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
                         # All tests only need the -cpp versions (C++ project includes all C files)
@@ -2287,6 +2318,14 @@ class PremakeGenerator:
                     if dep == 'lambda-data':
                         # lambda-data consumes the lower general-purpose archive;
                         # link its concrete mixed-language project for test executables.
+                        self.premake_content.append('        "lambda-lib-cpp",')
+                    elif dep == 'lambda-rt':
+                        # A static wrapper archive contains no objects. Runtime
+                        # white-box tests must therefore link the concrete rt
+                        # archive and its lower concrete providers in archive
+                        # order; otherwise GC/side-stack symbols resolve but
+                        # their lib providers remain invisible to the linker.
+                        self.premake_content.append('        "lambda-data-cpp",')
                         self.premake_content.append('        "lambda-lib-cpp",')
                 elif dep in configured_targets:
                     target = configured_targets[dep]

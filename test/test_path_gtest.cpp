@@ -4,7 +4,6 @@
  */
 
 #include <gtest/gtest.h>
-#include "../lambda/transpiler.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
@@ -29,40 +28,23 @@ extern "C" {
     Path* path_get_root_by_name(const char* name);
 }
 
-// Thread-local context (defined in runner.cpp)
-// On Windows, __thread variables can't be auto-imported from DLLs,
-// so we define a local copy for the test executable.
-#ifdef _WIN32
-__thread EvalContext* context;
-#else
-extern __thread EvalContext* context;
-#endif
+static Pool* path_test_pool = nullptr;
 
 static Pool* test_path_pool_provider(void) {
-    return context && context->heap ? context->heap->pool : nullptr;
+    return path_test_pool;
 }
 
 // Test fixture for Path tests
 class PathTest : public ::testing::Test {
 protected:
     Pool* pool;
-    EvalContext test_context;
-    Heap test_heap;
 
     void SetUp() override {
         log_init(NULL);
         pool = pool_create_mmap();
-
-        // Set up a minimal context for path operations
-        test_heap.pool = pool;
-        test_heap.gc = nullptr;
-
-        memset(&test_context, 0, sizeof(test_context));
-        test_context.heap = &test_heap;
-        test_context.pool = pool;
-
-        // Set thread-local context
-        context = &test_context;
+        // Path allocation is selected by its registered provider, so this
+        // core/data test must not manufacture a runtime TLS context.
+        path_test_pool = pool;
         path_register_pool_provider(test_path_pool_provider);
 
         // Initialize path system
@@ -71,7 +53,7 @@ protected:
 
     void TearDown() override {
         path_reset();
-        context = nullptr;
+        path_test_pool = nullptr;
         if (pool) {
             pool_destroy(pool);
         }
