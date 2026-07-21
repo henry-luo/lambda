@@ -256,7 +256,7 @@ $(TREE_SITTER_JAVASCRIPT_LIB): $(JS_SCANNER_C)
 # Build tree-sitter-bash library
 $(TREE_SITTER_BASH_LIB):
 	@echo "Building tree-sitter-bash library..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-bash libtree-sitter-bash.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-bash libtree-sitter-bash.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
 
 # Build tree-sitter-python library
 $(TREE_SITTER_PYTHON_LIB):
@@ -297,7 +297,7 @@ $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
 # Build tree-sitter-ruby library
 $(TREE_SITTER_RUBY_LIB):
 	@echo "Building tree-sitter-ruby library..."
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-ruby libtree-sitter-ruby.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-ruby libtree-sitter-ruby.a CC="$(CC)" CXX="$(CXX)" TS="npx tree-sitter-cli@0.24.7" V=1 VERBOSE=1
 
 # Generate LaTeX parser from grammar.js when it changes
 $(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMAR_JS)
