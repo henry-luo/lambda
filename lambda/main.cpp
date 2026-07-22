@@ -2964,9 +2964,12 @@ int main(int argc, char *argv[]) {
             uint64_t result_home = 0;
             Item result = transpile_ts_to_mir(&runtime, ts_source, ts_file, &result_home);
 
-            // only print non-null results
-            if (result.item != ITEM_NULL && result.item != 0) {
-                TypeId result_type = get_type_id(result);
+            TypeId result_type = get_type_id(result);
+            // TypeScript scripts share JavaScript's non-printing completion
+            // semantics; routing undefined through Lambda's printer produced a
+            // spurious diagnostic after every otherwise successful program.
+            if (result.item != ITEM_NULL && result.item != 0 &&
+                    result_type != LMD_TYPE_UNDEFINED) {
                 if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
                     || result_type == LMD_TYPE_ELEMENT) {
                     Pool* fmt_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "main.fmt");
