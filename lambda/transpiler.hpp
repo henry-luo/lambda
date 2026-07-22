@@ -169,7 +169,10 @@ void clear_dynamic_imports(void);
 }
 
 // MIR transpiler functions
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false);
+// compile_only stops after compilation (and therefore after MIR emission),
+// skipping execution; it backs --transpile-only for the MIR Direct pipeline.
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false,
+                      bool compile_only = false);
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms = nullptr,
                                    double* out_transpile_ms = nullptr,

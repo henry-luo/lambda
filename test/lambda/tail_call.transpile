@@ -1,8 +1,0 @@
-{
-    "expect": [
-        "tco_start:",
-        "goto tco_start",
-        "tco_tmp0"
-    ],
-    "forbid": []
-}

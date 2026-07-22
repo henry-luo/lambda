@@ -17,6 +17,7 @@ These rules MUST be followed. Violations are considered errors.
 11. **In `radiant/` layout code, NEVER use `int` for position/dimension variables**. All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make lint ARGS='--rule ^no-int-cast-radiant$'` to verify (or `make lint` for the full sweep).
 12. When fixing a bug, ALWAYS add a brief code comment at the fix point explaining the root cause or invariant being protected. Do not add generic narration.
 13. **NEVER duplicate code.** Grep for an existing helper before writing one. At the 3rd near-identical variant (type/kind/case), extract the shared shape first. To reuse another file's `static`, promote it to the module header — never copy it.
+14. **The legacy C2MIR path is FROZEN.** and new runtime/ABI/design work do NOT need C2MIR support.
 
 | DON'T | DO |
 |-------|-----|
@@ -29,6 +30,7 @@ These rules MUST be followed. Violations are considered errors.
 | `int width = (int)block->width` | `float width = block->width` |
 | Copy a `static` helper into another file | Promote it to the module header, then call it |
 | Add a 3rd/4th copy of a per-type/kind/case block | Extract a parameterized helper or table first |
+| Modify `transpile.cpp` or extend `--c2mir` | Evolve only MIR Direct (`transpile-mir.cpp`) |
 
 ## Project Overview
 

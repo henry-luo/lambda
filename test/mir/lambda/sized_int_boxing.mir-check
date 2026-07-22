@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "Boundary i64/u64 literals box through box_int64_value / box_uint64_value and are adopted into caller homes; no inline 64-bit integer encoding (Stack API #25).",
+  "checks": [
+    {
+      "in_func": "main",
+      "expect": [
+        "call\tbox_int64_value_p",
+        "call\tbox_uint64_value_p"
+      ],
+      "count": {
+        "call\tbox_int64_value_p": { "min": 1 },
+        "call\tbox_uint64_value_p": { "min": 1 },
+        "lambda_item_adopt_scalar_home": { "min": 2 }
+      }
+    }
+  ]
+}

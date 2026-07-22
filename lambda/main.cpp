@@ -825,10 +825,10 @@ int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, boo
     log_debug("run_script_file called: %s, use_mir=%d", script_path, use_mir);
     Input* output_input = nullptr;
     if (use_mir) {
-        output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main);
+        output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main, transpile_only);
     } else {
 #ifdef LAMBDA_C2MIR
-        output_input = run_script_with_run_main(runtime, (char*)script_path, false, run_main);
+        output_input = run_script_with_run_main(runtime, (char*)script_path, transpile_only, run_main);
 #endif
     }
 
@@ -861,6 +861,12 @@ int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, boo
         }
         // Do NOT delete output_input - it was allocated from the pool we just destroyed
         return 1;  // failure
+    }
+
+    // --transpile-only: compilation is the deliverable and nothing executed, so
+    // there is no result value to print. The MIR artifact was already written.
+    if (transpile_only) {
+        return 0;
     }
 
     StrBuf *output = strbuf_new_cap(256);
@@ -4836,9 +4842,6 @@ int main(int argc, char *argv[]) {
         if (strcmp(argv[i], "--c2mir") == 0) {
             use_mir = false;
         }
-        else if (strcmp(argv[i], "--transpile-only") == 0) {
-            transpile_only = true;
-        }
         else if (strcmp(argv[i], "--transpile-dir") == 0) {
             if (i + 1 < argc) {
                 runtime.transpile_dir = argv[++i];
@@ -4851,7 +4854,13 @@ int main(int argc, char *argv[]) {
         }
         else
 #endif
-        if (apply_common_mir_option(argv[i], &runtime, &use_mir)) {
+        // compile without executing. Not C2MIR-only: MIR Direct honors it too,
+        // so emission fixtures can be compiled and their MIR artifact checked
+        // without running the script.
+        if (strcmp(argv[i], "--transpile-only") == 0) {
+            transpile_only = true;
+        }
+        else if (apply_common_mir_option(argv[i], &runtime, &use_mir)) {
         }
         else if (strcmp(argv[i], "--help") == 0) {
             help_only = true;

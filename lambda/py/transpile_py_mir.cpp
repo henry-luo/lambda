@@ -5,6 +5,7 @@
 // (py_add, py_subtract, etc.) take and return Items.
 
 #include "py_transpiler.hpp"
+#include "../mir_dump.h"
 #include "py_runtime.h"
 #include "py_bigint.h"
 #include "py_async.h"
@@ -7939,11 +7940,10 @@ Item transpile_py_to_mir(void* host_execution, const char* py_source, const char
     }
 
 #ifndef NDEBUG
-    // dump MIR for debugging
-    FILE* mir_dump = fopen("temp/py_mir_dump.txt", "w");
-    if (mir_dump) {
-        MIR_output(ctx, mir_dump);
-        fclose(mir_dump);
+    // developer diagnostic; --no-log suppresses it like every other optional
+    // MIR artifact. The private-path/release contract is Lambda/JS/TS only.
+    if (mir_dump_instrumentation_enabled()) {
+        mir_dump_write_context(ctx, "temp/py_mir_dump.txt", false);
     }
 #endif
 

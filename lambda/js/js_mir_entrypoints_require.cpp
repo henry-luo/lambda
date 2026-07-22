@@ -1,5 +1,6 @@
 #include "js_mir_internal.hpp"
 #include "../lambda-error.h"
+#include "../mir_dump.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/path_str.h"
 #include <cstdio>
@@ -272,42 +273,13 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // transpile AST to MIR
     transpile_js_mir_ast(mt, ast);
 
+    // Canonical finalized artifact (MT2); see the JS path above.
 #ifndef NDEBUG
-    if (getenv("JS_MIR_DUMP")) {
-    create_dir_recursive("temp");
-    FILE* mir_dump = fopen("temp/ts_mir_dump.txt", "w");
-    if (mir_dump) {
-        bool dump_safe = true;
-        for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
-             m = DLIST_NEXT(MIR_module_t, m)) {
-            for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
-                 item = DLIST_NEXT(MIR_item_t, item)) {
-                if (item->item_type == MIR_func_item) {
-                    MIR_func_t func = item->u.func;
-                    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, func->insns); insn != NULL;
-                         insn = DLIST_NEXT(MIR_insn_t, insn)) {
-                        for (size_t i = 0; i < insn->nops; i++) {
-                            if (insn->ops[i].mode == MIR_OP_LABEL && insn->ops[i].u.label == NULL) {
-                                dump_safe = false;
-                                break;
-                            }
-                        }
-                        if (!dump_safe) break;
-                    }
-                }
-                if (!dump_safe) break;
-            }
-            if (!dump_safe) break;
-        }
-        if (dump_safe) {
-            MIR_output(ctx, mir_dump);
-        } else {
-            fprintf(mir_dump, "ERROR: NULL labels detected, dump skipped\n");
-        }
-        fclose(mir_dump);
-    }
-    } // JS_MIR_DUMP
+    const bool ts_legacy_mir_dump = getenv("JS_MIR_DUMP") != NULL;
+#else
+    const bool ts_legacy_mir_dump = false;
 #endif
+    mir_dump_finalized(ctx, "temp/ts_mir_dump.txt", ts_legacy_mir_dump);
 
     if (!jm_validate_mir_labels(ctx)) {
         log_error("js-mir-ast: NULL labels detected");
@@ -763,45 +735,16 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
     g_last_js_mir_phase_timing.mir_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ast_to_mir");
 
+    // Canonical finalized artifact (MT2): transpile_js_mir_ast has already run
+    // MIR_finish_func/MIR_finish_module, so this is the finalized stage the
+    // emission tests read. LAMBDA_MIR_DUMP_PATH names a private artifact and
+    // works in release builds; JS_MIR_DUMP keeps the legacy developer path.
 #ifndef NDEBUG
-    if (getenv("JS_MIR_DUMP")) {
-    // Dump MIR for debugging (guard against NULL labels that crash output)
-    create_dir_recursive("temp");
-    FILE* mir_dump = fopen("temp/js_mir_dump.txt", "w");
-    if (mir_dump) {
-        // Check for NULL labels before dumping
-        bool dump_safe = true;
-        for (MIR_module_t m = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
-             m = DLIST_NEXT (MIR_module_t, m)) {
-            for (MIR_item_t item = DLIST_HEAD (MIR_item_t, m->items); item != NULL;
-                 item = DLIST_NEXT (MIR_item_t, item)) {
-                if (item->item_type == MIR_func_item) {
-                    MIR_func_t func = item->u.func;
-                    for (MIR_insn_t insn = DLIST_HEAD (MIR_insn_t, func->insns); insn != NULL;
-                         insn = DLIST_NEXT (MIR_insn_t, insn)) {
-                        for (size_t i = 0; i < insn->nops; i++) {
-                            if (insn->ops[i].mode == MIR_OP_LABEL && insn->ops[i].u.label == NULL) {
-                                dump_safe = false;
-                                log_error("js-mir: NULL label in insn code=%d func=%s", insn->code, func->name);
-                                break;
-                            }
-                        }
-                        if (!dump_safe) break;
-                    }
-                }
-                if (!dump_safe) break;
-            }
-            if (!dump_safe) break;
-        }
-        if (dump_safe) {
-            MIR_output(ctx, mir_dump);
-        } else {
-            fprintf(mir_dump, "ERROR: NULL labels detected, dump skipped\n");
-        }
-        fclose(mir_dump);
-    }
-    } // JS_MIR_DUMP
+    const bool js_legacy_mir_dump = getenv("JS_MIR_DUMP") != NULL;
+#else
+    const bool js_legacy_mir_dump = false;
 #endif
+    mir_dump_finalized(ctx, "temp/js_mir_dump.txt", js_legacy_mir_dump);
 
     // Pre-link validation: abort gracefully if NULL labels found
     if (!jm_validate_mir_labels(ctx)) {

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "description": "Caller-donated scalar home: hidden trailing home argument on the callee, and adopt-before-number-watermark-restore ordering at the call site (Stack API #15/#16/#19/#21).",
+  "checks": [
+    {
+      "in_func": "_twice_#",
+      "expect": [
+        ":\tfunc\ti64, i64:_a, p:_scalar_home"
+      ]
+    },
+    {
+      "in_func": "main",
+      "expect_seq": [
+        { "pattern": "mov\tcall_number_base_" },
+        { "pattern": "call\tbox_int64_value_p" },
+        { "pattern": "lambda_item_adopt_scalar_home" },
+        { "pattern": ", call_number_base_" }
+      ],
+      "count": {
+        "call\tbox_int64_value_p": 1,
+        "mov\tcall_number_base_": 1
+      },
+      "expect": [
+        ", scalar_home_"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "A const initialized from a user function call keeps its boxed representation: the call is emitted, and no item-to-double unbox or double-to-int narrowing is applied to the result (Stage 4C LambdaJS bug #3).",
+  "checks": [
+    {
+      "in_func": "js_main",
+      "expect": [
+        "call\t_js_makeBox_"
+      ],
+      "forbid": [
+        "it2d",
+        "d2i",
+        "js_profiled_it2d"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "The in-progress array is published to a root slot before the element calls that can collect, and stays rooted through array_end (Stack API #7; the BUG-001 shape).",
+  "checks": [
+    {
+      "in_func": "main",
+      "expect_seq": [
+        { "pattern": "), array_" },
+        { "pattern": "call\t_boxed_" },
+        { "pattern": "call\tarray_end_p, array_end" }
+      ],
+      "count": {
+        "), array_": 1,
+        "call\t_boxed_": 3,
+        "call\tarray_end_p, array_end": 1
+      }
+    }
+  ]
+}

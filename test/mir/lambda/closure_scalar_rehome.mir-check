@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Bound-entry wrapper epilogue: allocate an activation-local scalar home, pass it to the direct body, rehome the result out of the activation, and only then restore the number watermark and return (Stack API #24/#27).",
+  "checks": [
+    {
+      "in_func": "_inner_b_#",
+      "expect_seq": [
+        { "pattern": "add\tscalar_home_" },
+        { "pattern": ", scalar_home_" },
+        { "pattern": "call\tlambda_item_heap_rehome_p" },
+        { "pattern": ", number_frame_" },
+        { "pattern": "ret\t" }
+      ],
+      "count": {
+        "call\tlambda_item_heap_rehome_p": 1
+      }
+    }
+  ]
+}
