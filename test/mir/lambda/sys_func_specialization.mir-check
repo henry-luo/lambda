@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "Typed system-function calls under MIR-Direct: boxed runtime entry points are imported, and the C-transpiler-only unboxed and native-math specializations are absent. The forbid list is the gap being tracked -- when a specialization lands in MIR-Direct this fixture fails on purpose.",
+  "checks": [
+    {
+      "in_func": "*",
+      "expect": [
+        "import\tfn_pow",
+        "import\tfn_abs",
+        "import\tfn_math_sin",
+        "import\tfn_math_sqrt"
+      ],
+      "forbid": [
+        "import\tfn_pow_u",
+        "import\tfn_abs_i",
+        "import\tfn_min2_u",
+        "import\tfn_max2_u",
+        "import\tfn_sign_i",
+        "import\tfn_sign_f"
+      ]
+    }
+  ]
+}

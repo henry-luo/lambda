@@ -6,6 +6,7 @@
 #include <string.h>
 #include "lambda-data.hpp"
 #include "sys_func_registry.h"
+#include "mir_dump.h"
 #include "../lib/arraylist.h"
 #include "../lib/hashmap.h"
 #include "../lib/log.h"
@@ -2023,9 +2024,14 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         result->instruction_count = instruction_count;
         result->block_count = block_count;
     }
-    const char* log_slots = getenv("LAMBDA_MIR_LOG_FRAME_SLOTS");
+    // --no-log is the master gate over optional emission telemetry (MT2).
+    const char* log_slots = mir_dump_instrumentation_enabled()
+        ? getenv("LAMBDA_MIR_LOG_FRAME_SLOTS") : NULL;
     if (log_slots && log_slots[0] && strcmp(log_slots, "0") != 0) {
-        log_info("mir-semantic-root-write-back: function=%s candidates=%d instructions=%d blocks=%d call_sites=%d stable=%d scratch=%d root_stores=%d",
+        // notice, not info: log_info is compiled out under NDEBUG, and the
+        // emission-size ratchet reads this telemetry from a release host too.
+        // It stays opt-in behind the env var, so normal runs are unaffected.
+        log_notice("mir-semantic-root-write-back: function=%s candidates=%d instructions=%d blocks=%d call_sites=%d stable=%d scratch=%d root_stores=%d",
             log_label ? log_label : "<anonymous>", candidate_count,
             instruction_count, block_count, call_site_count,
             stable_slot_count, scratch_slot_count, inserted_stores);
@@ -2540,9 +2546,14 @@ static inline void em_finalize_function_metadata(MirEmitter* em) {
         (uint16_t)frame->plan.fixed_number_scratch_slots,
         instruction_count, (uint32_t)frame->may_gc_call_count,
         (uint32_t)frame->root_store_count};
-    const char* enabled = getenv("LAMBDA_MIR_LOG_FRAME_SLOTS");
+    // --no-log is the master gate over optional emission telemetry (MT2).
+    const char* enabled = mir_dump_instrumentation_enabled()
+        ? getenv("LAMBDA_MIR_LOG_FRAME_SLOTS") : NULL;
     if (enabled && enabled[0] && strcmp(enabled, "0") != 0) {
-        log_info("mir-function: function=%s entry=%d bound=%d instructions=%u roots=%u root_stores=%u scalar_homes=%u number_scratch=%u safepoints=%u",
+        // notice, not info: log_info is compiled out under NDEBUG, and the
+        // emission-size ratchet reads this telemetry from a release host too.
+        // It stays opt-in behind the env var, so normal runs are unaffected.
+        log_notice("mir-function: function=%s entry=%d bound=%d instructions=%u roots=%u root_stores=%u scalar_homes=%u number_scratch=%u safepoints=%u",
             plan->debug_name ? plan->debug_name : "<unnamed>",
             (int)plan->entry_kind,
             plan->entry_mode == MIR_ENTRY_BOUND_INTERNAL,

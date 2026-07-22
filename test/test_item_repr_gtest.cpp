@@ -403,9 +403,10 @@ TEST(ItemRepresentation, MirMemberAccessKeepsContainerItemUnmodified) {
     shell_result_free(&shell_result);
 
     FILE* f = fopen(dump_path, "r");
-    if (!f) {
-        GTEST_SKIP() << "current lambda.exe does not emit debug MIR dump";
-    }
+    // LAMBDA_MIR_DUMP_PATH is honored in every build now (MT2 of
+    // vibe/Lambda_Design_MIR_Emission_Test.md), so a missing artifact means the
+    // dump contract broke rather than that this build cannot produce one.
+    ASSERT_NE(f, nullptr) << "no MIR artifact written to " << dump_path;
 
     char window[12][512] = {};
     int line_index = 0;

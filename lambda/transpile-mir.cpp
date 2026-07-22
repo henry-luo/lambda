@@ -6,6 +6,7 @@
 #include "module_registry.h"
 #include "template_registry.h"
 #include "mir_emitter_shared.hpp"
+#include "mir_dump.h"
 #include "js/js_runtime.h"
 #include "../lib/log.h"
 #include "../lib/lambda_alloca.h"
@@ -14428,27 +14429,28 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     em_frame_dispose(&mt.em);
 
 #ifndef NDEBUG
-    // Dump MIR text for debugging (before finish_func to capture state on error).
-    // The dump is a debug artifact like log.txt, so --no-log suppresses it too:
-    // log_disable_all() clears the default category's enabled flag, checked here.
-    // The path is overridable via LAMBDA_MIR_DUMP_PATH: every debug lambda.exe run
-    // truncates the fixed default path, so tests that inspect the dump while other
-    // lambda.exe processes run concurrently must redirect it to a private file.
-    if (log_default_category && log_default_category->enabled) {
-        const char* mir_dump_path = getenv("LAMBDA_MIR_DUMP_PATH");
-        if (!mir_dump_path || !*mir_dump_path) { mir_dump_path = "temp/mir_dump.txt"; }
-        FILE* mir_dump = fopen(mir_dump_path, "w");
-        if (mir_dump) {
-            MIR_output(ctx, mir_dump);
-            fclose(mir_dump);
-        } else {
-            log_warn("mir dump: failed to open '%s' for writing", mir_dump_path);
-        }
+    // Developer diagnostic: a pre-finish snapshot, so a crash between here and
+    // MIR_finish_module still leaves readable MIR behind. It writes only the
+    // shared default path -- a caller naming an explicit artifact wants the
+    // canonical finalized dump emitted below, not this earlier snapshot, and
+    // must not have its private file raced by the developer convenience.
+    if (mir_dump_instrumentation_enabled() && !mir_dump_explicit_path()) {
+        mir_dump_write_context(ctx, "temp/mir_dump.txt", false);
     }
 #endif
 
     MIR_finish_func(ctx);
     MIR_finish_module(ctx);
+
+    // Canonical finalized artifact (MT2): every function and the module are
+    // finished, nothing is linked or generated yet. Emission tests read this
+    // stage, so it must be emitted after the finishers, not before them.
+#ifndef NDEBUG
+    const bool mir_dump_default_enabled = true;
+#else
+    const bool mir_dump_default_enabled = false;
+#endif
+    mir_dump_finalized(ctx, "temp/mir_dump.txt", mir_dump_default_enabled);
 
     // Load module for linking (required before MIR_link)
     MIR_load_module(ctx, mt.module);
@@ -14910,7 +14912,8 @@ static ArrayList* collect_import_cone(Script* main_script) {
 // Main entry point for MIR compilation
 // ============================================================================
 
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main,
+                      bool compile_only) {
     log_notice("Running script with MIR JIT compilation (direct)");
 
     // Initialize runner
@@ -14952,6 +14955,20 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         Pool* error_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
         Input* output = Input::create(error_pool, nullptr);
         if (output) output->root = ItemError;
+        return output;
+    }
+
+    if (compile_only) {
+        // --transpile-only: the script and its whole import cone are compiled
+        // and their MIR artifacts written, so stop before any user code runs.
+        Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
+        Input* output = Input::create(output_pool, nullptr);
+        if (!output) {
+            log_error("Failed to create compile-only output Input");
+            if (output_pool) pool_destroy(output_pool);
+            return nullptr;
+        }
+        output->root = ItemNull;
         return output;
     }
 

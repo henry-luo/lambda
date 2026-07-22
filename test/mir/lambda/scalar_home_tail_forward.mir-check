@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "Tail-home forwarding: the epilogue adopts the result into the incoming _scalar_home, then restores the number watermark, then returns (Stack API #15/#16/#21).",
+  "checks": [
+    {
+      "in_func": "_accumulate_#",
+      "expect": [
+        ":\tfunc\ti64, i64:_n, i64:_acc, p:_scalar_home"
+      ],
+      "expect_seq": [
+        { "pattern": ", _scalar_home" },
+        { "pattern": ", number_frame_", "next_line": true },
+        { "pattern": "ret\t", "next_line": true }
+      ],
+      "count": {
+        ", _scalar_home": 1
+      }
+    }
+  ]
+}

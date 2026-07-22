@@ -513,6 +513,7 @@
             "source_files": [
                 "lambda/parse.c",
                 "lambda/mir.c",
+                "lambda/mir_dump.cpp",
                 "lambda/runtime/path_runtime.c",
                 "lambda/build_ast.cpp",
                 "lambda/lambda-data-runtime.cpp",
@@ -4283,6 +4284,62 @@
                             "libuv"
                         ],
                         "icon": "🔀"
+                    },
+                    {
+                        "source": "test/test_mir_gc_stress_gtest.cpp",
+                        "name": "MIR Forced-GC Stress Sweep",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "binary": "test_mir_gc_stress_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "\ud83e\uddea"
+                    },
+                    {
+                        "source": "test/test_mir_ratchet_gtest.cpp",
+                        "name": "MIR Emission Size Ratchet",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "binary": "test_mir_ratchet_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "\ud83d\udccf"
+                    },
+                    {
+                        "source": "test/test_mir_emission_gtest.cpp",
+                        "name": "Lambda MIR Emission Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "binary": "test_mir_emission_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "\ud83e\uddee"
+                    },
+                    {
+                        "source": "test/test_js_mir_emission_gtest.cpp",
+                        "name": "JS MIR Emission Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "binary": "test_js_mir_emission_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "\ud83e\uddee"
                     },
                     {
                         "source": "test/test_item_repr_gtest.cpp",

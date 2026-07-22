@@ -13,6 +13,7 @@
  * Variables are stored as Items in a module variable table (like Python).
  */
 #include "bash_transpiler.hpp"
+#include "../mir_dump.h"
 #include "bash_runtime.h"
 #include "bash_errors.h"
 #include "../lambda-data.hpp"
@@ -6287,10 +6288,10 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     MIR_load_module(ctx, mt->module);
 
 #ifndef NDEBUG
-    FILE* mir_dump = fopen("temp/bash_mir_dump.txt", "w");
-    if (mir_dump) {
-        MIR_output(ctx, mir_dump);
-        fclose(mir_dump);
+    // developer diagnostic; --no-log suppresses it like every other optional
+    // MIR artifact. The private-path/release contract is Lambda/JS/TS only.
+    if (mir_dump_instrumentation_enabled()) {
+        mir_dump_write_context(ctx, "temp/bash_mir_dump.txt", false);
     }
 #endif
 

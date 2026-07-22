@@ -5,6 +5,7 @@
 // (rb_add, rb_subtract, etc.) take and return Items.
 
 #include "rb_transpiler.hpp"
+#include "../mir_dump.h"
 #include "rb_runtime.h"
 #include "../lambda-data.hpp"
 #include "../mir_emitter_shared.hpp"
@@ -4677,10 +4678,10 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     MIR_load_module(mt->em.ctx, mt->module);
 
 #ifndef NDEBUG
-    FILE* mir_dump = fopen("temp/rb_mir_dump.txt", "w");
-    if (mir_dump) {
-        MIR_output(ctx, mir_dump);
-        fclose(mir_dump);
+    // developer diagnostic; --no-log suppresses it like every other optional
+    // MIR artifact. The private-path/release contract is Lambda/JS/TS only.
+    if (mir_dump_instrumentation_enabled()) {
+        mir_dump_write_context(ctx, "temp/rb_mir_dump.txt", false);
     }
 #endif
 

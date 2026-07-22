@@ -470,7 +470,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild \
-	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-gc-rooting-core test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python release-lang-python package-standard package-jube verify-jube-package test-jube-module-integrity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
@@ -1042,7 +1042,20 @@ test-gc-rooting-core: build
 	@diff -u -b -B test/lambda/proc/proc_number_model_realign.txt temp/gc_rooting_number_model_proc.txt
 	@python3 utils/check_gc_effects.py
 	@python3 utils/check_gc_root_hazards.py
+	@# The MIR emission corpus is swept by a driver rather than more shell
+	@# blocks here: it runs every test/mir fixture plus the capture/hoist
+	@# regressions through all three forced-GC modes and compares each against
+	@# the same script's unstressed output, so adding a fixture extends this
+	@# gate automatically. See MT4 in vibe/Lambda_Design_MIR_Emission_Test.md.
+	@$(MAKE) --no-print-directory test-mir-gc-stress
 	@echo "Core precise-root forced-GC gates passed."
+
+# Forced-GC stress sweep over the MIR emission corpus (MT4). Also runs inside
+# test-lambda-baseline; this target is the standalone entry point.
+test-mir-gc-stress:
+	@if [ ! -x test/test_mir_gc_stress_gtest.exe ]; then $(MAKE) --no-print-directory build-test; fi
+	@echo "Running forced-GC stress sweep over the MIR emission corpus..."
+	@./test/test_mir_gc_stress_gtest.exe
 
 test-gc-rooting-python: build build-lang-python
 	@mkdir -p temp
@@ -2496,6 +2509,12 @@ build-test: build-lambda-data generate-tree-sitter-python-parser
 	@echo "Building tests using Premake5..."
 	@echo "Building configurations..."
 	@mkdir -p build/premake
+	@# Drop a backup left behind by an interrupted earlier run. The restore step
+	@# below keys on this file merely existing, so a stale one silently replaces
+	@# a freshly built lambda.exe with an older binary -- which surfaces much
+	@# later as "unknown option" for a flag that is in fact implemented. Clearing
+	@# it here makes "the backup exists" mean "this invocation created it".
+	@rm -f .lambda_build_backup.exe
 	$(MAKE) generate-premake
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
 	@# If last build was release, rebuild lambda.exe incrementally in release mode

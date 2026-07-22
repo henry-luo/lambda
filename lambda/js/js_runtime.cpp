@@ -18442,13 +18442,22 @@ static Item js_collection_create(int type) {
 
 // v41: Link a collection instance to its constructor's prototype
 static void js_collection_link_prototype(Item obj, const char* ctor_name, int ctor_len) {
+    // The freshly created collection is reachable only from native locals at
+    // this point, and heap_create_name/js_property_get below can collect. With
+    // no native-stack scan, an unrooted obj is freed mid-link and the prototype
+    // is written into dead memory, which later reads back as a missing "add".
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> rooted_obj(roots, obj);
+    Rooted<Item> rooted_ctor(roots, ItemNull);
+    Rooted<Item> rooted_proto(roots, ItemNull);
+
     Item ctor_name_item = (Item){.item = s2it(heap_create_name(ctor_name, ctor_len))};
-    Item ctor = js_get_constructor(ctor_name_item);
-    if (ctor.item != ITEM_NULL && get_type_id(ctor) == LMD_TYPE_FUNC) {
+    rooted_ctor.set(js_get_constructor(ctor_name_item));
+    if (rooted_ctor.get().item != ITEM_NULL && get_type_id(rooted_ctor.get()) == LMD_TYPE_FUNC) {
         Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
-        Item ctor_proto = js_property_get(ctor, proto_key);
-        if (ctor_proto.item != ITEM_NULL && get_type_id(ctor_proto) == LMD_TYPE_MAP)
-            js_set_prototype(obj, ctor_proto);
+        rooted_proto.set(js_property_get(rooted_ctor.get(), proto_key));
+        if (rooted_proto.get().item != ITEM_NULL && get_type_id(rooted_proto.get()) == LMD_TYPE_MAP)
+            js_set_prototype(rooted_obj.get(), rooted_proto.get());
     }
 }
 
@@ -18568,32 +18577,45 @@ static void js_iterator_close_preserve_exception(Item iterator) {
 }
 
 extern "C" Item js_set_collection_new_from(Item iterable) {
-    Item set = js_collection_create(JS_COLLECTION_SET);
-    js_collection_link_prototype(set, "Set", 3);
-    TypeId tid = get_type_id(iterable);
-    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) return set;
+    // Precise rooting does not scan the native stack, so every Item that stays
+    // live across an allocating call here needs a root slot: heap_create_name,
+    // js_property_get, js_get_iterator, js_iterator_step and the adder call can
+    // all collect. The set must be rooted from creation -- linking its
+    // prototype allocates, and losing it there surfaced later as
+    // "Set.prototype.add is not callable".
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> rooted_set(roots, js_collection_create(JS_COLLECTION_SET));
+    Rooted<Item> rooted_iterable(roots, iterable);
+    Rooted<Item> rooted_adder(roots, ItemNull);
+    Rooted<Item> rooted_iterator(roots, ItemNull);
+
+    js_collection_link_prototype(rooted_set.get(), "Set", 3);
+    TypeId tid = get_type_id(rooted_iterable.get());
+    if (tid == LMD_TYPE_NULL || rooted_iterable.get().item == ITEM_JS_UNDEFINED) {
+        return rooted_set.get();
+    }
 
     Item add_key = (Item){.item = s2it(heap_create_name("add", 3))};
-    Item adder = js_property_get(set, add_key);
+    rooted_adder.set(js_property_get(rooted_set.get(), add_key));
     if (js_check_exception()) return ItemNull;
-    if (get_type_id(adder) != LMD_TYPE_FUNC) {
+    if (get_type_id(rooted_adder.get()) != LMD_TYPE_FUNC) {
         return js_throw_type_error("Set.prototype.add is not callable");
     }
 
-    Item iterator = js_get_iterator(iterable);
+    rooted_iterator.set(js_get_iterator(rooted_iterable.get()));
     if (js_check_exception()) return ItemNull;
     while (true) {
-        Item value = js_iterator_step(iterator);
+        Item value = js_iterator_step(rooted_iterator.get());
         if (js_check_exception()) return ItemNull;
         if (value.item == JS_ITER_DONE_SENTINEL) break;
         Item args[1] = { value };
-        js_call_function(adder, set, args, 1);
+        js_call_function(rooted_adder.get(), rooted_set.get(), args, 1);
         if (js_check_exception()) {
-            js_iterator_close_preserve_exception(iterator);
+            js_iterator_close_preserve_exception(rooted_iterator.get());
             return ItemNull;
         }
     }
-    return set;
+    return rooted_set.get();
 }
 
 extern "C" Item js_map_collection_new_from(Item iterable) {

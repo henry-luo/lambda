@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "The field arrow's body loads `this` from its captured environment and resolves it lexically, rather than starting from a fresh undefined register (Stage 4C LambdaJS bugs #1/#2). The env load is not pinned to an exact count so a redundant-load cleanup does not have to touch this fixture.",
+  "checks": [
+    {
+      "in_func": "_js_anon0_#_body",
+      "expect_seq": [
+        { "pattern": ", i64:(_js.env)" },
+        { "pattern": "call\tjs_resolve_lexical_this_p" }
+      ],
+      "count": {
+        ", i64:(_js.env)": { "min": 1 },
+        "call\tjs_resolve_lexical_this_p": 1
+      }
+    }
+  ]
+}
