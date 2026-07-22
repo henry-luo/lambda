@@ -17,7 +17,7 @@
 
 ---
 
-# §1 — Ledger: proposal items that landed (2026-07-03 → 2026-07-22)
+# §1 — Ledger: proposal items that landed
 
 | Original item | Outcome | Where it lives now |
 |---|---|---|
@@ -52,9 +52,21 @@ Still *not* the problem (unchanged from rev 1): closure variable access (env ind
 
 Most important first. Execution order differs slightly (small prerequisites early); see §5.
 
-### R0 — Re-baseline: produce `Overall_Result10.md` *(do first; days; every ranking below is provisional until this exists)*
+### R0 — Re-baseline: produce `Overall_Result10.md` — **DONE 2026-07-22; outcome: master is not baseline-able yet**
 
-Re-run the full JS + Lambda-MIR benchmark suite on current master (release build, same `__TIMING__` protocol as Result9) and record Result10 with three comparison columns: Result9, Result4, and attribution notes (self-tagged doubles / stack frames / safepoint rooting each have signature benchmarks: nbody-mandelbrot / fib-ack / deltablue-gcbench). This replaces T0's bisect — the regressed machinery no longer exists, so the only meaningful act is measuring the new floor. Also the go/no-go input for R7 (how much GC pressure remains) and the calibration for R2/R4 sizing.
+Executed on commit `e3b6f358`: clean `make release`, instrumentation check passed, same host/Node v22.13.0/QuickJS 2025-09-13/3-run-median `__TIMING__`/180 s protocol as Result9. Report: [`Overall_Result10.md`](../test/benchmark/Overall_Result10.md); data `benchmark_results_v10.json`; comparison blocks are stored in that JSON's `_metadata.historical_comparisons` (regenerate with `inject_v10_history.py` + `gen_overall_result.py`).
+
+**R0 did not produce a usable floor — it surfaced three regressions that outrank every tuning item below.** They are now R0a–R0c and must clear before R1 starts; until then any ranking here stays provisional, exactly as this item warned.
+
+| | Finding | Evidence |
+|---|---|---|
+| **R0a** | **MIR-Direct aborts on 12 benchmarks that ran in Result9** — 10 × `SIGABRT` (exit 134) with `mir-scalar-invariant: unresolved call retains scalar home`, plus `r7rs/fft` (type checker now rejects `float`→`int` var assign) and `beng/pidigits` (parser: `Unexpected syntax near '1'`) | Introduced by commit `e30dc677b` "impl scalar GC invariant", which replaced the `em_heap_rehome_item_arg()` fallback in `em_emit_unknown_call` (`lambda/mir_emitter_shared.hpp:2654`) with a hard `abort()`. Repro: `./lambda.exe run test/benchmark/jetstream/deltablue2.ls` |
+| **R0b** | **LambdaJS lost an order of magnitude on previously-fast small/mid benchmarks** while the disaster tail collapsed as designed | `awfy/sieve` 0.49 ms → 50.1 ms (**102× slower absolute**), `larceny/puzzle` 22.7 → 769 ms, `array1` 3.40 → 28.2 ms, `primes` 15.9 → 105 ms. Node's own times on the same rows moved < 10 %, so this is engine movement, not host noise. Shape suggests **lost native specialization** |
+| **R0c** | **`make test-lambda-baseline` cannot build** — the project's mandatory 100 % gate is unrunnable | Debug test build fails `-Werror,-Wunused-function` on two dead statics in `lambda/py/transpile_py_mir.cpp:161` and `:210` (`pm_create_hosted_item_function`, `…_proto` — defined once, referenced nowhere) |
+
+**What R0 does establish.** The §1 landings delivered exactly the predicted effect on the boxing/dispatch tail, measured like-for-like: **splay 392× → 14.6×** (26.8× better), **deltablue 266× → 19.0×** (14×), **cube3d 198× → 50.4×**, **matmul 176× → 54.9×**, **richards 119× → 37.5×**, plus mandelbrot/mbrot/bounce/storage/list/collatz. The Wall 1 and Wall 4 thesis is confirmed. But the aggregate moved the *wrong* way — dedup geo mean 13.1× → 19.9× all-timed, **13.1× → 16.7× like-for-like** on the 53 rows common to both rounds (20 improved, 33 regressed) — because R0b's broad regression outweighs the tail win, and because `cd` (2401×) and `hashmap` (2121×) are timed for the first time in Result10 and raise the mean by construction. Lambda/MIR is **not comparable at all**: 45 of 56 rows survive, so its 4.26× → 7.39× is a different benchmark population.
+
+**Do not re-rank R1–R8 on these numbers.** Fix R0a–R0c, re-run (`Result11`), then rank. The value R0 delivered is the three regressions, not a floor.
 
 ### R1 — Execute Tune-6, Tracks A → D → B → E *(design-ready; plan already written; not started)*
 
@@ -148,7 +160,9 @@ LambdaJS's pending-flag + compiler-emitted checks vs V8's zero-cost handler tabl
 
 # §5 — Sequencing
 
-**R0 (re-baseline) → R1 Tune-6 (A → D → B → E) → R3 (small, feeds R2) → R2 (IC inline, then PIC design + impl) → R4 + R5 (call protocol + check inlining) → R6 (MIR-Direct parity, can run parallel to JS-side work) → R7 (only on R0/Result11 evidence) → R8 (when interop demand warrants). R9/R10 parked.**
+**R0a + R0c (unbreak master: scalar-invariant abort, dead-code build failure) → R0b (root-cause the lost native specialization) → re-run as Result11 → R1 Tune-6 (A → D → B → E) → R3 (small, feeds R2) → R2 (IC inline, then PIC design + impl) → R4 + R5 (call protocol + check inlining) → R6 (MIR-Direct parity, can run parallel to JS-side work) → R7 (only on Result11 evidence) → R8 (when interop demand warrants). R9/R10 parked.**
+
+R0c is a few minutes' work and unblocks the correctness gate that R0a's fix will need. R0a and R0b are both plausibly consequences of the same recent scalar-ownership/stack-frame landings, so investigate them together before assuming two independent causes.
 
 Gates throughout, unchanged: full test262, `make test-lambda-baseline` 100 %, Radiant baseline where object-model or GC behavior changes, ASan on lifetime-touching changes, release-build-only perf numbers (CLAUDE.md rule 10), and per-change before/after tables on the fixed benchmark set.
 
