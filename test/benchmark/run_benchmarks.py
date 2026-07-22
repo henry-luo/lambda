@@ -62,6 +62,22 @@ MIR_VS_C_CSV_PATH = "temp/mir_vs_c_bench.csv"
 IS_MACOS = platform.system() == "Darwin"
 
 ALL_ENGINES = ["mir", "c2mir", "lambdajs", "quickjs", "nodejs", "python"]
+
+# Rows that RUN and exit 0 but compute the wrong answer on a given engine. They are
+# excluded per-engine, not per-row: both entries below are legitimately timed under
+# LambdaJS. Verify with test/benchmark goldens before adding or removing an entry.
+WRONG_OUTPUT_ROWS = {
+    ("awfy", "cd", "mir"):
+        'cd2.ls prints "collisions=0 / CD: FAIL"; golden awfy/cd2.txt is '
+        '"collisions=4305 / CD: PASS". The script stores an empty vector into its '
+        "voxel map and then fills it through the original binding — a reference-"
+        "semantics idiom that value semantics makes a no-op "
+        "(doc/Lambda_Formal_Semantics.md 9.3). Needs read-modify-write restructuring.",
+    ("awfy", "list", "mir"):
+        'list2.ls prints "List: FAIL result=6"; golden awfy/list2.txt is "List: PASS". '
+        "Completes in ~0.012 ms because it does almost no work, so timing it produces "
+        "a spurious best-in-class row. Already on MIR_SKIP_TESTS in test_lambda_gtest.",
+}
 ENGINE_LABELS = {
     "mir": "MIR", "c2mir": "C2MIR", "lambdajs": "LambdaJS",
     "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
@@ -661,9 +677,19 @@ def time_run_single(b, engines, num_runs, timeout_s, results):
     # --- MIR Direct ---
     if "mir" in engines:
         print(f"  MIR      ", end="", flush=True)
-        w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} run {ls_path}", num_runs, timeout_s)
-        record_time_result(results, row, suite, name, "mir", w, e, ok, status, detail)
-        print(f" {fmt_ms(e if e is not None else w)}")
+        wrong = WRONG_OUTPUT_ROWS.get((suite, name, "mir"))
+        if wrong:
+            # Exit code 0 does not mean the benchmark computed the right answer, and
+            # the runner never diffs output — so a wrong-but-fast row would otherwise
+            # be timed and folded into the geometric mean (awfy/list: 0.012 ms while
+            # printing "List: FAIL"). Record the reason instead of a meaningless time.
+            record_time_result(results, row, suite, name, "mir",
+                               None, None, False, "wrong_output", wrong)
+            print(" wrong_output (excluded)")
+        else:
+            w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} run {ls_path}", num_runs, timeout_s)
+            record_time_result(results, row, suite, name, "mir", w, e, ok, status, detail)
+            print(f" {fmt_ms(e if e is not None else w)}")
 
     # --- C2MIR ---
     if "c2mir" in engines:

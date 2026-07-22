@@ -2,9 +2,9 @@
 
 - **Date:** 2026-07-22
 - **Platform:** Darwin arm64
-- **Lambda commit:** `e3b6f358cf0e8fd75d2cefc00c219bfa24779638`
+- **Lambda commit:** `ecd19f5a5ccfec22c14e1709e9b0fcee0a53a303`
 - **Lambda build:** clean release build (`make release`)
-- **Instrumentation check:** passed
+- **Instrumentation check:** passed (original full run); MIR re-measurement used the same clean release build — verified no debug banner
 - **Node.js:** v22.13.0
 - **QuickJS:** 2025-09-13
 - **Methodology:** 3 run(s) per benchmark, median of self-reported `__TIMING__` milliseconds, timeout 180s per run
@@ -20,13 +20,13 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 | Suite | Total | Timed MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 9 | 10 | 9 | 10 | 1.98x | 7.35x | 6.60x |
-| AWFY | 14 | 11 | 13 | 14 | 14 | 3.03x | 37.1x | 5.49x |
-| BENG | 10 | 8 | 10 | 7 | 10 | 4.23x | 8.40x | 4.51x |
+| AWFY | 14 | 12 | 13 | 14 | 14 | 2.79x | 37.1x | 5.49x |
+| BENG | 10 | 9 | 10 | 7 | 10 | 4.07x | 8.40x | 4.51x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 28.3x | 16.3x | 11.7x |
-| LARCENY | 12 | 10 | 12 | 12 | 12 | 22.4x | 20.0x | 14.2x |
-| JetStream | 9 | 5 | 9 | 7 | 9 | 55.3x | 99.0x | 13.7x |
-| **Overall dedup** | **56** | **45** | **55** | **50** | **56** | **7.68x** | **20.1x** | **7.74x** |
-| Overall raw | 62 | 50 | 61 | 56 | 62 | 8.08x | 20.8x | 8.32x |
+| LARCENY | 12 | 12 | 12 | 12 | 12 | 22.6x | 20.0x | 14.2x |
+| JetStream | 9 | 9 | 9 | 7 | 9 | 52.2x | 99.0x | 13.7x |
+| **Overall dedup** | **56** | **52** | **55** | **50** | **56** | **8.60x** | **20.1x** | **7.74x** |
+| Overall raw | 62 | 58 | 61 | 56 | 62 | 9.01x | 20.8x | 8.32x |
 
 > **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -39,37 +39,45 @@ JetStream JavaScript-engine wrappers are standardized to an explicit x8 loop ove
 
 Result10 re-measures current master on the same host, Node.js v22.13.0 and QuickJS 2025-09-13, with the same clean release build, 3-run median `__TIMING__` protocol and 180 s timeout as Result9. It is the R0 deliverable of `vibe/Lambda_Tuning_Proposal.md`.
 
-**The Lambda/MIR column is not a usable baseline.** 12 benchmarks that ran in Result9 no longer run: 10 abort at transpile time with `mir-scalar-invariant: unresolved call retains scalar home` (`lambda/mir_emitter_shared.hpp`, `em_emit_unknown_call`), and 2 are rejected by the front end. The abort was introduced by commit `e30dc677b` ("impl scalar GC invariant"), which replaced the previous `em_heap_rehome_item_arg()` fallback for unresolved calls with a hard `abort()`. Because the failing rows drop out of the geometric mean, the MIR/Node figures in this report compare different benchmark populations and must not be quoted as a like-for-like movement.
+**Revised 2026-07-22 after the MIR regression fix.** As first published, this report lost 12 benchmarks that ran in Result9: 10 aborted at transpile time with `mir-scalar-invariant: unresolved call retains scalar home` (`lambda/mir_emitter_shared.hpp`, `em_emit_unknown_call`), introduced by `e30dc677b` ("impl scalar GC invariant"), and 2 were rejected by the front end. Commit `21e7d812a` ("regres fix") removed the abort, and those rows were re-measured on the same protocol; the MIR column below includes them.
 
-**The LambdaJS column is usable but bimodal**, and its headline moved for two separable reasons: a real broad regression on the small/mid cluster, and a coverage change (`cd` and `hashmap` are timed for the first time in Result10, both above 2000x, which raises the mean by construction). The like-for-like figures below hold the benchmark population fixed.
+**The Lambda/MIR column is usable again, with four rows excluded.** Eight of the twelve recovered fully and match their goldens. Four do not: `r7rs/fft` and `beng/pidigits` are still front-end rejections (unchanged, and `beng_pidigits` is a known MIR gap already on the skip list), while `awfy/cd` and `awfy/list` now execute but compute the **wrong answer**. Those two are recorded as `wrong_output` with no timing, so they drop out of the geometric mean instead of contributing a fast, meaningless number.
+
+**Every timed MIR row in this revision was output-checked.** The benchmark runners measure time only — they never compare output — so a wrong-but-fast row is invisible in the mean. That is exactly how `awfy/list` would have entered it: it "runs" in 0.012 ms while printing `List: FAIL result=6`. All 59 rows that were timed at that point were re-run and diffed against their `.txt` goldens or self-checks; 58 matched, and only `awfy/list` did not. Treat any future MIR figure produced without this check as unverified.
+
+**The LambdaJS column is unchanged from the first run and remains bimodal**, and its headline moved for two separable reasons: a real broad regression on the small/mid cluster, and a coverage change (`cd` and `hashmap` are timed for the first time in Result10, both above 2000x, which raises the mean by construction). The like-for-like figures below hold the benchmark population fixed.
 
 **Headline, all-timed vs like-for-like (deduplicated, engine/Node geometric mean)**
 
 | Engine | Result9 all-timed | Result10 all-timed | Result9 like-for-like | Result10 like-for-like | Common rows | Like-for-like change |
 |---|---|---|---|---|---|---|
 | LambdaJS | 13.1x (n=53) | 19.9x (n=55) | 13.1x | 16.7x | 53 | 1.27x worse |
-| Lambda/MIR | 4.26x (n=56) | 7.39x (n=45) | 3.83x | 7.39x | 45 | 1.93x worse |
+| Lambda/MIR | 4.26x (n=56) | 8.42x (n=52) | 4.80x | 8.42x | 52 | 1.75x worse |
 
-### Lambda/MIR — benchmarks lost since Result9
+### Lambda/MIR — the 12 rows lost in the first Result10 run
 
-All 10 SIGABRT rows share one message and one origin. Reproduce with `./lambda.exe run test/benchmark/jetstream/deltablue2.ls` (exit 134). `r7rs/fft` is rejected by the type checker (`cannot assign float value to var 'm' of type int`) and `beng/pidigits` by the parser (`Unexpected syntax near '1'`) — three distinct regression classes, not one.
+All 10 SIGABRT rows shared one message and one origin, and all 10 stopped aborting after `21e7d812a`. Eight now produce correct output and are timed here. The remaining two, `awfy/cd` and `awfy/list`, traded a loud failure for a silent one: they exit 0 and produce a wrong result, which is worse for a benchmark suite than crashing because a timing would still be recorded.
 
-**Regressed from timed to failing**
+`awfy/cd`'s wrong answer is a semantics issue, not a codegen one: `cd.ls` stores an empty vector into its voxel map and then keeps filling it through the original binding, which is a reference-semantics idiom. Under Lambda's mutable value semantics, construction captures by value (`doc/Lambda_Formal_Semantics.md` §9.3), so the stored copy stays empty and no voxel ever holds two motions. Both rows stay excluded until the scripts are restructured to read-modify-write.
 
-| Benchmark | Result9 MIR | Result10 status | Cause |
-|---|---|---|---|
-| r7rs/fft | 0.447 ms | exit_1 | compile rejected |
-| awfy/list | 0.2 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
-| awfy/havlak | 221 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
-| awfy/cd | 1.53e+03 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
-| beng/binarytrees | 44.4 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
-| beng/pidigits | 0.325 ms | exit_1 | compile rejected |
-| larceny/deriv | 72.9 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
-| larceny/gcbench | 1.37e+03 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
-| jetstream/splay | 3.17e+03 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
-| jetstream/deltablue | 40 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
-| jetstream/hashmap | 246 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
-| jetstream/raytrace3d | 471 ms | exit_-6 | SIGABRT — mir-scalar-invariant |
+The two front-end rejections are unrelated to the scalar-invariant abort and are unchanged since Result9 — three distinct classes, not one.
+
+**Result9 → Result10 (first run) → Result10 (revised)**
+
+| Benchmark | Result9 MIR | Result10 first run | Result10 revised | Status |
+|---|---|---|---|---|
+| r7rs/fft | 0.447 ms | exit_1 | exit_1 | Front end: `cannot assign float value to var 'm' of type int` — unchanged |
+| awfy/list | 0.2 ms | exit_-6 | wrong_output | Runs (0.012 ms) but prints `List: FAIL result=6` vs golden `List: PASS` — **excluded** |
+| awfy/havlak | 221 ms | exit_-6 | 108 ms | Recovered, golden matches |
+| awfy/cd | 1.53e+03 ms | exit_-6 | wrong_output | Runs but prints `collisions=0` vs golden `4305` — **excluded** |
+| beng/binarytrees | 44.4 ms | exit_-6 | 11.9 ms | Recovered, golden matches |
+| beng/pidigits | 0.325 ms | exit_1 | exit_1 | Front end: `Unexpected syntax near '1'` — unchanged, known MIR gap |
+| larceny/deriv | 72.9 ms | exit_-6 | 100 ms | Recovered, golden matches |
+| larceny/gcbench | 1.37e+03 ms | exit_-6 | 502 ms | Recovered, golden matches |
+| jetstream/splay | 3.17e+03 ms | exit_-6 | 7.32e+03 ms | Recovered, self-check PASS |
+| jetstream/deltablue | 40 ms | exit_-6 | 19 ms | Recovered, self-check PASS |
+| jetstream/hashmap | 246 ms | exit_-6 | 154 ms | Recovered, self-check PASS |
+| jetstream/raytrace3d | 471 ms | exit_-6 | 5.53e+03 ms | Recovered, self-check PASS |
 
 ### LambdaJS vs Result9 — where it moved
 
@@ -122,8 +130,8 @@ Across the 53 benchmarks timed in both rounds, 20 improved and 33 regressed.
 
 ## Notable Results
 
-- Missing timings: **19** cells
-- MIR missing: r7rs/fft (exit_1), awfy/list (exit_-6), awfy/havlak (exit_-6), awfy/cd (exit_-6), beng/binarytrees (exit_-6), beng/pidigits (exit_1), larceny/deriv (exit_-6), larceny/gcbench (exit_-6), +4 more
+- Missing timings: **11** cells
+- MIR missing: r7rs/fft (exit_1), awfy/list (wrong_output), awfy/cd (wrong_output), beng/pidigits (exit_1)
 - QuickJS missing: r7rs/ack (exit_1), beng/knucleotide (exit_1), beng/regexredux (exit_1), beng/revcomp (exit_1), jetstream/cube3d (exit_1), jetstream/raytrace3d (exit_1)
 - LambdaJS missing: awfy/havlak (timeout)
 - Deduplicated benchmark names: mandelbrot (awfy/beng), nbody (awfy/beng/jetstream), richards (awfy/jetstream), deltablue (awfy/jetstream), primes (kostya/larceny)
@@ -180,14 +188,14 @@ Across the 53 benchmarks timed in both rounds, 20 improved and 33 regressed.
 | richards | macro | 361.8 | 1.25s | 193.5 | 47.3 | 7.65x | 26.5x | 4.09x |
 | json | macro | 11.9 | 38.1 | 11.6 | 2.67 | 4.44x | 14.3x | 4.32x |
 | deltablue | macro | 113.9 | 226.1 | 111.5 | 11.9 | 9.57x | 19.0x | 9.36x |
-| havlak | macro | --- | --- | 3.98s | 98.8 | --- | --- | 40.3x |
+| havlak | macro | 108.0 | --- | 3.98s | 98.8 | 1.09x | --- | 40.3x |
 | cd | macro | --- | 87.38s | 1.04s | 36.4 | --- | 2401x | 28.6x |
 
 ## BENG
 
 | Benchmark | Category | MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| binarytrees | allocation | --- | 41.3 | 27.5 | 4.00 | --- | 10.3x | 6.88x |
+| binarytrees | allocation | 11.9 | 41.3 | 27.5 | 4.00 | 2.98x | 10.3x | 6.88x |
 | fannkuch | permutation | 4.69 | 12.1 | 7.09 | 4.00 | 1.17x | 3.03x | 1.77x |
 | fasta | generation | 138.3 | 36.3 | 10.6 | 6.21 | 22.3x | 5.85x | 1.71x |
 | knucleotide | hashing | 16.1 | 144.6 | --- | 4.97 | 3.24x | 29.1x | --- |
@@ -216,10 +224,10 @@ Across the 53 benchmarks timed in both rounds, 20 improved and 33 regressed.
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | triangl | search | 2.31s | 3.64s | 2.18s | 66.7 | 34.7x | 54.6x | 32.6x |
 | array1 | array | 25.8 | 28.2 | 35.9 | 1.84 | 14.0x | 15.3x | 19.5x |
-| deriv | symbolic | --- | 79.8 | 67.5 | 3.80 | --- | 21.0x | 17.8x |
+| deriv | symbolic | 100.2 | 79.8 | 67.5 | 3.80 | 26.4x | 21.0x | 17.8x |
 | diviter | iterative | 23.34s | 9.99s | 26.65s | 469.5 | 49.7x | 21.3x | 56.8x |
 | divrec | recursive | 24.1 | 41.9 | 35.6 | 7.61 | 3.16x | 5.50x | 4.68x |
-| gcbench | allocation | --- | 972.9 | 645.8 | 23.8 | --- | 41.0x | 27.2x |
+| gcbench | allocation | 501.5 | 972.9 | 645.8 | 23.8 | 21.1x | 41.0x | 27.2x |
 | paraffins | combinat | 2.62 | 2.32 | 2.56 | 0.994 | 2.64x | 2.33x | 2.58x |
 | pnpoly | numeric | 11.00s | 172.1 | 201.8 | 5.83 | 1886x | 29.5x | 34.6x |
 | primes | iterative | 77.9 | 105.2 | 94.9 | 4.41 | 17.7x | 23.9x | 21.5x |
@@ -235,8 +243,8 @@ Across the 53 benchmarks timed in both rounds, 20 improved and 33 regressed.
 | cube3d | 3d | 256.8 | 898.8 | --- | 17.8 | 14.4x | 50.4x | --- |
 | navier_stokes | numeric | 14.93s | 37.46s | 781.0 | 37.3 | 401x | 1005x | 21.0x |
 | richards | macro | 339.0 | 175.8 | 25.4 | 4.69 | 72.2x | 37.5x | 5.42x |
-| splay | data | --- | 49.3 | 32.1 | 3.37 | --- | 14.6x | 9.53x |
-| deltablue | macro | --- | 339.9 | 45.7 | 6.35 | --- | 53.5x | 7.20x |
-| hashmap | data | --- | 114.97s | 2.57s | 54.2 | --- | 2121x | 47.4x |
+| splay | data | 7.32s | 49.3 | 32.1 | 3.37 | 2171x | 14.6x | 9.53x |
+| deltablue | macro | 19.0 | 339.9 | 45.7 | 6.35 | 2.99x | 53.5x | 7.20x |
+| hashmap | data | 153.8 | 114.97s | 2.57s | 54.2 | 2.84x | 2121x | 47.4x |
 | crypto_sha1 | crypto | 248.0 | 856.5 | 68.9 | 6.96 | 35.6x | 123x | 9.90x |
-| raytrace3d | 3d | --- | 1.07s | --- | 18.3 | --- | 58.4x | --- |
+| raytrace3d | 3d | 5.53s | 1.07s | --- | 18.3 | 303x | 58.4x | --- |

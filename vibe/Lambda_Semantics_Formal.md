@@ -931,6 +931,19 @@ Two notes recorded with the ruling:
   a possible lint ("mutation of shared container copies — consider a `var` param").
   **Elements are the worst case** (whole-document copies) — editor workloads should
   be benchmarked before this ships.
+  **Resolved in direction (2026-07-22): whole-document copying is not required.**
+  A document is a DAG, not a tree — a copy rewrites only the spine from the
+  mutation point to the root and reuses every untouched subtree by reference,
+  making the cost O(depth) rather than O(size). Reused subtrees are safe because
+  every holder reached them by value and so can never mutate them in place, and
+  the scheme composes with refcounting: a node with `ref_cnt == 1` on the
+  mutation path is uniquely owned and still updates in place, keeping the
+  unshared case allocation-free. Standard persistent-data-structure result
+  (Clojure trees, `immer`, Perceus reuse); invisible to `==` and therefore
+  legitimate under P6. Cheap undo/history falls out as a side effect. Still to
+  design: node representation admitting spine-copying, the refcount discipline
+  for sound in-place update on unique paths, and the gating document benchmark.
+  Recorded in `doc/Lambda_Formal_Semantics.md` §9.5.1.
 - Users coming from JS/Python must learn that mutation does not travel — offset by
   it being the *point* of the model, and by `var` params making every place it does
   travel visible in a signature.
@@ -950,6 +963,23 @@ Two notes recorded with the ruling:
 5. Formal model (Stage 4): store only for `var` bindings; **`let`-finality and
    COW-unobservability become verifiable properties**; the `let g/var h` probe
    becomes a regression fixture.
+6. **Design nested-mutation ergonomics** (raised 2026-07-22, undesigned). Deep
+   in-place update — `t.nodes[i].value` — must not degrade into "read a copy,
+   mutate it, discard it", and the idiomatic spelling must not silently copy a
+   large subtree. Candidate shapes: path-shaped `var` borrows (`f(var
+   t.nodes[i])`, already implied by the exclusivity rule's "overlapping paths"
+   wording, needing a projection that does not materialise a copy); in-place
+   update accessors (Swift `_modify` coroutines, Hylo subscript projections);
+   or guaranteed get-modify-put reuse via uniqueness. Until designed, deep
+   updates in hot code are a copy hazard and the correct spelling is a
+   verbosity tax. Recorded in `doc/Lambda_Formal_Semantics.md` §9.5.2.
+7. **Make the construction rule explicit in teaching material.** C4 rule 2 said
+   "bindings and assignment copy"; it never said in so many words that *placing
+   a value into a container captures it by value*. That silence cost real
+   debugging time (the `awfy/cd` collision-detector returns 0 because an empty
+   vector is stored into a tree and then filled through the original binding —
+   a reference-semantics idiom that fails silently). Now stated as
+   `doc/Lambda_Formal_Semantics.md` §9.3, with the failing shape called out.
 
 ---
 

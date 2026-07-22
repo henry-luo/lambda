@@ -1,2545 +1,2563 @@
 {
- "_metadata": {
-  "schema_version": 2,
-  "mode": "time",
-  "started_at": "2026-07-22T14:29:02",
-  "command": "test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v10.json --fresh",
-  "engines": [
-   "mir",
-   "lambdajs",
-   "quickjs",
-   "nodejs"
-  ],
-  "runs": 3,
-  "timeout_s": 180,
-  "results_output": "test/benchmark/benchmark_results_v10.json",
-  "fresh": true,
-  "suite_filters": [],
-  "bench_filters": [],
-  "platform": "Darwin arm64",
-  "lambda_exe": "./lambda.exe",
-  "lambda_exe_size_bytes": 19827448,
-  "lambda_commit": "e3b6f358cf0e8fd75d2cefc00c219bfa24779638",
-  "node_version": "v22.13.0",
-  "python_version": "Python 3.14.6",
-  "quickjs_version": "2025-09-13",
-  "profile_check": "passed",
-  "log_dir": "temp/benchmark_v10",
-  "finished_at": "2026-07-22T14:58:34",
-  "historical_comparisons": [
-   {
-    "title": "R0 baseline status \u2014 read this before using the numbers above",
-    "notes": [
-     "Result10 re-measures current master on the same host, Node.js v22.13.0 and QuickJS 2025-09-13, with the same clean release build, 3-run median `__TIMING__` protocol and 180 s timeout as Result9. It is the R0 deliverable of `vibe/Lambda_Tuning_Proposal.md`.",
-     "**The Lambda/MIR column is not a usable baseline.** 12 benchmarks that ran in Result9 no longer run: 10 abort at transpile time with `mir-scalar-invariant: unresolved call retains scalar home` (`lambda/mir_emitter_shared.hpp`, `em_emit_unknown_call`), and 2 are rejected by the front end. The abort was introduced by commit `e30dc677b` (\"impl scalar GC invariant\"), which replaced the previous `em_heap_rehome_item_arg()` fallback for unresolved calls with a hard `abort()`. Because the failing rows drop out of the geometric mean, the MIR/Node figures in this report compare different benchmark populations and must not be quoted as a like-for-like movement.",
-     "**The LambdaJS column is usable but bimodal**, and its headline moved for two separable reasons: a real broad regression on the small/mid cluster, and a coverage change (`cd` and `hashmap` are timed for the first time in Result10, both above 2000x, which raises the mean by construction). The like-for-like figures below hold the benchmark population fixed."
+  "_metadata": {
+    "schema_version": 2,
+    "mode": "time",
+    "started_at": "2026-07-22T14:29:02",
+    "command": "test/benchmark/run_benchmarks.py -e mir,lambdajs,quickjs,nodejs -n 3 -t 180 --results-output test/benchmark/benchmark_results_v10.json --fresh  ;; then re-measured MIR-only for the rows lost to the scalar-invariant abort: run_benchmarks.py -e mir -s <suite> -b <rows> -t 180 (merge mode)",
+    "engines": [
+      "mir",
+      "lambdajs",
+      "quickjs",
+      "nodejs"
     ],
-    "tables": [
-     {
-      "caption": "Headline, all-timed vs like-for-like (deduplicated, engine/Node geometric mean)",
-      "columns": [
-       "Engine",
-       "Result9 all-timed",
-       "Result10 all-timed",
-       "Result9 like-for-like",
-       "Result10 like-for-like",
-       "Common rows",
-       "Like-for-like change"
-      ],
-      "rows": [
-       [
-        "LambdaJS",
-        "13.1x (n=53)",
-        "19.9x (n=55)",
-        "13.1x",
-        "16.7x",
-        "53",
-        "1.27x worse"
-       ],
-       [
-        "Lambda/MIR",
-        "4.26x (n=56)",
-        "7.39x (n=45)",
-        "3.83x",
-        "7.39x",
-        "45",
-        "1.93x worse"
-       ]
-      ]
-     }
-    ]
-   },
-   {
-    "title": "Lambda/MIR \u2014 benchmarks lost since Result9",
-    "notes": [
-     "All 10 SIGABRT rows share one message and one origin. Reproduce with `./lambda.exe run test/benchmark/jetstream/deltablue2.ls` (exit 134). `r7rs/fft` is rejected by the type checker (`cannot assign float value to var 'm' of type int`) and `beng/pidigits` by the parser (`Unexpected syntax near '1'`) \u2014 three distinct regression classes, not one."
+    "runs": 3,
+    "timeout_s": 180,
+    "results_output": "test/benchmark/benchmark_results_v10.json",
+    "fresh": false,
+    "suite_filters": [
+      "jetstream"
     ],
-    "tables": [
-     {
-      "caption": "Regressed from timed to failing",
-      "columns": [
-       "Benchmark",
-       "Result9 MIR",
-       "Result10 status",
-       "Cause"
-      ],
-      "rows": [
-       [
-        "r7rs/fft",
-        "0.447 ms",
-        "exit_1",
-        "compile rejected"
-       ],
-       [
-        "awfy/list",
-        "0.2 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ],
-       [
-        "awfy/havlak",
-        "221 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ],
-       [
-        "awfy/cd",
-        "1.53e+03 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ],
-       [
-        "beng/binarytrees",
-        "44.4 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ],
-       [
-        "beng/pidigits",
-        "0.325 ms",
-        "exit_1",
-        "compile rejected"
-       ],
-       [
-        "larceny/deriv",
-        "72.9 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ],
-       [
-        "larceny/gcbench",
-        "1.37e+03 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ],
-       [
-        "jetstream/splay",
-        "3.17e+03 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ],
-       [
-        "jetstream/deltablue",
-        "40 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ],
-       [
-        "jetstream/hashmap",
-        "246 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ],
-       [
-        "jetstream/raytrace3d",
-        "471 ms",
-        "exit_-6",
-        "SIGABRT \u2014 mir-scalar-invariant"
-       ]
-      ]
-     }
-    ]
-   },
-   {
-    "title": "LambdaJS vs Result9 \u2014 where it moved",
-    "notes": [
-     "The disaster tail that defined Result9's geometric mean has largely collapsed, which is the expected signature of the landed inline self-tagged doubles, side-number-stack scalars and safepoint rooting. The offsetting regression is concentrated in the previously-fast small and mid benchmarks. These are not measurement artifacts: Node.js's own times for the same rows moved by under 10% between the two rounds, so the host is consistent and the movement is in the engine. In absolute terms `awfy/sieve` went 0.49 ms to 50.1 ms (102x slower), `larceny/puzzle` 22.7 ms to 769 ms (34x), `larceny/array1` 3.40 ms to 28.2 ms (8.3x) and `primes` 15.9 ms to 105 ms (6.6x). The shape \u2014 previously-near-parity numeric/array loops losing an order of magnitude while the boxing-bound tail improves \u2014 is consistent with lost native specialization on these functions, and is the first thing to investigate before any further tuning work is ranked.",
-     "Across the 53 benchmarks timed in both rounds, 20 improved and 33 regressed."
+    "bench_filters": [
+      "splay",
+      "deltablue",
+      "hashmap",
+      "raytrace3d"
     ],
-    "tables": [
-     {
-      "caption": "Largest improvements (LambdaJS/Node ratio)",
-      "columns": [
-       "Benchmark",
-       "Result9",
-       "Result10",
-       "Change"
-      ],
-      "rows": [
-       [
-        "splay",
-        "392x",
-        "14.6x",
-        "26.81x better"
-       ],
-       [
-        "deltablue",
-        "266x",
-        "19.0x",
-        "13.99x better"
-       ],
-       [
-        "list",
-        "22.1x",
-        "5.33x",
-        "4.15x better"
-       ],
-       [
-        "cube3d",
-        "198x",
-        "50.4x",
-        "3.93x better"
-       ],
-       [
-        "mbrot",
-        "16.1x",
-        "4.95x",
-        "3.24x better"
-       ],
-       [
-        "matmul",
-        "176x",
-        "54.9x",
-        "3.21x better"
-       ],
-       [
-        "richards",
-        "119x",
-        "37.5x",
-        "3.17x better"
-       ],
-       [
-        "collatz",
-        "4.67x",
-        "1.58x",
-        "2.96x better"
-       ],
-       [
-        "mandelbrot",
-        "11.6x",
-        "4.04x",
-        "2.87x better"
-       ],
-       [
-        "bounce",
-        "18.2x",
-        "6.36x",
-        "2.86x better"
-       ]
-      ]
-     },
-     {
-      "caption": "Largest regressions (LambdaJS/Node ratio)",
-      "columns": [
-       "Benchmark",
-       "Result9",
-       "Result10",
-       "Change"
-      ],
-      "rows": [
-       [
-        "sieve",
-        "1.21x",
-        "133x",
-        "110.03x worse"
-       ],
-       [
-        "puzzle",
-        "6.62x",
-        "237x",
-        "35.87x worse"
-       ],
-       [
-        "array1",
-        "1.71x",
-        "15.3x",
-        "8.96x worse"
-       ],
-       [
-        "primes",
-        "3.31x",
-        "23.9x",
-        "7.21x worse"
-       ],
-       [
-        "navier_stokes",
-        "155x",
-        "1005x",
-        "6.49x worse"
-       ],
-       [
-        "fannkuch",
-        "0.49x",
-        "3.03x",
-        "6.15x worse"
-       ],
-       [
-        "fasta",
-        "1.25x",
-        "5.85x",
-        "4.66x worse"
-       ],
-       [
-        "nqueens",
-        "2.17x",
-        "9.57x",
-        "4.40x worse"
-       ],
-       [
-        "diviter",
-        "5.39x",
-        "21.3x",
-        "3.94x worse"
-       ],
-       [
-        "crypto_sha1",
-        "31.5x",
-        "123x",
-        "3.90x worse"
-       ]
-      ]
-     },
-     {
-      "caption": "Per-suite LambdaJS/Node geometric mean",
-      "columns": [
-       "Suite",
-       "Result9",
-       "Result10",
-       "Change"
-      ],
-      "rows": [
-       [
-        "R7RS",
-        "5.21x",
-        "7.35x",
-        "1.41x worse"
-       ],
-       [
-        "AWFY",
-        "36.6x",
-        "37.1x",
-        "1.02x worse"
-       ],
-       [
-        "BENG",
-        "6.18x",
-        "8.40x",
-        "1.36x worse"
-       ],
-       [
-        "KOSTYA",
-        "14.6x",
-        "16.3x",
-        "1.11x worse"
-       ],
-       [
-        "LARCENY",
-        "8.24x",
-        "20.0x",
-        "2.42x worse"
-       ],
-       [
-        "JetStream",
-        "148x",
-        "99.0x",
-        "1.49x better"
-       ]
-      ]
-     }
-    ]
-   }
-  ]
- },
- "r7rs": {
-  "fib": {
-   "category": "recursive",
-   "mir": 12.465,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 41.149667,
-   "quickjs": 19.184,
-   "nodejs": 1.851458
+    "platform": "Darwin arm64",
+    "lambda_exe": "./lambda.exe",
+    "lambda_exe_size_bytes": 19860232,
+    "lambda_commit": "ecd19f5a5ccfec22c14e1709e9b0fcee0a53a303",
+    "node_version": "v22.13.0",
+    "python_version": "Python 3.14.6",
+    "quickjs_version": "2025-09-13",
+    "profile_check": "passed (original full run); MIR re-measurement used the same clean release build \u2014 verified no debug banner",
+    "log_dir": null,
+    "finished_at": "2026-07-22T20:02:38",
+    "historical_comparisons": [
+      {
+        "title": "R0 baseline status \u2014 read this before using the numbers above",
+        "notes": [
+          "Result10 re-measures current master on the same host, Node.js v22.13.0 and QuickJS 2025-09-13, with the same clean release build, 3-run median `__TIMING__` protocol and 180 s timeout as Result9. It is the R0 deliverable of `vibe/Lambda_Tuning_Proposal.md`.",
+          "**Revised 2026-07-22 after the MIR regression fix.** As first published, this report lost 12 benchmarks that ran in Result9: 10 aborted at transpile time with `mir-scalar-invariant: unresolved call retains scalar home` (`lambda/mir_emitter_shared.hpp`, `em_emit_unknown_call`), introduced by `e30dc677b` (\"impl scalar GC invariant\"), and 2 were rejected by the front end. Commit `21e7d812a` (\"regres fix\") removed the abort, and those rows were re-measured on the same protocol; the MIR column below includes them.",
+          "**The Lambda/MIR column is usable again, with four rows excluded.** Eight of the twelve recovered fully and match their goldens. Four do not: `r7rs/fft` and `beng/pidigits` are still front-end rejections (unchanged, and `beng_pidigits` is a known MIR gap already on the skip list), while `awfy/cd` and `awfy/list` now execute but compute the **wrong answer**. Those two are recorded as `wrong_output` with no timing, so they drop out of the geometric mean instead of contributing a fast, meaningless number.",
+          "**Every timed MIR row in this revision was output-checked.** The benchmark runners measure time only \u2014 they never compare output \u2014 so a wrong-but-fast row is invisible in the mean. That is exactly how `awfy/list` would have entered it: it \"runs\" in 0.012 ms while printing `List: FAIL result=6`. All 59 rows that were timed at that point were re-run and diffed against their `.txt` goldens or self-checks; 58 matched, and only `awfy/list` did not. Treat any future MIR figure produced without this check as unverified.",
+          "**The LambdaJS column is unchanged from the first run and remains bimodal**, and its headline moved for two separable reasons: a real broad regression on the small/mid cluster, and a coverage change (`cd` and `hashmap` are timed for the first time in Result10, both above 2000x, which raises the mean by construction). The like-for-like figures below hold the benchmark population fixed."
+        ],
+        "tables": [
+          {
+            "caption": "Headline, all-timed vs like-for-like (deduplicated, engine/Node geometric mean)",
+            "columns": [
+              "Engine",
+              "Result9 all-timed",
+              "Result10 all-timed",
+              "Result9 like-for-like",
+              "Result10 like-for-like",
+              "Common rows",
+              "Like-for-like change"
+            ],
+            "rows": [
+              [
+                "LambdaJS",
+                "13.1x (n=53)",
+                "19.9x (n=55)",
+                "13.1x",
+                "16.7x",
+                "53",
+                "1.27x worse"
+              ],
+              [
+                "Lambda/MIR",
+                "4.26x (n=56)",
+                "8.42x (n=52)",
+                "4.80x",
+                "8.42x",
+                "52",
+                "1.75x worse"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "title": "Lambda/MIR \u2014 the 12 rows lost in the first Result10 run",
+        "notes": [
+          "All 10 SIGABRT rows shared one message and one origin, and all 10 stopped aborting after `21e7d812a`. Eight now produce correct output and are timed here. The remaining two, `awfy/cd` and `awfy/list`, traded a loud failure for a silent one: they exit 0 and produce a wrong result, which is worse for a benchmark suite than crashing because a timing would still be recorded.",
+          "`awfy/cd`'s wrong answer is a semantics issue, not a codegen one: `cd.ls` stores an empty vector into its voxel map and then keeps filling it through the original binding, which is a reference-semantics idiom. Under Lambda's mutable value semantics, construction captures by value (`doc/Lambda_Formal_Semantics.md` \u00a79.3), so the stored copy stays empty and no voxel ever holds two motions. Both rows stay excluded until the scripts are restructured to read-modify-write.",
+          "The two front-end rejections are unrelated to the scalar-invariant abort and are unchanged since Result9 \u2014 three distinct classes, not one."
+        ],
+        "tables": [
+          {
+            "caption": "Result9 \u2192 Result10 (first run) \u2192 Result10 (revised)",
+            "columns": [
+              "Benchmark",
+              "Result9 MIR",
+              "Result10 first run",
+              "Result10 revised",
+              "Status"
+            ],
+            "rows": [
+              [
+                "r7rs/fft",
+                "0.447 ms",
+                "exit_1",
+                "exit_1",
+                "Front end: `cannot assign float value to var 'm' of type int` \u2014 unchanged"
+              ],
+              [
+                "awfy/list",
+                "0.2 ms",
+                "exit_-6",
+                "wrong_output",
+                "Runs (0.012 ms) but prints `List: FAIL result=6` vs golden `List: PASS` \u2014 **excluded**"
+              ],
+              [
+                "awfy/havlak",
+                "221 ms",
+                "exit_-6",
+                "108 ms",
+                "Recovered, golden matches"
+              ],
+              [
+                "awfy/cd",
+                "1.53e+03 ms",
+                "exit_-6",
+                "wrong_output",
+                "Runs but prints `collisions=0` vs golden `4305` \u2014 **excluded**"
+              ],
+              [
+                "beng/binarytrees",
+                "44.4 ms",
+                "exit_-6",
+                "11.9 ms",
+                "Recovered, golden matches"
+              ],
+              [
+                "beng/pidigits",
+                "0.325 ms",
+                "exit_1",
+                "exit_1",
+                "Front end: `Unexpected syntax near '1'` \u2014 unchanged, known MIR gap"
+              ],
+              [
+                "larceny/deriv",
+                "72.9 ms",
+                "exit_-6",
+                "100 ms",
+                "Recovered, golden matches"
+              ],
+              [
+                "larceny/gcbench",
+                "1.37e+03 ms",
+                "exit_-6",
+                "502 ms",
+                "Recovered, golden matches"
+              ],
+              [
+                "jetstream/splay",
+                "3.17e+03 ms",
+                "exit_-6",
+                "7.32e+03 ms",
+                "Recovered, self-check PASS"
+              ],
+              [
+                "jetstream/deltablue",
+                "40 ms",
+                "exit_-6",
+                "19 ms",
+                "Recovered, self-check PASS"
+              ],
+              [
+                "jetstream/hashmap",
+                "246 ms",
+                "exit_-6",
+                "154 ms",
+                "Recovered, self-check PASS"
+              ],
+              [
+                "jetstream/raytrace3d",
+                "471 ms",
+                "exit_-6",
+                "5.53e+03 ms",
+                "Recovered, self-check PASS"
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "title": "LambdaJS vs Result9 \u2014 where it moved",
+        "notes": [
+          "The disaster tail that defined Result9's geometric mean has largely collapsed, which is the expected signature of the landed inline self-tagged doubles, side-number-stack scalars and safepoint rooting. The offsetting regression is concentrated in the previously-fast small and mid benchmarks. These are not measurement artifacts: Node.js's own times for the same rows moved by under 10% between the two rounds, so the host is consistent and the movement is in the engine. In absolute terms `awfy/sieve` went 0.49 ms to 50.1 ms (102x slower), `larceny/puzzle` 22.7 ms to 769 ms (34x), `larceny/array1` 3.40 ms to 28.2 ms (8.3x) and `primes` 15.9 ms to 105 ms (6.6x). The shape \u2014 previously-near-parity numeric/array loops losing an order of magnitude while the boxing-bound tail improves \u2014 is consistent with lost native specialization on these functions, and is the first thing to investigate before any further tuning work is ranked.",
+          "Across the 53 benchmarks timed in both rounds, 20 improved and 33 regressed."
+        ],
+        "tables": [
+          {
+            "caption": "Largest improvements (LambdaJS/Node ratio)",
+            "columns": [
+              "Benchmark",
+              "Result9",
+              "Result10",
+              "Change"
+            ],
+            "rows": [
+              [
+                "splay",
+                "392x",
+                "14.6x",
+                "26.81x better"
+              ],
+              [
+                "deltablue",
+                "266x",
+                "19.0x",
+                "13.99x better"
+              ],
+              [
+                "list",
+                "22.1x",
+                "5.33x",
+                "4.15x better"
+              ],
+              [
+                "cube3d",
+                "198x",
+                "50.4x",
+                "3.93x better"
+              ],
+              [
+                "mbrot",
+                "16.1x",
+                "4.95x",
+                "3.24x better"
+              ],
+              [
+                "matmul",
+                "176x",
+                "54.9x",
+                "3.21x better"
+              ],
+              [
+                "richards",
+                "119x",
+                "37.5x",
+                "3.17x better"
+              ],
+              [
+                "collatz",
+                "4.67x",
+                "1.58x",
+                "2.96x better"
+              ],
+              [
+                "mandelbrot",
+                "11.6x",
+                "4.04x",
+                "2.87x better"
+              ],
+              [
+                "bounce",
+                "18.2x",
+                "6.36x",
+                "2.86x better"
+              ]
+            ]
+          },
+          {
+            "caption": "Largest regressions (LambdaJS/Node ratio)",
+            "columns": [
+              "Benchmark",
+              "Result9",
+              "Result10",
+              "Change"
+            ],
+            "rows": [
+              [
+                "sieve",
+                "1.21x",
+                "133x",
+                "110.03x worse"
+              ],
+              [
+                "puzzle",
+                "6.62x",
+                "237x",
+                "35.87x worse"
+              ],
+              [
+                "array1",
+                "1.71x",
+                "15.3x",
+                "8.96x worse"
+              ],
+              [
+                "primes",
+                "3.31x",
+                "23.9x",
+                "7.21x worse"
+              ],
+              [
+                "navier_stokes",
+                "155x",
+                "1005x",
+                "6.49x worse"
+              ],
+              [
+                "fannkuch",
+                "0.49x",
+                "3.03x",
+                "6.15x worse"
+              ],
+              [
+                "fasta",
+                "1.25x",
+                "5.85x",
+                "4.66x worse"
+              ],
+              [
+                "nqueens",
+                "2.17x",
+                "9.57x",
+                "4.40x worse"
+              ],
+              [
+                "diviter",
+                "5.39x",
+                "21.3x",
+                "3.94x worse"
+              ],
+              [
+                "crypto_sha1",
+                "31.5x",
+                "123x",
+                "3.90x worse"
+              ]
+            ]
+          },
+          {
+            "caption": "Per-suite LambdaJS/Node geometric mean",
+            "columns": [
+              "Suite",
+              "Result9",
+              "Result10",
+              "Change"
+            ],
+            "rows": [
+              [
+                "R7RS",
+                "5.21x",
+                "7.35x",
+                "1.41x worse"
+              ],
+              [
+                "AWFY",
+                "36.6x",
+                "37.1x",
+                "1.02x worse"
+              ],
+              [
+                "BENG",
+                "6.18x",
+                "8.40x",
+                "1.36x worse"
+              ],
+              [
+                "KOSTYA",
+                "14.6x",
+                "16.3x",
+                "1.11x worse"
+              ],
+              [
+                "LARCENY",
+                "8.24x",
+                "20.0x",
+                "2.42x worse"
+              ],
+              [
+                "JetStream",
+                "148x",
+                "99.0x",
+                "1.49x better"
+              ]
+            ]
+          }
+        ]
+      }
+    ],
+    "revised_at": "2026-07-22T20:05:00",
+    "revision_note": "MIR rows lost to the `mir-scalar-invariant` abort were re-measured after commit 21e7d812a. Every timed MIR row was additionally output-checked against its golden/self-check; awfy/list and awfy/cd are excluded as wrong_output."
   },
-  "fibfp": {
-   "category": "recursive",
-   "mir": 5.359,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
+  "r7rs": {
+    "fib": {
+      "category": "recursive",
+      "mir": 12.465,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 41.149667,
+      "quickjs": 19.184,
+      "nodejs": 1.851458
     },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "fibfp": {
+      "category": "recursive",
+      "mir": 5.359,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 39.935959,
+      "quickjs": 18.797,
+      "nodejs": 1.814625
     },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "tak": {
+      "category": "recursive",
+      "mir": 0.9,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 3.383917,
+      "quickjs": 2.771,
+      "nodejs": 0.857417
     },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "cpstak": {
+      "category": "closure",
+      "mir": 1.755,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 6.871459,
+      "quickjs": 5.574,
+      "nodejs": 0.963916
+    },
+    "sum": {
+      "category": "iterative",
+      "mir": 19.551,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 12.481792,
+      "quickjs": 32.117,
+      "nodejs": 1.186958
+    },
+    "sumfp": {
+      "category": "iterative",
+      "mir": 0.067,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 1.212125,
+      "quickjs": 3.789,
+      "nodejs": 0.919792
+    },
+    "nqueens": {
+      "category": "backtrack",
+      "mir": 4.075,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 16.90225,
+      "quickjs": 9.982,
+      "nodejs": 1.766709
+    },
+    "fft": {
+      "category": "numeric",
+      "mir": null,
+      "_status": {
+        "mir": "exit_1",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 9.437917,
+      "quickjs": 2.949,
+      "nodejs": 1.632583
+    },
+    "mbrot": {
+      "category": "numeric",
+      "mir": 2.004,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 8.839125,
+      "quickjs": 18.619,
+      "nodejs": 1.78575
+    },
+    "ack": {
+      "category": "recursive",
+      "mir": 55.826,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 121.724625,
+      "quickjs": null,
+      "nodejs": 13.810375
     }
-   },
-   "lambdajs": 39.935959,
-   "quickjs": 18.797,
-   "nodejs": 1.814625
   },
-  "tak": {
-   "category": "recursive",
-   "mir": 0.9,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
+  "awfy": {
+    "sieve": {
+      "category": "micro",
+      "mir": 0.552,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 50.144084,
+      "quickjs": 0.627,
+      "nodejs": 0.376334
     },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "permute": {
+      "category": "micro",
+      "mir": 0.875,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 72.956417,
+      "quickjs": 1.638,
+      "nodejs": 0.812458
     },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "queens": {
+      "category": "micro",
+      "mir": 0.702,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 32.47425,
+      "quickjs": 1.106,
+      "nodejs": 0.639208
     },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "towers": {
+      "category": "micro",
+      "mir": 1.445,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 72.27,
+      "quickjs": 2.314,
+      "nodejs": 1.110917
+    },
+    "bounce": {
+      "category": "micro",
+      "mir": 0.956,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 3.568792,
+      "quickjs": 0.894,
+      "nodejs": 0.561
+    },
+    "list": {
+      "category": "micro",
+      "mir": null,
+      "_status": {
+        "mir": "wrong_output",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": "list2.ls prints \"List: FAIL result=6\"; golden awfy/list2.txt is \"List: PASS\". Runs in 0.012 ms because it does almost no work, so a timed value would be a spurious best-in-class row. awfy_list2 is already in MIR_SKIP_TESTS.",
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 2.606625,
+      "quickjs": 0.934,
+      "nodejs": 0.489083
+    },
+    "storage": {
+      "category": "micro",
+      "mir": 1.069,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 13.961834,
+      "quickjs": 2.642,
+      "nodejs": 0.629125
+    },
+    "mandelbrot": {
+      "category": "compute",
+      "mir": 94.342,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 348.011208,
+      "quickjs": 912.639,
+      "nodejs": 32.416375
+    },
+    "nbody": {
+      "category": "compute",
+      "mir": 198.918,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 286.001667,
+      "quickjs": 166.377,
+      "nodejs": 6.141458
+    },
+    "richards": {
+      "category": "macro",
+      "mir": 361.799,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 1251.625375,
+      "quickjs": 193.452,
+      "nodejs": 47.310167
+    },
+    "json": {
+      "category": "macro",
+      "mir": 11.865,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 38.123959,
+      "quickjs": 11.557,
+      "nodejs": 2.674042
+    },
+    "deltablue": {
+      "category": "macro",
+      "mir": 113.925,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "wall_fallback",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "wall_fallback": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 226.098291,
+      "quickjs": 111.481,
+      "nodejs": 11.908208
+    },
+    "havlak": {
+      "category": "macro",
+      "mir": 108.001,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "timeout",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "timeout": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": null,
+      "quickjs": 3983.478,
+      "nodejs": 98.830583
+    },
+    "cd": {
+      "category": "macro",
+      "mir": null,
+      "_status": {
+        "mir": "wrong_output",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": "cd2.ls prints \"collisions=0 / CD: FAIL\"; golden awfy/cd2.txt is \"collisions=4305 / CD: PASS\". No longer SIGABRTs (that was Result10 as first published) but is silently wrong, so it stays excluded.",
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 87375.793459,
+      "quickjs": 1041.177,
+      "nodejs": 36.394917
     }
-   },
-   "lambdajs": 3.383917,
-   "quickjs": 2.771,
-   "nodejs": 0.857417
   },
-  "cpstak": {
-   "category": "closure",
-   "mir": 1.755,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
+  "beng": {
+    "binarytrees": {
+      "category": "allocation",
+      "mir": 11.935,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 41.260125,
+      "quickjs": 27.54,
+      "nodejs": 4.0005
     },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "fannkuch": {
+      "category": "permutation",
+      "mir": 4.692,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 12.107459,
+      "quickjs": 7.087,
+      "nodejs": 4.000125
     },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "fasta": {
+      "category": "generation",
+      "mir": 138.268,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 36.331417,
+      "quickjs": 10.621,
+      "nodejs": 6.208708
     },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "knucleotide": {
+      "category": "hashing",
+      "mir": 16.094,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 144.642583,
+      "quickjs": null,
+      "nodejs": 4.96925
+    },
+    "mandelbrot": {
+      "category": "numeric",
+      "mir": 191.491,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 60.744,
+      "quickjs": 674.95,
+      "nodejs": 15.027209
+    },
+    "nbody": {
+      "category": "numeric",
+      "mir": 187.676,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 350.271834,
+      "quickjs": 150.029,
+      "nodejs": 7.399667
+    },
+    "pidigits": {
+      "category": "bignum",
+      "mir": null,
+      "_status": {
+        "mir": "exit_1",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 0.350334,
+      "quickjs": 0.156,
+      "nodejs": 1.947416
+    },
+    "regexredux": {
+      "category": "regex",
+      "mir": 1.331,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 14.757167,
+      "quickjs": null,
+      "nodejs": 2.450708
+    },
+    "revcomp": {
+      "category": "string",
+      "mir": 1.172,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 48.509417,
+      "quickjs": null,
+      "nodejs": 3.32975
+    },
+    "spectralnorm": {
+      "category": "numeric",
+      "mir": 49.735,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 275.993167,
+      "quickjs": 62.611,
+      "nodejs": 2.52
     }
-   },
-   "lambdajs": 6.871459,
-   "quickjs": 5.574,
-   "nodejs": 0.963916
   },
-  "sum": {
-   "category": "iterative",
-   "mir": 19.551,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
+  "kostya": {
+    "brainfuck": {
+      "category": "interpreter",
+      "mir": 702.267,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 1050.988583,
+      "quickjs": 882.7,
+      "nodejs": 43.57775
     },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "matmul": {
+      "category": "numeric",
+      "mir": 610.509,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 846.746666,
+      "quickjs": 541.05,
+      "nodejs": 15.4325
     },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "primes": {
+      "category": "numeric",
+      "mir": 78.114,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 105.550417,
+      "quickjs": 94.46,
+      "nodejs": 4.449708
     },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "base64": {
+      "category": "string",
+      "mir": 14418.2,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 843.380625,
+      "quickjs": 179.857,
+      "nodejs": 17.519
+    },
+    "levenshtein": {
+      "category": "string",
+      "mir": 61.018,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 86.449625,
+      "quickjs": 54.529,
+      "nodejs": 4.227375
+    },
+    "json_gen": {
+      "category": "data",
+      "mir": 129.111,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 38.412542,
+      "quickjs": 20.863,
+      "nodejs": 6.244458
+    },
+    "collatz": {
+      "category": "numeric",
+      "mir": 7465.81,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 2239.164583,
+      "quickjs": 6227.745,
+      "nodejs": 1416.715625
     }
-   },
-   "lambdajs": 12.481792,
-   "quickjs": 32.117,
-   "nodejs": 1.186958
   },
-  "sumfp": {
-   "category": "iterative",
-   "mir": 0.067,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
+  "larceny": {
+    "triangl": {
+      "category": "search",
+      "mir": 2313.23,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 3644.388792,
+      "quickjs": 2176.814,
+      "nodejs": 66.691084
     },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "array1": {
+      "category": "array",
+      "mir": 25.768,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 28.15375,
+      "quickjs": 35.909,
+      "nodejs": 1.841
     },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "deriv": {
+      "category": "symbolic",
+      "mir": 100.157,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 79.77975,
+      "quickjs": 67.538,
+      "nodejs": 3.797
     },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "diviter": {
+      "category": "iterative",
+      "mir": 23340.6,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 9990.055333,
+      "quickjs": 26646.782,
+      "nodejs": 469.513292
+    },
+    "divrec": {
+      "category": "recursive",
+      "mir": 24.056,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 41.895875,
+      "quickjs": 35.597,
+      "nodejs": 7.611458
+    },
+    "gcbench": {
+      "category": "allocation",
+      "mir": 501.513,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 972.930375,
+      "quickjs": 645.846,
+      "nodejs": 23.7545
+    },
+    "paraffins": {
+      "category": "combinat",
+      "mir": 2.622,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 2.320584,
+      "quickjs": 2.561,
+      "nodejs": 0.994167
+    },
+    "pnpoly": {
+      "category": "numeric",
+      "mir": 11002.5,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 172.116791,
+      "quickjs": 201.845,
+      "nodejs": 5.83475
+    },
+    "primes": {
+      "category": "iterative",
+      "mir": 77.929,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 105.237917,
+      "quickjs": 94.919,
+      "nodejs": 4.405916
+    },
+    "puzzle": {
+      "category": "search",
+      "mir": 26.927,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 768.876333,
+      "quickjs": 29.162,
+      "nodejs": 3.239917
+    },
+    "quicksort": {
+      "category": "sorting",
+      "mir": 16.102,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 47.113458,
+      "quickjs": 19.235,
+      "nodejs": 1.641375
+    },
+    "ray": {
+      "category": "numeric",
+      "mir": 209.543,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 14.922042,
+      "quickjs": 13.782,
+      "nodejs": 3.538792
     }
-   },
-   "lambdajs": 1.212125,
-   "quickjs": 3.789,
-   "nodejs": 0.919792
   },
-  "nqueens": {
-   "category": "backtrack",
-   "mir": 4.075,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
+  "jetstream": {
+    "nbody": {
+      "category": "numeric",
+      "mir": 188.581,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 219.649,
+      "quickjs": 132.666,
+      "nodejs": 5.431
     },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "cube3d": {
+      "category": "3d",
+      "mir": 256.826,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 898.793,
+      "quickjs": null,
+      "nodejs": 17.816
     },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "navier_stokes": {
+      "category": "numeric",
+      "mir": 14933.5,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 37461.24,
+      "quickjs": 780.998,
+      "nodejs": 37.261
     },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
+    "richards": {
+      "category": "macro",
+      "mir": 339.007,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 175.844,
+      "quickjs": 25.443,
+      "nodejs": 4.694
+    },
+    "splay": {
+      "category": "data",
+      "mir": 7315.47,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 49.309,
+      "quickjs": 32.1,
+      "nodejs": 3.37
+    },
+    "deltablue": {
+      "category": "macro",
+      "mir": 18.959,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 339.853,
+      "quickjs": 45.719,
+      "nodejs": 6.348
+    },
+    "hashmap": {
+      "category": "data",
+      "mir": 153.781,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 114965.745,
+      "quickjs": 2566.514,
+      "nodejs": 54.202
+    },
+    "crypto_sha1": {
+      "category": "crypto",
+      "mir": 247.998,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "ok",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 856.53,
+      "quickjs": 68.924,
+      "nodejs": 6.963
+    },
+    "raytrace3d": {
+      "category": "3d",
+      "mir": 5528.91,
+      "_status": {
+        "mir": "ok",
+        "lambdajs": "ok",
+        "quickjs": "exit_1",
+        "nodejs": "ok"
+      },
+      "_status_detail": {
+        "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "lambdajs": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "quickjs": {
+          "status_counts": {
+            "exit_1": 3
+          }
+        },
+        "nodejs": {
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      },
+      "lambdajs": 1065.485,
+      "quickjs": null,
+      "nodejs": 18.254
     }
-   },
-   "lambdajs": 16.90225,
-   "quickjs": 9.982,
-   "nodejs": 1.766709
-  },
-  "fft": {
-   "category": "numeric",
-   "mir": null,
-   "_status": {
-    "mir": "exit_1",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_1": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 9.437917,
-   "quickjs": 2.949,
-   "nodejs": 1.632583
-  },
-  "mbrot": {
-   "category": "numeric",
-   "mir": 2.004,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 8.839125,
-   "quickjs": 18.619,
-   "nodejs": 1.78575
-  },
-  "ack": {
-   "category": "recursive",
-   "mir": 55.826,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "exit_1",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "exit_1": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 121.724625,
-   "quickjs": null,
-   "nodejs": 13.810375
   }
- },
- "awfy": {
-  "sieve": {
-   "category": "micro",
-   "mir": 0.552,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 50.144084,
-   "quickjs": 0.627,
-   "nodejs": 0.376334
-  },
-  "permute": {
-   "category": "micro",
-   "mir": 0.875,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 72.956417,
-   "quickjs": 1.638,
-   "nodejs": 0.812458
-  },
-  "queens": {
-   "category": "micro",
-   "mir": 0.702,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 32.47425,
-   "quickjs": 1.106,
-   "nodejs": 0.639208
-  },
-  "towers": {
-   "category": "micro",
-   "mir": 1.445,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 72.27,
-   "quickjs": 2.314,
-   "nodejs": 1.110917
-  },
-  "bounce": {
-   "category": "micro",
-   "mir": 0.956,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 3.568792,
-   "quickjs": 0.894,
-   "nodejs": 0.561
-  },
-  "list": {
-   "category": "micro",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 2.606625,
-   "quickjs": 0.934,
-   "nodejs": 0.489083
-  },
-  "storage": {
-   "category": "micro",
-   "mir": 1.069,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 13.961834,
-   "quickjs": 2.642,
-   "nodejs": 0.629125
-  },
-  "mandelbrot": {
-   "category": "compute",
-   "mir": 94.342,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 348.011208,
-   "quickjs": 912.639,
-   "nodejs": 32.416375
-  },
-  "nbody": {
-   "category": "compute",
-   "mir": 198.918,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 286.001667,
-   "quickjs": 166.377,
-   "nodejs": 6.141458
-  },
-  "richards": {
-   "category": "macro",
-   "mir": 361.799,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 1251.625375,
-   "quickjs": 193.452,
-   "nodejs": 47.310167
-  },
-  "json": {
-   "category": "macro",
-   "mir": 11.865,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 38.123959,
-   "quickjs": 11.557,
-   "nodejs": 2.674042
-  },
-  "deltablue": {
-   "category": "macro",
-   "mir": 113.925,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "wall_fallback",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "wall_fallback": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 226.098291,
-   "quickjs": 111.481,
-   "nodejs": 11.908208
-  },
-  "havlak": {
-   "category": "macro",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "timeout",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "timeout": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": null,
-   "quickjs": 3983.478,
-   "nodejs": 98.830583
-  },
-  "cd": {
-   "category": "macro",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 87375.793459,
-   "quickjs": 1041.177,
-   "nodejs": 36.394917
-  }
- },
- "beng": {
-  "binarytrees": {
-   "category": "allocation",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 41.260125,
-   "quickjs": 27.54,
-   "nodejs": 4.0005
-  },
-  "fannkuch": {
-   "category": "permutation",
-   "mir": 4.692,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 12.107459,
-   "quickjs": 7.087,
-   "nodejs": 4.000125
-  },
-  "fasta": {
-   "category": "generation",
-   "mir": 138.268,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 36.331417,
-   "quickjs": 10.621,
-   "nodejs": 6.208708
-  },
-  "knucleotide": {
-   "category": "hashing",
-   "mir": 16.094,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "exit_1",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "exit_1": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 144.642583,
-   "quickjs": null,
-   "nodejs": 4.96925
-  },
-  "mandelbrot": {
-   "category": "numeric",
-   "mir": 191.491,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 60.744,
-   "quickjs": 674.95,
-   "nodejs": 15.027209
-  },
-  "nbody": {
-   "category": "numeric",
-   "mir": 187.676,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 350.271834,
-   "quickjs": 150.029,
-   "nodejs": 7.399667
-  },
-  "pidigits": {
-   "category": "bignum",
-   "mir": null,
-   "_status": {
-    "mir": "exit_1",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_1": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 0.350334,
-   "quickjs": 0.156,
-   "nodejs": 1.947416
-  },
-  "regexredux": {
-   "category": "regex",
-   "mir": 1.331,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "exit_1",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "exit_1": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 14.757167,
-   "quickjs": null,
-   "nodejs": 2.450708
-  },
-  "revcomp": {
-   "category": "string",
-   "mir": 1.172,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "exit_1",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "exit_1": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 48.509417,
-   "quickjs": null,
-   "nodejs": 3.32975
-  },
-  "spectralnorm": {
-   "category": "numeric",
-   "mir": 49.735,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 275.993167,
-   "quickjs": 62.611,
-   "nodejs": 2.52
-  }
- },
- "kostya": {
-  "brainfuck": {
-   "category": "interpreter",
-   "mir": 702.267,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 1050.988583,
-   "quickjs": 882.7,
-   "nodejs": 43.57775
-  },
-  "matmul": {
-   "category": "numeric",
-   "mir": 610.509,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 846.746666,
-   "quickjs": 541.05,
-   "nodejs": 15.4325
-  },
-  "primes": {
-   "category": "numeric",
-   "mir": 78.114,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 105.550417,
-   "quickjs": 94.46,
-   "nodejs": 4.449708
-  },
-  "base64": {
-   "category": "string",
-   "mir": 14418.2,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 843.380625,
-   "quickjs": 179.857,
-   "nodejs": 17.519
-  },
-  "levenshtein": {
-   "category": "string",
-   "mir": 61.018,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 86.449625,
-   "quickjs": 54.529,
-   "nodejs": 4.227375
-  },
-  "json_gen": {
-   "category": "data",
-   "mir": 129.111,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 38.412542,
-   "quickjs": 20.863,
-   "nodejs": 6.244458
-  },
-  "collatz": {
-   "category": "numeric",
-   "mir": 7465.81,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 2239.164583,
-   "quickjs": 6227.745,
-   "nodejs": 1416.715625
-  }
- },
- "larceny": {
-  "triangl": {
-   "category": "search",
-   "mir": 2313.23,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 3644.388792,
-   "quickjs": 2176.814,
-   "nodejs": 66.691084
-  },
-  "array1": {
-   "category": "array",
-   "mir": 25.768,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 28.15375,
-   "quickjs": 35.909,
-   "nodejs": 1.841
-  },
-  "deriv": {
-   "category": "symbolic",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 79.77975,
-   "quickjs": 67.538,
-   "nodejs": 3.797
-  },
-  "diviter": {
-   "category": "iterative",
-   "mir": 23340.6,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 9990.055333,
-   "quickjs": 26646.782,
-   "nodejs": 469.513292
-  },
-  "divrec": {
-   "category": "recursive",
-   "mir": 24.056,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 41.895875,
-   "quickjs": 35.597,
-   "nodejs": 7.611458
-  },
-  "gcbench": {
-   "category": "allocation",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 972.930375,
-   "quickjs": 645.846,
-   "nodejs": 23.7545
-  },
-  "paraffins": {
-   "category": "combinat",
-   "mir": 2.622,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 2.320584,
-   "quickjs": 2.561,
-   "nodejs": 0.994167
-  },
-  "pnpoly": {
-   "category": "numeric",
-   "mir": 11002.5,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 172.116791,
-   "quickjs": 201.845,
-   "nodejs": 5.83475
-  },
-  "primes": {
-   "category": "iterative",
-   "mir": 77.929,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 105.237917,
-   "quickjs": 94.919,
-   "nodejs": 4.405916
-  },
-  "puzzle": {
-   "category": "search",
-   "mir": 26.927,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 768.876333,
-   "quickjs": 29.162,
-   "nodejs": 3.239917
-  },
-  "quicksort": {
-   "category": "sorting",
-   "mir": 16.102,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 47.113458,
-   "quickjs": 19.235,
-   "nodejs": 1.641375
-  },
-  "ray": {
-   "category": "numeric",
-   "mir": 209.543,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 14.922042,
-   "quickjs": 13.782,
-   "nodejs": 3.538792
-  }
- },
- "jetstream": {
-  "nbody": {
-   "category": "numeric",
-   "mir": 188.581,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 219.649,
-   "quickjs": 132.666,
-   "nodejs": 5.431
-  },
-  "cube3d": {
-   "category": "3d",
-   "mir": 256.826,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "exit_1",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "exit_1": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 898.793,
-   "quickjs": null,
-   "nodejs": 17.816
-  },
-  "navier_stokes": {
-   "category": "numeric",
-   "mir": 14933.5,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 37461.24,
-   "quickjs": 780.998,
-   "nodejs": 37.261
-  },
-  "richards": {
-   "category": "macro",
-   "mir": 339.007,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 175.844,
-   "quickjs": 25.443,
-   "nodejs": 4.694
-  },
-  "splay": {
-   "category": "data",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 49.309,
-   "quickjs": 32.1,
-   "nodejs": 3.37
-  },
-  "deltablue": {
-   "category": "macro",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 339.853,
-   "quickjs": 45.719,
-   "nodejs": 6.348
-  },
-  "hashmap": {
-   "category": "data",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 114965.745,
-   "quickjs": 2566.514,
-   "nodejs": 54.202
-  },
-  "crypto_sha1": {
-   "category": "crypto",
-   "mir": 247.998,
-   "_status": {
-    "mir": "ok",
-    "lambdajs": "ok",
-    "quickjs": "ok",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 856.53,
-   "quickjs": 68.924,
-   "nodejs": 6.963
-  },
-  "raytrace3d": {
-   "category": "3d",
-   "mir": null,
-   "_status": {
-    "mir": "exit_-6",
-    "lambdajs": "ok",
-    "quickjs": "exit_1",
-    "nodejs": "ok"
-   },
-   "_status_detail": {
-    "mir": {
-     "status_counts": {
-      "exit_-6": 3
-     }
-    },
-    "lambdajs": {
-     "status_counts": {
-      "ok": 3
-     }
-    },
-    "quickjs": {
-     "status_counts": {
-      "exit_1": 3
-     }
-    },
-    "nodejs": {
-     "status_counts": {
-      "ok": 3
-     }
-    }
-   },
-   "lambdajs": 1065.485,
-   "quickjs": null,
-   "nodejs": 18.254
-  }
- }
 }

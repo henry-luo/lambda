@@ -575,9 +575,11 @@ by wild data. [C5.3a]
 `var` is its only marker.**
 
 1. **`let` is final**: nothing reachable through a `let` binding ever changes.
-2. **Bindings and assignment copy, observably** — for every container kind.
-   Implementation is copy-on-write on reference counts; **sharing must be
-   unobservable** (P6 — a verifiable property).
+2. **Binding, assignment, and construction copy, observably** — for every
+   container kind. Placing a value into a container — literal, insertion, or
+   field write — stores the value, not a reference (§9.3). Implementation is
+   copy-on-write on reference counts; **sharing must be unobservable**
+   (P6 — a verifiable property).
 3. **`var` parameters are the sole sharing construct**: `pn f(var a: T)` is an
    inout borrow. Compile checks: arguments must be `var` (never `let` or a
    temporary); **exclusivity** (the same `var`, or overlapping paths, cannot
@@ -596,10 +598,28 @@ call position) is not a value — it may access enclosing `var`s directly
 
 *Rationale.* `pn` becomes locally imperative but observably functional. The
 counter paradox decides closure immutability: a mutable capture makes a
-`let`-bound closure change behavior per call, violating rule 1. Value
-semantics also makes deep `==` total (cycles are unconstructible) and gives
-concurrency a race-free substrate. Precedents: Swift, Koka/Perceus, Hylo;
-R/Matlab for the domain. [C4]
+`let`-bound closure change behavior per call, violating rule 1.
+
+The model is not one preference among several — four other commitments rest on
+it, and each fails without it:
+
+- **The `fn`/`pn` effect system.** `pn` may claim "locally imperative,
+  observably functional" only if effects cannot escape through a captured or
+  passed container. Under reference semantics that claim is false, and the
+  one-bit effect colouring means nothing.
+- **Totality of `==`.** Cycles are unconstructible precisely because
+  construction copies (§9.3), so deep structural equality always terminates
+  and needs no cycle detection — and refcounting suffices with no cycle
+  collector.
+- **Race-free concurrency.** Isolates need no shared-memory discipline when
+  values cannot be shared; the concurrency model inherits safety instead of
+  enforcing it.
+- **The covariant-array hole closes by construction** (§9.2): the Java store
+  hole requires aliasing, and aliasing survives only in the borrow channel,
+  which carries the invariance restriction.
+
+The costs are real and are recorded in §9.5, not wished away. For precedent,
+see §9.4. [C4]
 
 ### 9.2 Covariance: where values copy — invariance: where they're borrowed
 
@@ -613,6 +633,118 @@ Representation widening (unboxed → boxed) happens lazily at COW-copy time.
 everywhere but the borrow channel, so the borrow channel carries the
 restriction (Rust's `&mut` shape). A8 thus resolves as a corollary of C4.
 [C12]
+
+### 9.3 Construction captures values
+
+Placing a value into a container **captures it by value**, at every constructor
+and every insertion point:
+
+- array and list literals — `[a, b]`
+- map and element literals, and object construction
+- field and index writes — `m.f = a`, `xs[i] = a`
+- insertion builtins — the appended element in `push`, `splice`, and friends
+
+After construction, container and source are independent: later mutation of the
+source is invisible through the container, and vice versa.
+
+```
+var b = []
+push(b, 1)
+var lit = [b, null]     // captures the VALUE of b
+push(b, 2)
+// len(b) == 2  but  len(lit[0]) == 1
+```
+
+This is a corollary of "values never alias" (§9.1), not an extra rule: a
+constructor storing a reference would make mutation travel, which is the
+definition of aliasing. It is also what makes cycles unconstructible, and hence
+`==` total.
+
+*Consequence for porting.* Reference-semantics idioms do not carry over, and
+they fail **silently** rather than loudly — the shape to watch for is *create an
+empty collection, store it into a structure, then keep filling it through the
+original binding*, which leaves the stored copy empty forever. Ports must
+read-modify-write instead: fill before storing, or retrieve, mutate, and put
+back. `var` parameters (§9.1 rule 3) are the only construct that makes mutation
+travel, and mutation never travels through a value already stored.
+
+### 9.4 Precedents
+
+Mutable value semantics is an established design, not a novel one. Hylo builds
+an entire language on the same two rules; Swift is the proof that the
+implementation strategy scales; Tcl, PHP and R are the proof that it works in a
+*scripting* language over large data.
+
+| Language | Shared with Lambda | Differs |
+|---|---|---|
+| **Hylo** (ex-Val) | The whole model, by name — no first-class references, `inout` as sole sharing channel, exclusivity checking | Compiled systems language; research maturity |
+| **Swift** | COW value containers (`Array`/`Dictionary`/`String`); assignment copies observably; `inout` ≡ `var` param; exclusive-access enforcement | Hybrid — classes are references, closures capture by reference |
+| **Tcl** | Refcounted COW values with no observable aliasing, in a scripting language | Everything-is-a-string value model |
+| **PHP** (arrays) | `$b = $a` copies; explicit `&$x` params are the only sharing channel | Objects reference-semantic since PHP 5 |
+| **R**, **MATLAB** | Copy-on-modify for all data — the data-processing domain precedent | R environments are an escape hatch |
+| **Koka/Perceus**, **Lean 4**, **Roc** | Refcount-uniqueness reuse: functional semantics executed in place when unshared | Immutable-first framing; no `var` marker |
+| **Pascal**, **Ada** | Value assignment of composites; `var` / `in out` parameters (the keyword is borrowed from Pascal) | No COW, no exclusivity checking |
+| **Erlang/Elixir** | "Mutation does not travel" as daily practice at scale | Pure immutability; no sharing channel at all |
+
+Two informative contrasts:
+
+- **Rust** shares only the exclusivity discipline (`&mut` xor shared). It kept
+  references and paid with a borrow checker; Lambda removed references and pays
+  with copies (§9.5).
+- **Go** is the cautionary case for the alternative. Arrays are values while
+  slices and maps alias, and that seam is a well-known defect source. A hybrid
+  is the worst of the three positions — and a hybrid is exactly what an
+  incomplete migration leaves in the implementation.
+
+### 9.5 Open engineering problems
+
+The model is settled; two implementation problems under it are not. Both are
+performance and ergonomics questions, never semantic ones: no resolution may
+change what a program observes (P6).
+
+**9.5.1 COW granularity on large documents.** A naive COW copies the whole
+container at the first mutation of a shared value. Lambda's characteristic
+values are documents — large, long-lived, multiply referenced (views, caches,
+undo history) — so whole-document copying is not an acceptable implementation
+of rule 2.
+
+*Resolution (direction): structural sharing.* A document is a **DAG, not a
+tree**. A copy rewrites only the spine from the mutation point to the root and
+**reuses every untouched subtree by reference**; cost becomes O(depth), not
+O(size). The reused subtrees stay safe because every holder reached them by
+value and so can never mutate them in place. This is the standard
+persistent-data-structure result (Clojure's trees, `immer`, Perceus-style
+reuse), and it composes with refcounting: a node with `ref_cnt == 1` on the
+mutation path is uniquely owned and can still be updated in place, so the
+unshared case stays allocation-free.
+
+Because sharing must be unobservable (P6), structural sharing is pure
+implementation freedom — invisible to `==`, which compares content. Cheap
+undo/history in the editor falls out as a side effect, since a snapshot is what
+the model already produces.
+
+*Still to design:* the node representation that admits spine-copying, the
+refcount discipline that keeps in-place update sound on unique paths, and the
+element/document benchmark that gates the design. [C4.3]
+
+**9.5.2 Nested-mutation ergonomics.** Value semantics makes deep in-place update
+awkward, and the awkward spellings are exactly the ones that copy. Updating
+`t.nodes[i].value` must not degrade into "read a copy, mutate the copy, discard
+it", nor should the idiomatic spelling silently copy a large subtree. **This
+needs a design**; the known shapes are:
+
+- **Path-shaped `var` borrows** — permit `f(var t.nodes[i])`. The exclusivity
+  rule already anticipates this by speaking of *overlapping paths*; it requires
+  a borrow that projects through a path without materialising a copy.
+- **In-place update accessors** — Swift's `_modify` coroutines and Hylo's
+  subscript projections exist for precisely this problem: yield a mutable
+  projection rather than a value.
+- **Guaranteed get-modify-put reuse** — make the naive spelling fast by
+  ensuring the retrieved value is uniquely referenced, so write-back reuses
+  storage instead of copying.
+
+Until this is designed, deep updates in hot code are a copy hazard and the
+correct alternative spelling is a verbosity tax. [C4.4]
 
 ---
 
