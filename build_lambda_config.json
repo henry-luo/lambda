@@ -4413,7 +4413,7 @@
                     },
                     {
                         "source": "test/test_js_gtest.cpp",
-                        "name": "JavaScript Transpiler Tests",
+                        "name": "JavaScript Tests",
                         "dependencies": [
                             "lambda-lib"
                         ],

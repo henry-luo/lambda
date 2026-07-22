@@ -87,6 +87,7 @@ std::string normalize_ascii_operators(const std::string& str) {
  * Check if two expressions are semantically equivalent for ASCII math
  */
 bool are_expressions_semantically_equivalent(const std::string& expr1, const std::string& expr2) {
+    // Callers print both expressions on mismatch, so successful comparisons stay silent.
     std::string norm1 = normalize_ascii_operators(expr1);
     std::string norm2 = normalize_ascii_operators(expr2);
 
@@ -116,14 +117,11 @@ bool are_expressions_semantically_equivalent(const std::string& expr1, const std
 
     for (const auto& eq : equivalences) {
         if ((expr1 == eq.a && expr2 == eq.b) || (expr1 == eq.b && expr2 == eq.a)) {
-            printf("  Direct match: %s <-> %s\n", eq.a.c_str(), eq.b.c_str());
             return true;
         }
     }
 
-    bool result = (norm1 == norm2);
-    printf("  Final result: %s\n", result ? "EQUIVALENT" : "NOT EQUIVALENT");
-    return result;
+    return norm1 == norm2;
 }
 
 /**
@@ -242,23 +240,14 @@ Url* create_test_url(const char* url_string) {
 // Common function to test ASCII math expression roundtrip for any array of test cases
 // Returns true if all tests pass, false if any fail
 bool test_ascii_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type,
-    const char* flavor, const char* url_prefix, const char* test_name, const char* error_prefix) {
-    printf("=== Starting %s test ===\n", test_name);
-
+    const char* flavor, const char* url_prefix, const char*, const char*) {
     String* type_str = create_lambda_string(type);
     String* flavor_str = create_lambda_string(flavor);
-
-    printf("Created type string: '%s', flavor string: '%s'\n",
-           type_str->chars, flavor_str->chars);
-
-    if (num_cases > 10) {
-        printf("Running %d comprehensive ASCII math test cases\n", num_cases);
-    }
 
     bool all_passed = true;
 
     for (int i = 0; i < num_cases; i++) {
-        printf("--- Testing %s case %d: %s ---\n", test_name, i, test_cases[i]);
+        // Successful cases stay silent; the failure branches retain actionable input context.
 
         // Create a virtual URL for this test case
         char virtual_path[256];
@@ -281,10 +270,6 @@ bool test_ascii_math_expressions_roundtrip(const char** test_cases, int num_case
         }
 
         // Parse the ASCII math expression using input_from_source
-        printf("Parsing input with type='%s', flavor='%s'\n", type_str->chars, flavor_str->chars);
-        if (strcmp(type, "math") == 0) {
-            printf("Content to parse: '%s' (length: %zu)\n", content_copy, strlen(content_copy));
-        }
         Item input_item = input_from_source(content_copy, test_url, type_str, flavor_str);
         Input* input = input_item.element ? (Input*)input_item.element : nullptr;
 
@@ -296,13 +281,7 @@ bool test_ascii_math_expressions_roundtrip(const char** test_cases, int num_case
             continue;
         }
 
-        printf("Successfully parsed input\n");
-
         // Format it back
-        printf("Formatting back with pool at %p\n", (void*)input->pool);
-        if (strcmp(type, "math") == 0) {
-            printf("About to call format_data with type='%s', flavor='%s'\n", type_str->chars, flavor_str->chars);
-        }
         String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
 
         if (!formatted) {
@@ -313,16 +292,10 @@ bool test_ascii_math_expressions_roundtrip(const char** test_cases, int num_case
             continue;
         }
 
-        if (strcmp(type, "math") == 0) {
-            printf("Formatted result: '%s' (length: %zu)\n", formatted->chars, strlen(formatted->chars));
-        }
-
         // Compare the results using semantic equivalence
         bool match = are_expressions_semantically_equivalent(std::string(formatted->chars), std::string(test_cases[i]));
 
-        if (match) {
-            printf("✅ Roundtrip successful for case %d\n", i);
-        } else {
+        if (!match) {
             printf("❌ Mismatch in case %d!\n", i);
             printf("  Original: '%s'\n", test_cases[i]);
             printf("  Result:   '%s'\n", formatted->chars);

@@ -56,6 +56,9 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1
 # known-failure inventories are not part of the fast Radiant baseline gate.
 RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
 RADIANT_DOM2_WPT_RUNNERS := input_events
+# GoogleTest emits pass/skip records and suite summaries unrelated to failures;
+# retain runtime diagnostics and failure records so baseline output stays actionable.
+GTEST_PROGRESS_FILTER = grep -vE '^Running main\(\) from |^Note: Google Test filter =|^\[ RUN      \]|^\[       OK \]|^\[  SKIPPED \]|^\[ DISABLED \]|^\[----------\]|^\[==========\]|^\[  PASSED  \]'
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -260,8 +263,8 @@ $(TREE_SITTER_BASH_LIB):
 # Regenerate the ignored Python parser before a direct Premake compile.
 # The ABI-14 header cannot compile a stale ABI-15 parser.c from an older CLI.
 generate-tree-sitter-python-parser:
-	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-python \
-		src/parser.c TS="$(CURDIR)/node_modules/.bin/tree-sitter"
+	@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -B -C lambda/tree-sitter-python \
+		src/parser.c TS="$(CURDIR)/node_modules/.bin/tree-sitter" 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Build tree-sitter-python library
 $(TREE_SITTER_PYTHON_LIB): generate-tree-sitter-python-parser
@@ -991,6 +994,9 @@ test-all-baseline: build-test
 	@echo "Running BASELINE test suites only..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --category=baseline --parallel
 
+# Keep the baseline report focused on test results. This target-specific value
+# propagates through its build prerequisites without changing standalone builds.
+test-lambda-baseline: TEST_BUILD_QUIET := 1
 test-lambda-baseline: build-test test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
@@ -1231,7 +1237,7 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo "📦 HTML5 WPT Parser Tests:"; \
 	if [ -f "test/test_wpt_html_parser_gtest.exe" ]; then \
 		output=$$(./test/test_wpt_html_parser_gtest.exe 2>&1) || true; \
-		echo "$$output" | tail -20; \
+		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
 		wpt_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		wpt_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		wpt_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1245,7 +1251,7 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo "📦 CommonMark Markdown Tests:"; \
 	if [ -f "test/test_markdown_gtest.exe" ]; then \
 		output=$$(./test/test_markdown_gtest.exe 2>&1) || true; \
-		echo "$$output" | tail -20; \
+		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
 		md_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		md_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		md_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1277,7 +1283,7 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo "📦 ASCII Math Tests:"; \
 	if [ -f "test/test_math_ascii_gtest.exe" ]; then \
 		output=$$(./test/test_math_ascii_gtest.exe 2>&1) || true; \
-		echo "$$output" | tail -20; \
+		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
 		math_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		math_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		math_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1291,7 +1297,7 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo "📦 LaTeX Math Tests:"; \
 	if [ -f "test/test_math_gtest.exe" ]; then \
 		output=$$(./test/test_math_gtest.exe 2>&1) || true; \
-		echo "$$output" | tail -20; \
+		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
 		latex_math_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		latex_math_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		latex_math_skipped=$$(echo "$$output" | grep -E "^\[  SKIPPED \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -2454,8 +2460,8 @@ benchmark:
 
 # Premake5 Build System Targets
 generate-premake:
-	@echo "Generating Premake5 configuration from JSON..."
-	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Generating Premake5 configuration from JSON..."; fi
+	@$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 
 clean-premake:
 	@echo "Cleaning Premake5 build artifacts..."
@@ -2466,14 +2472,14 @@ clean-premake:
 	@echo "Premake5 artifacts cleaned."
 
 build-lambda-data:
-	@echo "Building the lambda-data static archive..."
-	@echo "Generating Premake configuration..."
+	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building the lambda-data static archive..."; fi
+	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Generating Premake configuration..."; fi
 	@mkdir -p build/premake
-	$(MAKE) generate-premake
-	@echo "Generating makefiles..."
-	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	@$(MAKE) --no-print-directory TEST_BUILD_QUIET=$(TEST_BUILD_QUIET) generate-premake
+	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Generating makefiles..."; fi
+	@out=$$(cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE) 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 	$(call run_make_with_error_summary,lambda-data,debug_native,,lambda-data-cpp)
-	@echo "✅ lambda-data static archive built successfully!"
+	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "✅ lambda-data static archive built successfully!"; fi
 
 build-lambda-rt: build-lambda-data
 	@echo "Building the lambda-rt static archive..."
@@ -2510,8 +2516,8 @@ check-module-boundary:
 	@echo "✅ module-boundary validation completed (Class-F ratcheted deferment)"
 
 build-test: build-lambda-data generate-tree-sitter-python-parser
-	@echo "Building tests using Premake5..."
-	@echo "Building configurations..."
+	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building tests using Premake5..."; fi
+	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building configurations..."; fi
 	@mkdir -p build/premake
 	@# Drop a backup left behind by an interrupted earlier run. The restore step
 	@# below keys on this file merely existing, so a stale one silently replaces
@@ -2519,8 +2525,8 @@ build-test: build-lambda-data generate-tree-sitter-python-parser
 	@# later as "unknown option" for a flag that is in fact implemented. Clearing
 	@# it here makes "the backup exists" mean "this invocation created it".
 	@rm -f .lambda_build_backup.exe
-	$(MAKE) generate-premake
-	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
+	@$(MAKE) --no-print-directory TEST_BUILD_QUIET=$(TEST_BUILD_QUIET) generate-premake
+	@out=$$(cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE) 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 	@# If last build was release, rebuild lambda.exe incrementally in release mode
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental) — log: temp/build_tests_lambda.log"; \
