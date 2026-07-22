@@ -158,24 +158,6 @@ static void pm_finish_hosted_mir_function(MIR_context_t mir_context) {
     py_hosted_execution_api->mir_function_finish(mir_context);
 }
 
-static bool pm_create_hosted_item_function(MIR_context_t mir_context,
-        const char* function_name, int parameter_count,
-        const char* const* parameter_names, MIR_item_t* out_function_item,
-        MIR_func_t* out_function) {
-    if (!mir_context || !function_name || parameter_count < 0 || !out_function_item ||
-        !out_function || !py_hosted_execution_api ||
-        !py_hosted_execution_api->mir_item_function_create) return false;
-    void* function_item = NULL;
-    void* function = NULL;
-    if (py_hosted_execution_api->mir_item_function_create(mir_context, function_name,
-            (uint32_t)parameter_count, parameter_names, &function_item, &function) != 0) {
-        return false;
-    }
-    *out_function_item = (MIR_item_t)function_item;
-    *out_function = (MIR_func_t)function;
-    return true;
-}
-
 static bool pm_create_hosted_item_function_typed(MIR_context_t mir_context,
         const char* function_name, int parameter_count,
         const char* const* parameter_names, const uint8_t* parameter_kinds,
@@ -204,18 +186,6 @@ static bool pm_create_hosted_function_forward(MIR_context_t mir_context,
     if (py_hosted_execution_api->mir_function_forward_create(mir_context, function_name,
             &function_item) != 0) return false;
     *out_function_item = (MIR_item_t)function_item;
-    return true;
-}
-
-static bool pm_create_hosted_item_function_proto(MIR_context_t mir_context,
-        const char* prototype_name, int parameter_count, MIR_item_t* out_prototype_item) {
-    if (!mir_context || !prototype_name || parameter_count < 0 || !out_prototype_item ||
-        !py_hosted_execution_api ||
-        !py_hosted_execution_api->mir_item_function_proto_create) return false;
-    void* prototype_item = NULL;
-    if (py_hosted_execution_api->mir_item_function_proto_create(mir_context, prototype_name,
-            (uint32_t)parameter_count, &prototype_item) != 0) return false;
-    *out_prototype_item = (MIR_item_t)prototype_item;
     return true;
 }
 
