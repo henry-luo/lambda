@@ -6303,14 +6303,14 @@ extern "C" Item js_console_trace_fn(Item label_item) {
 
 // console.dir — uses util.inspect-like output
 extern "C" Item js_console_dir_fn(Item obj) {
-    extern void js_console_log(Item value);
+    extern Item js_console_log(Item value);
     js_console_log(obj);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 // console.table — simplified stub, just logs the value
 extern "C" Item js_console_table_fn(Item data) {
-    extern void js_console_log(Item value);
+    extern Item js_console_log(Item value);
     js_console_log(data);
     return (Item){.item = ITEM_JS_UNDEFINED};
 }

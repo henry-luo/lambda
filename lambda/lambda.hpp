@@ -273,6 +273,14 @@ inline ConstItem Item::to_const() const {
 // get type_id from an Item
 static inline TypeId get_type_id(Item value) { return value.type_id(); }
 
+static inline bool lambda_item_uses_scalar_home(Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64) return true;
+    return (type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) &&
+        !(item.item & ITEM_DBL_MASK) && item.item != ITEM_FLOAT_P0 &&
+        item.item != ITEM_FLOAT_N0;
+}
+
 // Compatibility aggregate: the native root/GC helpers are provided by rt.
 // Keep the include after Item so the Item-specialized root handles are complete.
 #include "runtime/lambda-root-frame.hpp"

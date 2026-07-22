@@ -615,6 +615,15 @@ static inline bool is_valid_function(Function* fn) {
     return type_id == LMD_TYPE_FUNC;
 }
 
+static bool reject_missing_mir_result_home(Function* fn, const char* caller) {
+    if (!(fn->flags & FN_FLAG_MIR_PUBLIC_ABI)) return false;
+    // MIR public wrappers have a trailing home argument. Calling one through
+    // the legacy signature shifts that home into arbitrary register contents.
+    set_runtime_error(ERR_INVALID_CALL,
+        "%s: MIR public function requires fn_call*_into", caller);
+    return true;
+}
+
 // Dynamic function dispatch for first-class functions
 // For closures, env is passed as the first argument
 // Stack traces are captured via native stack walking (no push/pop needed)
@@ -623,6 +632,7 @@ Item fn_call(Function* fn, List* args) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call: invalid function (null or wrong type)");
         return ItemError;
     }
+    if (reject_missing_mir_result_home(fn, "fn_call")) return ItemError;
     if (fn->flags & FN_FLAG_SYS_REF) {
         set_runtime_error(ERR_INVALID_CALL,
             "fn_call: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");
@@ -690,7 +700,20 @@ Item fn_call(Function* fn, List* args) {
 }
 
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
-    if (!fn || !(fn->flags & FN_FLAG_MIR_PUBLIC_ABI)) {
+    int arg_count = args ? (int)args->length : 0;
+    // Tagged error/null values can reach failed dynamic calls; validate before
+    // reading flags because they are not dereferenceable Function pointers.
+    if (!is_valid_function(fn)) {
+        switch (arg_count) {
+        case 0: return fn_call0(fn);
+        case 1: return fn_call1(fn, args->items[0]);
+        case 2: return fn_call2(fn, args->items[0], args->items[1]);
+        case 3: return fn_call3(fn, args->items[0], args->items[1], args->items[2]);
+        default: break;
+        }
+        return fn_call(fn, args);
+    }
+    if (!(fn->flags & FN_FLAG_MIR_PUBLIC_ABI)) {
         return fn_call(fn, args);
     }
     if (!result_home) {
@@ -698,10 +721,9 @@ Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
             "fn_call_into: MIR public function requires result home");
         return ItemError;
     }
-    if (!is_valid_function(fn) || !fn->ptr || (fn->flags & FN_FLAG_SYS_REF)) {
+    if (!fn->ptr || (fn->flags & FN_FLAG_SYS_REF)) {
         return fn_call(fn, args);
     }
-    int arg_count = args ? (int)args->length : 0;
     void* env = fn->closure_env;
     // The exact caller home must cross this forwarding boundary unchanged.
     if (env) {
@@ -833,6 +855,7 @@ Item fn_call0(Function* fn) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call0: cannot call non-function value");
         return ItemError;
     }
+    if (reject_missing_mir_result_home(fn, "fn_call0")) return ItemError;
     if (fn->flags & FN_FLAG_SYS_REF) {
         set_runtime_error(ERR_INVALID_CALL,
             "fn_call0: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");
@@ -856,6 +879,7 @@ Item fn_call1(Function* fn, Item a) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call1: cannot call non-function value");
         return ItemError;
     }
+    if (reject_missing_mir_result_home(fn, "fn_call1")) return ItemError;
     if (fn->flags & FN_FLAG_SYS_REF) {
         set_runtime_error(ERR_INVALID_CALL,
             "fn_call1: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");
@@ -879,6 +903,7 @@ Item fn_call2(Function* fn, Item a, Item b) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call2: cannot call non-function value");
         return ItemError;
     }
+    if (reject_missing_mir_result_home(fn, "fn_call2")) return ItemError;
     if (fn->flags & FN_FLAG_SYS_REF) {
         set_runtime_error(ERR_INVALID_CALL,
             "fn_call2: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");
@@ -902,6 +927,7 @@ Item fn_call3(Function* fn, Item a, Item b, Item c) {
         set_runtime_error(ERR_INVALID_CALL, "fn_call3: cannot call non-function value");
         return ItemError;
     }
+    if (reject_missing_mir_result_home(fn, "fn_call3")) return ItemError;
     if (fn->flags & FN_FLAG_SYS_REF) {
         set_runtime_error(ERR_INVALID_CALL,
             "fn_call3: builtin function '%s' is not dynamically callable", fn->name ? fn->name : "<anonymous>");

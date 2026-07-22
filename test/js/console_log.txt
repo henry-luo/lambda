@@ -1,3 +1,9 @@
 42
 15
 100
+log-result
+debug-result
+true
+true
+true
+true

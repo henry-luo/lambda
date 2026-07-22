@@ -54,9 +54,11 @@ extern "C" Context* _lambda_rt;
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
 #ifdef __APPLE__
-extern "C" Item radiant_lambda_fn_call3(Function* fn, Item a, Item b, Item c) asm("_fn_call3");
+extern "C" Item radiant_lambda_fn_call3_into(Function* fn, Item a, Item b, Item c,
+                                               uint64_t* result_home) asm("_fn_call3_into");
 #else
-extern "C" Item radiant_lambda_fn_call3(Function* fn, Item a, Item b, Item c) asm("fn_call3");
+extern "C" Item radiant_lambda_fn_call3_into(Function* fn, Item a, Item b, Item c,
+                                               uint64_t* result_home) asm("fn_call3_into");
 #endif
 Item vmap_get_by_item(VMap* vm, Item key);
 
@@ -870,10 +872,13 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         Rooted<Item> rooted_children(roots, radiant_layout_children_item(context));
         Rooted<Item> rooted_layout_context(roots, radiant_layout_context_item(context));
         Rooted<Item> rooted_result(roots, ItemNull);
+        LAMBDA_SCALAR_HOME(callback_result_home);
         // Lambda-registered callbacks are core Function values; the Jube script
-        // call hook is JS-specific and corrupts Lambda fn call frames.
-        rooted_result.set(radiant_lambda_fn_call3(rooted_fn.get().function,
-            rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()));
+        // call hook is JS-specific. MIR callbacks also require the explicit
+        // caller home so native layout dispatch cannot shift their public ABI.
+        rooted_result.set(radiant_lambda_fn_call3_into(rooted_fn.get().function,
+            rooted_parent.get(), rooted_children.get(), rooted_layout_context.get(),
+            &callback_result_home));
         if (get_type_id(rooted_result.get()) == LMD_TYPE_ERROR) {
             log_error("CUSTOM_LAYOUT_LAMBDA_EXCEPTION: layout='%s'", context->layout_name);
         } else {

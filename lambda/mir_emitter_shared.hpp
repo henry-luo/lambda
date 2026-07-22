@@ -726,6 +726,10 @@ static inline MIR_label_t em_new_label(MirEmitter* em) {
     return mir_new_emit_label(em->ctx);
 }
 static inline void em_emit_unknown_call(MirEmitter* em, MIR_insn_t insn);
+static inline void em_emit_borrowed_call(MirEmitter* em,
+        const char* call_name, MIR_insn_t insn);
+static inline void em_emit_destination_owned_call(MirEmitter* em,
+        const char* call_name, MIR_insn_t insn);
 
 static inline void em_emit_insn(MirEmitter* em, MIR_insn_t insn) {
     if (em && em->frame.active && insn &&
@@ -777,6 +781,18 @@ static inline void em_store_frame_slot_typed(MirEmitter* em,
             frame_base, 0, 1),
         MIR_new_reg_op(em->ctx, value)));
 }
+static inline MIR_reg_t em_adopt_scalar_item_value(MirEmitter* em,
+                                                   MirScalarReturnMode mode,
+                                                   MIR_reg_t item,
+                                                   MIR_reg_t target_home) {
+    if (mode == MIR_SCALAR_RETURN_NONE) return item;
+    MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
+    MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
+        MIR_new_reg_op(em->ctx, target_home)};
+    return em_call_with_args(em,
+        "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true);
+}
+
 // Adopt a temporary boxed scalar before restoring its source number extent.
 static inline MIR_reg_t em_adopt_scalar_item(MirEmitter* em,
                                              MirScalarReturnMode mode,
@@ -785,15 +801,7 @@ static inline MIR_reg_t em_adopt_scalar_item(MirEmitter* em,
                                              size_t number_top_offset,
                                              MIR_reg_t source_base,
                                              MIR_reg_t target_home) {
-    if (mode == MIR_SCALAR_RETURN_NONE) {
-        em_store_frame_top(em, runtime, number_top_offset, source_base);
-        return item;
-    }
-    MIR_type_t types[2] = {MIR_T_I64, MIR_T_P};
-    MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, item),
-        MIR_new_reg_op(em->ctx, target_home)};
-    MIR_reg_t result = em_call_with_args(em,
-        "lambda_item_adopt_scalar_home", MIR_T_I64, 2, types, args, true);
+    MIR_reg_t result = em_adopt_scalar_item_value(em, mode, item, target_home);
     em_store_frame_top(em, runtime, number_top_offset, source_base);
     return result;
 }
@@ -2638,10 +2646,14 @@ static inline void em_enforce_argument_ownership(MirEmitter* em,
     }
 }
 
-// Conservatively make metadata-free calls and values participate in safepoints.
-static inline void em_emit_unknown_call(MirEmitter* em, MIR_insn_t insn) {
+// Make metadata-free calls and values participate in safepoints. Only the
+// explicitly declared destination-owned path may consume activation-home
+// scalars because its callee copies their payloads before returning.
+static inline void em_emit_unclassified_call(MirEmitter* em,
+        const char* call_name, MIR_insn_t insn,
+        bool consumes_scalar_args_without_retaining) {
     if (!em || !insn) return;
-    const char* name = "<unresolved-call>";
+    const char* name = call_name ? call_name : "<unresolved-call>";
     if (em->note_mir_call) em->note_mir_call(name);
     size_t count = MIR_insn_nops(em->ctx, insn);
     for (size_t i = 0; i < count; i++) {
@@ -2649,9 +2661,12 @@ static inline void em_emit_unknown_call(MirEmitter* em, MIR_insn_t insn) {
         MIR_insn_op_mode(em->ctx, insn, i, &output);
         if (!output && insn->ops[i].mode == MIR_OP_REG) {
             MIR_reg_t reg = insn->ops[i].u.reg;
-            // An unresolved retaining callee has no declared owned destination.
-            if (em_scalar_home_for_reg(em, reg)) {
-                log_error("mir-scalar-invariant: unresolved call retains scalar home");
+            // An unresolved retaining callee has no declared owned destination;
+            // allowing its argument to escape would leave a dangling home.
+            if (!consumes_scalar_args_without_retaining &&
+                    em_scalar_home_for_reg(em, reg)) {
+                log_error("mir-scalar-invariant: unresolved call=%s arg=%zu retains scalar home",
+                    name, i);
                 abort();
             }
             if (em->root_call_value) em->root_call_value(em->call_owner, reg);
@@ -2679,6 +2694,22 @@ static inline void em_emit_unknown_call(MirEmitter* em, MIR_insn_t insn) {
             if (em->root_call_value) em->root_call_value(em->call_owner, reg);
         }
     }
+}
+
+static inline void em_emit_unknown_call(MirEmitter* em, MIR_insn_t insn) {
+    em_emit_unclassified_call(em, NULL, insn, false);
+}
+
+static inline void em_emit_borrowed_call(MirEmitter* em,
+        const char* call_name, MIR_insn_t insn) {
+    // Generated functions and forwarding trampolines borrow Item arguments
+    // only for the synchronous call; any returned aggregate owns its fields.
+    em_emit_unclassified_call(em, call_name, insn, true);
+}
+
+static inline void em_emit_destination_owned_call(MirEmitter* em,
+        const char* call_name, MIR_insn_t insn) {
+    em_emit_unclassified_call(em, call_name, insn, true);
 }
 
 static inline MIR_reg_t em_call_with_args(MirEmitter* em,

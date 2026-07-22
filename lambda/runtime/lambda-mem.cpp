@@ -723,18 +723,7 @@ extern "C" double lambda_mir_bits_double(uint64_t bits) {
 
 extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
     AutoAssertNoGC no_gc((Context*)context);
-    switch (get_type_id(item)) {
-    case LMD_TYPE_INT64:
-    case LMD_TYPE_UINT64:
-        break;
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
-        if ((item.item & ITEM_DBL_MASK) || item.item == ITEM_FLOAT_P0 ||
-                item.item == ITEM_FLOAT_N0) return item;
-        break;
-    default:
-        return item;
-    }
+    if (!lambda_item_uses_scalar_home(item)) return item;
     // Copy before watermark restore to prevent unbounded frame donation.
     if (!home) {
         // A missing ABI home would return a dead activation pointer.

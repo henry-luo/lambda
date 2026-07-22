@@ -6840,7 +6840,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             jm_call_void_1(mt, "js_console_log",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, null_val));
         }
-        return jm_emit_null(mt);
+        // Console calls are expressions whose ECMAScript result is undefined;
+        // returning null here made the specialized path disagree with the
+        // ordinary JsFunction ABI and exposed invalid scalar-result handling.
+        return jm_emit_undefined(mt);
     }
 
     // require(specifier) — CJS module loading

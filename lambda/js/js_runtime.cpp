@@ -8970,24 +8970,31 @@ extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int cou
 
 extern "C" void js_console_write_to_stdout(const char* data, int len);
 
-extern "C" void js_console_log(Item value) {
+// Console methods are stored as ordinary JsFunction pointers and therefore
+// must satisfy the Item-return ABI; a void return leaked an arbitrary register
+// value into generated scalar-result adoption.
+extern "C" Item js_console_log(Item value) {
     extern void js_console_log_multi(Item* args, int argc);
     js_console_log_multi(&value, 1);
+    return make_js_undefined();
 }
 
-extern "C" void js_console_error(Item value) {
+extern "C" Item js_console_error(Item value) {
     extern void js_console_error_multi(Item* args, int argc);
     js_console_error_multi(&value, 1);
+    return make_js_undefined();
 }
 
-extern "C" void js_console_warn(Item value) {
+extern "C" Item js_console_warn(Item value) {
     extern void js_console_warn_multi(Item* args, int argc);
     js_console_warn_multi(&value, 1);
+    return make_js_undefined();
 }
 
-extern "C" void js_console_debug(Item value) {
+extern "C" Item js_console_debug(Item value) {
     extern void js_console_debug_multi(Item* args, int argc);
     js_console_debug_multi(&value, 1);
+    return make_js_undefined();
 }
 
 // Per ES spec §9.2.2: if constructor returns an Object, use that instead of `this`
@@ -13053,6 +13060,13 @@ extern "C" void js_set_call_stack_limit(int64_t limit) {
     js_call_stack_limit = (int)limit;
 }
 
+static Item js_finish_borrowed_scalar_result(Item result, bool uses_local_home) {
+    if (!uses_local_home) return result;
+    if (!lambda_item_uses_scalar_home(result)) return result;
+    log_error("js-call: legacy result boundary requires an explicit caller home");
+    return ItemError;
+}
+
 static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
@@ -13152,11 +13166,15 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
     }
 
     JsFunction* fn = (JsFunction*)func_item.function;
+    LAMBDA_SCALAR_HOME(local_result_home);
+    bool uses_local_result_home = false;
     uint64_t* invoke_result_home = result_home;
     if ((fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) && !invoke_result_home) {
-        log_error("js_call_function: compiled wrapper missing caller result home (fn=%.*s)",
-            fn->name ? (int)fn->name->len : 6, fn->name ? fn->name->chars : "(anon)");
-        return ItemError;
+        // Legacy native consumers can safely borrow a local home only for the
+        // duration of this call. A pointer-backed scalar is rejected below so
+        // it can never escape after this C frame returns.
+        invoke_result_home = &local_result_home;
+        uses_local_result_home = true;
     }
     struct JsCallNameGuard {
         int* depth;
@@ -13343,16 +13361,17 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
             bool saved_array_mode = js_dispatch_as_array_method;
             js_dispatch_as_array_method = (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) == 0;
             Item result = js_dispatch_builtin(fn->builtin_id, effective_this, merged_args, total_argc,
-                result_home);
+                invoke_result_home);
             js_dispatch_as_array_method = saved_array_mode;
-            return result;
+            return js_finish_borrowed_scalar_result(result, uses_local_result_home);
         }
         // Js54 P5: same propagation for the non-bound path.
         bool saved_array_mode = js_dispatch_as_array_method;
         js_dispatch_as_array_method = (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) == 0;
-        Item result = js_dispatch_builtin(fn->builtin_id, this_val, args, arg_count, result_home);
+        Item result = js_dispatch_builtin(fn->builtin_id, this_val, args, arg_count,
+            invoke_result_home);
         js_dispatch_as_array_method = saved_array_mode;
-        return result;
+        return js_finish_borrowed_scalar_result(result, uses_local_result_home);
     }
 
     struct JsArrayDispatchModeGuard {
@@ -13467,7 +13486,7 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
         js_current_this = prev_this;
         js_new_target = prev_nt;
         js_eval_initializer_context = prev_eval_initializer_context;
-        return result;
+        return js_finish_borrowed_scalar_result(result, uses_local_result_home);
     }
 
     // Bind 'this' for the duration of this call
@@ -13547,30 +13566,10 @@ static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
     js_current_this = prev_this;
     js_new_target = prev_nt;
     js_eval_initializer_context = prev_eval_initializer_context;
-    return result;
+    return js_finish_borrowed_scalar_result(result, uses_local_result_home);
 }
 
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
-    JsFunction* compiled = get_type_id(func_item) == LMD_TYPE_FUNC
-        ? (JsFunction*)func_item.function : NULL;
-    if (compiled && (compiled->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI)) {
-        // Legacy native callers have no result-home parameter. They may still
-        // consume ordinary results, but must reject a wide scalar rather than
-        // returning an Item backed by this helper's departing C stack slot.
-        LAMBDA_SCALAR_HOME(legacy_result_home);
-        Item result = js_call_function_impl(func_item, this_val, args,
-            arg_count, &legacy_result_home);
-        TypeId type = get_type_id(result);
-        bool pointer_scalar = type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64 ||
-            ((type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) &&
-             !(result.item & ITEM_DBL_MASK) && result.item != ITEM_FLOAT_P0 &&
-             result.item != ITEM_FLOAT_N0);
-        if (pointer_scalar) {
-            log_error("js-call: legacy result boundary requires js_call_function_into");
-            return ItemError;
-        }
-        return result;
-    }
     return js_call_function_impl(func_item, this_val, args, arg_count, NULL);
 }
 
@@ -27024,10 +27023,10 @@ extern "C" Item js_get_console_object_value() {
         heap_register_gc_root(&js_console_object.item);
 
         // Populate console methods as function objects
-        extern void js_console_log(Item);
-        extern void js_console_error(Item);
-        extern void js_console_warn(Item);
-        extern void js_console_debug(Item);
+        extern Item js_console_log(Item);
+        extern Item js_console_error(Item);
+        extern Item js_console_warn(Item);
+        extern Item js_console_debug(Item);
         extern void js_console_log_multi(Item*, int);
         extern Item js_console_count_fn(Item);
         extern Item js_console_countReset_fn(Item);

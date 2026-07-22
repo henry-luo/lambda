@@ -1971,10 +1971,20 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
     TypeId type = get_type_id(func_or_result);
 
     if (type == LMD_TYPE_FUNC) {
-        // call function with collection as first argument
-        Function* fn = func_or_result.function;
+        // A MIR callback needs an explicit number-stack result home that stays
+        // valid until the generated caller adopts this native helper's result.
+        RootFrame roots((Context*)context, 2);
+        Rooted<Item> rooted_collection(roots, collection);
+        Rooted<Item> rooted_function(roots, func_or_result);
+        uint64_t* result_home = lambda_side_number_alloc((Context*)context);
+        if (!result_home) {
+            lambda_stack_overflow_error("fn_pipe_call-result-home");
+            return ItemError;
+        }
+        Function* fn = rooted_function.get().function;
         if (fn && fn->ptr) {
-            return fn_call1(fn, collection);
+            Item result = fn_call1_into(fn, rooted_collection.get(), result_home);
+            return lambda_item_adopt_scalar_home(result, result_home);
         }
         return ItemError;
     }
@@ -2629,14 +2639,19 @@ Item fn_sort2(Item item, Item dir_item) {
 
         // extract keys using the key function
         uint64_t** key_slots = (uint64_t**)mem_alloc(len * sizeof(uint64_t*), MEM_CAT_EVAL);
+        uint64_t* key_homes = (uint64_t*)mem_alloc(len * sizeof(uint64_t), MEM_CAT_EVAL);
         int64_t* indices = (int64_t*)mem_alloc(len * sizeof(int64_t), MEM_CAT_EVAL);
         for (int64_t i = 0; i < len; i++) {
             indices[i] = i;
             result = rooted_result.get();
             key_fn = rooted_key_fn.get().function;
-            Item key_result = fn_call1(key_fn, result->items[i]);
+            // A root slot stores the returned Item, while the parallel payload
+            // home owns a wide scalar; sharing one word would overwrite it.
+            Item key_result = fn_call1_into(key_fn, result->items[i], &key_homes[i]);
+            key_result = lambda_item_adopt_scalar_home(key_result, &key_homes[i]);
             if (get_type_id(key_result) == LMD_TYPE_ERROR) {
                 mem_free(key_slots);
+                mem_free(key_homes);
                 mem_free(indices);
                 return key_result;  // propagate error
             }
@@ -2668,6 +2683,7 @@ Item fn_sort2(Item item, Item dir_item) {
         memcpy(result->items, temp, len * sizeof(Item));
         mem_free(temp);
         mem_free(indices);
+        mem_free(key_homes);
         mem_free(key_slots);
 
         result->is_spreadable = false;
@@ -2691,19 +2707,30 @@ Item fn_reduce(Item collection, Item func_item) {
         log_error("reduce: 2nd argument must be a function, got type: %s", get_type_name(func_type));
         return ItemError;
     }
-    Function* fn = func_item.function;
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> rooted_collection(roots, collection);
+    Rooted<Item> rooted_function(roots, func_item);
+    Rooted<Item> rooted_acc(roots, ItemNull);
 
-    int64_t len = vector_length(collection);
+    int64_t len = vector_length(rooted_collection.get());
     if (len <= 0) return ItemNull;  // empty collection
-    if (len == 1) return vector_get(collection, 0);  // single element
+    if (len == 1) return vector_get(rooted_collection.get(), 0);  // single element
 
-    Item acc = vector_get(collection, 0);
+    uint64_t* accumulator_home = lambda_side_number_alloc((Context*)context);
+    if (!accumulator_home) {
+        lambda_stack_overflow_error("reduce-result-home");
+        return ItemError;
+    }
+    rooted_acc.set(vector_get(rooted_collection.get(), 0));
     for (int64_t i = 1; i < len; i++) {
-        Item elem = vector_get(collection, i);
-        acc = fn_call2(fn, acc, elem);
+        Item elem = vector_get(rooted_collection.get(), i);
+        Function* fn = rooted_function.get().function;
+        Item acc = fn_call2_into(fn, rooted_acc.get(), elem, accumulator_home);
+        acc = lambda_item_adopt_scalar_home(acc, accumulator_home);
+        rooted_acc.set(acc);
         if (get_type_id(acc) == LMD_TYPE_ERROR) return acc;  // propagate error
     }
-    return acc;
+    return rooted_acc.get();
 }
 
 // unique(vec) - remove duplicates

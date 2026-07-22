@@ -309,7 +309,7 @@ int js_function_get_arity(Item fn_item);
 // Console Functions
 // =============================================================================
 
-void js_console_log(Item value);
+Item js_console_log(Item value);
 
 // =============================================================================
 // String Method Dispatcher (delegates to Lambda fn_* functions)

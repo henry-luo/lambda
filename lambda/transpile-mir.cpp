@@ -621,19 +621,22 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1,
             MIR_new_reg_op(mt->ctx, rehomed)));
     } else if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
-        MIR_reg_t adopted_error = em_adopt_scalar_item(&mt->em,
+        MIR_reg_t adopted_error = em_adopt_scalar_item_value(&mt->em,
             MIR_SCALAR_RETURN_DYNAMIC, mt->em.frame.error_return_reg,
-            mt->em.frame.runtime, offsetof(Context, side_number_top),
-            mt->em.frame.number_base, mt->em.frame.incoming_scalar_home);
+            mt->em.frame.incoming_scalar_home);
         MIR_reg_t first = new_reg(mt, "return_first_final", mt->em.frame.return_type);
         MIR_insn_code_t first_load = mt->em.frame.return_type == MIR_T_D
             ? MIR_DMOV : MIR_MOV;
         MIR_type_t first_type = mt->em.frame.return_type == MIR_T_D
             ? MIR_T_D : MIR_T_I64;
+        // Debug frame restoration poisons reclaimed homes, so reload the
+        // native success lane before restoring its scratch extent.
         emit_insn(mt, MIR_new_insn(mt->ctx, first_load,
             MIR_new_reg_op(mt->ctx, first),
             MIR_new_mem_op(mt->ctx, first_type, 0,
                 error_scratch, 0, 1)));
+        em_store_frame_top(&mt->em, mt->em.frame.runtime,
+            offsetof(Context, side_number_top), mt->em.frame.number_base);
         em_store_frame_top(&mt->em, mt->em.frame.runtime,
             offsetof(Context, mir_return_lane),
             adopted_error);
@@ -1136,7 +1139,11 @@ static MIR_reg_t emit_vararg_call(MirTranspiler* mt, const char* fn_name,
         ops[oi++] = vararg_ops[i];
     }
 
-    emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, oi, ops));
+    // map/element/object fill helpers consume each Item into destination-owned
+    // field storage before returning, so activation-home scalar arguments do
+    // not escape this variadic boundary.
+    em_emit_destination_owned_call(&mt->em, fn_name,
+        MIR_new_insn_arr(mt->ctx, MIR_CALL, oi, ops));
     return result;
 }
 
@@ -1186,7 +1193,10 @@ static MIR_reg_t emit_vararg_call_2(MirTranspiler* mt, const char* fn_name,
         ops[oi++] = vararg_ops[i];
     }
 
-    emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, oi, ops));
+    // list_fill copies wide values into the list's scalar tail before return;
+    // the source activation homes remain borrowed call arguments.
+    em_emit_destination_owned_call(&mt->em, fn_name,
+        MIR_new_insn_arr(mt->ctx, MIR_CALL, oi, ops));
     return result;
 }
 
@@ -8653,7 +8663,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 ops[4 + ai] = MIR_new_reg_op(mt->ctx, wrapper_home);
 
                 async_emit_invoke_resume_point(mt, call_node);
-                emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                em_emit_borrowed_call(&mt->em, trampoline_name,
+                    MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
                 em_scalar_home_bind(&mt->em, wrapper_home_id, result);
             } else {
                 // Non-wrapper calls: function returns Item directly (MIR_T_I64)
@@ -8669,7 +8680,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 for (int i = 0; i < ai; i++) ops[3 + i] = arg_ops[i];
 
                 async_emit_invoke_resume_point(mt, call_node);
-                emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                em_emit_borrowed_call(&mt->em, fn_import_name->str,
+                    MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             }
 
             // Import calls return boxed Items. Unbox to native type to match
@@ -9049,8 +9061,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 result = new_reg(mt, "call", ret_type);
                 ops[2] = MIR_new_reg_op(mt->ctx, result);
                 for (int i = 0; i < ai; i++) ops[3 + i] = call_ops[i];
-                emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL,
-                    3 + ai, ops));
+                em_emit_borrowed_call(&mt->em, fn_mangled,
+                    MIR_new_insn_arr(mt->ctx, MIR_CALL, 3 + ai, ops));
             }
             MIR_reg_t second_result = 0;
             if (call_error_lane) {
@@ -9173,7 +9185,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             MirImportEntry* ie = ensure_import(mt, call_fn, MIR_T_I64, 4,
                 avars, 1);
             dyn_result = new_reg(mt, "call2", MIR_T_I64);
-            emit_insn(mt, MIR_new_call_insn(mt->ctx, 7,
+            em_emit_borrowed_call(&mt->em, call_fn,
+                MIR_new_call_insn(mt->ctx, 7,
                 MIR_new_ref_op(mt->ctx, ie->proto),
                 MIR_new_ref_op(mt->ctx, ie->import),
                 MIR_new_reg_op(mt->ctx, dyn_result),
@@ -9187,7 +9200,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 {MIR_T_I64,"b",0},{MIR_T_I64,"c",0},{MIR_T_P,"home",0}};
             MirImportEntry* ie = ensure_import(mt, call_fn, MIR_T_I64, 5, avars, 1);
             dyn_result = new_reg(mt, "call3", MIR_T_I64);
-            emit_insn(mt, MIR_new_call_insn(mt->ctx, 8,
+            em_emit_borrowed_call(&mt->em, call_fn,
+                MIR_new_call_insn(mt->ctx, 8,
                 MIR_new_ref_op(mt->ctx, ie->proto),
                 MIR_new_ref_op(mt->ctx, ie->import),
                 MIR_new_reg_op(mt->ctx, dyn_result),
