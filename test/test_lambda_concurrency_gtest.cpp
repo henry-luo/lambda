@@ -9,11 +9,13 @@
 
 extern __thread EvalContext* context;
 
-// The isolated scheduler suite does not link the evaluator's dynamic-call
-// layer; task-launch behavior is covered by the procedural concurrency suite.
-extern "C" Item lambda_concurrency_fn_call(Function* fn, List* args) {
+// The isolated scheduler suite must satisfy the current result-home call ABI;
+// otherwise the linker pulls the full evaluator into this white-box target.
+extern "C" Item lambda_concurrency_fn_call_into(Function* fn, List* args,
+    uint64_t* result_home) {
     (void)fn;
     (void)args;
+    (void)result_home;
     return ItemError;
 }
 

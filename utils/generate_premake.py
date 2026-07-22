@@ -2277,23 +2277,18 @@ class PremakeGenerator:
             '    '
         ])
 
-        # Static support targets do not propagate their external link requirements,
-        # so carry those libraries into the consuming test project explicitly.
+        # Static archives do not propagate transitive link requirements.  Walk the
+        # full module closure here; copying only the direct target libraries leaves
+        # split runtime tests without providers owned by lambda-data/lambda-lib.
         libraries = list(libraries or [])
         configured_targets = {
             target.get('name'): target for target in self.config.get('targets', [])
             if target.get('name')
         }
-        for dep in dependencies:
-            target = configured_targets.get(dep)
-            if not target:
-                continue
-            # Consumers must inherit the same platform-filtered dependency set as
-            # the target itself; otherwise excluded optional libraries leak back
-            # into test executable link lines.
-            for target_library in self._target_libraries_for_platform(target):
-                if target_library not in libraries:
-                    libraries.append(target_library)
+        dependency_root = {'libraries': dependencies}
+        for target_library in self._executable_external_dependencies(dependency_root):
+            if target_library not in libraries:
+                libraries.append(target_library)
 
         # Add library dependencies
         self.premake_content.append('    links {')
