@@ -173,6 +173,19 @@ public:
     AutoAssertNoGC& operator=(const AutoAssertNoGC&) = delete;
 };
 
+class AutoDeferGC {
+    Context* runtime_;
+
+public:
+    explicit AutoDeferGC(Context* runtime) : runtime_(runtime) {
+        heap_gc_defer_collection_begin(runtime_);
+    }
+    ~AutoDeferGC() { heap_gc_defer_collection_end(runtime_); }
+
+    AutoDeferGC(const AutoDeferGC&) = delete;
+    AutoDeferGC& operator=(const AutoDeferGC&) = delete;
+};
+
 #ifdef __cplusplus
 }
 #endif

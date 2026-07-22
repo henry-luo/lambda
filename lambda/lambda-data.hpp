@@ -232,9 +232,11 @@ typedef TypeArray TypeList;
 // safe ONLY because consumers consult `ShapeEntry::flags & JSPD_IS_ACCESSOR` BEFORE
 // invoking any function operation. Any code path that calls `.function->ptr` on
 // an Item from a property slot without first checking IS_ACCESSOR will misbehave.
+#define JS_ACCESSOR_PAIR_LAYOUT_MAGIC 0x4A534150u
 typedef struct JsAccessorPair {
     uint8_t type_id;   // = LMD_TYPE_FUNC (matches Function layout for tag compat)
-    uint8_t _pad[7];   // align getter to 8-byte boundary
+    uint8_t _pad[3];
+    uint32_t layout_magic;  // = JS_ACCESSOR_PAIR_LAYOUT_MAGIC for the GC tracer
     Item getter;       // ItemNull or LMD_TYPE_FUNC
     Item setter;       // ItemNull or LMD_TYPE_FUNC
 } JsAccessorPair;

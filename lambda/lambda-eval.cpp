@@ -760,8 +760,9 @@ Item fn_call3_into(Function* fn, Item a, Item b, Item c,
 
 // Concurrency is compiled as C++ while the legacy evaluator exports these
 // helpers with C linkage; explicit bridges keep scheduler callbacks ABI-stable.
-extern "C" Item lambda_concurrency_fn_call(Function* fn, List* args) {
-    return fn_call(fn, args);
+extern "C" Item lambda_concurrency_fn_call_into(Function* fn, List* args,
+        uint64_t* result_home) {
+    return fn_call_into(fn, args, result_home);
 }
 
 extern "C" Function* lambda_concurrency_to_closure(fn_ptr ptr, int arity, void* env) {

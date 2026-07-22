@@ -30,7 +30,16 @@ extern "C" void js_function_root_item_if_needed(void* function, Item* slot) {
 
 extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     JsFunction* fn = (JsFunction*)data;
-    if (!fn || fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) return 0;
+    if (!fn) return 0;
+    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) {
+        JsAccessorPair* pair = (JsAccessorPair*)data;
+        if (pair->layout_magic != JS_ACCESSOR_PAIR_LAYOUT_MAGIC) return 0;
+        // Accessor pairs share the FUNC tag for property-slot compatibility,
+        // but their getter and setter are the actual reachability edges.
+        gc_mark_item(gc, pair->getter.item);
+        gc_mark_item(gc, pair->setter.item);
+        return 1;
+    }
 
     // A GC-owned function is the reachability owner for its closure env and
     // bound argument vectors; tracing those edges replaces permanent root ranges.
@@ -54,6 +63,26 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     }
     gc_mark_object_ptr(gc, fn->vm_stack_filename);
     gc_mark_object_ptr(gc, fn->vm_stack_source);
+    return 1;
+}
+
+extern "C" int js_function_gc_compact(void* data, gc_heap_t* gc) {
+    JsFunction* fn = (JsFunction*)data;
+    if (!fn) return 0;
+    if (fn->layout_magic != JS_FUNCTION_LAYOUT_MAGIC) {
+        JsAccessorPair* pair = (JsAccessorPair*)data;
+        // Accessor pairs have no movable data-zone fields; skipping the legacy
+        // Function compactor prevents its field offsets from corrupting them.
+        return pair->layout_magic == JS_ACCESSOR_PAIR_LAYOUT_MAGIC;
+    }
+    if (!fn->env || fn->env_size <= 0 ||
+        !gc_data_zone_owns(gc->data_zone, fn->env)) return 1;
+    // JsFunction is not the legacy Function layout. Its environment includes
+    // a scalar tail, so the generic Function compactor both misread its magic
+    // bytes as a field count and left fn->env pointing into reset nursery data.
+    size_t size = (size_t)fn->env_size * sizeof(Item) * 2;
+    Item* moved = (Item*)gc_data_zone_copy(gc->tenured_data, fn->env, size);
+    if (moved) fn->env = moved;
     return 1;
 }
 
@@ -238,12 +267,12 @@ extern "C" Item js_new_function(void* func_ptr, int param_count) {
     // Only cache-addressable compiled wrappers are module-lifetime. A wrapper
     // carrying `with` state or cache-suppressed identity must own traced edges.
     RootFrame roots((Context*)context, 1);
-    Rooted<JsFunction*> fn_root(roots, (JsFunction*)NULL);
+    Rooted<Item> fn_root(roots, ItemNull);
     JsFunction* fn = (has_with_env || suppress_cache)
         ? js_alloc_gc_function_object()
         : (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
     if (!fn) return ItemError;
-    fn_root.set(fn);
+    fn_root.set((Item){.function = (Function*)fn});
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
@@ -267,12 +296,12 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
     // Method wrappers are not in the func_ptr identity cache, so ordinary GC
     // ownership avoids retaining every dynamically materialized method.
     RootFrame roots((Context*)context, 1);
-    Rooted<JsFunction*> fn_root(roots, (JsFunction*)NULL);
+    Rooted<Item> fn_root(roots, ItemNull);
     JsFunction* fn = js_alloc_gc_function_object();
     if (!fn) return ItemError;
     // The wrapper is fresh and not yet reachable from its owning object while
     // global/with capture helpers may allocate.
-    fn_root.set(fn);
+    fn_root.set((Item){.function = (Function*)fn});
     fn->func_ptr = func_ptr;
     fn->param_count = param_count;
     fn->formal_length = -1;
@@ -288,24 +317,26 @@ extern "C" Item js_new_method_function(void* func_ptr, int param_count) {
 
 // Create a closure (function with captured environment)
 extern "C" Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size) {
-    RootFrame roots((Context*)context, 2);
-    // The environment has no reachability owner until the function object is
-    // published. Root the raw GC allocation before allocating that function;
-    // forced collection here otherwise reclaims the env and corrupts captures.
-    Rooted<Item*> env_root(roots, env);
-    Rooted<JsFunction*> fn_root(roots, (JsFunction*)NULL);
-    JsFunction* fn = js_alloc_gc_function_object();
-    if (!fn) return ItemError;
+    RootFrame roots((Context*)context, 1);
+    JsFunction* fn = NULL;
+    {
+        // A closure environment is movable data-zone storage, not an Item.
+        // Attach it to its function before a collection can run; raw addresses
+        // in an Item root are not valid GC reachability edges for data zones.
+        AutoDeferGC defer_gc((Context*)context);
+        fn = js_alloc_gc_function_object();
+        if (!fn) return ItemError;
+        fn->func_ptr = func_ptr;
+        fn->param_count = param_count;
+        fn->formal_length = -1; // -1 = use param_count for .length
+        fn->env = env;
+        fn->env_size = env_size;
+        fn->prototype = ItemNull;
+        fn->module_vars = js_active_module_vars; // bind to creating module's vars
+    }
     // A new closure is not owned by its caller until return. Root it across
     // scalar rehoming and dynamic-with capture, both of which may allocate.
-    fn_root.set(fn);
-    fn->func_ptr = func_ptr;
-    fn->param_count = param_count;
-    fn->formal_length = -1; // -1 = use param_count for .length
-    fn->env = env_root.get();
-    fn->env_size = env_size;
-    fn->prototype = ItemNull;
-    fn->module_vars = js_active_module_vars; // bind to creating module's vars
+    Rooted<Item> fn_root(roots, (Item){.function = (Function*)fn});
     fn->home_global = js_get_global_this();
     js_env_rehome_scalars(fn->env);
     js_function_capture_with_env(fn);

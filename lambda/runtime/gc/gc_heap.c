@@ -552,7 +552,7 @@ void gc_heap_destroy(gc_heap_t* gc) {
 // ============================================================================
 
 static inline int gc_maybe_force_collect(gc_heap_t* gc, const char* site) {
-    if (!gc || gc->collecting || !gc->collect_callback ||
+    if (!gc || gc->collecting || gc->defer_collection_depth > 0 || !gc->collect_callback ||
             (gc->force_collect_interval == 0 &&
              gc->force_random_one_in == 0)) {
         return 0;
@@ -758,7 +758,7 @@ void* gc_data_alloc(gc_heap_t* gc, size_t size) {
     // Forced stress and threshold collection share this legal pre-allocation
     // safepoint; never invoke the callback twice for one allocation.
     int forced = gc_maybe_force_collect(gc, "gc_data_alloc");
-    if (!forced && !gc->collecting && gc->collect_callback) {
+    if (!forced && !gc->collecting && gc->defer_collection_depth == 0 && gc->collect_callback) {
         size_t used = gc_data_zone_used(gc->data_zone);
         if (used >= gc->gc_threshold) {
             log_debug("gc_data_alloc: threshold exceeded (%zu >= %zu), triggering GC",
@@ -861,6 +861,18 @@ void gc_no_gc_scope_end(gc_heap_t* gc) {
 #else
     (void)gc;
 #endif
+}
+
+void gc_defer_collection_begin(gc_heap_t* gc) {
+    if (gc) gc->defer_collection_depth++;
+}
+
+void gc_defer_collection_end(gc_heap_t* gc) {
+    if (!gc || gc->defer_collection_depth <= 0) {
+        log_error("gc-defer-collection: unmatched end");
+        abort();
+    }
+    gc->defer_collection_depth--;
 }
 
 void gc_register_weak(gc_heap_t* gc, uint64_t* slot,
@@ -1810,6 +1822,7 @@ static void gc_compact_data(gc_heap_t* gc) {
             break;
         }
         case LMD_TYPE_FUNC_: {
+            if (gc->js_function_compact && gc->js_function_compact(obj, gc)) break;
             uint8_t* p = (uint8_t*)obj;
             uint8_t field_count = *(uint8_t*)(p + 2);  // closure_field_count
             void** env_slot = (void**)(p + 24);

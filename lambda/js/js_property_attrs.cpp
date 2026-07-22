@@ -28,6 +28,7 @@ extern "C" JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter) {
     JsAccessorPair* p = (JsAccessorPair*)heap_calloc(sizeof(JsAccessorPair), LMD_TYPE_FUNC);
     if (!p) return nullptr;
     p->type_id = LMD_TYPE_FUNC;
+    p->layout_magic = JS_ACCESSOR_PAIR_LAYOUT_MAGIC;
     p->getter = getter;
     p->setter = setter;
     return p;
@@ -564,6 +565,15 @@ static bool js_accessor_half_same(Item left, Item right) {
 
 extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
                                             int is_setter, uint8_t attrs) {
+    extern __thread EvalContext* context;
+    RootFrame roots((Context*)context, 4);
+    Rooted<Item> obj_root(roots, obj);
+    Rooted<Item> name_root(roots, name);
+    Rooted<Item> fn_root(roots, fn);
+    Rooted<Item> pair_root(roots, ItemNull);
+    obj = obj_root.get();
+    name = name_root.get();
+    fn = fn_root.get();
     if (get_type_id(name) != LMD_TYPE_STRING) return;
     String* ns = it2s(name);
     if (!ns) return;
@@ -613,16 +623,16 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
         if (is_setter) pair->setter = fn;
         else           pair->getter = fn;
         // Re-store to keep slot value canonical (idempotent — same pointer bits).
-        Item pair_item = js_accessor_pair_to_item(pair);
-        js_property_set(obj, name, pair_item);
+        pair_root.set(js_accessor_pair_to_item(pair));
+        js_property_set(obj_root.get(), name_root.get(), pair_root.get());
     } else {
         // Allocate fresh pair with the requested half populated.
         Item g = is_setter ? ItemNull : fn;
         Item s = is_setter ? fn       : ItemNull;
         pair = js_alloc_accessor_pair(g, s);
         if (!pair) return;
-        Item pair_item = js_accessor_pair_to_item(pair);
-        js_property_set(obj, name, pair_item);
+        pair_root.set(js_accessor_pair_to_item(pair));
+        js_property_set(obj_root.get(), name_root.get(), pair_root.get());
     }
 
     // Set IS_ACCESSOR + caller-requested attribute bits on the shape entry.
@@ -638,12 +648,17 @@ extern "C" void js_define_accessor_partial(Item obj, Item name, Item fn,
 extern "C" Item js_to_property_key(Item key);
 extern "C" Item js_install_user_accessor(Item obj, Item name, Item fn,
                                           int is_setter) {
+    extern __thread EvalContext* context;
+    RootFrame roots((Context*)context, 3);
+    Rooted<Item> obj_root(roots, obj);
+    Rooted<Item> name_root(roots, name);
+    Rooted<Item> fn_root(roots, fn);
     // Canonicalize the property key per ES §7.1.14 ToPropertyKey: numeric/bool
     // literal keys (e.g. `{ get [1]() {} }`) must be converted to their string
     // form before the chokepoint stores under that name.
-    name = js_to_property_key(name);
-    js_define_accessor_partial(obj, name, fn, is_setter, 0);
-    return obj;
+    name_root.set(js_to_property_key(name_root.get()));
+    js_define_accessor_partial(obj_root.get(), name_root.get(), fn_root.get(), is_setter, 0);
+    return obj_root.get();
 }
 
 extern "C" Item js_get_prototype(Item object);

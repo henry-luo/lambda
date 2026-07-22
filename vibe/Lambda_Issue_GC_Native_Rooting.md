@@ -1,12 +1,49 @@
 # Native-code GC rooting: sizing, root cause, and severity
 
-**Status:** INVESTIGATION — 2026-07-22. Problem sized, root-cause pattern
-confirmed with one verified fix landed. The remaining work is a systematic
-campaign and is **not** started.
+**Status:** RESOLVED — 2026-07-22. Native GC lifetime fixes use exact
+`RootFrame` / `Rooted<Item>` ownership and explicit persistent roots only;
+conservative native-stack scanning was not restored or used as a fallback.
 
 **Found by:** the MT4 forced-GC stress sweep added in
 `vibe/Lambda_Design_MIR_Emission_Test.md` §10. This document is the follow-up
 that sizes what that sweep exposed.
+
+---
+
+## Completion update — native roots and LambdaJS bridge
+
+The initial sizing numbers below are historical discovery data, not the current
+status. The concrete failures from the forced-GC campaign have been retired:
+
+- transient JS objects, iterators, accessors, Promise reactions, DOM observer
+  state, `child_process`, and `DataTransfer` objects now hold exact roots until
+  publication;
+- Lambda module namespaces and exported `Function` values are rooted while the
+  JS Promise membrane creates their adapters;
+- `JsAccessorPair` is traced as its own FUNC-tagged layout, so getter/setter
+  callbacks remain live;
+- `JsFunction` closure environments now publish atomically, and their custom
+  compactor copies the actual JS environment layout rather than interpreting
+  it as a legacy `Function` layout.
+
+`make test-gc-rooting-core` covers the Lambda-to-JS Promise membrane directly
+under `precise-only`, collection-on-every-allocation, and freed-memory poison,
+in addition to the JIT, interpreter, Lambda MIR, static hazard, and MIR corpus
+gates. The gate passes with no conservative scan enabled.
+
+## Array/iterator completion
+
+The `Array.from(new Set(...))` regression in
+`test/js/array_callback_gc_roots.js` is fixed under precise-only forced GC.
+The fix roots the complete `Array.from` helper family, its constructor and
+mapper variants, the iterator step/close/rest helpers, `Map(iterable)`, and
+the array callback loop that retains a filter destination across an allocating
+callback. `Array.from` now roots the iterable-conversion result *before*
+allocating its destination array, which was the concrete UAF in §5.
+
+The script was removed from the stress suite's expected-failure mechanism and
+now passes JIT forced, deterministic randomized, and MIR-interpreter forced
+GC. Conservative stack scanning was neither enabled nor used by this fix.
 
 ---
 
@@ -124,8 +161,5 @@ LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 \
 ```
 
 Re-run the full sizing sweep with `python3 temp/gc_sweep.py`. The corpus-level
-gate is `make test-mir-gc-stress`; `test/js/array_callback_gc_roots.js` is
-carried there on `kKnownForcedGcFailures`, which asserts it *still* fails, so
-whoever fixes it will be told to retire the entry. It remains failing after the
-fix in §2 because a second unrooted site in `Array.from` over an iterator empties
-the array — that is the next concrete lead.
+gate is `make test-mir-gc-stress`; the former array/iterator and Lambda-Promise
+regressions run as passing exact-root tests.

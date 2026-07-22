@@ -41,37 +41,15 @@ static const char* kExtraJsScripts[] = {
     "test/js/class_field_decl_capture_nested_new.js",
     "test/js/class_method_capture_hoist.js",
     "test/js/function_decl_callback_hoist.js",
-};
-
-// Scripts that currently diverge under forced GC because of pre-existing
-// rooting bugs in the engine, not in the emission corpus. They stay in the
-// sweep and are asserted to STILL fail, so fixing one turns this test red and
-// says so; deleting an entry to make the suite green would silently drop
-// coverage. Widening the aperture beyond the handful of scripts in
-// `make test-gc-rooting-core` shows this class is not rare: a 12-script sample
-// of test/js diverged on 4, two of them SIGSEGV on the 0x9999... poison
-// pattern, which is a use-after-free of collected memory.
-static const char* kKnownForcedGcFailures[] = {
-    // "TypeError: Set.prototype.add is not callable" once the collector runs:
-    // a builtin prototype method is collected while still reachable from user
-    // code.
-    "test/js/array_callback_gc_roots.js",
+    "test/js/concurrency_lambda_promise.js",
 };
 
 struct StressScript {
     std::string path;
     mir_check::Language language = mir_check::LANG_LAMBDA;
     bool procedural = false;
-    bool known_failure = false;
     std::string name;
 };
-
-inline bool is_known_failure(const std::string& path) {
-    for (size_t i = 0; i < sizeof(kKnownForcedGcFailures) / sizeof(kKnownForcedGcFailures[0]); i++) {
-        if (path == kKnownForcedGcFailures[i]) return true;
-    }
-    return false;
-}
 
 std::vector<StressScript> collect_scripts() {
     std::vector<StressScript> scripts;
@@ -105,7 +83,6 @@ std::vector<StressScript> collect_scripts() {
         StressScript entry;
         entry.path = path;
         entry.language = mir_check::LANG_JS;
-        entry.known_failure = is_known_failure(path);
         entry.name = "regression_" + mir_check::gtest_safe_name(mir_check::basename_of(path));
         scripts.push_back(entry);
     }
@@ -175,8 +152,6 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
         << "\n--- output ---\n" << reference.output;
 
     std::vector<StressMode> modes = stress_modes();
-    int surviving_modes = 0;
-
     for (size_t m = 0; m < modes.size(); m++) {
         const StressMode& mode = modes[m];
         mir_check::ProcessSpec spec = base;
@@ -184,10 +159,6 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
         spec.env = mode.env;
 
         mir_check::ProcessResult stressed = mir_check::run_lambda_process(script.path, spec);
-        bool survived = (stressed.exit_code == 0 && stressed.output == reference.output);
-        if (survived) surviving_modes++;
-
-        if (script.known_failure) continue;  // asserted as a group below
 
         std::string context =
             "\nscript: " + script.path +
@@ -210,13 +181,6 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
         }
     }
 
-    if (script.known_failure) {
-        // an xfail that starts passing is good news that must not pass silently:
-        // the entry has to be retired so the script becomes real coverage.
-        EXPECT_LT(surviving_modes, (int)modes.size())
-            << script.path << " now survives every forced-GC mode. Remove it from"
-               " kKnownForcedGcFailures so the sweep enforces it from now on.";
-    }
 }
 
 std::string script_name(const ::testing::TestParamInfo<StressScript>& info) {

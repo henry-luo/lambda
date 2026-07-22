@@ -5,6 +5,7 @@
 #include "transpiler.hpp"
 #include "shape_pool.hpp"
 #include "concurrency_js.h"
+#include "runtime/lambda-root-frame.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/mem_factory.h"
 #include "../lib/hashmap_helpers.h"
@@ -14,6 +15,10 @@
 
 #include <string.h>
 #include <stdlib.h>
+
+extern __thread EvalContext* context;
+extern "C" void heap_register_gc_root(uint64_t* slot);
+extern "C" void heap_unregister_gc_root(uint64_t* slot);
 
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" Item js_new_object();
@@ -31,8 +36,11 @@ bool is_sys_func_name(const char* name, int name_len);
 static struct hashmap* registry_map = NULL;
 
 static Item js_namespace_get(Item namespace_obj, const char* name) {
+    RootFrame roots((Context*)context, 2);
+    Rooted<Item> namespace_root(roots, namespace_obj);
     Item key = {.item = s2it(heap_create_name(name))};
-    return js_property_get(namespace_obj, key);
+    Rooted<Item> key_root(roots, key);
+    return js_property_get(namespace_root.get(), key_root.get());
 }
 
 static const ModuleNamespaceOps js_namespace_ops = {
@@ -62,6 +70,7 @@ void module_registry_cleanup(void) {
     while (hashmap_iter(registry_map, &iter, &item)) {
         RegistryEntry* entry = (RegistryEntry*)item;
         if (entry->desc) {
+            heap_unregister_gc_root(&entry->desc->namespace_obj.item);
             mem_free((void*)entry->desc->path);
             mem_free(entry->desc);
         }
@@ -95,6 +104,9 @@ void module_register_with_namespace_ops(const char* path, const char* lang,
     desc->source_lang = lang;  // static string, not owned
     desc->profile = lang_profile_for_name(lang);
     desc->namespace_obj = namespace_obj;
+    // Module descriptors live outside the GC heap. Keep their namespace slot
+    // rooted so exact collection cannot reclaim exports between module loads.
+    heap_register_gc_root(&desc->namespace_obj.item);
     desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
     desc->mir_ctx = mir_ctx;
     desc->initialized = true;
@@ -142,6 +154,9 @@ ModuleDescriptor* module_register_loading_with_namespace_ops(
     desc->profile = lang_profile_for_name(lang);
     desc->namespace_obj = namespace_ops && namespace_ops->create
         ? namespace_ops->create() : js_new_object();
+    // A loading namespace can be observed by cyclic imports before it is
+    // initialized, so its native descriptor must own an exact GC root now.
+    heap_register_gc_root(&desc->namespace_obj.item);
     desc->namespace_ops = namespace_ops ? namespace_ops : &js_namespace_ops;
     desc->mir_ctx = NULL;
     desc->initialized = false;
@@ -172,6 +187,8 @@ Item module_build_lambda_namespace(void* script_ptr) {
 
     AstScript* ast = (AstScript*)script->ast_root;
     Item ns = js_new_object();
+    RootFrame roots((Context*)context, 1);
+    Rooted<Item> namespace_root(roots, ns);
 
     AstNode* node = ast->child;
     while (node) {
@@ -211,7 +228,11 @@ Item module_build_lambda_namespace(void* script_ptr) {
                         log_error("module_registry: pub fn '%s' shadows system function", export_name);
                     }
                     Item key = {.item = s2it(heap_create_name(export_name))};
+                    RootFrame export_roots((Context*)context, 3);
+                    Rooted<Item> key_root(export_roots, key);
                     Function* fn = to_fn_named((fn_ptr)func_ptr, arity, export_name);
+                    Rooted<Item> function_root(export_roots,
+                        (Item){.function = fn});
                     if (uses_public_wrapper) {
                         // Published MIR wrappers require the explicit dynamic-call home.
                         lambda_function_mark_mir_public_abi(fn);
@@ -220,9 +241,12 @@ Item module_build_lambda_namespace(void* script_ptr) {
                     // uniform Promise membrane, even when a particular call
                     // completes without parking.
                     Item val = node->node_type == AST_NODE_PROC
-                        ? lambda_js_wrap_procedure(fn, arity, export_name)
-                        : (Item){.function = fn};
-                    js_property_set(ns, key, val);
+                        ? lambda_js_wrap_procedure(function_root.get().function, arity, export_name)
+                        : function_root.get();
+                    Rooted<Item> value_root(export_roots, val);
+                    // The namespace and export pair remain unpublished until
+                    // this store completes; root all three across map growth.
+                    js_property_set(namespace_root.get(), key_root.get(), value_root.get());
                     log_debug("module_registry: lambda ns export fn '%s' arity=%d", export_name, arity);
                 }
             }
@@ -238,7 +262,7 @@ Item module_build_lambda_namespace(void* script_ptr) {
         node = node->next;
     }
 
-    return ns;
+    return namespace_root.get();
 }
 
 // =============================================================================
