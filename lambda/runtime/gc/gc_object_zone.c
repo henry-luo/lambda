@@ -302,8 +302,8 @@ int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr) {
     if (lo >= oz->range_count) return 0;
     if (p < oz->slab_ranges[lo].base || p >= oz->slab_ranges[lo].end) return 0;
 
-    // Conservative root scanning can see arbitrary words that point inside an
-    // object-zone slab. Only accept exact user pointers at allocated slot starts.
+    // Exact Item roots must name an allocated user slot, never an interior slab
+    // address, before the collector accepts the pointer as a managed object.
     for (int cls = 0; cls < GC_NUM_SIZE_CLASSES; cls++) {
         size_t slot_size = sizeof(gc_header_t) + SIZE_CLASSES[cls];
         gc_object_slab_t* slab = oz->slabs[cls];

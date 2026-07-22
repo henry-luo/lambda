@@ -2,8 +2,8 @@
 """Reject unsafe exact-root patterns in migrated native runtime code.
 
 This is the native-side ratchet paired with check_gc_effects.py. It is not a
-C++ type checker; it deliberately targets the failure patterns that made the
-old conservative scan necessary: registering addresses of automatic locals,
+C++ type checker; it deliberately targets the failure patterns that violate
+the exact-root contract: registering addresses of automatic locals,
 balanced register/unregister pairs used as transient guards, and one-time
 process booleans guarding heap-local root registries.
 """

@@ -2501,7 +2501,7 @@ static Item fs_get_filehandle_prototype(void) {
     if (fs_filehandle_proto.item != 0) return fs_filehandle_proto;
 
     // Constructor/prototype caches survive the native construction call and
-    // must own their partially built objects under precise-only collection.
+    // must own their partially built objects under exact-root collection.
     heap_register_gc_root(&fs_filehandle_proto.item);
     fs_filehandle_proto = js_new_object();
     Item fd_getter = js_new_function((void*)js_fs_filehandle_fd_getter, 0);

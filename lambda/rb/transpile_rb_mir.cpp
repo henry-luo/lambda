@@ -4584,7 +4584,12 @@ static void rm_transpile_ast(RbMirTranspiler* mt, RbAstNode* root) {
 
 Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* filename) {
     log_debug("rb-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
-    if (!runtime_require_gc_compatibility(runtime, "Ruby")) return ItemError;
+    (void)runtime;
+    (void)rb_source;
+    // Re-enable only after Ruby MIR emits canonical side-stack roots for every
+    // live Item across MAY_GC imports.
+    log_error("rb-mir: disabled until its precise GC root contract is implemented");
+    return ItemError;
 
     // create Ruby transpiler
     RbTranspiler* tp = rb_transpiler_create(runtime);

@@ -22,7 +22,6 @@ const JubeLanguageDef* jube_module_language(const JubeModuleDef* module);
 void jube_notify_heap_cleanup(void* heap);
 const JubeTypeDef* jube_find_type_by_host_type(const void* host_type);
 void jube_modules_runtime_reset(void);
-bool jube_has_legacy_rooting_abi(void);
 
 // Internal host bridge for import-time language dispatch.  The returned
 // wrapper is opaque to the language module and is always released by the

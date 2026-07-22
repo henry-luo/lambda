@@ -1232,7 +1232,7 @@ extern "C" Item lambda_task_start_function_scoped(Item function, List* args, boo
     frame->roots[0] = function;
     for (int i = 0; i < arg_count; i++) frame->roots[i + 1] = args->items[i];
     // Task creation allocates the GC-managed handle. Register the launch values
-    // before that allocation so precise-only GC cannot reclaim the function or
+    // before that allocation so exact-root GC cannot reclaim the function or
     // arguments in the gap before the new task assumes ownership of this range.
     if (scheduler_has_heap()) {
         heap_register_gc_root_range((uint64_t*)frame->roots, frame->root_count);

@@ -531,7 +531,7 @@ help:
 	@echo "  test-all      - Run ALL test suites (baseline + extended)"
 	@echo "  test-all-baseline - Run ALL BASELINE test suites (core functionality, must pass 100%)"
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
-	@echo "  test-gc-rooting - Run precise-only forced-GC JIT/interpreter/root-effect gates"
+	@echo "  test-gc-rooting - Run exact-root forced-GC JIT/interpreter/root-effect gates"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-radiant-baseline - Run shared layout baselines ($(LAYOUT_BASELINE_SUITES)) + render visual + other checks"
@@ -1006,42 +1006,42 @@ test-lambda-baseline: build-test test-input-baseline
 # Python, while the aggregate target preserves the historical full check.
 test-gc-rooting-core: build
 	@mkdir -p temp
-	@echo "Running LambdaJS JIT precise-only forced-GC gate..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@echo "Running LambdaJS JIT exact-root forced-GC gate..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_jit.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_jit.txt
-	@echo "Running Lambda-to-JS Promise membrane precise-only forced-GC gate..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@echo "Running Lambda-to-JS Promise membrane exact-root forced-GC gate..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/concurrency_lambda_promise.js > temp/gc_rooting_lambda_promise.txt
 	@diff -u test/js/concurrency_lambda_promise.txt temp/gc_rooting_lambda_promise.txt
 	@echo "Running LambdaJS deterministic randomized forced-GC gate..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_SEED=1592594996 LAMBDA_GC_FORCE_ONE_IN=3 LAMBDA_GC_POISON_FREED=1 \
+	@LAMBDA_GC_FORCE_SEED=1592594996 LAMBDA_GC_FORCE_ONE_IN=3 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_random.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_random.txt
-	@echo "Running LambdaJS MIR-interpreter precise-only forced-GC gate..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@echo "Running LambdaJS MIR-interpreter exact-root forced-GC gate..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe js --mir-interp --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_interp.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_interp.txt
-	@echo "Running Lambda MIR-Direct precise-only forced-GC gate..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@echo "Running Lambda MIR-Direct exact-root forced-GC gate..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe run --no-log test/lambda/proc/proc_var.ls > temp/gc_rooting_lambda.txt
 	@diff -u test/lambda/proc/proc_var.txt temp/gc_rooting_lambda.txt
 	@echo "Running suspended partial-Item construction forced-GC gate..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe run --no-log test/lambda/proc/proc_async_partial_item_gc.ls > temp/gc_rooting_proc_partial_item.txt
 	@diff -u test/lambda/proc/proc_async_partial_item_gc.txt temp/gc_rooting_proc_partial_item.txt
 	@echo "Running module-owned wide-scalar forced-GC gate..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe --no-log test/lambda/uint64_storage_lifetime.ls > temp/gc_rooting_module_scalars.txt
 	@diff -u test/lambda/uint64_storage_lifetime.txt temp/gc_rooting_module_scalars.txt
 	@echo "Running number-model exact-conversion forced-GC gates..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe --no-log test/lambda/number_model_realign.ls > temp/gc_rooting_number_model_jit.txt
 	@diff -u test/lambda/number_model_realign.txt temp/gc_rooting_number_model_jit.txt
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe --mir-interp --no-log test/lambda/number_model_realign.ls > temp/gc_rooting_number_model_interp.txt
 	@diff -u test/lambda/number_model_realign.txt temp/gc_rooting_number_model_interp.txt
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		./lambda.exe run --no-log test/lambda/proc/proc_number_model_realign.ls > temp/gc_rooting_number_model_proc.txt
 	@diff -u -b -B test/lambda/proc/proc_number_model_realign.txt temp/gc_rooting_number_model_proc.txt
 	@python3 utils/check_gc_effects.py
@@ -1052,7 +1052,7 @@ test-gc-rooting-core: build
 	@# the same script's unstressed output, so adding a fixture extends this
 	@# gate automatically. See MT4 in vibe/Lambda_Design_MIR_Emission_Test.md.
 	@$(MAKE) --no-print-directory test-mir-gc-stress
-	@echo "Core precise-root forced-GC gates passed."
+	@echo "Core exact-root forced-GC gates passed."
 
 # Forced-GC stress sweep over the MIR emission corpus (MT4). Also runs inside
 # test-lambda-baseline; this target is the standalone entry point.
@@ -1063,18 +1063,18 @@ test-mir-gc-stress:
 
 test-gc-rooting-python: build build-lang-python
 	@mkdir -p temp
-	@echo "Running LambdaPy closure precise-only forced-GC gate..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@echo "Running LambdaPy closure exact-root forced-GC gate..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		$${LAMBDA_PY_HOST_EXE:-./lambda.exe} py --no-log test/py/test_py_closures.py > temp/gc_rooting_py_closures.txt
 	@diff -u test/py/test_py_closures.txt temp/gc_rooting_py_closures.txt
-	@echo "Running LambdaPy generator precise-only forced-GC gate..."
-	@LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
+	@echo "Running LambdaPy generator exact-root forced-GC gate..."
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 \
 		$${LAMBDA_PY_HOST_EXE:-./lambda.exe} py --no-log test/py/test_py_generators.py > temp/gc_rooting_py_generators.txt
 	@diff -u test/py/test_py_generators.txt temp/gc_rooting_py_generators.txt
-	@echo "Hosted-Python precise-root forced-GC gates passed."
+	@echo "Hosted-Python exact-root forced-GC gates passed."
 
 test-gc-rooting: test-gc-rooting-core test-gc-rooting-python
-	@echo "Aggregate precise-root forced-GC gates passed."
+	@echo "Aggregate exact-root forced-GC gates passed."
 
 test-redex-baseline: build
 	@echo "Running Redex formal semantics baseline verification..."

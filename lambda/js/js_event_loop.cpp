@@ -1692,7 +1692,7 @@ extern "C" void js_event_loop_init(void) {
     timer_nan_warning_emitted = false;
     timer_negative_warning_emitted = false;
 
-    // register task ring buffers as GC roots (static memory invisible to stack scanning)
+    // register task ring buffers as exact roots because static storage is not on the side stack
     static struct gc_heap* statics_rooted_gc = NULL;
     struct gc_heap* active_gc = context && context->heap ? context->heap->gc : NULL;
     if (active_gc && statics_rooted_gc != active_gc) {

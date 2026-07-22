@@ -3515,7 +3515,7 @@ extern "C" void bash_runtime_init(void) {
     Item optind_val = {.item = s2it(heap_create_name("1", 1))};
     bash_set_var(optind_name, optind_val);
     log_debug("bash: runtime initialized");
-    // register bash_stdin_item as GC root (BSS memory invisible to stack scanning)
+    // register bash_stdin_item as an exact external root
     static bool statics_rooted = false;
     if (!statics_rooted) {
         heap_register_gc_root(&bash_stdin_item.item);

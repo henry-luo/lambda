@@ -599,7 +599,7 @@ static inline void em_root_propagate_mov_candidates(MirEmitter* em,
                     candidate_by_reg_capacity, insn->ops[0].u.reg,
                     value_class, 0)) {
                 log_error("mir-root-candidates: MOV propagation allocation failed");
-                // Dropping a candidate would make precise-only generated code
+                // Dropping a candidate would make exact-root generated code
                 // unsound. Compilation metadata OOM is therefore fail-stop.
                 abort();
             }

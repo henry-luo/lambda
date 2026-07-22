@@ -49,7 +49,7 @@ static inline bool rb_are_numeric_types(TypeId left, TypeId right) {
 
 extern "C" void rb_runtime_set_input(void* input_ptr) {
     rb_input = input_ptr;
-    // register static Item array as GC root (BSS memory invisible to stack scanning)
+    // register static Item array as an exact external root
     static bool statics_rooted = false;
     if (!statics_rooted) {
         heap_register_gc_root_range((uint64_t*)rb_module_vars, RB_MODULE_VAR_MAX);

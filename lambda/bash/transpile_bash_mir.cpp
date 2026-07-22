@@ -6107,7 +6107,12 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
 
 Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char* filename) {
     log_debug("bash-mir: starting transpilation for '%s'", filename ? filename : "<string>");
-    if (!runtime_require_gc_compatibility(runtime, "Bash")) return ItemError;
+    (void)runtime;
+    (void)bash_source;
+    // Re-enable only after Bash MIR emits canonical side-stack roots for every
+    // live Item across MAY_GC imports.
+    log_error("bash-mir: disabled until its precise GC root contract is implemented");
+    return ItemError;
 
     // store runtime for bash_source_file() to use
     bash_source_runtime = runtime;

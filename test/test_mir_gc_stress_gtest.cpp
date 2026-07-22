@@ -7,7 +7,7 @@
 // rather than a static pass: re-implementing CFG liveness would duplicate
 // em_finalize_semantic_root_write_back, the hardest code in the emitter, and
 // rot alongside it. Instead this binary runs each corpus script under
-// precise-only rooting with collection forced at every allocation and freed
+// exact-root rooting with collection forced at every allocation and freed
 // memory poisoned. A value that should be rooted but is not becomes
 // unreachable, is collected, and its next use fails deterministically.
 //
@@ -105,7 +105,6 @@ std::vector<StressMode> stress_modes() {
     StressMode jit_forced;
     jit_forced.name = "jit-forced";
     jit_forced.mir_interp = false;
-    jit_forced.env.push_back(std::make_pair(std::string("LAMBDA_GC_ROOT_MODE"), std::string("precise-only")));
     jit_forced.env.push_back(std::make_pair(std::string("LAMBDA_GC_FORCE_EVERY"), std::string("1")));
     jit_forced.env.push_back(std::make_pair(std::string("LAMBDA_GC_POISON_FREED"), std::string("1")));
     modes.push_back(jit_forced);
@@ -115,7 +114,6 @@ std::vector<StressMode> stress_modes() {
     StressMode randomized;
     randomized.name = "randomized-forced";
     randomized.mir_interp = false;
-    randomized.env.push_back(std::make_pair(std::string("LAMBDA_GC_ROOT_MODE"), std::string("precise-only")));
     randomized.env.push_back(std::make_pair(std::string("LAMBDA_GC_FORCE_SEED"), std::string("1592594996")));
     randomized.env.push_back(std::make_pair(std::string("LAMBDA_GC_FORCE_ONE_IN"), std::string("3")));
     randomized.env.push_back(std::make_pair(std::string("LAMBDA_GC_POISON_FREED"), std::string("1")));
@@ -126,7 +124,6 @@ std::vector<StressMode> stress_modes() {
     StressMode interp_forced;
     interp_forced.name = "interp-forced";
     interp_forced.mir_interp = true;
-    interp_forced.env.push_back(std::make_pair(std::string("LAMBDA_GC_ROOT_MODE"), std::string("precise-only")));
     interp_forced.env.push_back(std::make_pair(std::string("LAMBDA_GC_FORCE_EVERY"), std::string("1")));
     interp_forced.env.push_back(std::make_pair(std::string("LAMBDA_GC_POISON_FREED"), std::string("1")));
     modes.push_back(interp_forced);
@@ -163,7 +160,7 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
         std::string context =
             "\nscript: " + script.path +
             "\nmode:   " + mode.name +
-            "\nReproduce with LAMBDA_GC_ROOT_MODE=precise-only plus that mode's"
+            "\nReproduce with that mode's"
             " forcing variables; LAMBDA_MIR_ROOT_MODE=write-through is the"
             " bisection oracle when this fails.";
 

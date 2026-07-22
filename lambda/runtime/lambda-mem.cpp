@@ -19,9 +19,6 @@
 #include <mpdecimal.h>
 #include <math.h>
 #include <errno.h>
-#if GC_CONSERVATIVE_SCAN_AVAILABLE
-#include <setjmp.h>
-#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -211,109 +208,6 @@ static char ascii_char_storage[128 * ASCII_CHAR_ENTRY_SIZE];
 static String* ascii_char_table[128];
 static bool ascii_char_table_initialized = false;
 
-static bool heap_parse_requested_gc_root_mode(gc_root_mode_t* mode_out) {
-    if (!mode_out) return false;
-    const char* requested = getenv("LAMBDA_GC_ROOT_MODE");
-    if (!requested || !requested[0]) return false;
-
-    gc_root_mode_t mode = GC_ROOT_MODE_COMPATIBILITY;
-    if (strcmp(requested, "compatibility") == 0) {
-        mode = GC_ROOT_MODE_COMPATIBILITY;
-    } else if (strcmp(requested, "shadow-verify") == 0) {
-        mode = GC_ROOT_MODE_SHADOW_VERIFY;
-    } else if (strcmp(requested, "precise-only") == 0) {
-        mode = GC_ROOT_MODE_PRECISE_ONLY;
-    } else {
-        log_error("gc-root-mode: invalid LAMBDA_GC_ROOT_MODE=%s; expected compatibility, shadow-verify, or precise-only",
-            requested);
-        // An invalid override must fail toward the scanner-capable mode; it
-        // must never silently select precise execution against user intent.
-        *mode_out = GC_ROOT_MODE_COMPATIBILITY;
-        return true;
-    }
-    *mode_out = mode;
-    return true;
-}
-
-static gc_root_mode_t heap_default_gc_root_mode(void) {
-#ifdef LAMBDA_C2MIR
-    // C2MIR has no exact frame contract and is intentionally unchanged, so a
-    // build that admits it must start in sticky compatibility mode.
-    return GC_ROOT_MODE_COMPATIBILITY;
-#else
-    // MIR-Direct and LambdaJS now publish complete canonical roots. Keeping
-    // the historical scanner as their implicit default would hide regressions
-    // and defeat scan retirement from precise execution.
-    return GC_ROOT_MODE_PRECISE_ONLY;
-#endif
-}
-
-static void heap_configure_gc_root_mode(gc_heap_t* gc) {
-    if (!gc) return;
-    gc_root_mode_t mode;
-    bool explicit_mode = heap_parse_requested_gc_root_mode(&mode);
-    if (!explicit_mode) mode = heap_default_gc_root_mode();
-    if (mode != GC_ROOT_MODE_PRECISE_ONLY &&
-            !gc_conservative_scan_available()) {
-        // A scanner-free release cannot honor a compatibility request; fail
-        // before executing instead of silently running an unsound tier.
-        log_error("gc-root-mode: requested %s in scanner-free build",
-            gc_root_mode_name(mode));
-        abort();
-    }
-    gc_set_root_mode(gc, mode);
-    log_info("gc-root-mode: configured %s (%s) for heap=%p",
-        gc_root_mode_name(mode), explicit_mode ? "explicit" : "build-default",
-        (void*)gc);
-}
-
-extern "C" bool heap_gc_precise_only_requested_or_active(Heap* heap) {
-    if (heap && heap->gc) {
-        return gc_get_root_mode(heap->gc) == GC_ROOT_MODE_PRECISE_ONLY;
-    }
-    gc_root_mode_t requested_mode;
-    if (heap_parse_requested_gc_root_mode(&requested_mode)) {
-        return requested_mode == GC_ROOT_MODE_PRECISE_ONLY;
-    }
-    return heap_default_gc_root_mode() == GC_ROOT_MODE_PRECISE_ONLY;
-}
-
-extern "C" void heap_gc_force_compatibility(Heap* heap) {
-    if (!heap || !heap->gc) return;
-    if (!gc_conservative_scan_available()) {
-        // Old Jube/C2MIR activation chains need the scanner. A scanner-free
-        // binary must reject that capability rather than downgrade precisely
-        // rooted frames in place.
-        log_error("gc-root-mode: conservative-only tier rejected by scanner-free build");
-        abort();
-    }
-    if (gc_get_root_mode(heap->gc) == GC_ROOT_MODE_PRECISE_ONLY) {
-        // A context capability is sticky. Silently downgrading an explicitly
-        // precise heap would hide an unported activation chain from its gate.
-        log_error("gc-root-mode: cannot enter compatibility tier from precise-only context");
-        return;
-    }
-    gc_set_root_mode(heap->gc, GC_ROOT_MODE_COMPATIBILITY);
-    log_info("gc-root-mode: conservative-only execution made compatibility sticky for heap=%p",
-        (void*)heap->gc);
-}
-
-extern "C" bool runtime_require_gc_compatibility(Runtime* runtime,
-        const char* tier_name) {
-    if (runtime) runtime->gc_compatibility_required = true;
-    Heap* heap = runtime && runtime->heap
-        ? runtime->heap : (context ? context->heap : NULL);
-    if (heap_gc_precise_only_requested_or_active(heap)) {
-        // Unported guests have no canonical frame contract. Reject them before
-        // compilation/execution rather than relying on accidental native roots.
-        log_error("gc-root-mode: rejecting %s because precise-only context requires canonical roots",
-            tier_name ? tier_name : "conservative-only tier");
-        return false;
-    }
-    if (heap) heap_gc_force_compatibility(heap);
-    return true;
-}
-
 static void heap_configure_gc_force_schedule(gc_heap_t* gc) {
     if (!gc) return;
     const char* requested = getenv("LAMBDA_GC_FORCE_EVERY");
@@ -405,7 +299,6 @@ void heap_init() {
 
     // set the auto-collection callback so GC triggers when data zone fills up
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
-    heap_configure_gc_root_mode(context->heap->gc);
     heap_configure_gc_force_schedule(context->heap->gc);
     heap_configure_gc_poisoning(context->heap->gc);
 
@@ -435,7 +328,6 @@ void heap_init_with_pool(Pool* pool) {
     context->heap->result_root = context->result.item;
     gc_register_root(context->heap->gc, &context->heap->result_root);
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
-    heap_configure_gc_root_mode(context->heap->gc);
     heap_configure_gc_force_schedule(context->heap->gc);
     heap_configure_gc_poisoning(context->heap->gc);
     context->heap->gc->vmap_trace = vmap_gc_trace;
@@ -453,67 +345,21 @@ void heap_init_with_pool(Pool* pool) {
     }
 }
 
-// trigger a GC collection from the runtime.
-// gathers exact roots and, only in scanner-capable compatibility/debug builds,
-// native-stack candidates before running the collector.
-// Scanner-capable compatibility/debug builds use setjmp to flush registers;
-// scanner-free release builds compile that path out entirely.
+// Trigger a collection from the runtime using only registered and side-stack
+// Item roots. Native C/C++ frames are never inspected.
 __attribute__((noinline))
 extern "C" void heap_gc_collect(void) {
     JS_WEAK_PROPERTY_SET_BRANCH("heap_gc_collect");
     if (!context || !context->heap || !context->heap->gc) return;
     gc_heap_t* gc = context->heap->gc;
 
-    gc_root_mode_t root_mode = gc_get_root_mode(gc);
-#if GC_CONSERVATIVE_SCAN_AVAILABLE
-    uintptr_t stack_base = 0;
-    uintptr_t stack_current = 0;
-    jmp_buf regs;
-    if (root_mode != GC_ROOT_MODE_PRECISE_ONLY) {
-        // Compatibility and shadow modes still need register materialization;
-        // precise-only must not discover roots from either registers or stack.
-        setjmp(regs);
-        stack_base = _lambda_stack_base;
-#if defined(__aarch64__)
-        asm volatile("mov %0, sp" : "=r"(stack_current));
-#elif defined(__x86_64__)
-        asm volatile("movq %%rsp, %0" : "=r"(stack_current));
-#else
-        volatile int marker;
-        stack_current = (uintptr_t)&marker;
-#endif
-    }
-    (void)regs;
-#else
-    if (root_mode != GC_ROOT_MODE_PRECISE_ONLY) {
-        log_error("heap_gc_collect: non-precise mode reached scanner-free build");
-        abort();
-    }
-#endif
-
-#if GC_CONSERVATIVE_SCAN_AVAILABLE
-    log_debug("heap_gc_collect: mode=%s stack_base=%p stack_current=%p",
-        gc_root_mode_name(root_mode),
-        (void*)stack_base, (void*)stack_current);
-#else
-    log_debug("heap_gc_collect: mode=%s exact-roots-only",
-        gc_root_mode_name(root_mode));
-#endif
-
     int64_t side_root_count = 0;
     uint64_t* side_root_base = context->side_root_base;
     if (side_root_base && context->side_root_top >= side_root_base) {
         side_root_count = context->side_root_top - side_root_base;
     }
-#if GC_CONSERVATIVE_SCAN_AVAILABLE
-    gc_collect_with_root_region(gc, NULL, 0,
-        stack_base, stack_current, side_root_base, side_root_count);
-#else
-    // Scanner-free builds omit stack bounds from the collector ABI so precise
-    // execution cannot accidentally regain a conservative dependency.
     gc_collect_with_root_region(gc, NULL, 0,
         side_root_base, side_root_count);
-#endif
     // Side-stack virtual reservations are cheap; return untouched committed
     // pages after a collection so transient recursion does not set the RSS floor.
     lambda_side_stack_decommit_unused(context);

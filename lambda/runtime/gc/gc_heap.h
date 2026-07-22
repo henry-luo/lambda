@@ -132,39 +132,6 @@ typedef struct gc_weak_slot {
 } gc_weak_slot_t;
 
 /**
- * Root-discovery mode for one GC heap. Compatibility is the production
- * default while precise rooting is being migrated. Shadow verification keeps
- * the conservative scan but reports objects that precise roots did not reach.
- */
-typedef enum gc_root_mode {
-    GC_ROOT_MODE_COMPATIBILITY = 0,
-    GC_ROOT_MODE_SHADOW_VERIFY,
-    GC_ROOT_MODE_PRECISE_ONLY,
-} gc_root_mode_t;
-
-// Release builds that cannot admit C2MIR omit the native-stack scanner.
-// Debug builds retain it solely for shadow verification; C2MIR builds retain
-// it for their sticky compatibility contexts.
-#if defined(LAMBDA_C2MIR) || !defined(NDEBUG)
-#define GC_CONSERVATIVE_SCAN_AVAILABLE 1
-#else
-#define GC_CONSERVATIVE_SCAN_AVAILABLE 0
-#endif
-
-typedef struct gc_root_stats {
-    size_t precise_root_count;
-    size_t conservative_candidate_words;
-    size_t conservative_new_objects;
-    size_t conservative_scan_bytes;
-    size_t conservative_skipped_poisoned_words;
-} gc_root_stats_t;
-
-typedef struct gc_root_type_stat {
-    uint16_t type_tag;
-    size_t count;
-} gc_root_type_stat_t;
-
-/**
  * GCHeap - manages all GC-tracked allocations.
  *
  * Uses dual-zone architecture:
@@ -235,14 +202,6 @@ typedef struct gc_heap {
     gc_root_range_t* root_ranges;
     int root_range_count;
     int root_range_capacity;
-
-    // Root migration diagnostics. The mode is sticky for the heap unless an
-    // explicit test/debug API changes it before executing guest code.
-    gc_root_mode_t root_mode;
-    gc_root_stats_t last_root_stats;
-    gc_root_type_stat_t* root_type_stats;
-    int root_type_stat_count;
-    int root_type_stat_capacity;
 
     // Deterministic forced-GC schedule for safepoint stress. Zero disables it.
     size_t force_collect_interval;
@@ -440,18 +399,6 @@ void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count);
 void gc_unregister_root_range(gc_heap_t* gc, uint64_t* base);
 
 /**
- * Configure and inspect collector root discovery. Precise-only mode is a
- * verification facility until every active execution tier has exact roots.
- */
-void gc_set_root_mode(gc_heap_t* gc, gc_root_mode_t mode);
-gc_root_mode_t gc_get_root_mode(const gc_heap_t* gc);
-const char* gc_root_mode_name(gc_root_mode_t mode);
-int gc_conservative_scan_available(void);
-const gc_root_stats_t* gc_get_last_root_stats(const gc_heap_t* gc);
-size_t gc_get_last_conservative_type_count(const gc_heap_t* gc,
-                                           uint16_t type_tag);
-
-/**
  * Force the existing collection callback before every Nth public GC
  * allocation. This is disabled by default and intended for deterministic
  * rooting stress at allocator boundaries that are already MAY_GC.
@@ -470,8 +417,7 @@ int gc_get_poison_freed(const gc_heap_t* gc);
 
 /**
  * Run a full garbage collection cycle:
- *   1. Mark: scan registered and explicit roots; compatibility builds also
- *      scan the native stack
+ *   1. Mark: scan registered, side-stack, and explicit Item roots
  *   2. Compact: copy surviving data zone buffers to tenured data zone
  *   3. Sweep: free unmarked objects back to free lists
  *   4. Reset nursery data zone
@@ -480,21 +426,13 @@ int gc_get_poison_freed(const gc_heap_t* gc);
  * @param extra_roots   array of additional root Items (may be NULL)
  * @param extra_count   number of additional root Items
  */
-#if GC_CONSERVATIVE_SCAN_AVAILABLE
-void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
-                uintptr_t stack_base, uintptr_t stack_current);
-void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
-                int extra_count, uintptr_t stack_base, uintptr_t stack_current,
-                uint64_t* root_base, int64_t root_count);
-#else
 void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count);
 void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
                 int extra_count, uint64_t* root_base, int64_t root_count);
-#endif
 
 /**
  * Mark a single Item as reachable (pushes to mark stack if GC-managed).
- * Public for use by external root scanners.
+ * Public for exact native root providers.
  */
 void gc_mark_item(gc_heap_t* gc, uint64_t item);
 void gc_mark_object_ptr(gc_heap_t* gc, void* ptr);

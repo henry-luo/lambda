@@ -18,7 +18,7 @@ These rules MUST be followed. Violations are considered errors.
 12. When fixing a bug, ALWAYS add a brief code comment at the fix point explaining the root cause or invariant being protected. Do not add generic narration.
 13. **NEVER duplicate code.** Grep for an existing helper before writing one. At the 3rd near-identical variant (type/kind/case), extract the shared shape first. To reuse another file's `static`, promote it to the module header — never copy it.
 14. **The legacy C2MIR path is FROZEN.** and new runtime/ABI/design work do NOT need C2MIR support.
-15. **NEVER restore or rely on conservative native-stack GC scanning.** Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership; compatibility scanning is diagnostic-only and must not become a workaround or fallback.
+15. **NEVER restore or rely on conservative native-stack GC scanning.** It is retired. Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership only.
 
 | DON'T | DO |
 |-------|-----|

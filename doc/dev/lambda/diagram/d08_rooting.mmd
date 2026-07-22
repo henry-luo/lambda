@@ -4,16 +4,11 @@ flowchart LR
     RANGES["Registered root RANGES\npersistent contiguous Item[]\nmodule vars and JS args stack"]
     SIDE["Execution root side-stack\nlive base..top Item slice\nstatic per-function slots"]
     EXTRA["Other caller extra_roots"]
-    STACK["Conservative C-stack scan (gc_scan_stack)\nevery aligned 8-byte word SP -> stack_base\nitem_to_ptr decode, mark if GC object"]
   end
-
-  REG["setjmp register flush\n(heap_gc_collect)"]
-  REG -->|"spills live regs onto C stack"| STACK
 
   SLOTS --> MARK["gc_mark_item / gc_trace_object\n(precise per TypeId)"]
   RANGES --> MARK
   SIDE --> MARK
   EXTRA --> MARK
-  STACK --> MARK
 
   MARK --> LIVE["live object graph retained\n(non-moving -> Item pointers stay valid)"]

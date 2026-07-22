@@ -43,7 +43,6 @@ static JubeStaticModuleEntry jube_static_modules[JUBE_STATIC_MODULE_CAPACITY];
 static int jube_static_modules_count = 0;
 static bool jube_dynamic_modules_from_env_loaded = false;
 static bool jube_manifest_paths_scanned = false;
-static bool jube_legacy_rooting_abi_loaded = false;
 static char jube_host_module_root[1024];
 extern __thread EvalContext* context;
 extern "C" Context* _lambda_rt;
@@ -1146,8 +1145,8 @@ static Input* jube_host_data_input(void* session) {
 
 static int jube_host_opaque_persistent_root_register(void* session, uint64_t* slot) {
     if (!jube_host_data_input(session) || !slot) return -1;
-    // A TLS address is invisible to stack scanning, so keep its registration
-    // with the active guest heap rather than exposing that heap to the module.
+    // TLS storage is outside the side-root stack, so register its exact Item
+    // slot with the active guest heap rather than exposing that heap to a module.
     heap_register_gc_root(slot);
     return 0;
 }
@@ -1605,11 +1604,10 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
         return -1;
     }
     if (module->abi_version == JUBE_ABI_VERSION_LEGACY) {
-        // v1 exposes persistent roots but no scoped native handles. Once one
-        // is admitted, its activation chains require conservative scanning.
-        jube_legacy_rooting_abi_loaded = true;
-        log_info("JUBE_REG: module '%s' uses legacy rooting ABI; compatibility GC is required",
-            module->name);
+        // v1 lacks scoped native handles. Re-enable only after the guest ABI
+        // can publish exact roots for every live Item across MAY_GC calls.
+        log_error("JUBE_REG: module '%s' uses retired legacy rooting ABI", module->name);
+        return -1;
     }
     // v1 modules stop at JUBE_MODULE_DEF_V1_SIZE; the DOM3 tail is additive and
     // size-gated, so only the frozen v1 prefix is a hard requirement here.
@@ -1685,10 +1683,6 @@ static int jube_register_module_descriptor(const JubeModuleDef* module, void* dy
 
 int jube_register_static_module(const JubeModuleDef* module) {
     return jube_register_module_descriptor(module, NULL, "static");
-}
-
-bool jube_has_legacy_rooting_abi(void) {
-    return jube_legacy_rooting_abi_loaded;
 }
 
 typedef const JubeModuleDef* (*JubeDynamicModuleEntry)(void);

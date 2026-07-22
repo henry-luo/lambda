@@ -1,9 +1,9 @@
 # Lambda Stack Rooting: safepoint-current canonical slots
 
-**Status:** IMPLEMENTED — S0–S6 are complete for scanner-independent
-Lambda/LambdaJS builds. Release builds physically omit native-stack discovery
-and scanning; unchanged C2MIR and unported guest tiers are admitted only to a
-separate compatibility build/context. The current release Test262 baseline is
+**Status:** IMPLEMENTED — S0–S6 are complete for exact-rooted
+Lambda/LambdaJS builds. Every build physically omits native-stack root
+discovery. C2MIR and unported guest tiers are disabled until each publishes an
+exact-root ABI. The current release Test262 baseline is
 fully green with zero retries. Any remaining project-wide Radiant-refactor
 baseline debt is outside this design and is not an open rooting implementation
 item.
@@ -28,7 +28,8 @@ scheme and conservative-scan retirement.
 The implementation checkpoints below are chronological records. Statements in
 an earlier checkpoint that a later stage was incomplete describe that point in
 the implementation history; the **final implementation checkpoint** is the
-current status.
+current status. The historical root-mode and scan diagnostics described below
+were removed in the final retirement; they are not available in any build.
 
 ### Implementation checkpoint — 2026-07-17
 
@@ -111,8 +112,8 @@ the conservative `UNKNOWN` class. Control-flow joins and special binding
 paths still need explicit coverage before backward root-set analysis can be
 trusted. S0 is therefore **partially implemented**, not complete.
 
-The collector-side S0 diagnostics and deterministic stress hook are also now
-implemented:
+The collector-side S0 diagnostics and deterministic stress hook were recorded
+at this historical checkpoint:
 
 - every heap defaults to `compatibility`; `LAMBDA_GC_ROOT_MODE=shadow-verify`
   retains the native-stack scan and reports scan-exclusive objects, while
@@ -394,17 +395,12 @@ Verification after the flip:
 The rooting implementation is complete for Lambda MIR-Direct, LambdaJS JIT,
 and the MIR interpreter:
 
-- scanner-independent builds now create precise-only heaps by default in both
-  development and release configurations. Their release collector ABI no
-  longer takes a native stack region, and release objects/binaries contain no
-  `gc_scan_stack`, register-flushing `setjmp`, native-stack root discovery, or
-  scan-exclusive implementation. A compatibility request is rejected instead
-  of silently enabling a scanner that is not present;
-- debug/verification builds retain the scanner only for collector unit tests,
-  shadow verification, and explicitly compatible tiers. C2MIR source is
-  unchanged and cannot enter a precise context. Python, Ruby, and Bash remain
-  compatibility guests until their generated frames implement the same
-  canonical-slot protocol; their admission check occurs before execution;
+- every build creates exact-root heaps. The collector ABI no longer takes a
+  native stack region, and objects/binaries contain no native-stack root
+  discovery, register-flushing `setjmp`, or scan-exclusive implementation;
+- C2MIR and legacy Jube modules are disabled. Python, Ruby, and Bash entry
+  paths fail closed until their generated frames implement the same
+  canonical-slot protocol;
 - automatic native locals were migrated to `RootFrame`/`Rooted`; durable
   ownership uses `PersistentRooted` or stable registered ranges. Static JS
   registries re-register by heap epoch rather than process-lifetime booleans,
@@ -492,9 +488,8 @@ tier in the Lambda runtime is **safepoint-current canonical-slot frames**:
 3. **C/C++ runtime helpers** — via slot-backed handle types over the same
    side-root stack.
 
-Legacy C2MIR is an explicit exception: it remains unchanged and continues to
-use the existing conservative compatibility mode. It is not a target of this
-rooting migration and is never admitted to a precise-only context (CQ2).
+Legacy C2MIR is disabled: it remains frozen until its emitter publishes the
+same exact-root protocol. It is not a target of this rooting migration (CQ2).
 
 The central generated-code rule is: each rootable binding has a stable logical
 home and each protected temporary has a scratch home, but those slots are
@@ -505,12 +500,9 @@ write-through `Rooted<T>` discipline because C/C++ does not have the emitter's
 root-liveness analysis.
 
 End state for Lambda MIR-Direct, LambdaJS, the MIR interpreter, and migrated
-guest/helper paths: the conservative native-stack scan is **fully retired
-from precise execution contexts**. A build that retains legacy C2MIR also
-retains its isolated conservative compatibility path; a build that deletes
-the scanner cannot enable C2MIR. No C2MIR code is changed. For precise
-contexts, retirement means removing the collector's dependence on native
-stack contents:
+guest/helper paths: native-stack rooting is **fully retired from every
+execution context**. C2MIR is unavailable until it implements exact roots.
+Retirement means removing the collector's dependence on native stack contents:
 
 ```text
 remove setjmp used only for GC register flushing
@@ -537,7 +529,7 @@ The rooting design is the combination of the following contracts. None of the
 first seven can be removed independently: generated frames cover JIT values,
 native handles cover helper locals, ownership rules cover values that outlive
 an activation, unwind restoration covers paths that skip normal cleanup, and
-precise-only stress proves that the conservative scan is no longer carrying
+exact-root stress proves that native-stack discovery is no longer carrying
 correctness accidentally.
 
 ### 2.1 The seven essential contracts
@@ -826,10 +818,8 @@ mark explicit extra roots
 trace the marked object graph
 ```
 
-No `setjmp()` flush, no native stack bounds, no raw-word stack scan. During
-normal scanner-independent release execution this is the implemented collector
-path. Scanner-capable debug/verification builds and compatibility builds retain
-the old scan only behind the capability mode of §9.1.
+No `setjmp()` flush, no native stack bounds, no raw-word stack scan. This is
+the implemented collector path in every build.
 
 ## 5. Generated code: shared emitter and per-tier adoption
 
@@ -905,13 +895,13 @@ see §12.
 
 ### 5.4 Python and future guests
 
-`transpile_py_mir` currently emits **no rooting at all** — its locals survive
-on the conservative scan only, and its envs/generator frames are pool-pinned
+`transpile_py_mir` currently emits **no exact rooting** — its envs/generator
+frames are pool-pinned
 (Stack_Frame_Python PO2/PO8). Python adopts safepoint-current slots by
 construction when it ports onto the unified AST + `MirEmitter`
 (`Lambda_Unified_AST_Impl_Plan.md`; `Lambda_Impl_Stack_Frame_Py.md` P1
-already routes its frames through the shared em pair). Until then, an active
-Python module forces the compatibility mode of §9.1.
+already routes its frames through the shared em pair). Until then, the Python
+entry path is disabled.
 
 **CR6 — A guest language is precise iff it emits through the §5.1 primitives.
 No per-guest rooting dialects.**
@@ -930,13 +920,10 @@ Blocker B1 (§8) stands: current C2MIR emits no precise frames, and the
 settled position (OS6) is all-or-nothing — a partial patch would preserve
 hidden conservative dependence while hiding it from the gates.
 
-**CR7 — C2MIR remains unchanged and permanently gates the *mode*.** No C2MIR
-emission, frame, rooting, or runtime-support code is changed by this design.
-Executing a C2MIR-compiled module forces the context into compatibility mode
-(§9.1), where the existing conservative native-stack scan remains active.
-Precise-only contexts and scanner-free builds reject or omit C2MIR. Its current
-test suite remains a compatibility regression lane, not a precise-rooting
-acceptance lane. This resolves CQ2.
+**CR7 — C2MIR remains unchanged and disabled.** No C2MIR emission, frame,
+rooting, or runtime-support code is changed by this design. Re-enable it only
+after its emitter publishes exact roots at every `MAY_GC` boundary. This
+resolves CQ2.
 
 ## 6. Import tables as the single source of classification
 

@@ -20,10 +20,6 @@ void* heap_alloc(int size, TypeId type_id);
 extern "C" void* heap_calloc(size_t size, TypeId type_id);  // callable from C code (path.c)
 extern "C" String* heap_strcpy(const char* src, int64_t len);  // callable from C code (path.c)
 extern "C" void heap_gc_collect(void);                // trigger GC collection from runtime
-extern "C" bool heap_gc_precise_only_requested_or_active(Heap* heap);
-extern "C" void heap_gc_force_compatibility(Heap* heap);
-extern "C" bool runtime_require_gc_compatibility(Runtime* runtime,
-                                                   const char* tier_name);
 extern "C" void heap_register_gc_root(uint64_t* slot);   // register BSS global as GC root
 extern "C" void heap_unregister_gc_root(uint64_t* slot);  // unregister BSS global
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);  // register env array as GC roots
@@ -65,8 +61,7 @@ struct Runtime {
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
-    bool use_mir_direct; // if true, all modules (main + imports) compiled via MIR Direct instead of C2MIR
-    bool gc_compatibility_required; // sticky once this Runtime admits a conservative-only execution tier
+    bool use_mir_direct; // all executable Lambda paths use MIR Direct
 
     // Retained execution state (persistent across script evaluations).
     // The GC heap and name_pool are created on first evaluation

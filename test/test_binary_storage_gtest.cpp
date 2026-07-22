@@ -129,7 +129,7 @@ TEST(BinaryStorage, LiveSubviewRetainsStorageAfterSourceCollection) {
 
     uint64_t roots[] = {x2it(view)};
     source = nullptr;
-    gc_collect(gc, roots, 1, 0, 0);
+    gc_collect(gc, roots, 1);
 
     EXPECT_EQ(byte_storage_ref_count(storage), 1);
     EXPECT_EQ(binary_data(view)[0], 0x5au);
@@ -137,7 +137,7 @@ TEST(BinaryStorage, LiveSubviewRetainsStorageAfterSourceCollection) {
     int64_t releases = byte_storage_release_count();
     roots[0] = ITEM_NULL;
     view = nullptr;
-    gc_collect(gc, roots, 1, 0, 0);
+    gc_collect(gc, roots, 1);
     EXPECT_EQ(byte_storage_release_count(), releases + 1);
     gc_heap_destroy(gc);
 }

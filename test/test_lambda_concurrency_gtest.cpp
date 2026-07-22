@@ -209,7 +209,7 @@ TEST_F(LambdaConcurrencyRuntime, OwnedSlotsPreserveWideIntegersWithoutGcScalarCe
     gc_register_root(concurrency_test_gc, &slots[0].item);
     gc_register_root(concurrency_test_gc, &slots[1].item);
     gc_set_poison_freed(concurrency_test_gc, 1);
-    gc_collect(concurrency_test_gc, NULL, 0, 0, 0);
+    gc_collect(concurrency_test_gc, NULL, 0);
     Item owned_i = owned_item_slot_read(slots, 2, 0, false);
     Item owned_u = owned_item_slot_read(slots, 2, 1, false);
     EXPECT_EQ(owned_i.get_int64(), INT64_MAX);
@@ -276,7 +276,7 @@ TEST_F(LambdaConcurrencyRuntime, TaskPersistentSlotsOwnWideIntegerPayloads) {
     message_source = 0;
 
     gc_set_poison_freed(concurrency_test_gc, 1);
-    gc_collect(concurrency_test_gc, NULL, 0, 0, 0);
+    gc_collect(concurrency_test_gc, NULL, 0);
 
     EXPECT_EQ(lambda_task_result(completed).get_int64(), INT64_MAX);
     Item message = ItemNull;
@@ -408,7 +408,7 @@ TEST_F(LambdaConcurrencyRuntime, ParkedFramesAndMailboxesSurviveCollection) {
     lambda_task_set_frame_roots(task, frame_roots, 1);
     ASSERT_EQ(lambda_task_send(NULL, task, (Item){.vmap = message_value}), LAMBDA_SEND_OK);
 
-    gc_collect(concurrency_test_gc, NULL, 0, 0, 0);
+    gc_collect(concurrency_test_gc, NULL, 0);
 
     EXPECT_TRUE(gc_is_managed(concurrency_test_gc, frame_roots[0].vmap));
     Item message = ItemNull;

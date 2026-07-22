@@ -3,12 +3,10 @@ flowchart TB
   TRIG -->|"no"| BUMPALLOC["bump-allocate, return"]
   TRIG -->|"yes"| CB["callback heap_gc_collect (lambda-mem.cpp)"]
 
-  CB --> SJ["setjmp: flush callee-saved registers to C stack"]
-  SJ --> SB["read _lambda_stack_base / SP bounds"]
-  SB --> JF["derive live Context root-side-stack slice"]
+  CB --> JF["derive live Context root-side-stack slice"]
   JF --> GC["gc_collect_with_root_region"]
 
-  GC --> ROOTS["gather roots:\nroot_slots[] + root_ranges[]\n+ live execution root slice\n+ extra_roots\n+ conservative C-stack scan"]
+  GC --> ROOTS["gather exact roots:\nroot_slots[] + root_ranges[]\n+ live execution root slice\n+ extra_roots"]
   ROOTS --> MARK["MARK: precise per TypeId\nitems[], shapes, Lambda/JS functions\nJS env Item halves, VMap callback"]
   MARK --> COMPACT["COMPACT data zone: gc_compact_data\ncopy live buffers nursery -> tenured\nrewrite owner pointers, fixup embedded numerics"]
   COMPACT --> RESET["gc_data_zone_reset (wholesale nursery reset)"]

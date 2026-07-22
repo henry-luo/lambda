@@ -417,13 +417,6 @@ gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
     gc->root_range_count = 0;
     gc->root_range_capacity = 0;
 
-    // Compatibility preserves the existing conservative scan until the
-    // runtime explicitly opts a fully-audited heap into another mode.
-    gc->root_mode = GC_ROOT_MODE_COMPATIBILITY;
-    memset(&gc->last_root_stats, 0, sizeof(gc->last_root_stats));
-    gc->root_type_stats = NULL;
-    gc->root_type_stat_count = 0;
-    gc->root_type_stat_capacity = 0;
     gc->force_collect_interval = 0;
     gc->force_allocation_count = 0;
     gc->forced_collection_count = 0;
@@ -493,10 +486,6 @@ void gc_heap_destroy(gc_heap_t* gc) {
         gc->root_ranges = NULL;
     }
 
-    if (gc->root_type_stats) {
-        free(gc->root_type_stats);
-        gc->root_type_stats = NULL;
-    }
 
     // free root slot table (C heap allocated)
     if (gc->root_slots) {
@@ -951,56 +940,6 @@ void gc_unregister_root_range(gc_heap_t* gc, uint64_t* base) {
             return;
         }
     }
-}
-
-void gc_set_root_mode(gc_heap_t* gc, gc_root_mode_t mode) {
-    if (!gc) return;
-    if (mode < GC_ROOT_MODE_COMPATIBILITY || mode > GC_ROOT_MODE_PRECISE_ONLY) {
-        log_error("gc-root-mode: rejected invalid mode %d", (int)mode);
-        return;
-    }
-#if !GC_CONSERVATIVE_SCAN_AVAILABLE
-    if (mode != GC_ROOT_MODE_PRECISE_ONLY) {
-        // Scanner-free release code must never pretend compatibility is
-        // active; retaining precise-only is fail-closed for direct API users.
-        log_error("gc-root-mode: %s unavailable in scanner-free build",
-            gc_root_mode_name(mode));
-        return;
-    }
-#endif
-    gc->root_mode = mode;
-}
-
-int gc_conservative_scan_available(void) {
-    return GC_CONSERVATIVE_SCAN_AVAILABLE;
-}
-
-gc_root_mode_t gc_get_root_mode(const gc_heap_t* gc) {
-    return gc ? gc->root_mode : GC_ROOT_MODE_COMPATIBILITY;
-}
-
-const char* gc_root_mode_name(gc_root_mode_t mode) {
-    switch (mode) {
-    case GC_ROOT_MODE_COMPATIBILITY: return "compatibility";
-    case GC_ROOT_MODE_SHADOW_VERIFY: return "shadow-verify";
-    case GC_ROOT_MODE_PRECISE_ONLY: return "precise-only";
-    default: return "invalid";
-    }
-}
-
-const gc_root_stats_t* gc_get_last_root_stats(const gc_heap_t* gc) {
-    return gc ? &gc->last_root_stats : NULL;
-}
-
-size_t gc_get_last_conservative_type_count(const gc_heap_t* gc,
-        uint16_t type_tag) {
-    if (!gc) return 0;
-    for (int i = 0; i < gc->root_type_stat_count; i++) {
-        if (gc->root_type_stats[i].type_tag == type_tag) {
-            return gc->root_type_stats[i].count;
-        }
-    }
-    return 0;
 }
 
 void gc_set_force_collect_interval(gc_heap_t* gc, size_t interval) {
@@ -2009,140 +1948,9 @@ static void gc_sweep(gc_heap_t* gc) {
 // gc_collect: Full Collection Cycle
 // ============================================================================
 
-// Conservative stack scanning: scan C stack for potential Item values.
-// Treats each aligned 8-byte value as a potential tagged pointer and checks
-// if it points to a GC-managed object.
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define GC_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))
-#endif
-#endif
-#if defined(__SANITIZE_ADDRESS__) && !defined(GC_NO_SANITIZE_ADDRESS)
-#define GC_NO_SANITIZE_ADDRESS __attribute__((no_sanitize_address))
-#endif
-#ifndef GC_NO_SANITIZE_ADDRESS
-#define GC_NO_SANITIZE_ADDRESS
-#endif
-
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define GC_ASAN_ENABLED 1
-#endif
-#endif
-#if defined(__SANITIZE_ADDRESS__)
-#define GC_ASAN_ENABLED 1
-#endif
-#ifndef GC_ASAN_ENABLED
-#define GC_ASAN_ENABLED 0
-#endif
-
-#if GC_CONSERVATIVE_SCAN_AVAILABLE && GC_ASAN_ENABLED
-extern int __asan_address_is_poisoned(const volatile void *addr);
-
-static int gc_asan_word_is_poisoned(const uintptr_t* p) {
-    const unsigned char* bytes = (const unsigned char*)p;
-    for (size_t i = 0; i < sizeof(uintptr_t); i++) {
-        if (__asan_address_is_poisoned(bytes + i)) return 1;
-    }
-    return 0;
-}
-#endif
-
-static void gc_root_stats_reset(gc_heap_t* gc) {
-    memset(&gc->last_root_stats, 0, sizeof(gc->last_root_stats));
-    gc->root_type_stat_count = 0;
-}
-
-#if GC_CONSERVATIVE_SCAN_AVAILABLE
-static void gc_root_stats_note_type(gc_heap_t* gc, uint16_t type_tag) {
-    for (int i = 0; i < gc->root_type_stat_count; i++) {
-        if (gc->root_type_stats[i].type_tag == type_tag) {
-            gc->root_type_stats[i].count++;
-            return;
-        }
-    }
-    if (gc->root_type_stat_count >= gc->root_type_stat_capacity) {
-        int next_capacity = gc->root_type_stat_capacity
-            ? gc->root_type_stat_capacity * 2 : 16;
-        gc_root_type_stat_t* next = (gc_root_type_stat_t*)realloc(
-            gc->root_type_stats,
-            (size_t)next_capacity * sizeof(gc_root_type_stat_t));
-        if (!next) {
-            log_error("gc-root-shadow: failed to grow per-type statistics");
-            return;
-        }
-        gc->root_type_stats = next;
-        gc->root_type_stat_capacity = next_capacity;
-    }
-    gc_root_type_stat_t* stat =
-        &gc->root_type_stats[gc->root_type_stat_count++];
-    stat->type_tag = type_tag;
-    stat->count = 1;
-}
-
-static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc,
-        uintptr_t stack_base, uintptr_t stack_current) {
-    if (stack_base == 0 || stack_current == 0) return;
-    if (stack_current >= stack_base) return;  // stack grows down; current < base
-
-    // scan from current SP up to stack base (stack grows downward)
-    uintptr_t aligned_start = (stack_current + sizeof(uintptr_t) - 1) & ~(uintptr_t)(sizeof(uintptr_t) - 1);
-    uintptr_t aligned_end = stack_base & ~(uintptr_t)(sizeof(uintptr_t) - 1);
-    uintptr_t* scan_start = (uintptr_t*)aligned_start;
-    uintptr_t* scan_end = (uintptr_t*)aligned_end;
-    int scanned = 0;
-    int marked = 0;
-    int skipped_poisoned = 0;
-
-    gc->last_root_stats.conservative_scan_bytes =
-        (size_t)(aligned_end - aligned_start);
-
-    for (uintptr_t* p = scan_start; p < scan_end; p++) {
-#if GC_ASAN_ENABLED
-        if (gc_asan_word_is_poisoned(p)) {
-            skipped_poisoned++;
-            continue;
-        }
-#endif
-        uint64_t val = (uint64_t)*p;
-        scanned++;
-        // try to interpret as a tagged Item
-        void* ptr = item_to_ptr(gc, val);
-        if (!ptr) continue;
-        // check if it points to a GC-managed object
-        if (is_gc_object(gc, ptr)) {
-            gc_header_t* header = gc_get_header(ptr);
-            gc->last_root_stats.conservative_candidate_words++;
-            if (header && !header->marked && !(header->gc_flags & GC_FLAG_FREED)) {
-                header->marked = 1;
-                mark_stack_push(gc, header);
-                marked++;
-                gc->last_root_stats.conservative_new_objects++;
-                if (gc->root_mode == GC_ROOT_MODE_SHADOW_VERIFY) {
-                    gc_root_stats_note_type(gc, header->type_tag);
-                    log_info("gc-root-shadow-candidate: collection=%zu stack_slot=%p object=%p type=%u size=%u",
-                        gc->collections + 1, (void*)p, ptr,
-                        (unsigned)header->type_tag, (unsigned)header->alloc_size);
-                }
-            }
-        }
-    }
-
-    gc->last_root_stats.conservative_skipped_poisoned_words =
-        (size_t)skipped_poisoned;
-
-    log_debug("gc_scan_stack: scanned %d slots (%zu bytes), marked %d objects, skipped %d ASan-poisoned slots",
-              scanned, (size_t)(aligned_end - aligned_start), marked, skipped_poisoned);
-    (void)scanned; (void)marked; (void)skipped_poisoned;  // silence release-build unused warning
-}
-#endif
-
+// Collect from registered, side-stack, and explicit Item roots only.
 void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
-                int extra_count,
-#if GC_CONSERVATIVE_SCAN_AVAILABLE
-                uintptr_t stack_base, uintptr_t stack_current,
-#endif
-                uint64_t* root_base, int64_t root_count) {
+                int extra_count, uint64_t* root_base, int64_t root_count) {
     if (!gc) return;
     gc_assert_allocation_allowed(gc, "gc_collect_with_root_region");
     if (gc->collecting) {
@@ -2169,7 +1977,6 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
 
     // reset mark stack
     gc->mark_top = 0;
-    gc_root_stats_reset(gc);
 
     // Phase 1a: Mark registered root slots (BSS globals, context->result, etc.)
     uint64_t gc_roots_token = GC_PROFILE_ENTER("gc_mark_roots");
@@ -2208,43 +2015,10 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     }
     GC_PROFILE_LEAVE("gc_mark_extra_roots", gc_extra_roots_token);
 
-    // Trace the complete graph reachable from precise roots before shadow
-    // scanning. Otherwise a child of a precise root would be misreported as a
-    // stack-exclusive candidate merely because its parent had not run yet.
-    gc->last_root_stats.precise_root_count = (size_t)gc->mark_top;
     uint64_t gc_trace_token = GC_PROFILE_ENTER("gc_trace_objects");
     int traced_count = gc_drain_mark_stack(gc);
     GC_PROFILE_LEAVE("gc_trace_objects", gc_trace_token);
 
-    // Phase 1c: Conservative stack scan. Precise-only is explicit and never
-    // falls back to scanning when a root is absent.
-    if (gc->root_mode != GC_ROOT_MODE_PRECISE_ONLY) {
-#if GC_CONSERVATIVE_SCAN_AVAILABLE
-        uint64_t gc_stack_token = GC_PROFILE_ENTER("gc_scan_stack");
-        gc_scan_stack(gc, stack_base, stack_current);
-        GC_PROFILE_LEAVE("gc_scan_stack", gc_stack_token);
-
-        gc_trace_token = GC_PROFILE_ENTER("gc_trace_objects");
-        traced_count += gc_drain_mark_stack(gc);
-        GC_PROFILE_LEAVE("gc_trace_objects", gc_trace_token);
-#else
-        // This state can only arise from memory corruption or a caller that
-        // bypassed gc_set_root_mode(); continuing would collect live objects.
-        log_error("gc-root-mode: compatibility collection reached scanner-free build");
-        abort();
-#endif
-    }
-
-    if (gc->root_mode == GC_ROOT_MODE_SHADOW_VERIFY) {
-        log_info("gc-root-shadow: collection=%zu precise_roots=%zu candidate_words=%zu new_objects=%zu scan_bytes=%zu",
-            gc->collections + 1, gc->last_root_stats.precise_root_count,
-            gc->last_root_stats.conservative_candidate_words,
-            gc->last_root_stats.conservative_new_objects,
-            gc->last_root_stats.conservative_scan_bytes);
-    } else if (gc->root_mode == GC_ROOT_MODE_PRECISE_ONLY) {
-        log_debug("gc-root-precise: collection=%zu precise_roots=%zu conservative_scan=skipped",
-            gc->collections + 1, gc->last_root_stats.precise_root_count);
-    }
     log_debug("gc_collect: traced %d objects total", traced_count);
     // Release builds compile debug logging away; retain the accounting above
     // without turning its diagnostic-only result into an unused-variable error.
@@ -2309,13 +2083,6 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     GC_PROFILE_LEAVE("gc_collect_total", gc_total_token);
 }
 
-#if GC_CONSERVATIVE_SCAN_AVAILABLE
-void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
-                uintptr_t stack_base, uintptr_t stack_current) {
-    gc_collect_with_root_region(gc, extra_roots, extra_count,
-                                stack_base, stack_current, NULL, 0);
-#else
 void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count) {
     gc_collect_with_root_region(gc, extra_roots, extra_count, NULL, 0);
-#endif
 }

@@ -672,11 +672,7 @@ extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* 
 #endif
 
 void run_repl(Runtime *runtime, bool use_mir) {
-#ifdef LAMBDA_C2MIR
-    printf("Lambda Script REPL v1.0%s\n", use_mir ? "" : " (C2MIR)");
-#else
     printf("Lambda Script REPL v1.0\n");
-#endif
     printf("Type help for commands, quit to exit\n");
     printf("Multi-line input: use continuation prompt (.. ) for incomplete statements\n");
 
@@ -766,15 +762,9 @@ void run_repl(Runtime *runtime, bool use_mir) {
 
         // Run the accumulated script
         Input* output_input = nullptr;
-        if (use_mir) {
-            // transpile using MIR
-            output_input = run_script_mir(runtime, repl_history->str, script_path, false);
-        } else {
-#ifdef LAMBDA_C2MIR
-            // transpile using C2MIR
-            output_input = run_script(runtime, repl_history->str, script_path, false);
-#endif
-        }
+        // All executable paths use MIR Direct; C2MIR has no exact-root ABI.
+        (void)use_mir;
+        output_input = run_script_mir(runtime, repl_history->str, script_path, false);
 
         if (output_input) {
             if (output_input->root.type_id() == LMD_TYPE_ERROR) {
@@ -824,13 +814,9 @@ void run_repl(Runtime *runtime, bool use_mir) {
 int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bool transpile_only = false, bool run_main = false) {
     log_debug("run_script_file called: %s, use_mir=%d", script_path, use_mir);
     Input* output_input = nullptr;
-    if (use_mir) {
-        output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main, transpile_only);
-    } else {
-#ifdef LAMBDA_C2MIR
-        output_input = run_script_with_run_main(runtime, (char*)script_path, transpile_only, run_main);
-#endif
-    }
+    // C2MIR is disabled until it publishes exact roots at every MAY_GC call.
+    (void)use_mir;
+    output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main, transpile_only);
 
     log_debug("run_script_file: output_input = %p", output_input);
     if (!output_input) {
@@ -2297,7 +2283,7 @@ int main(int argc, char *argv[]) {
         JsDocumentSession js_document_session;
         js_document_session_init(&js_document_session);
 
-        // Initialize stack bounds for GC conservative scanning
+        // Initialize the signal-based native stack-overflow guard.
         lambda_stack_init();
 
         bool js_had_error = false;
@@ -3995,11 +3981,6 @@ int main(int argc, char *argv[]) {
         bool use_mir = true;
         int batch_timeout = 60; // default per-script timeout in seconds
         for (int i = 2; i < argc; i++) {
-#ifdef LAMBDA_C2MIR
-            if (strcmp(argv[i], "--c2mir") == 0) {
-                use_mir = false;
-            } else
-#endif
             if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
             } else if (strncmp(argv[i], "--timeout=", 10) == 0) {
@@ -4747,14 +4728,8 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Script Runner v1.0\n\n");
-#ifdef LAMBDA_C2MIR
-            printf("Usage: %s run [--c2mir] <script>\n", argv[0]);
-            printf("\nOptions:\n");
-            printf("  --c2mir        Use C2MIR JIT compilation (default: MIR Direct)\n");
-#else
             printf("Usage: %s run <script>\n", argv[0]);
             printf("\nOptions:\n");
-#endif
             printf("  --no-drain      Return without draining spawned tasks\n");
             printf("  -h, --help     Show this help message\n");
             printf("\nDescription:\n");
@@ -4763,9 +4738,6 @@ int main(int argc, char *argv[]) {
             printf("  automatically executed during script execution.\n");
             printf("\nExamples:\n");
             printf("  %s run script.ls                 # Run script with MIR Direct JIT (default)\n", argv[0]);
-#ifdef LAMBDA_C2MIR
-            printf("  %s run --c2mir script.ls         # Run script with C2MIR JIT compilation\n", argv[0]);
-#endif
             return lambda_main_finish(0);
         }
 
@@ -4774,19 +4746,6 @@ int main(int argc, char *argv[]) {
         char* script_file = NULL;
 
         for (int i = 2; i < argc; i++) {
-#ifdef LAMBDA_C2MIR
-            if (strcmp(argv[i], "--c2mir") == 0) {
-                use_mir = false;
-            } else if (strcmp(argv[i], "--transpile-dir") == 0) {
-                if (i + 1 < argc) {
-                    runtime.transpile_dir = argv[++i];
-                    use_mir = false;  // --transpile-dir is for C code inspection: force C2MIR
-                } else {
-                    printf("Error: --transpile-dir requires a directory argument\n");
-                    return lambda_main_finish(1);
-                }
-            } else
-#endif
             if (apply_common_mir_option(argv[i], &runtime, &use_mir)) {
             } else if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
@@ -4805,11 +4764,7 @@ int main(int argc, char *argv[]) {
 
         if (!script_file) {
             printf("Error: run command requires a script file\n");
-#ifdef LAMBDA_C2MIR
-            printf("Usage: %s run [--c2mir] <script>\n", argv[0]);
-#else
             printf("Usage: %s run <script>\n", argv[0]);
-#endif
             return lambda_main_finish(1);
         }
 
@@ -4838,23 +4793,7 @@ int main(int argc, char *argv[]) {
     // Parse arguments
     int ret_code = 0;
     for (int i = 1; i < argc; i++) {
-#ifdef LAMBDA_C2MIR
-        if (strcmp(argv[i], "--c2mir") == 0) {
-            use_mir = false;
-        }
-        else if (strcmp(argv[i], "--transpile-dir") == 0) {
-            if (i + 1 < argc) {
-                runtime.transpile_dir = argv[++i];
-                use_mir = false;  // --transpile-dir is for C code inspection: force C2MIR
-            } else {
-                printf("Error: --transpile-dir requires a directory argument\n");
-                help_only = true;
-                ret_code = 1;
-            }
-        }
-        else
-#endif
-        // compile without executing. Not C2MIR-only: MIR Direct honors it too,
+        // Compile without executing. MIR Direct honors it so emission fixtures
         // so emission fixtures can be compiled and their MIR artifact checked
         // without running the script.
         if (strcmp(argv[i], "--transpile-only") == 0) {
@@ -4938,7 +4877,7 @@ int main(int argc, char *argv[]) {
         print_help();
         ret_code = 1;
     } else {
-        // start REPL mode by default (with or without MIR)
+        // Start the MIR-Direct REPL by default.
         run_repl(&runtime, use_mir);
     }
 

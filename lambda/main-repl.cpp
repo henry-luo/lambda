@@ -217,18 +217,11 @@ void print_help() {
     printf("Usage:\n");
     printf("  lambda                       - Start REPL mode (default)\n");
     printf("  lambda [script.ls]           - Run a script file\n");
-#ifdef LAMBDA_C2MIR
-    printf("  lambda --c2mir [script.ls]   - Run with C2MIR JIT compilation\n");
-    printf("  lambda --transpile-only [script.ls] - Transpile to C code only (no execution)\n");
-#endif
+    printf("  lambda --transpile-only [script.ls] - Compile without execution\n");
     printf("  lambda --max-errors N [script.ls]   - Set max type errors before stopping (default: 10)\n");
     printf("  lambda --no-drain [script.ls]       - Return without draining spawned tasks\n");
     printf("  lambda --optimize=N [script.ls]     - Set MIR JIT optimization level (0-2, default: 2)\n");
-#ifdef LAMBDA_C2MIR
-    printf("  lambda run [--c2mir] <script.ls>    - Run script with main function execution\n");
-#else
     printf("  lambda run <script.ls>              - Run script with main function execution\n");
-#endif
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
     printf("  lambda layout <file.html>    - Analyze HTML/CSS layout structure\n");
@@ -237,10 +230,7 @@ void print_help() {
     printf("  lambda fetch <url> [-o file]  - Fetch HTTP/HTTPS resource\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nScript Options:\n");
-#ifdef LAMBDA_C2MIR
-    printf("  --c2mir                      - Use C2MIR JIT compilation (default: MIR Direct)\n");
-    printf("  --transpile-only             - Transpile to C code without execution\n");
-#endif
+    printf("  --transpile-only             - Compile without execution\n");
     printf("  --max-errors N               - Stop after N type errors (default: 10, 0 = unlimited)\n");
     printf("  --no-drain                   - Return without draining spawned tasks\n");
     printf("  --optimize=N                 - MIR JIT optimization level (0=debug/stack-trace, 1=basic, 2=full)\n");
@@ -249,11 +239,7 @@ void print_help() {
     printf("  --mem-dump[=PATH]            - On exit, write the memory-context snapshot as JSON\n");
     printf("                                 (default: ./temp/mem_snapshot.json) and log a MEMCTX leak report\n");
     printf("\nScript Commands:\n");
-#ifdef LAMBDA_C2MIR
-    printf("  run [--c2mir] <script>       - Execute script with run_main enabled\n");
-#else
     printf("  run <script>                 - Execute script with run_main enabled\n");
-#endif
     printf("                               - This automatically runs the main function if defined\n");
     printf("\nREPL Commands:\n");
     printf("  quit, q, exit        - Exit REPL\n");

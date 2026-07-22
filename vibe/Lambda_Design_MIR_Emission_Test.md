@@ -153,15 +153,11 @@ stay — they are the first line — but per §1.2 they are not sufficient.
   (deterministic random stress), `LAMBDA_GC_POISON_FREED=1` —
   `lambda/runtime/lambda-mem.cpp:318–363`, hooked at every allocation entry in
   `gc_heap.c`.
-- `LAMBDA_GC_ROOT_MODE=compatibility|shadow-verify|precise-only`
-  (`lambda-mem.cpp:215`) — shadow-verify traces precise reachability, then
-  reports additional objects discovered by a conservative scan. It is useful
-  diagnostic evidence, but is not a fail-closed proof of safepoint currency.
 - `LAMBDA_MIR_ROOT_MODE=write-through` differential oracle
   (`Lambda_Design_Stack_Rooting.md` §5.2).
 - `make test-gc-rooting` / `-core` / `-python` (Makefile:1007–1054): runs
-  `test/js/regression_side_stack_frame_gc.js` under precise-only forced-GC,
-  randomized forced-GC, and `--mir-interp` precise-only, plus the static
+  `test/js/regression_side_stack_frame_gc.js` under exact-root forced-GC,
+  randomized forced-GC, and `--mir-interp` exact-root collection, plus the static
   `utils/check_gc_effects.py` / `check_gc_root_hazards.py` sweeps.
 
 ### 2.6 Telemetry
@@ -369,28 +365,19 @@ forbidding over-rooting) — is **deliberately excluded from the active static
 design**.
 Re-implementing CFG liveness independently would duplicate
 `em_finalize_semantic_root_write_back` (`mir_emitter_shared.hpp:1444`), the
-hardest code in the emitter, and rot alongside it. Instead, precise-only
+hardest code in the emitter, and rot alongside it. Instead, exact-root
 `FORCE_EVERY=1` + `POISON_FREED=1` strongly stress-tests executed safepoints:
 a missing root that becomes otherwise unreachable is collected and its later
 use fails deterministically. This is behavioral stress over the selected
 corpus, not a proof over every CFG path.
 
-`shadow-verify` is a diagnostic oracle, not presently a fail-closed verifier.
-It traces precise reachability, conservatively scans the native stack, and
-logs objects newly discovered by that scan. Such candidates can include
-conservative false positives, and the current runtime reports rather than
-fails on them. A shadow lane may collect evidence with a process-private
-`LAMBDA_LOG_FILE`, but zero candidates must not become an uncalibrated gate.
-
 Work items:
 
 - extend `make test-gc-rooting-core` to sweep the MT5 corpus and the Stage-4C
-  regression scripts under the three existing precise-only modes (JIT forced,
+  regression scripts under the three existing exact-root modes (JIT forced,
   deterministic randomized forced, `--mir-interp` forced);
 - promote that sweep from on-demand target to baseline-adjacent gate (same
   tier as `test-lambda-baseline`, given runtime cost measured first);
-- optionally add a non-gating `shadow-verify` diagnostic run whose summary is
-  retained as an artifact;
 - keep `LAMBDA_MIR_ROOT_MODE=write-through` as the bisection oracle when the
   sweep fails.
 
@@ -576,7 +563,7 @@ exhaustive proof over all emitted functions or CFG paths.
 | Contract | Active coverage | Future MT3 |
 |---|---|---|
 | API #1–#6 (analysis purity, one call path, one frame owner) | emitter construction-time self-checks (§2.4) | belief-vs-emission cross-check after forms stabilize |
-| API #7 safepoint currency | MT4 precise-only forced-GC stress on executed paths | no static liveness pass currently planned |
+| API #7 safepoint currency | MT4 exact-root forced-GC stress on executed paths | no static liveness pass currently planned |
 | API #8 no redundant currency | MT7 root-store ratchet on probes; quality guard, not proof | optional future analysis if justified |
 | API #9 cleanup order | selected MT1 patterns only | CFG cleanup-state pass |
 | API #10/#11 entry/ABI isolation | existing `em_finalize_function_metadata`; selected MT1 patterns | call-target classification |
@@ -808,7 +795,7 @@ dead files were removed rather than left to look like coverage.
 `test/test_mir_gc_stress_gtest.cpp` sweeps every `test/mir` fixture plus six
 named rooting/capture regressions (`regression_side_stack_frame_gc`,
 `array_callback_gc_roots`, and the four Stage-4C capture/hoist scripts) through
-the three precise-only forced-GC modes MT4 specifies: JIT with
+the three exact-root forced-GC modes MT4 specifies: JIT with
 `FORCE_EVERY=1`, deterministic randomized `FORCE_ONE_IN=3`, and `--mir-interp`
 with `FORCE_EVERY=1`. All modes run with `POISON_FREED=1`.
 
@@ -835,7 +822,7 @@ mode fails with `TypeError: Set.prototype.add is not callable` — a builtin
 prototype method collected while still reachable from user code.
 
 That is not an isolated case. Sampling twelve `test/js` scripts that are green
-in the ordinary baseline, **four diverged under `FORCE_EVERY=1` precise-only**:
+in the ordinary baseline, **four diverged under `FORCE_EVERY=1` exact-root collection**:
 
 | script | symptom |
 |---|---|

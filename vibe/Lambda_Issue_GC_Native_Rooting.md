@@ -1,8 +1,9 @@
 # Native-code GC rooting: sizing, root cause, and severity
 
 **Status:** RESOLVED — 2026-07-22. Native GC lifetime fixes use exact
-`RootFrame` / `Rooted<Item>` ownership and explicit persistent roots only;
-conservative native-stack scanning was not restored or used as a fallback.
+`RootFrame` / `Rooted<Item>` ownership and explicit persistent roots only.
+Native-stack root discovery has been removed from the collector and is not an
+available compatibility mode.
 
 **Found by:** the MT4 forced-GC stress sweep added in
 `vibe/Lambda_Design_MIR_Emission_Test.md` §10. This document is the follow-up
@@ -27,14 +28,14 @@ status. The concrete failures from the forced-GC campaign have been retired:
   it as a legacy `Function` layout.
 
 `make test-gc-rooting-core` covers the Lambda-to-JS Promise membrane directly
-under `precise-only`, collection-on-every-allocation, and freed-memory poison,
-in addition to the JIT, interpreter, Lambda MIR, static hazard, and MIR corpus
-gates. The gate passes with no conservative scan enabled.
+under exact-root collection-on-every-allocation and freed-memory poison, in
+addition to the JIT, interpreter, Lambda MIR, static hazard, and MIR corpus
+gates.
 
 ## Array/iterator completion
 
 The `Array.from(new Set(...))` regression in
-`test/js/array_callback_gc_roots.js` is fixed under precise-only forced GC.
+`test/js/array_callback_gc_roots.js` is fixed under exact-root forced GC.
 The fix roots the complete `Array.from` helper family, its constructor and
 mapper variants, the iterator step/close/rest helpers, `Map(iterable)`, and
 the array callback loop that retains a filter destination across an allocating
@@ -50,7 +51,7 @@ GC. Conservative stack scanning was neither enabled nor used by this fix.
 ## 1. Sizing
 
 Every `test/js/*.js` with a golden was run unstressed and then under
-`LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1
+`LAMBDA_GC_FORCE_EVERY=1
 LAMBDA_GC_POISON_FREED=1`, comparing exit status and stdout
 (`temp/gc_sweep.py`, results in `temp/gc_sweep_results.json`).
 
@@ -102,13 +103,12 @@ already dead by then. Roots must start at creation, not at first apparent use.
 
 Three measurements qualify the headline number.
 
-**`precise-only` is the shipped default.** `heap_default_gc_root_mode()`
-(`lambda/runtime/lambda-mem.cpp`) returns `GC_ROOT_MODE_PRECISE_ONLY` for
-non-C2MIR builds, which is the standard build. Conservative native-stack
-scanning is *not* active in ordinary runs, so these are latent bugs in the
-shipped configuration rather than a not-yet-ready mode.
+**Exact rooting is the only runtime contract.** The collector accepts only
+registered roots and the live root-side-stack slice; there is no root-mode
+switch or native-stack fallback. These are latent bugs in the shipped
+configuration rather than a not-yet-ready mode.
 
-**But the crash needs poisoning, and appears in both root modes.** For
+**But the crash needs poisoning.** For
 `typed_arrays.js`:
 
 | configuration | result |
@@ -116,11 +116,6 @@ shipped configuration rather than a not-yet-ready mode.
 | natural GC | ok |
 | `FORCE_EVERY=1`, no poison | ok |
 | `FORCE_EVERY=1` + `POISON_FREED=1` | SIGSEGV |
-| `compatibility` + `FORCE_EVERY=1` + poison | SIGSEGV |
-
-Compatibility mode conservatively scans the native stack and still crashes, so
-this particular failure is not explained by precise rooting alone — a
-register-held reference invisible to a stack scan is the likeliest candidate.
 Without poisoning the freed memory still reads as plausible data, which is why
 these stay silent in normal runs.
 
@@ -149,14 +144,13 @@ thousands of native call sites across `js_runtime.cpp` (~40k lines) and
    scripts. Re-running the sweep after each shared-helper fix shows how much it
    moved the 107, which is a far better guide than the per-script list.
 
-Do not "fix" this by re-enabling conservative scanning: that reverses the
-rooting design's scan retirement, and §3 shows compatibility mode does not
-actually prevent the crashes anyway.
+Do not restore native-stack root discovery: it reverses the exact-root
+contract and cannot repair a missing ownership edge.
 
 ## 5. Reproduction
 
 ```bash
-LAMBDA_GC_ROOT_MODE=precise-only LAMBDA_GC_FORCE_EVERY=1 \
+LAMBDA_GC_FORCE_EVERY=1 \
   LAMBDA_GC_POISON_FREED=1 ./lambda.exe js --no-log test/js/<script>.js
 ```
 

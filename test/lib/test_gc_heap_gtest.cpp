@@ -12,7 +12,7 @@
  * 6. Data compaction (nursery → tenured)
  * 7. Full collection cycle
  * 8. Collection triggers (threshold-based auto-GC)
- * 9. Conservative stack scanning
+ * 9. Exact side-stack root regions
  */
 
 #include <gtest/gtest.h>
@@ -251,7 +251,7 @@ TEST_F(GCHeapTest, ExternalPayloadFinalizerRunsDuringSweep) {
     ASSERT_NE(obj, nullptr);
     *(void**)obj = obj;
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(external_destroy_calls, 1);
     EXPECT_EQ(external_destroy_last_tag, LMD_TYPE_BINARY);
@@ -334,7 +334,7 @@ TEST_F(GCHeapTest, WeakSlotClearsDeadReferentBeforeSweep) {
     int marker = 42;
     gc_register_weak(gc, &weak, test_weak_clear, &marker);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(weak, 0u);
     EXPECT_EQ(weak_clear_calls, 1);
@@ -349,7 +349,7 @@ TEST_F(GCHeapTest, WeakSlotPreservesStronglyReachableReferent) {
     gc_register_root(gc, &root);
     gc_register_weak(gc, &weak, test_weak_clear, nullptr);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_NE(weak, 0u);
     EXPECT_EQ(weak_clear_calls, 0);
@@ -363,7 +363,7 @@ TEST_F(GCHeapTest, UnregisteredWeakSlotIsNotTouched) {
     gc_register_weak(gc, &weak, test_weak_clear, nullptr);
     gc_unregister_weak(gc, &weak);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_NE(weak, 0u);
     EXPECT_EQ(weak_clear_calls, 0);
@@ -469,7 +469,7 @@ TEST_F(GCHeapTest, RootedWideIntegerFallbackCellsSurviveCollection) {
     gc_register_root(gc, &unsigned_root);
     gc_set_poison_freed(gc, 1);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // Ownerless wide scalars use leaf GC cells; both signedness tags must keep
     // the payload alive without tracing its arbitrary bits as child Items.
@@ -500,7 +500,7 @@ TEST_F(GCHeapTest, MarkListTracesChildren) {
     uint64_t root = list_item(list);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // list + 2 strings should survive (dead_str not in this test = all 3 survive)
     // We had 3 objects total (str_a, str_b, list), all reachable
@@ -530,8 +530,8 @@ TEST_F(GCHeapTest, CollectFreesUnreachableObjects) {
     uint64_t root = string_item(alive_str);
     gc_register_root(gc, &root);
 
-    // run collection (no stack scan — pass 0 for stack bounds)
-    gc_collect(gc, NULL, 0, 0, 0);
+    // registered root keeps the object alive across collection
+    gc_collect(gc, NULL, 0);
 
     // alive_str should survive, dead objects should be freed
     EXPECT_EQ(gc->object_count, 1u);
@@ -553,7 +553,7 @@ TEST_F(GCHeapTest, CollectPreservesAllRooted) {
 
     uint64_t roots[3] = { string_item(s1), string_item(s2), string_item(s3) };
 
-    gc_collect(gc, roots, 3, 0, 0);
+    gc_collect(gc, roots, 3);
 
     // all three should survive
     EXPECT_EQ(gc->object_count, 3u);
@@ -561,7 +561,7 @@ TEST_F(GCHeapTest, CollectPreservesAllRooted) {
 
 TEST_F(GCHeapTest, CollectEmptyHeap) {
     // should not crash on empty heap
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
     EXPECT_EQ(gc->collections, 1u);
     EXPECT_EQ(gc->object_count, 0u);
 }
@@ -583,7 +583,7 @@ TEST_F(GCHeapTest, CompactMovesNurseryData) {
     uint64_t root = list_item(list);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // items should now be in tenured, NOT nursery
     void* new_items = *(void**)(p + 8);
@@ -606,7 +606,7 @@ TEST_F(GCHeapTest, CompactPreservesListData) {
     uint64_t root = list_item(list);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // verify items data was preserved after compaction
     uint64_t* new_items = (uint64_t*)(*(void**)(p + 8));
@@ -658,7 +658,7 @@ TEST_F(GCHeapTest, CompactPromotesArrayNumBaseAndRebindsLiveView) {
 
     uint64_t root = list_item(view);
     gc_register_root(gc, &root);
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     int64_t* promoted_base = *(int64_t**)(base + 8);
     int64_t* rebound_view = *(int64_t**)(view + 8);
@@ -698,7 +698,7 @@ TEST_F(GCHeapTest, CollectTracesListChildren) {
     uint64_t root = list_item(list);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // list + 2 strings survive, dead_str is collected
     EXPECT_EQ(gc->object_count, 3u);
@@ -717,19 +717,19 @@ TEST_F(GCHeapTest, MultipleCollections) {
     // cycle 1: allocate and release
     void* str1 = make_string("cycle1");
     root = string_item(str1);
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
     EXPECT_EQ(gc->object_count, 1u);
     EXPECT_EQ(gc->collections, 1u);
 
     // cycle 2: allocate more, release old
     void* str2 = make_string("cycle2");
     root = string_item(str2);
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
     EXPECT_EQ(gc->object_count, 1u);
     EXPECT_EQ(gc->collections, 2u);
 
     // cycle 3: no allocations
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
     EXPECT_EQ(gc->object_count, 1u);
     EXPECT_EQ(gc->collections, 3u);
 
@@ -865,7 +865,7 @@ TEST_F(GCHeapTest, FreedObjectsCleanedInSweep) {
     uint64_t root = string_item(b);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // only b should remain
     EXPECT_EQ(gc->object_count, 1u);
@@ -881,7 +881,7 @@ TEST_F(GCHeapTest, PoisonFreedOverwritesDeadPayloadAndRecycledSlotIsZeroed) {
     ASSERT_NE(dead, nullptr);
     memset(dead, 0x5A, 32);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     for (int i = 0; i < 32; i++) {
         EXPECT_EQ(dead[i], GC_FREED_POISON_BYTE);
@@ -905,7 +905,7 @@ TEST_F(GCHeapTest, PoisonFreedCoversExplicitFreeBeforeSweep) {
     for (int i = 0; i < 24; i++) {
         EXPECT_EQ(dead[i], GC_FREED_POISON_BYTE);
     }
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 }
 
 // ============================================================================
@@ -920,7 +920,7 @@ TEST_F(GCHeapTest, CollectionStats) {
     EXPECT_EQ(gc->collections, 0u);
     EXPECT_EQ(gc->bytes_collected, 0u);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(gc->collections, 1u);
     // all 3 objects should have been collected
@@ -929,82 +929,7 @@ TEST_F(GCHeapTest, CollectionStats) {
 }
 
 // ============================================================================
-// 12. Conservative Stack Scanning
-// ============================================================================
-
-TEST_F(GCHeapTest, StackScanKeepsStackReferencedObjects) {
-    // This test verifies that conservative stack scanning finds tagged pointers
-    // in a memory region and marks the referenced objects as live.
-    // We use a controlled buffer rather than the real stack to avoid ASAN issues.
-    void* str = make_string("on stack");
-    uint64_t tagged = string_item(str);
-
-    // plant the tagged value in a fake "stack" buffer at a known offset
-    uint64_t fake_stack[16];
-    memset(fake_stack, 0, sizeof(fake_stack));
-    fake_stack[4] = tagged;  // GC scanner should find this
-
-    uintptr_t stack_lo = (uintptr_t)&fake_stack[0];
-    uintptr_t stack_hi = (uintptr_t)&fake_stack[16];
-
-    // collect with this region as the stack scan range
-    gc_collect(gc, NULL, 0, stack_hi, stack_lo);
-
-    // the string should survive because its tagged pointer was in the scan range
-    EXPECT_EQ(gc->object_count, 1u);
-}
-
-TEST_F(GCHeapTest, ShadowScanReportsOnlyObjectsOutsidePreciseGraph) {
-    void* parent = make_list(1, 1);
-    void* precise_child = make_string("precise child");
-    void* stack_only = make_string("stack only");
-    uint64_t* items = *(uint64_t**)((uint8_t*)parent + 8);
-    items[0] = string_item(precise_child);
-
-    uint64_t root = list_item(parent);
-    gc_register_root(gc, &root);
-    gc_set_root_mode(gc, GC_ROOT_MODE_SHADOW_VERIFY);
-
-    uint64_t fake_stack[16];
-    memset(fake_stack, 0, sizeof(fake_stack));
-    fake_stack[3] = string_item(precise_child);
-    fake_stack[9] = string_item(stack_only);
-
-    gc_collect(gc, NULL, 0,
-        (uintptr_t)&fake_stack[16], (uintptr_t)&fake_stack[0]);
-
-    // The precise child is traced before the shadow scan, so only the orphan
-    // is a scan-exclusive object even though both words look pointer-like.
-    const gc_root_stats_t* stats = gc_get_last_root_stats(gc);
-    ASSERT_NE(stats, nullptr);
-    EXPECT_EQ(stats->precise_root_count, 1u);
-    EXPECT_EQ(stats->conservative_candidate_words, 2u);
-    EXPECT_EQ(stats->conservative_new_objects, 1u);
-    EXPECT_EQ(stats->conservative_scan_bytes, sizeof(fake_stack));
-    EXPECT_EQ(gc_get_last_conservative_type_count(gc, LMD_TYPE_STRING), 1u);
-    EXPECT_EQ(gc->object_count, 3u);
-}
-
-TEST_F(GCHeapTest, PreciseOnlyNeverFallsBackToStackScanning) {
-    void* stack_only = make_string("not precisely rooted");
-    uint64_t fake_stack[8];
-    memset(fake_stack, 0, sizeof(fake_stack));
-    fake_stack[2] = string_item(stack_only);
-    gc_set_root_mode(gc, GC_ROOT_MODE_PRECISE_ONLY);
-
-    gc_collect(gc, NULL, 0,
-        (uintptr_t)&fake_stack[8], (uintptr_t)&fake_stack[0]);
-
-    const gc_root_stats_t* stats = gc_get_last_root_stats(gc);
-    ASSERT_NE(stats, nullptr);
-    EXPECT_EQ(stats->conservative_candidate_words, 0u);
-    EXPECT_EQ(stats->conservative_new_objects, 0u);
-    EXPECT_EQ(stats->conservative_scan_bytes, 0u);
-    EXPECT_EQ(gc->object_count, 0u);
-}
-
-// ============================================================================
-// 13. Stress Test — Many Objects
+// 12. Stress Test — Many Objects
 // ============================================================================
 
 TEST_F(GCHeapTest, StressAllocCollect) {
@@ -1019,7 +944,7 @@ TEST_F(GCHeapTest, StressAllocCollect) {
 
     EXPECT_EQ(gc->object_count, 1000u);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // only the last allocated string (referenced by root) should survive
     EXPECT_EQ(gc->object_count, 1u);
@@ -1071,7 +996,7 @@ TEST_F(GCHeapTest, ClosureEnvTracesChildren) {
     uint64_t root = list_item(fn);  // Function is a container (raw pointer)
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // fn + 2 captured strings survive, dead_str is collected
     EXPECT_EQ(gc->object_count, 3u);
@@ -1096,7 +1021,7 @@ TEST_F(GCHeapTest, ClosureEnvCompactsToTenured) {
     uint64_t root = list_item(fn);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // After compaction, env should be in tenured (not nursery)
     uint8_t* p = (uint8_t*)fn;
@@ -1134,7 +1059,7 @@ TEST_F(GCHeapTest, ClosureCycleCollected) {
     EXPECT_EQ(gc->object_count, 2u);  // fn and list
 
     // Collect with NO roots — the entire cycle should be freed
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(gc->object_count, 0u);
 }
@@ -1156,7 +1081,7 @@ TEST_F(GCHeapTest, ClosureCycleSurvivesWhenRooted) {
     uint64_t root = list_item(fn);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // Both fn and list should survive (reachable through cycle from rooted fn)
     EXPECT_EQ(gc->object_count, 2u);
@@ -1177,7 +1102,7 @@ TEST_F(GCHeapTest, ClosureNoEnvSafe) {
     uint64_t root = list_item(fn);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(gc->object_count, 1u);
 
@@ -1266,7 +1191,7 @@ TEST_F(GCHeapTest, VMapTraceCallbackInvoked) {
     uint64_t root = list_item(vm);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // trace callback should have been called once
     EXPECT_EQ(s_vmap_trace_calls, 1);
@@ -1292,7 +1217,7 @@ TEST_F(GCHeapTest, VMapTracedValuesKeepReferencesAlive) {
     uint64_t root = list_item(vm);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // str_alive survives (marked through VMap trace), str_dead is collected
     EXPECT_EQ(gc->object_count, 2u);
@@ -1310,7 +1235,7 @@ TEST_F(GCHeapTest, VMapDestroyCallbackOnDead) {
     EXPECT_EQ(gc->object_count, 1u);
 
     // Collect with no roots — VMap is dead
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     // VMap should be collected
     EXPECT_EQ(gc->object_count, 0u);
@@ -1330,7 +1255,7 @@ TEST_F(GCHeapTest, VMapDeadAlsoCollectsUnreferencedChildren) {
     EXPECT_EQ(gc->object_count, 2u);
 
     // No roots — both VMap and string are dead
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(gc->object_count, 0u);
     EXPECT_EQ(s_vmap_destroy_calls, 1);
@@ -1350,7 +1275,7 @@ TEST_F(GCHeapTest, VMapNullDataSafe) {
     *(void**)(p + 16) = nullptr;
 
     // Collect with no roots — should not crash
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(gc->object_count, 0u);
     // NULL backing data is not traced, but finalization still runs so host
@@ -1378,13 +1303,13 @@ TEST_F(GCHeapTest, VMapNoCallbacksSafe) {
     uint64_t root = list_item(obj);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(gc->object_count, 1u);  // survives because rooted
 
     // Now unroot and collect — without destroy callback, data leaks (expected)
     gc_unregister_root(gc, &root);
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(gc->object_count, 0u);
     // Manually free since no callback was set
@@ -1435,7 +1360,7 @@ TEST_F(GCHeapTest, ErrorTaggedPointerRootKeepsObjectAlive) {
     uint64_t root = error_item(error);
     gc_register_root(gc, &root);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(gc->object_count, 1u);
     EXPECT_EQ(s_error_trace_calls, 1);
@@ -1454,7 +1379,7 @@ TEST_F(GCHeapTest, ErrorDestroyCallbackOnDead) {
     void* error = gc_heap_calloc(gc, 32, LMD_TYPE_ERROR);
     ASSERT_NE(error, nullptr);
 
-    gc_collect(gc, NULL, 0, 0, 0);
+    gc_collect(gc, NULL, 0);
 
     EXPECT_EQ(gc->object_count, 0u);
     EXPECT_EQ(s_error_trace_calls, 0);

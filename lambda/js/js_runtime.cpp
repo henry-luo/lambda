@@ -18651,7 +18651,7 @@ static Item js_collection_create(int type) {
 static void js_collection_link_prototype(Item obj, const char* ctor_name, int ctor_len) {
     // The freshly created collection is reachable only from native locals at
     // this point, and heap_create_name/js_property_get below can collect. With
-    // no native-stack scan, an unrooted obj is freed mid-link and the prototype
+    // with exact roots, an unrooted obj is freed mid-link and the prototype
     // is written into dead memory, which later reads back as a missing "add".
     RootFrame roots((Context*)context, 3);
     Rooted<Item> rooted_obj(roots, obj);

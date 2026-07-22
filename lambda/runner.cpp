@@ -1464,12 +1464,6 @@ void runner_setup_context(Runner* runner) {
             rt->name_pool = context->name_pool;
         }
     }
-    if (rt && rt->gc_compatibility_required) {
-        // Conservative-only tiers make the heap mode sticky; later precise code
-        // must not disable the native-stack roots on the same activation chain.
-        heap_gc_force_compatibility(context->heap);
-    }
-
     path_register_pool_provider(runner_path_pool_provider);
 
     if (rt && rt->scheduler) {
@@ -1520,10 +1514,6 @@ void resolve_sys_paths_recursive(Item item) {
 
 // Common helper function to execute a compiled script and wrap the result in an Input*
 // The GC heap is retained on the Runtime — caller calls runtime_cleanup() when done.
-static bool runtime_conservative_execution_allowed(Runtime* runtime) {
-    if (!runtime || !runtime->gc_compatibility_required) return true;
-    return runtime_require_gc_compatibility(runtime, "C2MIR");
-}
 
 Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if (!runner->script || !runner->script->main_func) {
@@ -1538,9 +1528,6 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         output->root = ItemError;
         return output;
     }
-
-    Runtime* runtime = runner->runtime;
-    if (!runtime_conservative_execution_allowed(runtime)) return nullptr;
 
     log_notice("Executing JIT compiled code...");
     runner_setup_context(runner);
@@ -1624,29 +1611,14 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 }
 
 Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only) {
-    if (runtime && !transpile_only) {
-        runtime->gc_compatibility_required = true;
-        if (!runtime_conservative_execution_allowed(runtime)) return nullptr;
-    }
-    Runner runner;
-    runner_init(runtime, &runner);
-    runner.script = load_script(runtime, script_path, source, false);
-    if (transpile_only) {
-        log_info("Transpiled script %s only, not executing.", script_path);
-        // Return Input with null item for transpile-only mode
-        Pool* null_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
-        Input* output = Input::create(null_pool, nullptr);
-        if (!output) {
-            log_error("Failed to create transpile output Input");
-            if (null_pool) pool_destroy(null_pool);
-            return nullptr;
-        }
-        output->root = ItemNull;
-        return output;
-    }
-
-    // Use common execution function with run_main=false
-    return execute_script_and_create_output(&runner, false);
+    (void)runtime;
+    (void)source;
+    (void)script_path;
+    (void)transpile_only;
+    // C2MIR relies on native-stack discovery. Re-enable only after its emitter
+    // publishes canonical side-stack roots at every MAY_GC boundary.
+    log_error("C2MIR execution is disabled: it has no precise GC root contract");
+    return nullptr;
 }
 
 Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
@@ -1655,30 +1627,14 @@ Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
 
 // Extended function that supports setting run_main context and returns Input*
 Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main) {
-    if (runtime && !transpile_only) {
-        runtime->gc_compatibility_required = true;
-        if (!runtime_conservative_execution_allowed(runtime)) return nullptr;
-    }
-    Runner runner;
-    runner_init(runtime, &runner);
-    runner.script = load_script(runtime, script_path, NULL, false);
-
-    if (transpile_only) {
-        log_info("Transpiled script %s only, not executing.", script_path);
-        // Return Input with null item for transpile-only mode
-        Pool* null_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
-        Input* output = Input::create(null_pool, nullptr);
-        if (!output) {
-            log_error("Failed to create transpile output Input");
-            if (null_pool) pool_destroy(null_pool);
-            return nullptr;
-        }
-        output->root = ItemNull;
-        return output;
-    }
-
-    // Use common execution function with specified run_main flag
-    return execute_script_and_create_output(&runner, run_main);
+    (void)runtime;
+    (void)script_path;
+    (void)transpile_only;
+    (void)run_main;
+    // C2MIR relies on native-stack discovery. Re-enable only after its emitter
+    // publishes canonical side-stack roots at every MAY_GC boundary.
+    log_error("C2MIR execution is disabled: it has no precise GC root contract");
+    return nullptr;
 }
 
 // Installs runtime_cleanup into the DOM layer's hook so dom_document_destroy()
@@ -1706,11 +1662,6 @@ void runtime_init(Runtime* runtime) {
     }
     module_registry_init();
     jube_register_builtin_modules();
-    if (jube_has_legacy_rooting_abi()) {
-        // The capability is sticky for this Runtime because a legacy module
-        // can re-enter generated code on the same native activation chain.
-        runtime->gc_compatibility_required = true;
-    }
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 
