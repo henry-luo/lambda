@@ -509,7 +509,8 @@ function runTest(testInfo) {
         } else if (testInfo.isGtest) {
             const jsonPath = IS_WINDOWS ? jsonFile.replace(/\//g, '\\') : jsonFile;
             testArgs = [`--gtest_output=json:${jsonPath}`];
-            if (baseName === 'test_js_gtest' && targetCategory === 'baseline') {
+            if (['test_js_gtest', 'test_wpt_html_parser_gtest', 'test_markdown_gtest'].includes(baseName) &&
+                targetCategory === 'baseline') {
                 testArgs.push('--baseline');
             }
             // Special filter for input roundtrip

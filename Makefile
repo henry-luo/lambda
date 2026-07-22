@@ -58,7 +58,7 @@ RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest 
 RADIANT_DOM2_WPT_RUNNERS := input_events
 # GoogleTest emits pass/skip records and suite summaries unrelated to failures;
 # retain runtime diagnostics and failure records so baseline output stays actionable.
-GTEST_PROGRESS_FILTER = grep -vE '^Running main\(\) from |^Note: Google Test filter =|^\[ RUN      \]|^\[       OK \]|^\[  SKIPPED \]|^\[ DISABLED \]|^\[----------\]|^\[==========\]|^\[  PASSED  \]'
+GTEST_PROGRESS_FILTER = grep -vE '^Running main\(\) from |^Note: Google Test filter =|^\[ RUN      \]|^\[       OK \]|^\[  SKIPPED \]|^\[ DISABLED \]|^  YOU HAVE [0-9]+ DISABLED TESTS|^\[----------\]|^\[==========\]|^\[  PASSED  \]'
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
 JOBS := $(NPROCS)
@@ -1236,7 +1236,7 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo ""; \
 	echo "📦 HTML5 WPT Parser Tests:"; \
 	if [ -f "test/test_wpt_html_parser_gtest.exe" ]; then \
-		output=$$(./test/test_wpt_html_parser_gtest.exe 2>&1) || true; \
+		output=$$(./test/test_wpt_html_parser_gtest.exe --baseline 2>&1) || true; \
 		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
 		wpt_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		wpt_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
@@ -1250,7 +1250,7 @@ test-input-baseline: build-test ensure-yaml-submodule
 	echo ""; \
 	echo "📦 CommonMark Markdown Tests:"; \
 	if [ -f "test/test_markdown_gtest.exe" ]; then \
-		output=$$(./test/test_markdown_gtest.exe 2>&1) || true; \
+		output=$$(./test/test_markdown_gtest.exe --baseline 2>&1) || true; \
 		echo "$$output" | $(GTEST_PROGRESS_FILTER) | tail -20; \
 		md_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 		md_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \

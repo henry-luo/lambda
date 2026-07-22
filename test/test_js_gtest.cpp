@@ -11,6 +11,7 @@
 #include <thread>
 #include <atomic>
 #include "test_process.h"
+#include "test_baseline_mode.hpp"
 
 extern "C" {
 #include "../lib/shell.h"
@@ -826,22 +827,8 @@ TEST(JavaScriptRegression, Js54P6ArrayProtoFillSetSlice) {
     ASSERT_EQ(status, 0) << output;
 }
 
-static void parse_js_test_mode(int* argc, char** argv) {
-    int write_index = 1;
-    for (int read_index = 1; read_index < *argc; read_index++) {
-        if (strcmp(argv[read_index], "--baseline") == 0) {
-            js_baseline_mode = true;
-            continue;
-        }
-        argv[write_index++] = argv[read_index];
-    }
-    // GoogleTest must not see the runner-specific mode flag as an unknown option.
-    *argc = write_index;
-    argv[write_index] = nullptr;
-}
-
 int main(int argc, char **argv) {
-    parse_js_test_mode(&argc, argv);
+    js_baseline_mode = test_parse_baseline_mode(&argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
