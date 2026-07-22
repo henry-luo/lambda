@@ -373,16 +373,14 @@ bool test_math_expressions_roundtrip(
     const char* input_format,
     const char* input_flavor,
     const char* /* test_category */,  // Unused parameter
-    const char* test_name,
-    const char* description
+    const char*,
+    const char*
 ) {
-    printf("Testing %s: %s\n", description, test_name);
-
     bool all_passed = true;
 
     for (int i = 0; i < num_cases; i++) {
         const char* original = test_cases[i];
-        printf("  Test case %d: %s\n", i + 1, original);
+        // Successful round trips stay silent; failure branches retain input and result context.
 
         // Create test URL
         Url* test_url = url_parse("test://memory");
@@ -430,9 +428,7 @@ bool test_math_expressions_roundtrip(
             // Compare the results using semantic equivalence
             bool match = are_expressions_semantically_equivalent(std::string(formatted->chars), std::string(test_cases[i]));
 
-            if (match) {
-                printf("    ✅ Roundtrip successful: %s\n", formatted->chars);
-            } else {
+            if (!match) {
                 printf("    ❌ Mismatch!\n");
                 printf("      Original: %s\n", original);
                 printf("      Result:   %s\n", formatted->chars);
@@ -665,17 +661,12 @@ TEST_F(MathRoundtripTest, IndexedMathFileTest) {
         FAIL() << "No math expressions found in " << filepath;
     }
 
-    printf("Testing %zu expressions from %s\n", expressions.size(), filepath);
-
-    int passed = 0;
     int failed = 0;
 
     for (size_t i = 0; i < expressions.size(); i++) {
         const std::string& expr_str = expressions[i];
         const char* expr = expr_str.c_str();
 
-        // Determine format based on delimiters
-        bool is_inline = (expr[0] == '$' && expr[1] != '$');
         const char* input_format = "markdown";
         const char* input_flavor = "commonmark";
 
@@ -718,9 +709,7 @@ TEST_F(MathRoundtripTest, IndexedMathFileTest) {
             // Use semantic equivalence check (same as other tests)
             bool match = are_expressions_semantically_equivalent(result, original);
 
-            if (match) {
-                passed++;
-            } else {
+            if (!match) {
                 printf("  Expr %zu: ❌ Mismatch\n", i + 1);
                 printf("    Original: %s\n", expr);
                 printf("    Result:   %s\n", result.c_str());
@@ -735,9 +724,6 @@ TEST_F(MathRoundtripTest, IndexedMathFileTest) {
         free(output_flavor);
         url_destroy(test_url);
     }
-
-    printf("Results: %d passed, %d failed out of %zu total\n",
-           passed, failed, expressions.size());
 
     EXPECT_EQ(failed, 0) << "Some indexed math expressions failed roundtrip";
 }

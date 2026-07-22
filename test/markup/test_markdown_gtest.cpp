@@ -33,6 +33,7 @@
 #include "../../lib/url.h"
 #include "../../lib/log.h"
 #include "commonmark_html_formatter.hpp"
+#include "../test_baseline_mode.hpp"
 
 // Forward declarations with C linkage
 extern "C" {
@@ -40,6 +41,8 @@ extern "C" {
     String* format_data(Item item, String* type, String* flavor, Pool* pool);
     char* read_text_file(const char* filename);
 }
+
+static bool markdown_baseline_mode = false;
 
 // Helper function to create Lambda String
 static String* create_test_string(const char* text) {
@@ -218,13 +221,11 @@ static std::string normalize_html(const std::string& html) {
 
 // Test fixture for CommonMark spec tests
 class MarkdownSpecTest : public ::testing::Test {
-protected:
+public:
     static std::vector<MarkdownExample> examples;
     static bool examples_loaded;
 
-    void SetUp() override {
-        log_init(NULL);
-
+    static void load_examples() {
         if (!examples_loaded) {
             // list of spec files to load (md4c test specs)
             // format: {relative_path_suffix, display_name}
@@ -287,16 +288,42 @@ protected:
                     parse_commonmark_spec(spec_path.c_str(), spec_files[i].name);
                 
                 if (!file_examples.empty()) {
-                    printf("Loaded %zu examples from %s (%s)\n",
-                           file_examples.size(), spec_path.c_str(), spec_files[i].name);
+                    if (!markdown_baseline_mode) {
+                        printf("Loaded %zu examples from %s (%s)\n",
+                               file_examples.size(), spec_path.c_str(), spec_files[i].name);
+                    }
                     total_examples += file_examples.size();
                     examples.insert(examples.end(), file_examples.begin(), file_examples.end());
                 }
             }
             
-            printf("Total: %d examples from all spec files\n", total_examples);
+            if (!markdown_baseline_mode) {
+                printf("Total: %d examples from all spec files\n", total_examples);
+            }
             examples_loaded = true;
         }
+    }
+
+    static int example_count() {
+        load_examples();
+        return (int)examples.size();
+    }
+
+protected:
+    void SetUp() override {
+        log_init(NULL);
+        if (markdown_baseline_mode) {
+            // CommonMark fixtures intentionally include malformed embedded HTML.
+            log_set_level(log_default_category, LOG_LEVEL_FATAL);
+        }
+        load_examples();
+    }
+
+    void emit_parser_errors_for_failure(const MarkdownExample& example) {
+        if (!markdown_baseline_mode) return;
+        log_set_level(log_default_category, LOG_LEVEL_ERROR);
+        (void)parse_and_format_html(example.markdown, example.cmdline_options);
+        log_set_level(log_default_category, LOG_LEVEL_FATAL);
     }
 
     // Parse markdown and format as CommonMark-style HTML fragment
@@ -337,7 +364,9 @@ bool MarkdownSpecTest::examples_loaded = false;
 // Test that we can load the spec file
 TEST_F(MarkdownSpecTest, LoadSpec) {
     ASSERT_FALSE(examples.empty()) << "Failed to load CommonMark spec examples";
-    printf("Total examples loaded: %zu\n", examples.size());
+    if (!markdown_baseline_mode) {
+        printf("Total examples loaded: %zu\n", examples.size());
+    }
 }
 
 // Test case counter and statistics
@@ -386,18 +415,17 @@ TEST_P(MarkdownExampleTest, Example) {
     if (normalized_actual == normalized_expected) {
         global_stats.passed++;
     } else {
+        emit_parser_errors_for_failure(ex);
         global_stats.failed++;
     }
 }
 
-// Generate test parameters for first N examples (for quick testing)
-// Use INSTANTIATE_TEST_SUITE_P with a range
-// Note: We use a large enough number to cover all spec files
-// The tests will handle out-of-range indices gracefully
+// Register exactly the loaded fixture count; a fixed upper bound previously
+// created out-of-range placeholder cases that only produced GTest skips.
 INSTANTIATE_TEST_SUITE_P(
     AllExamples,
     MarkdownExampleTest,
-    ::testing::Range(0, 2000),  // Large enough to cover all examples from all spec files
+    ::testing::Range(0, MarkdownSpecTest::example_count()),
     [](const ::testing::TestParamInfo<int>& info) {
         return "Example_" + std::to_string(info.param + 1);
     }
@@ -417,14 +445,16 @@ TEST_F(MarkdownSpecTest, CountExamplesBySection) {
         section_counts[ex.section]++;
     }
 
-    printf("\nExamples by spec file:\n");
-    for (const auto& pair : spec_counts) {
-        printf("  %s: %d\n", pair.first.c_str(), pair.second);
-    }
+    if (!markdown_baseline_mode) {
+        printf("\nExamples by spec file:\n");
+        for (const auto& pair : spec_counts) {
+            printf("  %s: %d\n", pair.first.c_str(), pair.second);
+        }
 
-    printf("\nExamples by section:\n");
-    for (const auto& pair : section_counts) {
-        printf("  %s: %d\n", pair.first.c_str(), pair.second);
+        printf("\nExamples by section:\n");
+        for (const auto& pair : section_counts) {
+            printf("  %s: %d\n", pair.first.c_str(), pair.second);
+        }
     }
 }
 
@@ -452,7 +482,9 @@ TEST_F(MarkdownSpecTest, ATXHeadings) {
         }
     }
 
-    printf("ATX Headings: %d passed, %d failed\n", passed, failed);
+    if (!markdown_baseline_mode) {
+        printf("ATX Headings: %d passed, %d failed\n", passed, failed);
+    }
 }
 
 // Test paragraphs
@@ -473,7 +505,9 @@ TEST_F(MarkdownSpecTest, Paragraphs) {
         }
     }
 
-    printf("Paragraphs: %d passed, %d failed\n", passed, failed);
+    if (!markdown_baseline_mode) {
+        printf("Paragraphs: %d passed, %d failed\n", passed, failed);
+    }
 }
 
 // Test code blocks
@@ -495,7 +529,9 @@ TEST_F(MarkdownSpecTest, CodeBlocks) {
         }
     }
 
-    printf("Code blocks: %d passed, %d failed\n", passed, failed);
+    if (!markdown_baseline_mode) {
+        printf("Code blocks: %d passed, %d failed\n", passed, failed);
+    }
 }
 
 // Comprehensive statistics by section
@@ -509,9 +545,11 @@ TEST_F(MarkdownSpecTest, ComprehensiveStats) {
     std::map<std::string, std::pair<int, int>> spec_stats;    // {passed, failed} by spec file
     int total_passed = 0;
     int total_failed = 0;
+    const MarkdownExample* first_failed = nullptr;
 
     for (const auto& ex : examples) {
-        std::string actual = parse_and_format_html(ex.markdown);
+        // Fixture options select extensions such as GFM tables; omitting them misreports compliant cases.
+        std::string actual = parse_and_format_html(ex.markdown, ex.cmdline_options);
         std::string normalized_actual = normalize_html(actual);
         std::string normalized_expected = normalize_html(ex.expected_html);
 
@@ -525,68 +563,75 @@ TEST_F(MarkdownSpecTest, ComprehensiveStats) {
             section_stats[ex.section].second++;
             spec_stats[ex.spec_file].second++;
             total_failed++;
+            if (!first_failed) first_failed = &ex;
         }
     }
 
-    printf("\n");
-    printf("========================================\n");
-    printf("CommonMark Spec Compliance Report\n");
-    printf("========================================\n\n");
-    
-    // stats by spec file
-    printf("Results by Spec File:\n");
-    printf("%-30s %6s %6s %7s\n", "Spec File", "Pass", "Fail", "Rate");
-    printf("%-30s %6s %6s %7s\n", "------------------------------", "------", "------", "-------");
-    for (const auto& pair : spec_stats) {
-        int passed = pair.second.first;
-        int failed = pair.second.second;
-        int total = passed + failed;
-        double rate = 100.0 * passed / total;
-        printf("%-30s %6d %6d %6.1f%%\n",
-               pair.first.substr(0, 30).c_str(),
-               passed, failed, rate);
-    }
-    printf("\n");
-
-    printf("Results by Section:\n");
-    printf("%-40s %6s %6s %7s\n", "Section", "Pass", "Fail", "Rate");
-    printf("%-40s %6s %6s %7s\n", "----------------------------------------", "------", "------", "-------");
-
-    for (const auto& pair : section_stats) {
-        int passed = pair.second.first;
-        int failed = pair.second.second;
-        int total = passed + failed;
-        double rate = 100.0 * passed / total;
-
-        printf("%-40s %6d %6d %6.1f%%\n",
-               pair.first.substr(0, 40).c_str(),
-               passed, failed, rate);
+    if (first_failed) {
+        emit_parser_errors_for_failure(*first_failed);
     }
 
-    printf("%-40s %6s %6s %7s\n", "----------------------------------------", "------", "------", "-------");
-    double overall_rate = 100.0 * total_passed / (total_passed + total_failed);
-    printf("%-40s %6d %6d %6.1f%%\n", "TOTAL", total_passed, total_failed, overall_rate);
-    printf("\n");
+    if (!markdown_baseline_mode) {
+        printf("\n");
+        printf("========================================\n");
+        printf("CommonMark Spec Compliance Report\n");
+        printf("========================================\n\n");
+        printf("Results by Spec File:\n");
+        printf("%-30s %6s %6s %7s\n", "Spec File", "Pass", "Fail", "Rate");
+        printf("%-30s %6s %6s %7s\n", "------------------------------", "------", "------", "-------");
+        for (const auto& pair : spec_stats) {
+            int passed = pair.second.first;
+            int failed = pair.second.second;
+            int total = passed + failed;
+            double rate = 100.0 * passed / total;
+            printf("%-30s %6d %6d %6.1f%%\n",
+                   pair.first.substr(0, 30).c_str(), passed, failed, rate);
+        }
+        printf("\nResults by Section:\n");
+        printf("%-40s %6s %6s %7s\n", "Section", "Pass", "Fail", "Rate");
+        printf("%-40s %6s %6s %7s\n", "----------------------------------------", "------", "------", "-------");
+        for (const auto& pair : section_stats) {
+            int passed = pair.second.first;
+            int failed = pair.second.second;
+            int total = passed + failed;
+            double rate = 100.0 * passed / total;
+            printf("%-40s %6d %6d %6.1f%%\n",
+                   pair.first.substr(0, 40).c_str(), passed, failed, rate);
+        }
+        printf("%-40s %6s %6s %7s\n", "----------------------------------------", "------", "------", "-------");
+        double overall_rate = 100.0 * total_passed / (total_passed + total_failed);
+        printf("%-40s %6d %6d %6.1f%%\n", "TOTAL", total_passed, total_failed, overall_rate);
+        printf("\n");
+    }
+
+    EXPECT_EQ(total_failed, 0) << "CommonMark compliance report found "
+                               << total_failed << " failing fixture(s)";
 }
 
-// Print final statistics
-TEST_F(MarkdownSpecTest, FinalStatistics) {
-    printf("\n========================================\n");
-    printf("CommonMark Spec Test Summary\n");
-    printf("========================================\n");
-    printf("Total examples: %zu\n", examples.size());
-    printf("Passed: %d\n", global_stats.passed);
-    printf("Failed: %d\n", global_stats.failed);
-    printf("Skipped: %d\n", global_stats.skipped);
-    if (!examples.empty()) {
-        double pass_rate = 100.0 * global_stats.passed / examples.size();
-        printf("Pass rate: %.1f%%\n", pass_rate);
+class MarkdownSpecSummary : public ::testing::Environment {
+public:
+    void TearDown() override {
+        // Global teardown runs after parameterized examples have populated the aggregate counters.
+        if (markdown_baseline_mode) return;
+        printf("\n========================================\n");
+        printf("CommonMark Spec Test Summary\n");
+        printf("========================================\n");
+        printf("Total examples: %zu\n", MarkdownSpecTest::examples.size());
+        printf("Passed: %d\n", global_stats.passed);
+        printf("Failed: %d\n", global_stats.failed);
+        printf("Skipped: %d\n", global_stats.skipped);
+        if (!MarkdownSpecTest::examples.empty()) {
+            double pass_rate = 100.0 * global_stats.passed / MarkdownSpecTest::examples.size();
+            printf("Pass rate: %.1f%%\n", pass_rate);
+        }
+        printf("========================================\n");
     }
-    printf("========================================\n");
-}
+};
 
 // Main function
 int main(int argc, char** argv) {
+    markdown_baseline_mode = test_parse_baseline_mode(&argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
+    ::testing::AddGlobalTestEnvironment(new MarkdownSpecSummary());
     return RUN_ALL_TESTS();
 }

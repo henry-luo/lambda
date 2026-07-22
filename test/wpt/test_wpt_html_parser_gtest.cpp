@@ -23,6 +23,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include "../test_baseline_mode.hpp"
 
 #include "../../lambda/lambda-data.hpp"
 #include "../../lambda/mark_reader.hpp"
@@ -31,6 +32,8 @@ extern "C" {
 #include "../../lib/log.h"
     Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor);
 }
+
+static bool wpt_html_baseline_mode = false;
 
 // ============================================================================
 // Helper Functions
@@ -358,6 +361,17 @@ protected:
         // Initialize logging
         log_parse_config_file("log.conf");
         log_init("");
+        if (wpt_html_baseline_mode) {
+            // HTML5lib fixtures intentionally cover parser-recovery errors.
+            log_set_level(log_default_category, LOG_LEVEL_FATAL);
+        }
+    }
+
+    void emit_parser_errors_for_failure(const WptTestCase& test_case) {
+        if (!wpt_html_baseline_mode) return;
+        log_set_level(log_default_category, LOG_LEVEL_ERROR);
+        (void)input_from_source(test_case.input.c_str(), NULL, html_type, NULL);
+        log_set_level(log_default_category, LOG_LEVEL_FATAL);
     }
 
     void TearDown() override {
@@ -379,6 +393,7 @@ TEST_P(WptHtmlParserTest, ParseHtml) {
     Input* input = input_from_source(test_case.input.c_str(), NULL, html_type, NULL);
 
     if (!input || input->root.item == ITEM_NULL || input->root.item == ITEM_ERROR) {
+        emit_parser_errors_for_failure(test_case);
         FAIL() << "Failed to parse HTML: " << test_case.input;
         return;
     }
@@ -388,6 +403,7 @@ TEST_P(WptHtmlParserTest, ParseHtml) {
 
     // Compare trees
     if (actual_tree != test_case.expected) {
+        emit_parser_errors_for_failure(test_case);
         // Output detailed comparison for debugging
         std::cerr << "\n=== Test Failed ===\n";
         std::cerr << "File: " << test_case.file << "\n";
@@ -448,3 +464,9 @@ INSTANTIATE_TEST_SUITE_P(
         return name.substr(0, 50); // Truncate if too long
     }
 );
+
+int main(int argc, char** argv) {
+    wpt_html_baseline_mode = test_parse_baseline_mode(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}

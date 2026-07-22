@@ -11,6 +11,7 @@
 #include <thread>
 #include <atomic>
 #include "test_process.h"
+#include "test_baseline_mode.hpp"
 
 extern "C" {
 #include "../lib/shell.h"
@@ -264,6 +265,7 @@ struct JsBatchResult {
 
 // Max scripts per lambda.exe js-test-batch process
 static const size_t JS_BATCH_CHUNK_SIZE = 50;
+static bool js_baseline_mode = false;
 
 static void run_js_sub_batch(
     const std::vector<std::string>& scripts,
@@ -370,6 +372,18 @@ struct JsTestParam {
     std::string test_name;   // sanitised for GTest (alphanumeric + underscore)
 };
 
+static bool js_baseline_excludes_library_test(const JsTestParam& test) {
+    static const char* excluded_tests[] = {
+        "lib_codemirror",
+        "lib_tabulator",
+        "lib_tom_select",
+    };
+    for (const char* excluded : excluded_tests) {
+        if (strcmp(test.test_name.c_str(), excluded) == 0) return true;
+    }
+    return false;
+}
+
 static bool read_js_document_fixture(const char* script_path,
         char* fixture_name, size_t fixture_name_size) {
     if (!script_path || !fixture_name || fixture_name_size == 0) return false;
@@ -457,6 +471,9 @@ static std::vector<JsTestParam> discover_js_tests_in_dir(const char* dir_path) {
             }
         }
 
+        // These browser-library probes are extended coverage; exclude them only
+        // from the fast baseline gate while keeping ordinary JS runs comprehensive.
+        if (js_baseline_mode && js_baseline_excludes_library_test(p)) continue;
         params.push_back(p);
 
 #ifdef _WIN32
@@ -811,6 +828,7 @@ TEST(JavaScriptRegression, Js54P6ArrayProtoFillSetSlice) {
 }
 
 int main(int argc, char **argv) {
+    js_baseline_mode = test_parse_baseline_mode(&argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
