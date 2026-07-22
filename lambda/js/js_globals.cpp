@@ -18,6 +18,7 @@
 #include "js_class.h"
 #include "js_coerce.h"
 #include "js_runtime_state.hpp"
+#include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
 #include "js_state_guards.h"
 #include "js_dom_platform.h"
@@ -2102,9 +2103,7 @@ extern "C" Item js_date_utc(Item args_array) {
         ms = js_date_make_date_double(day, time);
     }
     ms = js_date_time_clip(ms);
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = ms;
-    return lambda_float_ptr_to_item(fp);
+    return push_d(ms);
 }
 
 // v11: Date instance method dispatch
@@ -2145,9 +2144,7 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
             return js_throw_range_error("Invalid time value");
         if (method_id == 17 || method_id == 9) // toString, toLocaleDateString
             return (Item){.item = s2it(heap_create_name("Invalid Date", 12))};
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
     time_t secs = js_date_seconds_from_ms(ms);
     struct tm tm;
@@ -2302,9 +2299,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
 
     auto store_ms = [&](double new_ms) -> Item {
         new_ms = js_date_time_clip(new_ms);
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = new_ms;
-        Item new_time = lambda_float_ptr_to_item(fp);
+        Item new_time = push_d(new_ms);
         js_property_set(date_obj, key, new_time);
         return new_time;
     };
@@ -2354,17 +2349,13 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         // NaN (Invalid Date) handling
         if (isnan(ms)) {
             if (method_id == 43) { // valueOf — return NaN
-                double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-                *fp = NAN;
-                return lambda_float_ptr_to_item(fp);
+                return push_d(NAN);
             }
             if (method_id == 44) // toJSON — return null for Invalid Date
                 return ItemNull;
             if (method_id == 45 || method_id == 46 || method_id == 47) // string representations
                 return (Item){.item = s2it(heap_create_name("Invalid Date", 12))};
-            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *fp = NAN;
-            return lambda_float_ptr_to_item(fp);
+            return push_d(NAN);
         }
         time_t secs = js_date_seconds_from_ms(ms);
         if (method_id == 40) { // getDay
@@ -2382,9 +2373,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             return (Item){.item = i2it(offset_min)};
         }
         if (method_id == 43) { // valueOf — same as getTime
-            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *fp = ms;
-            return lambda_float_ptr_to_item(fp);
+            return push_d(ms);
         }
         if (method_id == 44) { // toJSON — same as toISOString
             return js_date_to_json(date_obj);
@@ -2473,9 +2462,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         // all other setters: if t (original [[DateValue]]) is NaN, return NaN without writing
         // (ToNumber args may have side effects that change the date, per spec step 8 check uses t)
         if (isnan(ms)) {
-            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *fp = NAN;
-            return lambda_float_ptr_to_item(fp);
+            return push_d(NAN);
         }
 
         // local setters (21-27)
@@ -2671,10 +2658,8 @@ extern "C" Item js_date_new_multi(Item args_array) {
         int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
         ms_val = civil_ms + (double)offset_min * 60000.0;
     }
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
     ms_val = js_date_time_clip(ms_val);
-    *fp = ms_val;
-    js_property_set(obj, time_key, lambda_float_ptr_to_item(fp));
+    js_property_set(obj, time_key, push_d(ms_val));
     js_class_stamp(obj, JS_CLASS_DATE);
     js_date_set_instance_prototype(obj);
     return obj;
@@ -2685,21 +2670,15 @@ extern "C" Item js_date_parse(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
     // ES spec: extended year "-000000" is invalid (year zero must be "+000000")
     if (s->len >= 7 && memcmp(s->chars, "-000000", 7) == 0) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
     double iso_ms;
     if (js_date_parse_iso_ms(s, &iso_ms)) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = iso_ms;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(iso_ms);
     }
     struct tm tm = {};
     // Try ISO 8601 first
@@ -2711,13 +2690,9 @@ extern "C" Item js_date_parse(Item str_item) {
         strptime(s->chars, "%c", &tm)) {
         time_t t = timegm(&tm);
         double ms = (double)t * 1000.0;
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = ms;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(ms);
     }
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = NAN;
-    return lambda_float_ptr_to_item(fp);
+    return push_d(NAN);
 }
 
 extern "C" void js_store_process_argv(int argc, const char** argv) {
@@ -2874,9 +2849,7 @@ extern "C" Item js_process_uptime(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double now = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = now - start_time;
-    return lambda_float_ptr_to_item(fp);
+    return push_d(now - start_time);
 }
 
 // build process.env as a map of environment variables
@@ -3394,12 +3367,10 @@ static Item build_process_versions(void) {
 static void js_process_set_method(Item ns, const char* name, void* func_ptr, int param_count) {
     Item key = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
     Item fn = js_new_function(func_ptr, param_count);
-    // Mark as non-constructor (native builtin) so .prototype returns undefined
-    // Use offset to set builtin_id = -2 (JsFunction layout: type_id, func_ptr, param_count,
-    // env, env_size, prototype, bound_this, bound_args, bound_argc, name, builtin_id)
-    struct { TypeId t; void* fp; int pc; Item* e; int es; Item p; Item bt; Item* ba; int bc; String* n; int bid; } *fl;
-    fl = decltype(fl)(fn.function);
-    fl->bid = -2;
+    // Native builtins share the canonical layout; stale prefix mirrors write
+    // the wrong field once the scalar-owned bound-this slot is present.
+    JsFunction* function = (JsFunction*)fn.function;
+    function->builtin_id = -2;
     js_property_set(ns, key, fn);
 }
 
@@ -4636,9 +4607,7 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
 
     // Get radix per ES spec: ToInt32(radix), then validate 2-36
@@ -4667,9 +4636,7 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     if (radix == 0) { radix = 10; radix_explicit = false; }
     // Invalid radix: return NaN
     if (radix_explicit && (radix < 2 || radix > 36)) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
 
     // Null-terminate
@@ -4737,9 +4704,7 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
         start++;
     }
     if (!found_digit) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
     result *= sign;
 
@@ -4748,18 +4713,14 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
         result == (double)(int64_t)result) {
         return (Item){.item = i2it((int64_t)result)};
     }
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = result;
-    return lambda_float_ptr_to_item(fp);
+    return push_d(result);
 }
 
 extern "C" Item js_parseFloat(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
     if (!s || s->len == 0) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
 
     char buf[256];
@@ -4804,25 +4765,17 @@ extern "C" Item js_parseFloat(Item str_item) {
     if (*p == 'I') {
         // check for "Infinity"
         if (strncmp(p, "Infinity", 8) == 0) {
-            double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *fp = (*start == '-') ? -HUGE_VAL : HUGE_VAL;
-            return lambda_float_ptr_to_item(fp);
+            return push_d((*start == '-') ? -HUGE_VAL : HUGE_VAL);
         }
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
     // must start with a decimal digit or '.'
     if ((*p < '0' || *p > '9') && *p != '.') {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
     // '.' alone without a following digit is not valid
     if (*p == '.' && (p[1] < '0' || p[1] > '9')) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
 
     // scan to find the end of the valid decimal literal (no hex)
@@ -4844,14 +4797,10 @@ extern "C" Item js_parseFloat(Item str_item) {
     *q = saved;
 
     if (endptr == start) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
 
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = val;
-    return lambda_float_ptr_to_item(fp);
+    return push_d(val);
 }
 
 extern "C" Item js_isNaN(Item value) {
@@ -5491,9 +5440,7 @@ extern "C" Item js_string_charCodeAt(Item str_item, Item index_item) {
     }
 
     if (idx < 0 || idx >= (int)s->len) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = NAN;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(NAN);
     }
 
     // Return the UTF-16 code unit (for ASCII, same as byte value)
@@ -6411,22 +6358,7 @@ extern "C" Item js_array_fill(Item arr_item, Item value) {
 // instanceof operator — walks prototype chain
 // =============================================================================
 
-// partial JsFunction layout for accessing function name (used by instanceof fallback)
-struct JsFuncName {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map;
-    uint8_t flags;
-};
+using JsFuncName = JsFunction;
 
 static Item js_instanceof_impl(Item left, Item right, bool skip_symbol);
 extern "C" Item js_array_get_custom_proto(Item arr);
@@ -7101,22 +7033,7 @@ static Item js_async_func_ctor_placeholder(Item* args, int argc) {
     return ItemNull;
 }
 
-// Partial layout to access flags field (full JsFunctionLayout defined below)
-struct JsFuncFlagsAccess {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map;
-    uint8_t flags;
-};
+using JsFuncFlagsAccess = JsFunction;
 #define JS_FUNC_FLAG_GENERATOR_EARLY 1
 #define JS_FUNC_FLAG_ASYNC_EARLY     128
 
@@ -7442,32 +7359,7 @@ static bool js_reflect_create_list_from_array_like(Item array_like, Item** out_a
 #define JS_FUNC_FLAG_METHOD_G    32
 #define JS_FUNC_FLAG_ASYNC_G     128
 
-struct JsFunctionLayout {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map;
-    uint16_t flags;
-    int16_t formal_length;
-    Item* module_vars;
-    Item home_global;
-    String* source_text;
-    bool eval_initializer_context;
-    Item* with_env;
-    int with_env_depth;
-    String* vm_stack_filename;
-    String* vm_stack_source;
-    int64_t vm_stack_line_offset;
-    int64_t vm_stack_column_offset;
-};
+using JsFunctionLayout = JsFunction;
 
 static bool js_func_is_constructor(Item func_item) {
     // Proxy: a proxy is constructable only if its target is constructable
@@ -8467,21 +8359,7 @@ extern "C" Item js_reflect_apply(Item target, Item this_arg, Item args_array) {
 static Map* js_array_props_map(Array* arr);
 static Item js_defprop_get_internal_state(Item obj, const char* key, int keylen, bool* found);
 
-// v18: partial JsFunction layout for properties_map access
-struct JsFuncProps {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map;
-};
+using JsFuncProps = JsFunction;
 
 extern "C" Item js_get_constructor(Item name_item);
 
@@ -10714,9 +10592,7 @@ extern "C" Item js_to_string_val(Item value) {
 // =============================================================================
 
 static Item make_double(double val) {
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = val;
-    return lambda_float_ptr_to_item(fp);
+    return push_d(val);
 }
 
 extern "C" Item js_number_property(Item prop_name) {
@@ -15992,12 +15868,10 @@ extern "C" Item js_get_global_this() {
         // Legacy IE-style `window.event` — initially undefined, set to the
         // in-flight event during dispatch by js_dom_dispatch_event.
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("event", 5))}, make_js_undefined());
-        double* nan_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *nan_p = NAN;
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("NaN", 3))}, lambda_float_ptr_to_item(nan_p));
-        double* inf_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *inf_p = INFINITY;
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Infinity", 8))}, lambda_float_ptr_to_item(inf_p));
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("NaN", 3))},
+            push_d(NAN));
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Infinity", 8))},
+            push_d(INFINITY));
 
         // ES spec: NaN, Infinity, undefined are non-writable, non-enumerable, non-configurable
         static const char* ro_globals[] = {"NaN", "Infinity", "undefined", NULL};
@@ -16217,9 +16091,7 @@ extern "C" Item js_get_global_this() {
                 js_new_function((void*)js_performance_empty_entries_2, 2));
             js_property_set(perf, make_string_item("getEntriesByType"),
                 js_new_function((void*)js_performance_entries_by_type, 1));
-            double* origin = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-            *origin = js_performance_time_origin_ms();
-            origin_root.set(lambda_float_ptr_to_item(origin));
+            origin_root.set(push_d(js_performance_time_origin_ms()));
             js_property_set(perf, make_string_item("timeOrigin"), origin_root.get());
             timing_root.set(js_new_object());
             js_property_set(perf, make_string_item("timing"), timing_root.get());
@@ -17511,6 +17383,7 @@ extern "C" Item js_get_global_builtin_fn(Item name_item, Item param_count_item) 
     // since ItemNull.item != 0, which would confuse property lookup code.
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
     fn->type_id = LMD_TYPE_FUNC;
+    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
     fn->func_ptr = NULL;
     fn->param_count = pc;
     fn->formal_length = -1; // -1 = use param_count for .length
@@ -17720,33 +17593,7 @@ static Item js_ctor_event_target_fn() {
     return js_create_event_target();
 }
 
-// Forward declaration of JsFunction struct (matches js_runtime.cpp definition)
-struct JsCtor {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map; // v18: must match JsFunction layout
-    uint16_t flags;      // must match JsFunction layout (generator, arrow flags)
-    int16_t formal_length; // must match JsFunction layout
-    Item* module_vars;   // must match JsFunction layout
-    Item home_global;
-    String* source_text; // must match JsFunction layout (v29)
-    bool eval_initializer_context;
-    Item* with_env;
-    int with_env_depth;
-    String* vm_stack_filename;
-    String* vm_stack_source;
-    int64_t vm_stack_line_offset;
-    int64_t vm_stack_column_offset;
-};
+using JsCtor = JsFunction;
 
 // Reset constructor prototype objects between batch tests.
 //
@@ -17975,6 +17822,7 @@ extern "C" Item js_get_typed_array_base() {
     // Create the %TypedArray% intrinsic function object
     JsFunctionLayout* fn = (JsFunctionLayout*)pool_calloc(js_input->pool, sizeof(JsFunctionLayout));
     fn->type_id = LMD_TYPE_FUNC;
+    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
     fn->func_ptr = (void*)js_ctor_placeholder;
     fn->param_count = 0;
     fn->formal_length = -1;
@@ -18152,6 +18000,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     // caches by func_ptr and all constructors share js_ctor_placeholder.
     JsCtor* fn = (JsCtor*)pool_calloc(js_input->pool, sizeof(JsCtor));
     fn->type_id = LMD_TYPE_FUNC;
+    fn->layout_magic = JS_FUNCTION_LAYOUT_MAGIC;
     // v18: Use real function pointers for type coercion constructors
     if (ctor_id == JS_CTOR_BOOLEAN) fn->func_ptr = (void*)js_ctor_boolean_fn;
     else if (ctor_id == JS_CTOR_NUMBER) fn->func_ptr = (void*)js_ctor_number_fn;

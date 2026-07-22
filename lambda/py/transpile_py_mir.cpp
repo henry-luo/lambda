@@ -175,6 +175,25 @@ static bool pm_create_hosted_item_function(MIR_context_t mir_context,
     return true;
 }
 
+static bool pm_create_hosted_item_function_typed(MIR_context_t mir_context,
+        const char* function_name, int parameter_count,
+        const char* const* parameter_names, const uint8_t* parameter_kinds,
+        MIR_item_t* out_function_item, MIR_func_t* out_function) {
+    if (!mir_context || !function_name || parameter_count < 0 || !out_function_item ||
+            !out_function || !parameter_kinds || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_TYPED_FUNCTION_CREATE_SIZE ||
+            !py_hosted_execution_api->mir_item_function_create_typed) return false;
+    void* function_item = NULL;
+    void* function = NULL;
+    if (py_hosted_execution_api->mir_item_function_create_typed(mir_context,
+            function_name, (uint32_t)parameter_count, parameter_names,
+            parameter_kinds, &function_item, &function) != 0) return false;
+    *out_function_item = (MIR_item_t)function_item;
+    *out_function = (MIR_func_t)function;
+    return true;
+}
+
 static bool pm_create_hosted_function_forward(MIR_context_t mir_context,
         const char* function_name, MIR_item_t* out_function_item) {
     if (!mir_context || !function_name || !out_function_item ||
@@ -195,6 +214,22 @@ static bool pm_create_hosted_item_function_proto(MIR_context_t mir_context,
     void* prototype_item = NULL;
     if (py_hosted_execution_api->mir_item_function_proto_create(mir_context, prototype_name,
             (uint32_t)parameter_count, &prototype_item) != 0) return false;
+    *out_prototype_item = (MIR_item_t)prototype_item;
+    return true;
+}
+
+static bool pm_create_hosted_item_function_proto_typed(MIR_context_t mir_context,
+        const char* prototype_name, int parameter_count,
+        const uint8_t* parameter_kinds, MIR_item_t* out_prototype_item) {
+    if (!mir_context || !prototype_name || parameter_count < 0 ||
+            !parameter_kinds || !out_prototype_item || !py_hosted_execution_api ||
+            py_hosted_execution_api->struct_size <
+                JUBE_GUEST_EXECUTION_API_H7C_TYPED_PROTO_CREATE_SIZE ||
+            !py_hosted_execution_api->mir_item_function_proto_create_typed) return false;
+    void* prototype_item = NULL;
+    if (py_hosted_execution_api->mir_item_function_proto_create_typed(mir_context,
+            prototype_name, (uint32_t)parameter_count, parameter_kinds,
+            &prototype_item) != 0) return false;
     *out_prototype_item = (MIR_item_t)prototype_item;
     return true;
 }
@@ -227,8 +262,12 @@ static bool pm_activate_hosted_import_execution(void* host_execution, void** out
 
 static bool pm_run_hosted_guest_main(void* host_execution, void* entry_function,
                                      Item* out_result) {
-    return py_hosted_execution_api && py_hosted_execution_api->execution_run_main &&
-        py_hosted_execution_api->execution_run_main(host_execution, entry_function, out_result) == 0;
+    return py_hosted_execution_api &&
+        py_hosted_execution_api->struct_size >=
+            JUBE_GUEST_EXECUTION_API_H7C_RUN_MAIN_INTO_SIZE &&
+        py_hosted_execution_api->execution_run_main_into &&
+        py_hosted_execution_api->execution_run_main_into(host_execution,
+            entry_function, out_result) == 0;
 }
 
 static void pm_finish_hosted_guest_execution(void* host_execution) {
@@ -582,6 +621,22 @@ static void pm_begin_function_frame(PyMirTranspiler* mt, MIR_reg_t runtime) {
     pm_emit_label(mt, mt->em.frame.anchor);
 }
 
+static void pm_enable_scalar_return_home(PyMirTranspiler* mt,
+        const char* home_name) {
+    if (!mt || !home_name) return;
+    MIR_reg_t home = pm_lookup_hosted_function_register(mt->em.ctx,
+        mt->em.func, home_name);
+    if (!home) {
+        log_error("py-mir: missing required scalar return home '%s'", home_name);
+        abort();
+    }
+    // Public Python frames must hand scalar payloads to their caller before
+    // popping the number stack; a fallback GC scalar cell is forbidden.
+    mt->em.frame.incoming_scalar_home = home;
+    mt->em.frame.plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
+    mt->em.frame.plan.accepts_caller_scalar_home = true;
+}
+
 static void pm_finish_function_frame(PyMirTranspiler* mt, const char* name) {
     if (!mt || !mt->em.frame.active) return;
     mt->em.frame.plan.debug_name = name;
@@ -600,19 +655,14 @@ static void pm_finish_function_frame(PyMirTranspiler* mt, const char* name) {
 
     if (mt->em.frame.item_return) {
         MIR_reg_t returned = mt->em.frame.return_reg;
-        if (mt->em.frame.incoming_scalar_home) {
-            returned = em_adopt_scalar_item(&mt->em,
-                mt->em.frame.scalar_return_mode, returned,
-                mt->em.frame.runtime, offsetof(Context, side_number_top),
-                mt->em.frame.number_base, mt->em.frame.incoming_scalar_home);
-        } else {
-            // a Python Item may reference this activation's number stack.
-            // Public returns therefore need a heap home before restoring it.
-            returned = pm_call_1(mt, "lambda_item_heap_rehome", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, returned));
-            em_store_frame_top(&mt->em, mt->em.frame.runtime,
-                offsetof(Context, side_number_top), mt->em.frame.number_base);
+        if (!mt->em.frame.incoming_scalar_home) {
+            log_error("py-mir: public Item return has no scalar home");
+            abort();
         }
+        returned = em_adopt_scalar_item(&mt->em,
+            mt->em.frame.scalar_return_mode, returned,
+            mt->em.frame.runtime, offsetof(Context, side_number_top),
+            mt->em.frame.number_base, mt->em.frame.incoming_scalar_home);
         if (returned != mt->em.frame.return_reg) {
             pm_emit_raw(mt, MIR_new_insn(mt->em.ctx, MIR_MOV,
                 MIR_new_reg_op(mt->em.ctx, mt->em.frame.return_reg),
@@ -1202,6 +1252,8 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
                         pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
                     }
+                    fn_item_reg = pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
                     return fn_item_reg;
                 }
             }
@@ -2499,7 +2551,11 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             snprintf(fn_name, sizeof(fn_name), "_%s", target_fc->name);
 
             // determine total MIR params (regular + optional varargs pair + optional kwargs map)
-            int mir_total = total_params + (target_fc->has_star_args ? 2 : 0) + (target_fc->has_kwargs ? 1 : 0);
+            int mir_total = total_params + (target_fc->has_star_args ? 2 : 0) +
+                (target_fc->has_kwargs ? 1 : 0);
+            int direct_mir_total = mir_total + 1;
+            uint8_t direct_param_kinds[21] = {};
+            direct_param_kinds[mir_total] = 1;
 
             // check import cache for proto (avoid duplicate proto names)
             char proto_key[148];
@@ -2515,8 +2571,8 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             } else {
                 char proto_name[160];
                 snprintf(proto_name, sizeof(proto_name), "%s_lp", fn_name);
-                if (!pm_create_hosted_item_function_proto(mt->em.ctx, proto_name,
-                        mir_total, &proto)) {
+                if (!pm_create_hosted_item_function_proto_typed(mt->em.ctx,
+                        proto_name, direct_mir_total, direct_param_kinds, &proto)) {
                     log_error("py-mir: host could not create direct-call prototype '%s'", proto_name);
                     mt->has_compile_error = true;
                     return pm_emit_null(mt);
@@ -2581,6 +2637,13 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             }
 
             MIR_reg_t res = pm_new_reg(mt, "dcall", MIR_T_I64);
+            int result_home_id = em_scalar_home_new(&mt->em);
+            MIR_reg_t result_home = em_materialize_frame_ref(&mt->em,
+                em_scalar_home_ref(&mt->em, result_home_id));
+            if (!result_home) {
+                log_error("py-mir: direct call has no caller-owned scalar result home");
+                abort();
+            }
 
             if (target_fc->has_star_args) {
                 // collect all positional args beyond regular params as excess
@@ -2607,7 +2670,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                     pm_arg_scope_store(mt, varargs, i, excess_regs[i]);
                 }
 
-                int nops = 3 + mir_total;
+                int nops = 3 + direct_mir_total;
                 MIR_op_t ops[24];
                 ops[0] = MIR_new_ref_op(mt->em.ctx, proto);
                 ops[1] = MIR_new_ref_op(mt->em.ctx, target_fc->func_item);
@@ -2620,10 +2683,11 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 if (target_fc->has_kwargs) {
                     ops[3 + total_params + 2] = MIR_new_reg_op(mt->em.ctx, kwargs_map_reg);
                 }
+                ops[3 + mir_total] = MIR_new_reg_op(mt->em.ctx, result_home);
                 pm_emit(mt, MIR_new_insn_arr(mt->em.ctx, MIR_CALL, nops, ops));
                 pm_end_arg_scope(mt, varargs);
             } else {
-                int nops = 3 + mir_total;
+                int nops = 3 + direct_mir_total;
                 MIR_op_t ops[20]; // proto + func_ref + result + up to 16 args + optional kwargs map
                 ops[0] = MIR_new_ref_op(mt->em.ctx, proto);
                 ops[1] = MIR_new_ref_op(mt->em.ctx, target_fc->func_item);
@@ -2634,8 +2698,10 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 if (target_fc->has_kwargs) {
                     ops[3 + total_params] = MIR_new_reg_op(mt->em.ctx, kwargs_map_reg);
                 }
+                ops[3 + mir_total] = MIR_new_reg_op(mt->em.ctx, result_home);
                 pm_emit(mt, MIR_new_insn_arr(mt->em.ctx, MIR_CALL, nops, ops));
             }
+            em_scalar_home_bind(&mt->em, result_home_id, res);
             return res;
         }
     }
@@ -2694,20 +2760,38 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 }
                 ka = ka->next;
             }
-            MIR_reg_t result = pm_call_4(mt, "py_call_function_kw", MIR_T_I64,
+            int keyword_home_id = em_scalar_home_new(&mt->em);
+            MIR_reg_t keyword_home = em_materialize_frame_ref(&mt->em,
+                em_scalar_home_ref(&mt->em, keyword_home_id));
+            if (!keyword_home) {
+                log_error("py-mir: keyword call has no caller-owned scalar result home");
+                abort();
+            }
+            MIR_reg_t result = pm_call_5(mt, "py_call_function_kw_into", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->em.ctx, func),
                 MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
                 MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc),
-                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kw_map));
+                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, kw_map),
+                MIR_T_P, MIR_new_reg_op(mt->em.ctx, keyword_home));
+            em_scalar_home_bind(&mt->em, keyword_home_id, result);
             pm_end_arg_scope(mt, args);
             return result;
         }
     }
 
-    MIR_reg_t result = pm_call_3(mt, "py_call_function", MIR_T_I64,
+    int dynamic_home_id = em_scalar_home_new(&mt->em);
+    MIR_reg_t dynamic_home = em_materialize_frame_ref(&mt->em,
+        em_scalar_home_ref(&mt->em, dynamic_home_id));
+    if (!dynamic_home) {
+        log_error("py-mir: dynamic call has no caller-owned scalar result home");
+        abort();
+    }
+    MIR_reg_t result = pm_call_4(mt, "py_call_function_into", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->em.ctx, func),
         MIR_T_I64, MIR_new_reg_op(mt->em.ctx, args.args),
-        MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc));
+        MIR_T_I64, MIR_new_int_op(mt->em.ctx, argc),
+        MIR_T_P, MIR_new_reg_op(mt->em.ctx, dynamic_home));
+    em_scalar_home_bind(&mt->em, dynamic_home_id, result);
     pm_end_arg_scope(mt, args);
     return result;
 }
@@ -3063,12 +3147,15 @@ static MIR_reg_t pm_transpile_lambda(PyMirTranspiler* mt, PyLambdaNode* lam) {
                         pm_store_env_slot(mt, env, ci, cvar->reg);
                     }
                 }
-                return closure;
+                return pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->em.ctx, closure));
             }
 
-            return pm_call_2(mt, "py_new_function", MIR_T_I64,
+            MIR_reg_t function = pm_call_2(mt, "py_new_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fptr),
                 MIR_T_I64, MIR_new_int_op(mt->em.ctx, lc->param_count));
+            return pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, function));
         }
     }
     log_error("py-mir: lambda not found in pre-compiled entries");
@@ -4721,6 +4808,8 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                     MIR_T_I64, MIR_new_reg_op(mt->em.ctx, env),
                     MIR_T_I64, MIR_new_int_op(mt->em.ctx, fc_target->capture_count));
             }
+            closure = pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, closure));
             // assign to local variable
             char vname[128];
             snprintf(vname, sizeof(vname), "_py_%s", fc_target->name);
@@ -4750,6 +4839,8 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item));
             }
+            fn_item = pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item));
             MIR_reg_t dec_result = pm_apply_decorators(mt, fn_item, fdef->decorators);
             // store as local var — shadows local_funcs lookup for subsequent references
             MIR_reg_t var_reg = pm_new_reg(mt, vname, MIR_T_I64);
@@ -4811,6 +4902,8 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
             }
+            fn_item_reg = pm_call_1(mt, "py_mark_mir_public_abi", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->em.ctx, fn_item_reg));
 
             // Phase F1: detect @prop.setter / @prop.deleter decorator patterns.
             // When the first decorator expression is an attribute access like `celsius.setter`,
@@ -6869,7 +6962,8 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // ---- Step 3: Build param descriptor for both functions ----
     int offset = 0;
-    char* param_name_bufs[20];
+    char* param_name_bufs[21];
+    uint8_t param_kinds[21] = {};
 
     PyAstNode* pnode = fc->node->params;
     for (int i = 0; i < fc->param_count && i < 16; i++) {
@@ -6916,11 +7010,13 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     char rp0_buf[] = "_gen_frame";
     char rp1_buf[] = "_gen_sent";
-    const char* resume_params[] = {rp0_buf, rp1_buf};
+    char rp2_buf[] = "_py__scalar_home";
+    const char* resume_params[] = {rp0_buf, rp1_buf, rp2_buf};
+    const uint8_t resume_param_kinds[] = {1, 0, 1};
     MIR_item_t resume_func_item = NULL;
     MIR_func_t resume_func = NULL;
-    if (!pm_create_hosted_item_function(mt->em.ctx, resume_name, 2, resume_params,
-            &resume_func_item, &resume_func)) {
+    if (!pm_create_hosted_item_function_typed(mt->em.ctx, resume_name, 3,
+            resume_params, resume_param_kinds, &resume_func_item, &resume_func)) {
         log_error("py-mir: host could not create generator resume function '%s'", resume_name);
         mt->has_compile_error = true;
         return;
@@ -6930,6 +7026,7 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     // A resume activation can allocate between yields just like a normal
     // Python function; it must publish its locals before any helper call.
     pm_begin_function_frame(mt, pm_load_side_stack_runtime(mt));
+    pm_enable_scalar_return_home(mt, "_py__scalar_home");
     mt->scope_env_reg      = 0;
     mt->scope_env_slot_count = 0;
     mt->in_generator       = true;
@@ -7019,15 +7116,21 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     // ---- Step 6: Compile WRAPPER function ----
     // The wrapper: same name/params as original Python function.
     // Body: allocate generator object with resume func ptr + frame, store params, return gen.
+    param_name_bufs[mir_param_count] = (char*)alloca(128);
+    snprintf(param_name_bufs[mir_param_count], 128, "_py__scalar_home");
+    param_kinds[mir_param_count] = 1;
+    mir_param_count++;
     MIR_func_t wrapper_func = NULL;
-    if (!pm_create_hosted_item_function(mt->em.ctx, fn_name, mir_param_count,
-            (const char* const*)param_name_bufs, &fc->func_item, &wrapper_func)) {
+    if (!pm_create_hosted_item_function_typed(mt->em.ctx, fn_name, mir_param_count,
+            (const char* const*)param_name_bufs, param_kinds, &fc->func_item,
+            &wrapper_func)) {
         log_error("py-mir: host could not create generator wrapper '%s'", fn_name);
         mt->has_compile_error = true;
         return;
     }
     pm_select_hosted_function(mt, fc->func_item, wrapper_func);
     pm_begin_function_frame(mt, pm_load_side_stack_runtime(mt));
+    pm_enable_scalar_return_home(mt, "_py__scalar_home");
 
     // load address of resume function as i64
     MIR_reg_t rptr = pm_new_reg(mt, "genfptr", MIR_T_I64);
@@ -7077,7 +7180,8 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
     PyLambdaNode* lam = lc->node;
 
     int mir_param_count = lc->param_count + (lc->is_closure ? 1 : 0);
-    char* param_name_bufs[17];
+    char* param_name_bufs[18];
+    uint8_t param_kinds[18] = {};
     int offset = 0;
 
     if (lc->is_closure) {
@@ -7104,10 +7208,15 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
             snprintf(param_name_bufs[i + offset], 128, "_py_p%d", i);
         }
     }
+    param_name_bufs[mir_param_count] = (char*)alloca(128);
+    snprintf(param_name_bufs[mir_param_count], 128, "_py__scalar_home");
+    param_kinds[mir_param_count] = 1;
+    mir_param_count++;
 
     MIR_func_t lambda_func = NULL;
-    if (!pm_create_hosted_item_function(mt->em.ctx, lc->name, mir_param_count,
-            (const char* const*)param_name_bufs, &lc->func_item, &lambda_func)) {
+    if (!pm_create_hosted_item_function_typed(mt->em.ctx, lc->name, mir_param_count,
+            (const char* const*)param_name_bufs, param_kinds, &lc->func_item,
+            &lambda_func)) {
         log_error("py-mir: host could not create lambda '%s'", lc->name);
         mt->has_compile_error = true;
         return;
@@ -7122,6 +7231,7 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
 
     pm_select_hosted_function(mt, lc->func_item, lambda_func);
     pm_begin_function_frame(mt, pm_load_side_stack_runtime(mt));
+    pm_enable_scalar_return_home(mt, "_py__scalar_home");
 
     pm_push_scope(mt);
 
@@ -7179,7 +7289,8 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     // build parameter list; closures get _py__env as hidden first param
     // *args functions get _py__varargs (ptr) + _py__varargc (count) as extra params
     int mir_param_count = fc->param_count + (fc->is_closure ? 1 : 0) + (fc->has_star_args ? 2 : 0) + (fc->has_kwargs ? 1 : 0);
-    char* param_name_bufs[20];
+    char* param_name_bufs[21];
+    uint8_t param_kinds[21] = {};
     int offset = 0;
 
     if (fc->is_closure) {
@@ -7227,10 +7338,15 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         param_name_bufs[kwargs_param_offset] = (char*)alloca(128);
         snprintf(param_name_bufs[kwargs_param_offset], 128, "_py__kwargs_map");
     }
+    param_name_bufs[mir_param_count] = (char*)alloca(128);
+    snprintf(param_name_bufs[mir_param_count], 128, "_py__scalar_home");
+    param_kinds[mir_param_count] = 1;
+    mir_param_count++;
 
     MIR_func_t compiled_func = NULL;
-    if (!pm_create_hosted_item_function(mt->em.ctx, fn_name, mir_param_count,
-            (const char* const*)param_name_bufs, &fc->func_item, &compiled_func)) {
+    if (!pm_create_hosted_item_function_typed(mt->em.ctx, fn_name, mir_param_count,
+            (const char* const*)param_name_bufs, param_kinds, &fc->func_item,
+            &compiled_func)) {
         log_error("py-mir: host could not create function '%s'", fn_name);
         mt->has_compile_error = true;
         return;
@@ -7247,6 +7363,7 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     pm_select_hosted_function(mt, fc->func_item, compiled_func);
     pm_begin_function_frame(mt, pm_load_side_stack_runtime(mt));
+    pm_enable_scalar_return_home(mt, "_py__scalar_home");
 
     // find this function's index in func_entries
     for (int i = 0; i < mt->func_count; i++) {
@@ -7606,10 +7723,12 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     }
 
     // Phase 4: create py_main function
-    const char* main_params[] = {"ctx"};
+    const char* main_params[] = {"ctx", "_py__scalar_home"};
+    const uint8_t main_param_kinds[] = {0, 1};
     MIR_item_t main_function_item = NULL;
     MIR_func_t main_function = NULL;
-    if (!pm_create_hosted_item_function(mt->em.ctx, "py_main", 1, main_params,
+    if (!pm_create_hosted_item_function_typed(mt->em.ctx, "py_main", 2,
+            main_params, main_param_kinds,
             &main_function_item, &main_function)) {
         log_error("py-mir: host could not create py_main");
         mt->has_compile_error = true;
@@ -7618,6 +7737,10 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     pm_select_hosted_function(mt, main_function_item, main_function);
     mt->in_main = true;
     pm_begin_function_frame(mt, pm_lookup_hosted_function_register(mt->em.ctx, mt->em.func, "ctx"));
+    mt->em.frame.incoming_scalar_home = pm_lookup_hosted_function_register(
+        mt->em.ctx, mt->em.func, "_py__scalar_home");
+    mt->em.frame.plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
+    mt->em.frame.plan.accepts_caller_scalar_home = true;
 
     pm_push_scope(mt);
 

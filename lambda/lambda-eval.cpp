@@ -554,6 +554,13 @@ Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name) {
     return fn;
 }
 
+void lambda_function_mark_mir_public_abi(Function* fn) {
+    if (!fn) return;
+    // MIR wrappers have a trailing home; treating them as legacy Item calls
+    // would drop the only storage that survives their number-frame teardown.
+    fn->flags |= FN_FLAG_MIR_PUBLIC_ABI;
+}
+
 // Create a closure with captured environment
 Function* to_closure(fn_ptr ptr, int arity, void* env) {
     Function* fn = (Function*)heap_calloc(sizeof(Function), LMD_TYPE_FUNC);
@@ -682,6 +689,75 @@ Item fn_call(Function* fn, List* args) {
     }
 }
 
+Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
+    if (!fn || !(fn->flags & FN_FLAG_MIR_PUBLIC_ABI)) {
+        return fn_call(fn, args);
+    }
+    if (!result_home) {
+        set_runtime_error(ERR_INVALID_CALL,
+            "fn_call_into: MIR public function requires result home");
+        return ItemError;
+    }
+    if (!is_valid_function(fn) || !fn->ptr || (fn->flags & FN_FLAG_SYS_REF)) {
+        return fn_call(fn, args);
+    }
+    int arg_count = args ? (int)args->length : 0;
+    void* env = fn->closure_env;
+    // The exact caller home must cross this forwarding boundary unchanged.
+    if (env) {
+        switch (arg_count) {
+        case 0: return ((Item(*)(void*, uint64_t*))fn->ptr)(env, result_home);
+        case 1: return ((Item(*)(void*, Item, uint64_t*))fn->ptr)(env, args->items[0], result_home);
+        case 2: return ((Item(*)(void*, Item, Item, uint64_t*))fn->ptr)(env, args->items[0], args->items[1], result_home);
+        case 3: return ((Item(*)(void*, Item, Item, Item, uint64_t*))fn->ptr)(env, args->items[0], args->items[1], args->items[2], result_home);
+        case 4: return ((Item(*)(void*, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], result_home);
+        case 5: return ((Item(*)(void*, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], result_home);
+        case 6: return ((Item(*)(void*, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], result_home);
+        case 7: return ((Item(*)(void*, Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], result_home);
+        default: break;
+        }
+    } else {
+        switch (arg_count) {
+        case 0: return ((Item(*)(uint64_t*))fn->ptr)(result_home);
+        case 1: return ((Item(*)(Item, uint64_t*))fn->ptr)(args->items[0], result_home);
+        case 2: return ((Item(*)(Item, Item, uint64_t*))fn->ptr)(args->items[0], args->items[1], result_home);
+        case 3: return ((Item(*)(Item, Item, Item, uint64_t*))fn->ptr)(args->items[0], args->items[1], args->items[2], result_home);
+        case 4: return ((Item(*)(Item, Item, Item, Item, uint64_t*))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], result_home);
+        case 5: return ((Item(*)(Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], result_home);
+        case 6: return ((Item(*)(Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], result_home);
+        case 7: return ((Item(*)(Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], result_home);
+        case 8: return ((Item(*)(Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(args->items[0], args->items[1], args->items[2], args->items[3], args->items[4], args->items[5], args->items[6], args->items[7], result_home);
+        default: break;
+        }
+    }
+    set_runtime_error(ERR_ARGUMENT_COUNT_MISMATCH,
+        "fn_call_into: unsupported argument count %d", arg_count);
+    return ItemError;
+}
+
+Item fn_call0_into(Function* fn, uint64_t* result_home) {
+    return fn_call_into(fn, NULL, result_home);
+}
+
+Item fn_call1_into(Function* fn, Item a, uint64_t* result_home) {
+    Item values[1] = {a};
+    List args = {.length = 1, .items = values};
+    return fn_call_into(fn, &args, result_home);
+}
+
+Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home) {
+    Item values[2] = {a, b};
+    List args = {.length = 2, .items = values};
+    return fn_call_into(fn, &args, result_home);
+}
+
+Item fn_call3_into(Function* fn, Item a, Item b, Item c,
+        uint64_t* result_home) {
+    Item values[3] = {a, b, c};
+    List args = {.length = 3, .items = values};
+    return fn_call_into(fn, &args, result_home);
+}
+
 // Concurrency is compiled as C++ while the legacy evaluator exports these
 // helpers with C linkage; explicit bridges keep scheduler callbacks ABI-stable.
 extern "C" Item lambda_concurrency_fn_call(Function* fn, List* args) {
@@ -723,6 +799,29 @@ Item fn_call_boxed_7(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, I
 Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h) {
     return ((Item(*)(Item,Item,Item,Item,Item,Item,Item,Item))fp)(a, b, c, d, e, f, g, h);
 }
+
+Item fn_call_boxed_0_into(void* fp, uint64_t* result_home) {
+    return ((Item(*)(uint64_t*))fp)(result_home);
+}
+
+#define EXPAND_BOXED_CALL_PARAMS(...) __VA_ARGS__
+#define DEFINE_BOXED_CALL_INTO(count, params, args) \
+    Item fn_call_boxed_##count##_into(void* fp, \
+            EXPAND_BOXED_CALL_PARAMS params, uint64_t* result_home) { \
+        return ((Item(*)(EXPAND_BOXED_CALL_PARAMS params, uint64_t*))fp)( \
+            EXPAND_BOXED_CALL_PARAMS args, result_home); \
+    }
+
+DEFINE_BOXED_CALL_INTO(1, (Item a), (a))
+DEFINE_BOXED_CALL_INTO(2, (Item a, Item b), (a, b))
+DEFINE_BOXED_CALL_INTO(3, (Item a, Item b, Item c), (a, b, c))
+DEFINE_BOXED_CALL_INTO(4, (Item a, Item b, Item c, Item d), (a, b, c, d))
+DEFINE_BOXED_CALL_INTO(5, (Item a, Item b, Item c, Item d, Item e), (a, b, c, d, e))
+DEFINE_BOXED_CALL_INTO(6, (Item a, Item b, Item c, Item d, Item e, Item f), (a, b, c, d, e, f))
+DEFINE_BOXED_CALL_INTO(7, (Item a, Item b, Item c, Item d, Item e, Item f, Item g), (a, b, c, d, e, f, g))
+DEFINE_BOXED_CALL_INTO(8, (Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h), (a, b, c, d, e, f, g, h))
+#undef DEFINE_BOXED_CALL_INTO
+#undef EXPAND_BOXED_CALL_PARAMS
 } // extern "C"
 
 // Convenience wrappers for common arities (avoid List allocation)

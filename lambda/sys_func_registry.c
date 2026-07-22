@@ -1051,6 +1051,21 @@ extern Item fn_call_boxed_5(void* fp, Item a, Item b, Item c, Item d, Item e);
 extern Item fn_call_boxed_6(void* fp, Item a, Item b, Item c, Item d, Item e, Item f);
 extern Item fn_call_boxed_7(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g);
 extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h);
+extern Item fn_call_boxed_0_into(void* fp, uint64_t* result_home);
+extern Item fn_call_boxed_1_into(void* fp, Item a, uint64_t* result_home);
+extern Item fn_call_boxed_2_into(void* fp, Item a, Item b, uint64_t* result_home);
+extern Item fn_call_boxed_3_into(void* fp, Item a, Item b, Item c, uint64_t* result_home);
+extern Item fn_call_boxed_4_into(void* fp, Item a, Item b, Item c, Item d, uint64_t* result_home);
+extern Item fn_call_boxed_5_into(void* fp, Item a, Item b, Item c, Item d, Item e, uint64_t* result_home);
+extern Item fn_call_boxed_6_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, uint64_t* result_home);
+extern Item fn_call_boxed_7_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, uint64_t* result_home);
+extern Item fn_call_boxed_8_into(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h, uint64_t* result_home);
+extern Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
+extern Item fn_call0_into(Function* fn, uint64_t* result_home);
+extern Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
+extern Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home);
+extern Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home);
+extern void lambda_function_mark_mir_public_abi(Function* fn);
 extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 
 // Debug tracing helpers
@@ -1312,12 +1327,10 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE |
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"lambda_item_heap_rehome", FPTR(lambda_item_heap_rehome),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
-      JIT_IMPORT_RESULT_SCALAR_STABLE |
-      JIT_IMPORT_NUMBER_STACK_PRESERVES |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_restore_number_frame_top", FPTR(lambda_restore_number_frame_top),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"lambda_mir_double_bits", FPTR(lambda_mir_double_bits),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
@@ -1849,7 +1862,33 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR)}},
+    {"js_call_function_into", FPTR(js_call_function_into),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"js_apply_function", FPTR(js_apply_function)},
+    {"js_apply_function_into", FPTR(js_apply_function_into),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER)}},
+    {"js_super_call_class_into", FPTR(js_super_call_class_into),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
+    {"js_super_apply_class_into", FPTR(js_super_apply_class_into),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"js_apply_constructor", FPTR(js_apply_constructor)},
     // Ruby block lowering imports the JS/Lambda function pointer bridge directly.
     {"js_function_get_ptr", FPTR(js_function_get_ptr)},
@@ -1940,6 +1979,13 @@ JitImport jit_runtime_imports[] = {
     {"js_validate_native_function_source", FPTR(js_validate_native_function_source)},
 #endif
     {"js_array_method_direct", FPTR(js_array_method_direct)},
+    {"js_array_method_direct_into", FPTR(js_array_method_direct_into),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER)}},
     {"js_math_method", FPTR(js_math_method)},
     {"js_math_apply", FPTR(js_math_apply)},
     {"js_method_call_apply", FPTR(js_method_call_apply)},
@@ -2800,6 +2846,21 @@ JitImport jit_runtime_imports[] = {
     {"fn_call_boxed_6", FPTR(fn_call_boxed_6)},
     {"fn_call_boxed_7", FPTR(fn_call_boxed_7)},
     {"fn_call_boxed_8", FPTR(fn_call_boxed_8)},
+    {"fn_call_boxed_0_into", FPTR(fn_call_boxed_0_into)},
+    {"fn_call_boxed_1_into", FPTR(fn_call_boxed_1_into)},
+    {"fn_call_boxed_2_into", FPTR(fn_call_boxed_2_into)},
+    {"fn_call_boxed_3_into", FPTR(fn_call_boxed_3_into)},
+    {"fn_call_boxed_4_into", FPTR(fn_call_boxed_4_into)},
+    {"fn_call_boxed_5_into", FPTR(fn_call_boxed_5_into)},
+    {"fn_call_boxed_6_into", FPTR(fn_call_boxed_6_into)},
+    {"fn_call_boxed_7_into", FPTR(fn_call_boxed_7_into)},
+    {"fn_call_boxed_8_into", FPTR(fn_call_boxed_8_into)},
+    {"fn_call_into", FPTR(fn_call_into)},
+    {"fn_call0_into", FPTR(fn_call0_into)},
+    {"fn_call1_into", FPTR(fn_call1_into)},
+    {"fn_call2_into", FPTR(fn_call2_into)},
+    {"fn_call3_into", FPTR(fn_call3_into)},
+    {"lambda_function_mark_mir_public_abi", FPTR(lambda_function_mark_mir_public_abi)},
     {"to_sys_fn_named", FPTR(to_sys_fn_named)},
 
     // ========================================================================
@@ -3021,7 +3082,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
     static const char* audited[] = {
         "memset", "memcpy", "fmod", "is_truthy",
         "lambda_mir_double_bits", "lambda_mir_bits_double",
-        "lambda_item_adopt_scalar_home", "owned_item_slot_store",
+        "lambda_item_adopt_scalar_home", "lambda_restore_number_frame_top",
+        "owned_item_slot_store",
         "lambda_async_frame_get_word", "lambda_async_frame_set_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         "js_is_truthy", "js_is_nullish", "js_args_save", "js_args_restore",

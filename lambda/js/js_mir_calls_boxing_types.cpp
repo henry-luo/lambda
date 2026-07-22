@@ -25,6 +25,96 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     return result;
 }
 
+MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
+        MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count) {
+    if (!mt || !mt->em.frame.active) return 0;
+    int home_id = em_scalar_home_new(&mt->em);
+    MIR_reg_t home = em_materialize_frame_ref(&mt->em,
+        em_scalar_home_ref(&mt->em, home_id));
+    if (!home) {
+        log_error("js-mir: failed to materialize dynamic-call result home");
+        abort();
+    }
+    MIR_reg_t result = jm_call_5(mt, "js_call_function_into", MIR_T_I64,
+        MIR_T_I64, func,
+        MIR_T_I64, this_value,
+        MIR_T_I64, args,
+        MIR_T_I64, arg_count,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, home));
+    // The callee writes scalar payloads directly into this logical home; bind
+    // the returned Item so subsequent calls share the liveness-coloured slot.
+    em_scalar_home_bind(&mt->em, home_id, result);
+    return result;
+}
+
+MIR_reg_t jm_apply_function_into(JsMirTranspiler* mt, MIR_op_t func,
+        MIR_op_t this_value, MIR_op_t args) {
+    if (!mt || !mt->em.frame.active) return 0;
+    int home_id = em_scalar_home_new(&mt->em);
+    MIR_reg_t home = em_materialize_frame_ref(&mt->em,
+        em_scalar_home_ref(&mt->em, home_id));
+    if (!home) {
+        log_error("js-mir: failed to materialize apply result home");
+        abort();
+    }
+    MIR_reg_t result = jm_call_4(mt, "js_apply_function_into", MIR_T_I64,
+        MIR_T_I64, func, MIR_T_I64, this_value, MIR_T_I64, args,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, home));
+    em_scalar_home_bind(&mt->em, home_id, result);
+    return result;
+}
+
+MIR_reg_t jm_super_call_class_into(JsMirTranspiler* mt, MIR_op_t callee,
+        MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count) {
+    if (!mt || !mt->em.frame.active) return 0;
+    int home_id = em_scalar_home_new(&mt->em);
+    MIR_reg_t home = em_materialize_frame_ref(&mt->em,
+        em_scalar_home_ref(&mt->em, home_id));
+    if (!home) {
+        log_error("js-mir: failed to materialize super-call result home");
+        abort();
+    }
+    MIR_reg_t result = jm_call_5(mt, "js_super_call_class_into", MIR_T_I64,
+        MIR_T_I64, callee, MIR_T_I64, this_value, MIR_T_I64, args,
+        MIR_T_I64, arg_count, MIR_T_P, MIR_new_reg_op(mt->ctx, home));
+    em_scalar_home_bind(&mt->em, home_id, result);
+    return result;
+}
+
+MIR_reg_t jm_super_apply_class_into(JsMirTranspiler* mt, MIR_op_t callee,
+        MIR_op_t this_value, MIR_op_t args) {
+    if (!mt || !mt->em.frame.active) return 0;
+    int home_id = em_scalar_home_new(&mt->em);
+    MIR_reg_t home = em_materialize_frame_ref(&mt->em,
+        em_scalar_home_ref(&mt->em, home_id));
+    if (!home) {
+        log_error("js-mir: failed to materialize super-apply result home");
+        abort();
+    }
+    MIR_reg_t result = jm_call_4(mt, "js_super_apply_class_into", MIR_T_I64,
+        MIR_T_I64, callee, MIR_T_I64, this_value, MIR_T_I64, args,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, home));
+    em_scalar_home_bind(&mt->em, home_id, result);
+    return result;
+}
+
+MIR_reg_t jm_array_method_direct_into(JsMirTranspiler* mt, MIR_op_t array,
+        MIR_op_t method_name, MIR_op_t args, MIR_op_t arg_count) {
+    if (!mt || !mt->em.frame.active) return 0;
+    int home_id = em_scalar_home_new(&mt->em);
+    MIR_reg_t home = em_materialize_frame_ref(&mt->em,
+        em_scalar_home_ref(&mt->em, home_id));
+    if (!home) {
+        log_error("js-mir: failed to materialize array-method result home");
+        abort();
+    }
+    MIR_reg_t result = jm_call_5(mt, "js_array_method_direct_into", MIR_T_I64,
+        MIR_T_I64, array, MIR_T_I64, method_name, MIR_T_I64, args,
+        MIR_T_I64, arg_count, MIR_T_P, MIR_new_reg_op(mt->ctx, home));
+    em_scalar_home_bind(&mt->em, home_id, result);
+    return result;
+}
+
 MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
         int arg_count, MIR_reg_t* arg_regs) {
     if (!mt || !callee || !callee->native_func_item || arg_count < 0) return 0;
@@ -560,6 +650,10 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     }
     if (fn_node->is_arrow) flags |= JS_FUNC_INIT_ARROW;
     if (fc->is_strict) flags |= JS_FUNC_INIT_STRICT;
+    // Every compiled public wrapper takes the trailing ABI pointer. Only
+    // scalar-returning wrappers consume it, but one canonical call shape
+    // prevents callback dispatch from guessing a function's return type.
+    flags |= JS_FUNC_INIT_MIR_PUBLIC_ABI;
     jm_call_void_5(mt, "js_finalize_function",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, name),

@@ -171,7 +171,7 @@ def check_python_uses_neutral_data_membrane() -> None:
                       "heap_calloc_class(", "heap_calloc(sizeof(Function)"):
             if token in source:
                 fail(f"{path.relative_to(ROOT)} bypasses JubeHostDataAPI via {token}")
-        for token in ("heap_register_gc_root(", "lambda_item_heap_rehome("):
+        for token in ("heap_register_gc_root(",):
             if token in source:
                 fail(f"{path.relative_to(ROOT)} bypasses hosted root/data service via {token}")
     source = text(PYTHON_JUBE_ADAPTER)

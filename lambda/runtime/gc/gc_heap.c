@@ -40,6 +40,42 @@ void gc_heap_set_node_release_hook(void (*fn)(void*)) { g_gc_heap_node_release =
 #define GC_MARK_STACK_INITIAL 4096
 
 static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr);
+static int is_gc_object(gc_heap_t* gc, void* ptr);
+
+static volatile uint64_t gc_scalar_tag_allocations[4];
+
+static int gc_scalar_tag_index(uint16_t type_tag) {
+    switch (type_tag) {
+    case LMD_TYPE_INT64: return 0;
+    case LMD_TYPE_UINT64: return 1;
+    case LMD_TYPE_FLOAT: return 2;
+    case LMD_TYPE_FLOAT64: return 3;
+    default: return -1;
+    }
+}
+
+static void gc_note_scalar_tag_allocation(uint16_t type_tag) {
+    int index = gc_scalar_tag_index(type_tag);
+    if (index >= 0) {
+        __atomic_fetch_add(&gc_scalar_tag_allocations[index], 1, __ATOMIC_RELAXED);
+    }
+}
+
+uint64_t gc_scalar_tag_allocation_count(uint16_t type_tag) {
+    int index = gc_scalar_tag_index(type_tag);
+    return index < 0 ? 0 : __atomic_load_n(&gc_scalar_tag_allocations[index],
+        __ATOMIC_RELAXED);
+}
+
+static void gc_reject_scalar_object_allocation(uint16_t type_tag,
+        const char* site) {
+    if (gc_scalar_tag_index(type_tag) < 0) return;
+    // Wide scalar payloads must have a caller, container, or static home;
+    // publishing one in the GC object zone would invalidate marker early-out.
+    log_error("gc-scalar-invariant: rejected scalar type=%u at %s",
+        (unsigned)type_tag, site ? site : "unknown");
+    abort();
+}
 
 static void gc_assert_allocation_allowed(gc_heap_t* gc, const char* site) {
 #ifndef NDEBUG
@@ -552,7 +588,9 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
         log_error("gc_heap_alloc: invalid gc_heap");
         return NULL;
     }
+    gc_reject_scalar_object_allocation(type_tag, "gc_heap_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_alloc");
+    gc_note_scalar_tag_allocation(type_tag);
     gc_maybe_force_collect(gc, "gc_heap_alloc");
 
     // try object zone first (for objects up to GC_LARGE_OBJECT_THRESHOLD)
@@ -603,7 +641,9 @@ void* gc_heap_calloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
 }
 
 void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cls) {
+    gc_reject_scalar_object_allocation(type_tag, "gc_heap_calloc_class");
     gc_assert_allocation_allowed(gc, "gc_heap_calloc_class");
+    gc_note_scalar_tag_allocation(type_tag);
     gc_maybe_force_collect(gc, "gc_heap_calloc_class");
     // Fast path: skip gc_heap_alloc → gc_object_zone_alloc class_index lookup.
     // The class index is pre-computed by the JIT at compile time.
@@ -621,7 +661,9 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
 
 void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
                           uint16_t type_tag, int cls) {
+    gc_reject_scalar_object_allocation(type_tag, "gc_heap_bump_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_bump_alloc");
+    gc_note_scalar_tag_allocation(type_tag);
     gc_maybe_force_collect(gc, "gc_heap_bump_alloc");
     // ---- Fast path: try free list first (recycling after GC) ----
     gc_header_t* free_hdr = gc->object_zone->free_lists[cls];
@@ -1031,7 +1073,7 @@ static gc_header_t* mark_stack_pop(gc_heap_t* gc) {
 //     Type is determined by reading Container.type_id at the struct's first byte.
 //   - Error: _type_id = LMD_TYPE_ERROR, lower 56 bits may hold LambdaError*.
 //   - Any: _type_id = LMD_TYPE_ANY, lower bits = 0 → no pointer.
-static void* item_to_ptr(uint64_t item) {
+static void* item_to_ptr(gc_heap_t* gc, uint64_t item) {
     if (item == 0) return NULL;  // all-zero value
 
     // Inline doubles and invalid sentinel tags are scalar words; treating them
@@ -1048,7 +1090,20 @@ static void* item_to_ptr(uint64_t item) {
         return (void*)(uintptr_t)item;
     }
 
-    // tags 4-11: tagged pointer types (Int64, Float, Decimal, DateTime, String, etc.)
+    // Scalar tags are never GC objects: their payloads live in owned homes.
+    if (tag == LMD_TYPE_INT64_ || tag == LMD_TYPE_UINT64_ ||
+            tag == LMD_TYPE_FLOAT_ || tag == LMD_TYPE_FLOAT64) {
+#ifndef NDEBUG
+        void* scalar_payload = (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
+        if (scalar_payload && is_gc_object(gc, scalar_payload)) {
+            log_error("gc-scalar-invariant: scalar Item points into GC zone");
+            abort();
+        }
+#endif
+        return NULL;
+    }
+
+    // tags 4-11: tagged pointer types (Decimal, DateTime, String, etc.)
     // mask off the tag byte in the upper 8 bits to get the actual pointer
     if (tag >= LMD_TYPE_INT64_ && tag <= LMD_TYPE_BINARY_) {
         return (void*)(uintptr_t)(item & 0x00FFFFFFFFFFFFFF);
@@ -1112,7 +1167,7 @@ static int is_gc_object(gc_heap_t* gc, void* ptr) {
 }
 
 void gc_mark_item(gc_heap_t* gc, uint64_t item) {
-    void* ptr = item_to_ptr(item);
+    void* ptr = item_to_ptr(gc, item);
     if (!ptr) return;
 
     // only mark objects that are in the GC object zone (have GCHeader)
@@ -1147,7 +1202,7 @@ static void gc_process_weak_slots(gc_heap_t* gc) {
     for (int i = 0; i < snapshot_count; i++) {
         uint64_t* slot = gc->weak_slots[i].slot;
         if (!slot || *slot == 0) continue;
-        void* ptr = item_to_ptr(*slot);
+        void* ptr = item_to_ptr(gc, *slot);
         if (!ptr || !is_gc_object(gc, ptr)) continue;
         gc_header_t* header = gc_get_header(ptr);
         if (header && header->marked && !(header->gc_flags & GC_FLAG_FREED)) continue;
@@ -1173,7 +1228,7 @@ static void gc_process_weak_slots(gc_heap_t* gc) {
 }
 
 static void gc_mark_possible_item(gc_heap_t* gc, uint64_t value) {
-    void* ptr = item_to_ptr(value);
+    void* ptr = item_to_ptr(gc, value);
     if (!ptr || !is_gc_object(gc, ptr)) return;
 
     gc_header_t* header = gc_get_header(ptr);
@@ -2039,7 +2094,7 @@ static GC_NO_SANITIZE_ADDRESS void gc_scan_stack(gc_heap_t* gc,
         uint64_t val = (uint64_t)*p;
         scanned++;
         // try to interpret as a tagged Item
-        void* ptr = item_to_ptr(val);
+        void* ptr = item_to_ptr(gc, val);
         if (!ptr) continue;
         // check if it points to a GC-managed object
         if (is_gc_object(gc, ptr)) {

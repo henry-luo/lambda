@@ -582,6 +582,12 @@ extern "C" void heap_unregister_gc_weak(uint64_t* slot) {
 }
 
 void* heap_alloc(int size, TypeId type_id) {
+    if (type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
+            type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+        log_error("heap-scalar-invariant: rejected scalar allocation type=%u",
+            (unsigned)type_id);
+        abort();
+    }
     gc_heap_t *gc = context->heap->gc;
     void *data = gc_heap_alloc(gc, size, type_id);
     if (!data) {
@@ -594,6 +600,12 @@ void* heap_alloc(int size, TypeId type_id) {
 
 // declared extern "C" to allow calling from C code (path.c)
 extern "C" void* heap_calloc(size_t size, TypeId type_id) {
+    if (type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
+            type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+        log_error("heap-scalar-invariant: rejected scalar calloc type=%u",
+            (unsigned)type_id);
+        abort();
+    }
     gc_heap_t *gc = context->heap->gc;
     void* ptr = gc_heap_calloc(gc, size, type_id);
     if (!ptr) return NULL;
@@ -604,6 +616,23 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     }
     heap_assert_raw_item_allocation(ptr, type_id);
     return ptr;
+}
+
+extern "C" int64_t lambda_restore_number_frame_top(Context* runtime,
+        uint64_t* top) {
+    if (!runtime || !top || !runtime->side_number_base ||
+            !runtime->side_number_top || top < runtime->side_number_base ||
+            top > runtime->side_number_top) {
+        log_error("number-frame-restore: invalid scalar watermark");
+        abort();
+    }
+#ifndef NDEBUG
+    // A returned Item must have been adopted before this watermark is restored;
+    // poison makes any missed activation-home escape fail deterministically.
+    memset(top, 0xA5, (size_t)(runtime->side_number_top - top) * sizeof(uint64_t));
+#endif
+    runtime->side_number_top = top;
+    return 0;
 }
 
 extern "C" void* heap_calloc_closure_env(size_t size) {
@@ -620,6 +649,12 @@ extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
     if (!context || !context->heap) {
         log_error("heap_calloc_class: context=%p — called before runtime init", (void*)context);
         return NULL;
+    }
+    if (type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
+            type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+        log_error("heap-scalar-invariant: rejected scalar class allocation type=%u",
+            (unsigned)type_id);
+        abort();
     }
     gc_heap_t *gc = context->heap->gc;
     size_t class_size = gc_object_zone_class_size(cls);

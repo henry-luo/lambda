@@ -116,10 +116,7 @@ static Item radiant_bool_item(bool value) {
 }
 
 static Item radiant_float_item(double value) {
-    double* ptr = (double*)heap_calloc(sizeof(double), LMD_TYPE_FLOAT);
-    if (!ptr) return ItemNull;
-    *ptr = value;
-    return (Item){.item = d2it(ptr)};
+    return push_d(value);
 }
 
 static Item radiant_key_item(const char* key) {

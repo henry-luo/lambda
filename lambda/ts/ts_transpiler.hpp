@@ -47,4 +47,5 @@ char* ts_preprocess_source(const char* src, size_t len, size_t* out_len);
 #endif
 
 // Direct MIR transpilation entry point
-Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* filename);
+Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* filename,
+                          uint64_t* result_home);

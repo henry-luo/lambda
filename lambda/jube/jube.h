@@ -307,9 +307,8 @@ struct JubeHostDataAPI {
     int (*closure_env_load)(void* session, void* environment, int slot, Item* out_value);
     int (*item_slots_store)(void* session, Item* storage, int64_t item_count,
                             int64_t slot, Item value);
-    // Moves a scalar payload out of the current activation's number stack so
-    // an Item retained by guest TLS remains valid after that frame returns.
-    Item (*item_heap_rehome)(void* session, Item value);
+    int (*item_slots_load)(void* session, Item* storage, int64_t item_count,
+                           int64_t slot, Item* out_value);
     // Standard host allocations retain their existing object layouts and GC
     // registration; a hosted language receives only the resulting Item.
     Item (*map_new)(void* session);
@@ -690,6 +689,20 @@ struct JubeGuestExecutionAPI {
     int (*mir_function_register_lookup)(void* mir_context, void* function,
                                         const char* register_name,
                                         uint32_t* out_register);
+    // Runs a generated public entry whose final parameter is a caller-owned
+    // scalar-result home. The host owns that home for the execution lifetime.
+    int (*execution_run_main_into)(void* execution_context, void* entry_function,
+                                   Item* out_result);
+    // Typed variant of the boxed-Item function builder. `parameter_kinds[i]`
+    // is zero for an Item word and one for a raw pointer ABI operand.
+    int (*mir_item_function_create_typed)(void* mir_context,
+        const char* function_name, uint32_t parameter_count,
+        const char* const* parameter_names, const uint8_t* parameter_kinds,
+        void** out_function_item, void** out_function);
+    // Typed direct-call prototype counterpart for public result-home calls.
+    int (*mir_item_function_proto_create_typed)(void* mir_context,
+        const char* prototype_name, uint32_t parameter_count,
+        const uint8_t* parameter_kinds, void** out_prototype_item);
 };
 
 // Module graph operations retain host path/state ownership. The execution
@@ -823,7 +836,7 @@ struct JubeLanguageDef {
 #define JUBE_LANGUAGE_MODULE_REQUEST_V1_SIZE sizeof(JubeLanguageModuleRequest)
 #define JUBE_HOSTED_SOURCE_V1_SIZE sizeof(JubeHostedSource)
 #define JUBE_HOSTED_DIAGNOSTIC_V1_SIZE sizeof(JubeHostedDiagnostic)
-#define JUBE_HOST_SERVICE_API_VERSION 1
+#define JUBE_HOST_SERVICE_API_VERSION 3
 #define JUBE_SOURCE_API_V1_SIZE sizeof(JubeSourceAPI)
 #define JUBE_DIAGNOSTIC_API_V1_SIZE sizeof(JubeDiagnosticAPI)
 #define JUBE_OUTPUT_API_V1_SIZE sizeof(JubeOutputAPI)
@@ -833,7 +846,10 @@ struct JubeLanguageDef {
 #define JUBE_GUEST_EXECUTION_API_H7C_FUNCTION_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_forward_create)
 #define JUBE_GUEST_EXECUTION_API_H7C_FORWARD_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_item_function_proto_create)
 #define JUBE_GUEST_EXECUTION_API_H7C_PROTO_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_function_register_lookup)
-#define JUBE_GUEST_EXECUTION_API_H7C_REGISTER_LOOKUP_SIZE sizeof(JubeGuestExecutionAPI)
+#define JUBE_GUEST_EXECUTION_API_H7C_REGISTER_LOOKUP_SIZE offsetof(JubeGuestExecutionAPI, execution_run_main_into)
+#define JUBE_GUEST_EXECUTION_API_H7C_RUN_MAIN_INTO_SIZE offsetof(JubeGuestExecutionAPI, mir_item_function_create_typed)
+#define JUBE_GUEST_EXECUTION_API_H7C_TYPED_FUNCTION_CREATE_SIZE offsetof(JubeGuestExecutionAPI, mir_item_function_proto_create_typed)
+#define JUBE_GUEST_EXECUTION_API_H7C_TYPED_PROTO_CREATE_SIZE sizeof(JubeGuestExecutionAPI)
 #define JUBE_MODULE_GRAPH_API_V1_SIZE sizeof(JubeModuleGraphAPI)
 #define JUBE_HOST_LANG_API_V1_SIZE offsetof(JubeHostLangAPI, source)
 #define JUBE_HOST_LANG_API_H7A_SIZE offsetof(JubeHostLangAPI, execution)
@@ -845,10 +861,10 @@ struct JubeLanguageDef {
 #define JUBE_HOST_LANG_API_H7E2_ROOTS_SIZE sizeof(JubeHostLangAPI)
 #define JUBE_HOST_API_RUNTIME_CATALOG_SIZE offsetof(JubeHostAPI, data)
 #define JUBE_HOST_DATA_API_V1_SIZE offsetof(JubeHostDataAPI, closure_env_alloc)
-#define JUBE_HOST_DATA_API_H5_CLOSURE_ENV_SIZE offsetof(JubeHostDataAPI, item_slots_store)
-#define JUBE_HOST_DATA_API_H5_STORAGE_SIZE offsetof(JubeHostDataAPI, item_heap_rehome)
-#define JUBE_HOST_DATA_API_H5_REHOME_SIZE offsetof(JubeHostDataAPI, map_new)
-#define JUBE_HOST_DATA_API_H5_ALLOCATORS_SIZE sizeof(JubeHostDataAPI)
+#define JUBE_HOST_DATA_API_CLOSURE_ENV_SIZE offsetof(JubeHostDataAPI, item_slots_store)
+#define JUBE_HOST_DATA_API_SLOT_STORE_SIZE offsetof(JubeHostDataAPI, item_slots_load)
+#define JUBE_HOST_DATA_API_SLOT_LOAD_SIZE offsetof(JubeHostDataAPI, map_new)
+#define JUBE_HOST_DATA_API_FULL_SIZE sizeof(JubeHostDataAPI)
 #define JUBE_HOST_API_DATA_SIZE sizeof(JubeHostAPI)
 
 struct JubeModuleDef {

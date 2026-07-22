@@ -243,12 +243,9 @@ semantics. Ordinary mixed arithmetic maps every `uint64` value to the
 non-sized `integer` domain before operating; the current value never selects
 an `int64` versus decimal path.
 
-The only current standalone numeric heap representation is the explicit
-ownerless-persistence fallback. `lambda_item_heap_rehome()` copies a
-`DOUBLE`/`INT64`/`UINT64` only at a bare-Item boundary without a natural owner,
-and `lambda_scalar_heap_rehome_count()` measures actual cells by numeric type.
-This is intentionally transitional; it is not a default constructor or a
-transient representation.
+There is no standalone numeric GC representation. A bare-Item boundary carries
+a caller-supplied scalar home, and persistent destinations use an owned payload
+word. GC allocation rejects `DOUBLE`/`INT64`/`UINT64` scalar type tags.
 
 ### 5.4 Cross-rank and LambdaJS egress
 

@@ -178,40 +178,58 @@ TEST_F(LambdaConcurrencyRuntime, SchedulerRunsRunnableTasksInFifoOrder) {
     EXPECT_EQ(lambda_scheduler_live_count(scheduler), 0);
 }
 
-TEST_F(LambdaConcurrencyRuntime, OwnerlessWideIntegerFallbacksAreTypedAndRooted) {
+TEST_F(LambdaConcurrencyRuntime, OwnedSlotsPreserveWideIntegersWithoutGcScalarCells) {
     int64_t source_i = INT64_MAX;
     uint64_t source_u = UINT64_MAX;
-    uint64_t before_i = lambda_scalar_heap_rehome_count(LMD_TYPE_INT64);
-    uint64_t before_u = lambda_scalar_heap_rehome_count(LMD_TYPE_UINT64);
-    uint64_t before_f = lambda_scalar_heap_rehome_count(LMD_TYPE_FLOAT);
+    uint64_t alloc_i = gc_scalar_tag_allocation_count(LMD_TYPE_INT64);
+    uint64_t alloc_u = gc_scalar_tag_allocation_count(LMD_TYPE_UINT64);
+    uint64_t alloc_f = gc_scalar_tag_allocation_count(LMD_TYPE_FLOAT);
+    uint64_t alloc_f64 = gc_scalar_tag_allocation_count(LMD_TYPE_FLOAT64);
+    Item slots[4] = {};
 
     EXPECT_FALSE(gc_is_managed(concurrency_test_gc, &source_i));
     EXPECT_FALSE(gc_is_managed(concurrency_test_gc, &source_u));
 
-    Item owned_i = lambda_item_heap_rehome((Item){.item = l2it(&source_i)});
-    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_INT64), before_i + 1);
-    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_UINT64), before_u);
-    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_FLOAT), before_f);
-    Item owned_u = lambda_item_heap_rehome((Item){.item = u2it(&source_u)});
+    owned_item_slot_store(slots, 2, 0, (Item){.item = l2it(&source_i)});
+    owned_item_slot_store(slots, 2, 1, (Item){.item = u2it(&source_u)});
+    source_i = 0;
+    source_u = 0;
 
-    ASSERT_EQ(get_type_id(owned_i), LMD_TYPE_INT64);
-    ASSERT_EQ(get_type_id(owned_u), LMD_TYPE_UINT64);
-    EXPECT_TRUE(gc_is_managed(concurrency_test_gc,
-        (void*)(uintptr_t)owned_i.int64_ptr));
-    EXPECT_TRUE(gc_is_managed(concurrency_test_gc,
-        (void*)(uintptr_t)owned_u.uint64_ptr));
-    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_INT64), before_i + 1);
-    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_UINT64), before_u + 1);
-    EXPECT_EQ(lambda_scalar_heap_rehome_count(LMD_TYPE_FLOAT), before_f);
+    ASSERT_EQ(get_type_id(slots[0]), LMD_TYPE_INT64);
+    ASSERT_EQ(get_type_id(slots[1]), LMD_TYPE_UINT64);
+    EXPECT_FALSE(gc_is_managed(concurrency_test_gc,
+        (void*)(uintptr_t)slots[0].int64_ptr));
+    EXPECT_FALSE(gc_is_managed(concurrency_test_gc,
+        (void*)(uintptr_t)slots[1].uint64_ptr));
+    EXPECT_EQ(gc_scalar_tag_allocation_count(LMD_TYPE_INT64), alloc_i);
+    EXPECT_EQ(gc_scalar_tag_allocation_count(LMD_TYPE_UINT64), alloc_u);
+    EXPECT_EQ(gc_scalar_tag_allocation_count(LMD_TYPE_FLOAT), alloc_f);
+    EXPECT_EQ(gc_scalar_tag_allocation_count(LMD_TYPE_FLOAT64), alloc_f64);
 
-    gc_register_root(concurrency_test_gc, &owned_i.item);
-    gc_register_root(concurrency_test_gc, &owned_u.item);
+    gc_register_root(concurrency_test_gc, &slots[0].item);
+    gc_register_root(concurrency_test_gc, &slots[1].item);
     gc_set_poison_freed(concurrency_test_gc, 1);
     gc_collect(concurrency_test_gc, NULL, 0, 0, 0);
+    Item owned_i = owned_item_slot_read(slots, 2, 0, false);
+    Item owned_u = owned_item_slot_read(slots, 2, 1, false);
     EXPECT_EQ(owned_i.get_int64(), INT64_MAX);
     EXPECT_EQ(owned_u.get_uint64(), UINT64_MAX);
-    gc_unregister_root(concurrency_test_gc, &owned_i.item);
-    gc_unregister_root(concurrency_test_gc, &owned_u.item);
+    gc_unregister_root(concurrency_test_gc, &slots[0].item);
+    gc_unregister_root(concurrency_test_gc, &slots[1].item);
+}
+
+TEST_F(LambdaConcurrencyRuntime, GcRejectsEveryScalarObjectAllocationRoute) {
+    EXPECT_DEATH({
+        gc_heap_alloc(concurrency_test_gc, sizeof(int64_t), LMD_TYPE_INT64);
+    }, "gc-scalar-invariant");
+    EXPECT_DEATH({
+        gc_heap_calloc_class(concurrency_test_gc, sizeof(uint64_t),
+            LMD_TYPE_UINT64, 0);
+    }, "gc-scalar-invariant");
+    EXPECT_DEATH({
+        gc_heap_bump_alloc(concurrency_test_gc, sizeof(uint64_t) * 2,
+            sizeof(double), LMD_TYPE_FLOAT, 0);
+    }, "gc-scalar-invariant");
 }
 
 TEST_F(LambdaConcurrencyRuntime, MailboxIsBoundedAndDequeuesOnlyFromFifoHead) {

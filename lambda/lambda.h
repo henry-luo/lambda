@@ -869,10 +869,12 @@ void owned_item_slot_store(Item* storage, int64_t item_count,
 Item owned_item_slot_read(Item* storage, int64_t item_count,
                           int64_t index, bool immortal);
 Item lambda_item_adopt_scalar_home(Item item, uint64_t* home);
+int64_t lambda_restore_number_frame_top(struct Context* runtime, uint64_t* top);
+// A terminal native consumer owns this word only until it unboxes, discards, or
+// copies the result into destination-owned storage; never return its Item.
+#define LAMBDA_SCALAR_HOME(name) uint64_t name = 0
 // Counts actual GC rehomes at ownerless Item boundaries, by wide scalar type.
 // Small inline values and already-GC values do not contribute.
-uint64_t lambda_scalar_heap_rehome_count(TypeId type_id);
-Item lambda_item_heap_rehome(Item item);
 #ifdef __cplusplus
 }
 #endif
@@ -911,6 +913,7 @@ typedef void* (*fn_ptr)();
 #define FN_FLAG_IS_GENERATOR  0x04  // bit 2: function is a Python generator (resume fn, frame in closure_env)
 #define FN_FLAG_IS_COROUTINE  0x08  // bit 3: function is a Python coroutine (async def)
 #define FN_FLAG_SYS_REF       0x10  // bit 4: first-class builtin identity, not dynamic-call ABI
+#define FN_FLAG_MIR_PUBLIC_ABI 0x20 // bit 5: trailing caller-owned scalar-home parameter
 
 // Function as first-class value
 // Supports both direct function references and closures
@@ -937,6 +940,13 @@ Item fn_call0(Function* fn);
 Item fn_call1(Function* fn, Item a);
 Item fn_call2(Function* fn, Item a, Item b);
 Item fn_call3(Function* fn, Item a, Item b, Item c);
+// MIR-generated public wrappers require a caller-owned scalar result home.
+// These forms keep that home live across dynamic dispatch without GC scalar cells.
+Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
+Item fn_call0_into(Function* fn, uint64_t* result_home);
+Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
+Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home);
+Item fn_call3_into(Function* fn, Item a, Item b, Item c, uint64_t* result_home);
 
 // Forward declaration for Pool (full definition at line ~359)
 typedef struct Pool Pool;
@@ -968,6 +978,7 @@ Function* to_fn_named(fn_ptr ptr, int arity, const char* name);
 Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 Function* to_closure(fn_ptr ptr, int arity, void* env);
 Function* to_closure_named(fn_ptr ptr, int arity, void* env, const char* name);
+void lambda_function_mark_mir_public_abi(Function* fn);
 
 // Memory allocation for closure environments
 typedef struct Context Context;

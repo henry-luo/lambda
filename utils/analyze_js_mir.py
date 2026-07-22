@@ -122,7 +122,7 @@ def enrich(function: dict, frame: dict[str, int] | None) -> None:
         count for name, count in callees.items()
         if "box" in name or "unbox" in name or name in (
             "lambda_mir_double_bits", "js_profiled_push_d",
-            "lambda_item_adopt_scalar_home", "lambda_item_heap_rehome",
+            "lambda_item_adopt_scalar_home",
         )
     )
 

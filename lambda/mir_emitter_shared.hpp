@@ -748,8 +748,20 @@ static inline MIR_reg_t em_load_frame_top(MirEmitter* em, MIR_reg_t runtime,
     return result;
 }
 
+static inline MIR_reg_t em_call_with_args(MirEmitter* em,
+    const char* fn_name, MIR_type_t ret_type, int nargs,
+    MIR_type_t* arg_types, MIR_op_t* arg_ops, bool include_signature);
+
 static inline void em_store_frame_top(MirEmitter* em, MIR_reg_t runtime,
                                       size_t context_offset, MIR_reg_t value) {
+    if (context_offset == offsetof(Context, side_number_top)) {
+        MIR_type_t types[2] = {MIR_T_P, MIR_T_P};
+        MIR_op_t args[2] = {MIR_new_reg_op(em->ctx, runtime),
+            MIR_new_reg_op(em->ctx, value)};
+        (void)em_call_with_args(em, "lambda_restore_number_frame_top",
+            MIR_T_I64, 2, types, args, true);
+        return;
+    }
     em_emit_insn(em, MIR_new_insn(em->ctx, MIR_MOV,
         MIR_new_mem_op(em->ctx, MIR_T_I64, (MIR_disp_t)context_offset,
             runtime, 0, 1),
@@ -764,10 +776,6 @@ static inline void em_store_frame_slot_typed(MirEmitter* em,
             frame_base, 0, 1),
         MIR_new_reg_op(em->ctx, value)));
 }
-static inline MIR_reg_t em_call_with_args(MirEmitter* em,
-    const char* fn_name, MIR_type_t ret_type, int nargs,
-    MIR_type_t* arg_types, MIR_op_t* arg_ops, bool include_signature);
-
 // Adopt a temporary boxed scalar before restoring its source number extent.
 static inline MIR_reg_t em_adopt_scalar_item(MirEmitter* em,
                                              MirScalarReturnMode mode,
@@ -2599,28 +2607,6 @@ static inline void em_after_resolved_call(MirEmitter* em,
     }
 }
 
-static inline MIR_reg_t em_heap_rehome_item_arg(MirEmitter* em,
-        MIR_reg_t item) {
-    MIR_var_t arg = {MIR_T_I64, "item", 0};
-    MirImportEntry* import = em_ensure_import(em, "lambda_item_heap_rehome",
-        MIR_T_I64, 1, &arg, 1, false);
-    if (!import) {
-        log_error("mir-call: missing lambda_item_heap_rehome import");
-        abort();
-    }
-    MIR_type_t type = MIR_T_I64;
-    MIR_op_t op = MIR_new_reg_op(em->ctx, item);
-    em_before_resolved_call(em, "lambda_item_heap_rehome",
-        &import->call, 1, &type, &op);
-    MIR_reg_t result = em_new_reg(em, "persistent_arg", MIR_T_I64);
-    MIR_insn_t call = mir_new_call_with_args(em->ctx, import->proto,
-        import->import, result, 1, &op);
-    mir_append_emit_insn(em->ctx, em->func_item, call);
-    em_after_resolved_call(em, "lambda_item_heap_rehome", &import->call,
-        call, result, MIR_T_I64);
-    return result;
-}
-
 static inline void em_enforce_argument_ownership(MirEmitter* em,
         const JitCallMetadata* metadata, int nargs, MIR_op_t* arg_ops) {
     if (!em || !metadata || !arg_ops) return;
@@ -2634,8 +2620,10 @@ static inline void em_enforce_argument_ownership(MirEmitter* em,
                 !em_scalar_home_for_reg(em, arg_ops[i].u.reg)) {
             continue;
         }
-        arg_ops[i] = MIR_new_reg_op(em->ctx,
-            em_heap_rehome_item_arg(em, arg_ops[i].u.reg));
+        // The declared callee owns the destination contract (for example a
+        // module slot or container tail). Its runtime store must adopt the
+        // payload; the emitter must not substitute a scalar GC allocation.
+        continue;
     }
 }
 
@@ -2650,10 +2638,10 @@ static inline void em_emit_unknown_call(MirEmitter* em, MIR_insn_t insn) {
         MIR_insn_op_mode(em->ctx, insn, i, &output);
         if (!output && insn->ops[i].mode == MIR_OP_REG) {
             MIR_reg_t reg = insn->ops[i].u.reg;
-            // Retaining callees require arguments outside activation homes.
+            // An unresolved retaining callee has no declared owned destination.
             if (em_scalar_home_for_reg(em, reg)) {
-                reg = em_heap_rehome_item_arg(em, reg);
-                insn->ops[i] = MIR_new_reg_op(em->ctx, reg);
+                log_error("mir-scalar-invariant: unresolved call retains scalar home");
+                abort();
             }
             if (em->root_call_value) em->root_call_value(em->call_owner, reg);
         }

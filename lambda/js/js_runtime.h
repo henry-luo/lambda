@@ -242,6 +242,9 @@ enum {
     JS_FUNC_INIT_ASYNC = 1u << 2,
     JS_FUNC_INIT_ARROW = 1u << 3,
     JS_FUNC_INIT_STRICT = 1u << 4,
+    // Compiled wrappers take a trailing scalar-result home. Native builtins
+    // retain their published signatures and do not set this marker.
+    JS_FUNC_INIT_MIR_PUBLIC_ABI = 1u << 5,
 };
 void js_finalize_function(Item fn_item, Item name_item, Item source_item,
                           int formal_length, int init_flags);
@@ -255,8 +258,16 @@ void js_mark_eval_initializer_func_if_active(Item fn_item);
 Item js_get_constructor(Item name_item);
 Item js_get_intrinsic_prototype_for_class(int class_id);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+Item js_call_function_into(Item func_item, Item this_val, Item* args,
+                           int arg_count, uint64_t* result_home);
 void js_set_call_stack_limit(int64_t limit);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
+Item js_apply_function_into(Item func_item, Item this_val, Item args_array,
+                            uint64_t* result_home);
+Item js_super_call_class_into(Item callee, Item this_val, Item* args, int argc,
+                              uint64_t* result_home);
+Item js_super_apply_class_into(Item callee, Item this_val, Item args_array,
+                               uint64_t* result_home);
 Item js_apply_constructor(Item constructor, Item args_array);
 void js_set_internal_class_name(Item obj, Item class_name);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
@@ -311,7 +322,11 @@ Item js_string_method(Item str, Item method_name, Item* args, int argc);
 // =============================================================================
 
 Item js_array_method(Item arr, Item method_name, Item* args, int argc);
+Item js_array_method_into(Item arr, Item method_name, Item* args, int argc,
+                          uint64_t* result_home);
 Item js_array_method_direct(Item arr, Item method_name, Item* args, int argc);
+Item js_array_method_direct_into(Item arr, Item method_name, Item* args, int argc,
+                                 uint64_t* result_home);
 Item js_array_push_method_direct_1(Item arr, Item value);
 
 // =============================================================================

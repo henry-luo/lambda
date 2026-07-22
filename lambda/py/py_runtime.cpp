@@ -36,7 +36,7 @@ extern TypeMap EmptyMap;
 // Guest execution state belongs to the active host thread.  A Python exception
 // or module binding must not leak into another concurrently driven guest run.
 static thread_local bool py_exception_pending = false;
-static thread_local Item py_exception_value = {0};
+static thread_local Item py_exception_slots[2] = {};
 
 // Module variable table
 #define PY_MODULE_VAR_MAX 1024
@@ -128,9 +128,11 @@ extern "C" bool py_data_item_slots_store(Item* storage, int64_t item_count,
                                              slot, value) == 0;
 }
 
-extern "C" Item py_data_item_heap_rehome(Item value) {
-    if (!py_hosted_data_api || !py_hosted_data_api->item_heap_rehome) return value;
-    return py_hosted_data_api->item_heap_rehome(py_data_session, value);
+extern "C" bool py_data_item_slots_load(Item* storage, int64_t item_count,
+                                          int64_t slot, Item* out_value) {
+    return py_hosted_data_api && py_hosted_data_api->item_slots_load &&
+        py_hosted_data_api->item_slots_load(py_data_session, storage, item_count,
+                                            slot, out_value) == 0;
 }
 
 extern "C" Item py_data_map_new(void) {
@@ -149,7 +151,7 @@ extern "C" void py_runtime_set_data_session(void* session) {
     py_init_builtin_classes();
     // TLS addresses differ per guest thread; register this thread's persistent
     // slots with the active heap each time its Python runtime is entered.
-    py_register_hosted_gc_root(&py_exception_value.item);
+    py_register_hosted_gc_root(&py_exception_slots[0].item);
     py_register_hosted_gc_root(&py_stop_iteration_sentinel.item);
     py_register_hosted_gc_root_range((uint64_t*)py_module_vars, PY_MODULE_VAR_MAX);
     py_register_hosted_gc_root_range((uint64_t*)py_args_stack, PY_ARGS_STACK_CAP);
@@ -816,7 +818,7 @@ extern "C" Item py_modulo(Item left, Item right) {
         if (b == 0) {
             log_error("py: ZeroDivisionError: integer modulo by zero");
             py_exception_pending = true;
-            py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
+            py_exception_slots[0] = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
             return ItemNull;
         }
         // Python modulo: result has same sign as divisor
@@ -2032,9 +2034,10 @@ extern "C" Item py_iterator_next(Item iterator) {
         if (fn && (fn->flags & FN_FLAG_IS_GENERATOR)) {
             uint64_t* frame = (uint64_t*)fn->closure_env;
             if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
-            typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
+            typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t, uint64_t*);
             resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
-            uint64_t result = resume(frame, ItemNull.item);
+            uint64_t* result_home = frame + 2 * ((size_t)fn->arity + 1) - 1;
+            uint64_t result = resume(frame, ItemNull.item, result_home);
             return (Item){.item = result};
         }
     }
@@ -2134,6 +2137,13 @@ extern "C" Item py_new_closure_with_env(void* func_ptr, int param_count,
     fn->closure_env = env;
     fn->closure_field_count = (uint8_t)env_size;
     return (Item){.function = fn};
+}
+
+extern "C" Item py_mark_mir_public_abi(Item fn_item) {
+    if (get_type_id(fn_item) == LMD_TYPE_FUNC && fn_item.function) {
+        fn_item.function->flags |= FN_FLAG_MIR_PUBLIC_ABI;
+    }
+    return fn_item;
 }
 
 extern "C" uint64_t* py_alloc_env(int size) {
@@ -2425,15 +2435,104 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
     }
 }
 
+extern "C" Item py_call_function_into(Item func, Item* args, int arg_count,
+        uint64_t* result_home) {
+    if (get_type_id(func) != LMD_TYPE_FUNC || !func.function ||
+            !(func.function->flags & FN_FLAG_MIR_PUBLIC_ABI)) {
+        return py_call_function(func, args, arg_count);
+    }
+    if (!result_home) {
+        log_error("py-call-into: MIR public function requires result home");
+        return ItemError;
+    }
+    Function* fn = func.function;
+    if (!fn->ptr || arg_count < 0 || arg_count > 16 ||
+            (fn->flags & FN_FLAG_HAS_KWARGS)) {
+        log_error("py-call-into: unsupported MIR public function dispatch");
+        return ItemError;
+    }
+    int arity = fn->arity;
+    if (arity > 6) return ItemError;
+    Item padded[6] = {};
+    for (int i = 0; i < arity; i++) padded[i] = i < arg_count && args
+        ? args[i] : ItemNull;
+    bool is_closure = fn->closure_field_count > 0 && fn->closure_env;
+    // Generated Python functions append the home after every visible argument.
+    if (is_closure) {
+        uint64_t* env = (uint64_t*)fn->closure_env;
+        switch (arity) {
+        case 0: return ((Item(*)(uint64_t*, uint64_t*))fn->ptr)(env, result_home);
+        case 1: return ((Item(*)(uint64_t*, Item, uint64_t*))fn->ptr)(env, padded[0], result_home);
+        case 2: return ((Item(*)(uint64_t*, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], result_home);
+        case 3: return ((Item(*)(uint64_t*, Item, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], padded[2], result_home);
+        case 4: return ((Item(*)(uint64_t*, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], result_home);
+        case 5: return ((Item(*)(uint64_t*, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], padded[4], result_home);
+        case 6: return ((Item(*)(uint64_t*, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], padded[4], padded[5], result_home);
+        default: return ItemError;
+        }
+    }
+    switch (arity) {
+    case 0: return ((Item(*)(uint64_t*))fn->ptr)(result_home);
+    case 1: return ((Item(*)(Item, uint64_t*))fn->ptr)(padded[0], result_home);
+    case 2: return ((Item(*)(Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], result_home);
+    case 3: return ((Item(*)(Item, Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], padded[2], result_home);
+    case 4: return ((Item(*)(Item, Item, Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], padded[2], padded[3], result_home);
+    case 5: return ((Item(*)(Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], padded[2], padded[3], padded[4], result_home);
+    case 6: return ((Item(*)(Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], padded[2], padded[3], padded[4], padded[5], result_home);
+    default: return ItemError;
+    }
+}
+
+extern "C" Item py_call_function_kw_into(Item func, Item* args, int arg_count,
+        Item kwargs_map, uint64_t* result_home) {
+    if (get_type_id(func) != LMD_TYPE_FUNC || !func.function ||
+            !(func.function->flags & FN_FLAG_MIR_PUBLIC_ABI)) {
+        return py_call_function_kw(func, args, arg_count, kwargs_map);
+    }
+    if (!result_home || !(func.function->flags & FN_FLAG_HAS_KWARGS)) {
+        log_error("py-call-kw-into: invalid MIR public keyword dispatch");
+        return ItemError;
+    }
+    Function* fn = func.function;
+    if (!fn->ptr || arg_count < 0 || arg_count > 16 || fn->arity > 6) return ItemError;
+    Item padded[6] = {};
+    for (int i = 0; i < fn->arity; i++) padded[i] = i < arg_count && args
+        ? args[i] : ItemNull;
+    bool is_closure = fn->closure_field_count > 0 && fn->closure_env;
+    if (is_closure) {
+        uint64_t* env = (uint64_t*)fn->closure_env;
+        switch (fn->arity) {
+        case 0: return ((Item(*)(uint64_t*, Item, uint64_t*))fn->ptr)(env, kwargs_map, result_home);
+        case 1: return ((Item(*)(uint64_t*, Item, Item, uint64_t*))fn->ptr)(env, padded[0], kwargs_map, result_home);
+        case 2: return ((Item(*)(uint64_t*, Item, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], kwargs_map, result_home);
+        case 3: return ((Item(*)(uint64_t*, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], padded[2], kwargs_map, result_home);
+        case 4: return ((Item(*)(uint64_t*, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], kwargs_map, result_home);
+        case 5: return ((Item(*)(uint64_t*, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], padded[4], kwargs_map, result_home);
+        case 6: return ((Item(*)(uint64_t*, Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], padded[4], padded[5], kwargs_map, result_home);
+        default: return ItemError;
+        }
+    }
+    switch (fn->arity) {
+    case 0: return ((Item(*)(Item, uint64_t*))fn->ptr)(kwargs_map, result_home);
+    case 1: return ((Item(*)(Item, Item, uint64_t*))fn->ptr)(padded[0], kwargs_map, result_home);
+    case 2: return ((Item(*)(Item, Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], kwargs_map, result_home);
+    case 3: return ((Item(*)(Item, Item, Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], padded[2], kwargs_map, result_home);
+    case 4: return ((Item(*)(Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], padded[2], padded[3], kwargs_map, result_home);
+    case 5: return ((Item(*)(Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], padded[2], padded[3], padded[4], kwargs_map, result_home);
+    case 6: return ((Item(*)(Item, Item, Item, Item, Item, Item, Item, uint64_t*))fn->ptr)(padded[0], padded[1], padded[2], padded[3], padded[4], padded[5], kwargs_map, result_home);
+    default: return ItemError;
+    }
+}
+
 // ============================================================================
 // Exception handling
 // ============================================================================
 
 extern "C" void py_raise(Item exception) {
     py_exception_pending = true;
-    // The exception slot outlives the raising MIR frame, so relocate scalar
-    // payloads before its number-stack extent is restored.
-    py_exception_value = py_data_item_heap_rehome(exception);
+    // The exception state outlives the raising MIR frame, so its adjacent
+    // payload word owns pointer-backed scalars before that extent is restored.
+    (void)py_data_item_slots_store(py_exception_slots, 1, 0, exception);
 }
 
 extern "C" Item py_check_exception(void) {
@@ -2442,8 +2541,10 @@ extern "C" Item py_check_exception(void) {
 
 extern "C" Item py_clear_exception(void) {
     py_exception_pending = false;
-    Item val = py_exception_value;
-    py_exception_value = ItemNull;
+    Item val = ItemNull;
+    (void)py_data_item_slots_load(py_exception_slots, 1, 0, &val);
+    py_exception_slots[0] = ItemNull;
+    py_exception_slots[1] = ItemNull;
     return val;
 }
 
@@ -2567,10 +2668,13 @@ extern "C" Item py_gen_create(void* resume_fn_ptr, int frame_size) {
     if (!fn) return ItemNull;
     PyHostedRootFrame roots(1);
     PyHostedItemRoot rooted_fn(roots, (Item){.function = fn});
-    uint64_t* frame = py_alloc_env(frame_size);
+    uint64_t* frame = py_alloc_env(frame_size + 1);
     if (!frame) return ItemNull;
     fn = rooted_fn.get().function;
     fn->flags = FN_FLAG_IS_GENERATOR;
+    // Preserve the logical frame count so resume calls can locate its final
+    // destination-owned scalar payload slot without borrowing C stack storage.
+    fn->arity = (uint8_t)frame_size;
     fn->closure_env = frame;
     // Generator slot zero is a raw resume state, so the traced env owns the
     // frame while the legacy Item-field count deliberately remains zero.
@@ -2598,9 +2702,10 @@ extern "C" Item py_gen_next(Item gen) {
     if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
     uint64_t* frame = (uint64_t*)fn->closure_env;
     if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
-    typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
+    typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t, uint64_t*);
     resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
-    uint64_t result = resume(frame, ItemNull.item);
+    uint64_t* result_home = frame + 2 * ((size_t)fn->arity + 1) - 1;
+    uint64_t result = resume(frame, ItemNull.item, result_home);
     return (Item){.item = result};
 }
 
@@ -2615,9 +2720,10 @@ extern "C" Item py_gen_send(Item gen, Item value) {
     if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
     uint64_t* frame = (uint64_t*)fn->closure_env;
     if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
-    typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
+    typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t, uint64_t*);
     resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
-    uint64_t result = resume(frame, rooted_value.get().item);
+    uint64_t* result_home = frame + 2 * ((size_t)fn->arity + 1) - 1;
+    uint64_t result = resume(frame, rooted_value.get().item, result_home);
     return (Item){.item = result};
 }
 

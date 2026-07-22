@@ -797,7 +797,8 @@ static JsAstNode* ts_strip_type_only_nodes(TsTranspiler* tp, JsAstNode* body) {
 // Main entry point
 // ============================================================================
 
-Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* filename) {
+Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* filename,
+                         uint64_t* result_home) {
     log_debug("ts-mir: starting TypeScript transpilation for '%s'", filename ? filename : "<string>");
 
     size_t ts_len = strlen(ts_source);
@@ -806,7 +807,7 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
     char* js_source = ts_preprocess_source(ts_source, ts_len, &js_len);
     if (js_source) {
         log_debug("ts-mir: preprocessed TypeScript source to JavaScript (%zu bytes)", js_len);
-        Item result = transpile_js_to_mir(runtime, js_source, filename);
+        Item result = transpile_js_to_mir(runtime, js_source, filename, result_home);
         mem_free(js_source);
         return result;
     }
@@ -851,7 +852,7 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
 
     // Phase 4: Delegate to JS MIR transpiler with the pre-built AST
     log_debug("ts-mir: delegating to JS MIR transpiler...");
-    Item result = transpile_js_ast_to_mir(runtime, tp, ts_ast, filename);
+    Item result = transpile_js_ast_to_mir(runtime, tp, ts_ast, filename, result_home);
     log_debug("ts-mir: JS MIR transpiler returned");
 
     ts_transpiler_destroy(tp);

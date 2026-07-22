@@ -392,9 +392,7 @@ extern "C" Item js_os_uptime(void) {
     struct sysinfo si;
     if (sysinfo(&si) == 0) uptime = si.uptime;
 #endif
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = uptime;
-    return lambda_float_ptr_to_item(fp);
+    return push_d(uptime);
 }
 
 // os.endianness()
@@ -587,16 +585,12 @@ extern "C" Item js_os_loadavg(void) {
     double loadavg[3] = {0, 0, 0};
     getloadavg(loadavg, 3);
     for (int i = 0; i < 3; i++) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = loadavg[i];
-        js_array_push(arr, lambda_float_ptr_to_item(fp));
+        js_array_push(arr, push_d(loadavg[i]));
     }
 #else
     // Windows doesn't have getloadavg
     for (int i = 0; i < 3; i++) {
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = 0.0;
-        js_array_push(arr, lambda_float_ptr_to_item(fp));
+        js_array_push(arr, push_d(0.0));
     }
 #endif
     return arr;

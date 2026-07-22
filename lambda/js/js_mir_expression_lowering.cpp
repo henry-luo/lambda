@@ -6941,11 +6941,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
                 } else {
-                    super_result = jm_call_4(mt, "js_super_call_class", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    super_result = jm_super_call_class_into(mt,
+                        MIR_new_reg_op(mt->ctx, null_callee), MIR_new_reg_op(mt->ctx, this_val),
+                        args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_new_int_op(mt->ctx, arg_count));
                 }
                 return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
             }
@@ -6984,19 +6983,24 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     jm_call_void_1(mt, "js_set_new_target",
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt));
                     if (super_has_spread) {
-                        MIR_reg_t super_result = jm_call_3(mt,
-                            parent_ctor_captured ? "js_super_apply_class" : "js_apply_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                        MIR_reg_t super_result = parent_ctor_captured
+                            ? jm_super_apply_class_into(mt,
+                                MIR_new_reg_op(mt->ctx, ctor_fn), MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_new_reg_op(mt->ctx, args_ptr))
+                            : jm_apply_function_into(mt,
+                                MIR_new_reg_op(mt->ctx, ctor_fn), MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_new_reg_op(mt->ctx, args_ptr));
                         return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
                     }
-                    MIR_reg_t super_result = jm_call_4(mt,
-                        parent_ctor_captured ? "js_super_call_class" : "js_call_function", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    MIR_reg_t super_result = parent_ctor_captured
+                        ? jm_super_call_class_into(mt,
+                            MIR_new_reg_op(mt->ctx, ctor_fn), MIR_new_reg_op(mt->ctx, this_val),
+                            args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                            MIR_new_int_op(mt->ctx, arg_count))
+                        : jm_call_function_into(mt,
+                            MIR_new_reg_op(mt->ctx, ctor_fn), MIR_new_reg_op(mt->ctx, this_val),
+                            args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                            MIR_new_int_op(mt->ctx, arg_count));
                     return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
                 } else {
                     // Parent class has no explicit constructor — walk up the superclass chain
@@ -7028,19 +7032,24 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                             jm_call_void_1(mt, "js_set_new_target",
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_nt2));
                             if (anc_has_spread) {
-                                MIR_reg_t super_result = jm_call_3(mt,
-                                    ancestor_ctor_captured ? "js_super_apply_class" : "js_apply_function", MIR_T_I64,
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                                MIR_reg_t super_result = ancestor_ctor_captured
+                                    ? jm_super_apply_class_into(mt,
+                                        MIR_new_reg_op(mt->ctx, ctor_fn), MIR_new_reg_op(mt->ctx, this_val),
+                                        MIR_new_reg_op(mt->ctx, args_ptr))
+                                    : jm_apply_function_into(mt,
+                                        MIR_new_reg_op(mt->ctx, ctor_fn), MIR_new_reg_op(mt->ctx, this_val),
+                                        MIR_new_reg_op(mt->ctx, args_ptr));
                                 return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
                             }
-                            MIR_reg_t super_result = jm_call_4(mt,
-                                ancestor_ctor_captured ? "js_super_call_class" : "js_call_function", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                            MIR_reg_t super_result = ancestor_ctor_captured
+                                ? jm_super_call_class_into(mt,
+                                    MIR_new_reg_op(mt->ctx, ctor_fn), MIR_new_reg_op(mt->ctx, this_val),
+                                    args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                                    MIR_new_int_op(mt->ctx, arg_count))
+                                : jm_call_function_into(mt,
+                                    MIR_new_reg_op(mt->ctx, ctor_fn), MIR_new_reg_op(mt->ctx, this_val),
+                                    args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                                    MIR_new_int_op(mt->ctx, arg_count));
                             return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
                         }
                         ancestor = ancestor->superclass;
@@ -7180,11 +7189,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     // Use js_super_call_class: handles both FUNC and MAP (class expression) callee.
                     // An empty class {} produces a MAP with no __ctor__, which js_call_function
                     // would reject as "not a function". js_super_call_class treats that as a no-op.
-                    MIR_reg_t super_result = jm_call_4(mt, "js_super_call_class", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, parent_fn),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    MIR_reg_t super_result = jm_super_call_class_into(mt,
+                        MIR_new_reg_op(mt->ctx, parent_fn), MIR_new_reg_op(mt->ctx, this_val),
+                        args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_new_int_op(mt->ctx, arg_count));
                     log_debug("js-mir: super() resolved dynamically for member-expression parent");
                     return jm_emit_super_bind_this_with_public_fields(mt, this_val, super_result);
                 }
@@ -7239,11 +7247,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, found_method->param_count));
                         }
                         MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-                        return jm_call_4(mt, "js_call_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                        return jm_call_function_into(mt,
+                            MIR_new_reg_op(mt->ctx, fn_item),
+                            MIR_new_reg_op(mt->ctx, this_val),
+                            args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                            MIR_new_int_op(mt->ctx, arg_count));
                     } else {
                         log_debug("js-mir: super.%.*s not found in parent class",
                             (int)prop->name->len, prop->name->chars);
@@ -7258,11 +7266,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_reg));
                 MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-                return jm_call_4(mt, "js_call_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                    MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                return jm_call_function_into(mt,
+                    MIR_new_reg_op(mt->ctx, fn_item),
+                    MIR_new_reg_op(mt->ctx, this_val),
+                    args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                    MIR_new_int_op(mt->ctx, arg_count));
             }
         }
     }
@@ -7328,11 +7336,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                 (int)key_id_name->len, key_id_name->chars,
                                 found_method->fc->name);
                             super_computed_handled = true;
-                            return jm_call_4(mt, "js_call_function", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                            return jm_call_function_into(mt,
+                                MIR_new_reg_op(mt->ctx, fn_item),
+                                MIR_new_reg_op(mt->ctx, this_val),
+                                args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                                MIR_new_int_op(mt->ctx, arg_count));
                         }
                     }
                 }
@@ -7358,17 +7366,17 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     }
                     if (has_spread) {
                         MIR_reg_t args_arr = jm_build_spread_args_array(mt, call->arguments);
-                        return jm_call_3(mt, "js_apply_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr));
+                        return jm_apply_function_into(mt,
+                            MIR_new_reg_op(mt->ctx, fn_item),
+                            MIR_new_reg_op(mt->ctx, this_val),
+                            MIR_new_reg_op(mt->ctx, args_arr));
                     }
                     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-                    return jm_call_4(mt, "js_call_function", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    return jm_call_function_into(mt,
+                        MIR_new_reg_op(mt->ctx, fn_item),
+                        MIR_new_reg_op(mt->ctx, this_val),
+                        args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_new_int_op(mt->ctx, arg_count));
                 }
             }
         }
@@ -7664,18 +7672,18 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     }
 
                     if (has_spread) {
-                        MIR_reg_t r = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, class_this),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                        MIR_reg_t r = jm_apply_function_into(mt,
+                            MIR_new_reg_op(mt->ctx, fn_item),
+                            MIR_new_reg_op(mt->ctx, class_this),
+                            MIR_new_reg_op(mt->ctx, args_ptr));
                         jm_emit_exc_propagate_check(mt);
                         return r;
                     }
-                    MIR_reg_t r = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, class_this),
-                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    MIR_reg_t r = jm_call_function_into(mt,
+                        MIR_new_reg_op(mt->ctx, fn_item),
+                        MIR_new_reg_op(mt->ctx, class_this),
+                        args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_new_int_op(mt->ctx, arg_count));
                     jm_emit_exc_propagate_check(mt);
                     return r;
                 }
@@ -8334,18 +8342,17 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
                 if (args_have_spread) {
-                    MIR_reg_t r = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                    MIR_reg_t r = jm_apply_function_into(mt,
+                        MIR_new_reg_op(mt->ctx, fn), MIR_new_reg_op(mt->ctx, recv),
+                        MIR_new_reg_op(mt->ctx, args_ptr));
                     jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
                     return r;
                 }
-                MIR_reg_t r = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t r = jm_call_function_into(mt,
+                    MIR_new_reg_op(mt->ctx, fn),
+                    MIR_new_reg_op(mt->ctx, recv),
+                    args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                    MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
                 return r;
             }
@@ -8436,16 +8443,15 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
                 MIR_reg_t call_result;
                 if (args_have_spread) {
-                    call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                    call_result = jm_apply_function_into(mt,
+                        MIR_new_reg_op(mt->ctx, fn), MIR_new_reg_op(mt->ctx, recv),
+                        MIR_new_reg_op(mt->ctx, args_ptr));
                 } else {
-                    call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    call_result = jm_call_function_into(mt,
+                        MIR_new_reg_op(mt->ctx, fn),
+                        MIR_new_reg_op(mt->ctx, recv),
+                        args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_new_int_op(mt->ctx, arg_count));
                 }
                 jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
@@ -8472,18 +8478,17 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
             bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
             if (args_have_spread) {
-                MIR_reg_t r = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr));
+                MIR_reg_t r = jm_apply_function_into(mt,
+                    MIR_new_reg_op(mt->ctx, fn), MIR_new_reg_op(mt->ctx, recv),
+                    MIR_new_reg_op(mt->ctx, args_ptr));
                 jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
                 return r;
             }
-            MIR_reg_t r = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            MIR_reg_t r = jm_call_function_into(mt,
+                MIR_new_reg_op(mt->ctx, fn),
+                MIR_new_reg_op(mt->ctx, recv),
+                args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                MIR_new_int_op(mt->ctx, arg_count));
             jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
             return r;
         }
@@ -8655,11 +8660,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     jm_gen_spill_load(mt, recv, recv_arg_spill);
                     jm_gen_spill_load(mt, fn, fn_arg_spill);
                 }
-                return jm_call_4(mt, "js_call_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                return jm_call_function_into(mt,
+                    MIR_new_reg_op(mt->ctx, fn),
+                    MIR_new_reg_op(mt->ctx, recv),
+                    args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                    MIR_new_int_op(mt->ctx, arg_count));
             }
 
             if (!m->optional && jm_has_optional_chain(m->object)) {
@@ -8691,11 +8696,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_clear_last_closure_tracking(mt);
                 MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                 MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
-                MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t call_result = jm_call_function_into(mt,
+                    MIR_new_reg_op(mt->ctx, fn),
+                    MIR_new_reg_op(mt->ctx, recv), args_op,
+                    MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, opt_result),
                     MIR_new_reg_op(mt->ctx, call_result)));
                 jm_emit_label(mt, l_opt_end);
@@ -8739,11 +8743,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_clear_last_closure_tracking(mt);
                 MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
                 MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
-                MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t call_result = jm_call_function_into(mt,
+                    MIR_new_reg_op(mt->ctx, fn),
+                    MIR_new_reg_op(mt->ctx, recv), args_op,
+                    MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, opt_result),
                     MIR_new_reg_op(mt->ctx, call_result)));
                 jm_emit_label(mt, l_opt_end);
@@ -8975,11 +8978,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return r;
             }
             if (recv_type == LMD_TYPE_ARRAY) {
-                MIR_reg_t r = jm_call_4(mt, "js_array_method_direct", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t r = jm_array_method_direct_into(mt,
+                    MIR_new_reg_op(mt->ctx, recv), MIR_new_reg_op(mt->ctx, method_name),
+                    args_op, MIR_new_int_op(mt->ctx, arg_count));
                 jm_readback_closure_env(mt);
                 return r;
             }
@@ -9095,11 +9096,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // ARRAY path
             jm_emit_label(mt, l_array);
             {
-                MIR_reg_t r = jm_call_4(mt, "js_array_method_direct", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t r = jm_array_method_direct_into(mt,
+                    MIR_new_reg_op(mt->ctx, recv), MIR_new_reg_op(mt->ctx, method_name),
+                    args_op, MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, r)));
             }
@@ -9150,11 +9149,10 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)cs_id));
                 bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-                MIR_reg_t r = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, args_op,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                MIR_reg_t r = jm_call_function_into(mt,
+                    MIR_new_reg_op(mt->ctx, fn),
+                    MIR_new_reg_op(mt->ctx, recv), args_op,
+                    MIR_new_int_op(mt->ctx, arg_count));
                 jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, r)));
@@ -10019,20 +10017,19 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
             bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-            call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
+            call_result = jm_apply_function_into(mt,
+                MIR_new_reg_op(mt->ctx, callee), MIR_new_reg_op(mt->ctx, null_this),
+                MIR_new_reg_op(mt->ctx, sp_arr));
             jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
             bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-            call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
-                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            call_result = jm_call_function_into(mt,
+                MIR_new_reg_op(mt->ctx, callee),
+                MIR_new_reg_op(mt->ctx, null_this),
+                args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                MIR_new_int_op(mt->ctx, arg_count));
             jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
         }
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
@@ -10077,20 +10074,19 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_reg_t sp_arr = jm_build_spread_args_array(mt, call->arguments);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
             bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-            call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
+            call_result = jm_apply_function_into(mt,
+                MIR_new_reg_op(mt->ctx, callee), MIR_new_reg_op(mt->ctx, null_this),
+                MIR_new_reg_op(mt->ctx, sp_arr));
             jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
         } else {
             MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
             if (callee_spill_slot >= 0) jm_gen_spill_load(mt, callee, callee_spill_slot);
             bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-            call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
-                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            call_result = jm_call_function_into(mt,
+                MIR_new_reg_op(mt->ctx, callee),
+                MIR_new_reg_op(mt->ctx, null_this),
+                args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                MIR_new_int_op(mt->ctx, arg_count));
             jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
         }
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
@@ -10112,10 +10108,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         // calls are patched by jm_emit_plain_call_this_arg to preserve the base object.
         MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
         bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-        MIR_reg_t call_result = jm_call_3(mt, "js_apply_function", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, sp_arr));
+        MIR_reg_t call_result = jm_apply_function_into(mt,
+            MIR_new_reg_op(mt->ctx, callee), MIR_new_reg_op(mt->ctx, null_this),
+            MIR_new_reg_op(mt->ctx, sp_arr));
         jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
         jm_emit_exc_propagate_check(mt);
         jm_readback_closure_env(mt);
@@ -10128,11 +10123,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     // calls are patched by jm_emit_plain_call_this_arg to preserve the base object.
     MIR_reg_t null_this = jm_emit_plain_call_this_arg(mt, call);
     bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
-    MIR_reg_t call_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, null_this),
-        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+    MIR_reg_t call_result = jm_call_function_into(mt,
+        MIR_new_reg_op(mt->ctx, callee),
+        MIR_new_reg_op(mt->ctx, null_this),
+        args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+        MIR_new_int_op(mt->ctx, arg_count));
     jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
     jm_emit_exc_propagate_check(mt);
     jm_readback_closure_env(mt);
@@ -12195,12 +12190,10 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
             MIR_new_reg_op(mt->ctx, val)));
     }
 
-    // call tag function: js_call_function(tag, this, args, argc)
-    return jm_call_4(mt, "js_call_function", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, tag_fn),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, total_argc));
+    // Preserve a scalar tag result in the caller-owned liveness slot.
+    return jm_call_function_into(mt,
+        MIR_new_reg_op(mt->ctx, tag_fn), MIR_new_reg_op(mt->ctx, this_val),
+        MIR_new_reg_op(mt->ctx, args_ptr), MIR_new_int_op(mt->ctx, total_argc));
 }
 
 // Helper: create a function or closure value for an inner function declaration.

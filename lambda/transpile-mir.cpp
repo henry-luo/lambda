@@ -2600,6 +2600,10 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
                 }
+                if (use_wrapper) {
+                    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                }
                 strbuf_free(fn_import_name);
                 return fn_obj;
             }
@@ -2613,6 +2617,7 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             StrBuf* wrapper_buf = strbuf_new_cap(64);
             write_fn_name_ex(wrapper_buf, fn_node, ident->entry->import, "_b");
             MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
+            bool uses_wrapper = wrapper_item != NULL;
             if (wrapper_item) {
                 log_debug("mir: fn ref '%s' → using ABI wrapper '%s'",
                     nm_buf->str, wrapper_buf->str);
@@ -2699,6 +2704,10 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                         MIR_new_int_op(mt->ctx, cap_count)));
+                    if (uses_wrapper) {
+                        emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                    }
 
                     return fn_obj;
                 } else {
@@ -2715,6 +2724,10 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                         fn_obj = emit_call_2(mt, "to_fn_n", MIR_T_P,
                             MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
                             MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
+                    }
+                    if (uses_wrapper) {
+                        emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
+                            MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                     }
 
                     strbuf_free(nm_buf);
@@ -8595,13 +8608,15 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
             MIR_item_t imp_item = MIR_new_import(mt->ctx, fn_import_name->str);
 
             MIR_reg_t result;
-            if (use_wrapper && ai <= 8) {
-                // _b wrappers return RetItem (16 bytes). On Windows x64, structs > 8 bytes
-                // use hidden pointer return, which MIR cannot handle directly.
-                // Route through fn_call_boxed_N trampoline: passes function pointer + args
-                // to C code that calls the _b wrapper with correct ABI.
+            if (use_wrapper) {
+                if (ai > 8) {
+                    log_error("mir: imported wrapper call has unsupported argument count %d", ai);
+                    abort();
+                }
+                // Public wrappers take a trailing caller-owned scalar home. Route
+                // cross-module calls through C so MIR preserves that final ABI operand.
                 char trampoline_name[32];
-                snprintf(trampoline_name, sizeof(trampoline_name), "fn_call_boxed_%d", ai);
+                snprintf(trampoline_name, sizeof(trampoline_name), "fn_call_boxed_%d_into", ai);
 
                 // Load _b function address into a register
                 MIR_reg_t fp_reg = new_reg(mt, "bfp", MIR_T_I64);
@@ -8609,15 +8624,24 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                     MIR_new_reg_op(mt->ctx, fp_reg),
                     MIR_new_ref_op(mt->ctx, imp_item)));
 
-                // Build trampoline call: fn_call_boxed_N(fp, arg0, arg1, ...)
+                int wrapper_home_id = em_scalar_home_new(&mt->em);
+                MIR_reg_t wrapper_home = em_materialize_frame_ref(&mt->em,
+                    em_scalar_home_ref(&mt->em, wrapper_home_id));
+                if (!wrapper_home) {
+                    log_error("mir: imported wrapper call has no scalar result home");
+                    abort();
+                }
+
+                // Build trampoline call: fn_call_boxed_N_into(fp, arg0, ..., home)
                 MIR_var_t tramp_vars[17];
                 tramp_vars[0] = {MIR_T_P, "fp", 0};
                 for (int i = 0; i < ai; i++) tramp_vars[1 + i] = arg_vars[i];
+                tramp_vars[1 + ai] = {MIR_T_P, "home", 0};
 
                 MirImportEntry* tramp_ie = ensure_import(mt, trampoline_name,
-                    MIR_T_I64, 1 + ai, tramp_vars, 1);
+                    MIR_T_I64, 2 + ai, tramp_vars, 1);
 
-                int nops = 3 + 1 + ai;  // proto + import + result + fp + args
+                int nops = 3 + 2 + ai;  // proto + import + result + fp + args + home
                 MIR_op_t ops[20];
                 ops[0] = MIR_new_ref_op(mt->ctx, tramp_ie->proto);
                 ops[1] = MIR_new_ref_op(mt->ctx, tramp_ie->import);
@@ -8625,9 +8649,11 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 ops[2] = MIR_new_reg_op(mt->ctx, result);
                 ops[3] = MIR_new_reg_op(mt->ctx, fp_reg);
                 for (int i = 0; i < ai; i++) ops[4 + i] = arg_ops[i];
+                ops[4 + ai] = MIR_new_reg_op(mt->ctx, wrapper_home);
 
                 async_emit_invoke_resume_point(mt, call_node);
                 emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+                em_scalar_home_bind(&mt->em, wrapper_home_id, result);
             } else {
                 // Non-wrapper calls: function returns Item directly (MIR_T_I64)
                 MIR_type_t res_types[1] = { MIR_T_I64 };
@@ -9105,18 +9131,27 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
 
     const char* call_fn = NULL;
     switch (arg_count) {
-    case 0: call_fn = "fn_call0"; break;
-    case 1: call_fn = "fn_call1"; break;
-    case 2: call_fn = "fn_call2"; break;
-    case 3: call_fn = "fn_call3"; break;
-    default: call_fn = "fn_call"; break;
+    case 0: call_fn = "fn_call0_into"; break;
+    case 1: call_fn = "fn_call1_into"; break;
+    case 2: call_fn = "fn_call2_into"; break;
+    case 3: call_fn = "fn_call3_into"; break;
+    default: call_fn = "fn_call_into"; break;
     }
 
     MIR_reg_t dyn_result;
+    int dyn_scalar_home_id = em_scalar_home_new(&mt->em);
+    MIR_reg_t dyn_scalar_home = em_materialize_frame_ref(&mt->em,
+        em_scalar_home_ref(&mt->em, dyn_scalar_home_id));
+    if (!dyn_scalar_home) {
+        log_error("mir: dynamic call has no caller-owned scalar result home");
+        abort();
+    }
 
     if (arg_count == 0) {
         async_emit_invoke_resume_point(mt, call_node);
-        dyn_result = emit_call_1(mt, call_fn, MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn));
+        dyn_result = emit_call_2(mt, call_fn, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
+            MIR_T_P, MIR_new_reg_op(mt->ctx, dyn_scalar_home));
     } else if (arg_count <= 3) {
         MIR_reg_t args[3];
         arg = call_node->argument;
@@ -9127,19 +9162,16 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
         }
         async_emit_invoke_resume_point(mt, call_node);
         if (arg_count == 1) {
-            dyn_result = emit_call_2(mt, call_fn, MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, args[0]));
-        } else if (arg_count == 2) {
             dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, args[0]),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, args[1]));
-        } else {
-            // 3 args
-            MIR_var_t avars[4] = {{MIR_T_I64,"f",0},{MIR_T_I64,"a",0},{MIR_T_I64,"b",0},{MIR_T_I64,"c",0}};
-            MirImportEntry* ie = ensure_import(mt, call_fn, MIR_T_I64, 4, avars, 1);
-            dyn_result = new_reg(mt, "call3", MIR_T_I64);
+                MIR_T_P, MIR_new_reg_op(mt->ctx, dyn_scalar_home));
+        } else if (arg_count == 2) {
+            MIR_var_t avars[4] = {{MIR_T_I64,"f",0},{MIR_T_I64,"a",0},
+                {MIR_T_I64,"b",0},{MIR_T_P,"home",0}};
+            MirImportEntry* ie = ensure_import(mt, call_fn, MIR_T_I64, 4,
+                avars, 1);
+            dyn_result = new_reg(mt, "call2", MIR_T_I64);
             emit_insn(mt, MIR_new_call_insn(mt->ctx, 7,
                 MIR_new_ref_op(mt->ctx, ie->proto),
                 MIR_new_ref_op(mt->ctx, ie->import),
@@ -9147,7 +9179,22 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_new_reg_op(mt->ctx, boxed_fn),
                 MIR_new_reg_op(mt->ctx, args[0]),
                 MIR_new_reg_op(mt->ctx, args[1]),
-                MIR_new_reg_op(mt->ctx, args[2])));
+                MIR_new_reg_op(mt->ctx, dyn_scalar_home)));
+        } else {
+            // 3 args
+            MIR_var_t avars[5] = {{MIR_T_I64,"f",0},{MIR_T_I64,"a",0},
+                {MIR_T_I64,"b",0},{MIR_T_I64,"c",0},{MIR_T_P,"home",0}};
+            MirImportEntry* ie = ensure_import(mt, call_fn, MIR_T_I64, 5, avars, 1);
+            dyn_result = new_reg(mt, "call3", MIR_T_I64);
+            emit_insn(mt, MIR_new_call_insn(mt->ctx, 8,
+                MIR_new_ref_op(mt->ctx, ie->proto),
+                MIR_new_ref_op(mt->ctx, ie->import),
+                MIR_new_reg_op(mt->ctx, dyn_result),
+                MIR_new_reg_op(mt->ctx, boxed_fn),
+                MIR_new_reg_op(mt->ctx, args[0]),
+                MIR_new_reg_op(mt->ctx, args[1]),
+                MIR_new_reg_op(mt->ctx, args[2]),
+                MIR_new_reg_op(mt->ctx, dyn_scalar_home)));
         }
     } else {
         // More than 3 args: use fn_call with list
@@ -9159,6 +9206,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node) {
     // Unbox to native type to match direct call behavior, so callers
     // can re-box consistently based on AST type.
     TypeId call_tid = get_effective_type(mt, (AstNode*)call_node);
+    em_scalar_home_bind(&mt->em, dyn_scalar_home_id, dyn_result);
     if (!mt->emitting_async_call && mir_is_native_scalar_value_type(call_tid)) {
         dyn_result = emit_unbox(mt, dyn_result, call_tid);
     }
@@ -11377,6 +11425,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         StrBuf* wrapper_buf = strbuf_new_cap(64);
         write_fn_name_ex(wrapper_buf, fn_node, NULL, "_b");
         MIR_item_t wrapper_item = find_local_func(mt, wrapper_buf->str);
+        bool uses_wrapper = wrapper_item != NULL;
         if (wrapper_item) {
             log_debug("mir: fn expr '%s' → using ABI wrapper '%s'",
                 name_buf->str, wrapper_buf->str);
@@ -11478,6 +11527,10 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, fn_obj, 0, 1),
                     MIR_new_int_op(mt->ctx, cap_count)));
+                if (uses_wrapper) {
+                    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
+                }
 
                 return fn_obj;
             } else {
@@ -11494,6 +11547,10 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                     fn_obj = emit_call_2(mt, "to_fn_n", MIR_T_P,
                         MIR_T_P, MIR_new_reg_op(mt->ctx, fn_addr),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arity));
+                }
+                if (uses_wrapper) {
+                    emit_call_void_1(mt, "lambda_function_mark_mir_public_abi",
+                        MIR_T_P, MIR_new_reg_op(mt->ctx, fn_obj));
                 }
 
                 strbuf_free(name_buf);
@@ -11982,7 +12039,10 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     public_entry->effects = {true, true, false,
         type && type->can_raise, analysis->may_await, true};
     public_entry->result.normal = {LMD_TYPE_ANY, VALUE_REP_ITEM,
-        SCALAR_RETURN_NONE, false};
+        // A boxed wrapper can carry a subnormal or wide integer even when
+        // static inference chose a native body, so its public ABI is dynamic.
+        SCALAR_RETURN_DYNAMIC, true};
+    public_entry->result.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
     public_entry->param_count = param_count;
 
     FnVariantAnalysis* body =
@@ -12053,7 +12113,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     bool is_variadic = fn_type && fn_type->is_variadic;
 
     // The wrapper preserves hidden env/self/vargs parameters but exposes boxed
-    // Items for every user parameter.
+    // Items for every user parameter plus a mandatory caller-owned result home.
     MIR_var_t params[33];
     char* param_name_copies[33];
     int param_count = 0;
@@ -12080,6 +12140,9 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
         param_name_copies[param_count] = (char*)params[param_count].name;
         param_count++;
     }
+    params[param_count] = {MIR_T_P, raw_strdup("_scalar_home"), 0}; // RAWALLOC_OK: MIR owns a copy
+    param_name_copies[param_count] = (char*)params[param_count].name;
+    param_count++;
 
     // Save outer function context
     MIR_item_t saved_func_item = mt->em.func_item;
@@ -12108,8 +12171,12 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     mt->em.frame.runtime = runtime;
     mt->em.frame.return_type = ret_type;
     emit_jit_root_frame_enter(mt);
-    begin_function_epilogue(mt, ret_type, RETURN_LANE_NONE,
-        MIR_SCALAR_RETURN_NONE);
+    begin_function_epilogue(mt, ret_type, RETURN_LANE_SCALAR,
+        MIR_SCALAR_RETURN_DYNAMIC);
+    mt->em.frame.plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
+    mt->em.frame.plan.accepts_caller_scalar_home = true;
+    mt->em.frame.incoming_scalar_home = MIR_reg(mt->ctx, "_scalar_home",
+        wrapper_func);
     mt->em.frame.plan.debug_name = wrapper_name->str;
     emit_number_frame_enter(mt);
 
@@ -12210,9 +12277,8 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     if (scalar_home_id) {
         em_scalar_home_bind(&mt->em, scalar_home_id, boxed_result);
     }
-    // Public results must not retain this wrapper's activation home.
-    boxed_result = emit_call_1(mt, "lambda_item_heap_rehome", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_result));
+    // The wrapper's side-number frame is about to be reclaimed; its result
+    // must therefore be adopted by the caller-provided home in the epilogue.
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, boxed_result));
     finish_function_epilogue(mt);
     finalize_gc_root_publication(mt, wrapper_name->str);

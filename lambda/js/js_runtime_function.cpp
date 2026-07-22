@@ -39,7 +39,7 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
         for (int i = 0; i < fn->env_size; i++) gc_mark_item(gc, fn->env[i].item);
     }
     gc_mark_item(gc, fn->prototype.item);
-    gc_mark_item(gc, fn->bound_this.item);
+    gc_mark_item(gc, fn->bound_this_store[0].item);
     if (fn->bound_args) {
         gc_mark_object_ptr(gc, fn->bound_args);
         for (int i = 0; i < fn->bound_argc; i++) gc_mark_item(gc, fn->bound_args[i].item);
@@ -431,6 +431,7 @@ extern "C" void js_finalize_function(Item fn_item, Item name_item,
     if (init_flags & JS_FUNC_INIT_ASYNC) fn->flags |= JS_FUNC_FLAG_ASYNC;
     if (init_flags & JS_FUNC_INIT_ARROW) fn->flags |= JS_FUNC_FLAG_ARROW;
     if (init_flags & JS_FUNC_INIT_STRICT) fn->flags |= JS_FUNC_FLAG_STRICT;
+    if (init_flags & JS_FUNC_INIT_MIR_PUBLIC_ABI) fn->flags |= JS_FUNC_FLAG_MIR_PUBLIC_ABI;
     if (js_private_field_initializing || js_eval_initializer_context) {
         fn->eval_initializer_context = true;
     }

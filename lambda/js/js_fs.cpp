@@ -682,10 +682,7 @@ static Item make_stats_object(const uv_stat_t* st, bool bigint) {
     // Time properties as Date objects (for stats.mtime instanceof Date, etc.)
     auto set_date = [&](const char* name, const uv_timespec_t& ts) {
         double ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
-        double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *fp = ms;
-        Item ms_item;
-        ms_item = lambda_float_ptr_to_item(fp);
+        Item ms_item = push_d(ms);
         js_property_set(obj, make_string_item(name), js_date_new_from(ms_item));
     };
     set_date("atime", st->st_atim);
@@ -3649,9 +3646,7 @@ static Item js_fs_toUnixTimestamp(Item value) {
     if (!isfinite(number)) {
         return js_throw_invalid_arg_type("time", "number", value);
     }
-    double* fp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *fp = number;
-    return lambda_float_ptr_to_item(fp);
+    return push_d(number);
 }
 
 static Item js_fs_opendirSync(Item path_item, Item options_item) {

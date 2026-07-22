@@ -196,19 +196,23 @@ void runtime_log_mir_cache_summary(Runtime* runtime);
 void path_reset(void);  // reset path scheme roots (must call after runtime_reset_heap in batch)
 
 // JavaScript transpiler integration
-Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
-Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename);
+Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename,
+                          uint64_t* result_home);
+Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                             const char* filename, uint64_t* result_home);
 
 // Batch mode preamble support (two-module MIR split)
 struct JsPreambleState;
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
-                                   JsPreambleState* out_state);
+                                   JsPreambleState* out_state, uint64_t* result_home);
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                                      const char* filename, JsPreambleState* out_state);
+                                      const char* filename, JsPreambleState* out_state,
+                                      uint64_t* result_home);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
-                                        const JsPreambleState* preamble);
+                                        const JsPreambleState* preamble, uint64_t* result_home);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                                           const char* filename, const JsPreambleState* preamble);
+                                           const char* filename, const JsPreambleState* preamble,
+                                           uint64_t* result_home);
 void preamble_state_destroy(JsPreambleState* state);
 void jm_cleanup_deferred_mir();
 

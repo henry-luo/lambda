@@ -551,9 +551,8 @@ Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count)
         fn->name = heap_create_name(name, strlen(name));
     }
     fn->prototype = ItemNull;
-    // NOTE: bound_this left as 0 (from pool_calloc). Do NOT set to ItemNull
-    // because ItemNull.item is non-zero (0x100000000000000) and the bound
-    // function check uses `fn->bound_this.item` as a boolean test.
+    // bound_this_store remains zeroed; bound state is represented only by its
+    // flag so scalar payload storage is never mistaken for a truthy Item.
     Item result = {.function = (Function*)fn};
     if (builtin_id == JS_BUILTIN_FUNC_THROW_TYPE_ERROR) {
         Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};

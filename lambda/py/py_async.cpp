@@ -46,19 +46,23 @@ extern "C" bool py_is_coroutine(Item x) {
 // =========================================================================
 
 // Coroutine completion may outlive the resume frame and is isolated per host thread.
-static thread_local Item g_coro_return_value = {.item = ITEM_NULL};
+static thread_local Item g_coro_return_slots[2] = {};
 
 extern "C" Item py_coro_set_return(Item value) {
-    // The completion slot outlives a resume frame, so root and rehome it via
-    // the active hosted session before its scalar stack extent is restored.
-    py_register_hosted_gc_root(&g_coro_return_value.item);
-    g_coro_return_value = py_data_item_heap_rehome(value);
-    return g_coro_return_value;
+    // The completion state outlives a resume frame, so its payload home must
+    // be owned by the persistent slot rather than the departing frame.
+    py_register_hosted_gc_root(&g_coro_return_slots[0].item);
+    (void)py_data_item_slots_store(g_coro_return_slots, 1, 0, value);
+    Item result = ItemNull;
+    (void)py_data_item_slots_load(g_coro_return_slots, 1, 0, &result);
+    return result;
 }
 
 extern "C" Item py_coro_get_return(void) {
-    Item v = g_coro_return_value;
-    g_coro_return_value = {.item = ITEM_NULL};
+    Item v = ItemNull;
+    (void)py_data_item_slots_load(g_coro_return_slots, 1, 0, &v);
+    g_coro_return_slots[0] = {.item = ITEM_NULL};
+    g_coro_return_slots[1] = {.item = ITEM_NULL};
     return v;
 }
 
@@ -91,7 +95,8 @@ extern "C" Item py_coro_drive(Item coro) {
 // Resume function for the sleep coroutine.
 // frame[0] = state  (0 = not yet run, -1 = exhausted)
 // frame[1] = seconds as raw uint64_t bits (via memcpy from double)
-static uint64_t py_sleep_resume(uint64_t* frame, uint64_t /*sent*/) {
+static uint64_t py_sleep_resume(uint64_t* frame, uint64_t /*sent*/,
+        uint64_t* /*result_home*/) {
     if (frame[0] == (uint64_t)-1) {
         // Already exhausted — return StopIteration again.
         return py_stop_iteration().item;

@@ -7,6 +7,7 @@
 #include "js_runtime.h"
 #include "js_typed_array.h"
 #include "js_class.h"
+#include "js_function.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../transpiler.hpp"
@@ -31,22 +32,6 @@ extern "C" Item js_process_emit(Item event_name, Item arg1);
 extern "C" Item js_buffer_isBuffer(Item obj);
 extern "C" Item js_get_process_argv(void);
 extern __thread EvalContext* context;
-
-struct JsUtilFunctionView {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map;
-    uint16_t flags;
-};
 
 #define JS_UTIL_FUNC_FLAG_GENERATOR 1
 #define JS_UTIL_FUNC_FLAG_ASYNC 128
@@ -2483,7 +2468,7 @@ extern "C" Item js_util_types_isExternal(Item obj) {
 
 extern "C" Item js_util_types_isGeneratorFunction(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
-    JsUtilFunctionView* fn = (JsUtilFunctionView*)obj.function;
+    JsFunction* fn = (JsFunction*)obj.function;
     return (Item){.item = b2it(fn && (fn->flags & JS_UTIL_FUNC_FLAG_GENERATOR))};
 }
 
@@ -2493,7 +2478,7 @@ extern "C" Item js_util_types_isGeneratorObject(Item obj) {
 
 extern "C" Item js_util_types_isAsyncFunction(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
-    JsUtilFunctionView* fn = (JsUtilFunctionView*)obj.function;
+    JsFunction* fn = (JsFunction*)obj.function;
     return (Item){.item = b2it(fn && (fn->flags & JS_UTIL_FUNC_FLAG_ASYNC) &&
         !(fn->flags & JS_UTIL_FUNC_FLAG_GENERATOR))};
 }

@@ -374,9 +374,9 @@ extern "C" void js_require_object_coercible(Item value) {
 
 extern "C" void js_throw_value(Item value) {
     js_exception_pending = true;
-    // The exception slot outlives the throwing JS frame, so pointer-backed
-    // scalars must move to traced heap storage before that frame is reclaimed.
-    js_exception_value = lambda_item_heap_rehome(value);
+    // The exception state outlives the throwing frame, so its adjacent payload
+    // word must own pointer-backed scalars before the frame is reclaimed.
+    owned_item_slot_store(js_exception_slots, 1, 0, value);
     value = js_exception_value;
     // Capture exception message into static buffer while context is alive
     js_exception_msg_buf[0] = '\0';
@@ -416,8 +416,11 @@ extern "C" int js_check_exception(void) {
 
 extern "C" Item js_clear_exception(void) {
     js_exception_pending = false;
-    Item val = js_exception_value;
+    // Re-materialize before clearing: a nested throw may overwrite this slot
+    // while the catcher still holds the returned wide scalar.
+    Item val = owned_item_slot_read(js_exception_slots, 1, 0, false);
     js_exception_value = ItemNull;
+    js_exception_slots[1] = ItemNull;
     return val;
 }
 
@@ -475,6 +478,7 @@ extern "C" void js_batch_reset() {
     // clear any pending exception from previous script
     js_exception_pending = false;
     js_exception_value = (Item){0};
+    js_exception_slots[1] = (Item){0};
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();
@@ -627,6 +631,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // clear pending exception
     js_exception_pending = false;
     js_exception_value = (Item){0};
+    js_exception_slots[1] = (Item){0};
     js_reset_transient_call_state();
     js_reset_heap_bound_runtime_state();
     js_decimal_number_egress_warning_reset();

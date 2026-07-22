@@ -1097,9 +1097,13 @@ static Item js_array_generic_flat(Item object, Item* args, int argc);
 static Item js_array_generic_flat_map(Item object, Item* args, int argc);
 static Item js_array_generic_iterative_callback_with_object(Item object, Item callback_object, Item* args, int argc, int method_kind);
 static Item js_array_generic_iterative_callback(Item object, Item* args, int argc, int method_kind);
-static Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args, int argc, bool from_right);
-static Item js_array_generic_reduce(Item object, Item* args, int argc, bool from_right);
+static Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args,
+    int argc, bool from_right, uint64_t* result_home = NULL);
+static Item js_array_generic_reduce(Item object, Item* args, int argc, bool from_right,
+    uint64_t* result_home = NULL);
 static Item js_array_generic_find_last(Item object, Item* args, int argc, bool return_index);
+static Item js_array_method_impl(Item arr, Item method_name, Item* args, int argc,
+    uint64_t* result_home);
 static Item js_array_generic_push(Item object, Item* args, int argc);
 static Item js_array_generic_pop(Item object);
 static Item js_array_generic_shift(Item object);
@@ -1449,7 +1453,11 @@ extern "C" Item js_proxy_trap_get_prototype_of(Item proxy) {
         return js_get_prototype_of(PD_TARGET(pd));
     }
     Item args[1] = { PD_TARGET(pd) };
-    Item result = js_call_function(trap, PD_HANDLER(pd), args, 1);
+    LAMBDA_SCALAR_HOME(get_prototype_trap_home);
+    // The result is validated and consumed by this proxy operation before it
+    // returns, so the temporary home cannot escape this native frame.
+    Item result = js_call_function_into(trap, PD_HANDLER(pd), args, 1,
+        &get_prototype_trap_home);
     if (js_exception_pending) return ItemNull;
     // ES2020 §9.5.1 invariant: result must be Object or null
     TypeId rt = get_type_id(result);
@@ -1480,7 +1488,11 @@ extern "C" Item js_proxy_trap_set_prototype_of(Item proxy, Item proto) {
         return js_reflect_set_prototype_of(PD_TARGET(pd), proto);
     }
     Item args[2] = { PD_TARGET(pd), proto };
-    Item result = js_call_function(trap, PD_HANDLER(pd), args, 2);
+    LAMBDA_SCALAR_HOME(set_prototype_trap_home);
+    // The trap result is immediately coerced to boolean, so this native
+    // boundary is a terminal scalar consumer rather than a forwarding ABI.
+    Item result = js_call_function_into(trap, PD_HANDLER(pd), args, 2,
+        &set_prototype_trap_home);
     if (js_exception_pending) return ItemNull;
     bool bool_result = it2b(js_to_boolean(result));
     // ES2020 §9.5.2 step 9: If booleanTrapResult is false, return false
@@ -8988,7 +9000,8 @@ extern "C" void js_set_internal_class_name(Item obj, Item class_name) {
 
 // Built-in registry tables and installers live in js_runtime_builtin_registry.cpp.
 
-static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count);
+static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count,
+    uint64_t* result_home = NULL);
 static Item js_get_iterator_proto();
 static Item js_get_array_iterator_proto();
 static Item js_get_string_iterator_proto();
@@ -9001,6 +9014,8 @@ extern "C" Item js_generator_next(Item generator, Item input);
 extern "C" Item js_generator_return(Item generator, Item value);
 extern "C" Item js_generator_throw(Item generator, Item error);
 extern "C" Item js_ordinary_has_instance(Item, Item);
+extern "C" int js_with_save_stack(Item* out_stack, int max_depth);
+extern "C" void js_with_set_stack(Item* stack, int depth);
 
 static bool js_is_object_constructor_result(Item value) {
     TypeId type = get_type_id(value);
@@ -9064,7 +9079,8 @@ static void js_invoke_trace_call(JsFunction* fn, int arg_count, int effective_co
 #endif
 }
 
-static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
+static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
+        uint64_t* scalar_result_home) {
 
     // Builtin functions have no func_ptr — dispatch by builtin_id
     if (fn->builtin_id > 0) {
@@ -9081,7 +9097,8 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
         // shared JS_BUILTIN_ARR_* ids (see comment in js_call_function).
         bool saved_array_mode = js_dispatch_as_array_method;
         js_dispatch_as_array_method = (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) == 0;
-        Item result = js_dispatch_builtin(fn->builtin_id, js_current_this, args, arg_count);
+        Item result = js_dispatch_builtin(fn->builtin_id, js_current_this, args, arg_count,
+            scalar_result_home);
         js_dispatch_as_array_method = saved_array_mode;
         return result;
     }
@@ -9204,6 +9221,23 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
     typedef Item (*P14)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
     typedef Item (*P15)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
     typedef Item (*P16)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P0H)(uint64_t*);
+    typedef Item (*P1H)(Item, uint64_t*);
+    typedef Item (*P2H)(Item, Item, uint64_t*);
+    typedef Item (*P3H)(Item, Item, Item, uint64_t*);
+    typedef Item (*P4H)(Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P5H)(Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P6H)(Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P7H)(Item, Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P8H)(Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P9H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P10H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P11H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P12H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P13H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P14H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P15H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
+    typedef Item (*P16H)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, uint64_t*);
 
     // Pad missing arguments with undefined to match declared param count
     Item padded_args[16];
@@ -9263,6 +9297,55 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
         return make_js_undefined();
     }
 
+    if (fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) {
+        if (!scalar_result_home) {
+            log_error("js_invoke_fn: compiled wrapper missing caller result home");
+            return ItemError;
+        }
+        if (!fn->func_ptr) return make_js_undefined();
+        if (fn->env) {
+            Item env_item = {.item = (uint64_t)fn->env};
+            switch (effective_count) {
+            case 0: return ((P1H)fn->func_ptr)(env_item, scalar_result_home);
+            case 1: return ((P2H)fn->func_ptr)(env_item, effective_args[0], scalar_result_home);
+            case 2: return ((P3H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], scalar_result_home);
+            case 3: return ((P4H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], scalar_result_home);
+            case 4: return ((P5H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], scalar_result_home);
+            case 5: return ((P6H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], scalar_result_home);
+            case 6: return ((P7H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], scalar_result_home);
+            case 7: return ((P8H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], scalar_result_home);
+            case 8: return ((P9H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], scalar_result_home);
+            case 9: return ((P10H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], scalar_result_home);
+            case 10: return ((P11H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], scalar_result_home);
+            case 11: return ((P12H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], scalar_result_home);
+            case 12: return ((P13H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], scalar_result_home);
+            case 13: return ((P14H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
+            case 14: return ((P15H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
+            case 15: return ((P16H)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
+            default: return ItemError;
+            }
+        }
+        switch (effective_count) {
+        case 0: return ((P0H)fn->func_ptr)(scalar_result_home);
+        case 1: return ((P1H)fn->func_ptr)(effective_args[0], scalar_result_home);
+        case 2: return ((P2H)fn->func_ptr)(effective_args[0], effective_args[1], scalar_result_home);
+        case 3: return ((P3H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], scalar_result_home);
+        case 4: return ((P4H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], scalar_result_home);
+        case 5: return ((P5H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], scalar_result_home);
+        case 6: return ((P6H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], scalar_result_home);
+        case 7: return ((P7H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], scalar_result_home);
+        case 8: return ((P8H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], scalar_result_home);
+        case 9: return ((P9H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], scalar_result_home);
+        case 10: return ((P10H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], scalar_result_home);
+        case 11: return ((P11H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], scalar_result_home);
+        case 12: return ((P12H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], scalar_result_home);
+        case 13: return ((P13H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], scalar_result_home);
+        case 14: return ((P14H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], scalar_result_home);
+        case 15: return ((P15H)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14], scalar_result_home);
+        default: return ItemError;
+        }
+    }
+
     if (fn->env) {
         // Closure: prepend env pointer as first argument
         Item env_item;
@@ -9315,15 +9398,16 @@ static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count) {
     }
 }
 
-static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
+static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count,
+        uint64_t* scalar_result_home) {
     bool legacy_async = (fn->flags & JS_FUNC_FLAG_ASYNC) &&
         !(fn->flags & JS_FUNC_FLAG_GENERATOR);
-    if (!legacy_async) return js_invoke_fn_raw(fn, args, arg_count);
+    if (!legacy_async) return js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
 
     // no-await async functions lower to a direct Promise.resolve return, so the
     // call wrapper must provide the async-function Promise resource up front.
     Item async_promise = js_promise_async_function_start();
-    Item result = js_invoke_fn_raw(fn, args, arg_count);
+    Item result = js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
     int64_t had_exception = js_check_exception() ? 1 : 0;
     return js_promise_async_function_finish(async_promise, result, had_exception);
 }
@@ -9636,7 +9720,8 @@ static int js_resolve_ta_type_from_ctor(Item ctor) {
     return js_builtin_typed_array_type(fn->name->chars, (int)fn->name->len);
 }
 
-static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args, int arg_count) {
+static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args, int arg_count,
+        uint64_t* result_home) {
         // Map builtin_id to method name and delegate to js_map_method
         const JsBuiltinMethodSpec* catalog_spec = js_builtin_catalog_find_id(builtin_id);
         if (!catalog_spec) return ItemNull;
@@ -9672,7 +9757,9 @@ static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args,
         // the property access fallback which finds the builtin again.
         if (this_type == LMD_TYPE_ARRAY) {
             js_array_method_real_this = this_val;
-            Item result = js_array_method(this_val, method_name, args, arg_count);
+            Item result = result_home
+                ? js_array_method_into(this_val, method_name, args, arg_count, result_home)
+                : js_array_method(this_val, method_name, args, arg_count);
             js_array_method_real_this = (Item){0};
             return result;
         }
@@ -9769,10 +9856,10 @@ static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args,
                 return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_EVERY);
             }
             if (builtin_id == JS_BUILTIN_ARR_REDUCE) {
-                return js_array_generic_reduce(this_val, args, arg_count, false);
+                return js_array_generic_reduce(this_val, args, arg_count, false, result_home);
             }
             if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT) {
-                return js_array_generic_reduce(this_val, args, arg_count, true);
+                return js_array_generic_reduce(this_val, args, arg_count, true, result_home);
             }
             if (builtin_id == JS_BUILTIN_ARR_SLICE) {
                 Item result = js_array_generic_slice(this_val, args, arg_count);
@@ -9892,9 +9979,9 @@ static Item js_dispatch_array_builtin(int builtin_id, Item this_val, Item* args,
                 if (builtin_id == JS_BUILTIN_ARR_EVERY)
                     return js_array_generic_iterative_callback(this_val, args, arg_count, JS_ARRAY_ITER_EVERY);
                 if (builtin_id == JS_BUILTIN_ARR_REDUCE)
-                    return js_array_generic_reduce(this_val, args, arg_count, false);
+                    return js_array_generic_reduce(this_val, args, arg_count, false, result_home);
                 if (builtin_id == JS_BUILTIN_ARR_REDUCE_RIGHT)
-                    return js_array_generic_reduce(this_val, args, arg_count, true);
+                    return js_array_generic_reduce(this_val, args, arg_count, true, result_home);
                 if (builtin_id == JS_BUILTIN_ARR_FLAT)
                     return js_array_generic_flat(this_val, args, arg_count);
                 if (builtin_id == JS_BUILTIN_ARR_FLAT_MAP)
@@ -10053,7 +10140,8 @@ static Item js_dispatch_math_builtin(int builtin_id, Item* args, int arg_count) 
 }
 
 // Dispatch a built-in method call by builtin_id
-static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count) {
+static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count,
+        uint64_t* result_home) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_DISPATCH_BUILTIN);
     Item undef = make_js_undefined();
     Item arg0 = arg_count > 0 && args ? args[0] : undef;
@@ -10063,7 +10151,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     // Catalog groups keep shared receiver adaptation out of the exceptional-case switch.
     switch (js_builtin_dispatch_group(builtin_id)) {
     case JS_BUILTIN_DISPATCH_ARRAY:
-        return js_dispatch_array_builtin(builtin_id, this_val, args, arg_count);
+        return js_dispatch_array_builtin(builtin_id, this_val, args, arg_count, result_home);
     case JS_BUILTIN_DISPATCH_STRING:
         return js_dispatch_string_builtin(builtin_id, this_val, args, arg_count);
     case JS_BUILTIN_DISPATCH_MATH:
@@ -10608,7 +10696,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             // User-defined functions with stored source text: return original source
             // Check builtin_id and bound state first (safe struct fields) before
             // dereferencing source_text which may be a dangling pointer under memory pressure.
-            if (fn->builtin_id == 0 && !(fn->bound_this.item || fn->bound_args)
+            if (fn->builtin_id == 0 && !(fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS || fn->bound_args)
                 && VALID_STR_PTR(fn->source_text) && fn->source_text->len > 0) {
                 return (Item){.item = s2it(fn->source_text)};
             }
@@ -12810,6 +12898,9 @@ extern "C" void js_check_class_prototype_parent(Item prototype) {
     js_throw_type_error("Class extends value has invalid prototype property");
 }
 
+static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home);
+
 // super() for class-expression superclasses: handle both FUNC and MAP (class object) callee.
 // If callee is a FUNC, call it directly. If callee is a MAP class object with __ctor__, call the
 // constructor with the given this. If neither (empty class, no ctor), return this as-is (no-op).
@@ -12836,6 +12927,30 @@ extern "C" Item js_super_call_class(Item callee, Item this_val, Item* args, int 
     return this_val;
 }
 
+extern "C" Item js_super_call_class_into(Item callee, Item this_val, Item* args,
+        int argc, uint64_t* result_home) {
+    if (!result_home) {
+        log_error("js_super_call_class_into: missing caller result home");
+        return ItemError;
+    }
+    TypeId callee_type = get_type_id(callee);
+    if (callee.item == ITEM_JS_UNDEFINED || callee_type == LMD_TYPE_UNDEFINED ||
+            callee.item == ItemNull.item || callee_type == LMD_TYPE_NULL) {
+        return js_throw_type_error("Super constructor is not a constructor");
+    }
+    if (callee_type == LMD_TYPE_FUNC) {
+        return js_call_function_impl(callee, this_val, args, argc, result_home);
+    }
+    if (callee_type == LMD_TYPE_MAP) {
+        bool own = false;
+        Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &own);
+        if (own && get_type_id(ctor) == LMD_TYPE_FUNC) {
+            return js_call_function_impl(ctor, this_val, args, argc, result_home);
+        }
+    }
+    return this_val;
+}
+
 extern "C" Item js_super_apply_class(Item callee, Item this_val, Item args_array) {
     int argc = js_array_length(args_array);
     Item* args = argc > 0 ? LAMBDA_ALLOCA(argc, Item) : NULL;
@@ -12843,6 +12958,16 @@ extern "C" Item js_super_apply_class(Item callee, Item this_val, Item args_array
         args[i] = js_array_get(args_array, (Item){.item = i2it(i)});
     }
     return js_super_call_class(callee, this_val, args, argc);
+}
+
+extern "C" Item js_super_apply_class_into(Item callee, Item this_val, Item args_array,
+        uint64_t* result_home) {
+    int argc = js_array_length(args_array);
+    Item* args = argc > 0 ? LAMBDA_ALLOCA(argc, Item) : NULL;
+    for (int i = 0; i < argc; i++) {
+        args[i] = js_array_get(args_array, (Item){.item = i2it(i)});
+    }
+    return js_super_call_class_into(callee, this_val, args, argc, result_home);
 }
 
 // super() for native (built-in) parent constructors that ignore `this` and return a fresh
@@ -12913,7 +13038,8 @@ extern "C" void js_set_call_stack_limit(int64_t limit) {
     js_call_stack_limit = (int)limit;
 }
 
-extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
+static Item js_call_function_impl(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
     JS_EXEC_PROFILE_SCOPE(JS_EXEC_PROF_CALL_FUNCTION);
     static int js_call_depth = 0;
     static thread_local const char* js_call_name_stack[64];
@@ -12932,6 +13058,20 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         js_throw_range_error("Maximum call stack size exceeded");
         return ItemNull;
     }
+    int rooted_argc = args && arg_count > 0 ? arg_count : 0;
+    RootFrame call_roots((Context*)context, (size_t)(2 + rooted_argc));
+    Rooted<Item> func_root(call_roots, func_item);
+    Rooted<Item> this_root(call_roots, this_val);
+    uint64_t** arg_roots = rooted_argc > 0
+        ? LAMBDA_ALLOCA(rooted_argc, uint64_t*) : NULL;
+    for (int i = 0; i < rooted_argc; i++) {
+        arg_roots[i] = call_roots.take_slot();
+        if (arg_roots[i]) *arg_roots[i] = args[i].item;
+    }
+    // Calls can allocate while resolving proxies, binding `this`, or invoking
+    // callbacks; native locals are invisible to precise GC during that work.
+    func_item = func_root.get();
+    this_val = this_root.get();
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
         // Proxy [[Call]] trap
         if (js_is_proxy(func_item)) {
@@ -12997,6 +13137,12 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     }
 
     JsFunction* fn = (JsFunction*)func_item.function;
+    uint64_t* invoke_result_home = result_home;
+    if ((fn->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI) && !invoke_result_home) {
+        log_error("js_call_function: compiled wrapper missing caller result home (fn=%.*s)",
+            fn->name ? (int)fn->name->len : 6, fn->name ? fn->name->chars : "(anon)");
+        return ItemError;
+    }
     struct JsCallNameGuard {
         int* depth;
         bool pushed;
@@ -13157,7 +13303,8 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     if (fn->builtin_id > 0) {
         // TypedArray method validation: this must be a TypedArray
         if (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) {
-            Item effective_this = (fn->bound_this.item) ? fn->bound_this : this_val;
+            Item effective_this = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
+                ? js_function_get_bound_this(fn) : this_val;
             if (!js_is_typed_array(effective_this)) {
                 Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
                 Item msg = (Item){.item = s2it(heap_create_name("Method requires a TypedArray as receiver"))};
@@ -13167,7 +13314,8 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         }
         // Handle bound builtins
         if (fn->bound_args || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) {
-            Item effective_this = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) ? fn->bound_this : this_val;
+            Item effective_this = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
+                ? js_function_get_bound_this(fn) : this_val;
             int total_argc = fn->bound_argc + arg_count;
             Item* merged_args = LAMBDA_ALLOCA(total_argc, Item);
             for (int i = 0; i < fn->bound_argc; i++) {
@@ -13179,14 +13327,15 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             // Js54 P5: propagate Array-vs-TypedArray prototype dispatch mode.
             bool saved_array_mode = js_dispatch_as_array_method;
             js_dispatch_as_array_method = (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) == 0;
-            Item result = js_dispatch_builtin(fn->builtin_id, effective_this, merged_args, total_argc);
+            Item result = js_dispatch_builtin(fn->builtin_id, effective_this, merged_args, total_argc,
+                result_home);
             js_dispatch_as_array_method = saved_array_mode;
             return result;
         }
         // Js54 P5: same propagation for the non-bound path.
         bool saved_array_mode = js_dispatch_as_array_method;
         js_dispatch_as_array_method = (fn->flags & JS_FUNC_FLAG_TYPED_ARRAY_METHOD) == 0;
-        Item result = js_dispatch_builtin(fn->builtin_id, this_val, args, arg_count);
+        Item result = js_dispatch_builtin(fn->builtin_id, this_val, args, arg_count, result_home);
         js_dispatch_as_array_method = saved_array_mode;
         return result;
     }
@@ -13209,7 +13358,8 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         if (js_has_pending_new_target) {
             effective_this = this_val; // 'new' call: use newly created object
         } else {
-            effective_this = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS) ? fn->bound_this : this_val;
+            effective_this = (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
+                ? js_function_get_bound_this(fn) : this_val;
         }
         // OrdinaryCallBindThis: coerce undefined/null this → globalThis for non-strict target
         if (!(fn->flags & JS_FUNC_FLAG_STRICT) && !(fn->flags & JS_FUNC_FLAG_ARROW)) {
@@ -13264,8 +13414,6 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             get_type_id(fn->home_global) == LMD_TYPE_MAP;
         if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
         // Enter the callee's lexical with-environment, then restore caller state.
-        extern int js_with_save_stack(Item* out_stack, int max_depth);
-        extern void js_with_set_stack(Item* stack, int depth);
         Item saved_with_stack[16];
         int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
         if (fn->func_ptr || fn->with_env_depth > 0) {
@@ -13292,7 +13440,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         }
         bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
         if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
-        Item result = js_invoke_fn(fn, merged_args, total_argc);
+        Item result = js_invoke_fn(fn, merged_args, total_argc, invoke_result_home);
         if (pushed_vm_stack_source) js_eval_source_pop();
         js_current_private_home_class = prev_private_home_class;
         js_current_private_home_class_index = prev_private_home_class_index;
@@ -13345,8 +13493,6 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         get_type_id(fn->home_global) == LMD_TYPE_MAP;
     if (switched_global) prev_global = js_vm_swap_global_this(fn->home_global);
     // Enter the callee's lexical with-environment, then restore caller state.
-    extern int js_with_save_stack(Item* out_stack, int max_depth);
-    extern void js_with_set_stack(Item* stack, int depth);
     Item saved_with_stack[16];
     int saved_with_depth = js_with_save_stack(saved_with_stack, 16);
     if (fn->func_ptr || fn->with_env_depth > 0) {
@@ -13374,7 +13520,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     }
     bool pushed_vm_stack_source = js_function_has_vm_stack_source(fn);
     if (pushed_vm_stack_source) js_function_push_vm_stack_source(fn);
-    Item result = js_invoke_fn(fn, args, arg_count);
+    Item result = js_invoke_fn(fn, args, arg_count, invoke_result_home);
     if (pushed_vm_stack_source) js_eval_source_pop();
     js_current_private_home_class = prev_private_home_class;
     js_current_private_home_class_index = prev_private_home_class_index;
@@ -13389,8 +13535,44 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     return result;
 }
 
+extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
+    JsFunction* compiled = get_type_id(func_item) == LMD_TYPE_FUNC
+        ? (JsFunction*)func_item.function : NULL;
+    if (compiled && (compiled->flags & JS_FUNC_FLAG_MIR_PUBLIC_ABI)) {
+        // Legacy native callers have no result-home parameter. They may still
+        // consume ordinary results, but must reject a wide scalar rather than
+        // returning an Item backed by this helper's departing C stack slot.
+        LAMBDA_SCALAR_HOME(legacy_result_home);
+        Item result = js_call_function_impl(func_item, this_val, args,
+            arg_count, &legacy_result_home);
+        TypeId type = get_type_id(result);
+        bool pointer_scalar = type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64 ||
+            ((type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) &&
+             !(result.item & ITEM_DBL_MASK) && result.item != ITEM_FLOAT_P0 &&
+             result.item != ITEM_FLOAT_N0);
+        if (pointer_scalar) {
+            log_error("js-call: legacy result boundary requires js_call_function_into");
+            return ItemError;
+        }
+        return result;
+    }
+    return js_call_function_impl(func_item, this_val, args, arg_count, NULL);
+}
+
+extern "C" Item js_call_function_into(Item func_item, Item this_val, Item* args,
+        int arg_count, uint64_t* result_home) {
+    if (!result_home) {
+        // `_into` is the explicit ownership boundary; accepting NULL would
+        // silently fall back to an activation-local result home.
+        log_error("js_call_function_into: missing caller result home");
+        return ItemError;
+    }
+    return js_call_function_impl(func_item, this_val, args, arg_count, result_home);
+}
+
 // Function.prototype.apply(thisArg, argsArray)
-extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array) {
+static Item js_apply_function_impl(Item func_item, Item this_val, Item args_array,
+        uint64_t* result_home) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
         // Support objects with .apply method (e.g. Sizzle's push polyfill)
         if (get_type_id(func_item) == LMD_TYPE_MAP) {
@@ -13398,7 +13580,7 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
             Item apply_fn = js_map_get_fast(func_item.map, "apply", 5, &found);
             if (found && get_type_id(apply_fn) == LMD_TYPE_FUNC) {
                 Item args[2] = { this_val, args_array };
-                return js_call_function(apply_fn, func_item, args, 2);
+                return js_call_function_impl(apply_fn, func_item, args, 2, result_home);
             }
         }
         log_error("js_apply_function: not a function (type=%d)", get_type_id(func_item));
@@ -13441,7 +13623,20 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
     } else if (args_array.item != ITEM_NULL && args_array.item != ITEM_JS_UNDEFINED) {
         return js_throw_type_error("CreateListFromArrayLike called on non-object");
     }
-    return js_call_function(func_item, this_val, args, argc);
+    return js_call_function_impl(func_item, this_val, args, argc, result_home);
+}
+
+extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array) {
+    return js_apply_function_impl(func_item, this_val, args_array, NULL);
+}
+
+extern "C" Item js_apply_function_into(Item func_item, Item this_val, Item args_array,
+        uint64_t* result_home) {
+    if (!result_home) {
+        log_error("js_apply_function_into: missing caller result home");
+        return ItemError;
+    }
+    return js_apply_function_impl(func_item, this_val, args_array, result_home);
 }
 
 extern "C" Item js_apply_constructor(Item constructor, Item args_array) {
@@ -13552,9 +13747,8 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->builtin_id = orig->builtin_id;
     bound->flags = orig->flags; // preserve strict/arrow flags from original
     bound->flags |= JS_FUNC_FLAG_HAS_BOUND_THIS; // always mark as having bound this
-    bound->bound_this = lambda_item_heap_rehome(
-        (orig->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
-            ? orig->bound_this : this_root.get());
+    js_function_set_bound_this(bound, (orig->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)
+        ? js_function_get_bound_this(orig) : this_root.get());
     Item bound_item = bound_root.get();
     {
         Item target_key = (Item){.item = s2it(heap_create_name(JS_BOUND_TARGET_KEY, JS_BOUND_TARGET_KEY_LEN))};
@@ -13648,9 +13842,7 @@ extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, 
             bound->env = js_alloc_env(1);
             owned_item_slot_store(bound->env, 1, 0, func_item);
             bound->flags = JS_FUNC_FLAG_HAS_BOUND_THIS;
-            // JsFunction's fixed ABI has no adjacent scalar payload for this
-            // one persistent slot, so use the explicit ownerless fallback.
-            bound->bound_this = lambda_item_heap_rehome(bound_this);
+            js_function_set_bound_this(bound, bound_this);
             bound->name = heap_create_name("bound ", 6);
             Item bound_item = (Item){.function = (Function*)bound};
             if (bound_argc > 0 && bound_args) {
@@ -23733,7 +23925,8 @@ extern "C" Item js_array_indexOf_int(Item arr, int64_t search) {
 // Wrapper for MIR-compiled direct array method calls: isolates js_array_method_real_this
 // so that an outer .call() context (e.g. slice.call(arrayLike)) doesn't leak into
 // nested array method calls (e.g. getCalls.push(0) inside a getter).
-extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, int argc) {
+static Item js_array_method_direct_impl(Item arr, Item method_name, Item* args, int argc,
+        uint64_t* result_home) {
     Item saved = js_array_method_real_this;
     js_array_method_real_this = (Item){0};
     if (get_type_id(arr) == LMD_TYPE_ARRAY && get_type_id(method_name) == LMD_TYPE_STRING) {
@@ -23759,14 +23952,29 @@ extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, i
                 js_array_method_real_this = saved;
                 return js_throw_type_error("Array method is not callable");
             }
-            Item result = js_call_function(resolved, arr, args, argc);
+            Item result = result_home
+                ? js_call_function_into(resolved, arr, args, argc, result_home)
+                : js_call_function(resolved, arr, args, argc);
             js_array_method_real_this = saved;
             return result;
         }
     }
-    Item result = js_array_method(arr, method_name, args, argc);
+    Item result = js_array_method_impl(arr, method_name, args, argc, result_home);
     js_array_method_real_this = saved;
     return result;
+}
+
+extern "C" Item js_array_method_direct(Item arr, Item method_name, Item* args, int argc) {
+    return js_array_method_direct_impl(arr, method_name, args, argc, NULL);
+}
+
+extern "C" Item js_array_method_direct_into(Item arr, Item method_name, Item* args, int argc,
+        uint64_t* result_home) {
+    if (!result_home) {
+        log_error("js_array_method_direct_into: missing caller result home");
+        return ItemError;
+    }
+    return js_array_method_direct_impl(arr, method_name, args, argc, result_home);
 }
 
 extern "C" Item js_array_push_method_direct_1(Item arr, Item value) {
@@ -23996,13 +24204,14 @@ static bool js_array_flatten_into(Item target, Item source, int64_t source_len, 
         if (js_exception_pending) return false;
         if (has_mapper) {
             Item cb_args[3] = { element, (Item){.item = i2it(source_index)}, source };
+            LAMBDA_SCALAR_HOME(mapper_result_home);
             JsFunction* fn = (JsFunction*)mapper.function;
             if (fn->bound_args || (fn->flags & JS_FUNC_FLAG_HAS_BOUND_THIS)) {
-                element = js_call_function(mapper, this_arg, cb_args, 3);
+                element = js_call_function_into(mapper, this_arg, cb_args, 3, &mapper_result_home);
             } else {
                 Item prev_this = js_current_this;
                 js_current_this = this_arg;
-                element = js_invoke_fn(fn, cb_args, 3);
+                element = js_invoke_fn(fn, cb_args, 3, &mapper_result_home);
                 js_current_this = prev_this;
             }
             if (js_exception_pending) return false;
@@ -24918,7 +25127,12 @@ static Item js_array_generic_iterative_callback_with_object(Item object, Item ca
         }
         if (present) {
             Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, callback_object };
-            Item selected = js_call_function(callback, this_arg, cb_args, 3);
+            uint64_t selected_home = 0;
+            // map stores the callback result into an owned array slot below.
+            // Donate this short-lived native cell to the wrapper so no scalar
+            // object-zone allocation is needed between callback and store.
+            Item selected = js_call_function_into(callback, this_arg, cb_args, 3,
+                &selected_home);
             if (js_exception_pending) {
                 js_array_sparse_key_cursor_free(&sparse_cursor);
                 return ItemNull;
@@ -24972,7 +25186,8 @@ static Item js_array_generic_iterative_callback(Item object, Item* args, int arg
     return js_array_generic_iterative_callback_with_object(object, object, args, argc, method_kind);
 }
 
-static Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args, int argc, bool from_right) {
+static Item js_array_generic_reduce_with_object(Item object, Item callback_object, Item* args,
+        int argc, bool from_right, uint64_t* result_home) {
     Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
     int64_t len = js_array_to_length(js_property_get(object, len_key));
     if (js_exception_pending) return ItemNull;
@@ -25011,7 +25226,9 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
             Item elem = js_property_get(object, key);
             if (js_exception_pending) return ItemNull;
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(k)}, callback_object };
-            accumulator = js_call_function(callback, undefined_this, cb_args, 4);
+            accumulator = result_home
+                ? js_call_function_into(callback, undefined_this, cb_args, 4, result_home)
+                : js_call_function(callback, undefined_this, cb_args, 4);
             if (js_exception_pending) return ItemNull;
         }
         if (js_exception_pending) return ItemNull;
@@ -25020,8 +25237,10 @@ static Item js_array_generic_reduce_with_object(Item object, Item callback_objec
     return accumulator;
 }
 
-static Item js_array_generic_reduce(Item object, Item* args, int argc, bool from_right) {
-    return js_array_generic_reduce_with_object(object, object, args, argc, from_right);
+static Item js_array_generic_reduce(Item object, Item* args, int argc, bool from_right,
+        uint64_t* result_home) {
+    return js_array_generic_reduce_with_object(object, object, args, argc, from_right,
+        result_home);
 }
 
 static Item js_array_generic_find_last(Item object, Item* args, int argc, bool return_index) {
@@ -25050,7 +25269,8 @@ static Item js_array_generic_find_last(Item object, Item* args, int argc, bool r
     return return_index ? (Item){.item = i2it(-1)} : make_js_undefined();
 }
 
-extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc) {
+static Item js_array_method_impl(Item arr, Item method_name, Item* args, int argc,
+        uint64_t* result_home) {
     if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     String* method = it2s(method_name);
     if (!method) return ItemNull;
@@ -25155,10 +25375,10 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         return js_array_generic_iterative_callback(arr, args, argc, JS_ARRAY_ITER_EVERY);
     }
     if (method->len == 6 && strncmp(method->chars, "reduce", 6) == 0) {
-        return js_array_generic_reduce(arr, args, argc, false);
+        return js_array_generic_reduce(arr, args, argc, false, result_home);
     }
     if (method->len == 11 && strncmp(method->chars, "reduceRight", 11) == 0) {
-        return js_array_generic_reduce(arr, args, argc, true);
+        return js_array_generic_reduce(arr, args, argc, true, result_home);
     }
 
     // push - mutating
@@ -25640,7 +25860,8 @@ includes_slow_path:
                 continue;
             }
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
-            Item mapped = js_invoke_fn(fn, cb_args, 3);
+            LAMBDA_SCALAR_HOME(map_result_home);
+            Item mapped = js_invoke_fn(fn, cb_args, 3, &map_result_home);
             if (js_exception_pending) break;
             if (result_is_plain_array) {
                 js_array_store_owned(dst, i, mapped);
@@ -25677,7 +25898,8 @@ includes_slow_path:
             Item elem;
             if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) continue;
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, 3);
+            LAMBDA_SCALAR_HOME(filter_result_home);
+            Item pred = js_invoke_fn(fn, cb_args, 3, &filter_result_home);
             if (js_exception_pending) break;
             if (js_is_truthy(pred)) {
                 if (result_is_plain_array) {
@@ -25735,7 +25957,9 @@ includes_slow_path:
             Item elem;
             if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) continue;
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
-            accumulator = js_invoke_fn(fn, cb_args, 4);
+            // The reduce result escapes this dispatcher, so this local cannot own it.
+            // The explicit map-method result-home path supplies the final home.
+            accumulator = js_invoke_fn(fn, cb_args, 4, result_home);
             if (js_exception_pending) break;
             // J39-7: refresh check_proto in case callback mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
@@ -25774,7 +25998,8 @@ includes_slow_path:
                 if (!found) break;
             }
             Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, cb_this };
-            js_invoke_fn(fn, cb_args, 3);
+            LAMBDA_SCALAR_HOME(for_each_result_home);
+            js_invoke_fn(fn, cb_args, 3, &for_each_result_home);
             if (js_exception_pending) break;
             i = idx + 1;
             // J39-7: refresh check_proto in case callback mutated proto chain.
@@ -25799,7 +26024,8 @@ includes_slow_path:
         for (int i = 0; i < len; i++) {
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, 3);
+            LAMBDA_SCALAR_HOME(find_result_home);
+            Item pred = js_invoke_fn(fn, cb_args, 3, &find_result_home);
             if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return elem; }
         }
@@ -25820,7 +26046,8 @@ includes_slow_path:
         js_current_this = js_compute_callback_this(fn, thisArg_findIdx);
         for (int i = 0; i < len; i++) {
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, 3);
+            LAMBDA_SCALAR_HOME(find_index_result_home);
+            Item pred = js_invoke_fn(fn, cb_args, 3, &find_index_result_home);
             if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = i2it(i)}; }
         }
@@ -25840,7 +26067,8 @@ includes_slow_path:
         for (int i = src->length - 1; i >= 0; i--) {
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, 3);
+            LAMBDA_SCALAR_HOME(find_last_result_home);
+            Item pred = js_invoke_fn(fn, cb_args, 3, &find_last_result_home);
             if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return elem; }
         }
@@ -25860,7 +26088,8 @@ includes_slow_path:
         for (int i = src->length - 1; i >= 0; i--) {
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, 3);
+            LAMBDA_SCALAR_HOME(find_last_index_result_home);
+            Item pred = js_invoke_fn(fn, cb_args, 3, &find_last_index_result_home);
             if (js_exception_pending) break;
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = i2it(i)}; }
         }
@@ -25899,7 +26128,8 @@ includes_slow_path:
                 if (!found) break;
             }
             Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, 3);
+            LAMBDA_SCALAR_HOME(some_result_home);
+            Item pred = js_invoke_fn(fn, cb_args, 3, &some_result_home);
             if (js_exception_pending) break;
             if (js_is_truthy(pred)) {
                 js_array_sparse_key_cursor_free(&sparse_cursor);
@@ -25946,7 +26176,8 @@ includes_slow_path:
                 if (!found) break;
             }
             Item cb_args[3] = { elem, (Item){.item = i2it(idx)}, cb_this };
-            Item pred = js_invoke_fn(fn, cb_args, 3);
+            LAMBDA_SCALAR_HOME(every_result_home);
+            Item pred = js_invoke_fn(fn, cb_args, 3, &every_result_home);
             if (js_exception_pending) break;
             if (!js_is_truthy(pred)) {
                 js_array_sparse_key_cursor_free(&sparse_cursor);
@@ -26301,7 +26532,9 @@ includes_slow_path:
             Item elem;
             if (!js_array_has_element(arr, lam::gc_borrow(src), i, &elem, check_proto)) continue;
             Item cb_args[4] = { accumulator, elem, (Item){.item = i2it(i)}, cb_this };
-            accumulator = js_invoke_fn(fn, cb_args, 4);
+            // The reduceRight result is forwarded by the map-method ABI and
+            // therefore cannot use a transient terminal home here.
+            accumulator = js_invoke_fn(fn, cb_args, 4, result_home);
             if (js_exception_pending) break;
             // J39-7: refresh check_proto in case callback mutated proto chain.
             check_proto = js_proto_chain_has_numeric_keys(arr);
@@ -26447,6 +26680,22 @@ includes_slow_path:
     }
     log_debug("js_array_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
+}
+
+extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc) {
+    return js_array_method_impl(arr, method_name, args, argc, NULL);
+}
+
+extern "C" Item js_array_method_into(Item arr, Item method_name, Item* args, int argc,
+        uint64_t* result_home) {
+    if (!result_home) {
+        log_error("js_array_method_into: missing caller result home");
+        return ItemError;
+    }
+    Item result = js_array_method_impl(arr, method_name, args, argc, result_home);
+    // A native array method can return an existing scalar-backed Item; copy it
+    // before this dispatch frame gives control back to generated code.
+    return lambda_item_adopt_scalar_home(result, result_home);
 }
 
 // Generic method call with expanded args array (used for obj.method(...spread) calls)

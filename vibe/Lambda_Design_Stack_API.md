@@ -65,10 +65,10 @@ Phases 0 through 7 are complete. The completed implementation provides:
 - one normalized import/direct-call path and one conservative raw-call funnel;
 - one `MirEmitter` physical-frame owner, prologue, finalizer, verifier, root
   coloring path, and scalar-home coloring/fixup path for both languages;
-- checked public wrappers separated from bound generated bodies, with the
-  hidden caller-home operand confined to internal direct calls;
-- normal/error lane adoption, discard scratch, tail-home validation, wrapper
-  heap rehoming, and full callee watermark restoration;
+- checked public wrappers separated from bound generated bodies, with a
+  trailing caller-home operand for every scalar-capable return;
+- normal/error lane adoption, discard scratch, tail-home validation, and full
+  callee watermark restoration;
 - full-domain `INT64`/`UINT64` transient homes, unsigned caller-home transfer,
   destination-owned scalar storage, and `ushr` lowering for Lambda and
   LambdaJS. The high-`u64` corruption repair landed in this implementation
@@ -76,8 +76,8 @@ Phases 0 through 7 are complete. The completed implementation provides:
   type-directed number model and is tracked in `Lambda_Impl_Numbers.md`;
 - owner-backed datetime objects (dynamic GC or static Input arena) with no
   number-home return or relocation lane;
-- a counted `lambda_item_heap_rehome()` fallback only for Item-only numeric
-  persistence without a natural destination owner;
+- no scalar GC fallback: Item-only numeric persistence uses an explicit
+  caller home or destination-owned scalar slot;
 - conservative metadata and representation fallback where an edge is not yet
   profitable to specialize, without a second frame or call implementation.
 
@@ -1887,27 +1887,10 @@ is therefore not required for arrays, environments, modules, async state,
 tasks, promises, messages, or exceptions once those owners are complete and
 audited.
 
-With the current one-word public and foreign `Item` ABI, however, some fallback
-is still required unless that ABI is strengthened. Phase 7 therefore uses an
-immutable GC scalar cell for every persistent `DOUBLE`, `INT64`, or `UINT64`
-value whose destination has no natural owner. This is the fail-closed rule for
-public returns, foreign retention, unaudited retaining calls, singleton slots,
-and ownerless cross-thread handoff.
-
-This is an interim lifetime decision, not a claim that numeric payloads belong
-in the GC domain. It lets Phase 7 realign local, return, and destination-owned
-storage without simultaneously changing every public or foreign lifetime ABI.
-`lambda_scalar_heap_rehome_count(INT64/UINT64/FLOAT)` counts actual fallback
-allocations, rather than treating a numeric tag as proof of heap ownership.
-The audit inventory therefore keeps the remaining edge cost visible behind the
-single rehome helper.
-
-The future alternatives remain:
-
-1. **Caller-supplied persistent home:** extend the public/embedding ABI with a
-   result or retained-argument home whose lifetime is guaranteed by the caller.
-2. **Owned non-GC scalar handle/cell:** return an explicitly retained object or
-   handle with a release/ownership contract rather than a borrowable bare
+Public and foreign scalar-capable returns carry a caller-supplied result home.
+Persistent scalar storage uses a destination-owned companion word. GC object
+allocation rejects scalar tags, so an unaudited retaining call fails rather
+than manufacturing a scalar cell.
    `Item`.
 3. **Reject persistent retention:** keep an Item-only API borrow-scoped and
    require callers that retain a value to copy it through an ownership API.

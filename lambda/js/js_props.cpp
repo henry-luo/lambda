@@ -15,6 +15,7 @@
 #include "js_props.h"
 #include "js_runtime.h"
 #include "js_property_attrs.h"
+#include "js_function.hpp"
 #include "js_state_guards.h"
 #include "../lambda-data.hpp"
 
@@ -50,23 +51,6 @@ extern "C++" String* heap_create_name(const char* name, size_t len);
 extern void fn_map_set(Item map_item, Item key, Item value);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
-// Mirror of JsFuncProps from js_globals.cpp / js_runtime.cpp — used here to
-// reach `properties_map`. Layout MUST stay in sync.
-struct JsFuncPropsView_props {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map;
-};
-
 // Stage E: debug-only invariant assertions. Compiled out under NDEBUG.
 // Three classes of invariants the property-model kernels enforce:
 //   (E1) Key well-formedness: callers must pass a non-NULL name buffer
@@ -100,7 +84,7 @@ static Map* js_props_storage_map(Item object) {
         return js_array_props(arr);
     }
     if (t == LMD_TYPE_FUNC) {
-        JsFuncPropsView_props* fn = (JsFuncPropsView_props*)object.function;
+        JsFunction* fn = (JsFunction*)object.function;
         if (!fn || fn->properties_map.item == 0) return NULL;
         if (get_type_id(fn->properties_map) != LMD_TYPE_MAP) return NULL;
         return fn->properties_map.map;
@@ -451,7 +435,7 @@ extern "C" bool js_get_own_property_descriptor(Item object,
         // FUNC: storage lives in fn->properties_map.map. Caller is still
         // responsible for the synthetic length/name/prototype intrinsics —
         // those are not stored as own properties.
-        JsFuncPropsView_props* fn = (JsFuncPropsView_props*)object.function;
+        JsFunction* fn = (JsFunction*)object.function;
         if (!fn || fn->properties_map.item == 0) return false;
         return js_props_desc_from_storage(object, fn->properties_map.map,
                                            name, name_len, out);
@@ -564,7 +548,7 @@ static Item js_props_array_companion_storage_target(Item object) {
 
 static Item js_props_function_properties_storage_target(Item object) {
     if (get_type_id(object) != LMD_TYPE_FUNC) return ItemNull;
-    JsFuncPropsView_props* fn = (JsFuncPropsView_props*)object.function;
+    JsFunction* fn = (JsFunction*)object.function;
     if (!fn || fn->properties_map.item == 0 ||
             get_type_id(fn->properties_map) != LMD_TYPE_MAP) {
         return ItemNull;

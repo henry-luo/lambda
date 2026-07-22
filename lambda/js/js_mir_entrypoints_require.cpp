@@ -214,7 +214,8 @@ static void js_mir_destroy_unowned_eval_context(EvalContext* local_context, Eval
     context = old_context;
 }
 
-Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename) {
+Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
+                             const char* filename, uint64_t* result_home) {
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
 
     js_source_runtime = runtime;
@@ -352,9 +353,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
             if (value == (double)(int64_t)value && value >= INT32_MIN && value <= INT32_MAX) {
                 final_result = (Item){.item = i2it((int64_t)value)};
             } else {
-                double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-                *ptr = value;
-                final_result = lambda_float_ptr_to_item(ptr);
+                final_result = lambda_item_adopt_scalar_home(result, result_home);
             }
         } else {
             final_result = result;
@@ -507,7 +506,9 @@ static size_t js_commonjs_injection_offset(const char* source, size_t source_len
     return i;
 }
 
-Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename) {
+Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
+                                  size_t js_source_len, const char* filename,
+                                  uint64_t* result_home) {
     js_mir_reset_last_phase_timing();
     long phase_total_start = js_mir_phase_now_us();
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
@@ -1083,9 +1084,9 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
             if (value == (double)(int64_t)value && value >= INT32_MIN && value <= INT32_MAX) {
                 final_result = (Item){.item = i2it((int64_t)value)};
             } else {
-                double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-                *ptr = value;
-                final_result = lambda_float_ptr_to_item(ptr);
+                // The JS context is about to be restored, so its number frame
+                // cannot own an out-of-band scalar result after this boundary.
+                final_result = lambda_item_adopt_scalar_home(result, result_home);
             }
         } else {
             final_result = result;
@@ -1176,39 +1177,46 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_
     return final_result;
 }
 
-Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename) {
-    return transpile_js_to_mir_core_len(runtime, js_source, strlen(js_source), filename);
+Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source,
+                              const char* filename, uint64_t* result_home) {
+    return transpile_js_to_mir_core_len(runtime, js_source, strlen(js_source), filename,
+                                        result_home);
 }
 
 // ============================================================================
 // Public API wrappers for preamble support
 // ============================================================================
 
-Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
-    return transpile_js_to_mir_len(runtime, js_source, strlen(js_source), filename);
+Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename,
+                         uint64_t* result_home) {
+    return transpile_js_to_mir_len(runtime, js_source, strlen(js_source), filename, result_home);
 }
 
-Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename) {
+Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                             const char* filename, uint64_t* result_home) {
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
     g_jm_preamble_in = NULL;
-    return transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
+    return transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename, result_home);
 }
 
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
-                                   JsPreambleState* out_state) {
-    return transpile_js_to_mir_preamble_len(runtime, js_source, strlen(js_source), filename, out_state);
+                                   JsPreambleState* out_state, uint64_t* result_home) {
+    return transpile_js_to_mir_preamble_len(runtime, js_source, strlen(js_source), filename,
+                                            out_state, result_home);
 }
 
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                                      const char* filename, JsPreambleState* out_state) {
+                                      const char* filename, JsPreambleState* out_state,
+                                      uint64_t* result_home) {
     g_jm_preamble_mode = true;
     g_jm_preamble_out = out_state;
     g_jm_preamble_in = NULL;
     // Preamble (harness) always compiled at -O3 for best runtime performance
     unsigned int saved_level = g_js_mir_optimize_level;
     g_js_mir_optimize_level = 3;
-    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
+    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename,
+                                                result_home);
     g_js_mir_optimize_level = saved_level;
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
@@ -1227,7 +1235,9 @@ static Item compile_js_mir_cached_unit_len(
     g_jm_preamble_in = preamble;
     unsigned int saved_level = g_js_mir_optimize_level;
     g_js_mir_optimize_level = 3;
-    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
+    uint64_t compile_result_home = 0;
+    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename,
+                                                &compile_result_home);
     g_js_mir_optimize_level = saved_level;
     g_jm_preamble_out = NULL;
     g_jm_preamble_in = NULL;
@@ -1284,16 +1294,19 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
 }
 
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
-                                        const JsPreambleState* preamble) {
-    return transpile_js_to_mir_with_preamble_len(runtime, js_source, strlen(js_source), filename, preamble);
+                                        const JsPreambleState* preamble, uint64_t* result_home) {
+    return transpile_js_to_mir_with_preamble_len(runtime, js_source, strlen(js_source), filename,
+                                                  preamble, result_home);
 }
 
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                                           const char* filename, const JsPreambleState* preamble) {
+                                           const char* filename, const JsPreambleState* preamble,
+                                           uint64_t* result_home) {
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
     g_jm_preamble_in = preamble;
-    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename);
+    Item result = transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename,
+                                                result_home);
     g_jm_preamble_in = NULL;
     return result;
 }

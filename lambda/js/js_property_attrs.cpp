@@ -7,6 +7,7 @@
 #include "js_props.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
+#include "js_function.hpp"
 #include "js_state_guards.h"
 #include "../lambda.hpp"
 #include "../lambda-data.hpp"
@@ -18,23 +19,6 @@ extern "C" void* heap_calloc(size_t size, TypeId type);
 String* heap_create_name(const char* name, size_t len);
 extern "C" Item js_object_is(Item left, Item right);
 extern void map_put(Map* mp, String* key, Item value, Input* input);
-
-// Mirror of JsFuncProps from js_globals.cpp / js_runtime.cpp — only used here to
-// reach `properties_map`. Layout MUST stay in sync with the canonical definitions.
-struct JsFuncPropsView {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map;
-};
 
 extern "C" JsAccessorPair* js_alloc_accessor_pair(Item getter, Item setter) {
     // Allocate as LMD_TYPE_FUNC so the GC tracer (if any) treats it like a Function
@@ -68,7 +52,7 @@ static TypeMap* js_obj_typemap(Item obj) {
         return typemap_ptr_is_plausible(tm) ? tm : nullptr;
     }
     if (t == LMD_TYPE_FUNC) {
-        JsFuncPropsView* fn = (JsFuncPropsView*)obj.function;
+        JsFunction* fn = (JsFunction*)obj.function;
         if (!fn || fn->properties_map.item == 0) return nullptr;
         if (get_type_id(fn->properties_map) != LMD_TYPE_MAP) return nullptr;
         Map* m = fn->properties_map.map;
@@ -391,7 +375,7 @@ static Map* js_obj_resolve_map(Item obj) {
     TypeId t = get_type_id(obj);
     if (t == LMD_TYPE_MAP) return obj.map;
     if (t == LMD_TYPE_FUNC) {
-        JsFuncPropsView* fn = (JsFuncPropsView*)obj.function;
+        JsFunction* fn = (JsFunction*)obj.function;
         if (!fn || fn->properties_map.item == 0) return nullptr;
         if (get_type_id(fn->properties_map) != LMD_TYPE_MAP) return nullptr;
         return fn->properties_map.map;
@@ -557,7 +541,7 @@ static Map* js_obj_underlying_map(Item obj) {
         return js_array_props(arr);
     }
     if (t == LMD_TYPE_FUNC) {
-        JsFuncPropsView* fn = (JsFuncPropsView*)obj.function;
+        JsFunction* fn = (JsFunction*)obj.function;
         if (!fn || fn->properties_map.item == 0) return nullptr;
         if (get_type_id(fn->properties_map) != LMD_TYPE_MAP) return nullptr;
         return fn->properties_map.map;

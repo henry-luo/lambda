@@ -265,10 +265,7 @@ Item py_bigint_pow(Item base_item, Item exp_item) {
         uint32_t st3 = 0;
         double e = (double)mpd_qget_ssize(mexp, &st3);
         mpd_del(mbase); mpd_del(mexp);
-        double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        if (!ptr) return ItemNull;
-        *ptr = pow(b, e);
-        return lambda_float_ptr_to_item(ptr);
+        return push_d(pow(b, e));
     }
     mpd_t* r = mpd_new(ctx);
     uint32_t status = 0;

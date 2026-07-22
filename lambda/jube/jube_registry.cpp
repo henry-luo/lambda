@@ -744,6 +744,7 @@ struct JubeGuestExecution {
     bool import_execution;
     bool import_retained;
     Input* input;
+    uint64_t result_scalar_home;
     JubeGuestExecution* previous_active_execution;
 };
 
@@ -886,6 +887,73 @@ static int jube_host_mir_item_function_create(void* mir_context, const char* fun
     return 0;
 }
 
+static int jube_host_mir_item_function_create_typed(void* mir_context,
+        const char* function_name, uint32_t parameter_count,
+        const char* const* parameter_names, const uint8_t* parameter_kinds,
+        void** out_function_item, void** out_function) {
+    if (!mir_context || !function_name || !*function_name || !out_function_item ||
+            !out_function || (parameter_count > 0 && (!parameter_names || !parameter_kinds)) ||
+            parameter_count > 1024) return -1;
+    MIR_var_t* parameters = NULL;
+    if (parameter_count > 0) {
+        parameters = (MIR_var_t*)mem_calloc(parameter_count, sizeof(MIR_var_t), MEM_CAT_SYSTEM);
+        if (!parameters) return -1;
+        for (uint32_t i = 0; i < parameter_count; i++) {
+            if (!parameter_names[i] || !*parameter_names[i] || parameter_kinds[i] > 1) {
+                mem_free(parameters);
+                return -1;
+            }
+            parameters[i] = {parameter_kinds[i] ? MIR_T_P : MIR_T_I64,
+                parameter_names[i], 0};
+        }
+    }
+    MIR_type_t return_type = MIR_T_I64;
+    MIR_item_t item = MIR_new_func_arr((MIR_context_t)mir_context, function_name,
+        1, &return_type, parameter_count, parameters);
+    if (parameters) mem_free(parameters);
+    if (!item) return -1;
+    *out_function_item = item;
+    *out_function = MIR_get_item_func((MIR_context_t)mir_context, item);
+    return *out_function ? 0 : -1;
+}
+
+static int jube_host_mir_item_function_proto_create_typed(void* mir_context,
+        const char* prototype_name, uint32_t parameter_count,
+        const uint8_t* parameter_kinds, void** out_prototype_item) {
+    if (!mir_context || !prototype_name || !*prototype_name || !out_prototype_item ||
+            (parameter_count > 0 && !parameter_kinds) || parameter_count > 1024) return -1;
+    MIR_var_t* parameters = NULL;
+    char (*parameter_names)[16] = NULL;
+    if (parameter_count > 0) {
+        parameters = (MIR_var_t*)mem_calloc(parameter_count, sizeof(MIR_var_t), MEM_CAT_SYSTEM);
+        parameter_names = (char (*)[16])mem_calloc(parameter_count,
+            sizeof(*parameter_names), MEM_CAT_SYSTEM);
+        if (!parameters || !parameter_names) {
+            if (parameters) mem_free(parameters);
+            if (parameter_names) mem_free(parameter_names);
+            return -1;
+        }
+        for (uint32_t i = 0; i < parameter_count; i++) {
+            if (parameter_kinds[i] > 1) {
+                mem_free(parameters);
+                mem_free(parameter_names);
+                return -1;
+            }
+            snprintf(parameter_names[i], sizeof(parameter_names[i]), "p%u", i);
+            parameters[i] = {parameter_kinds[i] ? MIR_T_P : MIR_T_I64,
+                parameter_names[i], 0};
+        }
+    }
+    MIR_type_t result_type = MIR_T_I64;
+    MIR_item_t prototype = MIR_new_proto_arr((MIR_context_t)mir_context,
+        prototype_name, 1, &result_type, parameter_count, parameters);
+    if (parameters) mem_free(parameters);
+    if (parameter_names) mem_free(parameter_names);
+    if (!prototype) return -1;
+    *out_prototype_item = prototype;
+    return 0;
+}
+
 static int jube_host_mir_function_forward_create(void* mir_context,
         const char* function_name, void** out_function_item) {
     if (!mir_context || !function_name || !*function_name || !out_function_item) return -1;
@@ -981,6 +1049,7 @@ static int jube_host_execution_activate_import(void* execution_context, void** o
 }
 
 typedef Item (*JubeGuestMainFn)(Context* runtime);
+typedef Item (*JubeGuestMainIntoFn)(Context* runtime, uint64_t* result_home);
 
 static int jube_host_execution_run_main(void* execution_context, void* entry_function,
                                         Item* out_result) {
@@ -1007,6 +1076,36 @@ static int jube_host_execution_run_main(void* execution_context, void* entry_fun
     }
     _lambda_recovery_armed = 1;
     *out_result = entry((Context*)context);
+    _lambda_recovery_armed = 0;
+    lambda_recovery_checkpoint_disarm(&checkpoint);
+    return 0;
+}
+
+static int jube_host_execution_run_main_into(void* execution_context,
+        void* entry_function, Item* out_result) {
+    JubeGuestExecution* execution = jube_guest_execution_from_handle(execution_context);
+    JubeGuestMainIntoFn entry = (JubeGuestMainIntoFn)entry_function;
+    if (!execution || !execution->activation_active || !entry || !out_result) return -1;
+
+    LambdaRecoveryCheckpoint checkpoint = lambda_recovery_checkpoint_capture((Context*)context);
+#if defined(__APPLE__) || defined(__linux__)
+    if (sigsetjmp(_lambda_recovery_point, 1)) {
+#elif defined(_WIN32)
+    if (setjmp(_lambda_recovery_point)) {
+#else
+    if (0) {
+#endif
+        _lambda_recovery_armed = 0;
+        _lambda_stack_overflow_flag = false;
+        lambda_recovery_checkpoint_restore(&checkpoint);
+        lambda_stack_overflow_error("hosted-guest");
+        *out_result = ItemError;
+        return -1;
+    }
+    _lambda_recovery_armed = 1;
+    // The execution owns this slot until its caller has consumed the result.
+    execution->result_scalar_home = 0;
+    *out_result = entry((Context*)context, &execution->result_scalar_home);
     _lambda_recovery_armed = 0;
     lambda_recovery_checkpoint_disarm(&checkpoint);
     return 0;
@@ -1123,9 +1222,13 @@ static int jube_host_data_item_slots_store(void* session, Item* storage,
     return 0;
 }
 
-static Item jube_host_data_item_heap_rehome(void* session, Item value) {
-    if (!jube_host_data_input(session)) return value;
-    return lambda_item_heap_rehome(value);
+static int jube_host_data_item_slots_load(void* session, Item* storage,
+                                          int64_t item_count, int64_t slot,
+                                          Item* out_value) {
+    if (!jube_host_data_input(session) || !storage || !out_value || item_count <= 0 ||
+        slot < 0 || slot >= item_count) return -1;
+    *out_value = owned_item_slot_read(storage, item_count, slot, false);
+    return 0;
 }
 
 static Item jube_host_data_map_new(void* session) {
@@ -1160,7 +1263,7 @@ static const JubeHostDataAPI jube_host_data_api = {
     jube_host_data_closure_env_store,
     jube_host_data_closure_env_load,
     jube_host_data_item_slots_store,
-    jube_host_data_item_heap_rehome,
+    jube_host_data_item_slots_load,
     jube_host_data_map_new,
     jube_host_data_function_new,
 };
@@ -1279,6 +1382,9 @@ static const JubeGuestExecutionAPI jube_host_execution_api = {
     jube_host_mir_function_forward_create,
     jube_host_mir_item_function_proto_create,
     jube_host_mir_function_register_lookup,
+    jube_host_execution_run_main_into,
+    jube_host_mir_item_function_create_typed,
+    jube_host_mir_item_function_proto_create_typed,
 };
 
 static const JubeModuleGraphAPI jube_host_module_graph_api = {

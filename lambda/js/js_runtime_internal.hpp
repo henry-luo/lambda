@@ -14,6 +14,7 @@
 #include "js_class.h"
 #include "js_coerce.h"
 #include "js_runtime_state.hpp"
+#include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda-decimal.hpp"
@@ -66,53 +67,6 @@ static inline void* memmem(const void* haystack, size_t hlen, const void* needle
 
 #ifndef JS_RUNTIME_INTERNAL_HPP_DECLS
 #define JS_RUNTIME_INTERNAL_HPP_DECLS
-
-// JsFunction layout shared by runtime translation units.
-struct JsFunction {
-    TypeId type_id;  // Always LMD_TYPE_FUNC
-    uint32_t layout_magic; // distinguishes GC-owned JsFunction from Lambda Function layout
-    void* func_ptr;  // Pointer to the compiled function
-    int param_count; // Number of parameters (user-visible, not including env)
-    Item* env;       // Closure environment (NULL for non-closures)
-    int env_size;    // Number of captured variables in env
-    Item prototype;  // Constructor prototype (Foo.prototype = {...})
-    Item bound_this; // v11: bound 'this' (0 if not a bound function)
-    Item* bound_args; // v11: pre-applied arguments (NULL if none)
-    int bound_argc;  // v11: number of bound arguments
-    String* name;    // Function name (NULL if anonymous)
-    int builtin_id;  // >0 for built-in method dispatch (0 = user function)
-    Item properties_map; // v18: backing map for arbitrary properties (0 if none)
-    uint16_t flags;   // v20: JS_FUNC_FLAG_* bits
-    int16_t formal_length; // ES spec .length: params before first default, excl rest (-1 = use param_count)
-    Item* module_vars; // Per-module variable array (NULL for built-in functions)
-    Item home_global; // globalThis captured when the function was created
-    String* source_text; // v29: original source text for Function.prototype.toString
-    bool eval_initializer_context;
-    Item* with_env; // captured with-object environment stack, if any
-    int with_env_depth;
-    String* vm_stack_filename;
-    String* vm_stack_source;
-    int64_t vm_stack_line_offset;
-    int64_t vm_stack_column_offset;
-    const char** ctor_prop_names; // fixed-slot layout for dynamic constructor calls
-    int* ctor_prop_lens;
-    int ctor_prop_count;
-};
-
-#define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu
-static_assert(offsetof(JsFunction, func_ptr) == 8,
-              "JsFunction prefix must preserve the compiled-function ABI");
-
-#define JS_FUNC_FLAG_GENERATOR 1
-#define JS_FUNC_FLAG_ARROW     2
-#define JS_FUNC_FLAG_TYPED_ARRAY_METHOD 4
-#define JS_FUNC_FLAG_STRICT    8
-#define JS_FUNC_FLAG_HAS_BOUND_THIS 16
-#define JS_FUNC_FLAG_METHOD    32
-#define JS_FUNC_FLAG_ASYNC_GEN 64  // async generator function (sets is_async in js_generator_create)
-#define JS_FUNC_FLAG_ASYNC     128 // async (non-generator) function: changes [[Prototype]] to %AsyncFunction%.prototype
-#define JS_FUNC_FLAG_DERIVED_CTOR 256
-#define JS_FUNC_FLAG_DATA_VIEW_ACCESSOR JS_FUNC_FLAG_METHOD
 
 extern "C" Item js_get_generator_shared_proto(bool is_async);
 extern "C" JsFunction* js_alloc_gc_function_object(void);

@@ -1,6 +1,6 @@
 # Lambda Design: Scalar GC-Heap Elimination (No-Scalar-Cell Invariant)
 
-**Status: PROPOSED** — rev 3, 2026-07-22. **Direction confirmed by user
+**Status: IMPLEMENTED** — rev 3, 2026-07-22. **Direction confirmed by user
 2026-07-22**: keep the no-scalar-cell invariant and caller-donated-home model,
 with the transitive lifetime, context-boundary, release-enforcement, layout,
 gate, and documentation corrections incorporated below. The C2MIR freeze is

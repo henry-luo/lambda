@@ -18,6 +18,15 @@ struct JsRegexpLastMatch {
     int match_end;
 };
 
+struct JsExceptionState {
+    bool pending = false;
+    // slots[0] is the GC-visible Item; slots[1] is its scalar payload home.
+    // Keep wide scalar payloads owned by the runtime state rather than in a
+    // standalone GC cell that outlives the throwing activation.
+    Item slots[2] = {};
+    char msg_buf[1024] = {};
+};
+
 struct JsRuntimeState {
     Input* input = NULL;
     bool strict_mode = false;
@@ -61,9 +70,7 @@ struct JsRuntimeState {
     bool resolving_object_proto = false;
     bool private_field_initializing = false;
     bool eval_initializer_context = false;
-    bool exception_pending = false;
-    Item exception_value = {0};
-    char exception_msg_buf[1024] = {};
+    JsExceptionState exception = {};
     int pending_args_is_strict = 0;
     Item pending_args_callee = {0};
 
@@ -109,9 +116,10 @@ static inline Item*& js_active_module_vars_ref() {
 #define js_resolving_object_proto (js_runtime_state.resolving_object_proto)
 #define js_private_field_initializing (js_runtime_state.private_field_initializing)
 #define js_eval_initializer_context (js_runtime_state.eval_initializer_context)
-#define js_exception_pending (js_runtime_state.exception_pending)
-#define js_exception_value (js_runtime_state.exception_value)
-#define js_exception_msg_buf (js_runtime_state.exception_msg_buf)
+#define js_exception_pending (js_runtime_state.exception.pending)
+#define js_exception_slots (js_runtime_state.exception.slots)
+#define js_exception_value (js_exception_slots[0])
+#define js_exception_msg_buf (js_runtime_state.exception.msg_buf)
 #define js_pending_args_is_strict (js_runtime_state.pending_args_is_strict)
 #define js_pending_args_callee (js_runtime_state.pending_args_callee)
 #define _trace_last_fn (js_runtime_state.trace_last_fn)

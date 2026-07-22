@@ -1599,7 +1599,8 @@ static void script_eval_context_init(Runtime* runtime, EvalContext* eval_context
 
 static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* preamble,
                                             const char* source, size_t source_len,
-                                            const char* filename, bool refresh_snapshot) {
+                                            const char* filename, bool refresh_snapshot,
+                                            uint64_t* result_home) {
     if (!runtime || !preamble) return ItemError;
     if (!source) {
         source = "";
@@ -1611,7 +1612,8 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
 
     EvalContext* saved_context = context;
     context = &task_context;
-    Item result = transpile_js_to_mir_with_preamble_len(runtime, source, source_len, filename, preamble);
+    Item result = transpile_js_to_mir_with_preamble_len(runtime, source, source_len, filename,
+                                                        preamble, result_home);
     context = saved_context;
     js_mir_accumulate_last_phase_timing(false);
 
@@ -1696,8 +1698,9 @@ static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preambl
         if (timing) timing->cache_instantiations++;
         js_mir_accumulate_last_phase_timing(false);
     } else {
+        uint64_t result_home = 0;
         result = execute_js_source_with_preamble(
-            runtime, preamble, source, strlen(source), filename, false);
+            runtime, preamble, source, strlen(source), filename, false, &result_home);
     }
     js_microtask_flush();
     if (get_type_id(result) == LMD_TYPE_ERROR) {
@@ -1790,8 +1793,9 @@ static bool execute_browser_global_sync(Runtime* runtime, JsPreambleState* pream
         log_error("execute_document_scripts: failed to retain browser global sync source");
         return false;
     }
+    uint64_t result_home = 0;
     Item result = execute_js_source_with_preamble(runtime, preamble, sync_buf->str,
-                                                 sync_len, "<browser-global-sync>", true);
+                                                 sync_len, "<browser-global-sync>", true, &result_home);
     if (get_type_id(result) == LMD_TYPE_ERROR) {
         script_runner_clear_pending_exception("global-sync", "<browser-global-sync>");
         log_error("execute_document_scripts: browser global sync failed");
@@ -1881,10 +1885,11 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         bool timing_enabled = script_task_timing_enabled();
         long task_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
+        uint64_t result_home = 0;
         Item result = task->kind == JS_SCRIPT_TASK_MODULE
             ? execute_js_module_source(runtime, source, task->source_len, filename)
             : execute_js_source_with_preamble(runtime, preamble, source,
-                                             task->source_len, filename, true);
+                                             task->source_len, filename, true, &result_home);
 #ifndef NDEBUG
         if (timing_enabled) {
             long task_wall_us = script_runner_wall_now_us() - task_start_us;
@@ -1936,8 +1941,9 @@ static bool execute_body_onload_tasks(Runtime* runtime, JsScriptTaskCollection* 
         return true;
     }
 
+    uint64_t result_home = 0;
     Item result = execute_js_source_with_preamble(runtime, preamble, onload_buf->str,
-                                                 onload_buf->length, "<body-onload>", true);
+                                                 onload_buf->length, "<body-onload>", true, &result_home);
     strbuf_free(onload_buf);
     js_microtask_flush();
     if (get_type_id(result) == LMD_TYPE_ERROR) {
@@ -2078,8 +2084,9 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
             result = ItemError;
         }
     } else {
+        uint64_t result_home = 0;
         result = transpile_js_to_mir_preamble_len(runtime, preamble_buf->str, preamble_buf->length,
-                                                  preamble_filename, preamble);
+                                                  preamble_filename, preamble, &result_home);
         js_mir_accumulate_last_phase_timing(true);
     }
 #ifndef NDEBUG
@@ -2710,8 +2717,10 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     EvalContext* saved_ctx = context;
     context = &handler_compile_ctx;
 
+    uint64_t compile_result_home = 0;
     Item compile_result = transpile_js_to_mir_with_preamble(&runtime, compile_buf->str,
-                                                             "<event-handlers>", preamble);
+                                                             "<event-handlers>", preamble,
+                                                             &compile_result_home);
     strbuf_free(compile_buf);
 
     TypeId result_type = get_type_id(compile_result);

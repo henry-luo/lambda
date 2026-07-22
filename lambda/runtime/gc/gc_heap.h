@@ -351,6 +351,10 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
 void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
                           uint16_t type_tag, int cls);
 
+// Migration instrumentation for the no-scalar-cell invariant.  Counts every
+// scalar-tag allocation observed at the GC object-allocation choke points.
+uint64_t gc_scalar_tag_allocation_count(uint16_t type_tag);
+
 /**
  * Free a GC-managed object. Sets GC_FLAG_FREED on the header.
  * If the object is in the object zone, returns it to the size-class free list.

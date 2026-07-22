@@ -224,9 +224,7 @@ extern "C" Item py_builtin_abs(Item value) {
     }
     if (type == LMD_TYPE_FLOAT) {
         double d = it2d(value);
-        double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *ptr = fabs(d);
-        return lambda_float_ptr_to_item(ptr);
+        return push_d(fabs(d));
     }
     if (type == LMD_TYPE_DECIMAL && py_is_bigint(value)) {
         return py_bigint_abs(value);
@@ -483,9 +481,7 @@ extern "C" Item py_builtin_round(Item x, Item ndigits) {
     }
     double scale = pow(10.0, (double)n);
     double rounded = round(val * scale) / scale;
-    double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *ptr = rounded;
-    return lambda_float_ptr_to_item(ptr);
+    return push_d(rounded);
 }
 
 // ============================================================================
@@ -578,9 +574,7 @@ extern "C" Item py_builtin_divmod(Item a, Item b) {
     Item tuple = py_tuple_new(2);
     py_tuple_set(tuple, 0, (Item){.item = i2it(quotient)});
     if (get_type_id(a) == LMD_TYPE_FLOAT || get_type_id(b) == LMD_TYPE_FLOAT) {
-        double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-        *ptr = remainder;
-        py_tuple_set(tuple, 1, lambda_float_ptr_to_item(ptr));
+        py_tuple_set(tuple, 1, push_d(remainder));
     } else {
         py_tuple_set(tuple, 1, (Item){.item = i2it((int64_t)remainder)});
     }
@@ -616,9 +610,7 @@ extern "C" Item py_builtin_pow(Item base, Item exp, Item mod) {
     if (get_type_id(base) == LMD_TYPE_INT && get_type_id(exp) == LMD_TYPE_INT && e >= 0) {
         return (Item){.item = i2it((int64_t)result)};
     }
-    double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *ptr = result;
-    return lambda_float_ptr_to_item(ptr);
+    return push_d(result);
 }
 
 // ============================================================================
@@ -654,34 +646,37 @@ extern "C" Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_
     for (int i = 0; i < src->length; i++) array_push(result, src->items[i]);
 
     // compute sort keys if key function provided
-    Item* keys = NULL;
+    Array* keys = NULL;
     if (has_key) {
-        keys = (Item*)mem_alloc(result->length * sizeof(Item), MEM_CAT_PY_RUNTIME);
+        keys = array();
         for (int i = 0; i < result->length; i++) {
             Item arg = result->items[i];
-            keys[i] = py_call_function(key_func, &arg, 1);
+            LAMBDA_SCALAR_HOME(key_result_home);
+            Item key = py_call_function_into(key_func, &arg, 1, &key_result_home);
+            // Sort keys survive later callback allocations, so the Array must
+            // take ownership of any wide scalar payload before the next call.
+            array_push(keys, key);
         }
     }
 
     // insertion sort using keys or direct values
     for (int i = 1; i < result->length; i++) {
-        Item key_i = has_key ? keys[i] : result->items[i];
+        Item key_i = has_key ? keys->items[i] : result->items[i];
         Item val_i = result->items[i];
         Item saved_key = key_i;
         int j = i - 1;
         while (j >= 0) {
-            Item key_j = has_key ? keys[j] : result->items[j];
+            Item key_j = has_key ? keys->items[j] : result->items[j];
             bool do_swap = reverse ? it2b(py_lt(key_j, saved_key)) : it2b(py_lt(saved_key, key_j));
             if (!do_swap) break;
             result->items[j + 1] = result->items[j];
-            if (has_key) keys[j + 1] = keys[j];
+            if (has_key) array_set(keys, j + 1, keys->items[j]);
             j--;
         }
         result->items[j + 1] = val_i;
-        if (has_key) keys[j + 1] = saved_key;
+        if (has_key) array_set(keys, j + 1, saved_key);
     }
 
-    if (keys) mem_free(keys);
     return (Item){.array = result};
 }
 
@@ -697,33 +692,36 @@ extern "C" Item py_list_sort_ex(Item list_item, Item key_func, Item reverse_flag
     bool has_key = (get_type_id(key_func) == LMD_TYPE_FUNC);
     bool reverse = py_is_truthy(reverse_flag);
 
-    Item* keys = NULL;
+    Array* keys = NULL;
     if (has_key) {
-        keys = (Item*)mem_alloc(arr->length * sizeof(Item), MEM_CAT_PY_RUNTIME);
+        keys = array();
         for (int i = 0; i < arr->length; i++) {
             Item arg = arr->items[i];
-            keys[i] = py_call_function(key_func, &arg, 1);
+            LAMBDA_SCALAR_HOME(key_result_home);
+            Item key = py_call_function_into(key_func, &arg, 1, &key_result_home);
+            // Keep callback scalar payloads in Array-owned tail storage while
+            // insertion sort may allocate or invoke comparison helpers.
+            array_push(keys, key);
         }
     }
 
     for (int i = 1; i < arr->length; i++) {
-        Item key_i = has_key ? keys[i] : arr->items[i];
+        Item key_i = has_key ? keys->items[i] : arr->items[i];
         Item val_i = arr->items[i];
         Item saved_key = key_i;
         int j = i - 1;
         while (j >= 0) {
-            Item key_j = has_key ? keys[j] : arr->items[j];
+            Item key_j = has_key ? keys->items[j] : arr->items[j];
             bool do_swap = reverse ? it2b(py_lt(key_j, saved_key)) : it2b(py_lt(saved_key, key_j));
             if (!do_swap) break;
             arr->items[j + 1] = arr->items[j];
-            if (has_key) keys[j + 1] = keys[j];
+            if (has_key) array_set(keys, j + 1, keys->items[j]);
             j--;
         }
         arr->items[j + 1] = val_i;
-        if (has_key) keys[j + 1] = saved_key;
+        if (has_key) array_set(keys, j + 1, saved_key);
     }
 
-    if (keys) mem_free(keys);
     return ItemNull;
 }
 
@@ -739,7 +737,9 @@ extern "C" Item py_builtin_map(Item func, Item iterable) {
     Array* result = array();
     for (int i = 0; i < src->length; i++) {
         Item arg = src->items[i];
-        Item val = py_call_function(func, &arg, 1);
+        LAMBDA_SCALAR_HOME(map_result_home);
+        Item val = py_call_function_into(func, &arg, 1, &map_result_home);
+        // The destination list, not this callback activation, owns val's tail.
         array_push(result, val);
     }
     return (Item){.array = result};
@@ -753,7 +753,8 @@ extern "C" Item py_builtin_filter(Item func, Item iterable) {
     Array* result = array();
     for (int i = 0; i < src->length; i++) {
         Item arg = src->items[i];
-        Item val = py_call_function(func, &arg, 1);
+        LAMBDA_SCALAR_HOME(filter_result_home);
+        Item val = py_call_function_into(func, &arg, 1, &filter_result_home);
         if (py_is_truthy(val)) {
             array_push(result, src->items[i]);
         }

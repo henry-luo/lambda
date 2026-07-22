@@ -188,12 +188,14 @@ Item module_build_lambda_namespace(void* script_ptr) {
                 // prefer boxed wrapper for cross-language compatibility
                 StrBuf* name_buf = strbuf_new();
                 void* func_ptr = NULL;
+                bool uses_public_wrapper = false;
 
                 // MIR type inference can give a pn a native ABI even when its
                 // source parameters are untyped. Prefer the generated boxed
                 // entry whenever present so the JS membrane always passes Items.
                 write_fn_name_ex(name_buf, fn_node, NULL, "_b");
                 func_ptr = find_func((MIR_context_t)script->jit_context, name_buf->str);
+                uses_public_wrapper = func_ptr != NULL;
                 if (!func_ptr) {
                     // fall back to direct variant
                     strbuf_reset(name_buf);
@@ -210,6 +212,10 @@ Item module_build_lambda_namespace(void* script_ptr) {
                     }
                     Item key = {.item = s2it(heap_create_name(export_name))};
                     Function* fn = to_fn_named((fn_ptr)func_ptr, arity, export_name);
+                    if (uses_public_wrapper) {
+                        // Published MIR wrappers require the explicit dynamic-call home.
+                        lambda_function_mark_mir_public_abi(fn);
+                    }
                     // Lambda procedures cross into JavaScript through one
                     // uniform Promise membrane, even when a particular call
                     // completes without parking.

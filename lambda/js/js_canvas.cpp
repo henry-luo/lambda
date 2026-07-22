@@ -343,9 +343,7 @@ extern "C" Item js_canvas_measure_text(Item ctx_obj, Item text_arg) {
     // return TextMetrics object: { width }
     Item result = js_new_object();
     Item wk = (Item){.item = s2it(heap_create_name("width"))};
-    double* dp = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
-    *dp = (double)width;
-    Item wv = lambda_float_ptr_to_item(dp);
+    Item wv = push_d((double)width);
     js_property_set(result, wk, wv);
     return result;
 }

@@ -3434,11 +3434,10 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             }
             jm_call_void_1(mt, "js_set_new_target",
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_for_nt));
-            MIR_reg_t ctor_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+            MIR_reg_t ctor_result = jm_call_function_into(mt,
+                MIR_new_reg_op(mt->ctx, ctor_fn), MIR_new_reg_op(mt->ctx, obj),
+                args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                MIR_new_int_op(mt->ctx, arg_count));
             // Per ES spec: if constructor returns an object, use that instead
             MIR_reg_t final_obj = jm_call_2(mt, "js_new_check_constructor_return", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
@@ -3645,11 +3644,10 @@ MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // Set pending new.target to the constructor function (picked up by js_call_function)
     jm_call_void_1(mt, "js_set_new_target",
         MIR_T_I64, MIR_new_reg_op(mt->ctx, callee));
-    MIR_reg_t ctor_result = jm_call_4(mt, "js_call_function", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+    MIR_reg_t ctor_result = jm_call_function_into(mt,
+        MIR_new_reg_op(mt->ctx, callee), MIR_new_reg_op(mt->ctx, obj),
+        args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+        MIR_new_int_op(mt->ctx, arg_count));
     // Per ES spec: if constructor returns an object, use that instead
     return jm_call_2(mt, "js_new_check_constructor_return", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),

@@ -126,6 +126,7 @@ Item py_range_new(Item start, Item stop, Item step);
 Item py_new_function(void* func_ptr, int param_count);
 Item py_new_closure(void* func_ptr, int param_count, int env_size);
 Item py_new_closure_with_env(void* func_ptr, int param_count, uint64_t* env, int env_size);
+Item py_mark_mir_public_abi(Item fn_item);
 uint64_t* py_alloc_env(int size);
 int64_t py_closure_get_env(Item closure);
 void py_env_store(uint64_t* env, int slot, Item value);
@@ -133,7 +134,11 @@ Item py_env_load(uint64_t* env, int slot);
 Item py_set_kwargs_flag(Item fn_item);
 Item py_dict_merge(Item dst, Item src);
 Item py_call_function(Item func, Item* args, int arg_count);
+Item py_call_function_into(Item func, Item* args, int arg_count,
+                           uint64_t* result_home);
 Item py_call_function_kw(Item func, Item* args, int arg_count, Item kwargs_map);
+Item py_call_function_kw_into(Item func, Item* args, int arg_count,
+                              Item kwargs_map, uint64_t* result_home);
 
 // ========================================================================
 // Exception handling
@@ -246,7 +251,7 @@ void* py_data_closure_env_alloc(size_t item_count);
 bool py_data_closure_env_store(uint64_t* environment, int slot, Item value);
 bool py_data_closure_env_load(uint64_t* environment, int slot, Item* out_value);
 bool py_data_item_slots_store(Item* storage, int64_t item_count, int64_t slot, Item value);
-Item py_data_item_heap_rehome(Item value);
+bool py_data_item_slots_load(Item* storage, int64_t item_count, int64_t slot, Item* out_value);
 Item py_data_map_new(void);
 Item py_data_function_new(void* function_ptr, int param_count);
 

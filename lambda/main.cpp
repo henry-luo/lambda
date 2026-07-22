@@ -262,6 +262,7 @@ struct JsCliRunArgs {
     const char* source;
     size_t source_len;
     const char* filename;
+    uint64_t* result_home;
     Item result;
 };
 
@@ -269,31 +270,34 @@ static void* js_cli_run_on_stack_thread(void* arg) {
     JsCliRunArgs* run_args = (JsCliRunArgs*)arg;
     lambda_stack_init();
     run_args->result = transpile_js_to_mir_len(
-        run_args->runtime, run_args->source, run_args->source_len, run_args->filename);
+        run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
+        run_args->result_home);
     js_event_loop_shutdown();
     lambda_uv_cleanup();
     return NULL;
 }
 
 static Item js_cli_transpile_with_execution_stack(
-    Runtime* runtime, const char* source, size_t source_len, const char* filename) {
+    Runtime* runtime, const char* source, size_t source_len, const char* filename,
+    uint64_t* result_home) {
     JsCliRunArgs run_args;
     memset(&run_args, 0, sizeof(run_args));
     run_args.runtime = runtime;
     run_args.source = source;
     run_args.source_len = source_len;
     run_args.filename = filename;
+    run_args.result_home = result_home;
     run_args.result = ItemNull;
 
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0) {
         log_error("js-cli-stack: pthread_attr_init failed");
-        return transpile_js_to_mir_len(runtime, source, source_len, filename);
+        return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
     }
     if (pthread_attr_setstacksize(&attr, JS_CLI_STACK_SIZE) != 0) {
         log_error("js-cli-stack: pthread_attr_setstacksize failed");
         pthread_attr_destroy(&attr);
-        return transpile_js_to_mir_len(runtime, source, source_len, filename);
+        return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
     }
 
     pthread_t thread;
@@ -301,7 +305,7 @@ static Item js_cli_transpile_with_execution_stack(
     pthread_attr_destroy(&attr);
     if (create_rc != 0) {
         log_error("js-cli-stack: pthread_create failed");
-        return transpile_js_to_mir_len(runtime, source, source_len, filename);
+        return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
     }
     int join_rc = pthread_join(thread, NULL);
     if (join_rc != 0) {
@@ -1720,10 +1724,12 @@ static int node_runner_run_file(const char* exe_path, const char* file,
     char* js_source = read_binary_file(file, &js_source_len);
     int exit_code = 1;
     if (js_source) {
+        uint64_t result_home = 0;
 #if !defined(_WIN32)
-        Item result = js_cli_transpile_with_execution_stack(&runtime, js_source, js_source_len, file);
+        Item result = js_cli_transpile_with_execution_stack(&runtime, js_source, js_source_len, file,
+                                                             &result_home);
 #else
-        Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, file);
+        Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, file, &result_home);
 #endif
         if (result.item == ITEM_ERROR) exit_code = 1;
         else exit_code = js_process_current_exit_code();
@@ -2544,11 +2550,14 @@ int main(int argc, char *argv[]) {
                 fputs("> ", stdout);
                 fflush(stdout);
             }
+            uint64_t result_home = 0;
             Item result = html_file
-                ? transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file)
-                : js_cli_transpile_with_execution_stack(&runtime, js_source, js_source_len, js_file);
+                ? transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file, &result_home)
+                : js_cli_transpile_with_execution_stack(&runtime, js_source, js_source_len, js_file,
+                                                        &result_home);
 #else
-            Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file);
+            uint64_t result_home = 0;
+            Item result = transpile_js_to_mir_len(&runtime, js_source, js_source_len, js_file, &result_home);
 #endif
             if (input_type_module) {
                 const char* promise_state = js_promise_state_name(result);
@@ -2960,7 +2969,8 @@ int main(int argc, char *argv[]) {
                 return lambda_main_finish(1);
             }
 
-            Item result = transpile_ts_to_mir(&runtime, ts_source, ts_file);
+            uint64_t result_home = 0;
+            Item result = transpile_ts_to_mir(&runtime, ts_source, ts_file, &result_home);
 
             // only print non-null results
             if (result.item != ITEM_NULL && result.item != 0) {
@@ -4237,7 +4247,9 @@ int main(int argc, char *argv[]) {
                 }
 
                 memset(&preamble, 0, sizeof(preamble));
-                transpile_js_to_mir_preamble_len(&runtime, harness_src, total_read, "<harness>", &preamble);
+                uint64_t preamble_result_home = 0;
+                transpile_js_to_mir_preamble_len(&runtime, harness_src, total_read, "<harness>",
+                                                  &preamble, &preamble_result_home);
 
                 // Save harness source for recompilation after crash recovery
                 if (saved_harness_src) mem_free(saved_harness_src);
@@ -4415,11 +4427,14 @@ int main(int argc, char *argv[]) {
                 if (setjmp(mir_error_jmp) == 0) {
                     if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                         alarm(batch_timeout);
+                        uint64_t result_home = 0;
                         Item res = inline_module_source
                             ? transpile_js_module_to_mir(&runtime, js_source, script_exec_path)
                             : has_preamble
-                            ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_exec_path, &preamble)
-                            : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_exec_path);
+                            ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len,
+                                                                    script_exec_path, &preamble, &result_home)
+                            : transpile_js_to_mir_len(&runtime, js_source, js_source_len,
+                                                      script_exec_path, &result_home);
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
@@ -4442,11 +4457,14 @@ int main(int argc, char *argv[]) {
             } else {
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
+                    uint64_t result_home = 0;
                     Item res = inline_module_source
                         ? transpile_js_module_to_mir(&runtime, js_source, script_exec_path)
                         : has_preamble
-                        ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_exec_path, &preamble)
-                        : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_exec_path);
+                        ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len,
+                                                                script_exec_path, &preamble, &result_home)
+                        : transpile_js_to_mir_len(&runtime, js_source, js_source_len,
+                                                  script_exec_path, &result_home);
                     mir_error_active = 0;
                     if (res.item == ITEM_ERROR || js_check_exception()) {
                         result = 1;
@@ -4457,11 +4475,14 @@ int main(int argc, char *argv[]) {
                 }
             }
 #else
+            uint64_t result_home = 0;
             Item res = inline_module_source
                 ? transpile_js_module_to_mir(&runtime, js_source, script_exec_path)
                 : has_preamble
-                ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len, script_exec_path, &preamble)
-                : transpile_js_to_mir_len(&runtime, js_source, js_source_len, script_exec_path);
+                ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len,
+                                                        script_exec_path, &preamble, &result_home)
+                : transpile_js_to_mir_len(&runtime, js_source, js_source_len,
+                                          script_exec_path, &result_home);
             if (res.item == ITEM_ERROR || js_check_exception()) {
                 result = 1;
             }
@@ -4567,7 +4588,10 @@ int main(int argc, char *argv[]) {
                     }
                     if (saved_harness_src) {
                         memset(&preamble, 0, sizeof(preamble));
-                        Item pres = transpile_js_to_mir_preamble_len(&runtime, saved_harness_src, saved_harness_len, "<harness>", &preamble);
+                        uint64_t preamble_result_home = 0;
+                        Item pres = transpile_js_to_mir_preamble_len(
+                            &runtime, saved_harness_src, saved_harness_len, "<harness>",
+                            &preamble, &preamble_result_home);
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;
@@ -4612,7 +4636,10 @@ int main(int argc, char *argv[]) {
                     }
                     if (saved_harness_src) {
                         memset(&preamble, 0, sizeof(preamble));
-                        Item pres = transpile_js_to_mir_preamble_len(&runtime, saved_harness_src, saved_harness_len, "<harness>", &preamble);
+                        uint64_t preamble_result_home = 0;
+                        Item pres = transpile_js_to_mir_preamble_len(
+                            &runtime, saved_harness_src, saved_harness_len, "<harness>",
+                            &preamble, &preamble_result_home);
                         if (pres.item != ITEM_ERROR) {
                             has_preamble = true;
                             preamble_var_checkpoint = preamble.module_var_count;

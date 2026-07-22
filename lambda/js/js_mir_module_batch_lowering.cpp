@@ -5971,11 +5971,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             fc->has_direct_eval, fc->uses_arguments, true};
         public_entry->effects = {true, true, true, false,
             fc->node->is_async || fc->node->is_generator, true};
+        ScalarReturnClass scalar_class = fc->boxed_return_scalar_class;
         public_entry->result.normal = {fc->return_type, VALUE_REP_ITEM,
-            SCALAR_RETURN_NONE, false};
+            scalar_class, scalar_class != SCALAR_RETURN_NONE};
+        public_entry->result.scalar_home_lane_mask =
+            scalar_class != SCALAR_RETURN_NONE ? FN_RETURN_HOME_NORMAL : 0;
         int env_param_count = fc->capture_count > 0 ? 1 : 0;
         int physical_param_count = fc->param_count + env_param_count;
-        public_entry->param_count = physical_param_count;
+        public_entry->param_count = physical_param_count + 1;
         if (fc->param_count <= 16 && physical_param_count <= 17) {
             public_entry->params = fc->public_param_analysis;
             for (int p = 0; p < physical_param_count; p++) {
@@ -5992,7 +5995,6 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         body->entry = {FN_ENTRY_BOXED_BODY, true, fc->has_direct_eval,
             fc->uses_arguments, false};
         body->effects = public_entry->effects;
-        ScalarReturnClass scalar_class = fc->boxed_return_scalar_class;
         body->result.normal = {fc->return_type, VALUE_REP_ITEM,
             scalar_class, scalar_class != SCALAR_RETURN_NONE};
         body->result.scalar_home_lane_mask =

@@ -427,13 +427,13 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
                 mt->em.frame.incoming_scalar_home);
         } else {
             if (mt->em.frame.scalar_return_mode != MIR_SCALAR_RETURN_NONE) {
-                // Public entries persist activation scalars before teardown.
-                rehomed = jm_call_1(mt, "lambda_item_heap_rehome", MIR_T_I64,
-                    MIR_T_I64,
-                    MIR_new_reg_op(mt->ctx, mt->em.frame.return_reg));
+                // js_main hands its result to an outer entrypoint while this
+                // context is still alive; that boundary adopts the provided
+                // result home before restoring the module number extent.
+            } else {
+                em_store_frame_top(&mt->em, mt->em.frame.runtime,
+                    offsetof(Context, side_number_top), mt->em.frame.number_base);
             }
-            em_store_frame_top(&mt->em, mt->em.frame.runtime,
-                offsetof(Context, side_number_top), mt->em.frame.number_base);
         }
         if (rehomed != mt->em.frame.return_reg) {
             jm_emit_raw(mt, MIR_new_insn(mt->ctx, MIR_MOV,

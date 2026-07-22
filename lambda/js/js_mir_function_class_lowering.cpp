@@ -575,7 +575,14 @@ static MIR_reg_t jm_transpile_default_param_value(JsMirTranspiler* mt, JsFunctio
 
 static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
         JsFuncCollected* fc, int param_count, bool has_captures) {
-    int total_params = param_count + (has_captures ? 1 : 0);
+    MirScalarReturnMode scalar_return_mode = em_scalar_return_mode_for_class(
+        fc->boxed_return_scalar_class);
+    bool needs_scalar_home = scalar_return_mode != MIR_SCALAR_RETURN_NONE;
+    int call_param_count = param_count + (has_captures ? 1 : 0);
+    // Every compiled public wrapper shares the same trailing ABI operand.
+    // Only scalar lanes consume it, but callback dispatch cannot infer a
+    // function's return representation before entering its wrapper.
+    int total_params = call_param_count + 1;
     MIR_var_t* params = total_params > 0
         ? LAMBDA_ALLOCA(total_params, MIR_var_t) : NULL;
     char** names = total_params > 0
@@ -596,8 +603,10 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
         pi++;
     }
     int env_offset = has_captures ? 1 : 0;
-    for (int i = env_offset; i < total_params; i++) {
-        for (int j = i + 1; j < total_params; j++) {
+    for (int i = env_offset; i < call_param_count; i++) {
+        // The trailing ABI parameter is installed below; do not compare an
+        // uninitialized name slot while normalizing duplicate JS formals.
+        for (int j = i + 1; j < call_param_count; j++) {
             if (strcmp(names[i], names[j]) != 0) continue;
             char* renamed = LAMBDA_ALLOCA(128, char);
             snprintf(renamed, 128, "%s__dup%d", names[i], i);
@@ -606,6 +615,9 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
             break;
         }
     }
+    names[call_param_count] = LAMBDA_ALLOCA(128, char);
+    snprintf(names[call_param_count], 128, "%s", "_js.public_scalar_home");
+    params[call_param_count] = {MIR_T_P, names[call_param_count], 0};
     MIR_type_t return_type = MIR_T_I64;
     MIR_item_t wrapper_item = MIR_new_func_arr(mt->ctx, fc->name, 1,
         &return_type, total_params, params);
@@ -614,31 +626,24 @@ static void jm_emit_public_function_wrapper(JsMirTranspiler* mt,
     jm_register_local_func(mt, fc->name, wrapper_item);
     mt->em.func_item = wrapper_item;
     mt->em.func = wrapper_func;
-    jm_begin_function_frame(mt, return_type, true, MIR_SCALAR_RETURN_NONE, 0);
+    jm_begin_function_frame(mt, return_type, true, scalar_return_mode, 0);
     mt->em.frame.plan.entry_mode = MIR_ENTRY_CHECKED;
+    if (needs_scalar_home) {
+        mt->em.frame.incoming_scalar_home = MIR_reg(mt->ctx,
+            "_js.public_scalar_home", wrapper_func);
+        mt->em.frame.plan.accepts_caller_scalar_home = true;
+        mt->em.frame.plan.scalar_home_lane_mask = FN_RETURN_HOME_NORMAL;
+    }
 
-    MIR_reg_t* args = total_params > 0
-        ? LAMBDA_ALLOCA(total_params, MIR_reg_t) : NULL;
-    for (int i = 0; i < total_params; i++) {
+    MIR_reg_t* args = call_param_count > 0
+        ? LAMBDA_ALLOCA(call_param_count, MIR_reg_t) : NULL;
+    for (int i = 0; i < call_param_count; i++) {
         args[i] = MIR_reg(mt->ctx, names[i], wrapper_func);
     }
-    MIR_reg_t result = jm_call_direct_boxed(mt, fc, total_params, args);
-    // Public wrappers persist activation-backed results; exceptional nulls
-    // retain the active exception and bypass ordinary ownership conversion.
+    MIR_reg_t result = jm_call_direct_boxed(mt, fc, call_param_count, args);
     MIR_reg_t persistent = jm_new_reg(mt, "public_result", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, persistent), MIR_new_reg_op(mt->ctx, result)));
-    MIR_reg_t exception_pending = jm_call_0(mt, "js_check_exception", MIR_T_I64);
-    MIR_label_t persistent_ready = jm_new_label(mt);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-        MIR_new_label_op(mt->ctx, persistent_ready),
-        MIR_new_reg_op(mt->ctx, exception_pending)));
-    MIR_reg_t heap_result = jm_call_1(mt, "lambda_item_heap_rehome", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, persistent));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, persistent),
-        MIR_new_reg_op(mt->ctx, heap_result)));
-    jm_emit_label(mt, persistent_ready);
     jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
         MIR_new_reg_op(mt->ctx, persistent)));
     jm_finish_function_frame(mt, fc->name);

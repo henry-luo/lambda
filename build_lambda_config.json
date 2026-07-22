@@ -524,7 +524,6 @@
                 "lambda/module_registry.cpp",
                 "lambda/pack.cpp",
                 "lambda/render_map.cpp",
-                "lambda/scalar_heap.cpp",
                 "lambda/sysinfo.cpp",
                 "lambda/template_registry.cpp",
                 "lambda/template_state.cpp",
@@ -4272,7 +4271,6 @@
                         ],
                         "additional_sources": [
                             "lambda/concurrency.cpp",
-                            "lambda/scalar_heap.cpp",
                             "lib/uv_loop.c"
                         ],
                         "binary": "test_lambda_concurrency_gtest.exe",

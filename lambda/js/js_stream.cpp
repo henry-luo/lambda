@@ -17,6 +17,7 @@
 #include "js_runtime.h"
 #include "js_class.h"
 #include "js_property_attrs.h"
+#include "js_function.hpp"
 #include "js_typed_array.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
@@ -27,22 +28,6 @@
 #include <cstdio>
 #include <cstring>
 #include <math.h>
-
-struct JsStreamFuncFlagsAccess {
-    TypeId type_id;
-    void* func_ptr;
-    int param_count;
-    Item* env;
-    int env_size;
-    Item prototype;
-    Item bound_this;
-    Item* bound_args;
-    int bound_argc;
-    String* name;
-    int builtin_id;
-    Item properties_map;
-    uint8_t flags;
-};
 
 #define JS_STREAM_FUNC_FLAG_GENERATOR 1
 #define JS_STREAM_FUNC_FLAG_ASYNC_GEN 64
@@ -8900,7 +8885,7 @@ static Item js_stream_compose_normalize(Item stream) {
 
 static bool js_stream_compose_is_async_sink_function(Item stream) {
     if (get_type_id(stream) != LMD_TYPE_FUNC) return false;
-    JsStreamFuncFlagsAccess* fn = (JsStreamFuncFlagsAccess*)stream.function;
+    JsFunction* fn = (JsFunction*)stream.function;
     if (!fn) return false;
     return (fn->flags & JS_STREAM_FUNC_FLAG_ASYNC) &&
            !(fn->flags & JS_STREAM_FUNC_FLAG_GENERATOR) &&

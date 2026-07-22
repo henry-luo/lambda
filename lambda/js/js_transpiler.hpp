@@ -126,8 +126,10 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
 #endif
 
 // Direct MIR transpilation entry point
-Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
-Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len, const char* filename);
+Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename,
+                          uint64_t* result_home);
+Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len,
+                             const char* filename, uint64_t* result_home);
 
 // Batch mode preamble support (two-module MIR split)
 struct JsModuleConstEntry;  // defined in transpile_js_mir.cpp
@@ -180,9 +182,10 @@ void js_mir_cache_record_instantiation(JsMirCache* cache);
 void js_mir_cache_get_stats(const JsMirCache* cache, JsMirCacheStats* stats);
 
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
-                                   JsPreambleState* out_state);
+                                   JsPreambleState* out_state, uint64_t* result_home);
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                                      const char* filename, JsPreambleState* out_state);
+                                      const char* filename, JsPreambleState* out_state,
+                                      uint64_t* result_home);
 Item compile_js_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                  const char* filename, JsPreambleState* out_state);
 Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
@@ -192,9 +195,10 @@ Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
 Item execute_compiled_js_in_current_realm(Runtime* runtime,
                                           const JsPreambleState* compiled_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
-                                        const JsPreambleState* preamble);
+                                        const JsPreambleState* preamble, uint64_t* result_home);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
-                                           const char* filename, const JsPreambleState* preamble);
+                                           const char* filename, const JsPreambleState* preamble,
+                                           uint64_t* result_home);
 bool preamble_state_update_from_eval_snapshot(JsPreambleState* state);
 bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out_state);
 Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
@@ -208,7 +212,8 @@ void jm_cleanup_deferred_mir();
 void* jm_get_last_deferred_mir_ctx();
 
 // Transpile a pre-built JS AST to MIR (used by TS transpiler)
-Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename);
+Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
+                             const char* filename, uint64_t* result_home);
 
 // JavaScript runtime function declarations (js_runtime.cpp)
 #ifdef __cplusplus
@@ -271,6 +276,8 @@ bool js_property_has(Item object, Item key);
 
 // Function call functions
 Item js_call_function(Item func, Item this_binding, Item* args, int arg_count);
+Item js_call_function_into(Item func, Item this_binding, Item* args,
+                           int arg_count, uint64_t* result_home);
 Item js_new_function(void* func_ptr, int param_count);
 
 // Array functions

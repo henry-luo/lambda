@@ -165,12 +165,12 @@ static int python_jube_init(const JubeHostAPI* host) {
         !host->runtime_catalog->register_imports ||
         !host->runtime_catalog->lookup_import_metadata || !host->data ||
         host->data->api_version != JUBE_HOST_SERVICE_API_VERSION ||
-        host->data->struct_size < JUBE_HOST_DATA_API_H5_ALLOCATORS_SIZE ||
+        host->data->struct_size < JUBE_HOST_DATA_API_FULL_SIZE ||
         !host->data->name_from_utf8 || !host->data->map_set ||
         !host->data->float_from_f64 || !host->data->format_json ||
         !host->data->closure_env_alloc || !host->data->closure_env_store ||
         !host->data->closure_env_load || !host->data->item_slots_store ||
-        !host->data->item_heap_rehome || !host->data->map_new ||
+        !host->data->item_slots_load || !host->data->map_new ||
         !host->data->function_new ||
         !host->hosted_language ||
         host->hosted_language->api_version != JUBE_HOST_LANG_API_VERSION ||
