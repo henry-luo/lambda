@@ -9,14 +9,33 @@
       "description": "Caller-donated scalar home: the donation protocol's instruction cost.",
       "budgets": {
         "default": {
-          "module_insns": 136,
+          "module_insns": 148,
           "functions": {
-            "_twice_#": { "insns": 47 },
-            "main": { "insns": 57 }
+            "_twice_#": {
+              "insns": 59
+            },
+            "main": {
+              "insns": 57
+            }
           },
           "frames": [
-            { "name": "_twice_#", "occurrence": 0, "roots": 2, "root_stores": 0, "scalar_homes": 0, "number_scratch": 0, "safepoints": 2 },
-            { "name": "main", "roots": 2, "root_stores": 0, "scalar_homes": 1, "number_scratch": 0, "safepoints": 4 }
+            {
+              "name": "_twice_#",
+              "occurrence": 0,
+              "roots": 2,
+              "root_stores": 0,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 2
+            },
+            {
+              "name": "main",
+              "roots": 2,
+              "root_stores": 0,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 4
+            }
           ]
         }
       }
@@ -28,14 +47,33 @@
       "description": "Tail-home forwarding, including the recursive body's root reservation.",
       "budgets": {
         "default": {
-          "module_insns": 157,
+          "module_insns": 174,
           "functions": {
-            "_accumulate_#": { "insns": 77 },
-            "main": { "insns": 46 }
+            "_accumulate_#": {
+              "insns": 94
+            },
+            "main": {
+              "insns": 46
+            }
           },
           "frames": [
-            { "name": "_accumulate_#", "occurrence": 0, "roots": 5, "root_stores": 0, "scalar_homes": 0, "number_scratch": 0, "safepoints": 4 },
-            { "name": "main", "roots": 2, "root_stores": 0, "scalar_homes": 1, "number_scratch": 0, "safepoints": 2 }
+            {
+              "name": "_accumulate_#",
+              "occurrence": 0,
+              "roots": 5,
+              "root_stores": 0,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 4
+            },
+            {
+              "name": "main",
+              "roots": 2,
+              "root_stores": 0,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 2
+            }
           ]
         }
       }
@@ -49,10 +87,19 @@
         "default": {
           "module_insns": 75,
           "functions": {
-            "main": { "insns": 75 }
+            "main": {
+              "insns": 75
+            }
           },
           "frames": [
-            { "name": "main", "roots": 3, "root_stores": 0, "scalar_homes": 1, "number_scratch": 0, "safepoints": 9 }
+            {
+              "name": "main",
+              "roots": 3,
+              "root_stores": 0,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 9
+            }
           ]
         }
       }
@@ -66,10 +113,19 @@
         "default": {
           "module_insns": 155,
           "functions": {
-            "js_main": { "insns": 95 }
+            "js_main": {
+              "insns": 95
+            }
           },
           "frames": [
-            { "name": "js_main", "roots": 4, "root_stores": 13, "scalar_homes": 1, "number_scratch": 0, "safepoints": 15 }
+            {
+              "name": "js_main",
+              "roots": 4,
+              "root_stores": 13,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 15
+            }
           ]
         }
       }
@@ -83,11 +139,28 @@
         "default": {
           "module_insns": 298,
           "functions": {
-            "js_main": { "insns": 67 }
+            "js_main": {
+              "insns": 67
+            }
           },
           "frames": [
-            { "name": "js_main", "roots": 2, "root_stores": 6, "scalar_homes": 2, "number_scratch": 0, "safepoints": 10 },
-            { "name": "_js_anon1_#", "occurrence": 0, "roots": 3, "root_stores": 4, "scalar_homes": 1, "number_scratch": 0, "safepoints": 6 }
+            {
+              "name": "js_main",
+              "roots": 2,
+              "root_stores": 6,
+              "scalar_homes": 2,
+              "number_scratch": 0,
+              "safepoints": 10
+            },
+            {
+              "name": "_js_anon1_#",
+              "occurrence": 0,
+              "roots": 3,
+              "root_stores": 4,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 6
+            }
           ]
         }
       }
@@ -97,35 +170,55 @@
       "script": "test/lambda/closure.ls",
       "language": "lambda",
       "description": "Picked corpus script (closure-heavy), whole-module total only.",
-      "budgets": { "default": { "module_insns": 1799 } }
+      "budgets": {
+        "default": {
+          "module_insns": 1799
+        }
+      }
     },
     {
       "name": "lambda_corpus_array_float",
       "script": "test/lambda/array_float.ls",
       "language": "lambda",
       "description": "Picked corpus script (array-heavy), whole-module total only.",
-      "budgets": { "default": { "module_insns": 896 } }
+      "budgets": {
+        "default": {
+          "module_insns": 896
+        }
+      }
     },
     {
       "name": "js_corpus_array_methods",
       "script": "test/js/array_methods.js",
       "language": "js",
       "description": "Picked corpus script (array/callback-heavy), whole-module total only.",
-      "budgets": { "default": { "module_insns": 2834 } }
+      "budgets": {
+        "default": {
+          "module_insns": 2834
+        }
+      }
     },
     {
       "name": "js_corpus_generator_basic",
       "script": "test/js/generator_basic.js",
       "language": "js",
       "description": "Picked corpus script (generator/resume-heavy), whole-module total only.",
-      "budgets": { "default": { "module_insns": 4062 } }
+      "budgets": {
+        "default": {
+          "module_insns": 4062
+        }
+      }
     },
     {
       "name": "js_corpus_side_stack_frame_gc",
       "script": "test/js/regression_side_stack_frame_gc.js",
       "language": "js",
       "description": "The rooting-bloat sentinel: the GC-rooting regression script, which is the committed stand-in for the historical frameReview probe whose emission grew 58 -> 440 instructions under shadow-copy rooting.",
-      "budgets": { "default": { "module_insns": 3873 } }
+      "budgets": {
+        "default": {
+          "module_insns": 3873
+        }
+      }
     }
   ]
 }

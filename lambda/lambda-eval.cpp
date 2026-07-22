@@ -1842,29 +1842,44 @@ static bool datetime_magnitude_comparable(DateTime* a, DateTime* b) {
     return a_time == b_time;
 }
 
-Bool fn_lt_scalar(Item a_item, Item b_item) {
+// Ordering outcome for a scalar pair. `UNORDERED` is kept distinct from `LT`
+// so that `<=`/`>=` cannot be derived by negating `>`/`<`: with a NaN operand
+// no ordered relation holds, and `!(a > b)` would wrongly report `a <= b`
+// (Lambda_Formal_Semantics.md 6.1 — poison stays incomparable, IEEE).
+typedef enum ScalarOrder {
+    SCALAR_ORDER_LT,
+    SCALAR_ORDER_EQ,
+    SCALAR_ORDER_GT,
+    SCALAR_ORDER_UNORDERED,
+    SCALAR_ORDER_INVALID,
+} ScalarOrder;
+
+static ScalarOrder scalar_order(Item a_item, Item b_item) {
     TypeId a_type_id = get_type_id(a_item);
     TypeId b_type_id = get_type_id(b_item);
     if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
         LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
-        return comparison.valid && !comparison.unordered && comparison.order < 0 ?
-            BOOL_TRUE : BOOL_FALSE;
+        if (!comparison.valid) return SCALAR_ORDER_INVALID;
+        if (comparison.unordered) return SCALAR_ORDER_UNORDERED;
+        return comparison.order < 0 ? SCALAR_ORDER_LT :
+            comparison.order > 0 ? SCALAR_ORDER_GT : SCALAR_ORDER_EQ;
     }
     if (a_type_id != b_type_id) {
         // Type mismatch error for ordered comparisons
-        return BOOL_ERROR;
+        return SCALAR_ORDER_INVALID;
     }
 
     if (a_type_id == LMD_TYPE_NULL) {
-        return BOOL_ERROR;  // public wrappers absorb null before scalar comparison
+        return SCALAR_ORDER_INVALID;  // public wrappers absorb null before scalar comparison
     }
     else if (a_type_id == LMD_TYPE_BOOL) {
-        return BOOL_ERROR;  // bool does not support <, >, <=, >=
+        return SCALAR_ORDER_INVALID;  // bool does not support <, >, <=, >=
     }
     else if (a_type_id == LMD_TYPE_DTIME) {
         DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
-        if (!datetime_magnitude_comparable(&dt_a, &dt_b)) return BOOL_ERROR;
-        return (datetime_compare(&dt_a, &dt_b) < 0) ? BOOL_TRUE : BOOL_FALSE;
+        if (!datetime_magnitude_comparable(&dt_a, &dt_b)) return SCALAR_ORDER_INVALID;
+        int cmp = datetime_compare(&dt_a, &dt_b);
+        return cmp < 0 ? SCALAR_ORDER_LT : cmp > 0 ? SCALAR_ORDER_GT : SCALAR_ORDER_EQ;
     }
     else if (a_type_id == LMD_TYPE_STRING) {
         const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
@@ -1872,48 +1887,40 @@ Bool fn_lt_scalar(Item a_item, Item b_item) {
         uint32_t min_len = len_a < len_b ? len_a : len_b;
         int cmp = min_len ? memcmp(chars_a, chars_b, min_len) : 0;
         // strings/binaries are length-prefixed; embedded NUL bytes participate in ordering.
-        bool result = cmp < 0 || (cmp == 0 && len_a < len_b);
-        return result ? BOOL_TRUE : BOOL_FALSE;
+        if (cmp != 0) return cmp < 0 ? SCALAR_ORDER_LT : SCALAR_ORDER_GT;
+        return len_a < len_b ? SCALAR_ORDER_LT :
+            len_a > len_b ? SCALAR_ORDER_GT : SCALAR_ORDER_EQ;
     }
     log_error("unknown comparing type: %s", get_type_name(a_type_id));
-    return BOOL_ERROR;
+    return SCALAR_ORDER_INVALID;
+}
+
+// The four ordered relations all read the same ordering; an unordered pair
+// satisfies none of them, and an invalid pair errors.
+static inline Bool scalar_order_holds(ScalarOrder order, bool lt, bool eq, bool gt) {
+    switch (order) {
+    case SCALAR_ORDER_LT: return lt ? BOOL_TRUE : BOOL_FALSE;
+    case SCALAR_ORDER_EQ: return eq ? BOOL_TRUE : BOOL_FALSE;
+    case SCALAR_ORDER_GT: return gt ? BOOL_TRUE : BOOL_FALSE;
+    case SCALAR_ORDER_UNORDERED: return BOOL_FALSE;
+    default: return BOOL_ERROR;
+    }
+}
+
+Bool fn_lt_scalar(Item a_item, Item b_item) {
+    return scalar_order_holds(scalar_order(a_item, b_item), true, false, false);
 }
 
 Bool fn_gt_scalar(Item a_item, Item b_item) {
-    TypeId a_type_id = get_type_id(a_item);
-    TypeId b_type_id = get_type_id(b_item);
-    if (IS_NUMERIC_ID(a_type_id) && IS_NUMERIC_ID(b_type_id)) {
-        LambdaNumericComparison comparison = lambda_numeric_compare(a_item, b_item);
-        return comparison.valid && !comparison.unordered && comparison.order > 0 ?
-            BOOL_TRUE : BOOL_FALSE;
-    }
-    if (a_type_id != b_type_id) {
-        // Type mismatch error for ordered comparisons
-        return BOOL_ERROR;
-    }
+    return scalar_order_holds(scalar_order(a_item, b_item), false, false, true);
+}
 
-    if (a_type_id == LMD_TYPE_NULL) {
-        return BOOL_ERROR;  // public wrappers absorb null before scalar comparison
-    }
-    else if (a_type_id == LMD_TYPE_BOOL) {
-        return BOOL_ERROR;  // bool does not support <, >, <=, >=
-    }
-    else if (a_type_id == LMD_TYPE_DTIME) {
-        DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
-        if (!datetime_magnitude_comparable(&dt_a, &dt_b)) return BOOL_ERROR;
-        return (datetime_compare(&dt_a, &dt_b) > 0) ? BOOL_TRUE : BOOL_FALSE;
-    }
-    else if (a_type_id == LMD_TYPE_STRING) {
-        const char* chars_a = a_item.get_chars();  const char* chars_b = b_item.get_chars();
-        uint32_t len_a = a_item.get_len();  uint32_t len_b = b_item.get_len();
-        uint32_t min_len = len_a < len_b ? len_a : len_b;
-        int cmp = min_len ? memcmp(chars_a, chars_b, min_len) : 0;
-        // strings/binaries are length-prefixed; embedded NUL bytes participate in ordering.
-        bool result = cmp > 0 || (cmp == 0 && len_a > len_b);
-        return result ? BOOL_TRUE : BOOL_FALSE;
-    }
-    log_error("unknown comparing type: %s", get_type_name(a_type_id));
-    return BOOL_ERROR;
+Bool fn_le_scalar(Item a_item, Item b_item) {
+    return scalar_order_holds(scalar_order(a_item, b_item), true, true, false);
+}
+
+Bool fn_ge_scalar(Item a_item, Item b_item) {
+    return scalar_order_holds(scalar_order(a_item, b_item), false, true, true);
 }
 
 Item fn_lt(Item a_item, Item b_item) {
@@ -1933,15 +1940,15 @@ Item fn_gt(Item a_item, Item b_item) {
 Item fn_le(Item a_item, Item b_item) {
     if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
         return ItemNull;
-    Bool r = fn_gt_scalar(a_item, b_item);   // a <= b  ==  !(a > b)
-    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r ? BOOL_FALSE : BOOL_TRUE) };
+    Bool r = fn_le_scalar(a_item, b_item);
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
 }
 
 Item fn_ge(Item a_item, Item b_item) {
     if (get_type_id(a_item) == LMD_TYPE_NULL || get_type_id(b_item) == LMD_TYPE_NULL)
         return ItemNull;
-    Bool r = fn_lt_scalar(a_item, b_item);   // a >= b  ==  !(a < b)
-    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r ? BOOL_FALSE : BOOL_TRUE) };
+    Bool r = fn_ge_scalar(a_item, b_item);
+    return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
 }
 
 Bool fn_not(Item item) {

@@ -685,16 +685,12 @@ static Item cmp_scalar_item(Item a, Item b, int op) {
     if (op == 1) return (Item){ .item = b2it(fn_ne(a, b)) };
     if (get_type_id(a) == LMD_TYPE_NULL || get_type_id(b) == LMD_TYPE_NULL) return ItemNull;
     Bool r = BOOL_ERROR;
+    // `le`/`ge` read the ordering directly rather than negating `gt`/`lt`:
+    // negation would make an unordered pair (NaN operand) satisfy both.
     if (op == 2) r = fn_lt_scalar(a, b);
-    else if (op == 3) {
-        r = fn_gt_scalar(a, b);
-        if (r != BOOL_ERROR) r = r ? BOOL_FALSE : BOOL_TRUE;
-    }
+    else if (op == 3) r = fn_le_scalar(a, b);
     else if (op == 4) r = fn_gt_scalar(a, b);
-    else if (op == 5) {
-        r = fn_lt_scalar(a, b);
-        if (r != BOOL_ERROR) r = r ? BOOL_FALSE : BOOL_TRUE;
-    }
+    else if (op == 5) r = fn_ge_scalar(a, b);
     return (r == BOOL_ERROR) ? ItemError : (Item){ .item = b2it(r) };
 }
 

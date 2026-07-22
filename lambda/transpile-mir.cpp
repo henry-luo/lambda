@@ -3365,15 +3365,97 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     // the generic boxed path, whose result is preserved by transpile_box_item.
 
     if (both_int && (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB || bi->op == OPERATOR_MUL)) {
-        // Compact-int arithmetic can promote to boxed float at the 53-bit boundary;
-        // the native MIR op would silently create an out-of-model tagged int.
-        MIR_reg_t boxl = transpile_box_item(mt, bi->left);
-        MIR_reg_t boxr = transpile_box_item(mt, bi->right);
-        const char* fn_name = (bi->op == OPERATOR_ADD) ? "fn_add" :
-                              (bi->op == OPERATOR_SUB) ? "fn_sub" : "fn_mul";
-        return emit_call_2(mt, fn_name, MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxl),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
+        // Compact-int arithmetic promotes to float past the 53-bit boundary, so a
+        // bare native op would silently mint an out-of-model tagged int. Inline the
+        // whole decision instead of calling fn_add/fn_sub/fn_mul: the C call cost
+        // ~25x the arithmetic and taxed every loop counter.
+        //
+        // Equivalence with the runtime helpers' pack_compact_int_or_float
+        // (lambda-eval-num.cpp), which computes in __int128 and promotes outside
+        // +/-(2^53-1):
+        //  ADD/SUB - both operands are compact (|v| <= 2^53-1), so the int64 sum
+        //    cannot overflow (|result| <= 2^54) and is exact; promotion then
+        //    rounds the exact value once, exactly as (double)__int128 does.
+        //  MUL - both operands are exact as doubles, so a product that fits the
+        //    compact range is computed exactly, and a larger one gets the same
+        //    single correct rounding. Rounding never lands back inside the compact
+        //    range (values >= 2^53 round to >= 2^53), so the int-vs-float choice
+        //    matches too.
+        MIR_reg_t left = transpile_expr(mt, bi->left);
+        MIR_reg_t right = transpile_expr(mt, bi->right);
+        MIR_reg_t out = new_reg(mt, "flexint", MIR_T_I64);
+        MIR_label_t l_promote = new_label(mt);
+        MIR_label_t l_done = new_label(mt);
+        MIR_reg_t in_range = new_reg(mt, "fi_inrange", MIR_T_I64);
+
+        if (bi->op == OPERATOR_MUL) {
+            // Multiply in double: exact for every compact-int operand pair.
+            MIR_reg_t dl = new_reg(mt, "fi_dl", MIR_T_D);
+            MIR_reg_t dr = new_reg(mt, "fi_dr", MIR_T_D);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dl),
+                MIR_new_reg_op(mt->ctx, left)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dr),
+                MIR_new_reg_op(mt->ctx, right)));
+            MIR_reg_t prod = new_reg(mt, "fi_prod", MIR_T_D);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMUL, MIR_new_reg_op(mt->ctx, prod),
+                MIR_new_reg_op(mt->ctx, dl), MIR_new_reg_op(mt->ctx, dr)));
+            // |prod| <= INT56_MAX keeps it an int; anything else stays float.
+            MIR_reg_t lo_ok = new_reg(mt, "fi_lo", MIR_T_I64);
+            MIR_reg_t hi_ok = new_reg(mt, "fi_hi", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DGE, MIR_new_reg_op(mt->ctx, lo_ok),
+                MIR_new_reg_op(mt->ctx, prod),
+                MIR_new_double_op(mt->ctx, (double)INT56_MIN)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DLE, MIR_new_reg_op(mt->ctx, hi_ok),
+                MIR_new_reg_op(mt->ctx, prod),
+                MIR_new_double_op(mt->ctx, (double)INT56_MAX)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
+                MIR_new_reg_op(mt->ctx, lo_ok), MIR_new_reg_op(mt->ctx, hi_ok)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                MIR_new_label_op(mt->ctx, l_promote), MIR_new_reg_op(mt->ctx, in_range)));
+            MIR_reg_t ival = new_reg(mt, "fi_i", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_D2I, MIR_new_reg_op(mt->ctx, ival),
+                MIR_new_reg_op(mt->ctx, prod)));
+            MIR_reg_t boxed_int = emit_box(mt, ival, LMD_TYPE_INT);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+                MIR_new_reg_op(mt->ctx, boxed_int)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+            emit_label(mt, l_promote);
+            MIR_reg_t boxed_float = emit_box(mt, prod, LMD_TYPE_FLOAT);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+                MIR_new_reg_op(mt->ctx, boxed_float)));
+            emit_label(mt, l_done);
+            return out;
+        }
+
+        // ADD/SUB: exact in int64 for compact operands, then range-check.
+        MIR_reg_t sum = new_reg(mt, "fi_sum", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx,
+            bi->op == OPERATOR_ADD ? MIR_ADD : MIR_SUB,
+            MIR_new_reg_op(mt->ctx, sum),
+            MIR_new_reg_op(mt->ctx, left), MIR_new_reg_op(mt->ctx, right)));
+        // Single unsigned test for -INT56_MAX <= sum <= INT56_MAX:
+        // (sum + INT56_MAX) as unsigned must not exceed 2*INT56_MAX.
+        MIR_reg_t biased = new_reg(mt, "fi_bias", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, biased),
+            MIR_new_reg_op(mt->ctx, sum), MIR_new_int_op(mt->ctx, INT56_MAX)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ULE, MIR_new_reg_op(mt->ctx, in_range),
+            MIR_new_reg_op(mt->ctx, biased),
+            MIR_new_int_op(mt->ctx, (int64_t)((uint64_t)INT56_MAX * 2))));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_promote), MIR_new_reg_op(mt->ctx, in_range)));
+        MIR_reg_t boxed_int = emit_box(mt, sum, LMD_TYPE_INT);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+            MIR_new_reg_op(mt->ctx, boxed_int)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
+        emit_label(mt, l_promote);
+        MIR_reg_t dsum = new_reg(mt, "fi_d", MIR_T_D);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, dsum),
+            MIR_new_reg_op(mt->ctx, sum)));
+        MIR_reg_t boxed_float = emit_box(mt, dsum, LMD_TYPE_FLOAT);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, out),
+            MIR_new_reg_op(mt->ctx, boxed_float)));
+        emit_label(mt, l_done);
+        return out;
     }
 
     // Arithmetic ops with native types

@@ -1,0 +1,116 @@
+"=== M2: int add/sub at the compact-int boundary ==="
+[int, 9007199254740991]
+[float, 9007199254740992]
+[float, 9007199254740992]
+[int, -9007199254740991]
+[float, -9007199254740992]
+[float, -9007199254740992]
+[int, 9007199254740990]
+[int, 0]
+[int, 0]
+"=== M2: int mul at the compact-int boundary ==="
+[int, 9007199136250225]
+[float, 9007199326062756]
+[int, 0]
+[int, 0]
+[int, -21]
+[float, 4611686014132420600]
+[float, -4611686014132420600]
+"=== M2: int div is true division (float) ==="
+[float, 0.3333333333333333]
+[float, 3.5]
+[float, -3.5]
+[float, 0]
+[float, 2]
+[float, 9007199254740991]
+"=== M2: idiv and mod stay integral ==="
+[int, 3]
+[int, -3]
+[int, 1]
+[int, -1]
+"=== M1: float vs float, static ==="
+[bool, true]
+[bool, false]
+[bool, true]
+[bool, false]
+[bool, false]
+[bool, true]
+"=== M1: float vs float, any-typed ==="
+[false, false, true, true, false, true]
+[true, true, false, false, false, true]
+[false, true, false, true, true, false]
+[false, true, false, true, true, false]
+[false, false, true, true, false, true]
+[true, true, false, false, false, true]
+"=== M1: exactness above 2^53 — must NOT round through double ==="
+[true, true, false, false, false, true]
+[false, false, true, true, false, true]
+[false, true, false, true, true, false]
+[true, true, false, false, false, true]
+[false, false, true, true, false, true]
+"=== M1: float vs int, fractional parts ==="
+[false, false, true, true, false, true]
+[true, true, false, false, false, true]
+[true, true, false, false, false, true]
+[false, false, true, true, false, true]
+[false, false, true, true, false, true]
+[false, false, true, true, false, true]
+[true, true, false, false, false, true]
+[true, true, false, false, false, true]
+[false, false, true, true, false, true]
+[false, true, false, true, true, false]
+"=== M1: float vs u64 ==="
+[true, true, false, false, false, true]
+[false, false, true, true, false, true]
+[false, true, false, true, true, false]
+[false, false, true, true, false, true]
+[true, true, false, false, false, true]
+"=== M1: infinities vs integers ==="
+[false, false, true, true, false, true]
+[true, true, false, false, false, true]
+[false, false, true, true, false, true]
+[false, true, false, true, true, false]
+[true, true, false, false, false, true]
+"=== M1: NaN is unordered against everything ==="
+[false, false, false, false, false, true]
+[false, false, false, false, false, true]
+[false, false, false, false, false, true]
+[false, false, false, false, false, true]
+[false, false, false, false, false, true]
+"=== M1: decimal operands keep the decimal relation ==="
+[false, true, false, true, true, false]
+[false, false, true, true, false, true]
+[false, true, false, true, true, false]
+[false, true, false, true, true, false]
+[false, true, false, true, true, false]
+[true, true, false, false, false, true]
+"=== M1: signed/unsigned integer pairs ==="
+[true, true, false, false, false, true]
+[false, false, true, true, false, true]
+[true, true, false, false, false, true]
+[false, true, false, true, true, false]
+"=== M1: comparisons through array elements (any-typed loads) ==="
+[true, false, true, false]
+[true, false, false]
+"=== M1/M2: min/max and sort route through the same comparison ==="
+-1
+2
+9007199254740992
+9007199254740993
+[-1, 0.25, 0.5, 2, 3]
+[0, 9007199254740992, 9007199254740993]
+"=== M2: accumulation loop crossing the boundary ==="
+[int, 55]
+[float, 22517998136852480]
+"=== NaN: statically-typed operands take the native path ==="
+[false, false, false, false, false, true]
+[false, false, false, false, false, true]
+[false, false, false, false, false, true]
+[false, false, true, true, false, true]
+"=== NaN: elementwise keyword comparisons ==="
+[true, false, false]
+[true, false, false]
+[false, false, true]
+[false, false, true]
+[true, false, false]
+[false, false, true]
