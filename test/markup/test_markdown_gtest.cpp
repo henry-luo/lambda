@@ -218,13 +218,11 @@ static std::string normalize_html(const std::string& html) {
 
 // Test fixture for CommonMark spec tests
 class MarkdownSpecTest : public ::testing::Test {
-protected:
+public:
     static std::vector<MarkdownExample> examples;
     static bool examples_loaded;
 
-    void SetUp() override {
-        log_init(NULL);
-
+    static void load_examples() {
         if (!examples_loaded) {
             // list of spec files to load (md4c test specs)
             // format: {relative_path_suffix, display_name}
@@ -297,6 +295,17 @@ protected:
             printf("Total: %d examples from all spec files\n", total_examples);
             examples_loaded = true;
         }
+    }
+
+    static int example_count() {
+        load_examples();
+        return (int)examples.size();
+    }
+
+protected:
+    void SetUp() override {
+        log_init(NULL);
+        load_examples();
     }
 
     // Parse markdown and format as CommonMark-style HTML fragment
@@ -390,14 +399,12 @@ TEST_P(MarkdownExampleTest, Example) {
     }
 }
 
-// Generate test parameters for first N examples (for quick testing)
-// Use INSTANTIATE_TEST_SUITE_P with a range
-// Note: We use a large enough number to cover all spec files
-// The tests will handle out-of-range indices gracefully
+// Register exactly the loaded fixture count; a fixed upper bound previously
+// created out-of-range placeholder cases that only produced GTest skips.
 INSTANTIATE_TEST_SUITE_P(
     AllExamples,
     MarkdownExampleTest,
-    ::testing::Range(0, 2000),  // Large enough to cover all examples from all spec files
+    ::testing::Range(0, MarkdownSpecTest::example_count()),
     [](const ::testing::TestParamInfo<int>& info) {
         return "Example_" + std::to_string(info.param + 1);
     }

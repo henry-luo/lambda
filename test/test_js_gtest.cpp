@@ -264,6 +264,7 @@ struct JsBatchResult {
 
 // Max scripts per lambda.exe js-test-batch process
 static const size_t JS_BATCH_CHUNK_SIZE = 50;
+static bool js_baseline_mode = false;
 
 static void run_js_sub_batch(
     const std::vector<std::string>& scripts,
@@ -370,6 +371,18 @@ struct JsTestParam {
     std::string test_name;   // sanitised for GTest (alphanumeric + underscore)
 };
 
+static bool js_baseline_excludes_library_test(const JsTestParam& test) {
+    static const char* excluded_tests[] = {
+        "lib_codemirror",
+        "lib_tabulator",
+        "lib_tom_select",
+    };
+    for (const char* excluded : excluded_tests) {
+        if (strcmp(test.test_name.c_str(), excluded) == 0) return true;
+    }
+    return false;
+}
+
 static bool read_js_document_fixture(const char* script_path,
         char* fixture_name, size_t fixture_name_size) {
     if (!script_path || !fixture_name || fixture_name_size == 0) return false;
@@ -457,6 +470,9 @@ static std::vector<JsTestParam> discover_js_tests_in_dir(const char* dir_path) {
             }
         }
 
+        // These browser-library probes are extended coverage; exclude them only
+        // from the fast baseline gate while keeping ordinary JS runs comprehensive.
+        if (js_baseline_mode && js_baseline_excludes_library_test(p)) continue;
         params.push_back(p);
 
 #ifdef _WIN32
@@ -810,7 +826,22 @@ TEST(JavaScriptRegression, Js54P6ArrayProtoFillSetSlice) {
     ASSERT_EQ(status, 0) << output;
 }
 
+static void parse_js_test_mode(int* argc, char** argv) {
+    int write_index = 1;
+    for (int read_index = 1; read_index < *argc; read_index++) {
+        if (strcmp(argv[read_index], "--baseline") == 0) {
+            js_baseline_mode = true;
+            continue;
+        }
+        argv[write_index++] = argv[read_index];
+    }
+    // GoogleTest must not see the runner-specific mode flag as an unknown option.
+    *argc = write_index;
+    argv[write_index] = nullptr;
+}
+
 int main(int argc, char **argv) {
+    parse_js_test_mode(&argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

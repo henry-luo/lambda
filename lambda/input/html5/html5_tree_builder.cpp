@@ -697,8 +697,8 @@ static void html5_process_in_initial_mode(Html5Parser* parser, Html5Token* token
         return;
     }
 
-    // anything else: missing doctype, switch to before html mode
-    log_error("html5: missing doctype, switching to before html mode");
+    // WHATWG recovery enters quirks mode and reprocesses this token; omission is
+    // common browser input, not a parse failure that should reach normal output.
     parser->quirks_mode = true;  // no DOCTYPE = quirks mode
     parser->limited_quirks_mode = false;
     parser->mode = HTML5_MODE_BEFORE_HTML;
